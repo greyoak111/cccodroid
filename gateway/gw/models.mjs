@@ -91,6 +91,86 @@ export function withWindows(list) {
   });
 }
 
+// ── 目录补全：厂商 /models 只报 id 时，用 models.dev 的公开目录补窗口 ──
+// 不少兼容端点（比如 opencode 的 /v1/models）只回 id/created/owned_by，窗口和输出上限都没有，
+// 清单里就只剩「—」。models.dev 是公开的模型目录，按 id 能查到上下文档位。
+// 只补厂商没报的字段，不覆盖它自己给的值；拉不到就留空，不瞎编。
+const CATALOG_URL = "https://models.dev/api.json";
+const CATALOG_TTL = 12 * 3600e3, CATALOG_BACKOFF = 30 * 60e3;
+let CAT = null, CAT_AT = 0, CAT_TRY = null, CAT_FAIL_AT = 0;
+
+async function loadCatalog() {
+  if (CAT && Date.now() - CAT_AT < CATALOG_TTL) return CAT;
+  if (CAT_TRY) return CAT_TRY;
+  if (Date.now() - CAT_FAIL_AT < CATALOG_BACKOFF) return null;
+  CAT_TRY = (async () => {
+    try {
+      const r = await fetch(CATALOG_URL, { signal: AbortSignal.timeout(9000) });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      const byProv = new Map(), votes = new Map();
+      for (const [pid, pv] of Object.entries(j || {})) {
+        const m = new Map();
+        for (const [mid, mv] of Object.entries((pv && pv.models) || {})) {
+          const lim = (mv && mv.limit) || {};
+          const ctx = Number(lim.context) || 0;
+          if (!ctx) continue;
+          const v = { context_window: ctx, max_output_tokens: Number(lim.output) || 0 };
+          m.set(mid, v);
+          // 同一个 id 在多家目录里窗口可能不一样：按出现次数取多数，免得被冷门厂商的旧值带偏
+          let vs = votes.get(mid);
+          if (!vs) votes.set(mid, vs = new Map());
+          const k = v.context_window + "/" + v.max_output_tokens;
+          vs.set(k, (vs.get(k) || 0) + 1);
+        }
+        if (m.size) byProv.set(pid, m);
+      }
+      const byId = new Map();
+      for (const [mid, vs] of votes) {
+        let best = "", n = 0;
+        for (const [k, c] of vs) if (c > n) { n = c; best = k; }
+        const [ctx, out] = best.split("/").map(Number);
+        byId.set(mid, { context_window: ctx, max_output_tokens: out });
+      }
+      CAT = { byProv, byId }; CAT_AT = Date.now(); CAT_FAIL_AT = 0;
+      log(`[catalog] models.dev 已载入：${byProv.size} 家 / ${byId.size} 个型号`);
+      return CAT;
+    } catch (e) {
+      CAT_FAIL_AT = Date.now();
+      log(`[catalog] 拉 models.dev 失败：${e.message}`);
+      return null;
+    } finally { CAT_TRY = null; }
+  })();
+  return CAT_TRY;
+}
+
+/** 这家厂商在目录里对应哪几家：先看配置里写死的 catalog，再按 baseUrl 的域名猜
+ *  （opencode.ai 的订阅端点在 /go/ 下，目录里分 opencode 和 opencode-go 两份） */
+function catalogKeys(p) {
+  const keys = [];
+  if (p.catalog) keys.push(String(p.catalog));
+  let host = "";
+  try { host = new URL(p.baseUrl || "").hostname; } catch {}
+  const name = (host.split(".")[0] || "").replace(/^api$/, host.split(".")[1] || "");
+  if (name) keys.push(name + "-go", name);
+  return keys;
+}
+
+async function withCatalog(list, p) {
+  if (!list.some((m) => !m.context_window)) return list;
+  const cat = await loadCatalog();
+  if (!cat) return list;
+  const maps = catalogKeys(p).map((k) => cat.byProv.get(k)).filter(Boolean);
+  return list.map((m) => {
+    if (m.context_window) return m;
+    let lim = null;
+    for (const mp of maps) { lim = mp.get(m.id); if (lim) break; }
+    if (!lim) lim = cat.byId.get(m.id);
+    if (!lim) return m;
+    return { ...m, context_window: lim.context_window, max_output_tokens: m.max_output_tokens || lim.max_output_tokens };
+  });
+}
+
 // 清空 / 让它过期：别的模块改不了这几个变量（ES 模块的导入是只读的），走这两个函数
 export function dropModelCache() { MODELS = null; MODELS_AT = 0; MODELS_FOR = null; CACHE.clear(); }
 export function expireModelCache() { MODELS_AT = 0; for (const c of CACHE.values()) c.at = 0; }
@@ -123,7 +203,7 @@ async function fetchModelsOf(p, force) {
       }
       const r = await fetch(p.modelsUrl, { headers, signal: AbortSignal.timeout(15000) });
       if (r.ok) {
-        const list = mergeKnown(normalizeModels(await r.json()), p.fallbackModels);
+        const list = await withCatalog(mergeKnown(normalizeModels(await r.json()), p.fallbackModels), p);
         if (list.length) {
           log(`[${p.id}] 模型清单：${list.map((m) => m.id).join(", ")}`);
           return keep(list);

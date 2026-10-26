@@ -58,6 +58,7 @@ export async function startRun(item) {
     provider: P.id,                    // 这一轮用的那家：记 token、删接口前查占用都看它
     log: [], pend: null, pendTimer: null,
     sched: item.sched || null,         // 定时任务跑的：{ taskId, runKey }（结束时 sched.mjs 记运行记录）
+    channel: item.channel || null,     // 频道来的：{ channelId, chatKey, ... }（结束时 channels.mjs 把回复发回聊天）
     unattended: !!item.unattended,     // 没人看着：要确认的一律拒绝
   };
   run.lane = laneOfItem(item);
@@ -438,7 +439,9 @@ export async function startRun(item) {
         // 本地命令（/context /cost …）的结果正文在这里
         localCommand: localCmd,
         resultText: localCmd ? String(lastResult.result || "") : "",
-        ...(run.sched ? { finalText: String(lastResult.result || "").slice(0, 4000), costRaw: Number(lastResult.total_cost_usd || 0) } : {}),
+        // 正文要给出去：定时任务发通知、频道回消息都用 f.finalText。
+        // 以前只给 run.sched，频道拿到的永远是空串，发回去就成了「（没有回复）」
+        ...(run.sched || run.channel ? { finalText: String(lastResult.result || "").slice(0, run.channel ? 8800 : 4000), costRaw: Number(lastResult.total_cost_usd || 0) } : {}),
       });
     }
     const hint = code !== 0 ? `生成失败（退出码 ${code}）` : "生成结束但没有返回结果";

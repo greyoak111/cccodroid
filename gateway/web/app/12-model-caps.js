@@ -128,7 +128,7 @@
       try { r = await api("/api/models" + sidQ(browse && browse !== curProv() ? "browse=" + encodeURIComponent(browse) : "")); }
       catch (e) { list.textContent = t("拉取模型清单失败：{msg}", { msg: e.message }); return false; }
       if (!m.isConnected || want !== browse) return false;
-      info = r; ML = r.models || [];
+      info = r; ML = await fillLimits(r.models || []);
       if (r.providers) state.provList = r.providers;
       if (!browse) browse = r.provider;
       return true;
@@ -244,11 +244,64 @@
     updateCtx(state.ctxUsed, state.ctxTotal);
   }
 
+  // 厂商的 /models 往往只报 id，窗口就空着（清单里显示「—」）。
+  // models.dev 是公开的模型目录（CORS 全开），按 id 补上下文档位；12 小时缓存，拉不到就照旧。
+  const CAT_KEY = "cc.modelcat";
+  let CAT_MEM = null;
+  async function fillLimits(list) {
+    if (!list.some((m) => !m.context_window)) return list;
+    let lim = CAT_MEM;
+    if (!lim) {
+      // 拉成功缓存 12 小时；失败只等 30 分钟再试，别每次开设置都卡在网络超时上
+      try {
+        const c = JSON.parse(localStorage.getItem(CAT_KEY) || "null");
+        if (c && Date.now() - c.at < (c.fail ? 30 * 60e3 : 12 * 3600e3)) lim = c.lim || {};
+      } catch {}
+    }
+    if (!lim) {
+      try {
+        const ac = new AbortController(), tm = setTimeout(() => ac.abort(), 9000);
+        const r = await fetch("https://models.dev/api.json", { signal: ac.signal });
+        clearTimeout(tm);
+        const j = await r.json();
+        // 同一个 id 在多家目录里窗口可能不一样：取多数，别被冷门厂商的旧值带偏
+        const votes = {};
+        for (const pv of Object.values(j || {})) {
+          for (const [id, mv] of Object.entries((pv && pv.models) || {})) {
+            const l = (mv && mv.limit) || {};
+            const c = Number(l.context) || 0;
+            if (!c) continue;
+            const k = c + "/" + (Number(l.output) || 0);
+            if (!votes[id]) votes[id] = {};
+            votes[id][k] = (votes[id][k] || 0) + 1;
+          }
+        }
+        lim = {};
+        for (const [id, vs] of Object.entries(votes)) {
+          let best = "", n = 0;
+          for (const [k, c] of Object.entries(vs)) if (c > n) { n = c; best = k; }
+          const [ctx, out] = best.split("/").map(Number);
+          lim[id] = { c: ctx, o: out };
+        }
+        try { localStorage.setItem(CAT_KEY, JSON.stringify({ at: Date.now(), lim })); } catch {}
+      } catch {
+        try { localStorage.setItem(CAT_KEY, JSON.stringify({ at: Date.now(), lim: {}, fail: 1 })); } catch {}
+        return list;
+      }
+    }
+    CAT_MEM = lim;
+    return list.map((m) => {
+      if (m.context_window) return m;
+      const l = lim[m.id];
+      return l ? { ...m, context_window: l.c, max_output_tokens: m.max_output_tokens || l.o } : m;
+    });
+  }
+
   /** 模型与 effort 档位都从厂商的 /models 实时拉。设置页的下拉框是全局默认 */
   async function loadModels(refresh) {
     try {
       const r = await api("/api/models" + (refresh ? "?refresh=1" : ""));
-      MODELS = r.models || [];
+      MODELS = await fillLimits(r.models || []);
       if (r.providers) state.provList = r.providers;
       const sel = $("set-model");
       // 原生厂商（官方账户）：不挑 = 用它自己的默认模型。
@@ -263,7 +316,9 @@
             const img = (m.input_modalities || []).includes("image") ? ' data-img="1"' : "";
             // 官方 /v1/models 只报能力，不报窗口 —— 报不出来就别写 "0k"
             const ctx = m.context_window ? Math.round(m.context_window / 1024) + "k" : "—";
-            return `<option value="${esc(m.id)}"${img}>${esc(m.id)} · ${esc(m.name || "")} · ${ctx}</option>`;
+            // 厂商常把 name 填成 id，那样就成了「id · id · 窗口」
+            const nm = m.name && m.name !== m.id ? " · " + esc(m.name) : "";
+            return `<option value="${esc(m.id)}"${img}>${esc(m.id)}${nm} · ${ctx}</option>`;
           }).join("")
         : (dfltOpt ? "" : '<option value="">' + t("（该厂商不提供模型清单）") + '</option>')));
       if (r.current) {
@@ -279,6 +334,7 @@
       renderEffort(r.effortLevels || [], r.effort || "", r.effortDefault);
 
       // 用量条：总刻度用厂商给的真实窗口，但设了压缩窗口就改以它为满刻度
+      if (!r.contextWindow) r.contextWindow = (MODELS.find((m) => m.id === r.current) || {}).context_window || 0;
       loadCtxModel(r);
       const cur = MODELS.find((m) => m.id === r.current);
       if (cur) {
@@ -327,7 +383,7 @@
   }
   segMirror($("set-effort"), (o) => o.value || t("默认"));
   const PERM_SHORT = { default: "问我", acceptEdits: "接受编辑", plan: "计划", auto: "自动", dontAsk: "不问就拒", bypassPermissions: "全部放行" };
-  segMirror($("set-perm"), (o) => t(PERM_SHORT[o.value] || o.value));
+  // 权限模式用原生下拉：六项带说明，分段控件塞不下
   segMirror($("set-parallel"), (o) => o.value, ["1", "2", "3", "4"]);
   // 设置里的「打开用量页」
   $("set-ov").addEventListener("click", (e) => { const b = e.target.closest("[data-gopage]"); if (b) { closeSettings(); openPage(b.dataset.gopage); } });

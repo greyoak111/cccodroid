@@ -2183,3 +2183,181 @@
 2183	Touchez une partie de la page pour l’ajouter au message
 2184	Ajouté au message — dites maintenant quoi modifier
 2185	{sel} dans {path} :
+2186	Canaux
+2187	Désactivé
+2188	En ligne
+2189	Groupe
+2190	Message privé
+2191	Aucun canal pour l'instant
+2192	Connecté
+2193	Activé, pas encore connecté
+2194	{n} en attente d'approbation
+2195	Nouveau canal
+2196	Parlez à Claude sur cet appareil directement depuis une messagerie : chaque message lance un tour ici et la réponse revient dans cette conversation. Le premier adaptateur est le bot officiel QQ : créez un bot sur la plateforme ouverte QQ, collez son AppID / AppSecret ici, puis écrivez-lui en privé ou mentionnez-le dans un groupe.
+2197	Aucun canal pour l'instant. Créez-en un pour écrire à Claude sur cet appareil depuis QQ.
+2198	Simple conversation (pas de modification de fichiers ; l'usage d'outils demande confirmation)
+2199	Garder une seule session (avec le contexte)
+2200	Nouvelle session à chaque message
+2201	Reçu
+2202	Envoyé
+2203	Système
+2204	Connecté à QQ ; les messages arriveront
+2205	Connexion en cours, pas encore établie
+2206	Ne reçoit pas de messages
+2207	{a} reçus · {b} réponses · {c} échecs
+2208	Connexion
+2209	Se reconnecte tout seul ; changer les identifiants nécessite une reconnexion
+2210	Vérifier
+2211	Reconnecter
+2212	Qui peut l'utiliser
+2213	Code d'appairage
+2214	Le premier message privé au bot doit être ce code à 6 chiffres ; la personne est alors autorisée.
+2215	Nouveau code
+2216	Les inconnus doivent d'abord s'appairer
+2217	Tout le monde (déconseillé)
+2218	Seulement les personnes de la liste
+2219	Liste d'autorisation
+2220	Tout le monde
+2221	Veut accéder : {n}
+2222	Refuser
+2223	Où exécuter
+2224	Le travail venant des discussions s'exécute dans ce dossier ; vide = espace de travail
+2225	Personne ne surveille, donc toute demande de confirmation est refusée
+2226	Durée max. d'un tour
+2227	Tout dissocier
+2228	Session {id} · {w}
+2229	Dissocier
+2230	Personne n'a encore écrit
+2231	Derniers échanges
+2232	Aucun message pour l'instant
+2233	Modifier le canal
+2234	Nom
+2235	Bot QQ
+2236	Plateforme
+2237	Plateforme ouverte QQ → Bot → Paramètres développeur → AppID du bot
+2238	Déjà défini ; laissez vide pour ne pas changer
+2239	Sert à obtenir les jetons ; stocké uniquement sur cet appareil et plus jamais affiché
+2240	Options
+2241	Créer et activer
+2242	Créé. Essayez de lui écrire sur QQ
+2243	Envoyer un message de test
+2244	Destinataire
+2245	openid de la personne
+2246	openid du groupe
+2247	Texte
+2248	Test : le canal fonctionne
+2249	Envoyer
+2250	L'ID et le texte sont requis
+2251	Envoyé
+2252	Supprimé
+2253	Autorisé
+2254	Refusé
+2255	Dissocié ; le prochain message ouvrira une nouvelle session
+2256	Copier le code d'appairage
+2257	Supprimer ce canal
+2258	Supprimer le canal « {n} » ? Les discussions et sessions restent ; il cesse simplement de recevoir des messages.
+2259	Tout est bon
+2260	Reconnexion
+2261	Changer de code d'appairage ? L'ancien cessera de fonctionner.
+2262	Nouveau code : {c} (copié)
+2263	Dissocier toutes les discussions de ce canal de leur session ?
+2264	Toutes dissociées
+2265	Activé
+2266	Désactivé
+2267	Impossible d'obtenir un jeton QQ ({e}) ; vérifiez AppID / AppSecret
+2268	Connecté à QQ
+2269	Connexion rétablie
+2270	Aucune adresse WebSocket reçue
+2271	Ce Node ne prend pas en charge WebSocket
+2272	Délai de connexion dépassé
+2273	Connexion impossible
+2274	Un bot créé sur la plateforme ouverte QQ. Renseignez AppID / AppSecret, puis écrivez-lui en privé ou mentionnez-le dans un groupe une fois en ligne.
+2275	AppID
+2276	AppSecret
+2277	Utiliser le bac à sable
+2278	Envoyer des messages markdown (permission du bot requise ; repli en texte brut)
+2279	Groupe QQ · {id}
+2280	QQ · {id}
+2281	Envoyez simplement un message pour parler à Claude sur cet appareil.
+2282	Commencer une nouvelle session (sans l'ancien contexte)
+2283	Arrêter le tour en cours
+2284	Voir la session liée et l'état
+2285	Cette aide
+2286	Le canal n'est pas lancé ; la réponse n'a pas été envoyée
+2287	Envoi impossible : {e}
+2288	[groupe]
+2289	Ce bot n'est encore appairé avec personne. Ouvrez Réglages → Canaux dans l'app et envoyez-lui le code d'appairage ({c}).
+2290	Ce groupe n'est pas encore autorisé. Le propriétaire du bot peut appuyer sur « Autoriser » dans l'app → Canaux.
+2291	Vous n'êtes pas sur la liste d'autorisation.
+2292	Appairage réussi. Envoyez simplement vos messages ; tapez /help pour les commandes.
+2293	D'accord, le prochain message ouvrira une nouvelle session.
+2294	Canal : {n} ({s})
+2295	Session : {id}
+2296	Session : pas encore commencée
+2297	État : en cours
+2298	État : au repos
+2299	Rien ne tourne pour l'instant.
+2300	Arrêt en cours.
+2301	Commande inconnue. Envoyez /help.
+2302	(depuis un groupe QQ, expéditeur {s})
+2303	(limite de temps atteinte, arrêté)
+2304	(arrêté)
+2305	⚠️ Une erreur est survenue
+2306	Réponse envoyée ({n} parties)
+2307	La réponse n'a pas été envoyée
+2308	Type de canal non pris en charge : {t}
+2309	Il manque {list}
+2310	Identifiants valides : jeton {t}…, adresse WebSocket {ok}
+2311	obtenue
+2312	non obtenue
+2313	Rien à tester
+2314	Le canal n'est pas lancé
+2315	(Ce modèle ne prend pas en charge le protocole Anthropic à cette adresse : choisissez un modèle pris en charge, ou utilisez l'adresse fournie par la plateforme pour Claude Code)
+2316	Lier par scan
+2317	Obtenir AppID / AppSecret par scan
+2318	Scannez avec QQ sur mobile, choisissez un bot — AppID et AppSecret seront remplis
+2319	Lié. AppID et AppSecret sont remplis — enregistrez pour appliquer
+2320	Lier un bot QQ par scan
+2321	Récupération du QR code…
+2322	Copier le lien
+2323	Scannez ce code avec QQ sur mobile et choisissez un bot à lier
+2324	Le secret chiffré renvoyé par l'API de liaison est mal formé
+2325	Erreur de l'API de liaison par QR ({e})
+2326	L'API de liaison par QR n'a pas renvoyé d'identifiant de tâche
+2327	Il manque les champs de saisie dans cette fenêtre — fermez-la et rouvrez-la
+2328	AppID est vide : touchez « Lier par scan » ci-dessus pour le remplir automatiquement
+2329	AppSecret est vide : touchez « Lier par scan » ci-dessus pour le remplir automatiquement
+2330	Enregistrement…
+2331	La passerelle n'a renvoyé aucun nouveau canal — consultez les journaux
+2332	Erreur inconnue
+2333	Palette de couleurs
+2334	Clair ou sombre
+2335	Police de lecture
+2336	Raccourcis de la barre latérale
+2337	Langue et profil
+2338	Saisie et barre latérale
+2339	Arrière-plan et performances
+2340	Seuil de compactage
+2341	Seuil d'auto-compactage
+2342	Sessions parallèles
+2343	Mode de lancement des programmes
+2344	Work Island
+2345	Exporter le diagnostic
+2346	Signaler un problème
+2347	Vérification des composants
+2348	Historique des réparations
+2349	Rechercher dans les réglages
+2350	Aucun réglage correspondant
+2351	Native, « 求索 » ou « 逐月 »
+2352	Le canal n'est pas encore chargé
+2353	L'envoi n'a renvoyé aucun file_info
+2354	(Session de canal QQ. Pour envoyer un fichier local dans la conversation : mettez [[file:/chemin/absolu]] sur sa propre ligne dans votre réponse, 3 fichiers maximum, 10 Mo chacun au plus ; écrivez le corps du message comme d'habitude.)
+2355	[message vide]
+2356	Ce canal ne peut pas envoyer de fichiers
+2357	Ce n'est pas un fichier : {p}
+2358	Fichier de plus de 10 Mo : {p}
+2359	[pièce jointe]
+2360	(L'autre personne a envoyé une pièce jointe sans texte)
+2361	Échec de l'envoi du fichier : {e}
+2362	(Fichier envoyé)
+2363	(Le fichier n'a pas été envoyé)

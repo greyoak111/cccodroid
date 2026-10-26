@@ -664,6 +664,23 @@ a.weblink{overflow-wrap:anywhere}
 #toast.err{border-color:var(--err-line);color:var(--err-fg)}
 #toast .toast-act{margin-inline-start:10px;color:var(--accent);font-weight:600;background:none;border:0;padding:2px 4px;font-size:inherit;cursor:pointer}
 
+/* 界面脚本出错：顶栏底下的浮动条（不占用副标题，也不挡输入） */
+#errbar{
+  position:fixed;left:50%;top:calc(var(--safe-tt) + 44px);transform:translateX(-50%);
+  z-index:97;box-sizing:border-box;max-width:min(92vw,560px);
+  display:flex;align-items:flex-start;gap:4px;padding:8px 6px 8px 12px;
+  background:var(--bg3);border:1px solid var(--err-line);border-radius:12px;
+  box-shadow:0 10px 30px var(--shadow);animation:fade .18s;
+}
+#errbar.hidden{display:none}
+#errbar .eb-txt{flex:1;min-width:0;color:var(--err-fg);font-size:13px;line-height:1.45;word-break:break-word;max-height:5.4em;overflow:auto}
+#errbar .eb-btn{flex:none;background:none;border:0;color:var(--fg3);font-size:13px;padding:2px 6px;border-radius:8px;cursor:pointer}
+#errbar .eb-btn:active{background:var(--bg2)}
+#errbar .eb-x{font-size:17px;line-height:1.1;color:var(--fg3)}
+/* 频道弹窗里点「建好并打开」失败时的就地提示（软键盘可能把底部 toast 挡住） */
+.ch-saveerr{margin-top:var(--g2);color:var(--err-fg);font-size:13px;line-height:1.45}
+.ch-saveerr[hidden]{display:none}
+
 /* ═══════════════════════════════════════════════════════════════════
    家具三件套：递进来 / 拿出去 / 看得见
    ═══════════════════════════════════════════════════════════════════ */
@@ -1585,10 +1602,10 @@ input[type=checkbox].sw::after{content:"";position:absolute;top:3px;inset-inline
 input[type=checkbox].sw:checked{background:var(--accent)}
 input[type=checkbox].sw:checked::after{inset-inline-start:21px;background:var(--on-accent)}   /* 逐月深色强调色是白：滑块跟着变黑，不然看不见 */
 input[type=checkbox].sw:disabled{opacity:.45;cursor:default}
-/* 窄：控件掉到说明下面整行 */
-#tab-settings.set-one .srow:has(.sc select),#tab-settings.set-one .srow:has(.sc input:not(.sw):not(.narrow)){flex-direction:column;align-items:stretch;gap:8px}
-#tab-settings.set-one .srow .sc{max-width:none}
-#tab-settings.set-one .srow .sc select,#tab-settings.set-one .srow .sc input:not(.sw):not(.narrow){width:100%}
+/* 整页里控件一律靠右，不掉到说明下面 */
+#tab-settings.set-one .srow:not(.stack):has(> .sc > select:not(.hidden)),#tab-settings.set-one .srow:not(.stack):has(> .sc > input:not(.sw):not(.narrow):not(.hidden)){flex-wrap:nowrap;align-items:center;gap:12px}
+#tab-settings.set-one .srow > .sc{flex:none;max-width:none}
+#tab-settings.set-one .srow > .sc select,#tab-settings.set-one .srow > .sc input:not(.sw):not(.narrow){width:auto;max-width:100%}
 /* 窄屏 */
 #tab-settings.set-list .set-wrap,#tab-settings.set-one .set-wrap{display:block}
 #tab-settings.set-list .set-main{display:none}
@@ -2770,6 +2787,107 @@ html[data-theme="light"] .lmap{--lm-track:#c4c4c4;--lm-grid:#f4f4f4}
 /* 时间轴始终从左往右：地图各层钉 LTR（阿拉伯语界面也一样），卡片里的文字仍跟界面方向 */
 .lmap .lm-canvas{direction:ltr}
 html[dir="rtl"] .lmap .lm-card,html[dir="rtl"] .lmap .lm-now{direction:rtl}
+/* 扫码绑定：二维码用白底，深浅色界面都扫得动 */
+.ch-qrwrap{display:flex;justify-content:center;padding:6px 0 10px}
+.ch-qr{background:#fff;padding:10px;border-radius:12px;line-height:0}
+.ch-qr svg{width:220px;height:220px;display:block}
+.ch-qrmsg{text-align:center;margin-top:2px}
+/* 频道弹窗的「选项」：文字靠左、开关靠右、上下居中（.pj-frow > label 是块级的，这里要盖过去） */
+.pj-frow > label.ch-opt{display:flex;align-items:center;gap:10px;margin-bottom:0;padding:8px 0;font-size:14px;font-weight:400;color:var(--fg)}
+.pj-frow > label.ch-opt > span{flex:1;order:1;text-align:left;line-height:1.4}
+.pj-frow > label.ch-opt > .sw{order:2;flex:none;margin-left:auto}
+
+/* ═══ 设置改版（0.4.11）：手机设置那样的分页 ═══ */
+.set-shead{border-bottom:0;padding-bottom:2px}
+.set-tools{flex:none;padding:2px 16px 10px}
+.set-search{display:flex;align-items:center;gap:8px;height:38px;padding:0 10px;
+  border:1px solid var(--line);border-radius:11px;background:var(--bg2)}
+.set-search:focus-within{border-color:var(--accent-dim);background:var(--bg)}
+.set-search > svg{width:17px;height:17px;flex:none;fill:none;stroke:var(--fg3);stroke-width:2;stroke-linecap:round}
+#set-ov .set-search input{flex:1;min-width:0;margin:0;padding:0;border:0;border-radius:0;background:none;
+  color:var(--fg);font:inherit;font-size:14.5px;outline:0;box-shadow:none}
+#set-ov .set-search input::placeholder{color:var(--fg3)}
+#set-ov .set-search input::-webkit-search-cancel-button{display:none}
+#set-ov .set-search-x{flex:none;width:24px;height:24px;padding:0;border:0;border-radius:50%;
+  background:var(--bg3);color:var(--fg2);font-size:16px;line-height:1;cursor:pointer}
+#set-ov .set-search-x.hidden{display:none}
+
+/* 所有宽度都单栏分页（手机上就是整页） */
+#tab-settings{display:block;overflow:auto}
+#tab-settings .set-wrap{display:block}
+#set-ov:not(.narrow) #tab-settings .set-wrap{max-width:560px;margin:0 auto}
+#set-ov:not(.narrow) .set-sheet{width:min(560px,calc(100vw - 64px));height:min(760px,calc(100vh - 2 * (var(--safe-t) + 16px)))}
+
+/* 根页：分类清单，像系统设置的卡片 */
+#tab-settings.set-list .set-cats{position:static;display:block;width:auto;overflow:hidden;
+  margin:4px 16px calc(var(--safe-b) + 24px);padding:0;background:var(--panel);
+  border:1px solid var(--line);border-radius:14px}
+#tab-settings.set-list .set-cats button{display:flex;align-items:center;gap:12px;width:100%;padding:10px 14px;
+  border:0;border-radius:0;background:none;color:var(--fg);font-size:15px;font-weight:400;
+  text-align:start;box-shadow:0 1px 0 var(--line)}
+#tab-settings.set-list .set-cats button:last-child{box-shadow:none}
+#tab-settings.set-list .set-cats button:hover{background:var(--bg2)}
+#tab-settings.set-list .set-cats button.on{background:none;color:var(--fg);font-weight:400}
+#tab-settings .set-cats span{flex:1;min-width:0}
+#tab-settings .set-cats svg:not(.chev){display:block;box-sizing:content-box;width:20px;height:20px;flex:none;
+  padding:7px;border-radius:10px;background:var(--bg3);color:var(--fg2);stroke-width:1.8}
+#tab-settings .set-cats .chev{display:block;width:16px;height:16px;flex:none;margin-inline-start:auto;
+  color:var(--fg3);stroke-width:2}
+
+/* 三种状态：分类清单 / 某一类 / 搜索结果 */
+#tab-settings.set-one .set-cats,#tab-settings.set-searching .set-cats{display:none}
+#set-ov.set-one-mode .set-tools{display:none}
+#tab-settings .set-main{padding:6px 20px 32px}
+#tab-settings.set-one .set-main{padding-top:2px}
+
+/* 行 */
+#tab-settings .set-cat{margin-top:18px;padding-top:8px;border-top:1px solid var(--line)}
+#tab-settings.set-one .set-cat{margin-top:0;padding-top:0;border-top:0}
+#tab-settings .set-cat .set-h{margin:6px 0 2px;font-size:13.5px;font-weight:600;letter-spacing:.02em;color:var(--fg2)}
+#tab-settings .srow{gap:16px;padding:13px 0}
+#tab-settings .srow:has(.sl p) > .sc{align-self:flex-start;margin-top:1px}
+#tab-settings .sl b{font-size:15px;font-weight:500;line-height:1.5}
+#tab-settings .sl p{font-size:12.5px;line-height:1.55;margin-top:2px;color:var(--fg3)}
+#set-ov .sl p.clamp:not(.open){display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  overflow:hidden;white-space:normal;-webkit-mask-image:none;mask-image:none}
+#set-ov .sx{display:none!important}
+.set-nores{padding:48px 8px;text-align:center;font-size:14px;color:var(--fg3)}
+
+/* 窄屏：铺满整页，边距小一点 */
+#set-ov.narrow .set-tools{padding:0 16px 8px}
+#set-ov.narrow #tab-settings.set-list .set-cats{margin:4px 12px calc(var(--safe-b) + 24px)}
+#set-ov.narrow #tab-settings .set-main{padding:2px 16px calc(var(--safe-b) + 28px)}
+
+/* 权限模式：原生下拉，控件靠右，不另起一行 */
+#set-ov .srow:has(> .sc > #set-perm){flex-wrap:nowrap;flex-direction:row;align-items:center;gap:12px}
+#set-ov .srow:has(> .sc > #set-perm) > .sc{flex:0 1 auto;max-width:62%}
+#set-ov #set-perm{width:auto;max-width:100%}
+/* 输出风格：只有标签和下拉，不换行，控件靠右 */
+#tab-settings.set-one .srow:has(> .sc > #set-style){flex-direction:row;align-items:center;gap:12px}
+/* 靠右后个别控件给回合适宽度 */
+#set-ov #set-autocompact{width:9em}
+#set-ov .srow > .sc #prof-name{width:12em;max-width:40vw}
+/* 模型：选项带 id、名字、窗口，太长，控件独占一行 */
+#set-ov .srow:has(> .sc > #set-model){flex-direction:column;align-items:stretch;gap:8px}
+#set-ov #set-model{width:100%;max-width:none}
+
+/* ═══ 频道详情：手机上控件不再挤成一行 ═══
+   ch-code / ch-chip / ch-txt 之前根本没有样式，配对码和名单挤成一串文字；分段控件又不会换行，
+   长选项（“接着同一个会话（带着上下文）”）直接把面板撑出屏幕。 */
+#tab-channels .panel > .row{flex-wrap:wrap;row-gap:8px}
+#tab-channels .panel > .row > .grow{flex:1 1 11em;min-width:0}
+#tab-channels .panel > .row > select{flex:1 1 auto;max-width:100%}
+#tab-channels .panel > .row > .seg{flex:1 1 auto;max-width:100%;flex-wrap:wrap}
+#tab-channels .ch-code{flex:none;padding:3px 10px;border-radius:8px;background:var(--bg3);font-size:15px;font-weight:600;letter-spacing:.08em}
+#tab-channels .ch-chip{display:inline-flex;align-items:center;gap:2px;margin:4px 4px 0 0;padding:1px 4px 1px 9px;border-radius:999px;background:var(--bg3);font-size:12px;line-height:1.5;max-width:100%}
+#tab-channels .ch-x{flex:none;border:0;background:none;color:var(--fg3);padding:3px;line-height:0;cursor:pointer}
+#tab-channels .ch-txt{font-size:13.5px;line-height:1.5;overflow-wrap:anywhere}
+#tab-channels .ch-ev{align-items:flex-start}
+#tab-channels .ch-ev > .pill{flex:none;margin-top:2px}
+@media (max-width:680px){
+  #tab-channels .panel > .row > .seg{flex:1 1 100%}
+  #tab-channels .seg button{flex:1 1 auto;white-space:normal;text-align:center;line-height:1.35;padding:6px 9px}
+}
 
 /* ── 动效（app/01-core.js 的 MO）──────────────────────────────────────
    mo-drawer / mo-pop / mo-page / mo-rise / mo-item / mo-drop / mo-card / mo-tick / mo-bump / mo-back 这些关键帧
@@ -2850,3 +2968,4 @@ html[data-motion="on"] .ch-sep.mo-hit :is(.ch-n,.ch-t){animation:mo-bump var(--m
 html[data-motion="on"] .lmap.mo-pick .lm-main .dim{animation:mo-dim calc(.32s * var(--mo-x,1)) ease-out}
 html[data-motion="on"] .lmap.mo-pick .lm-cardbox{animation:mo-card var(--mo-snap) linear both}
 html[data-motion="on"] .lmap.mo-pick .t-ch{animation:mo-rise var(--mo-soft) linear both;animation-delay:calc(.08s * var(--mo-x,1))}
+

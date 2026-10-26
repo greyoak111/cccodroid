@@ -147,14 +147,14 @@
   }
 
   // ── 弹层：宽屏居中（宽 560、高不过宽×φ），窄屏整页推入；返回键先关它 ──
-  function dlg(title, body, foot) {
+  function dlg(title, body, foot, opts) {
     const narrow = innerWidth < 680;
     const o = document.createElement("div");
     o.className = "pj-ov" + (narrow ? " narrow" : "");
     const xb = `<button class="icon-btn" data-close aria-label="${esc(t(narrow ? "返回" : "关闭"))}"><svg viewBox="0 0 24 24">${narrow ? PI.back : PI.x}</svg></button>`;
     o.innerHTML = `<div class="pj-sheet" role="dialog" aria-modal="true"><div class="pj-shead">${narrow ? xb : ""}<h3>${esc(title)}</h3>${narrow ? "" : xb}</div>
       <div class="pj-smain">${body}</div><div class="pj-sfoot">${foot}</div></div>`;
-    OV.open(o, { kind: "modal", keep: true, cover: true });   // 填了一半的表单，转屏也别丢
+    OV.open(o, { kind: "modal", keep: true, cover: true, ...(opts || {}) });   // 填了一半的表单，转屏也别丢
     o.addEventListener("click", (e) => {
       if ((e.target === o && !narrow) || e.target.closest("[data-close]")) return OV.close(o);
       const rc = e.target.closest(".pj-rc");
@@ -544,9 +544,10 @@
     if (name === "help") loadHelp();
     if (name === "changelog") loadChangelog();
     if (name === "usage") { loadQuota(); loadUsage(); loadEnergy(); loadAcctCard(false); }
-    if (name !== "projects" && name !== "sched") pageTitleOv = "";
+    if (name !== "projects" && name !== "sched" && name !== "channels") pageTitleOv = "";
     if (name === "projects") { if (prev !== name && !PJ.cur) PJ.detail = null; renderProjects(); loadProjects(); loadSched(); }
     if (name === "sched") { renderSched(); loadSched(); loadProjects(); }
+    if (name === "channels") { CH.cur = null; CH.detail = null; renderChannels(); loadChannels(); loadProjects(); }
     if (name === "lineage") { if (LIN.g) linPaint(prev !== name); loadLineage(); }
   }
   function closePage() {

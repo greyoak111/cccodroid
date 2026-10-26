@@ -160,6 +160,7 @@
       <div class="lin-tour hidden" id="lin-tour"><div id="lt-map"></div><div class="lt-panel" id="lt-panel" role="dialog"></div></div>
     </section>
     <section id="tab-sched" class="tab-pane hidden"></section>
+    <section id="tab-channels" class="tab-pane hidden"></section>
     <section id="tab-usage" class="tab-pane hidden">
       <!-- 用量（照设计稿）：一排数字（额度、今天、本月、缓存命中）→ 每天用量柱状图（可切表格）→ 按型号占比 → 最费的对话 / 耗电 → 月报与数据管理。
            数据：额度来自 /api/login/status；token 来自网关的使用统计（home/ccapp-usage.json，按小时记）；耗电来自 /api/energy -->
@@ -377,26 +378,77 @@
       <h3 id="set-title" data-i18n>设置</h3>
       <button id="set-x" class="icon-btn" aria-label="关闭" data-i18n-attr="aria-label"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
-    <section id="tab-settings" class="set-pane">
-      <!-- 设置（0.3.13 改版）：按类分开，每项一行 —— 左边名称和一句说明，右边控件；开关一律拨动开关。
-           复杂的块（接口卡、Shizuku、设备工具、内存管家、更新）是「标题行 + 内容」。
-           宽屏左栏分类、右边一类；窄屏先列分类，点进去再看（逻辑在 app.js paintSetCats）。所有 id 与旧版一致 -->
+    <!-- 搜索：所有分类一起筛，命中项留在原类里；清空即恢复（逻辑在 app.js paintSetCats） -->
+    <div class="set-tools">
+      <div class="set-search" role="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>
+        <input id="set-search" type="search" autocomplete="off" spellcheck="false" placeholder="搜索设置" data-i18n-attr="placeholder">
+        <button type="button" id="set-search-x" class="set-search-x hidden" aria-label="清空" data-i18n-attr="aria-label">×</button>
+      </div>
+    </div>
+    <section id="tab-settings" class="set-pane set-list">
+      <!-- 设置（大改版）：一张长表，所有分类连续排下去；顶上搜索，分类是一排标记（宽屏在左栏），
+           滚到哪类哪个标记就亮，点标记跳到那一类。窄屏不再有「先看分类列表」这一层。
+           所有控件 id 与旧版一致；复杂块（接口卡、Shizuku、设备工具、内存管家、更新）是「标题行 + 内容」 -->
       <div class="set-wrap">
         <nav class="set-cats" id="set-cats">
-          <button data-cat="general"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M8 4v5"/></svg><span data-i18n>通用</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button data-cat="look"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span data-i18n>外观</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button data-cat="me"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg><span data-i18n>语言与身份</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button data-cat="input"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg><span data-i18n>输入与侧栏</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="provider"><svg viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg><span data-i18n>接口与型号</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button data-cat="context"><svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg><span data-i18n>上下文</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="claude"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.6L20 9.3l-4.4 3.9 1.3 5.8L12 16l-4.9 3 1.3-5.8L4 9.3l5.8-.7z"/></svg><span data-i18n>Claude 行为</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
-          <button data-cat="run"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg><span data-i18n>后台与并行</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button data-cat="run"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg><span data-i18n>后台与性能</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="device"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/></svg><span data-i18n>设备与权限</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="update"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-i18n>更新</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="usage"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span data-i18n>用量与耗电</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="trouble"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg><span data-i18n>排障</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
         </nav>
         <div class="set-main">
-  
-        <!-- ── 通用 ── -->
-        <div class="set-cat hidden" data-cat="general">
-          <h3 class="set-h" data-i18n>通用</h3>
+          <div id="set-nores" class="set-nores hidden" data-i18n>没有匹配的设置</div>
+
+        <!-- ── 外观：配色、字体、字号 ── -->
+        <div class="set-cat hidden" data-cat="look">
+          <h3 class="set-h" data-i18n>外观</h3>
+          <div class="srow">
+            <div class="sl"><b data-i18n>配色</b><p data-i18n>原生、「求索」或「逐月」</p></div>
+            <div class="sc"><span class="seg" id="seg-skin"><button data-sk="native" data-i18n>原生</button><button data-sk="qiusuo" data-i18n>求索</button><button data-sk="zhuyue" data-i18n>逐月</button></span></div>
+          </div>
+          <div class="srow">
+            <div class="sl"><b data-i18n>明暗</b></div>
+            <div class="sc"><span class="seg" id="seg-mode"><button data-md="auto" data-i18n>跟随系统</button><button data-md="light" data-i18n>浅</button><button data-md="dark" data-i18n>深</button></span>
+              <!-- 真正的设置仍是这个下拉框（theme.js 读写它）；上面两组分段只是它的两半 -->
+              <select id="set-theme" class="hidden">
+                <option value="auto" data-i18n>原生 · 跟随系统</option>
+                <option value="light" data-i18n>原生 · 浅色</option>
+                <option value="dark" data-i18n>原生 · 深色</option>
+                <option value="qs-auto" data-i18n>求索 · 跟随系统</option>
+                <option value="qs-light" data-i18n>求索 · 浅色</option>
+                <option value="qs-dark" data-i18n>求索 · 深色</option>
+                <option value="zy-auto" data-i18n>逐月 · 跟随系统</option>
+                <option value="zy-light" data-i18n>逐月 · 浅色</option>
+                <option value="zy-dark" data-i18n>逐月 · 深色</option>
+              </select>
+            </div>
+          </div>
+          <!-- 字体与正文字号（theme.js 读写，结果在 html 的 data-uifont / data-readfont / data-fs 上） -->
+          <div class="srow">
+            <div class="sl"><b data-i18n>界面字体</b><p data-i18n>默认用应用自带的 Inter 与思源黑体，不受系统字体主题影响</p></div>
+            <div class="sc"><span class="seg" id="seg-uifont"><button data-uf="cc" data-i18n>默认</button><button data-uf="system" data-i18n>跟随系统</button></span></div>
+          </div>
+          <div class="srow">
+            <div class="sl"><b data-i18n>正文用字</b><p data-i18n>Claude 回复正文的字体</p></div>
+            <div class="sc"><span class="seg" id="seg-readfont"><button data-rf="serif" data-i18n>衬线</button><button data-rf="sans" data-i18n>无衬线</button></span></div>
+          </div>
+          <div class="srow">
+            <div class="sl"><b data-i18n>正文字号</b><p data-i18n>对话和输入框里的字</p></div>
+            <div class="sc"><span class="seg" id="seg-fs"><button data-fs="s" data-i18n>小</button><button data-fs="m" data-i18n>中</button><button data-fs="l" data-i18n>大</button></span></div>
+          </div>
+        </div>
+
+        <!-- ── 语言与身份 ── -->
+        <div class="set-cat hidden" data-cat="me">
+          <h3 class="set-h" data-i18n>语言与身份</h3>
           <!-- 语言：标签跟界面语言走；选项里各语言用自己的写法（谁都认得出自己的语言）。逻辑在 i18n.js -->
           <div class="srow">
             <div class="sl"><b data-i18n>语言</b></div>
@@ -419,40 +471,11 @@
               <input type="file" id="prof-file" accept="image/*" class="hidden">
             </div>
           </div>
-          <div class="srow">
-            <div class="sl"><b data-i18n>外观</b><p data-i18n>原生、「求索」或「逐月」配色</p></div>
-            <div class="sc"><span class="seg" id="seg-skin"><button data-sk="native" data-i18n>原生</button><button data-sk="qiusuo" data-i18n>求索</button><button data-sk="zhuyue" data-i18n>逐月</button></span></div>
-          </div>
-          <div class="srow">
-            <div class="sl"><b data-i18n>深浅</b></div>
-            <div class="sc"><span class="seg" id="seg-mode"><button data-md="auto" data-i18n>跟随系统</button><button data-md="light" data-i18n>浅</button><button data-md="dark" data-i18n>深</button></span>
-              <!-- 真正的设置仍是这个下拉框（theme.js 读写它）；上面两组分段只是它的两半 -->
-              <select id="set-theme" class="hidden">
-                <option value="auto" data-i18n>原生 · 跟随系统</option>
-                <option value="light" data-i18n>原生 · 浅色</option>
-                <option value="dark" data-i18n>原生 · 深色</option>
-                <option value="qs-auto" data-i18n>求索 · 跟随系统</option>
-                <option value="qs-light" data-i18n>求索 · 浅色</option>
-                <option value="qs-dark" data-i18n>求索 · 深色</option>
-                <option value="zy-auto" data-i18n>逐月 · 跟随系统</option>
-                <option value="zy-light" data-i18n>逐月 · 浅色</option>
-                <option value="zy-dark" data-i18n>逐月 · 深色</option>
-              </select>
-            </div>
-          </div>
-          <!-- 字体与正文字号（theme.js 读写，结果在 html 的 data-uifont / data-readfont / data-fs 上） -->
-          <div class="srow">
-            <div class="sl"><b data-i18n>界面字体</b><p data-i18n>默认用应用自带的 Inter 与思源黑体，不受系统字体主题影响</p></div>
-            <div class="sc"><span class="seg" id="seg-uifont"><button data-uf="cc" data-i18n>默认</button><button data-uf="system" data-i18n>跟随系统</button></span></div>
-          </div>
-          <div class="srow">
-            <div class="sl"><b data-i18n>回复字体</b><p data-i18n>Claude 回复正文的字体</p></div>
-            <div class="sc"><span class="seg" id="seg-readfont"><button data-rf="serif" data-i18n>衬线</button><button data-rf="sans" data-i18n>无衬线</button></span></div>
-          </div>
-          <div class="srow">
-            <div class="sl"><b data-i18n>正文字号</b><p data-i18n>对话和输入框里的字</p></div>
-            <div class="sc"><span class="seg" id="seg-fs"><button data-fs="s" data-i18n>小</button><button data-fs="m" data-i18n>中</button><button data-fs="l" data-i18n>大</button></span></div>
-          </div>
+        </div>
+
+        <!-- ── 输入与侧栏 ── -->
+        <div class="set-cat hidden" data-cat="input">
+          <h3 class="set-h" data-i18n>输入与侧栏</h3>
           <div class="srow">
             <div class="sl"><b data-i18n>界面动效</b><p data-i18n>侧栏、菜单、整页的进出和完成提示；跟随系统时，系统开了「减少动态效果」就不放</p></div>
             <div class="sc"><span class="seg" id="seg-motion"><button data-mo="auto" data-i18n>跟随系统</button><button data-mo="on" data-i18n>开</button><button data-mo="off" data-i18n>关</button></span></div>
@@ -467,11 +490,11 @@
             </div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>侧栏常驻项</b><p data-i18n>其余收在「更多」里</p></div>
+            <div class="sl"><b data-i18n>侧栏固定项</b><p data-i18n>其余收在「更多」里</p></div>
             <div class="sc"><button class="btn sm ghost" id="set-navpins" data-i18n>编辑</button></div>
           </div>
         </div>
-  
+
         <!-- ── 接口与型号 ── -->
         <div class="set-cat hidden" data-cat="provider">
           <h3 class="set-h" data-i18n>接口与型号</h3>
@@ -486,19 +509,32 @@
             <div class="sc"><select id="set-model"></select></div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>思考强度（--effort）</b><p id="effort-info" class="clamp" data-i18n-html>档位随模型变化。也可在输入框打 <code>/effort &lt;level&gt;</code>。</p></div>
+            <div class="sl"><b data-i18n>思考强度</b><p id="effort-info" class="clamp" data-i18n-html>档位随模型变化。也可在输入框打 <code>/effort &lt;level&gt;</code>。</p></div>
             <div class="sc"><select id="set-effort"></select></div>
           </div>
-          <!-- 压缩线：拖动设 autoCompactWindow（和「Claude 行为」里的数字框是同一项） -->
+        </div>
+
+        <!-- ── 上下文：压缩 ── -->
+        <div class="set-cat hidden" data-cat="context">
+          <h3 class="set-h" data-i18n>上下文</h3>
+          <!-- 压缩线：拖动设 autoCompactWindow（和下面「自动压缩阈值」是同一项） -->
           <div class="sblock ac-slide" id="ac-slide">
-            <div class="ac-head"><b data-i18n>上下文压缩线</b><span id="ac-val"></span><button class="btn sm ghost" id="ac-auto" data-i18n>交给 claude</button></div>
+            <div class="ac-head"><b data-i18n>压缩触发点</b><span id="ac-val"></span><button class="btn sm ghost" id="ac-auto" data-i18n>交给 claude</button></div>
             <div class="ac-track"><input type="range" id="ac-range" min="0" max="100" step="1"></div>
             <div class="ac-scale"><span id="ac-min"></span><span id="ac-max"></span></div>
             <p class="tiny" data-i18n>用量逼近这条线时自动摘要历史。线放低更省、记得更少；放高记得多，但每轮更贵、更慢。</p>
           </div>
+          <div class="srow">
+            <div class="sl"><b data-i18n>自动压缩阈值</b><p data-i18n>上下文到多少 token 时压缩</p><p id="ac-info" class="clamp" data-i18n-html>用量逼近这个值时自动摘要历史。留空即不干预；也可在输入框打 <code>/autocompact &lt;n&gt;k</code>。</p></div>
+            <div class="sc"><input id="set-autocompact" type="number" inputmode="numeric" placeholder="留空 = 交给 claude 按窗口决定" data-i18n-attr="placeholder"></div>
+          </div>
+          <div class="srow">
+            <div class="sl"><b data-i18n>空闲压缩</b><p data-i18n>长会话闲置快一小时时先压缩</p><p class="clamp" data-i18n>只对 Claude 账户和 Anthropic API Key 生效。上下文超过 20 万 token 的会话闲置约 54 分钟、1 小时提示缓存快过期时，先压缩一次；回来接着聊就不用把整段历史按全价重新处理，订阅账户少占额度，API Key 少花钱。电脑上的 Claude Code 也是这么做的。</p></div>
+            <div class="sc"><input type="checkbox" class="sw" id="set-idlecompact"></div>
+          </div>
         </div>
-  
-        <!-- ── Claude 行为 ── -->
+
+        <!-- ── Claude 行为：权限、输出、目录、安全 ── -->
         <div class="set-cat hidden" data-cat="claude">
           <h3 class="set-h" data-i18n>Claude 行为</h3>
           <div class="srow stack">
@@ -518,18 +554,6 @@
             <div class="sl"><b data-i18n>输出风格</b></div>
             <div class="sc"><select id="set-style"><option value="" data-i18n>（默认）</option></select></div>
           </div>
-          <div class="srow">
-            <div class="sl"><b data-i18n>自动压缩窗口（token）</b><p data-i18n>上下文到多少 token 时压缩</p><p id="ac-info" class="clamp" data-i18n-html>用量逼近这个值时自动摘要历史。留空即不干预；也可在输入框打 <code>/autocompact &lt;n&gt;k</code>。</p></div>
-            <div class="sc"><input id="set-autocompact" type="number" inputmode="numeric" placeholder="留空 = 交给 claude 按窗口决定" data-i18n-attr="placeholder"></div>
-          </div>
-          <div class="srow">
-            <div class="sl"><b data-i18n>空闲压缩</b><p data-i18n>长会话闲置快一小时时先压缩</p><p class="clamp" data-i18n>只对 Claude 账户和 Anthropic API Key 生效。上下文超过 20 万 token 的会话闲置约 54 分钟、1 小时提示缓存快过期时，先压缩一次；回来接着聊就不用把整段历史按全价重新处理，订阅账户少占额度，API Key 少花钱。电脑上的 Claude Code 也是这么做的。</p></div>
-            <div class="sc"><input type="checkbox" class="sw" id="set-idlecompact"></div>
-          </div>
-          <div class="srow">
-            <div class="sl"><b data-i18n>工作岛（ColorOS 灵动岛）</b><p data-i18n>把 Claude 的工作状态显示在 ColorOS 16 的流体云 / 灵动岛上</p><p class="clamp" data-i18n>需要另外安装「工作岛」应用。开启后，正在干活、等待确认、任务完成会出现在岛上的胶囊里；完成后 8 秒自动收起。目前仅在 ColorOS 16 / Android 16 上测试过。</p></div>
-            <div class="sc"><input type="checkbox" class="sw" id="set-workisland"></div>
-          </div>
           <div class="sblock" id="dir-field">
             <div class="srow head">
               <div class="sl"><b data-i18n>附加目录</b><p data-i18n>--add-dir，让 claude 能读写工作区之外的目录</p><p class="clamp" data-i18n>让 claude 能读写工作区之外的目录。这些目录同时会成为文件浏览器的快捷入口。</p></div>
@@ -546,10 +570,10 @@
             <div class="sc"><input type="checkbox" class="sw" id="safe-mode"></div>
           </div>
         </div>
-  
-        <!-- ── 后台与并行 ── -->
+
+        <!-- ── 后台与性能 ── -->
         <div class="set-cat hidden" data-cat="run">
-          <h3 class="set-h" data-i18n>后台与并行</h3>
+          <h3 class="set-h" data-i18n>后台与性能</h3>
           <!-- 后台被冻结的提示：GatewayService 测到冻结才出现（前台服务挡不住部分厂商的冻结器） -->
           <div class="sblock hidden" id="bg-field">
             <div class="srow head"><div class="sl"><b data-i18n>后台运行</b></div></div>
@@ -561,7 +585,7 @@
             </div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>最多同时跑几个会话</b><p data-i18n>每多跑一个多占几百 MB 内存</p><p class="clamp" data-i18n>不同会话可以同时干活，同一个会话里还是一条接一条。每多跑一个要多占几百 MB 内存，手机内存紧时调小；1 = 一次只跑一轮。</p></div>
+            <div class="sl"><b data-i18n>并行会话数</b><p data-i18n>每多跑一个多占几百 MB 内存</p><p class="clamp" data-i18n>不同会话可以同时干活，同一个会话里还是一条接一条。每多跑一个要多占几百 MB 内存，手机内存紧时调小；1 = 一次只跑一轮。</p></div>
             <div class="sc"><input id="set-parallel" class="narrow" type="number" inputmode="numeric" min="1" step="1"></div>
           </div>
           <div class="srow">
@@ -569,7 +593,7 @@
             <div class="sc"><input type="checkbox" class="sw" id="set-static"></div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>执行方式</b><p id="exec-now"></p><p class="clamp" data-i18n>自动：按安装包定。直接执行：工具包里的程序直接运行（targetSdk 28 的安装包）。经加载器：借系统加载器间接运行，targetSdk 36 的安装包只能这样；28 的也能选，用来排查问题。改完重启网关才生效。</p></div>
+            <div class="sl"><b data-i18n>程序启动方式</b><p id="exec-now"></p><p class="clamp" data-i18n>自动：按安装包定。直接执行：工具包里的程序直接运行（targetSdk 28 的安装包）。经加载器：借系统加载器间接运行，targetSdk 36 的安装包只能这样；28 的也能选，用来排查问题。改完重启网关才生效。</p></div>
             <div class="sc"><select id="set-exec"><option value="auto" data-i18n>自动</option><option value="direct" data-i18n>直接执行</option><option value="loader" data-i18n>经加载器</option></select></div>
           </div>
           <!-- 内存管家（cc-mem）：重活前清场、压住杀了又活的后台应用。默认关，经 Shizuku -->
@@ -589,7 +613,7 @@
             <div class="prov-state" id="mem-result"></div>
           </div>
         </div>
-  
+
         <!-- ── 设备与权限 ── -->
         <div class="set-cat hidden" data-cat="device">
           <h3 class="set-h" data-i18n>设备与权限</h3>
@@ -664,8 +688,12 @@
               <button class="btn sm ghost" id="dev-a11y-sys" data-i18n>去系统无障碍设置</button>
             </div>
           </div>
+          <div class="srow">
+            <div class="sl"><b data-i18n>工作岛</b><p data-i18n>把 Claude 的工作状态显示在 ColorOS 16 的流体云 / 灵动岛上</p><p class="clamp" data-i18n>需要另外安装「工作岛」应用。开启后，正在干活、等待确认、任务完成会出现在岛上的胶囊里；完成后 8 秒自动收起。目前仅在 ColorOS 16 / Android 16 上测试过。</p></div>
+            <div class="sc"><input type="checkbox" class="sw" id="set-workisland"></div>
+          </div>
         </div>
-  
+
         <!-- ── 更新 ── -->
         <div class="set-cat hidden" data-cat="update">
           <h3 class="set-h" data-i18n>更新</h3>
@@ -698,8 +726,7 @@
             <div class="tiny" id="upd-last"></div>
           </div>
         </div>
-  
-        <!-- ── 排障：安全模式 / 打包诊断 / 反馈 / 核对记录 / 修复账本 / 运行状态 ── -->
+
         <!-- ── 用量与耗电：只放入口，明细在「用量」页 ── -->
         <div class="set-cat hidden" data-cat="usage">
           <h3 class="set-h" data-i18n>用量与耗电</h3>
@@ -717,26 +744,27 @@
           </div>
         </div>
 
+        <!-- ── 排障：诊断 / 反馈 / 核对 / 修复账本 / 运行状态 ── -->
         <div class="set-cat hidden" data-cat="trouble">
           <h3 class="set-h" data-i18n>排障</h3>
           <div class="srow">
-            <div class="sl"><b data-i18n>打包诊断</b><p class="clamp" id="share-logs-hint" data-i18n>遇到装不上、跑不动、报错看不懂：打一个诊断包，经系统分享发给帮你看的人（或附在 GitHub issue 里）。打包前会列出包里有什么；密钥、令牌、邮箱和你的消息内容都会先去掉。</p></div>
+            <div class="sl"><b data-i18n>导出诊断包</b><p class="clamp" id="share-logs-hint" data-i18n>遇到装不上、跑不动、报错看不懂：打一个诊断包，经系统分享发给帮你看的人（或附在 GitHub issue 里）。打包前会列出包里有什么；密钥、令牌、邮箱和你的消息内容都会先去掉。</p></div>
             <div class="sc"><button class="btn sm" id="btn-share-logs" data-i18n>我卡住了 · 打包诊断</button></div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>到 GitHub 反馈</b><p class="clamp" id="issue-hint" data-i18n>「到 GitHub 反馈」会打开一个新建 Issue 的页面，机型、系统版本、自检结果都已经填好，你只要写遇到了什么。需要 GitHub 账号；不放日志和对话。</p></div>
+            <div class="sl"><b data-i18n>提交问题</b><p class="clamp" id="issue-hint" data-i18n>「到 GitHub 反馈」会打开一个新建 Issue 的页面，机型、系统版本、自检结果都已经填好，你只要写遇到了什么。需要 GitHub 账号；不放日志和对话。</p></div>
             <div class="sc"><button class="btn sm" id="btn-issue" data-i18n>到 GitHub 反馈</button></div>
           </div>
           <div class="sblock">
             <div class="srow head">
-              <div class="sl"><b data-i18n>核对记录</b><p data-i18n>组件、模块、包清单与磁盘是否一致</p></div>
+              <div class="sl"><b data-i18n>组件核对</b><p data-i18n>组件、模块、包清单与磁盘是否一致</p></div>
               <div class="sc"><button class="btn sm ghost" id="btn-reconcile" data-i18n>核对记录</button></div>
             </div>
             <div id="reconcile-box" class="list hidden"></div>
           </div>
           <div class="sblock">
             <div class="srow head">
-              <div class="sl"><b data-i18n>修复账本</b><p data-i18n>安装、校验、修复做过什么</p></div>
+              <div class="sl"><b data-i18n>修复记录</b><p data-i18n>安装、校验、修复做过什么</p></div>
               <div class="sc"><button class="btn sm ghost" id="btn-ledger" data-i18n>修复账本</button></div>
             </div>
             <div id="ledger-list" class="list hidden"></div>
@@ -750,12 +778,13 @@
             <pre id="cli-out" class="mono hidden"></pre>
           </div>
         </div>
-  
+
         </div>
       </div>
     </section>
   </div>
 </div>
+
 
 <!-- ── 文件浏览器（全屏）── -->
 <div id="files" class="hidden">
@@ -910,6 +939,7 @@
 <script src="/i18n.js"></script>
 <script src="/layout.js"></script>
 <script src="/lineage/map.js"></script>
+<script src="/qrcode.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

@@ -251,8 +251,8 @@ export function enqueue(body) {
     addDirs: Array.isArray(body.addDirs) ? body.addDirs : [],
     projectId: body.projectId ? String(body.projectId) : null,
     at: Date.now(),
-    // 只有网关自己（定时任务）会带的：前端发来的 /api/chat 不许设这些
-    ...(body.internal ? { cwd: body.cwd || null, effort: body.effort || null, provider: body.provider || null, sched: body.sched || null, unattended: !!body.unattended,
+    // 只有网关自己（定时任务、频道）会带的：前端发来的 /api/chat 不许设这些
+    ...(body.internal ? { cwd: body.cwd || null, effort: body.effort || null, provider: body.provider || null, sched: body.sched || null, channel: body.channel || null, unattended: !!body.unattended,
       allowedTools: body.allowedTools || null, disallowedTools: body.disallowedTools || null, timeoutMs: body.timeoutMs || 0 } : {}),
     ...(body.auto ? { auto: body.auto } : {}),
   };
