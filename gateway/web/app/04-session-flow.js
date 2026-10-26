@@ -215,7 +215,7 @@
       setStatus(t("就绪"), "ok");
       if (anchor) return landOnChapter(page, gen);
       if (fwd) { stick = false; chatEl.scrollTop = 0; }   // 重连时接着原来那一段
-      else scrollDown(true);
+      else { scrollDown(true); MO.play(histEl, "mo-in-rise", 1400); }
     } else {
       const h0 = chatEl.scrollHeight, t0 = chatEl.scrollTop;
       histEl.insertBefore(page, histEl.firstChild);
@@ -233,7 +233,10 @@
     const y = sep ? sep.getBoundingClientRect().top - chatEl.getBoundingClientRect().top + chatEl.scrollTop : 0;
     chatEl.scrollTop = Math.max(0, y - chatEl.clientHeight / 3);
     progTop = chatEl.scrollTop;
-    if (sep) { sep.classList.add("hit-flash"); setTimeout(() => sep.classList.remove("hit-flash"), 2400); }
+    if (!sep) return;
+    // 动效开着：章名轻轻一顶、蓝线从左扫到右；关着照旧底色闪一下
+    if (MO.on()) { if (!sep.querySelector(".mo-sweep")) sep.insertAdjacentHTML("beforeend", '<i class="mo-sweep"></i>'); MO.play(sep, "mo-hit", 2200); }
+    else { sep.classList.add("hit-flash"); setTimeout(() => sep.classList.remove("hit-flash"), 2400); }
   }
   /** 回到最新：窗口没到最新时整个重开（#live 本来就在，重开会按正常方式从尾巴取） */
   function backToLatest() {
@@ -303,6 +306,7 @@
     b.innerHTML = `<div class="wl-hero">${WL_MARK}<h1 class="wl-greet">${esc(greeting())}</h1></div><div class="setup-guide hidden"></div>`;
     fillSetupGuide(b.querySelector(".setup-guide"));
     paintWelBelow();
+    MO.play(b.parentElement, "mo-in-rise", 1400);
   }
   // 输入框下方：只留「使用提示」（进帮助页）；原先还有三条示例，用户嫌不好看，去掉了
   const wlBelow = document.createElement("div");

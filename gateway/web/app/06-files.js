@@ -27,7 +27,7 @@
   }
 
   async function openFiles(path) {
-    filesEl.classList.remove("hidden");
+    MO.cancel(filesEl); filesEl.classList.remove("hidden");
     await fsLoad(path || state.fs.path || state.settings.workspace || "/sdcard");
   }
 
@@ -147,7 +147,7 @@
     inputEl.focus();
   }
 
-  function closeFiles() { filesEl.classList.add("hidden"); }
+  function closeFiles() { MO.hide(filesEl, MO.paneOut()); }
 
   // 新建 / 重命名：都不覆盖已有的同名项。新建文件默认 .txt，建好直接进编辑器；想换类型就改后缀
   const fsErr = (e) => toast(/exists|409/.test(e.message) ? t("已经有同名的文件或文件夹") : t("操作失败：{msg}", { msg: e.message }), true);

@@ -18,12 +18,12 @@
   async function openGit(dir, opts = {}) {
     Object.assign(GIT, { dir, root: "", tab: opts.tab || "changes", status: null, file: opts.file || "", view: opts.file ? (opts.tab === "history" ? { kind: "log" } : { kind: "diff" }) : null });
     GIT.sel = new Set();
-    gitEl.classList.remove("hidden");
+    MO.cancel(gitEl); gitEl.classList.remove("hidden");
     $("git-name").textContent = String(dir).split("/").pop();
     $("git-info").textContent = "";
     await gitLoad();
   }
-  function closeGit() { gitEl.classList.add("hidden"); $("git-body").innerHTML = ""; $("git-sync").classList.add("hidden"); }
+  function closeGit() { MO.hide(gitEl, MO.paneOut(), 170, () => { $("git-body").innerHTML = ""; $("git-sync").classList.add("hidden"); }); }
   $("git-close").addEventListener("click", closeGit);
   $("git-reload").addEventListener("click", () => gitLoad());
   gitEl.querySelector(".git-tabs").addEventListener("click", (e) => {
@@ -367,7 +367,7 @@
     $("vw-name").textContent = path.split("/").pop();
     $("vw-name").title = path;
     $("vw-info").textContent = fmtSize(VW.size);
-    viewerEl.classList.remove("hidden");
+    MO.cancel(viewerEl); viewerEl.classList.remove("hidden");
     if (VW.kind === "text" && isHtml(path) && localStorage.getItem("cc.vw.htmlmode") !== "edit") return vwHtml();
     if (VW.kind === "text") return vwLoadText(isMd(path) ? (localStorage.getItem("cc.vw.mdmode") === "edit" ? "edit" : "md") : "edit");
     if (VW.kind === "image") return vwImage();
@@ -427,6 +427,14 @@
       return vwHtml();
     }
     if (a === "reload") return vwHtmlReload();
+    if (a === "pick") {
+      const fr = $("vw-body").querySelector(".vw-html"); if (!fr || !fr.contentWindow) return;
+      VW.picking = !VW.picking; vwRenderActs();
+      fr.contentWindow.postMessage({ cc: VW.picking ? "pick" : "pickoff" }, "*");
+      if (VW.picking) toast(t("点一下网页里的某一块，它就会放进输入框"));
+      return;
+    }
+    if (a === "devtools") { VW.picking = false; try { localStorage.setItem("cc.pvDevtools", pvDevtools() ? "0" : "1"); } catch {} vwRenderActs(); return vwHtmlReload(); }
     if (a === "openweb") { if (VW.pv) openWeb(VW.pv.url); return; }
     if (a === "gitdiff") return vwShowDiff();
     if (a === "aspdf") return vwOffice();
@@ -532,7 +540,7 @@
     const acts = [];
     if (isMd(VW.path)) acts.push(VW.mode === "md" ? [t("编辑"), "edit"] : [t("预览"), "md"]);
     if (isHtml(VW.path)) {
-      if (VW.mode === "html") { vwActs([[t("源码"), "edit"], [t("刷新"), "reload"], [t("在浏览器打开"), "openweb"]]); return; }
+      if (VW.mode === "html") { vwActs([[t("源码"), "edit"], [t("刷新"), "reload"], [t("开发者工具"), "devtools", pvDevtools()], ...(pvDevtools() ? [[t("选取元素"), "pick", VW.picking]] : []), [t("在浏览器打开"), "openweb"]]); return; }
       acts.push([t("预览"), "html"]);
     }
     if (VW.mode === "edit") {
@@ -691,7 +699,7 @@
     catch (e) { if (p === VW.path) $("vw-body").innerHTML = `<div class="vw-empty">${t("预览打不开")}: ${esc(e.message)}</div>`; return; }
     if (p !== VW.path || VW.mode !== "html") return;
     VW.pv = { url: r.url, mtime: r.mtime };
-    $("vw-body").innerHTML = `<iframe class="vw-html" src="${esc(r.url)}" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock" allow="autoplay; fullscreen; clipboard-write" referrerpolicy="same-origin"></iframe>`;
+    $("vw-body").innerHTML = `<iframe class="vw-html" src="${esc(pvSrc())}" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock" allow="autoplay; fullscreen; clipboard-write" referrerpolicy="same-origin"></iframe>`;
     // Claude 一边改、你一边看：每 1.5 秒看一眼修改时间，变了就重新载入
     VW.pvTimer = setInterval(async () => {
       if (viewerEl.classList.contains("hidden") || VW.mode !== "html" || VW.path !== p) return vwHtmlStop();
@@ -700,9 +708,42 @@
       if (VW.pv && s && s.mtime && s.mtime !== VW.pv.mtime) { VW.pv.mtime = s.mtime; VW.size = s.size; $("vw-info").textContent = fmtSize(s.size); vwHtmlReload(); }
     }, 1500);
   }
+  // 开发者工具（Eruda）：开关记在本机；开着时预览地址带上 cc_devtools，预览服务往网页里插它（深浅跟界面走）
+  const pvDevtools = () => { try { return localStorage.getItem("cc.pvDevtools") === "1"; } catch { return false; } };
+  function pvSrc(bust) {
+    const q = new URLSearchParams();
+    if (pvDevtools()) { q.set("cc_devtools", "1"); if (document.documentElement.dataset.theme !== "light") q.set("cc_dark", "1"); }
+    if (bust) q.set("_r", Date.now());
+    const qs = q.toString();
+    return VW.pv.url + (qs ? (VW.pv.url.includes("?") ? "&" : "?") + qs : "");
+  }
+  // 预览里选中的元素递回来：只认当前预览框、当前预览站点发来的；只取几段文字放进输入框（不执行），发不发由用户定
+  window.addEventListener("message", (e) => {
+    const fr = $("vw-body").querySelector(".vw-html"), d = e.data;
+    if (!fr || e.source !== fr.contentWindow || !VW.pv || !d || typeof d !== "object") return;
+    try { if (e.origin !== new URL(VW.pv.url).origin) return; } catch { return; }
+    if (d.cc === "pickoff") { VW.picking = false; vwRenderActs(); return; }
+    if (d.cc !== "picked") return;
+    VW.picking = false; vwRenderActs();
+    pickInsert("@" + VW.path, d);
+  });
+  /** 选中的元素放进输入框：只取选择器和一小段 HTML 当文字，不执行任何东西 */
+  function pickInsert(where, d) {
+    const str = (v, n) => String(v == null ? "" : v).slice(0, n);
+    const sel = str(d.sel, 300), html = str(d.html, 900).replace(/```/g, "`\u200b``");
+    insertAtCursor(t("{path} 里的 {sel}：", { path: where, sel: "`" + sel + "`" }) + "\n```html\n" + html + "\n```\n");
+    toast(t("已放进输入框，接着写要怎么改"));
+  }
+  // 浏览器窗格（原生 WebView）里选中的：原生侧轮询取到后调这里，参数是 JSON 文本
+  window.__ccPickIn = (json) => {
+    let d; try { d = JSON.parse(String(json)); } catch { return; }
+    if (!d || typeof d !== "object" || d.cc !== "picked") return;
+    pickInsert(String(d.url || "").slice(0, 300), d);
+  };
   function vwHtmlReload() {
+    VW.picking = false;
     const f = $("vw-body").querySelector(".vw-html");
-    if (f && VW.pv) f.src = VW.pv.url + (VW.pv.url.includes("?") ? "&" : "?") + "_r=" + Date.now();
+    if (f && VW.pv) f.src = pvSrc(true);
   }
   function vwHtmlStop() { clearInterval(VW.pvTimer); VW.pvTimer = 0; VW.pv = null; }
 

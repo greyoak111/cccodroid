@@ -108,10 +108,13 @@
       </button>
     </div>
     <button id="side-new" class="side-new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span data-i18n>新对话</span></button>
+    <!-- 导航和最近对话合成一段一起滚：平时和分开时一样，放不下时导航跟着往上走（#24） -->
+    <div id="side-scroll" class="side-scroll">
     <nav id="side-nav" class="side-nav"></nav>
 
     <!-- 最近的对话：单行条目，按置顶 / 今天 / 昨天 / 更早分组；长按（右键）出菜单。搜索、多选、导入、回收站在「对话」整页 -->
     <div id="side-recent" class="side-recent"></div>
+    </div>
 
     <button id="side-acct" class="side-acct">
       <span class="acct-av" id="acct-av">C</span>
@@ -473,6 +476,10 @@
         <!-- ── 输入与侧栏 ── -->
         <div class="set-cat hidden" data-cat="input">
           <h3 class="set-h" data-i18n>输入与侧栏</h3>
+          <div class="srow">
+            <div class="sl"><b data-i18n>界面动效</b><p data-i18n>侧栏、菜单、整页的进出和完成提示；跟随系统时，系统开了「减少动态效果」就不放</p></div>
+            <div class="sc"><span class="seg" id="seg-motion"><button data-mo="auto" data-i18n>跟随系统</button><button data-mo="on" data-i18n>开</button><button data-mo="off" data-i18n>关</button></span></div>
+          </div>
           <div class="srow">
             <div class="sl"><b data-i18n>回车键</b><p data-i18n>手机键盘没有 Shift，想多行输入就选换行</p></div>
             <div class="sc">

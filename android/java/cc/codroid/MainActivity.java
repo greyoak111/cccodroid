@@ -1395,6 +1395,8 @@ public class MainActivity extends Activity {
         if (pane == null) {
             pane = new BrowserPane(this, new BrowserPane.Host() {
                 @Override public void onPaneClose() { closePane(true); }
+                // json 已经是 evaluateJavascript 编好的 JS 字符串字面量，原样当参数传，界面那边再 JSON.parse、只取文字
+                @Override public void onPicked(String json) { if (web != null) web.evaluateJavascript("window.__ccPickIn&&__ccPickIn(" + json + ")", null); }
             }, 9);
             pane.setVisibility(View.GONE);               // 等页面报来位置再显示，免得先闪一下全屏
             root.addView(pane, new FrameLayout.LayoutParams(0, 0));

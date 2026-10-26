@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="cc.codroid"
-    android:versionCode="75"
-    android:versionName="0.4.10">
+    android:versionCode="79"
+    android:versionName="0.4.14">
 
     <!-- targetSdk 28：29 起禁止执行应用可写目录里的程序（W^X），工具链只能「经加载器」跑（Env.applyLoader）。
          build.sh 的 TARGET_SDK=36 会改这一行出 36 的包；下面为 36 加的声明在 28 的包里都不改变行为 -->

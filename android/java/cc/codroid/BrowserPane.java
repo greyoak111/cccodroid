@@ -43,10 +43,17 @@ import android.widget.Toast;
  * 不用 lambda：开发端的构建链（同一份源码改包名）不支持。
  */
 public class BrowserPane extends LinearLayout {
-    static final String PREFS = "browser", LAST = "last", TAG = "cccodroid-browser";
+    static final String PREFS = "browser", LAST = "last", DEVTOOLS = "devtools", TAG = "cccodroid-browser";
+    /** 开发者工具（Eruda，MIT）：开着时每个页面载完往里注入。本体读网关目录里随包带的那份，不走网络 */
+    private boolean devtools;
+    private String erudaSrc, pickSrc;
+    private TextView pickBtn;
+    private int pickPolls;     // 选取模式还剩几次轮询
+    private boolean picking;
 
     /** 宿主：关闭（✕ / 渲染进程崩了）怎么处理由它定 */
-    public interface Host { void onPaneClose(); }
+    /** onPicked：开发者工具里选中了一块，json 是 JSON.stringify 的结果再经 evaluateJavascript 编成的 JS 字符串字面量 */
+    public interface Host { void onPaneClose(); void onPicked(String json); }
 
     private final Activity act;
     private final Host host;
@@ -93,13 +100,19 @@ public class BrowserPane extends LinearLayout {
         bar.setImeOptions(EditorInfo.IME_ACTION_GO);
         bar.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
         bar.setSelectAllOnFocus(true);
+        devtools = a.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(DEVTOOLS, false);
+        final TextView dt = btn("</>", fg, Tr.t("开发者工具"));
+        dt.setTextSize(13);
+        dt.setAlpha(devtools ? 1f : 0.45f);
+        pickBtn = btn("⌖", fg, Tr.t("选取元素"));
+        pickBtn.setVisibility(devtools ? View.VISIBLE : View.GONE);
         TextView ext = btn("↗", fg, Tr.t("用系统浏览器打开"));
         TextView close = btn("✕", fg, Tr.t("关闭"));
         top.addView(back); top.addView(fwd); top.addView(reload);
         LayoutParams lp = new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1);
         lp.setMargins(dp(4), 0, dp(4), 0);
         top.addView(bar, lp);
-        top.addView(ext); top.addView(close);
+        top.addView(dt); top.addView(pickBtn); top.addView(ext); top.addView(close);
         addView(top);
 
         prog = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
@@ -132,7 +145,7 @@ public class BrowserPane extends LinearLayout {
             }
             @SuppressWarnings("deprecation")
             @Override public boolean shouldOverrideUrlLoading(WebView v, String url) { return route(url); }
-            @Override public void onPageStarted(WebView v, String url, Bitmap icon) { Log.i(TAG, "start " + url); shown(url); }
+            @Override public void onPageStarted(WebView v, String url, Bitmap icon) { Log.i(TAG, "start " + url); pickStop(); shown(url); }
             @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
                 if (r.isForMainFrame()) Log.w(TAG, "error " + e.getErrorCode() + " " + e.getDescription() + " " + r.getUrl());
             }
@@ -143,6 +156,7 @@ public class BrowserPane extends LinearLayout {
             }
             @Override public void onPageFinished(WebView v, String url) {
                 Log.i(TAG, "finish " + url);
+                if (devtools) injectDevtools();
                 shown(url);
                 act.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(LAST, url).apply();
             }
@@ -168,6 +182,24 @@ public class BrowserPane extends LinearLayout {
         back.setOnClickListener(new OnClickListener() { @Override public void onClick(View v) { if (web.canGoBack()) web.goBack(); } });
         fwd.setOnClickListener(new OnClickListener() { @Override public void onClick(View v) { if (web.canGoForward()) web.goForward(); } });
         reload.setOnClickListener(new OnClickListener() { @Override public void onClick(View v) { web.reload(); } });
+        dt.setOnClickListener(new OnClickListener() { @Override public void onClick(View v) {
+            devtools = !devtools;
+            act.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(DEVTOOLS, devtools).apply();
+            dt.setAlpha(devtools ? 1f : 0.45f);
+            pickBtn.setVisibility(devtools ? View.VISIBLE : View.GONE);
+            pickStop();
+            web.reload();
+        } });
+        pickBtn.setOnClickListener(new OnClickListener() { @Override public void onClick(View v) {
+            if (picking) { pickStop(); web.evaluateJavascript("window.postMessage({cc:'pickoff'},'*')", null); return; }
+            if (pickSrc == null) pickSrc = readWeb("vendor/cc-pick.js");
+            if (pickSrc == null) return;
+            web.evaluateJavascript("if(!window.__ccPick){" + pickSrc + "\n}window.__ccPicked=null;window.postMessage({cc:'pick'},'*')", null);
+            picking = true; pickPolls = 200;   // 0.3 秒一次，最多等一分钟
+            pickBtn.setAlpha(0.5f);
+            android.widget.Toast.makeText(act, Tr.t("点一下网页里的某一块，它就会放进输入框"), android.widget.Toast.LENGTH_SHORT).show();
+            pickPoll();
+        } });
         ext.setOnClickListener(new OnClickListener() { @Override public void onClick(View v) { external(web.getUrl()); } });
         close.setOnClickListener(new OnClickListener() { @Override public void onClick(View v) { host.onPaneClose(); } });
         bar.setOnEditorActionListener(new TextView.OnEditorActionListener() {
@@ -279,6 +311,35 @@ public class BrowserPane extends LinearLayout {
         if (fileCb == null) return;
         fileCb.onReceiveValue(MainActivity.chooserResult(res, data));
         fileCb = null;
+    }
+
+    /** 网关目录里随包带的前端文件（Eruda、选取脚本） */
+    private String readWeb(String rel) {
+        try {
+            java.io.File f = new java.io.File(act.getFilesDir(), "app/web/" + rel);
+            return new String(java.nio.file.Files.readAllBytes(f.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) { Log.w(TAG, rel + ": " + e); return null; }
+    }
+    /** 选取模式：不给网页开任何原生接口，由这边隔一会儿去网页里取结果（window.__ccPicked），取到就交给对话界面 */
+    private void pickPoll() {
+        if (!picking) return;
+        pickPolls--;
+        web.evaluateJavascript("(function(){var p=window.__ccPicked;window.__ccPicked=null;return p?JSON.stringify(p):null})()",
+            new ValueCallback<String>() { @Override public void onReceiveValue(String v) {
+                if (!picking) return;
+                if (v != null && v.startsWith("\"")) { pickStop(); host.onPicked(v); return; }
+                if (pickPolls <= 0) { pickStop(); return; }
+                web.postDelayed(new Runnable() { public void run() { pickPoll(); } }, 300);
+            } });
+    }
+    private void pickStop() { picking = false; pickPolls = 0; if (pickBtn != null) pickBtn.setAlpha(1f); }
+
+    private void injectDevtools() {
+        if (erudaSrc == null) erudaSrc = readWeb("vendor/eruda/eruda.js");
+        if (erudaSrc == null) return;
+        String theme = night(act) ? "Dark" : "Light";
+        web.evaluateJavascript("if(!window.__ccEruda){window.__ccEruda=1;" + erudaSrc
+            + "\n;try{eruda.init({defaults:{displaySize:50,transparency:.97,theme:'" + theme + "'}})}catch(e){}}", null);
     }
 
     public void saveState(Bundle o) { web.saveState(o); }

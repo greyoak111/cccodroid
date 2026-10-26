@@ -438,9 +438,14 @@ async function queryBalance(v, k) {
   const key = String(v.apiKey || "").trim();
   if (k.kind === "deepseek") {
     const j = await fetchJson("https://api.deepseek.com/user/balance", { Authorization: `Bearer ${key}` });
-    const b = (j.balance_infos || [])[0];
-    if (!b) throw new Error("no balance_infos");
-    return { currency: b.currency, balance: +b.total_balance, parts: [{ k: "granted", v: +b.granted_balance }, { k: "topped", v: +b.topped_up_balance }], available: j.is_available !== false };
+    // 按币种各一条（人民币、美元）：别只拿第一条 —— 钱在美元那条时第一条是 0，界面就一直显示 ¥0.00，顺序一变还会跳。
+    // 取有钱的那条（都有就取多的；都没有优先人民币），另一种币有钱的话列在明细里
+    const infos = (j.balance_infos || []).filter((x) => x && x.currency);
+    if (!infos.length) throw new Error("no balance_infos");
+    const b = infos.slice().sort((x, y) => (+y.total_balance || 0) - (+x.total_balance || 0) || (x.currency === "CNY" ? -1 : y.currency === "CNY" ? 1 : 0))[0];
+    const parts = [{ k: "granted", v: +b.granted_balance }, { k: "topped", v: +b.topped_up_balance }];
+    for (const o of infos) if (o !== b && +o.total_balance > 0) parts.push({ k: o.currency, v: +o.total_balance, currency: o.currency });
+    return { currency: b.currency, balance: +b.total_balance, parts, available: j.is_available !== false };
   }
   if (k.kind === "kimi") {
     const j = await fetchJson(k.host + "/v1/users/me/balance", { Authorization: `Bearer ${key}` });

@@ -4,15 +4,81 @@
   function openDrawer(tab) {
     if (tab && tab !== "sessions") return openPage(tab);
     OV.closeAll();
+    MO.cancel(drawerEl);
+    // 收到一半又打开：从停下的位置用弹簧弹回来，别跳
+    const back = drawerEl._moShut ? drawerEl._moShut() : null;
+    const wasHidden = drawerEl.classList.contains("hidden");
+    if (back != null) MO.spring(drawerEl.querySelector(".drawer-panel"), "snap", (p) => ({ transform: `translateX(${back * (1 - p)}px)` }));
     drawerEl.classList.remove("hidden");
     refreshStatus();
     loadSessions();
     if (!tab) loadCaps();
     renderSideNav();
     loadProjects(); loadSched();
+    // 条目一个接一个跟上（点菜单键、横滑拉出都放）；点菜单键的再加遮罩淡入、面板弹出 ——
+    // 横滑拉出的面板跟着手指走（手势把面板动画关了），松手由手势那边用弹簧落定。常驻左栏不放
+    const panel = drawerEl.querySelector(".drawer-panel");
+    if (wasHidden && MO.on() && panel && !(window.CCLayout && CCLayout.docked())) {
+      MO.stagger(drawerEl.querySelectorAll(".side-new, .side-nav > .nav-item, .side-recent > :is(h4, .sr-item)"), 14);
+      MO.play(drawerEl, "mo-items", 1600);
+      if (panel.style.animation !== "none") MO.play(drawerEl, "mo-enter", 1400);
+    }
   }
   // 三栏宽屏时侧栏常驻在左边：开会话之类顺手的关闭不收它，只有用户点收起 / 菜单键（force）才收
-  function closeDrawer(force) { if (!force && window.CCLayout && CCLayout.docked()) return; drawerEl.classList.add("hidden"); }
+  // 收起：面板从它此刻所在的位置（点遮罩时在原位，横滑推到一半时在手指那里，弹簧还没落定时在半路）滑回屏外，
+  // 遮罩的底色和毛玻璃一起褪 —— 不对整个 #drawer 做透明度：透明度叠毛玻璃在旧 WebView 上会留一层残影。
+  // fling = 手指甩出去的，已经在动，就用减速曲线接着走；点出来的收起用先加速后减速，和滑入对称
+  function closeDrawer(force, fling) {
+    if (!force && window.CCLayout && CCLayout.docked()) return;
+    if (drawerEl.classList.contains("hidden") || drawerEl._moShut) return;
+    const panel = drawerEl.querySelector(".drawer-panel");
+    MO.cancel(drawerEl);
+    if (!MO.on() || !panel || !panel.animate) { drawerEl.classList.add("hidden"); return; }
+    if (document.documentElement.classList.contains("dock-l")) {
+      // 常驻栏收起：真身马上藏（接着会摘 dock-l，右边内容铺满），留一张替身照原样往外滑走，盖着内容让出来的那一条。
+      // 替身挂在 body 下：#drawer 已经藏了；样式不靠 #drawer 祖先，dock-l 下的内边距 / 背景当场抄下来
+      const r = panel.getBoundingClientRect(), cs = getComputedStyle(panel);
+      const g = panel.cloneNode(true);
+      g.classList.add("mo-ghost"); g.inert = true; g.setAttribute("aria-hidden", "true");
+      Object.assign(g.style, { position: "fixed", left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px", inset: "auto",
+        margin: "0", padding: cs.padding, background: cs.backgroundColor, borderInlineEnd: cs.borderInlineEnd, boxSizing: "border-box",
+        overflow: "hidden", zIndex: "45", pointerEvents: "none", animation: "none", transform: "none" });
+      const sc = drawerEl.querySelector("#side-scroll"), st = sc ? sc.scrollTop : 0;
+      document.body.appendChild(g);
+      if (st) { const gs = g.querySelector("#side-scroll"); if (gs) gs.scrollTop = st; }
+      drawerEl.classList.add("hidden");
+      const a = g.animate([{ transform: "none" }, { transform: `translateX(${MO.rtl() ? 100 : -100}%)` }], { duration: Math.round(260 / 1.1), easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" });
+      a.finished.then(() => g.remove(), () => g.remove());
+      return;
+    }
+    const w = panel.getBoundingClientRect().width || 300, side = MO.rtl() ? 1 : -1;
+    const tf = getComputedStyle(panel).transform, x0 = tf && tf !== "none" ? new DOMMatrix(tf).m41 : 0;
+    const dcs = getComputedStyle(drawerEl), bg = dcs.backgroundColor, bf = dcs.backdropFilter && dcs.backdropFilter !== "none" ? dcs.backdropFilter : "blur(0px)";
+    MO.stopJs(panel); MO.stopJs(drawerEl);
+    drawerEl.classList.remove("mo-enter", "mo-items");
+    panel.style.animation = "none"; panel.style.transition = "none"; panel.style.transform = `translateX(${x0}px)`;
+    Object.assign(drawerEl.style, { transition: "none", background: bg });
+    drawerEl.classList.add("mo-shut");
+    const left = Math.min(1, Math.abs(side * w - x0) / w);
+    const dur = Math.max(90, Math.round((fling ? 200 : 260) / 1.1 * Math.sqrt(left)));
+    const ease = fling ? "cubic-bezier(.2,.7,.3,1)" : "cubic-bezier(.4,0,.2,1)";
+    const a = panel.animate([{ transform: `translateX(${x0}px)` }, { transform: `translateX(${side * w}px)` }], { duration: dur, easing: ease, fill: "forwards" });
+    // 遮罩底色和毛玻璃一起褪（毛玻璃一开始就关掉的话，背景会「突然一清」）；不对整个 #drawer 做透明度 —— 那会连面板一起淡、旧 WebView 上留残影
+    const b = drawerEl.animate([{ backgroundColor: bg, backdropFilter: bf }, { backgroundColor: "transparent", backdropFilter: "blur(0px)" }], { duration: dur, easing: "linear", fill: "forwards" });
+    const clean = () => {
+      drawerEl._moShut = null; drawerEl._moLeave = null; drawerEl.classList.remove("mo-shut");
+      a.cancel(); b.cancel();
+      panel.style.animation = panel.style.transition = panel.style.transform = "";
+      drawerEl.style.transition = drawerEl.style.backdropFilter = drawerEl.style.background = "";
+    };
+    // 中途又打开：停下来，交出此刻的位置（openDrawer 从这里弹回去）
+    drawerEl._moShut = () => {
+      const t = getComputedStyle(panel).transform, x = t && t !== "none" ? new DOMMatrix(t).m41 : 0;
+      clean(); return x;
+    };
+    drawerEl._moLeave = { cls: "mo-shut", t: 0 };   // 返回键当它已经关了
+    a.finished.then(() => { if (drawerEl._moShut) { drawerEl.classList.add("hidden"); clean(); } }, () => {});
+  }
 
   const PAGES = {
     sessions: { name: tk("对话"), icon: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>' },
@@ -153,8 +219,17 @@
     }
     else { x = Math.min(ar.left + 24, W - mw - 8); y = ar.bottom + 2; if (y + mh > H - 8) y = Math.max(8, ar.top - mh - 2); }
     m.style.left = Math.max(8, Math.min(x, W - mw - 8)) + "px"; m.style.top = Math.max(8, y) + "px";
+    moOrigin(m, ar);
     m.addEventListener("click", (e) => { const b = e.target.closest("[data-i]"); if (!b || !items[+b.dataset.i].fn) return; OV.close(m); items[+b.dataset.i].fn(); });
     return m;
+  }
+  /** 菜单的缩放原点放在锚点那一侧（在锚点下面就从上沿长出、在上面就从下沿），条目错开出场 */
+  function moOrigin(m, ar) {
+    if (!MO.on()) return;
+    const r = m.getBoundingClientRect();
+    const ox = Math.max(12, Math.min(r.width - 12, ar.left + ar.width / 2 - r.left));
+    m.style.transformOrigin = `${ox}px ${r.top >= ar.top + ar.height / 2 ? "0" : "100%"}`;
+    MO.stagger(m.querySelectorAll(":scope > button, :scope > .pm-head"), 10);
   }
   // 下拉框不用系统弹出的选择器（深色、和主题不搭），换成同一套菜单：当前项打勾，optgroup 成小标题，
   // 长列表可滚、自动滚到当前项，宽度至少和下拉框一样。选了照常触发 input / change，原有逻辑不用改。
@@ -184,6 +259,7 @@
     if (y + mh > H - 8) y = ar.top - mh - 4 >= 8 ? ar.top - mh - 4 : Math.max(8, H - mh - 8);
     const x = getComputedStyle(sel).direction === "rtl" ? ar.right - mw : ar.left;
     m.style.left = Math.max(8, Math.min(x, W - mw - 8)) + "px"; m.style.top = y + "px";
+    moOrigin(m, ar);
     const on = m.querySelector("button.on"); if (on) m.scrollTop = on.offsetTop - (m.clientHeight - on.offsetHeight) / 2;
     m.addEventListener("click", (e) => {
       const b = e.target.closest("button[data-i]"); if (!b || b.disabled) return;
@@ -275,6 +351,7 @@
         + `<div class="sr-hint">${esc(t("长按会话：置顶、重命名、导出、删除"))}</div>`
       : `<div class="sr-empty">${esc(t("还没有历史会话。"))}</div>`;
   }
+  $("side-scroll").addEventListener("scroll", (e) => e.target.classList.toggle("scrolled", e.target.scrollTop > 2), { passive: true });
   $("side-recent").addEventListener("click", (e) => {
     if (e.target.closest("[data-all]")) return openPage("sessions");
     const g = e.target.closest("[data-fold]");

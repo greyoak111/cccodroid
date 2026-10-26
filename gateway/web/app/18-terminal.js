@@ -43,7 +43,7 @@
   }
 
   async function openTerm() {
-    termEl.classList.remove("hidden");
+    MO.cancel(termEl); termEl.classList.remove("hidden");
     try { await loadXterm(); } catch (e) { toast(t("终端组件加载失败：{msg}", { msg: e.message }), true); return; }
     let r;
     try { r = await api("/api/term/list"); } catch (e) { toast(t("终端打不开：{msg}", { msg: e.message }), true); return; }
@@ -61,13 +61,13 @@
   }
 
   function closeTerm() {
-    termEl.classList.add("hidden");
+    MO.hide(termEl, MO.paneOut());
     TERM.inst.get(TERM.cur)?.xt.blur();
   }
 
   /** 手动登录：开一个新终端，网关替你敲好 claude auth login；授权码贴给 claude 自己的提示 */
   async function openLoginTerm(method) {
-    termEl.classList.remove("hidden");
+    MO.cancel(termEl); termEl.classList.remove("hidden");
     try { await loadXterm(); } catch (e) { toast(t("终端组件加载失败：{msg}", { msg: e.message }), true); return; }
     try { const r = await api("/api/term/list"); TERM.list = (r.terms || []).filter((x) => x.alive || TERM.inst.has(x.id)); } catch {}
     await newTerm({ login: method === "console" ? "console" : true });

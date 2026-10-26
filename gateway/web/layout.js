@@ -27,7 +27,7 @@
   const $ = (id) => document.getElementById(id);
   const tr = (s) => (window.I18N && I18N.t ? I18N.t(s) : s);
 
-  let tier = 1, avoid = null, hooks = {}, ovCover = false;   // ovCover：app.js 的浮层管理说有弹层盖着
+  let tier = 1, avoid = null, hooks = {}, ovCover = false, ready = false;   // ovCover：app.js 的浮层管理说有弹层盖着
   const recent = [];                                       // 打开顺序，最后一个在最上面
   const isOpen = (id) => { const el = $(id); return !!el && !el.classList.contains("hidden"); };
   const rtl = () => root.getAttribute("dir") === "rtl";
@@ -69,10 +69,12 @@
     root.classList.toggle("short", h < SHORT);
 
     // 左侧常驻侧栏：进三栏时展开（除非用户收起过），退出三栏时收回去，别留一个盖满屏幕的抽屉
+    // 收常驻栏要赶在摘 dock-l 之前：摘掉后侧栏会先变回盖满屏的抽屉（整屏遮罩 + 毛玻璃）闪一帧
     const dock = docked();
+    if (!dock && wasDocked && hooks.closeDrawer) hooks.closeDrawer(true);
     root.classList.toggle("dock-l", dock);
     if (dock && !wasDocked && isOpen("drawer") === false && hooks.openDrawer) hooks.openDrawer();
-    if (!dock && wasDocked && hooks.closeDrawer) hooks.closeDrawer(true);
+    if (dock && !wasDocked && ready && hooks.dockIn) hooks.dockIn();   // 启动时那次不放
     root.style.setProperty("--lw", leftWidth() + "px");
     root.style.setProperty("--dw", drawerWidth() + "px");
 
@@ -225,7 +227,7 @@
 
   window.CCLayout = {
     // app.js 启动时交过来：openDrawer() 展开侧栏并加载数据，closeDrawer(force) 收起
-    init(h) { hooks = h || {}; watch(); splitter(); sideSplitter(); drawerSplitter(); apply(); },
+    init(h) { hooks = h || {}; watch(); splitter(); sideSplitter(); drawerSplitter(); apply(); ready = true; },
     tier: () => tier,
     docked,
     // 宽屏下处于停靠状态的右侧窗格，按"最近打开在后"排；返回手势先关最后一个

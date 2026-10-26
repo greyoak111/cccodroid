@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { MIME, NEXT, readBody, sendJson } from "./http.mjs";
 import { fileRoots, safeFilePath } from "./files.mjs";
+import { PATHS } from "./config.mjs";
 
 // ── HTML 预览 ─────────────────────────────────────────────────────────
 // 查看器里渲染 HTML：另起一个只读的小服务（随机端口，地址用 localhost），和界面（127.0.0.1:端口）不同站点——
@@ -67,8 +68,15 @@ function previewServe(req, res) {
   if (req.method !== "GET" && req.method !== "HEAD") return fail(405, "read only");
   const host = String(req.headers.host || "").toLowerCase();
   if (host !== `localhost:${PREVIEW.port}` && host !== `127.0.0.1:${PREVIEW.port}`) return fail(421, "bad host");
-  let pathname;
-  try { pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname); } catch { return fail(400, "bad path"); }
+  let pathname, query;
+  try { const u = new URL(req.url, "http://localhost"); pathname = decodeURIComponent(u.pathname); query = u.searchParams; } catch { return fail(400, "bad path"); }
+  // 开发者工具（Eruda，MIT，随包内置）：本体从包里吐，不走网络；凭证随机，不会和 __cc 撞
+  const CC_FILES = { "/__cc/eruda.js": ["eruda", "eruda.js"], "/__cc/pick.js": ["cc-pick.js"] };
+  if (CC_FILES[pathname]) {
+    let buf; try { buf = fs.readFileSync(path.join(PATHS.web, "vendor", ...CC_FILES[pathname])); } catch { return fail(404, "no devtools"); }
+    res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "max-age=86400", "content-length": buf.length });
+    return res.end(req.method === "HEAD" ? undefined : buf);
+  }
   const segs = pathname.split("/").filter(Boolean);
   let cap = segs[0], rel = segs.slice(1), viaRef = false;
   if (!PREVIEW.caps.has(cap)) {
@@ -97,6 +105,25 @@ function previewServe(req, res) {
     if (!t.error) r = t;
   }
   if (r.error) return fail(r.status || 404, r.error);
+  // 开着开发者工具：网页本身（带 ?cc_devtools=1 的那次请求）在 <head> 最前面插上 Eruda，好让控制台从第一行脚本起就记着。
+  // 只改这次吐出去的内容，磁盘上的文件不动；按字节插（latin1 来回不改任何字节），GBK 之类的网页也不会被转坏
+  // 开关记在这张凭证上：之后在预览里点链接跳到的网页（地址里没有我们的参数）照样带上；
+  // 关掉开关时界面会带 _r 重新载入且不带 cc_devtools，那一次清掉。只给「整页导航」插（脚本、样式、图片请求不碰）
+  const isHtml = /\.html?$/i.test(r.file), nav = !req.headers["sec-fetch-mode"] || req.headers["sec-fetch-mode"] === "navigate";
+  if (isHtml && nav) {
+    if (query.get("cc_devtools") === "1") g.dt = { dark: query.get("cc_dark") === "1" };
+    else if (query.has("_r")) g.dt = null;
+  }
+  if (g.dt && isHtml && nav && req.method === "GET" && r.size <= 16 * 1024 * 1024) {
+    let src; try { src = fs.readFileSync(r.file).toString("latin1"); } catch { return fail(404, "read failed"); }
+    const theme = g.dt.dark ? "Dark" : "Light";
+    const tag = `<script src="/__cc/pick.js"></script><script src="/__cc/eruda.js"></script><script>try{eruda.init({defaults:{displaySize:50,transparency:.97,theme:"${theme}"}})}catch(e){}</script>`;
+    const m = /<head\b[^>]*>/i.exec(src) || /<html\b[^>]*>/i.exec(src) || /<!doctype[^>]*>/i.exec(src);
+    const at = m ? m.index + m[0].length : 0;
+    const out = Buffer.from(src.slice(0, at) + tag + src.slice(at), "latin1");
+    res.writeHead(200, { "content-type": MIME[path.extname(r.file).toLowerCase()] || "text/html", "cache-control": "no-store", "x-content-type-options": "nosniff", "content-length": out.length });
+    return res.end(out);
+  }
   const head = { "content-type": MIME[path.extname(r.file).toLowerCase()] || "application/octet-stream",
     "cache-control": "no-store", "x-content-type-options": "nosniff", "accept-ranges": "bytes" };
   // 音视频要 Range 才能拖进度

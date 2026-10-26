@@ -2070,6 +2070,12 @@ html.dock-l .drawer-panel,.drawer-panel{padding:var(--safe-tt) 8px 0}
 html.dock-l .side-recent,.side-recent{margin:0 -8px;padding:6px 8px 8px}
 .side-recent h4,.side-recent h4:first-child{margin:10px 12px 4px;font-size:12px;letter-spacing:0}
 html.dock-l .side-acct,.side-acct{margin:8px -8px 0;padding:16px 16px calc(var(--safe-b) + 16px);line-height:1.3}
+/* 标题和「新对话」钉在上、账户行钉在下，中间导航 + 最近对话是一个滚动区（#24：全勾上常驻项、展开「更多」在矮屏上放得下也划得到）。
+   滚动条贴边：外扩 8px 再用内边距收回来；只有滚动过才在「新对话」底下显一道细线，平时和原来一样干净 */
+.side-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;margin:0 -8px;padding:0 8px;
+  border-top:1px solid transparent;transition:border-color .15s}
+.side-scroll.scrolled{border-top-color:var(--line)}
+#side-scroll>.side-recent{flex:none;min-height:0;overflow:visible;margin:0;padding:6px 0 8px}
 /* 输入区：发送键 34、标签 12px */
 #btn-send{width:34px;height:34px;flex:0 0 34px}
 #hint-row .chip,#perm-chip,#draft-chip{font-size:12px;line-height:1.6}
@@ -2481,7 +2487,8 @@ html:not(.dock-l) .drawer-panel{border-start-end-radius:var(--g4);border-end-end
   --font-read:var(--font-serif);
   --fs-chat:14.5px;
 }
-html[data-uifont="system"]{--font-ui:sans-serif;--font-sans:sans-serif}
+/* 跟随系统：界面字体换成系统的；等宽处的中文也别再点名 Noto，交给系统字体兜底（厂商字体主题才盖得到工具卡、数字旁的中文） */
+html[data-uifont="system"]{--font-ui:sans-serif;--font-sans:sans-serif;--mono:"CC Mono",ui-monospace,"Droid Sans Mono",monospace}
 html[data-readfont="sans"]{--font-read:var(--font-ui)}
 html[data-fs="s"]{--fs-chat:13.5px}
 html[data-fs="l"]{--fs-chat:16px}
@@ -2517,7 +2524,7 @@ html.wel .msg.welcome .who,html.wel .msg.welcome + .msg-acts,html.wel .msg.welco
 .wl-mark path:nth-of-type(2){animation-delay:.12s}.wl-mark path:nth-of-type(3){animation-delay:.24s}
 @keyframes wl-draw{0%{stroke-dashoffset:1;opacity:0}1%{opacity:1}to{stroke-dashoffset:0;opacity:1}}@keyframes wl-dot{to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.wl-mark path,.wl-mark circle{animation:none;stroke-dashoffset:0;opacity:1}}
-.wl-greet{margin:0;font-family:var(--font-serif);font-weight:400;font-size:clamp(19px,4.2cqi,31px);line-height:1.3;letter-spacing:.01em;color:var(--fg)}
+.wl-greet{margin:0;font-family:var(--font-read);font-weight:400;font-size:clamp(19px,4.2cqi,31px);line-height:1.3;letter-spacing:.01em;color:var(--fg)}
 html.wel .msg.welcome .setup-guide{text-align:start;margin-top:var(--g4)}
 /* 首屏的输入框更舒展：两行高，像一张卡片 */
 html.wel #composer-inner{border-radius:20px;padding:var(--g2) var(--g2) var(--g2) var(--g3);box-shadow:0 2px 14px var(--shadow)}
@@ -2881,3 +2888,84 @@ html[dir="rtl"] .lmap .lm-card,html[dir="rtl"] .lmap .lm-now{direction:rtl}
   #tab-channels .panel > .row > .seg{flex:1 1 100%}
   #tab-channels .seg button{flex:1 1 auto;white-space:normal;text-align:center;line-height:1.35;padding:6px 9px}
 }
+
+/* ── 动效（app/01-core.js 的 MO）──────────────────────────────────────
+   mo-drawer / mo-pop / mo-page / mo-rise / mo-item / mo-drop / mo-card / mo-tick / mo-bump / mo-back 这些关键帧
+   由脚本按弹簧算出来写进 <style id="mo-kf">，时长是 --mo-snap / --mo-pop / --mo-soft；这里只管谁在什么时候用哪个。
+   进场弹、退场干脆（.17s 缓入）。html[data-motion="off"] 时一条都不生效，保持原来的样子 */
+@keyframes mo-fade-in{from{opacity:0}}
+@keyframes mo-fade-out{to{opacity:0}}
+@keyframes mo-slide-out{to{transform:translateX(-100%)}}
+@keyframes mo-slide-out-r{to{transform:translateX(100%)}}
+@keyframes mo-push-out{to{transform:translateX(100%)}}
+@keyframes mo-push-out-r{to{transform:translateX(-100%)}}
+@keyframes mo-ring{0%{opacity:0}20%{opacity:1}100%{opacity:0}}
+@keyframes mo-sweep{0%{transform:scaleX(0);opacity:1}40%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+@keyframes mo-dim{from{opacity:1}}
+/* 侧栏：遮罩淡入、面板弹出、条目错开跟上；收起时滑回去（常驻左栏不放） */
+html[data-motion="on"]:not(.dock-l) .drawer-panel{animation:mo-drawer var(--mo-snap) linear}
+html[data-motion="on"]:not(.dock-l)[dir="rtl"] .drawer-panel{animation-name:mo-drawer-r}
+html[data-motion="on"] #drawer.mo-enter{animation:mo-fade-in calc(.2s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #drawer.mo-items .mo-st{animation:mo-item var(--mo-soft) linear both;animation-delay:calc((70ms + var(--i,0) * 45ms) * var(--mo-x,1))}
+html[data-motion="on"][dir="rtl"] #drawer.mo-items .mo-st{animation-name:mo-item-r}
+#drawer.mo-shut{pointer-events:none}   /* 收起由脚本按当前位置播（closeDrawer），这里只挡点击 */
+/* 弹出菜单：从锚点那一侧长出来（原点由脚本按锚点设），条目错开落下 */
+html[data-motion="on"] .pop-menu{animation:mo-pop var(--mo-pop) linear}
+html[data-motion="on"] .pop-menu > .mo-st{animation:mo-drop var(--mo-soft) linear both;animation-delay:calc(var(--i,0) * 40ms * var(--mo-x,1))}
+/* 通用的进退场类（脚本 MO.play / MO.hide 挂上、播完摘掉）：
+   mo-in-push 从右推进来（窄屏整页、设置的一类、项目详情）· mo-in-back 从左边一点点回来（返回上一层）
+   mo-in-rise 浮上来（宽屏整页、换会话、新会话问候）· mo-in-pane / mo-in-pane-back 宽屏页内前进 / 后退的短位移
+   mo-out-push 往右滑出去 · mo-out-fade 淡掉 · mo-out-sheet 底部菜单滑下去。退场带 !important：压过元素自己的进场动画 */
+html[data-motion="on"] .mo-in-push{animation:mo-page var(--mo-snap) linear}
+html[data-motion="on"][dir="rtl"] .mo-in-push{animation-name:mo-page-r}
+html[data-motion="on"] .mo-in-back{animation:mo-back var(--mo-snap) linear}
+html[data-motion="on"][dir="rtl"] .mo-in-back{animation-name:mo-back-r}
+html[data-motion="on"] .mo-in-rise{animation:mo-rise var(--mo-soft) linear}
+html[data-motion="on"] .mo-in-pane{animation:mo-pane var(--mo-soft) linear}
+html[data-motion="on"] .mo-in-pane-back,html[data-motion="on"][dir="rtl"] .mo-in-pane{animation:mo-pane-r var(--mo-soft) linear}
+html[data-motion="on"][dir="rtl"] .mo-in-pane-back{animation-name:mo-pane}
+html[data-motion] .mo-out-push{animation:mo-push-out calc(.17s * var(--mo-x,1)) cubic-bezier(.4,0,1,1) both!important;pointer-events:none}
+html[data-motion][dir="rtl"] .mo-out-push{animation-name:mo-push-out-r!important}
+html[data-motion] .mo-out-fade{animation:mo-fade-out calc(.17s * var(--mo-x,1)) cubic-bezier(.4,0,1,1) both!important;pointer-events:none}
+html[data-motion] .mo-out-sheet{animation:mo-fade-out calc(.17s * var(--mo-x,1)) cubic-bezier(.4,0,1,1) both!important;pointer-events:none}
+html[data-motion] .mo-out-sheet .sheet-panel{animation:mo-sheet-out calc(.17s * var(--mo-x,1)) cubic-bezier(.4,0,1,1) both!important}
+html[data-motion] #sheet.pop.mo-out-sheet .sheet-panel{animation:mo-fade-out calc(.14s * var(--mo-x,1)) cubic-bezier(.4,0,1,1) both!important}
+@keyframes mo-sheet-out{to{transform:translateY(100%)}}
+/* 右侧窗格（文件 / 查看器 / git / 终端）：宽屏停靠在右边时从右侧浮进来，窄屏铺满时像整页一样推进来 */
+html[data-motion="on"]:not(.has-right) :is(#files,#viewer,#git,#term):not(.hidden){animation:mo-page var(--mo-snap) linear}
+html[data-motion="on"][dir="rtl"]:not(.has-right) :is(#files,#viewer,#git,#term):not(.hidden){animation-name:mo-page-r}
+html[data-motion="on"].has-right :is(#files,#viewer,#git,#term):not(.hidden){animation:mo-pane var(--mo-soft) linear}
+html[data-motion="on"][dir="rtl"].has-right :is(#files,#viewer,#git,#term):not(.hidden){animation-name:mo-pane-r}
+/* 底部「＋」菜单：窄屏从底下弹上来，宽屏贴着 ＋ 号弹出；斜杠 / @ 浮窗浮上来；看图淡入、图片放大一点点落定；提示条弹上来 */
+html[data-motion="on"] #sheet:not(.hidden){animation:mo-fade-in calc(.18s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #sheet:not(.hidden) .sheet-panel{animation:mo-sheet var(--mo-snap) linear}
+html[data-motion="on"] #sheet.pop:not(.hidden) .sheet-panel{animation:mo-zoom var(--mo-pop) linear;transform-origin:20% 100%}
+html[data-motion="on"] #popup:not(.hidden){animation:mo-rise var(--mo-soft) linear}
+html[data-motion="on"] #lightbox:not(.hidden){animation:mo-fade-in calc(.2s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #lightbox:not(.hidden) #lightbox-img{animation:mo-zoom var(--mo-pop) linear}
+html[data-motion="on"] #toast:not(.hidden){animation:mo-toast var(--mo-pop) linear}
+/* 脉络导览：遮罩淡入、里面浮上来 */
+html[data-motion="on"] #lin-tour:not(.hidden){animation:mo-fade-in calc(.2s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #lin-tour:not(.hidden) > *{animation:mo-rise var(--mo-soft) linear}
+/* 设置弹窗：宽屏遮罩淡入、面板浮上来；窄屏从右推进来 */
+html[data-motion="on"] #set-ov:not(.narrow){animation:mo-fade-in calc(.18s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #set-ov:not(.narrow) .set-sheet{animation:mo-sheet-in calc(.2s * var(--mo-x,1)) cubic-bezier(.2,.8,.2,1)}   /* 宽屏设置：原地轻轻放大淡入，不上下走 */
+@keyframes mo-sheet-in{from{opacity:0;transform:scale(.97)}}
+html[data-motion="on"] .mo-in-fade{animation:mo-fade-in calc(.16s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #set-ov.narrow{animation:mo-page var(--mo-snap) linear}
+html[data-motion="on"][dir="rtl"] #set-ov.narrow{animation-name:mo-page-r}
+/* 工具卡跑完：「完成」弹一下，卡片边缘闪一圈绿 */
+html[data-motion="on"] .tool-state.mo-tick{display:inline-block;animation:mo-tick var(--mo-pop) linear}
+html[data-motion="on"] .tool.mo-ok{position:relative}
+html[data-motion="on"] .tool.mo-ok::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1.5px var(--ok);pointer-events:none;animation:mo-ring calc(1.1s * var(--mo-x,1)) ease-out both}
+/* 跳章落地：章名一顶、蓝线从起点扫到终点再淡掉 */
+.ch-sep{position:relative}
+.ch-sep .mo-sweep{position:absolute;inset-inline:0;top:50%;height:2px;margin-top:-1px;background:var(--zy-blue,var(--accent));transform:scaleX(0);transform-origin:left;opacity:0;pointer-events:none}
+html[dir="rtl"] .ch-sep .mo-sweep{transform-origin:right}
+html[data-motion="on"] .ch-sep.mo-hit .mo-sweep{animation:mo-sweep calc(1.6s * var(--mo-x,1)) cubic-bezier(.2,.8,.2,1)}
+html[data-motion="on"] .ch-sep.mo-hit :is(.ch-n,.ch-t){animation:mo-bump var(--mo-pop) linear}
+/* 脉络选线：其余的线退暗，卡片弹上来，逐章题名浮出 */
+html[data-motion="on"] .lmap.mo-pick .lm-main .dim{animation:mo-dim calc(.32s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] .lmap.mo-pick .lm-cardbox{animation:mo-card var(--mo-snap) linear both}
+html[data-motion="on"] .lmap.mo-pick .t-ch{animation:mo-rise var(--mo-soft) linear both;animation-delay:calc(.08s * var(--mo-x,1))}
+

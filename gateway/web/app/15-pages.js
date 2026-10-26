@@ -250,14 +250,14 @@
       b.classList.toggle("on", on);
     });
   }
-  // ── 扩展页的页内分区导航：吸顶一排，点了展开并滚到那一节，滚动时高亮当前节 ──
-  // 节 = 页里直接挂着的 .ext-sec / .ext-sec-plain（没藏起来的）；名字取标题，计数取标题里的 .pill
+  // ── 页内分区导航（扩展、能力）：吸顶一排，点了展开并滚到那一节，滚动时高亮当前节 ──
+  // 节 = 页里直接挂着的 .ext-sec / .ext-sec-plain（没藏起来的）；名字取标题，计数取标题里的 .pill（「3 / 7 · 1.2 GB」只留前半）
   const SUBNAVS = { ext: "ext-subnav" };
   function subnavSecs(name) { return [...$("tab-" + name).querySelectorAll(":scope > .ext-sec, :scope > .ext-sec-plain")].filter((x) => !x.classList.contains("hidden")); }
   function paintSubnav(name) {
     const nav = $(SUBNAVS[name]); if (!nav) return;
     nav.innerHTML = subnavSecs(name).map((x) => {
-      const nm = (x.querySelector(":scope > summary > span[data-i18n], :scope > .sec-title > span:last-child") || {}).textContent || "";
+      const nm = x.dataset.short ? t(x.dataset.short) : (x.querySelector(":scope > summary > span[data-i18n], :scope > summary > span.sec-name, :scope > .sec-title > span:last-child") || {}).textContent || "";
       const cnt = ((x.querySelector(":scope > summary .pill, :scope > .sec-title .pill") || {}).textContent || "").split("·")[0].trim();
       return `<button data-sec="${esc(x.dataset.sec)}">${esc(nm)}${cnt ? `<span class="cnt">${esc(cnt)}</span>` : ""}</button>`;
     }).join("");
@@ -277,19 +277,16 @@
       const x = $("tab-" + name).querySelector(`:scope > [data-sec="${b.dataset.sec}"]`); if (!x) return;
       if (x.tagName === "DETAILS") x.open = true;
       const body = $("page-body");
-      body.scrollTo({ top: body.scrollTop + x.getBoundingClientRect().top - body.getBoundingClientRect().top - $(id).offsetHeight - 10, behavior: "smooth" });
+      const d = x.getBoundingClientRect().top - body.getBoundingClientRect().top - $(id).offsetHeight - 10;
+      if (Math.abs(d) < 24) return;   // 已经在这一节了：再点别挪那几像素（来回一挪就是「抽一下」）
+      body.scrollTo({ top: body.scrollTop + d, behavior: "smooth" });
     });
     // 计数、哪节显示都是异步加载出来的：内容一变就重画（下一帧合并；导航自己重画引起的变化不算）
     let raf = 0;
     new MutationObserver((recs) => { if (raf || recs.every((m) => $(id) && $(id).contains(m.target))) return; raf = requestAnimationFrame(() => { raf = 0; if (curPage === name) paintSubnav(name); }); })
       .observe($("tab-" + name), { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class"] });
   }
-  // 滚动时高亮：扩展页用分区条，帮助/更新日志用各自的目录
-  $("page-body").addEventListener("scroll", () => {
-    if (SUBNAVS[curPage]) spySubnav();
-    else if (curPage === "help") spyHelp();
-    else if (curPage === "changelog") spyToc("changelog");
-  }, { passive: true });
+  $("page-body").addEventListener("scroll", () => { if (SUBNAVS[curPage]) spySubnav(); else if (TOCS[curPage]) spyToc(curPage); }, { passive: true });
 
   $("help-toc").addEventListener("click", (e) => {
     const b = e.target.closest("[data-sec]"); if (!b) return;

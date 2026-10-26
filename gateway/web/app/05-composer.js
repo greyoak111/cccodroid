@@ -94,7 +94,7 @@
 
   // ── 补全浮层（/ 命令 与 @ 文件）───────────────────────────────────
   function hidePopup() {
-    popupEl.classList.add("hidden");
+    MO.hide(popupEl, "mo-out-fade", 120);
     state.popup.mode = null;
     state.popup.items = [];
   }
@@ -111,7 +111,7 @@
     state.popup.sel = 0;
     popupHead.innerHTML = `<span>${esc(head)}</span><span>${t("{n} 项", { n: items.length })}</span>`;
     renderPopup();
-    popupEl.classList.remove("hidden");
+    MO.cancel(popupEl); popupEl.classList.remove("hidden");
     followPopup();
   }
   // 对话这一栏的左右边界：右侧窗格（浏览器是原生视图，永远在页面上面）和常驻侧栏都不算，浮层只能在这里面摆

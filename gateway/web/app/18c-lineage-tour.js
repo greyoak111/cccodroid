@@ -56,6 +56,7 @@
     localStorage.setItem(TOUR_SEEN, "1");
     $("lin-how").classList.remove("new");
     const box = $("lin-tour");
+    MO.cancel(box);
     box.classList.remove("hidden");
     if (!TOUR.map) {
       TOUR.map = CCLineageMap.create($("lt-map"), {
@@ -79,9 +80,11 @@
     tourSync();
   }
   function closeTour() {
-    $("lin-tour").classList.add("hidden");
-    if (TOUR.map) { TOUR.map.destroy(); TOUR.map = null; }
-    if (TOUR.ro) { TOUR.ro.disconnect(); TOUR.ro = null; }
+    // 淡出之后再拆地图；淡出途中又点开导览（openTour 先 cancel）就不拆，接着用
+    MO.hide($("lin-tour"), "mo-out-fade", 150, () => {
+      if (TOUR.map) { TOUR.map.destroy(); TOUR.map = null; }
+      if (TOUR.ro) { TOUR.ro.disconnect(); TOUR.ro = null; }
+    });
   }
   // 形态（地图 / 缩进树）跟着宽度走；换了形态就换一套步骤，接着各自的进度
   function tourSync() {

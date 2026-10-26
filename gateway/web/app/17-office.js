@@ -342,8 +342,7 @@
     closeViewerPdf();
     vwDropEd();
     vwHtmlStop();
-    $("vw-body").innerHTML = "";
-    viewerEl.classList.add("hidden");
+    MO.hide(viewerEl, MO.paneOut(), 170, () => { $("vw-body").innerHTML = ""; });   // 内容等滑出去了再清，别先白一下
     // 文件面板开着就刷新一下：大小 / 修改时间可能变了
     if (!filesEl.classList.contains("hidden") && state.fs.path) fsLoad(state.fs.path, { keepSel: true });
   }

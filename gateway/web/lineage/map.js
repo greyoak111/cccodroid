@@ -453,8 +453,14 @@
 
     function select(id, opt = {}) {
       if (id && !st.BY[id]) id = null;
+      const prev = st.sel;
       st.sel = id;
       if (st.mode === "tree") paintTree(); else if (st.model) paint();
+      // 动效：其余线退暗、卡片弹上来、逐章题名浮出（html[data-motion=on] 才有样式）
+      if (id && id !== prev && document.documentElement.dataset.motion === "on") {
+        root.classList.remove("mo-pick"); void root.offsetWidth; root.classList.add("mo-pick");
+        clearTimeout(st.moT); st.moT = setTimeout(() => root.classList.remove("mo-pick"), 1200);
+      }
       if (id && opt.reveal && st.mode === "map") reveal(id);
       opts.onSelect && opts.onSelect(id);
     }

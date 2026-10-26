@@ -570,11 +570,13 @@
       if (!live || ended) return;
       const k = ev && ev.phase;
       if (!k || k === "text") return phClear();
-      if (!phEv || phEv.phase !== k || k === "retry" || (k === "tool" && phEv.name !== ev.name)) phT0 = Date.now();
+      const changed = !phEv || phEv.phase !== k || k === "retry" || (k === "tool" && phEv.name !== ev.name);
+      if (changed) phT0 = Date.now();
       phEv = ev;
       if (!ph) { ph = document.createElement("span"); ph.className = "run-phase"; }
       ph.title = k === "retry" ? [ev.status, ev.error].filter(Boolean).join(" · ") : "";
       phPlace(); phPaint();
+      if (changed) MO.spring(ph, "pop", (p) => ({ opacity: Math.min(1, p * 1.6), transform: `translateY(${(1 - p) * 8}px)` }));
       if (!phIv) phIv = setInterval(phPaint, 1000);
     };
     const keepTail = () => { if (liveTail && !ended) { bubble.appendChild(liveTail); phPlace(); } };

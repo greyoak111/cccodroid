@@ -125,7 +125,6 @@
   const THINK_TAIL = 4000;
   const THINK_CAP  = 200000;
   const THINK_TICK = 250;
-  const PAINT_TICK = 60;
   const DOTS = `<div class="dots"><span></span><span></span><span></span></div>`;
   const fmtChars = (n) => (n < 1000 ? t("{n} 字", { n }) : t("{n}k 字", { n: (n / 1000).toFixed(1) }));
 
@@ -148,37 +147,56 @@
     return best;
   }
 
+  // 匀速吐字：厂商常常一口吐一大段（几十上百字），原样贴上去就是一顿一顿地跳。
+  // 收到的先进缓冲，每 STREAM_TICK 吐一截；积压越多吐得越快（约 STREAM_STEPS 步追平），不会越落越远。
+  // 只管显示，text 永远是收全了的；回复结束 / 切到后台时一次补齐
+  const STREAM_TICK = 33, STREAM_STEPS = 8;
   function TextBlock(parent, live) {
     const el = document.createElement("div");
     el.className = "txt";
     const frozen = document.createElement("div"), tail = document.createElement("div");
     el.append(frozen, tail);
     parent.appendChild(el);
-    let text = "", fz = 0, timer = 0;
+    let text = "", fz = 0, timer = 0, shown = 0, ending = false;
 
     function paint(final) {
       if (timer) { clearTimeout(timer); timer = 0; }
+      if (final) shown = text.length;
+      const vis = text.slice(0, shown);
+      if (fz > vis.length) { frozen.innerHTML = ""; fz = 0; }
       if (!final) {
-        const idx = safeSplit(text, fz);
+        const idx = safeSplit(vis, fz);
         if (idx > fz) {
           const c = document.createElement("div");
-          setHtml(c, renderMd(text.slice(fz, idx)));
+          setHtml(c, renderMd(vis.slice(fz, idx)));
           frozen.appendChild(c);
           fz = idx;
         }
-        tail.innerHTML = renderMd(text.slice(fz)); enhanceMd(tail);   // 光标不跟在每段正文后面：整条回复只留一个，见 AssistantView 的 liveTail
+        tail.innerHTML = renderMd(vis.slice(fz)); enhanceMd(tail);   // 光标不跟在每段正文后面：整条回复只留一个，见 AssistantView 的 liveTail
       } else {
-        setHtml(tail, renderMd(text.slice(fz)));
+        setHtml(tail, renderMd(vis.slice(fz)));
       }
       scrollDown();
     }
+    function tick() {
+      timer = 0;
+      const left = text.length - shown;
+      if (document.hidden || left <= 0) { if (ending) return paint(true); shown = text.length; return paint(false); }
+      let n = Math.max(2, Math.ceil(left / (ending ? 3 : STREAM_STEPS)));
+      // 别把一个代理对（emoji、生僻字）劈成两半
+      const c = text.charCodeAt(shown + n - 1); if (c >= 0xd800 && c <= 0xdbff) n++;
+      shown = Math.min(text.length, shown + n);
+      paint(false);
+      if (shown < text.length || ending) timer = setTimeout(tick, STREAM_TICK);
+    }
+    const kick = () => { if (!timer) timer = setTimeout(tick, STREAM_TICK); };
     return {
       kind: "text",
-      append(t) { text += t; if (!timer) timer = setTimeout(() => paint(false), PAINT_TICK); },
-      set(t) { text = t; if (live) { if (!timer) timer = setTimeout(() => paint(false), PAINT_TICK); } else paint(true); },
-      finish() { if (live) paint(true); },
+      append(t) { text += t; kick(); },
+      set(t) { text = t; if (live) { shown = Math.min(shown, text.length); kick(); } else paint(true); },
+      finish() { if (!live) return; if (shown >= text.length) paint(true); else { ending = true; kick(); } },
       /** 从末尾删掉 n 个字（流断了、那半截不算数）；冻结的段落可能也在里面，整块重画 */
-      drop(n) { text = text.slice(0, Math.max(0, text.length - n)); frozen.innerHTML = ""; fz = 0; paint(!live); return text.length; },
+      drop(n) { text = text.slice(0, Math.max(0, text.length - n)); shown = Math.min(shown, text.length); frozen.innerHTML = ""; fz = 0; paint(!live); return text.length; },
       remove() { if (timer) { clearTimeout(timer); timer = 0; } el.remove(); },
       get text() { return text; },
     };
@@ -305,6 +323,7 @@
         api.state = ok ? "ok" : "err";
         st.className = "tool-state " + (ok ? "ok" : "err");
         st.textContent = ok ? t("完成") : t("失败");
+        if (live) { MO.play(st, "mo-tick", 1400); if (ok) MO.play(card, "mo-ok", 1400); }
         // 后台子代理：工具结果只是「已启动」，真正跑完靠 sub_done
         if (isAgent && ok && /^Async agent launched/.test(result.text) && !(sub && sub.done)) { st.className = "tool-state run"; st.textContent = t("后台运行"); }
         if (built) { built = false; build(); }
@@ -389,7 +408,13 @@
     el.innerHTML = `<button class="tg-head" type="button"></button><div class="tg-body"></div>`;
     parent.appendChild(el);
     const head = el.firstChild, body = el.lastChild, members = [], inner = [];
-    head.addEventListener("click", () => el.classList.toggle("open"));
+    // 收起整组时，组里展开着的步骤、子代理过程、思考也一起收回去 —— 不然下次点开还是一大片摊着（群友 10-27）
+    head.addEventListener("click", () => {
+      if (!el.classList.toggle("open")) {
+        body.querySelectorAll(".tool.open, .tool-sub.open").forEach((x) => x.classList.remove("open"));
+        body.querySelectorAll("details[open]").forEach((d) => { d.open = false; });
+      }
+    });
     function refresh() {
       const n = members.length;
       el.classList.toggle("single", n < 2);
