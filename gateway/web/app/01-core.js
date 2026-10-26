@@ -22,17 +22,53 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
   const t = I18N.t;
   const tk = (s) => s;   // 词条键：表格里先登记（扫描器认它），显示时再 t(变量)
 
-  // 出错要看得见：脚本一挂界面就是死的，把原因写到顶栏副标题上，
-  // 而不是让人对着一个不动的东西猜。
-  const showErr = (msg) => {
-    const el = document.getElementById("sub-title");
-    if (el) { el.textContent = t("界面脚本出错：{msg}", { msg }); el.className = "err"; }
+  // 出错要看得见，但不该塞进顶栏副标题：那是状态显示，下一次状态刷新就把它盖掉，
+  // 而且「顶栏里突然冒出一行报错」看着莫名其妙。改成从顶部滑下来的浮动条：
+  // 红边、可关、可复制；同一条错误只留一条，20 秒后自己收。
+  // WebView 的 console 不进 logcat，所以顺手上报给网关日志（/api/freeze），出问题的人不用截图也能查。
+  let errBar = null, errBarT = 0, errSent = "", errSentAt = 0;
+  const hideErr = () => { if (errBar) errBar.classList.add("hidden"); };
+  const showErr = (msg, loc) => {
+    msg = String(msg == null ? "" : msg).trim() || t("未知错误");
+    console.warn("[cc] " + msg);
+    try {
+      const now = Date.now();
+      if (msg !== errSent || now - errSentAt > 60000) {
+        errSent = msg; errSentAt = now;
+        fetch("/api/freeze", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ why: "ui", touch: ["[界面错误] " + msg.slice(0, 300) + (loc ? "  @" + loc : "")] }) }).catch(() => {});
+      }
+    } catch {}
+    try {
+      if (!document.body) return;
+      if (!errBar) {
+        errBar = document.createElement("div");
+        errBar.id = "errbar";
+        errBar.innerHTML = `<div class="eb-txt"></div><button type="button" class="eb-btn" data-eb="copy"></button>` +
+          `<button type="button" class="eb-btn eb-x" data-eb="close" aria-hidden="true">×</button>`;
+        errBar.querySelector('[data-eb="copy"]').textContent = t("复制");
+        errBar.addEventListener("click", (e) => {
+          const b = e.target.closest("[data-eb]");
+          if (!b) return;
+          if (b.dataset.eb === "close") return hideErr();
+          copyText(errBar.dataset.msg || "").then((ok) => toast(ok ? t("已复制") : t("复制失败"), !ok));
+        });
+        document.body.appendChild(errBar);
+      }
+      errBar.dataset.msg = msg;
+      errBar.querySelector(".eb-txt").textContent = t("界面脚本出错：{msg}", { msg });
+      errBar.classList.remove("hidden");
+      clearTimeout(errBarT);
+      errBarT = setTimeout(hideErr, 20000);
+    } catch {}
   };
   window.addEventListener("error", (e) => {
     // 光秃秃的「Script error.」没有文件和行号：是从外壳 evaluateJavascript 注入的代码里冒出去的错，WebView 把细节抹了。
-    // 写在顶栏上谁也看不懂，只进控制台；外壳注入的每段代码自己 try 住交给 __ccErr，页面这边的入口也用 guardHook 包着
+    // 报出来谁也看不懂，只进控制台；外壳注入的每段代码自己 try 住交给 __ccErr，页面这边的入口也用 guardHook 包着
     if (!e.filename && /^Script error\.?$/.test(e.message || "")) { console.warn("[cc] 外壳注入的脚本出错（细节被 WebView 隐去）"); return; }
-    showErr(e.message || String(e.error));
+    // 带上出错位置（app.js:行号）：日志里只看得到消息时，根本没法定位是哪一段
+    const st = (e.error && e.error.stack ? String(e.error.stack) : "").split("\n").find((l) => /app\.js:\d+/.test(l)) || "";
+    showErr(e.message || String(e.error), (st.match(/app\.js:\d+:\d+/) || [""])[0]);
   });
   // 外壳（MainActivity）直接调用的入口：在页面自己的代码里接住错误，按原文报，不让它变成「Script error.」
   // 外壳注入的代码接住错误后交到这里（MainActivity.guarded / caught）：name 是哪个入口
@@ -42,8 +78,7 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     catch (err) { window.__ccErr(name, err); return false; }
   };
   window.addEventListener("unhandledrejection", (e) => {
-    const el = document.getElementById("sub-title");
-    if (el) { el.textContent = t("界面脚本出错：{msg}", { msg: e.reason?.message || String(e.reason) }); el.className = "err"; }
+    showErr(e.reason?.message || String(e.reason));
   });
 
   const $ = (id) => document.getElementById(id);
@@ -85,7 +120,8 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     function closeAll(kind) { for (const it of live().slice().reverse()) if (!kind || it.kind === kind) drop(it); sync(); }
     function open(el, o = {}) {
       const kind = o.kind || "menu";
-      closeAll(kind === "modal" ? null : "menu");
+      // layer：叠在别的弹层上面开（比如频道弹窗里再开扫码），不把下面那层关掉
+      if (!o.layer) closeAll(kind === "modal" ? null : "menu");
       if (!el.isConnected) document.body.appendChild(el);
       stack.push({ el, kind, anchor: o.anchor || null, onClose: o.onClose, place: o.place, keep: !!o.keep, cover: !!o.cover, w0: innerWidth });
       sync();

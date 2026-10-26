@@ -72,6 +72,7 @@ import { routeNotices } from "./gw/notices.mjs";
 import { routeReconcile } from "./gw/reconcile.mjs";
 import { routeProjects } from "./gw/projects.mjs";
 import { routeSched } from "./gw/sched.mjs";
+import { routeChannels, startChannels, stopChannels } from "./gw/channels.mjs";
 import { routeSessModel } from "./gw/sessmodel.mjs";
 import { routeLineage } from "./gw/lineage.mjs";
 import { routeBackfill } from "./gw/backfill.mjs";
@@ -80,7 +81,7 @@ import { COOKIE, TOKEN, denyLog, denyReason, tokenOk } from "./gw/access.mjs";
 import { startWorkIsland, stopWorkIslandSync } from "./gw/work-island.mjs";
 
 // 各模块的路由函数，按原来分支的先后排；返回 NEXT 表示不归它管
-const ROUTES = [routeClaude, routeFeedback, routeUsage, routeCaps, routeProviders, routeSettings, routeProjects, routeSched, routeSessModel, routeBackfill, routeLineage, routeArchive, routeSessions, routeExtensions, routeModels, routeTerminal, routeComponents, routeModules, routeOrphans, routeCustom, routeGit, routeLocal, routeOffice, routeFiles, routePreview, routeBus, routeQueue, routeDevside, routeLogin, routeRun, routeNotices, routeReconcile];
+const ROUTES = [routeClaude, routeFeedback, routeUsage, routeCaps, routeProviders, routeSettings, routeProjects, routeSched, routeChannels, routeSessModel, routeBackfill, routeLineage, routeArchive, routeSessions, routeExtensions, routeModels, routeTerminal, routeComponents, routeModules, routeOrphans, routeCustom, routeGit, routeLocal, routeOffice, routeFiles, routePreview, routeBus, routeQueue, routeDevside, routeLogin, routeRun, routeNotices, routeReconcile];
 
 // ── 路由 ──────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
@@ -165,6 +166,7 @@ server.listen(CFG.port, "127.0.0.1", () => {
   try { customRefresh(); } catch (e) { log("自定义组件入口重写失败: " + e.message); }
   try { cleanOrphans(); } catch (e) { log("旧工具包残留清理失败: " + e.message); }
   try { startWorkIsland(); } catch (e) { log("工作岛启动失败: " + e.message); }
+  try { startChannels(); } catch (e) { log("频道启动失败: " + e.message); }
 });
 
 // 启动后校验一次模型名：不在清单里就落到默认。
@@ -186,5 +188,5 @@ setTimeout(async () => {
 }, 2500);
 
 // 工作岛的收起放最后：它要同步调 am（最多 3 秒），App 等 5 秒就强杀，先把 claude 和终端收了
-process.on("SIGTERM", () => { for (const t of TERMS.values()) if (t.alive) killTree(t.child); try { bridgeProc?.kill(); } catch {} try { stopWorkIslandSync(); } catch {} process.exit(0); });
-process.on("SIGINT", () => { try { bridgeProc?.kill(); } catch {} try { stopWorkIslandSync(); } catch {} process.exit(0); });
+process.on("SIGTERM", () => { for (const t of TERMS.values()) if (t.alive) killTree(t.child); try { bridgeProc?.kill(); } catch {} try { stopChannels(); } catch {} try { stopWorkIslandSync(); } catch {} process.exit(0); });
+process.on("SIGINT", () => { try { bridgeProc?.kill(); } catch {} try { stopChannels(); } catch {} try { stopWorkIslandSync(); } catch {} process.exit(0); });
