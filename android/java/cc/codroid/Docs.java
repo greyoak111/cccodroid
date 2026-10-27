@@ -165,6 +165,8 @@ public final class Docs extends DocumentsProvider {
             Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE,
             Document.COLUMN_SIZE, Document.COLUMN_LAST_MODIFIED, Document.COLUMN_FLAGS };
         MatrixCursor c = new MatrixCursor(cols, 64);
+        // 登记这一层的通知地址：新建、改名、删除后 changed() 一喊，文件管理器自己刷新（不然新建完列表里看不到）
+        c.setNotificationUri(getContext().getContentResolver(), DocumentsContract.buildChildDocumentsUri(AUTH, idOf(dir)));
         File[] list = dir.listFiles();
         if (list == null) return c;
         // 目录在前、同类按名字；文件管理器的排序还能再覆盖
@@ -240,6 +242,7 @@ public final class Docs extends DocumentsProvider {
             } else if (!f.createNewFile()) {
                 throw new java.io.IOException("建文件失败");
             }
+            changed(parent);
             return idOf(f);
         } catch (java.io.IOException e) {
             throw new FileNotFoundException("创建失败：" + f.getName());
@@ -251,8 +254,14 @@ public final class Docs extends DocumentsProvider {
         File f = fileOf(docId);
         if (f.equals(home)) throw new FileNotFoundException("不能删根");
         // 链接只删它本身，别顺着删到链接指向的地方（可能在作用域外）
-        if (isSymlink(f)) { f.delete(); return; }
-        deleteTree(f);
+        if (isSymlink(f)) f.delete(); else deleteTree(f);
+        changed(f.getParentFile());
+    }
+
+    /** 这个目录的内容变了：通知正在看它的文件管理器刷新 */
+    private void changed(File dir) {
+        try { getContext().getContentResolver().notifyChange(DocumentsContract.buildChildDocumentsUri(AUTH, idOf(dir)), null); }
+        catch (FileNotFoundException ignored) {}
     }
 
     private static void deleteTree(File f) {
@@ -268,6 +277,7 @@ public final class Docs extends DocumentsProvider {
         File f = fileOf(docId);
         File to = checked(new File(f.getParentFile(), safeName(displayName)));
         if (f.equals(home) || !f.renameTo(to)) throw new FileNotFoundException("改名失败");
+        changed(to.getParentFile());
         return idOf(to);
     }
 
