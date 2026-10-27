@@ -151,7 +151,8 @@
   let compTimer = 0;
   // 只有 zh / en 两份：中文界面（简繁都算）用 zh，其它语言一律用 en
   const pickLang = (o) => (o && typeof o === "object" ? (isZh() ? o.zh || o.en : o.en || o.zh) || "" : o || "");
-  const MB = (n) => Math.max(1, Math.round((n || 0) / 1048576)) + " MB";
+  // 一整块工具包动辄上 GB：999 MB 之后就用 GB，手机上那一列放得下、也一眼看得懂
+  const MB = (n) => (n || 0) >= 1048576 * 1024 ? (n / 1073741824).toFixed(1) + " GB" : Math.max(1, Math.round((n || 0) / 1048576)) + " MB";
   // 「A、B 和 C」这种并列按当前语言的习惯拼
   const listOf = (a) => { try { return new Intl.ListFormat((window.I18N && I18N.lang) || "zh", { type: "conjunction" }).format(a); } catch { return a.join(", "); } };
   // 顶栏副标题：几个模块 · 几个组件

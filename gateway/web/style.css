@@ -2850,3 +2850,12 @@ html[data-motion="on"] .ch-sep.mo-hit :is(.ch-n,.ch-t){animation:mo-bump var(--m
 html[data-motion="on"] .lmap.mo-pick .lm-main .dim{animation:mo-dim calc(.32s * var(--mo-x,1)) ease-out}
 html[data-motion="on"] .lmap.mo-pick .lm-cardbox{animation:mo-card var(--mo-snap) linear both}
 html[data-motion="on"] .lmap.mo-pick .t-ch{animation:mo-rise var(--mo-soft) linear both;animation-delay:calc(.08s * var(--mo-x,1))}
+
+
+/* 手机上的工具包模块行：命令一长串只露两行（整份在展开里）；右侧大小 + 按钮别把标题挤没 */
+@media (max-width:680px){
+  #mod-list .xr-sub{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+  #pages .xr-r{gap:8px}
+  #pages .xr-r .num{min-width:0}
+}
+

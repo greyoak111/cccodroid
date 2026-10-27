@@ -22,7 +22,8 @@
       "ca-certificates",
       "openssl",
       "openssl-tool",
-      "debianutils", "which",
+      "debianutils",
+      "which",
       "patch",
       "ed",
       "dos2unix",
@@ -95,6 +96,22 @@
     ],
     "claude": [
       "glibc"
+    ],
+    "go": [
+      "golang",
+      "gopls",
+      "goimports",
+      "gofumpt",
+      "gotestsum",
+      "govulncheck",
+      "golangci-lint",
+      "delve"
+    ],
+    "node": [
+      "pnpm",
+      "yarn",
+      "bun",
+      "deno"
     ]
   },
   "exclude": [
@@ -288,6 +305,51 @@
         "typst",
         "duckdb",
         "magick"
+      ]
+    },
+    "go": {
+      "groups": [
+        "go"
+      ],
+      "name": {
+        "zh": "Go 语言",
+        "en": "Go"
+      },
+      "desc": {
+        "zh": "Go 工具链、gopls、goimports/gofumpt、gotestsum、govulncheck、golangci-lint、dlv：写、查、测、调 Go 程序。",
+        "en": "Go toolchain, gopls, goimports/gofumpt, gotestsum, govulncheck, golangci-lint and dlv: write, inspect, test and debug Go."
+      },
+      "uses": [],
+      "key": [
+        "go",
+        "gofmt",
+        "gopls",
+        "goimports",
+        "gofumpt",
+        "gotestsum",
+        "govulncheck",
+        "golangci-lint",
+        "dlv"
+      ]
+    },
+    "node": {
+      "groups": [
+        "node"
+      ],
+      "name": {
+        "zh": "Node.js 生态",
+        "en": "Node.js ecosystem"
+      },
+      "desc": {
+        "zh": "pnpm、yarn、bun、deno：npm 之外再装几个包管理器和运行时。",
+        "en": "pnpm, yarn, bun and deno: package managers and runtimes beyond the bundled npm."
+      },
+      "uses": [],
+      "key": [
+        "pnpm",
+        "yarn",
+        "bun",
+        "deno"
       ]
     }
   },

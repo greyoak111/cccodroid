@@ -66,7 +66,7 @@ cccodroid 让执行回到你自己的设备上：云端只负责模型推理，�
   - 一个项目就是一个工作目录，加上它的 CLAUDE.md 和默认的接口、型号、思考强度、权限；会话按目录自动归到项目下。
   - 定时任务让 Claude 按时干一件事：每天、每周、每月、每隔几小时、只跑一次，或者直接写 cron；由系统闹钟准点叫醒。可以限定只读、只改这个项目或只用哪些工具，设单次花费和时长上限、每天的总额。跑的时候没人看着，凡是需要你确认的操作一律拒绝。
 - **用量与额度**：顶栏上下文线的后半截直接显示当前接口还剩多少——账户登录是 5 小时与每周额度，DeepSeek、Kimi 等是余额；快用完时提醒。「用量」页记对话次数、活跃天数、常用模型，每月一张月报图，可以保存或分享；只记次数和用量，不记内容。
-- **工具包按模块装**（扩展 → 工具包模块，0.3.9 起）：开发工具包分成基础、命令行工具、C/C++ 编译、Java 与安卓打包、图形库、音视频、其他工具几块，首次安装时勾选，之后随装随卸。每块写明用途、主要命令、大小、依赖和被谁用着；在终端敲一个没装的命令会提示它在哪块。从 0.3.8 及以前升级会装上全部模块，功能一样不少。
+- **工具包按模块装**（扩展 → 工具包模块，0.3.9 起）：开发工具包分成基础、命令行工具、C/C++ 编译、Java 与安卓打包、图形库、音视频、文档与数据、Go 语言、Node.js 生态几块，首次安装时勾选，之后随装随卸。每块写明用途、主要命令、大小、依赖和被谁用着；在终端敲一个没装的命令会提示它在哪块。从 0.3.8 及以前升级会装上全部模块，功能一样不少。
 - **可选组件**（扩展 → 可选组件）：体积大的工具不随应用安装，用得上再下载。每个组件包都对应特定版本的工具包，装之前先核对 SHA-256 和逐文件清单，卸载干净。
   - **浏览器组件（无头 Chromium 155）**：下载约 254 MB，装好后约 750 MB。让 Claude 在后台打开网页：截图、导出 PDF、取渲染后的页面、用 puppeteer-core 操作网页。附带一个技能，告诉 Claude 怎么用。
   - **社区组件**：还可以装 [cccodroid-components](https://github.com/greyoak111/cccodroid-components) 仓库里的组件。目前 28 个，加上面的浏览器共 29 个。开发：GitHub CLI（gh）、Godot（无头运行 / 导出 APK）、Graphviz / PlantUML 画图、Hugo 建站、逆向分析（rizin、binwalk）；图像影音：Blender（无头合成 / 渲染，3D 走 GPU）、LilyPond（乐谱排版）、音乐制作工具链；办公：LibreOffice、Pandoc、PDF 工具箱、OCR（简繁中英）、LaTeX（Tectonic，支持中文）；AI：llama.cpp；3D 与科学计算：OpenSCAD、GNU Octave、科学计算 Python（numpy / scipy / matplotlib）；电子设计：ngspice / gnucap、Icarus Verilog / Yosys；GPU：骁龙驱动（Vulkan / OpenGL / OpenCL）、Mali 驱动、GPU 跑分；网络：Cloudflare（wrangler）、rclone。见[完整列表](https://github.com/greyoak111/cccodroid-components/blob/main/README.zh-CN.md#组件列表)。索引带 ed25519 签名，核对不过不装；社区组件标「社区」，没人在真机上验证过的会先提示一声再装。

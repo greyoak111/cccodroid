@@ -62,6 +62,7 @@ node devkit.mjs modules --plan <plan> --build --target <包名> --out DIR   # �
 - 合并时检查：同一路径在两块里内容必须相同；alternatives 同组不能两块各给一个（依赖块已给、优先级不低的，打包时就跳过）。
 - CI 按「划分 → 整包 → 各块」走，同一个 Release 里整包（旧 App 用）和模块（新 App 用）出自同一份快照。
 - adb 单独成组并进基础模块：Shizuku 的无线调试自启动要用它。
+- 目前的可选模块：命令行增强（`cli`）、C/C++ 构建（`build`）、安卓打包（`android`）、GPU 图形（`graphics`）、音视频（`media`）、文档与数据（`extra`）、Go 语言（`go`，含 gopls / goimports / gofumpt / gotestsum / govulncheck / golangci-lint / dlv）、Node.js 生态（`node`，pnpm / yarn / bun / deno）。`clang` 与 `libllvm` 这类多块共用的大家伙由划分自动提成共享层（`lib-clang`、`lib-libllvm`）。
 
 ## 组件（`component`）
 
