@@ -120,6 +120,19 @@
             android:exported="false"
             android:grantUriPermissions="true" />
 
+        <!-- 内部文件借给别的文件管理器（MT、系统「文件」）：安卓上私有目录没法靠 chmod 放开，
+             只能走系统文件访问框架；权限只经系统选择器一次性授出，作用域是 home/（见 Docs.java） -->
+        <provider
+            android:name=".Docs"
+            android:authorities="cc.codroid.docs"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+
         <!-- 应用内部回调：安装结果、通知栏填的配对码。不导出 -->
         <receiver android:name=".Events" android:exported="false" />
         <!-- 定时任务的系统闹钟：到点拉起网关。不导出 -->
