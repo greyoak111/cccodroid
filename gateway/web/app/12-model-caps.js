@@ -328,7 +328,7 @@
   }
   segMirror($("set-effort"), (o) => o.value || t("默认"));
   const PERM_SHORT = { default: "问我", acceptEdits: "接受编辑", plan: "计划", auto: "自动", dontAsk: "不问就拒", bypassPermissions: "全部放行" };
-  segMirror($("set-perm"), (o) => t(PERM_SHORT[o.value] || o.value));
+  // 权限模式用原生下拉：六项带说明，分段控件在手机上塞不下
   segMirror($("set-parallel"), (o) => o.value, ["1", "2", "3", "4"]);
   // 设置里的「打开用量页」
   $("set-ov").addEventListener("click", (e) => { const b = e.target.closest("[data-gopage]"); if (b) { closeSettings(); openPage(b.dataset.gopage); } });
