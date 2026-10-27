@@ -264,7 +264,9 @@
             const img = (m.input_modalities || []).includes("image") ? ' data-img="1"' : "";
             // 官方 /v1/models 只报能力，不报窗口 —— 报不出来就别写 "0k"
             const ctx = m.context_window ? Math.round(m.context_window / 1024) + "k" : "—";
-            return `<option value="${esc(m.id)}"${img}>${esc(m.id)} · ${esc(m.name || "")} · ${ctx}</option>`;
+            // 厂商常把 name 填成 id，那样就成了「id · id · 窗口」
+            const nm = m.name && m.name !== m.id ? " · " + esc(m.name) : "";
+            return `<option value="${esc(m.id)}"${img}>${esc(m.id)}${nm} · ${ctx}</option>`;
           }).join("")
         : (dfltOpt ? "" : '<option value="">' + t("（该厂商不提供模型清单）") + '</option>')));
       if (r.current) {
@@ -280,6 +282,8 @@
       renderEffort(r.effortLevels || [], r.effort || "", r.effortDefault);
 
       // 用量条：总刻度用厂商给的真实窗口，但设了压缩窗口就改以它为满刻度
+      // 接口没回窗口时（登录态 / 老缓存），用清单里这个模型自己的值兜底
+      if (!r.contextWindow) r.contextWindow = (MODELS.find((m) => m.id === r.current) || {}).context_window || 0;
       loadCtxModel(r);
       const cur = MODELS.find((m) => m.id === r.current);
       if (cur) {
