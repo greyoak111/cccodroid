@@ -86,7 +86,10 @@ public final class Docs extends DocumentsProvider {
         try {
             String base = home.getCanonicalPath();
             String path = f.getCanonicalPath();
-            return path.equals(base) ? ROOT_ID : ROOT_ID + "/" + path.substring(base.length() + 1);
+            if (path.equals(base)) return ROOT_ID;
+            // 指到作用域外的软链接：不给 ID（列目录时跳过这一条）。以前直接截前缀，路径比根短就抛越界，整个目录列不出来
+            if (!path.startsWith(base + File.separator)) throw new FileNotFoundException("越界：" + f.getName());
+            return ROOT_ID + "/" + path.substring(base.length() + 1);
         } catch (java.io.IOException e) {
             throw new FileNotFoundException(f.getName());
         }
@@ -111,8 +114,11 @@ public final class Docs extends DocumentsProvider {
         return "application/octet-stream";
     }
 
-    private void row(MatrixCursor.RowBuilder r, File f) throws FileNotFoundException {
-        r.add(Document.COLUMN_DOCUMENT_ID, idOf(f));
+    /** 先算 ID 再建行：ID 算不出来（越界的链接）就整条不加，不留空行 */
+    private void row(MatrixCursor c, File f) throws FileNotFoundException {
+        String id = idOf(f);
+        MatrixCursor.RowBuilder r = c.newRow();
+        r.add(Document.COLUMN_DOCUMENT_ID, id);
         r.add(Document.COLUMN_DISPLAY_NAME, f.getName().isEmpty() ? ROOT_ID : f.getName());
         r.add(Document.COLUMN_MIME_TYPE, mimeOf(f));
         r.add(Document.COLUMN_SIZE, f.isDirectory() ? 0 : f.length());
@@ -148,7 +154,7 @@ public final class Docs extends DocumentsProvider {
             Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE,
             Document.COLUMN_SIZE, Document.COLUMN_LAST_MODIFIED, Document.COLUMN_FLAGS };
         MatrixCursor c = new MatrixCursor(cols, 1);
-        row(c.newRow(), f);
+        row(c, f);
         return c;
     }
 
@@ -166,7 +172,7 @@ public final class Docs extends DocumentsProvider {
             ? (a.isDirectory() ? -1 : 1)
             : a.getName().compareToIgnoreCase(b.getName()));
         for (File f : list) {
-            try { row(c.newRow(), f); } catch (FileNotFoundException ignored) {}
+            try { row(c, f); } catch (FileNotFoundException ignored) {}
         }
         return c;
     }
@@ -189,9 +195,9 @@ public final class Docs extends DocumentsProvider {
             visited++;
             for (File k : list) {
                 if (k.getName().startsWith(".git")) continue;
-                if (k.isDirectory()) { if (depthOf(k) < 4) queue.add(k); }
+                if (k.isDirectory() && !isSymlink(k)) { if (depthOf(k) < 4) queue.add(k); }   // 不顺着链接翻到作用域外
                 if (k.getName().toLowerCase(Locale.ROOT).contains(q)) {
-                    try { row(c.newRow(), k); found++; } catch (FileNotFoundException ignored) {}
+                    try { row(c, k); found++; } catch (FileNotFoundException ignored) {}
                     if (found >= 100) break;
                 }
             }
@@ -222,10 +228,16 @@ public final class Docs extends DocumentsProvider {
         if (!parent.isDirectory()) parent = parent.getParentFile();
         String name = safeName(displayName == null || displayName.isEmpty() ? "未命名" : displayName);
         File f = checked(new File(parent, name));
+        // 同名已存在就另起名「名字 (1).扩展名」：直接把已有文件交出去，对方一写就把用户的文件冲掉了
+        for (int n = 1; f.exists() && n < 1000; n++) {
+            int dot = Document.MIME_TYPE_DIR.equals(mimeType) ? -1 : name.lastIndexOf('.');
+            String alt = dot > 0 ? name.substring(0, dot) + " (" + n + ")" + name.substring(dot) : name + " (" + n + ")";
+            f = checked(new File(parent, alt));
+        }
         try {
             if (Document.MIME_TYPE_DIR.equals(mimeType)) {
-                if (!f.mkdirs() && !f.isDirectory()) throw new java.io.IOException("建目录失败");
-            } else if (!f.createNewFile() && !f.isFile()) {
+                if (!f.mkdirs()) throw new java.io.IOException("建目录失败");
+            } else if (!f.createNewFile()) {
                 throw new java.io.IOException("建文件失败");
             }
             return idOf(f);

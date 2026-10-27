@@ -121,7 +121,7 @@
             android:grantUriPermissions="true" />
 
         <!-- 内部文件借给别的文件管理器（MT、系统「文件」）：安卓上私有目录没法靠 chmod 放开，
-             只能走系统文件访问框架；权限只经系统选择器一次性授出，作用域是 home/（见 Docs.java） -->
+             只能走系统文件访问框架；权限只经系统选择器一次性授出，作用域只有 home/workspace（见 Docs.java） -->
         <provider
             android:name=".Docs"
             android:authorities="cc.codroid.docs"
