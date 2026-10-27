@@ -38,7 +38,7 @@ public final class Docs extends DocumentsProvider {
     @Override
     public boolean onCreate() {
         Tr.init(getContext());
-        home = new File(new File(getContext().getFilesDir().getParentFile(), "home"), "workspace");
+        home = new File(new File(getContext().getFilesDir(), "home"), "workspace");   // 和 Env.home 同一处：files/home/workspace
         return home.isDirectory();
     }
 
