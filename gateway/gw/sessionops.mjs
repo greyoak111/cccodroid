@@ -7,6 +7,7 @@ import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
 import { NAMES, PEEK_CACHE, PINS, findSessionFile, peekSession, saveNames, savePins } from "./sessions.mjs";
 import { claudeCmd, claudeEnv, killTree } from "./claude.mjs";
 import { LAST_SESSION, forgetSession, runOfSession } from "./runs.mjs";
+import { forgetChild, recordPrimary } from "./lineage-store.mjs";
 
 // ── 会话管理：回收站 / 导出 / 导入 ─────────────────────────────────────
 // 回收站放在 claude 的 projects 目录之外（它看不见，--resume 也就找不回来），同一文件系统，挪进挪出都是 rename。
@@ -66,8 +67,10 @@ export function forkSession(id, userText, after, { before = false } = {}) {
   if (cut === lines.length && runOfSession(id)) return { ok: false, status: 409, message: tz("这一轮还在生成，等它答完再分叉。") };
   const nid = crypto.randomUUID();
   const out = [];
+  let at = null;   // 分叉点：抄过去的最后一条链上消息（脉络的主父记录用）
   for (const line of lines.slice(0, cut)) {
     if (!line.trim()) continue;
+    if (line.includes('"uuid"')) { try { const e = JSON.parse(line); if (e.uuid && !e.isSidechain && /^(user|assistant|system)$/.test(e.type)) at = e.uuid; } catch {} }
     if (!line.includes(id)) { out.push(line); continue; }
     try { const ev = JSON.parse(line); if (ev.sessionId === id) ev.sessionId = nid; out.push(JSON.stringify(ev)); }
     catch { out.push(line); }
@@ -79,6 +82,7 @@ export function forkSession(id, userText, after, { before = false } = {}) {
   try { if (fs.statSync(side).isDirectory()) fs.cpSync(side, path.join(dir, nid), { recursive: true }); } catch {}
   const title = (NAMES[id] || peekSession(found.file).title || "").slice(0, 100);
   NAMES[nid] = title + " · " + tr(LAST_LANG, before ? tz("回退") : tz("分叉")); saveNames();
+  recordPrimary(nid, id, at, before ? "rewind" : "fork");
   log(`会话分叉 ${id.slice(0, 8)} → ${nid.slice(0, 8)}（保留 ${best + 1}/${users.length} 轮）`);
   return { ok: true, id: nid, title: NAMES[nid], kept: best + 1, total: users.length };
 }
@@ -275,7 +279,7 @@ export function purgeTrash(ids) {
   for (const id of ids) {
     if (!SID_RE.test(id)) continue;
     const slot = path.join(TRASH_DIR, id);
-    if (fs.existsSync(slot)) { fs.rmSync(slot, { recursive: true, force: true }); n++; }
+    if (fs.existsSync(slot)) { fs.rmSync(slot, { recursive: true, force: true }); forgetChild(id); n++; }
   }
   return n;
 }

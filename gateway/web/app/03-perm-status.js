@@ -363,6 +363,7 @@
     const r = permEl.getBoundingClientRect(), col = colRect(), mw = Math.min(m.offsetWidth, col.width - 16);
     m.style.maxWidth = (col.width - 16) + "px";
     m.style.bottom = (fixedH() - r.top + 6) + "px";
+    m.style.maxHeight = Math.max(120, r.top - 14) + "px";   // 矮屏：上面放不下就限高自己滚
     // 标签在右半边就右对齐；不出对话这一栏（右边可能是浏览器窗格）
     const x0 = r.left + r.width / 2 > col.left + col.width / 2 ? r.right - mw : r.left;
     m.style.left = Math.max(col.left + 8, Math.min(x0, col.right - mw - 8)) + "px";
@@ -397,7 +398,7 @@
     const acts = document.createElement("div");
     acts.className = "msg-acts";
     acts.innerHTML = actBtn("copy", t("复制")) + actBtn("share", t("转发")) +
-      (msgEl.classList.contains("sys") ? "" : actBtn("fork", t("从这里分叉")) + actBtn("del", t("删除")));
+      (msgEl.classList.contains("sys") ? "" : actBtn("fork", t("从这里分叉")) + actBtn("mark", t("书签")) + actBtn("del", t("删除")));
     acts.addEventListener("click", (e) => {
       const a = e.target.closest("button")?.dataset.a, text = getText();
       if (a === "copy") { copyText(text); toast(t("已复制")); }
@@ -407,6 +408,7 @@
         else { copyText(text); toast(t("这里没有系统分享，已复制到剪贴板")); }
       }
       if (a === "fork") forkFrom(msgEl);
+      if (a === "mark") toggleMark(msgEl);
       if (a === "del") deleteMsg(msgEl, "bot");
     });
     msgEl.appendChild(acts);
@@ -547,7 +549,9 @@
         case "wait":    return t("已连上，等待输出") + sec;
         case "retry":   return t("连接出错，第 {a}/{m} 次重试", { a: phEv.attempt || 1, m: phEv.max || "?" });
         case "think":   return t("思考中") + sec;
-        case "tool":    return t("正在写 {name} 的参数", { name: phEv.name || "?" }) + (phEv.chars ? " · " + fmtChars(phEv.chars) : "");
+        // 官方接口默认把工具参数攒成大块才下发（不像 DeepSeek 逐字流），字数常常一下跳到底就不动了；
+        // 后面跟上这一步的用时，不动的时候也看得出没卡住
+        case "tool":    return t("正在写 {name} 的参数", { name: phEv.name || "?" }) + (phEv.chars ? " · " + fmtChars(phEv.chars) : "") + sec;
       }
       return "";
     };
@@ -568,11 +572,13 @@
       if (!live || ended) return;
       const k = ev && ev.phase;
       if (!k || k === "text") return phClear();
-      if (!phEv || phEv.phase !== k || k === "retry" || (k === "tool" && phEv.name !== ev.name)) phT0 = Date.now();
+      const changed = !phEv || phEv.phase !== k || k === "retry" || (k === "tool" && phEv.name !== ev.name);
+      if (changed) phT0 = Date.now();
       phEv = ev;
       if (!ph) { ph = document.createElement("span"); ph.className = "run-phase"; }
       ph.title = k === "retry" ? [ev.status, ev.error].filter(Boolean).join(" · ") : "";
       phPlace(); phPaint();
+      if (changed) MO.spring(ph, "pop", (p) => ({ opacity: Math.min(1, p * 1.6), transform: `translateY(${(1 - p) * 8}px)` }));
       if (!phIv) phIv = setInterval(phPaint, 1000);
     };
     const keepTail = () => { if (liveTail && !ended) { bubble.appendChild(liveTail); phPlace(); } };
@@ -591,7 +597,7 @@
       /** 工具结果回来：这一批工具都有结果了，下一步就是再请求模型 */
       toolDone(id) { if (pendTools.delete(id) && !pendTools.size) setPhase({ phase: "connect" }); },
       delta(t) { textB().append(t); },
-      text(t) { push(TextBlock(bubble, live)).set(t); },
+      text(t, uuid) { const b = push(TextBlock(bubble, live)); b.set(t); if (uuid) b.el.dataset.uuid = uuid; },
       thinkDelta(t) { thinkB().append(t); },
       thinking(t) { (inGroup() ? groupThink() : push(ThinkBlock(bubble))).set(t); },
       /** 流断了重来：删掉上一次请求逐字推出、却没进对话的半截（正文在最后一块，思考在它前面或步骤组里） */
@@ -674,6 +680,18 @@
     };
   }
 
+  /** 压缩处的章节分隔：第 n 章 · 题名（没建档的拿章首提问灰字顶上）· 档号 */
+  function chapterSep(m, parent) {
+    const el = document.createElement("div");
+    el.className = "ch-sep";
+    el.dataset.uuid = m.uuid || "";
+    el.innerHTML = `<span class="ch-n">${esc(t("第 {n} 章", { n: m.chapter }))}</span>`
+      + (m.chTitle ? `<span class="ch-t${m.chGhost ? " ghost" : ""}">${esc(m.chTitle)}</span>` : "")
+      + `<span class="ch-no">${esc(m.chNo || "")}</span>`;
+    el.title = m.text;
+    parent.appendChild(el);
+    return el;
+  }
   /** 历史页：一段 transcript 条目 → 一个 .page 容器 */
   function renderItems(items) {
     const page = document.createElement("div");
@@ -681,11 +699,11 @@
     let av = null;
     const avs = [];
     for (const m of items) {
-      if (m.role === "user") { renderUser(m.text, page); av = null; continue; }
-      if (m.role === "note") { addNote(m.text, page); av = null; continue; }
+      if (m.role === "user") { renderUser(m.text, page, m.uuid); av = null; continue; }
+      if (m.role === "note") { (m.chapter ? chapterSep : addNote)(m.chapter ? m : m.text, page); av = null; continue; }
       if (m.role === "tool_result") { toolResult(m.id, m.ok, m.text); continue; }
       if (!av) { av = AssistantView(page, false); avs.push(av); }
-      if (m.role === "assistant") av.text(m.text);
+      if (m.role === "assistant") av.text(m.text, m.uuid);
       else if (m.role === "thinking") av.thinking(m.text);
       else if (m.role === "tool_use") {
         av.tool(m.id, m.name, m.input);
@@ -694,6 +712,7 @@
       }
     }
     for (const a of avs) a.finish();
+    paintMarks(page);
     return page;
   }
 

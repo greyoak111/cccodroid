@@ -10,7 +10,20 @@
     ...(cur && !usableProvs().some((p) => p.id === cur) ? [[cur, provLabel(cur)]] : [])];
 
   // ── 项目页 ──
+  // 列表 ↔ 详情的动效：上次画的是哪个详情，变了才放（数据刷新重画不放）；整页刚滑进来时不叠加
+  const pgNav = {};
+  function navMo(name, cur) {
+    const k = cur || "", was = pgNav[name];
+    pgNav[name] = k;
+    if (was === undefined || was === k || curPage !== name) return;
+    const pg = $("pages"); if (pg.classList.contains("mo-in-push") || pg.classList.contains("mo-in-rise")) return;
+    const narrow = innerWidth < 680, into = !!k;
+    // 回程：内容马上要被重画，先给旧的留个替身 —— 进详情时列表往左退暗（垫在下面），返回时详情往右滑走（盖在上面）
+    MO.ghost($("tab-" + name), narrow ? (into ? "back" : "push") : "fade", !(narrow && into));
+    MO.play($("tab-" + name), narrow ? (into ? "mo-in-push" : "mo-in-back") : (into ? "mo-in-pane" : "mo-in-pane-back"), 1400);
+  }
   async function renderProjects() {
+    navMo("projects", PJ.cur);
     const box = $("tab-projects");
     if (PJ.cur) return renderProject(box);
     setOv("");
@@ -80,7 +93,7 @@
     if (a === "back") { PJ.cur = null; PJ.detail = null; return renderProjects(); }
     if (a === "new") return newProjectDlg();
     const card = e.target.closest("[data-pj]"); if (card) return openProject(card.dataset.pj);
-    const sid = e.target.closest("[data-sid]"); if (sid) return openSession(sid.dataset.sid);
+    const sid = e.target.closest("[data-sid]"); if (sid) return goSession(sid.dataset.sid);
     const tk = e.target.closest("[data-task]"); if (tk) { SC.cur = tk.dataset.task; SC.detail = null; return openPage("sched"); }
     const p = PJ.detail && PJ.detail.project; if (!p) return;
     if (a === "chat") return newChatIn(p.id);
@@ -234,6 +247,7 @@
 
   // ── 定时任务页 ──
   async function renderSched() {
+    navMo("sched", SC.cur);
     const box = $("tab-sched");
     if (SC.cur) return renderTask(box);
     setOv("");
@@ -323,7 +337,7 @@
     }
     const ms = e.target.closest("[data-missed]");
     if (ms) { try { await jsend("/api/sched/missed", { taskId: ms.dataset.id, at: +ms.dataset.at, act: ms.dataset.missed }); toast(ms.dataset.missed === "run" ? t("已开始补跑") : t("这次就算了")); } catch (err) { toast(err.message, true); } return loadSched(); }
-    const sid = e.target.closest("[data-sid]"); if (sid) return openSession(sid.dataset.sid);
+    const sid = e.target.closest("[data-sid]"); if (sid) return goSession(sid.dataset.sid);
     const tk = e.target.closest("[data-task]"); if (tk && !SC.cur) { SC.cur = tk.dataset.task; SC.detail = null; renderSched(); $("page-body").scrollTop = 0; return; }
     const d = SC.detail; if (!d) return;
     if (a === "edit") return taskDlg(d.task);
@@ -508,7 +522,14 @@
     OV.closeAll();
     const prev = curPage;
     curPage = name;
-    $("pages").classList.remove("hidden");
+    document.documentElement.classList.toggle("pg-lineage", name === "lineage");   // 脉络页整页不滚（地图自己接手势）
+    if (name !== "lineage") closeTour();   // 离开脉络页：导览一起收掉
+    // 从对话进整页：窄屏从右边推进来（盖住对话），宽屏只在对话那一块浮上来；整页之间切换：新的那一页浮上来
+    const pg = $("pages"), fromChat = pg.classList.contains("hidden") || !!pg._moLeave;
+    MO.cancel(pg);
+    pg.classList.remove("hidden");
+    if (fromChat) MO.play(pg, innerWidth < 680 ? "mo-in-push" : "mo-in-rise", 1400);
+    else if (prev !== name) { if (prev && $("tab-" + prev)) MO.ghost($("tab-" + prev), "fade"); MO.play($("tab-" + name), "mo-in-fade", 1400); }   // 整页之间换：新旧交叉淡变，不上下走
     pageSub = "";
     paintTitle();
     document.querySelectorAll("#page-body > .tab-pane").forEach((p) => p.classList.toggle("hidden", p.id !== "tab-" + name));
@@ -522,16 +543,23 @@
     if (SUBNAVS[name]) paintSubnav(name);
     if (name === "help") loadHelp();
     if (name === "changelog") loadChangelog();
+    if (name === "bookmarks") loadBookmarks();
     if (name === "usage") { loadQuota(); loadUsage(); loadEnergy(); loadAcctCard(false); }
     if (name !== "projects" && name !== "sched") pageTitleOv = "";
     if (name === "projects") { if (prev !== name && !PJ.cur) PJ.detail = null; renderProjects(); loadProjects(); loadSched(); }
     if (name === "sched") { renderSched(); loadSched(); loadProjects(); }
+    if (name === "lineage") { if (LIN.g) linPaint(prev !== name); loadLineage(); }
   }
   function closePage() {
     if (!curPage) return;
     curPage = null;
     pageTitleOv = "";
-    $("pages").classList.add("hidden");
+    document.documentElement.classList.remove("pg-lineage");
+    closeTour();
+    // 回到对话：窄屏整页滑出去、底下的对话从左边一点点回来；宽屏淡掉
+    const pg = $("pages");
+    MO.leave(pg, innerWidth < 680 ? "mo-out-push" : "mo-out-fade", 170, () => pg.classList.add("hidden"));
+    if (innerWidth < 680) MO.play(chatEl, "mo-in-back", 1400);
     renderSideNav();
     paintTitle();
   }
@@ -540,7 +568,14 @@
   function paintTitle() {
     const el = $("app-title");
     if (curPage) { el.textContent = pageTitleOv || t(PAGES[curPage].name); subEl.textContent = pageSub; subEl.className = ""; }
-    else { el.textContent = view.title || t("新对话"); subEl.textContent = chatStatus[0]; subEl.className = chatStatus[1]; }
+    else { el.textContent = view.title || t("新对话"); subEl.textContent = chatStatus[0] + (chatStatus[1] === "ok" ? archSub() : ""); subEl.className = chatStatus[1]; }
+  }
+  // 空闲时状态行后面接上档号和起止日期（建过档的会话才有）
+  function archSub() {
+    try {
+      const s = view.sessionId && (state.sessions || []).find((x) => x.id === view.sessionId);
+      return s && s.no ? " · " + s.no + " · " + fmtRange(s.created, s.mtime) : "";
+    } catch { return ""; }
   }
   function setPageSub(name, text) { if (curPage !== name) return; pageSub = text || ""; subEl.textContent = pageSub; }
 

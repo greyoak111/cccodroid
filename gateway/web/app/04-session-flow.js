@@ -48,6 +48,7 @@
     refreshSessModel();                      // 模型标签换成这个会话自己的（打开、启动、重连都经过这里）
     view.gen++;
     view.cursor = null;
+    view.next = null;
     view.loading = false;
     view.runIds = new Set();
     view.cids = new Set();
@@ -61,6 +62,10 @@
     view.tasks = null;
     view.tasksHide = hid.t || "";
     renderRunStrip();
+    // 新会话的首屏留着：点「新对话」时已经画过一次，重连回来（hello）又会走到这里——清掉重画就是空一帧再整块冒出来，
+    // 关了动效时看着就是一闪。还是新会话、首屏也还在，就把那块原样接回去（showWelcome 认它）
+    const wel = !view.sessionId && histEl.childElementCount === 1 ? histEl.querySelector(":scope > .msg.welcome") : null;
+    welKeep = wel || null;
     histEl.innerHTML = "";
     liveEl.innerHTML = "";
     for (const rv of runViews.values()) rv.timer?.stop();
@@ -68,6 +73,7 @@
     TOOL_CARDS.clear();
     PENDING_RESULTS.clear();
     olderEl.classList.add("hidden");
+    syncWindow();
     statEl.textContent = "";
     pickViewRun();                     // 换了会话：「本会话在不在跑」要重新算
     paintProjChip();
@@ -75,14 +81,27 @@
     saveUiState();
   }
 
-  /** 打开某个会话（null = 新会话）。重连事件流：网关会把正在跑的那一轮从头重放过来 */
-  function openSession(id, jumpQ) {
+  /** 打开某个会话（null = 新会话）。重连事件流：网关会把正在跑的那一轮从头重放过来。
+   *  anchor：落在某一章开头（脉络里点站 / 章标题；压缩消息的 uuid，第一章是 "start"） */
+  function openSession(id, jumpQ, anchor) {
+    if (id !== view.sessionId) saveLastRead();   // 切走前记下读到哪（在底部就作废）
     closePage();
     resetView(id);
+    if (!id) showWelcome();   // 新会话当场画首屏，不等重连回来——中间空着那一下就是闪
     view.jumpQ = id && jumpQ ? jumpQ : "";   // 从搜索结果点进来：历史加载完后跳到命中的那条
     view.jumpPages = 0;
+    view.anchor = id && anchor ? anchor : "";
+    view.resume = null;
     renderSessions();
     connectBus(false);
+  }
+
+  // 用户点会话标题（侧栏 / 对话列表 / 项目）：点的就是眼前这个、又不是跳搜索命中，就只收起整页和侧栏，现场原样（#37）；
+  // 正看着中间某一段（窗口式）时照旧重开，回到最新
+  function goSession(id, jumpQ) {
+    if (id && id === view.sessionId && !jumpQ && view.next == null && !view.loading) { closePage(); closeDrawer(); return; }
+    // 切回别的会话：上次离开时不在底部，就落回那时视口顶部那一段
+    closeDrawer(); openSession(id, jumpQ, id && !jumpQ && id !== view.sessionId ? lastReadOf(id) : null);
   }
 
   function newConversation(note) {
@@ -97,6 +116,62 @@
     return r && view.sessionId && r.sessionId === view.sessionId ? r.startedAt : 0;
   }
 
+  // ── 窗口式历史（跳到某一章时）：#hist 只是会话里连续的一段，view.cursor 是上沿、view.next 是下沿（null = 一直到最新）。
+  //    没到最新时 #live 藏起来，往下滚按页续读；每页记着自己的字节范围（data-from / data-to），
+  //    超过 MAX_PAGES 页就从另一头整页摘掉，滚回去再按范围原样重读——长会话来回翻，DOM 始终只有这么几页
+  const MAX_PAGES = 8;
+  function syncWindow() {
+    const w = view.next != null;
+    liveEl.classList.toggle("hidden", w);
+    chatEl.classList.toggle("windowed", w);
+  }
+  // 往后读时不重复给的部分：正在跑的那一轮，加上本次打开后在 #live 里已经画出来的各轮
+  function windowExclude() {
+    let ex = liveExclude();
+    for (const rv of runViews.values()) if (rv.startedAt && (!ex || rv.startedAt < ex)) ex = rv.startedAt;
+    return ex;
+  }
+  const histPages = () => histEl.querySelectorAll(":scope > .page");
+  function trimPages(side) {
+    let ps = histPages();
+    while (ps.length > MAX_PAGES) {
+      if (side === "top") {
+        const p = ps[0], h0 = chatEl.scrollHeight;
+        p.remove();
+        chatEl.scrollTop -= h0 - chatEl.scrollHeight;
+        view.cursor = Number(p.dataset.to);
+        olderEl.classList.remove("hidden");
+      } else {
+        const p = ps[ps.length - 1];
+        p.remove();
+        view.next = Number(p.dataset.from);
+        syncWindow();
+      }
+      ps = histPages();
+    }
+  }
+
+  async function loadNewer() {
+    const id = view.sessionId, after = view.next;
+    if (!id || view.loading || after == null) return;
+    view.loading = true;
+    const gen = view.gen;
+    const q = new URLSearchParams({ limit: "60", after: String(after) });
+    const ex = windowExclude();
+    if (ex) q.set("exclude", String(ex));
+    let r;
+    try { r = await api(`/api/session/${encodeURIComponent(id)}?${q}`); }
+    catch (e) { if (gen === view.gen) { view.loading = false; toast(t("读取历史失败：{msg}", { msg: e.message }), true); } return; }
+    if (gen !== view.gen) return;
+    view.loading = false;
+    const page = renderItems(r.items || []);
+    page.dataset.from = after; page.dataset.to = r.next;
+    histEl.appendChild(page);
+    view.next = r.next < r.size ? r.next : null;
+    trimPages("top");
+    syncWindow();
+  }
+
   async function loadOlder(initial) {
     const id = view.sessionId;
     if (!id || view.loading) return;
@@ -105,8 +180,16 @@
     const gen = view.gen;
     olderEl.textContent = t("加载中…");
     const q = new URLSearchParams({ limit: initial ? "40" : "60" });
-    if (!initial) q.set("before", String(view.cursor));
-    const ex = liveExclude();
+    const anchor = initial ? view.anchor : "", resume = initial ? view.resume : null, before = view.cursor;
+    if (initial) { view.anchor = ""; view.resume = null; }
+    const fwd = !!anchor || resume != null;
+    // 锚点：章节是压缩消息 uuid（字符串）；书签 / 上次读到是 { uuid, off, para, quiet }
+    const aObj = anchor && typeof anchor === "object" ? anchor : null;
+    if (anchor) { q.set("anchor", aObj ? aObj.uuid : anchor); if (aObj && aObj.off > 0) q.set("off", String(aObj.off)); }
+    if (initial) loadMarks();
+    else if (resume != null) q.set("after", String(resume));
+    else if (!initial) q.set("before", String(before));
+    const ex = fwd ? windowExclude() : liveExclude();
     if (ex) q.set("exclude", String(ex));
     let r;
     try {
@@ -115,6 +198,11 @@
       if (gen !== view.gen) return;
       view.loading = false;
       olderEl.textContent = t("加载更早的消息");
+      if (anchor && e.status === 404) {
+        // 那一章 / 书签的位置找不到了（记录被改写过、回退截掉了）：退回最新；「上次读到」找不到就悄悄打开到最新
+        if (!aObj || !aObj.quiet) toast(aObj ? t("没找到书签的位置，已打开到最新") : t("没找到这一章的位置，已打开到最新"), true);
+        return loadOlder(true);
+      }
       if (e.status === 404 && initial) {
         // 记着的会话已经不在了（删掉了 / 清过数据）：当新会话处理，回到欢迎页，别挂一条让人摸不着头脑的提示
         view.sessionId = null;
@@ -126,25 +214,54 @@
     if (gen !== view.gen) return;
     view.loading = false;
     view.cursor = r.cursor;
+    if (initial) view.next = fwd && r.next < r.size ? r.next : null;
     view.title = r.title || "";
     if (initial && "goal" in r) { view.goal = r.goal || null; renderRunStrip(); }
     if (initial && "tasks" in r) { view.tasks = r.tasks || null; renderRunStrip(); }
     const page = renderItems(r.items || []);
+    page.dataset.from = r.cursor;
+    page.dataset.to = fwd ? r.next : initial ? r.size : before;
+    olderEl.textContent = t("加载更早的消息");
+    olderEl.classList.toggle("hidden", !r.cursor);
     if (initial) {
       histEl.innerHTML = "";
       histEl.appendChild(page);
+      syncWindow();
       if (r.contextTokens != null) updateCtx(r.contextTokens, state.ctxTotal);
       paintTitle();
       setStatus(t("就绪"), "ok");
-      scrollDown(true);
+      if (anchor) return landOnChapter(page, gen, aObj);
+      if (fwd) { stick = false; chatEl.scrollTop = 0; }   // 重连时接着原来那一段
+      else { scrollDown(true); if (!seenSessions.has(id)) MO.play(histEl, "mo-in-rise", 1400); }
+      seenSessions.add(id);
     } else {
       const h0 = chatEl.scrollHeight, t0 = chatEl.scrollTop;
       histEl.insertBefore(page, histEl.firstChild);
       chatEl.scrollTop = t0 + (chatEl.scrollHeight - h0);   // 往上补内容，视线别跳
+      trimPages("bottom");
     }
-    olderEl.textContent = t("加载更早的消息");
-    olderEl.classList.toggle("hidden", !r.cursor);
     if (view.jumpQ) jumpToHit();
+  }
+  // 落在某一章：先往上补一页（分隔线上面要有东西可看），再把分隔线放到视口上三分之一处、闪一下
+  async function landOnChapter(page, gen, aObj) {
+    stick = false;
+    if (view.cursor) await loadOlder(false);
+    if (gen !== view.gen) return;
+    if (aObj) { landOnMark(page, aObj); progTop = chatEl.scrollTop; return; }
+    const sep = page.querySelector(".ch-sep");
+    const y = sep ? sep.getBoundingClientRect().top - chatEl.getBoundingClientRect().top + chatEl.scrollTop : 0;
+    chatEl.scrollTop = Math.max(0, y - chatEl.clientHeight / 3);
+    progTop = chatEl.scrollTop;
+    if (!sep) return;
+    // 动效开着：章名轻轻一顶、蓝线从左扫到右；关着照旧底色闪一下
+    if (MO.on()) { if (!sep.querySelector(".mo-sweep")) sep.insertAdjacentHTML("beforeend", '<i class="mo-sweep"></i>'); MO.play(sep, "mo-hit", 2200); }
+    else { sep.classList.add("hit-flash"); setTimeout(() => sep.classList.remove("hit-flash"), 2400); }
+  }
+  /** 回到最新：窗口没到最新时整个重开（#live 本来就在，重开会按正常方式从尾巴取） */
+  function backToLatest() {
+    if (view.next == null) return false;
+    openSession(view.sessionId);
+    return true;
   }
 
   // 在已渲染的消息里从新往旧找搜索词；没找到就继续往前翻，最多翻 30 页
@@ -176,6 +293,7 @@
   olderEl.addEventListener("click", () => loadOlder(false));
   chatScrollHooks.push(() => {
     if (chatEl.scrollTop < 240 && view.cursor && !view.loading && histEl.childElementCount) loadOlder(false);
+    else if (view.next != null && !view.loading && chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 240) loadNewer();
   });
 
   // ── 新会话首屏（照网页版的布局）：问候语居中，输入框紧跟在下面，示例和使用提示在输入框下方；
@@ -201,12 +319,24 @@
     if ((wd === 0 || wd === 6) && h >= 8 && h < 22) pool.push(t("周末，做点自己想做的"));
     return pool[Math.floor(Math.random() * pool.length)];
   }
+  var welKeep = null;   // var：resetView 在上面，别撞暂时性死区
   function showWelcome() {
+    if (histEl.querySelector(":scope > .msg.welcome")) return;
+    if (welKeep) {
+      // 接回去的节点：重新插进文档时浏览器会把它的 CSS 动画（淡入、线稿描画）从头再播，挂 wl-kept 压住
+      const w = welKeep; welKeep = null;
+      w.classList.add("wl-kept");
+      histEl.appendChild(w);
+      fillSetupGuide(w.querySelector(".setup-guide"));
+      paintWelBelow();
+      return;
+    }
     const b = mkMsg("bot", null, histEl);
     b.parentElement.classList.add("welcome");
     b.innerHTML = `<div class="wl-hero">${WL_MARK}<h1 class="wl-greet">${esc(greeting())}</h1></div><div class="setup-guide hidden"></div>`;
     fillSetupGuide(b.querySelector(".setup-guide"));
     paintWelBelow();
+    MO.play(b.parentElement, "mo-in-rise", 1400);
   }
   // 输入框下方：只留「使用提示」（进帮助页）；原先还有三条示例，用户嫌不好看，去掉了
   const wlBelow = document.createElement("div");
@@ -220,13 +350,17 @@
   });
   function welSync() {
     const w = histEl.childElementCount === 1 && !!histEl.querySelector(":scope > .msg.welcome") && !liveEl.childElementCount;
+    // 发出第一条后问候语就退场：留着会变成一条顶着「Claude」名字的假回复（重新打开会话时本来也没有它）
+    if (!w && histEl.childElementCount > 1) { const old = histEl.querySelector(":scope > .msg.welcome"); if (old) { old.remove(); return welSync(); } }
     if (document.documentElement.classList.contains("wel") === w) return;
     document.documentElement.classList.toggle("wel", w);
     syncPlaceholder(); paintProjChip(); welNarrow();
+    // 首屏输入框两行高，autoGrow 量出来的高度写在行内；离开首屏要重量一次，不然发完第一条输入框还是两行高、发送键被挤偏
+    autoGrow();
   }
   // 对话栏窄（开着右侧窗格、分屏）：首屏排得紧一点
   function welNarrow() { document.documentElement.classList.toggle("wel-narrow", colRect().width < 600); }
-  addEventListener("resize", welNarrow);
+  addEventListener("resize", () => { welNarrow(); autoGrow(); });   // 转屏后宽度变了，行内高度也要重量
   new MutationObserver(welSync).observe(histEl, { childList: true });
   new MutationObserver(welSync).observe(liveEl, { childList: true });
   // 输入框里的一行提示：首屏问「有什么可以帮你」，会话里提示斜杠命令
@@ -345,8 +479,9 @@
         if (view.sessionId && ev.sessionId === view.sessionId) { view.goal = ev.goal || null; renderRunStrip(); }
         return;
       case "state": return applyState(ev);
+      case "archive": return loadSessions();   // 建档 / 归入杂项：标题、档号、分组跟着变
       case "sched": case "sched_note": return onSchedEvent(ev);
-      case "sync": return;
+      case "sync": busReplay = false; return;
       case "run_start": {
         if (!belongs(ev)) return;
         view.runIds.add(ev.runId);
@@ -458,6 +593,7 @@
     if (ev.uiTag) uiTag = ev.uiTag;
     applyState(ev);
     if (ev.resume) { setStatus(t("已连接"), "ok"); return; }
+    busReplay = true;
 
     // 续不上（首次连接 / 网关重启过 / 断太久）：本视图从头来 —— 历史重新取，
     // 正在跑的那一轮紧接着会被网关整轮重放过来
@@ -473,7 +609,9 @@
     }
     const keepRuns = new Set(view.runIds), keepCids = new Set(view.cids);
     const sid = view.sessionId, keepProj = view.projectId;   // 重连会重置视图：新会话已挑的项目留着
+    const resume = sid && view.next != null && !view.anchor ? view.cursor : null;   // 正看着中间某一段：重连后接着那段
     resetView(sid);
+    if (resume != null) view.resume = resume;
     if (!sid && keepProj) { view.projectId = keepProj; paintProjChip(); }
     view.runIds = keepRuns; view.cids = keepCids;
     pickViewRun();
@@ -531,6 +669,7 @@
     syncPlaceholder();
     syncInterject();
     renderQueue();
+    lineageRuns();
     // 别的窗口（或网关那边）已经答掉的，这里也收起来
     const livePerms = new Set((srv.run?.perms || []).map((p) => p.id));
     for (const [id, it] of PERMS) if (!it.done && srv.run && it.runId === srv.run.id && !livePerms.has(id) && it.p.at < Date.now() - 1500) permDone(id, "gone");

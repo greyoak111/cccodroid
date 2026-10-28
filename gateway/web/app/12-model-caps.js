@@ -206,7 +206,8 @@
       let html = "";
       if (!kw) {
         if (info.nativeModels) html += row("", info.defaultModel ? t("（默认：{model}）", { model: info.defaultModel }) : t("（默认，由 claude 决定）"));
-        const rec = (JSON.parse(localStorage.getItem(RECENT_KEY) || "[]")).filter((id) => ML.some((md) => md.id === id));
+        // 当前在用的那个总排在「最近用过」头一个：不然清单一长，打开弹层根本看不到现在用的是哪个
+        const rec = [...new Set([cur(), ...JSON.parse(localStorage.getItem(RECENT_KEY) || "[]")])].filter((id) => id && ML.some((md) => md.id === id));
         if (rec.length) html += `<div class="mp-sec">${t("最近用过")}</div>` + rec.map((id) => row(id, meta(ML.find((md) => md.id === id)))).join("") + `<div class="mp-sec">${t("全部 {n} 个", { n: ML.length })}</div>`;
       }
       html += all.slice(0, 300).map((md) => row(md.id, meta(md))).join("");
@@ -263,7 +264,9 @@
             const img = (m.input_modalities || []).includes("image") ? ' data-img="1"' : "";
             // 官方 /v1/models 只报能力，不报窗口 —— 报不出来就别写 "0k"
             const ctx = m.context_window ? Math.round(m.context_window / 1024) + "k" : "—";
-            return `<option value="${esc(m.id)}"${img}>${esc(m.id)} · ${esc(m.name || "")} · ${ctx}</option>`;
+            // 厂商常把 name 填成 id，那样就成了「id · id · 窗口」
+            const nm = m.name && m.name !== m.id ? " · " + esc(m.name) : "";
+            return `<option value="${esc(m.id)}"${img}>${esc(m.id)}${nm} · ${ctx}</option>`;
           }).join("")
         : (dfltOpt ? "" : '<option value="">' + t("（该厂商不提供模型清单）") + '</option>')));
       if (r.current) {
@@ -279,6 +282,8 @@
       renderEffort(r.effortLevels || [], r.effort || "", r.effortDefault);
 
       // 用量条：总刻度用厂商给的真实窗口，但设了压缩窗口就改以它为满刻度
+      // 接口没回窗口时（登录态 / 老缓存），用清单里这个模型自己的值兜底
+      if (!r.contextWindow) r.contextWindow = (MODELS.find((m) => m.id === r.current) || {}).context_window || 0;
       loadCtxModel(r);
       const cur = MODELS.find((m) => m.id === r.current);
       if (cur) {
@@ -327,7 +332,7 @@
   }
   segMirror($("set-effort"), (o) => o.value || t("默认"));
   const PERM_SHORT = { default: "问我", acceptEdits: "接受编辑", plan: "计划", auto: "自动", dontAsk: "不问就拒", bypassPermissions: "全部放行" };
-  segMirror($("set-perm"), (o) => t(PERM_SHORT[o.value] || o.value));
+  // 权限模式用原生下拉：六项带说明，分段控件在手机上塞不下
   segMirror($("set-parallel"), (o) => o.value, ["1", "2", "3", "4"]);
   // 设置里的「打开用量页」
   $("set-ov").addEventListener("click", (e) => { const b = e.target.closest("[data-gopage]"); if (b) { closeSettings(); openPage(b.dataset.gopage); } });
@@ -429,9 +434,11 @@
 
   $("set-static").addEventListener("change", (e) => saveSettings({ staticCompat: e.target.checked }));
   // 执行方式：存在 files/.exec-mode，重启网关生效（36 的包选「直接执行」网关会拒）
+  let execPid = 0;
   async function loadExecMode() {
     try {
       const r = await api("/api/exec-mode");
+      execPid = r.pid || 0;
       $("set-exec").value = r.pref;
       $("set-exec").querySelector('option[value="direct"]').disabled = !!r.must;
       let now = t("现在是：{mode}", { mode: t(r.active === "loader" ? "经加载器" : "直接执行") });
@@ -445,6 +452,12 @@
       if (confirm(t("执行方式已保存。现在重启网关让它生效吗？打开的终端会断开。"))) {
         await api("/api/exec-mode", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ restart: true }) });
         toast(t("网关重启中…"));
+        // 旧网关 300ms 后才退：等到换了 pid 的新网关答话再刷新「现在是」，不然读到的还是旧状态
+        const old = execPid;
+        for (let i = 0; i < 40; i++) {
+          await new Promise((r) => setTimeout(r, 750));
+          try { const r = await api("/api/exec-mode"); if (r.pid && r.pid !== old) break; } catch {}
+        }
       }
     } catch (err) { toast(err.message || String(err)); }
     loadExecMode();

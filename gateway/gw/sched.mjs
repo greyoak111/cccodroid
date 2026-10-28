@@ -133,6 +133,19 @@ async function deviceState() {
 // ── 记账 ──
 const dayKey = (ms) => { const d = new Date(ms); return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); };
 const costToday = () => RUNLOG.filter((r) => dayKey(r.at) === dayKey(Date.now())).reduce((s, r) => s + (r.cost || 0), 0);
+/** 脉络用：会话 → 所属定时任务 { id, name }。运行记录（留最近 500 条）+「同一个会话」任务的 lastSid，
+ *  再往前的旧会话按名字「任务名 · 时间」认领；任务已删的只留名字（id 为 null） */
+export function schedSessions() {
+  const out = new Map(), put = (sid, t) => { if (sid && !out.has(sid)) out.set(sid, { id: t.id, name: t.name }); };
+  for (const t of DB.tasks) put(t.lastSid, t);
+  for (let i = RUNLOG.length - 1; i >= 0; i--) { const t = byId(RUNLOG[i].taskId); if (t) put(RUNLOG[i].sid, t); }
+  for (const sid of DB.sids) {
+    if (out.has(sid)) continue;
+    const n = NAMES[sid] || "", t = DB.tasks.find((x) => n === x.name || n.startsWith(x.name + " · "));
+    put(sid, t || { id: null, name: n.replace(/ · [\d-]+ [\d:]+$/, "") || "?" });
+  }
+  return out;
+}
 function addRun(rec) { RUNLOG.push(rec); saveRuns(); publish({ type: "sched", op: "run", taskId: rec.taskId }); return rec; }
 function note(t, title, text, sessionId, ok) { publish({ type: "sched_note", taskId: t.id, title, text: String(text || "").slice(0, 200), sessionId: sessionId || null, ok: !!ok }); }
 

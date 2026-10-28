@@ -485,7 +485,7 @@ final class Updater {
         } catch (Exception e) { Log.i(TAG, "planModules: 按整包装（" + e + "）"); }
     }
 
-    /** 现在装着哪些模块：模块化工具包按各块的 .ok；整包工具包 = 新清单里的全部模块（升级后一样不少，不用的再到扩展页卸） */
+    /** 现在装着哪些模块：模块化工具包按各块的 .ok；整包工具包 = 新清单里整包本来就有的模块（full，升级后一样不少，不用的再到扩展页卸） */
     private java.util.List<String> installedModuleIds(JSONObject newMj) {
         java.util.List<String> ids = new java.util.ArrayList<>();
         JSONObject cur = new Installer(env, null).readModules();
@@ -494,7 +494,8 @@ final class Updater {
             JSONObject m = all.optJSONObject(i);
             if (m == null || !"module".equals(m.optString("kind"))) continue;
             String id = m.optString("id");
-            if (cur == null) { ids.add(id); continue; }
+            // 整包里没有的模块（full=false，比如后加的 Go、Node 生态）不算已装，要用再到扩展页加
+            if (cur == null) { if (m.optBoolean("full", true)) ids.add(id); continue; }
             JSONObject old = Installer.moduleById(cur, id);
             if (old != null && new File(env.usr, old.optString("dir") + "/.ok").isFile()) ids.add(id);
         }

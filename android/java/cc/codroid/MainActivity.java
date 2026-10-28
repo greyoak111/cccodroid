@@ -230,7 +230,7 @@ public class MainActivity extends Activity {
         if (has && web != null && web.getParent() != null && getCurrentFocus() == null) web.requestFocus();
     }
 
-    @Override protected void onResume() { super.onResume(); visible = true; Battery.foreground(true);
+    @Override protected void onResume() { super.onResume(); visible = true; applyLandBars(); Battery.foreground(true);
         if (pane != null) pane.resume();
         getSystemService(android.app.NotificationManager.class).cancel(41);    // Priv.toFront 的「点此回来」
         Notify.get(this).onForeground(); }                                    // 确认卡就在眼前，通知撤掉
@@ -269,8 +269,26 @@ public class MainActivity extends Activity {
             d.setSystemUiVisibility(dark ? f & ~m : f | m);
         }
     }
+    /** 手机横屏（高不到 500dp、不在分屏里）藏掉状态栏：370 来高的屏，状态栏要占掉近一成；从顶上下拉可以临时唤出。
+     *  其余情况照常显示。藏起来以后系统报的顶部占位变 0，--safe-t 跟着归零，顶栏自己顶上去 */
+    private void applyLandBars() {
+        if (android.os.Build.VERSION.SDK_INT < 30) return;
+        android.content.res.Configuration c = getResources().getConfiguration();
+        boolean hide = c.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE && c.screenHeightDp < 500 && !isInMultiWindowMode();
+        android.view.WindowInsetsController ic = getWindow().getInsetsController();
+        if (ic == null) return;
+        if (hide) {
+            ic.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            ic.hide(android.view.WindowInsets.Type.statusBars());
+        } else ic.show(android.view.WindowInsets.Type.statusBars());
+    }
+    @Override public void onMultiWindowModeChanged(boolean on, android.content.res.Configuration cfg) {
+        super.onMultiWindowModeChanged(on, cfg);
+        applyLandBars();
+    }
     @Override public void onConfigurationChanged(android.content.res.Configuration cfg) {
         super.onConfigurationChanged(cfg);
+        applyLandBars();
         if (web != null) web.evaluateJavascript(guarded("Theme.system", "window.Theme&&Theme.system(" + systemNight() + ")"), null);
     }
 
@@ -867,6 +885,9 @@ public class MainActivity extends Activity {
                 | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         root.setOnApplyWindowInsetsListener((v, in) -> {
             insetTop = in.getSystemWindowInsetTop();
+            // LAYOUT_STABLE 下上面那个值在状态栏藏起来后仍报原高度；安卓 11+ 按状态栏当前是否可见取（加上挖孔）
+            if (android.os.Build.VERSION.SDK_INT >= 30)
+                insetTop = in.getInsets(android.view.WindowInsets.Type.statusBars() | android.view.WindowInsets.Type.displayCutout()).top;
             // 安装页没有网页来避让，顶部也由这里留白；界面起来以后交给 --safe-t
             v.setPadding(in.getSystemWindowInsetLeft(), web == null ? insetTop : 0, in.getSystemWindowInsetRight(), in.getSystemWindowInsetBottom());
             pushInsets();
@@ -1395,6 +1416,8 @@ public class MainActivity extends Activity {
         if (pane == null) {
             pane = new BrowserPane(this, new BrowserPane.Host() {
                 @Override public void onPaneClose() { closePane(true); }
+                // json 已经是 evaluateJavascript 编好的 JS 字符串字面量，原样当参数传，界面那边再 JSON.parse、只取文字
+                @Override public void onPicked(String json) { if (web != null) web.evaluateJavascript("window.__ccPickIn&&__ccPickIn(" + json + ")", null); }
             }, 9);
             pane.setVisibility(View.GONE);               // 等页面报来位置再显示，免得先闪一下全屏
             root.addView(pane, new FrameLayout.LayoutParams(0, 0));

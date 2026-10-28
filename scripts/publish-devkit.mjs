@@ -158,7 +158,8 @@ step.fetch = async () => {
   if (g) say("  ✓ glibc.deb 留存在 Release 上");
   // devkit.json 点名要的包都进了（10.22.1 以为 which 在 debianutils 里、实际没有，就是这一步该拦下的）
   const dj = json(path.join(ROOT, "devkit/devkit.json"));
-  const names = new Set(lock.packages.map((p) => p.name));
+  // full:false 的模块（go、node）不进整包，它们的包只在 modules.json 各自的清单里，要一起算
+  const names = new Set([...lock.packages.map((p) => p.name), ...mods.modules.flatMap((m) => (m.packages || []).map((p) => (typeof p === "string" ? p : p.name)))]);
   const named = [...new Set(Object.values(dj.groups).flat())].filter((n) => typeof n === "string" && !(dj.exclude || []).includes(n));
   const miss = named.filter((n) => !names.has(n));
   if (miss.length) fail(`devkit.json 点名的包不在清单里：${miss.join(" ")}（虚包要写实际提供它的包名，如 man → mandoc）`);

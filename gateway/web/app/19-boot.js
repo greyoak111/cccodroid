@@ -8,7 +8,7 @@
   let bottomH = 0, bottomRaf = 0;
   function syncBottomBtn() {
     bottomRaf = 0;
-    const away = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight > 320;
+    const away = view.next != null || chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight > 320;
     toBottomEl.classList.toggle("hidden", !away);
     if (!away) toBottomEl.classList.remove("new");
     else if (chatEl.scrollHeight > bottomH + 4 && bottomH) toBottomEl.classList.add("new");
@@ -21,6 +21,7 @@
   bottomRO.observe(histEl); bottomRO.observe(liveEl);
   toBottomEl.addEventListener("click", () => {
     toBottomEl.classList.remove("new");
+    if (backToLatest()) return;
     chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: "smooth" });
   });
 
@@ -77,7 +78,7 @@
     const p = sheetEl.querySelector(".sheet-panel"), col = colRect(), wide = col.width >= 560;
     sheetEl.classList.toggle("pop", wide);
     p.style.cssText = ""; sheetEl.style.left = sheetEl.style.right = "";
-    sheetEl.classList.remove("hidden");
+    MO.cancel(sheetEl); sheetEl.classList.remove("hidden");
     sheetW = innerWidth;
     if (!wide) { sheetEl.style.left = col.left + "px"; sheetEl.style.right = (innerWidth - col.right) + "px"; return; }
     const ar = $("btn-plus").getBoundingClientRect(), w = Math.min(360, col.width - 32);
@@ -100,11 +101,11 @@
   for (const ev of ["pointerup", "pointercancel", "pointerleave"]) sheetEl.addEventListener(ev, () => clearTimeout(shotHold));
   sheetEl.addEventListener("contextmenu", (e) => { if (e.target.closest('.sheet-tile[data-act="shot"]')) e.preventDefault(); });
   sheetEl.addEventListener("click", (e) => {
-    if (e.target === sheetEl) { sheetEl.classList.add("hidden"); return; }
+    if (e.target === sheetEl) { MO.hide(sheetEl, "mo-out-sheet"); return; }
     const it = e.target.closest(".sheet-item, .sheet-tile");
     if (!it) return;
     if (shotHeld) { shotHeld = false; return; }
-    sheetEl.classList.add("hidden");
+    if (it.dataset.act === "shot") sheetEl.classList.add("hidden"); else MO.hide(sheetEl, "mo-out-sheet");   // 截屏别把菜单截进去
     const a = it.dataset.act;
     if (a === "new") return $("btn-new").click();
     if (a === "caps") return openPage("caps");
@@ -289,7 +290,8 @@
     };
     let g = null;
     // 遮罩跟着手指由浅到深（只改 #drawer 的底色，别动 opacity —— 那会让侧栏本身也半透明）
-    const scrim = (k) => { drawerEl.style.background = `color-mix(in srgb, var(--scrim) ${Math.round(k * 100)}%, transparent)`; drawerEl.style.backdropFilter = k >= 1 ? "" : "none"; };
+    // 毛玻璃也跟着手指由无到有（原来拖动时关着、松手才一下打开，背景「突然一虚」—— 群友 10-27）
+    const scrim = (k) => { drawerEl.style.background = `color-mix(in srgb, var(--scrim) ${Math.round(k * 100)}%, transparent)`; drawerEl.style.backdropFilter = k >= 1 ? "" : `blur(${(2 * k).toFixed(2)}px)`; };
     const reset = () => { panel.style.transition = ""; panel.style.transform = ""; drawerEl.style.transition = ""; drawerEl.style.background = ""; drawerEl.style.backdropFilter = ""; };
     // 手势开出来的侧栏把滑入动画关了（不然展开后再播一遍）；收起时还原，下次点菜单键照常有动画
     new MutationObserver(() => { if (drawerEl.classList.contains("hidden")) { panel.style.animation = ""; reset(); } })
@@ -310,6 +312,8 @@
         if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
         if (!(dx > 0 && dx >= Math.abs(dy))) { g = null; return; }
         g.on = true;
+        // 三栏宽屏收起时：横滑同样回到常驻侧栏，和菜单键一致（不拉出盖在对话上的抽屉）
+        if (window.CCLayout && CCLayout.expand && CCLayout.tier() >= 3) { g = null; CCLayout.expand(); return; }
         panel.style.animation = "none";
         panel.style.transition = drawerEl.style.transition = "none";
         panel.style.transform = rtl() ? "translateX(100%)" : "translateX(-100%)";   // 先藏在屏外再显示，别闪一下全开
@@ -331,9 +335,17 @@
       const s = g; g = null;
       if (!s || !s.on) return;
       const open = s.dx > s.w / 5 || s.v > 0.3;
-      panel.style.transition = "transform .18s ease";
+      if (!open && MO.on()) { closeDrawer(true, true); return; }   // 没拉够：从手指那里缩回去，走统一的收起
       drawerEl.style.transition = "background-color .18s ease";
-      panel.style.transform = open ? "translateX(0)" : `translateX(${(rtl() ? 1 : -1) * s.w}px)`;
+      if (open && MO.on()) {
+        // 松手展开：从手指放开的位置用弹簧落定（和点菜单键打开一个手感）；收回去仍是干脆的缓动
+        const x0 = (rtl() ? 1 : -1) * (s.w - s.dx);
+        panel.style.transition = "none"; panel.style.transform = "translateX(0)";
+        MO.spring(panel, "snap", (p) => ({ transform: `translateX(${x0 * (1 - p)}px)` }));
+      } else {
+        panel.style.transition = "transform .18s ease";
+        panel.style.transform = open ? "translateX(0)" : `translateX(${(rtl() ? 1 : -1) * s.w}px)`;
+      }
       scrim(open ? 0.999 : 0);
       setTimeout(() => { if (open) reset(); else closeDrawer(true); }, 190);
     };
@@ -383,6 +395,7 @@
       const s = c; c = null;
       if (!s || !s.on) return;
       const shut = s.dx > s.w / 5 || s.v > 0.3;
+      if (shut && MO.on()) { closeDrawer(true, true); return; }   // 从手指放开的位置接着滑出去，和点遮罩收起同一套
       panel.style.transition = "transform .18s ease";
       drawerEl.style.transition = "background-color .18s ease";
       panel.style.transform = shut ? `translateX(${(rtl() ? 1 : -1) * s.w}px)` : "translateX(0)";
@@ -396,10 +409,10 @@
   // 返回键 / 侧滑返回：壳先问这里，从最上层往下关一层浮层，关了就返回 true；什么都没开才由壳把界面退到后台。
   // 顺序按 z-index 从高到低（灯箱 90 > 终端文本 73 > 终端 72 > 查看器 71 > 文件 70 > 补全弹窗 60 > 底部菜单 55 > 侧栏 50）
   window.__ccBack = guardHook("__ccBack", () => {
-    const open = (id) => !$(id).classList.contains("hidden");
+    const open = (id) => !$(id).classList.contains("hidden") && !$(id)._moLeave;   // 正在退场的不算开着，返回键往下一层走
     if (OV.back()) return true;     // 菜单、速览卡、弹层：关最上面那个
     const steps = [
-      ["lightbox", () => $("lightbox").classList.add("hidden")],
+      ["lightbox", () => MO.hide($("lightbox"), "mo-out-fade")],
       ["term-textview", () => $("term-textview").classList.add("hidden")],
       ["browser", closeBrowser],
       ["term", closeTerm],
@@ -407,7 +420,7 @@
       ["viewer", closeViewer],          // 有未保存修改会先问；选了不丢弃也算处理过，别把界面退到后台
       ["files", closeFiles],
       ["popup", hidePopup],
-      ["sheet", () => $("sheet").classList.add("hidden")],
+      ["sheet", () => MO.hide($("sheet"), "mo-out-sheet")],
       ["set-ov", setBack],
       ["drawer", closeDrawer],
       // 项目 / 定时任务的详情：先回列表，再关整页
@@ -428,7 +441,9 @@
     }
     return false;
   });
-  if (window.CCLayout) CCLayout.init({ openDrawer: () => openDrawer(), closeDrawer });
+  if (window.CCLayout) CCLayout.init({ openDrawer: () => openDrawer(), closeDrawer,
+    // 常驻栏展开：面板从左边弹进来（右边内容已经让出位置）
+    dockIn: () => MO.spring(drawerEl.querySelector(".drawer-panel"), "snap", (p) => ({ transform: `translateX(${(MO.rtl() ? 100 : -100) * (1 - p)}%)` })) });
   window.__cc = { view, srv, state, send, abort, openSession, newConversation, openPage,
     openGit, openViewer, openFiles, openDrawer, showWhatsNew, mdEd: () => VW.ed, provCard: (id) => { state.provView = id; renderProvCard(); } };
 

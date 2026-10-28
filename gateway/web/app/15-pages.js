@@ -1,8 +1,10 @@
   // ── 设置：弹窗。宽屏居中（左分类、右内容）；窄屏铺满，先列分类，点进去看一类，返回键回分类 ──
   var setOpen = false;
+  var setCatShown = "-";   // 上次画的是哪一类：null = 窄屏的分类列表，"-" = 刚打开还没画过
   function openSettings(cat) {
     OV.closeAll();
     setOpen = true;
+    MO.cancel($("set-ov"));
     $("set-ov").classList.remove("hidden");
     setCatOpen = cat || (pagesNarrow() ? null : setCatOpen || "general");
     loadQuota().catch(() => {});
@@ -14,7 +16,9 @@
   function closeSettings() {
     if (!setOpen) return;
     setOpen = false;
-    $("set-ov").classList.add("hidden");
+    const ov = $("set-ov");
+    MO.leave(ov, ov.classList.contains("narrow") ? "mo-out-push" : "mo-out-fade", 170, () => ov.classList.add("hidden"));
+    setCatShown = "-";
     renderSideNav();
   }
   $("set-x").addEventListener("click", closeSettings);
@@ -52,7 +56,9 @@
       const x = $("tab-" + name).querySelector(`:scope > [data-sec="${b.dataset.sec}"]`); if (!x) return;
       if (x.tagName === "DETAILS") x.open = true;
       const body = $("page-body");
-      body.scrollTo({ top: body.scrollTop + x.getBoundingClientRect().top - body.getBoundingClientRect().top - $(id).offsetHeight - 10, behavior: "smooth" });
+      const d = x.getBoundingClientRect().top - body.getBoundingClientRect().top - $(id).offsetHeight - 10;
+      if (Math.abs(d) < 24) return;   // 已经在这一节了：再点别挪那几像素（来回一挪就是「抽一下」）
+      body.scrollTo({ top: body.scrollTop + d, behavior: "smooth" });
     });
     // 计数、哪节显示都是异步加载出来的：内容一变就重画（下一帧合并；导航自己重画引起的变化不算）
     let raf = 0;
@@ -71,6 +77,15 @@
     .observe($("tab-settings"), { subtree: true, attributes: true, attributeFilter: ["class"] });
   function paintSetCats() {
     paintSetUsage();
+    // 回程：换类之前给旧的那一屏留个替身 —— 窄屏往里进时分类列表往左退暗、返回时内容页往右滑走。
+    // 宽屏（左边选、右边换）不放动画，直接换（10-27 用户定：交叉淡变不好看，做减法）
+    if (setCatShown !== "-" && setCatShown !== setCatOpen && pagesNarrow()) {
+      const old = setCatShown ? document.querySelector(`.set-cat[data-cat="${setCatShown}"]:not(.mo-ghost)`) : $("set-cats");
+      if (old && old.getClientRects().length) {
+        if (setCatOpen) MO.ghost(old, "back", false);
+        else MO.ghost(old, "push");
+      }
+    }
     const narrow = pagesNarrow(), cats = [...document.querySelectorAll("#set-cats [data-cat]")];
     // 一类里一项都没显示（比如开发端没有通知 / 更新）就连分类一起藏起来
     const empty = (k) => ![...document.querySelectorAll(`.set-cat[data-cat="${k}"] > :is(.srow, .sblock)`)].some((f) => !f.classList.contains("hidden"));
@@ -79,7 +94,14 @@
     $("tab-settings").classList.toggle("set-list", narrow && !setCatOpen);
     $("tab-settings").classList.toggle("set-one", narrow && !!setCatOpen);
     cats.forEach((b) => b.classList.toggle("on", b.dataset.cat === setCatOpen));
-    document.querySelectorAll(".set-cat").forEach((c) => c.classList.toggle("hidden", c.dataset.cat !== setCatOpen));
+    // 每次进「更新」这一类都重新查一遍（不只读上回的结果）；离开再进来才算一次
+    if (setCatOpen === "update" && setCatShown !== "update") updOnOpen();
+    if (setCatShown !== "-" && setCatShown !== setCatOpen) {
+      const cur = setCatOpen && document.querySelector(`.set-cat[data-cat="${setCatOpen}"]`);
+      if (narrow) { if (cur) MO.play(cur, "mo-in-push", 1400); else if (!setCatOpen) MO.play($("set-cats"), "mo-in-back", 1400); }
+    }
+    setCatShown = setCatOpen;
+    document.querySelectorAll(".set-cat:not(.mo-ghost)").forEach((c) => c.classList.toggle("hidden", c.dataset.cat !== setCatOpen));
     const cb = cats.find((b) => b.dataset.cat === setCatOpen);
     $("set-title").textContent = narrow && cb ? cb.textContent.trim() : t("设置");
     $("set-ov").classList.toggle("narrow", narrow);
@@ -95,7 +117,7 @@
   // 侧栏常驻项：打开侧栏、展开「更多」、进入勾选
   $("set-navpins").addEventListener("click", () => {
     localStorage.setItem("cc.navMore", "1"); navEdit = true;
-    if (!(window.CCLayout && CCLayout.docked())) drawerEl.classList.remove("hidden");
+    if (!(window.CCLayout && (CCLayout.docked() || CCLayout.expand()))) drawerEl.classList.remove("hidden");
     renderSideNav();
   });
   // 设置里较长的说明默认收成两行，点一下展开 / 收起

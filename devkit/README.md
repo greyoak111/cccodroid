@@ -39,7 +39,7 @@ node devkit.mjs build --target <10字符包名> [--groups ...]     # 产出 out/
 - `devkit.lock.json`：每个包的版本、文件名、SHA256、配方链接，加上仓库快照时间
 - `SBOM.tsv`：同上，表格形式
 
-分组见 `devkit.json`：不加 `--groups` 时**全部分组都打进去**，即整包；按模块分块打见下面「模块」一节。包括 `graphics`（Mesa、Vulkan 加载器等 9 个公共图形包，2026-10-15 并入，GPU 与浏览器组件共用）和 `media`（ffmpeg，2026-10-15 夜并入：+30 包，下载 +21 MB，解开后 +87 MB；带 MediaCodec 硬件编码）。共 256 个包（devkit-2026.10.22.3；10.22.1 起基础模块补了 patch、ed、dos2unix、lsof、nano、inetutils、net-tools、tree，10.22.3 补上单独的 which 包），从 Termux 仓库下载约 447 MB，整包 gz 约 680 MB（10.22.2 修了 venv 用的 ensurepip pip wheel），解包后约 1.9 GB。
+分组见 `devkit.json`：不加 `--groups` 时**全部分组都打进去**，即整包；按模块分块打见下面「模块」一节。包括 `graphics`（Mesa、Vulkan 加载器等 9 个公共图形包，2026-10-15 并入，GPU 与浏览器组件共用）和 `media`（ffmpeg，2026-10-15 夜并入：+30 包，下载 +21 MB，解开后 +87 MB；带 MediaCodec 硬件编码）。共 256 个包（devkit-2026.10.28；10.22.1 起基础模块补了 patch、ed、dos2unix、lsof、nano、inetutils、net-tools、tree，10.22.3 补上单独的 which 包），从 Termux 仓库下载约 447 MB，整包 gz 约 680 MB（10.22.2 修了 venv 用的 ensurepip pip wheel），解包后约 1.9 GB。
 `extra` 组（typst、duckdb、imagemagick）依赖很重，作为选装。
 
 ## 发一版
@@ -62,6 +62,8 @@ node devkit.mjs modules --plan <plan> --build --target <包名> --out DIR   # �
 - 合并时检查：同一路径在两块里内容必须相同；alternatives 同组不能两块各给一个（依赖块已给、优先级不低的，打包时就跳过）。
 - CI 按「划分 → 整包 → 各块」走，同一个 Release 里整包（旧 App 用）和模块（新 App 用）出自同一份快照。
 - adb 单独成组并进基础模块：Shizuku 的无线调试自启动要用它。
+- 目前的可选模块：命令行增强（`cli`）、C/C++ 构建（`build`）、安卓打包（`android`）、GPU 图形（`graphics`）、音视频（`media`）、文档与数据（`extra`）、Go 语言（`go`，含 gopls / goimports / gofumpt / gotestsum / govulncheck / golangci-lint / dlv）、Node.js 生态（`node`，pnpm / yarn / bun / deno）。`clang` 与 `libllvm` 这类多块共用的大家伙由划分自动提成共享层（`lib-clang`、`lib-libllvm`）。
+- 模块可以标 `"full": false`：整包里不放它，从整包升级上来的用户也不会自动装上（要用再到扩展页加）。后加的大模块（`go`、`node`）都这么标，免得只认整包的旧版 App 和整包用户升级时平白多下几百 MB。
 
 ## 组件（`component`）
 

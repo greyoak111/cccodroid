@@ -3,34 +3,105 @@
   // 宽屏时侧栏和右侧窗格都留着、整页只占对话那一块；窄屏整页盖住对话，返回键回到对话。
   function openDrawer(tab) {
     if (tab && tab !== "sessions") return openPage(tab);
+    if (window.CCLayout && CCLayout.expand && CCLayout.expand()) return;   // 三栏收起时：回到常驻，布局层会回调这里把内容填上
     OV.closeAll();
+    MO.cancel(drawerEl);
+    // 收到一半又打开：从停下的位置用弹簧弹回来，别跳
+    const back = drawerEl._moShut ? drawerEl._moShut() : null;
+    const wasHidden = drawerEl.classList.contains("hidden");
+    if (back != null) MO.spring(drawerEl.querySelector(".drawer-panel"), "snap", (p) => ({ transform: `translateX(${back * (1 - p)}px)` }));
     drawerEl.classList.remove("hidden");
     refreshStatus();
     loadSessions();
     if (!tab) loadCaps();
     renderSideNav();
     loadProjects(); loadSched();
+    // 条目一个接一个跟上（点菜单键、横滑拉出都放）；点菜单键的再加遮罩淡入、面板弹出 ——
+    // 横滑拉出的面板跟着手指走（手势把面板动画关了），松手由手势那边用弹簧落定。常驻左栏不放
+    const panel = drawerEl.querySelector(".drawer-panel");
+    if (wasHidden && MO.on() && panel && !(window.CCLayout && CCLayout.docked())) {
+      MO.stagger(drawerEl.querySelectorAll(".side-new, .side-nav > .nav-item, .side-recent > :is(h4, .sr-item)"), 14);
+      MO.play(drawerEl, "mo-items", 1600);
+      if (panel.style.animation !== "none") MO.play(drawerEl, "mo-enter", 1400);
+    }
   }
   // 三栏宽屏时侧栏常驻在左边：开会话之类顺手的关闭不收它，只有用户点收起 / 菜单键（force）才收
-  function closeDrawer(force) { if (!force && window.CCLayout && CCLayout.docked()) return; drawerEl.classList.add("hidden"); }
+  // 收起：面板从它此刻所在的位置（点遮罩时在原位，横滑推到一半时在手指那里，弹簧还没落定时在半路）滑回屏外，
+  // 遮罩的底色和毛玻璃一起褪 —— 不对整个 #drawer 做透明度：透明度叠毛玻璃在旧 WebView 上会留一层残影。
+  // fling = 手指甩出去的，已经在动，就用减速曲线接着走；点出来的收起用先加速后减速，和滑入对称
+  function closeDrawer(force, fling) {
+    if (!force && window.CCLayout && CCLayout.docked()) return;
+    if (drawerEl.classList.contains("hidden") || drawerEl._moShut) return;
+    const panel = drawerEl.querySelector(".drawer-panel");
+    MO.cancel(drawerEl);
+    if (!MO.on() || !panel || !panel.animate) { drawerEl.classList.add("hidden"); return; }
+    if (document.documentElement.classList.contains("dock-l")) {
+      // 常驻栏收起：真身马上藏（接着会摘 dock-l，右边内容铺满），留一张替身照原样往外滑走，盖着内容让出来的那一条。
+      // 替身挂在 body 下：#drawer 已经藏了；样式不靠 #drawer 祖先，dock-l 下的内边距 / 背景当场抄下来
+      const r = panel.getBoundingClientRect(), cs = getComputedStyle(panel);
+      const g = panel.cloneNode(true);
+      g.classList.add("mo-ghost"); g.inert = true; g.setAttribute("aria-hidden", "true");
+      Object.assign(g.style, { position: "fixed", left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px", inset: "auto",
+        margin: "0", padding: cs.padding, background: cs.backgroundColor, borderInlineEnd: cs.borderInlineEnd, boxSizing: "border-box",
+        overflow: "hidden", zIndex: "45", pointerEvents: "none", animation: "none", transform: "none" });
+      const sc = drawerEl.querySelector("#side-scroll"), st = sc ? sc.scrollTop : 0;
+      document.body.appendChild(g);
+      if (st) { const gs = g.querySelector("#side-scroll"); if (gs) gs.scrollTop = st; }
+      drawerEl.classList.add("hidden");
+      const a = g.animate([{ transform: "none" }, { transform: `translateX(${MO.rtl() ? 100 : -100}%)` }], { duration: Math.round(260 / 1.1), easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" });
+      a.finished.then(() => g.remove(), () => g.remove());
+      return;
+    }
+    const w = panel.getBoundingClientRect().width || 300, side = MO.rtl() ? 1 : -1;
+    const tf = getComputedStyle(panel).transform, x0 = tf && tf !== "none" ? new DOMMatrix(tf).m41 : 0;
+    const dcs = getComputedStyle(drawerEl), bg = dcs.backgroundColor, bf = dcs.backdropFilter && dcs.backdropFilter !== "none" ? dcs.backdropFilter : "blur(0px)";
+    MO.stopJs(panel); MO.stopJs(drawerEl);
+    drawerEl.classList.remove("mo-enter", "mo-items");
+    panel.style.animation = "none"; panel.style.transition = "none"; panel.style.transform = `translateX(${x0}px)`;
+    Object.assign(drawerEl.style, { transition: "none", background: bg });
+    drawerEl.classList.add("mo-shut");
+    const left = Math.min(1, Math.abs(side * w - x0) / w);
+    const dur = Math.max(90, Math.round((fling ? 200 : 260) / 1.1 * Math.sqrt(left)));
+    const ease = fling ? "cubic-bezier(.2,.7,.3,1)" : "cubic-bezier(.4,0,.2,1)";
+    const a = panel.animate([{ transform: `translateX(${x0}px)` }, { transform: `translateX(${side * w}px)` }], { duration: dur, easing: ease, fill: "forwards" });
+    // 遮罩底色和毛玻璃一起褪（毛玻璃一开始就关掉的话，背景会「突然一清」）；不对整个 #drawer 做透明度 —— 那会连面板一起淡、旧 WebView 上留残影
+    const b = drawerEl.animate([{ backgroundColor: bg, backdropFilter: bf }, { backgroundColor: "transparent", backdropFilter: "blur(0px)" }], { duration: dur, easing: "linear", fill: "forwards" });
+    const clean = () => {
+      drawerEl._moShut = null; drawerEl._moLeave = null; drawerEl.classList.remove("mo-shut");
+      a.cancel(); b.cancel();
+      panel.style.animation = panel.style.transition = panel.style.transform = "";
+      drawerEl.style.transition = drawerEl.style.backdropFilter = drawerEl.style.background = "";
+    };
+    // 中途又打开：停下来，交出此刻的位置（openDrawer 从这里弹回去）
+    drawerEl._moShut = () => {
+      const t = getComputedStyle(panel).transform, x = t && t !== "none" ? new DOMMatrix(t).m41 : 0;
+      clean(); return x;
+    };
+    drawerEl._moLeave = { cls: "mo-shut", t: 0 };   // 返回键当它已经关了
+    a.finished.then(() => { if (drawerEl._moShut) { drawerEl.classList.add("hidden"); clean(); } }, () => {});
+  }
 
   const PAGES = {
     sessions: { name: tk("对话"), icon: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>' },
     settings: { name: tk("设置"), icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>' },
     projects: { name: tk("项目"), icon: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>' },
+    lineage: { name: tk("脉络"), icon: '<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 3v12.5M18 8.5a9 9 0 0 1-9.5 8"/>' },
     sched: { name: tk("定时任务"), icon: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/>' },
     ext: { name: tk("扩展"), icon: '<path d="M10 3h4v4a2 2 0 1 0 4 0h3v4h-4a2 2 0 1 0 0 4h4v6H3V3z"/>' },
     caps: { name: tk("能力"), icon: '<path d="M13 2 4.5 13.5H11l-1 8.5L18.5 10H12z"/>' },
     usage: { name: tk("用量"), icon: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>' },
     help: { name: tk("帮助"), icon: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01"/>' },
+    bookmarks: { name: tk("书签"), icon: '<path d="M7 3.5h10a1 1 0 0 1 1 1V20l-6-4.2L6 20V4.5a1 1 0 0 1 1-1z"/>' },
     changelog: { name: tk("更新日志"), icon: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>' },
   };
-  const NAV_ITEMS = ["sessions", "projects", "sched", "ext", "caps", "usage", "help", "changelog"];          // 侧栏「去哪」里能放的；设置走底部账户行
+  const NAV_ITEMS = ["sessions", "projects", "lineage", "sched", "bookmarks", "ext", "caps", "usage", "help", "changelog"];          // 侧栏「去哪」里能放的；设置走底部账户行
   var curPage = null;   // var：openSession 在启动早期就会调 closePage，别撞上 let 的暂时性死区
   // 轮询（下载进度、配对状态…）只在那一页开着时继续：整页关了、换页了就停
   function pageOn(name) { return name === "settings" ? setOpen : curPage === name && !$("pages").classList.contains("hidden"); }
   (function () { try { const p = JSON.parse(localStorage.getItem("cc.navPins")); if (Array.isArray(p) && !localStorage.getItem("cc.navPinsV2")) { localStorage.setItem("cc.navPins", JSON.stringify([...new Set([...p.filter((k) => k !== "ext"), "projects", "sched"])])); } localStorage.setItem("cc.navPinsV2", "1"); } catch {} })();
-  const navPins = () => { try { const p = JSON.parse(localStorage.getItem("cc.navPins")); if (Array.isArray(p)) return NAV_ITEMS.filter((k) => p.includes(k)); } catch {} return ["sessions", "projects", "sched"]; };
+  // 0.4.10 加了「脉络」：已有的固定项里补上它（只补一次，用户之后取消了不再加回来）
+  (function () { try { const p = JSON.parse(localStorage.getItem("cc.navPins")); if (Array.isArray(p) && !localStorage.getItem("cc.navPinsV3") && !p.includes("lineage")) localStorage.setItem("cc.navPins", JSON.stringify([...p, "lineage"])); localStorage.setItem("cc.navPinsV3", "1"); } catch {} })();
+  const navPins = () => { try { const p = JSON.parse(localStorage.getItem("cc.navPins")); if (Array.isArray(p)) return NAV_ITEMS.filter((k) => p.includes(k)); } catch {} return ["sessions", "projects", "lineage", "sched"]; };
   var navEdit = false;
   function renderSideNav() {
     const nav = $("side-nav"); if (!nav) return;
@@ -53,7 +124,13 @@
   }
   $("side-nav").addEventListener("click", (e) => {
     const p = e.target.closest("[data-page]");
-    if (p) { if (p.dataset.page === "projects") PJ.cur = null; if (p.dataset.page === "sched") SC.cur = null; return openPage(p.dataset.page); }
+    if (p) {
+      const pg = p.dataset.page;
+      // 已经在这一页的首页：再点不重画、不重载，只收侧栏（#37）；在项目 / 定时任务的详情里点 = 回首页，照常
+      if (pg === curPage && !(pg === "projects" && PJ.cur) && !(pg === "sched" && SC.cur)) return closeDrawer();
+      if (pg === "projects") PJ.cur = null; if (pg === "sched") SC.cur = null;
+      return openPage(pg);
+    }
     const n = e.target.closest("[data-nav]")?.dataset.nav;
     if (n === "more") { localStorage.setItem("cc.navMore", localStorage.getItem("cc.navMore") === "1" ? "0" : "1"); navEdit = false; }
     if (n === "edit") navEdit = true;
@@ -121,21 +198,25 @@
       acctEmailAt = Date.now();
       api("/api/login/status").then((st) => {
         const wk = st && st.limits && st.limits.sevenDay ? Math.round(st.limits.sevenDay.used) : null;
-        if (st && ((st.email && st.email !== acctEmail) || wk !== acctWeek)) { acctEmail = st.email || acctEmail; acctWeek = wk; paintAcct(s); }
+        if (!st) return;
+        acctLogged = !!st.loggedIn;
+        const em = st.loggedIn ? st.email || acctEmail : "";
+        if (em !== acctEmail || wk !== acctWeek) { acctEmail = em; acctWeek = wk; paintAcct(s); }
       }).catch(() => {});
     }
   }
-  var acctEmail = "", acctEmailAt = 0, acctWeek = null;
+  var acctEmail = "", acctEmailAt = 0, acctWeek = null, acctLogged = null;
 
   // ── 弹出菜单（长按会话、账户行）：items 是 { label, icon, small, danger, fn } / "hr" / { head } ──
   function closeMenu() { OV.closeAll("menu"); }
-  function popMenu(anchor, items, place) {
+  function popMenu(anchor, items, place, cls) {
     // 同一个按钮再点一次 = 收起（侧栏账户、项目标签、⋯ 这些都走这里）
     if (anchor && OV.at(anchor)) { closeMenu(); return null; }
     const m = document.createElement("div");
-    m.className = "pop-menu";
-    m.innerHTML = items.map((it, i) => it === "hr" ? "<hr>" : it.head ? `<div class="pm-head">${esc(it.head)}</div>`
-      : `<button data-i="${i}" class="${it.danger ? "danger" : ""}">${it.icon ? `<svg viewBox="0 0 24 24">${it.icon}</svg>` : '<span class="pm-pad"></span>'}<span>${esc(it.label)}</span>${it.small ? `<small>${esc(it.small)}</small>` : ""}</button>`).join("");
+    m.className = "pop-menu" + (cls ? " " + cls : "");   // 额外的类要在量宽度之前挂上，不然定位按窄的算、加宽后出屏
+    // head 带 fn 时可点（脉络弹层的「来源」行）；no：左边一列等宽小字（档号）代替图标；cur 加粗；没有 fn 的按钮是灰的
+    m.innerHTML = items.map((it, i) => it === "hr" ? "<hr>" : it.head ? `<div class="pm-head${it.fn ? " pm-link" : ""}"${it.fn ? ` data-i="${i}"` : ""}>${esc(it.head)}</div>`
+      : `<button data-i="${i}" class="${it.danger ? "danger" : ""}${it.cur ? " cur" : ""}${it.fn ? "" : " dim"}">${it.no ? `<i class="pm-no">${esc(it.no)}</i>` : it.icon ? `<svg viewBox="0 0 24 24">${it.icon}</svg>` : '<span class="pm-pad"></span>'}<span>${esc(it.label)}</span>${it.small ? `<small>${esc(it.small)}</small>` : ""}</button>`).join("");
     OV.open(m, { anchor });
     const ar = anchor.getBoundingClientRect(), W = innerWidth, H = innerHeight, mw = m.offsetWidth, mh = m.offsetHeight;
     let x, y;
@@ -145,9 +226,21 @@
       y = ar.top - m.offsetHeight - 6;
     }
     else { x = Math.min(ar.left + 24, W - mw - 8); y = ar.bottom + 2; if (y + mh > H - 8) y = Math.max(8, ar.top - mh - 2); }
+    // 矮屏（手机横屏）放不下：限高、菜单自己滚，别顶出屏幕
+    const room = place === "up" ? ar.top - 14 : (y >= ar.bottom ? H - y - 8 : ar.top - 10);
+    if (m.offsetHeight > room && room > 80) { m.style.maxHeight = room + "px"; if (place === "up" || y < ar.top) y = ar.top - room - (place === "up" ? 6 : 2); }
     m.style.left = Math.max(8, Math.min(x, W - mw - 8)) + "px"; m.style.top = Math.max(8, y) + "px";
-    m.addEventListener("click", (e) => { const b = e.target.closest("button[data-i]"); if (!b) return; OV.close(m); items[+b.dataset.i].fn(); });
+    moOrigin(m, ar);
+    m.addEventListener("click", (e) => { const b = e.target.closest("[data-i]"); if (!b || !items[+b.dataset.i].fn) return; OV.close(m); items[+b.dataset.i].fn(); });
     return m;
+  }
+  /** 菜单的缩放原点放在锚点那一侧（在锚点下面就从上沿长出、在上面就从下沿），条目错开出场 */
+  function moOrigin(m, ar) {
+    if (!MO.on()) return;
+    const r = m.getBoundingClientRect();
+    const ox = Math.max(12, Math.min(r.width - 12, ar.left + ar.width / 2 - r.left));
+    m.style.transformOrigin = `${ox}px ${r.top >= ar.top + ar.height / 2 ? "0" : "100%"}`;
+    MO.stagger(m.querySelectorAll(":scope > button, :scope > .pm-head"), 10);
   }
   // 下拉框不用系统弹出的选择器（深色、和主题不搭），换成同一套菜单：当前项打勾，optgroup 成小标题，
   // 长列表可滚、自动滚到当前项，宽度至少和下拉框一样。选了照常触发 input / change，原有逻辑不用改。
@@ -177,6 +270,7 @@
     if (y + mh > H - 8) y = ar.top - mh - 4 >= 8 ? ar.top - mh - 4 : Math.max(8, H - mh - 8);
     const x = getComputedStyle(sel).direction === "rtl" ? ar.right - mw : ar.left;
     m.style.left = Math.max(8, Math.min(x, W - mw - 8)) + "px"; m.style.top = y + "px";
+    moOrigin(m, ar);
     const on = m.querySelector("button.on"); if (on) m.scrollTop = on.offsetTop - (m.clientHeight - on.offsetHeight) / 2;
     m.addEventListener("click", (e) => {
       const b = e.target.closest("button[data-i]"); if (!b || b.disabled) return;
@@ -233,6 +327,8 @@
     people: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M16 4a3 3 0 0 1 0 6M21 20a6 6 0 0 0-4-5.6"/>',
     logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
     update: '<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4"/>',
+    lineage: '<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 3v12.5M18 8.5a9 9 0 0 1-9.5 8"/>',
+    tray: '<path d="M4 13h4l1.5 2.5h5L16 13h4"/><path d="M5 5h14l1 8v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-5z"/>',
   };
 
   // 侧栏的最近对话：一行一个，分组 置顶 / 今天 / 昨天 / 更早；更早的只列前一段，全部在「对话」整页
@@ -242,7 +338,8 @@
   function folds() { return sideFold ||= new Set((() => { try { return JSON.parse(localStorage.getItem("cc.sideFold") || "[]"); } catch { return []; } })()); }
   function renderSideRecent() {
     const box = $("side-recent"); if (!box) return;
-    const list = state.sessions || [];
+    // 杂项不进侧栏（正开着的那个除外），在「对话」整页最后一组
+    const list = (state.sessions || []).filter((x) => !x.misc || x.id === view.sessionId);
     const live = new Set(srv.runs.filter((x) => !x.idle).map((x) => x.sessionId).filter(Boolean));
     const ask = new Set(srv.runs.filter((x) => x.perms && x.perms.length).map((x) => x.sessionId).filter(Boolean));
     const d0 = new Date(); d0.setHours(0, 0, 0, 0);
@@ -252,7 +349,8 @@
     const more = groups[3][1].length > RECENT_MAX;
     groups[3][1] = groups[3][1].slice(0, RECENT_MAX);
     const cur = view.sessionId && list.find((x) => x.id === view.sessionId);
-    if (cur && cur.title && cur.title !== view.title) { view.title = cur.title; paintTitle(); }
+    if (cur && cur.title && cur.title !== view.title) view.title = cur.title;
+    paintTitle();   // 顶栏状态行后面的档号 / 日期也跟着会话列表变
     const row = (x) => `<button class="sr-item${x.id === view.sessionId ? " on" : ""}" data-sid="${esc(x.id)}" title="${esc(x.title)}">${ask.has(x.id) ? '<i class="sr-dot ask"></i>' : live.has(x.id) ? '<i class="sr-dot"></i>' : ""}<span>${esc(x.title)}</span></button>`;
     box.innerHTML = list.length
       ? groups.filter(([, l]) => l.length).map(([g, l, k]) => {
@@ -264,6 +362,7 @@
         + `<div class="sr-hint">${esc(t("长按会话：置顶、重命名、导出、删除"))}</div>`
       : `<div class="sr-empty">${esc(t("还没有历史会话。"))}</div>`;
   }
+  $("side-scroll").addEventListener("scroll", (e) => e.target.classList.toggle("scrolled", e.target.scrollTop > 2), { passive: true });
   $("side-recent").addEventListener("click", (e) => {
     if (e.target.closest("[data-all]")) return openPage("sessions");
     const g = e.target.closest("[data-fold]");
@@ -274,7 +373,7 @@
       return renderSideRecent();
     }
     const it = e.target.closest("[data-sid]"); if (!it) return;
-    closeDrawer(); openSession(it.dataset.sid);
+    goSession(it.dataset.sid);
   });
   $("side-recent").addEventListener("contextmenu", (e) => {
     const it = e.target.closest("[data-sid]"); if (!it) return;
@@ -288,6 +387,8 @@
       { label: x.pinned ? t("取消置顶") : t("置顶"), icon: SM.pin, fn: () => post(`/api/session/${encodeURIComponent(id)}/pin`, { pin: !x.pinned }).then(reload, (e) => toast(e.message, true)) },
       { label: t("移到项目…"), icon: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', fn: () => moveToProject(id, anchor) },
       { label: t("重命名"), icon: SM.edit, fn: () => { const n = prompt(t("新的会话名称"), x.title || ""); if (n) post(`/api/session/${encodeURIComponent(id)}/rename`, { title: n }).then(reload, (e) => toast(e.message, true)); } },
+      { label: t("脉络"), icon: SM.lineage, fn: () => lineageMenu(id, anchor) },
+      { label: x.misc ? t("移出杂项") : t("归入杂项"), icon: SM.tray, fn: () => post("/api/archive/misc", { session: id, misc: !x.misc }).then(reload, (e) => toast(e.message, true)) },
       { label: t("导出"), icon: SM.export, fn: async () => {
         if (!confirm(t("会话记录可能含有你贴过的密钥、令牌或文件内容。导出的压缩包请只发给你信任的地方。继续？"))) return;
         const r = await post("/api/sessions/export", { ids: [id] }).catch((e) => ({ ok: false, message: e.message }));
@@ -302,6 +403,36 @@
         toast(t("已移进回收站（{d} 天内可恢复）", { d: sess.keepDays }));
       } },
     ]);
+  }
+  // 脉络弹层：这个会话的来源（从哪个会话分叉 / 回退来）+ 各章（卷）。全局亲缘图在阶段 1 的脉络页
+  async function lineageMenu(id, anchor) {
+    let r;
+    try { r = await api("/api/archive?session=" + encodeURIComponent(id)); } catch (e) { return toast(e.status === 404 ? t("这个会话还没有记录") : e.message, true); }
+    const p2 = (n) => String(n).padStart(2, "0"), md = (ms) => { const d = new Date(ms); return p2(d.getMonth() + 1) + "-" + p2(d.getDate()); };
+    const range = (a, b) => (md(a) === md(b) ? md(b) : md(a) + " – " + md(b));
+    const open = id === view.sessionId ? null : () => { closeDrawer(); openSession(id); };
+    const items = [];
+    const P = r.parent;
+    if (P) {
+      const tt = (P.title || P.id.slice(0, 8)).slice(0, 24), d = P.ts ? md(P.ts) : "";
+      const head = P.kind === "rewind" ? t("从「{t}」回退 · {d}", { t: tt, d }) : t("从「{t}」分叉 · {d}", { t: tt, d });
+      items.push({ head: d ? head : head.replace(/ · $/, ""), fn: P.missing || P.trashed ? null : () => { closeDrawer(); openSession(P.id); } }, "hr");
+    }
+    const sid4 = id.slice(0, 4);
+    // 点卷：跳到这一卷第一章的开头（和脉络页点站、卡片里点章同一个去处）；要看最新用最上面的「打开」
+    if (open) items.push({ label: t("打开"), icon: SM.chat, fn: open }, "hr");
+    for (const v of [...r.volumes].reverse()) {
+      const a = v.chapters[0], b = v.chapters[v.chapters.length - 1], live = r.chapters[b - 1].open;
+      const anchor = a === 1 ? "start" : r.chapters[a - 1].anchor;
+      items.push({ no: sid4 + "·" + (a === b ? a : a + "–" + b), label: v.title || t("还没有题名"), small: live ? t("进行中") : range(v.from, v.to), cur: live, fn: () => { closeDrawer(); openSession(id, null, anchor); } });
+    }
+    items.push("hr", { label: t("改题名"), icon: SM.edit, fn: () => {
+      const last = r.volumes[r.volumes.length - 1], n = last.chapters[last.chapters.length - 1];
+      const title = prompt(t("新的题名"), last.title || "");
+      if (!title) return;
+      post("/api/archive", { session: id, title, chapter: n }).then(() => loadSessions(), (e) => toast((e.body && e.body.errors || [e.message]).join("；"), true));
+    } }, { label: t("在脉络中查看"), icon: SM.lineage, fn: () => { closeDrawer(); openLineage(id); } });
+    popMenu(anchor, items, null, "lineage");
   }
   // 账户菜单：常用的在上，不可逆的放最下
   function acctMenu() {
@@ -321,12 +452,16 @@
       { label: t("到 GitHub 反馈"), icon: SM.chat, fn: () => $("btn-issue").click() },
       { label: t("交流群 · 讨论区"), icon: SM.people, fn: () => { openPage("help"); setTimeout(() => $("help-body").querySelector(".cm-box")?.scrollIntoView({ block: "center", behavior: "smooth" }), 400); } },
     ];
-    if (st.keyMode === "login") items.push("hr", { label: t("退出登录"), icon: SM.logout, danger: true, fn: async () => {
+    // 官方账户：按实际登录状态给「退出登录」或「登录」（接口是官方账户 ≠ 已登录）；状态没问到时先不放
+    if (st.keyMode === "login" && acctLogged) items.push("hr", { label: t("退出登录"), icon: SM.logout, danger: true, fn: async () => {
       if (!confirm(t("退出这台设备上的 Claude 账户登录？"))) return;
       const r = await post("/api/login/logout").catch((e) => ({ ok: false, output: e.message }));
       toast(r.ok ? t("已退出登录") : t("退出失败：{msg}", { msg: r.output || r.message || "" }), !r.ok);
+      acctEmailAt = 0;
       refreshStatus();
     } });
+    else if (st.keyMode === "login" && acctLogged === false) items.push("hr", { label: t("登录账户"), icon: SM.swap, fn: () => openPage("settings", "provider") });
+    if (st.keyMode === "login") { acctEmailAt = 0; paintAcct(st); }
     popMenu($("side-acct"), items, "up");
   }
 

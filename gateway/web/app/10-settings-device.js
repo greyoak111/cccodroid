@@ -385,6 +385,14 @@
   $("dev-idle").addEventListener("change", (e) => post("/api/app/dev_set", { idle: Number(e.target.value) || 10 }).then(devRender).catch(() => {}));
   $("dev-a11y-sys").addEventListener("click", () => post("/api/app/a11y_settings").catch(() => {}));
 
+  // 打开更新页时自动查一次：正在查、正在下/装，或 20 秒内刚查过就只刷新显示
+  async function updOnOpen() {
+    await loadUpd();
+    const busy = (lastUpd.items || []).some((it) => ["downloading", "installing", "verifying"].includes(it.state));
+    if (lastUpd.checking || busy || Date.now() - (lastUpd.lastCheck || 0) < 20000) return;
+    await post("/api/app/upd_check").catch(() => {});
+    followUpd(); setTimeout(loadUpd, 300);
+  }
   $("upd-check").addEventListener("click", async () => {
     await post("/api/app/upd_check").catch((e2) => toast(e2.message, true));
     followUpd(); setTimeout(loadUpd, 300);

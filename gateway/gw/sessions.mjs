@@ -3,8 +3,11 @@ import path from "node:path";
 import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
 import { SID_RE, TRASH_KEEP_DAYS, exportSessions, deleteMessage, forkSession, importSessions, listTrash, locateUserTurn, purgeTrash, realWorkspace, restoreSession, rewindFiles, rewindFixup, trashSession, undoDelete } from "./sessionops.mjs";
 import { goalStateOf, tasksOf } from "./goal.mjs";
-import { agentFilesOf, readSessionPage, transcriptItems } from "./transcript.mjs";
+import { agentFilesOf, findLineOffset, lineHas, readSessionForward, readSessionPage, transcriptItems } from "./transcript.mjs";
+import { lineageCached } from "./lineage.mjs";
+import { chapterView } from "./archive-core.mjs";
 import { runOfSession } from "./runs.mjs";
+import { archiveBrief, archiveDb, archivedTitle } from "./archive-store.mjs";
 import { NEXT, readBody, readBodyBuf, sendJson } from "./http.mjs";
 
 // ── 会话重命名表 ──────────────────────────────────────────────────────
@@ -90,12 +93,15 @@ export function listSessions(limit = 150) {
   found.sort((a, b) => b.mtime - a.mtime);
   const shown = found.filter((s, i) => i < limit || PINS[s.id]);
   return shown.map((s) => {
-    const meta = peekSession(s.file);
+    const meta = peekSession(s.file), ab = archiveBrief(s.id);
     return {
       id: s.id,
+      no: ab.no, misc: ab.misc,
       created: meta.created || 0,
       pinned: PINS[s.id] || 0,
-      title: NAMES[s.id] || meta.title,
+      // 标题：用户改过的 > 建档的最新一章题名 > 第一句提问
+      title: NAMES[s.id] || archivedTitle(s.id) || meta.title,
+      archived: !NAMES[s.id] && !!archivedTitle(s.id),
       renamed: !!NAMES[s.id],
       cwd: meta.cwd,
       mtime: s.mtime,
@@ -276,12 +282,38 @@ export async function routeSessions(req, res, u, p) {
       if (!found) return sendJson(res, 404, { error: "not found" });
       const meta = peekSession(found.file);
       const live = runOfSession(id);
-      const page = await readSessionPage(found.file, {
-        before: u.searchParams.has("before") ? Number(u.searchParams.get("before")) : null,
-        limit: Math.min(200, Math.max(10, Number(u.searchParams.get("limit")) || 40)),
-        // 正在生成的那一轮走事件总线，这里不重复给
-        excludeFrom: Number(u.searchParams.get("exclude")) || (live ? live.startedAt : 0),
-      });
+      const limit = Math.min(200, Math.max(10, Number(u.searchParams.get("limit")) || 40));
+      // 正在生成的那一轮走事件总线，这里不重复给
+      const excludeFrom = Number(u.searchParams.get("exclude")) || (live ? live.startedAt : 0);
+      const rec = lineageCached(id);
+      // 脉络里点站 / 章标题：anchor=压缩消息 uuid（或 start）→ 字节偏移，从那里往后读；after=往下续读
+      let fwd = null;
+      if (u.searchParams.has("anchor")) {
+        const a = String(u.searchParams.get("anchor"));
+        if (a === "start") fwd = 0;
+        else {
+          // 偏移：章节用脉络索引里的；书签自己带着（off）。都先核对那一行确实是它，对不上再整文件找
+          const c = rec?.compacts.find((x) => x.uuid === a), hint = c ? c.off : Number(u.searchParams.get("off"));
+          // 「上次读到」带的是那一页的起点，不是行首：核对不上就从那里往后找，再不行才从头
+          const ok = Number.isFinite(hint) && hint >= 0;
+          fwd = ok && await lineHas(found.file, hint, a) ? hint : ok && hint > 0 ? await findLineOffset(found.file, a, hint) : -1;
+          if (fwd < 0) fwd = await findLineOffset(found.file, a);
+          if (fwd < 0) return sendJson(res, 404, { error: "anchor not found" });
+        }
+      } else if (u.searchParams.has("after")) fwd = Math.max(0, Number(u.searchParams.get("after")) || 0);
+      const page = fwd !== null
+        ? await readSessionForward(found.file, { after: fwd, limit, excludeFrom })
+        : await readSessionPage(found.file, { before: u.searchParams.has("before") ? Number(u.searchParams.get("before")) : null, limit, excludeFrom });
+      // 压缩处标上第几章、题名、档号，前端画成章节分隔
+      if (rec && page.items.some((it) => it.compact)) {
+        const chs = chapterView(rec, archiveDb().sessions[id] || null);
+        for (const it of page.items) {
+          if (!it.compact || !it.uuid) continue;
+          const k = rec.compacts.findIndex((x) => x.uuid === it.uuid);
+          const ch = k >= 0 ? chs.chapters[k + 1] : null;
+          if (ch) Object.assign(it, { chapter: ch.n, chTitle: ch.title || rec.compacts[k].q || "", chGhost: !ch.title, chNo: ch.no });
+        }
+      }
       // 有子代理记录的 Agent 卡打个标，前端据此给「查看过程」
       const subs = agentFilesOf(found.file);
       if (subs.size) for (const it of page.items) if (it.role === "tool_use" && subs.has(it.id)) it.sub = true;
@@ -290,12 +322,13 @@ export async function routeSessions(req, res, u, p) {
         title: NAMES[id] || meta.title,
         cwd: meta.cwd,
         items: page.items,
-        cursor: page.cursor,
+        cursor: fwd !== null ? page.from : page.cursor,
+        next: fwd !== null ? page.next : undefined,
         size: page.size,
         contextTokens: page.contextTokens,
         liveRunId: live ? live.id : null,
-        goal: u.searchParams.has("before") ? undefined : goalStateOf(found.file),
-        tasks: u.searchParams.has("before") ? undefined : tasksOf(id),
+        goal: u.searchParams.has("before") || u.searchParams.has("after") ? undefined : goalStateOf(found.file),
+        tasks: u.searchParams.has("before") || u.searchParams.has("after") ? undefined : tasksOf(id),
       });
     }
 

@@ -311,7 +311,7 @@
     if (b.balanceError) rows.push(`<div class="prov-state err">${esc(t("余额查询失败：{msg}", { msg: b.balanceError }))}</div>`);
     else if (Number.isFinite(b.balance)) {
       const PART = { granted: t("赠送"), topped: t("充值"), voucher: t("代金券"), cash: t("现金") };
-      const parts = (b.parts || []).filter((x) => Number.isFinite(x.v)).map((x) => `${PART[x.k] || x.k} ${fmt(x.v, b.currency)}`).join(" · ");
+      const parts = (b.parts || []).filter((x) => Number.isFinite(x.v)).map((x) => `${PART[x.k] || x.k} ${fmt(x.v, x.currency || b.currency)}`).join(" · ");
       rows.push(`<div class="bill-big">${t("余额")} <b>${fmt(b.balance, b.currency)}</b>${b.available === false ? ` <span class="badge warn">${t("不可用")}</span>` : ""}</div>` +
         (parts ? `<div class="tiny">${parts}</div>` : ""));
     } else if (b.kind === "openrouter" && Number.isFinite(b.usage)) {

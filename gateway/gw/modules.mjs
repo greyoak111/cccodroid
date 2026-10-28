@@ -3,7 +3,7 @@ import path from "node:path";
 import { LAST_LANG, PREFIX, log, tr, tz } from "./config.mjs";
 import { killTree } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { compBaseDeps, compNeeds, compRecords, compRun, devkitIdentity, sha256File } from "./components.mjs";
+import { compBaseDeps, compNeeds, compRecords, compRun, devkitIdentity, sha256File, breathe } from "./components.mjs";
 
 // ── 模块化工具包（0.3.9 起）──────────────────────────────────────────
 // 工具包按 devkit.json 的 modules 拆成基础块 + 若干模块（+ 自动算出的共享层），同一份 Termux 快照一起发布。
@@ -173,12 +173,15 @@ async function modRunInstall(mj, m, base, job) {
   fs.mkdirSync(tree, { recursive: true });
   try { await compRun(job, path.join(PREFIX, "bin", "tar"), ["-xzf", gz, "-C", tree]); }
   catch (e) { if (!job.cancelled) fs.rmSync(gz, { force: true }); throw e; }
-  for (const line of readLines(path.join(tree, "usr", m.dir, "MANIFEST"))) {
+  const man = readLines(path.join(tree, "usr", m.dir, "MANIFEST"));
+  job.total = man.reduce((a, l) => a + (Number(l.split(" ")[1]) || 0), 0);   // 按清单字节算，installed 含链接等到不了头
+  for (const line of man) {
+    await breathe();
     if (job.cancelled) throw new Error("cancelled");
     const i = line.indexOf(" "), j = line.indexOf(" ", i + 1), h = line.slice(0, i), n = Number(line.slice(i + 1, j)), rel = line.slice(j + 1);
     const f = path.join(tree, "usr", rel);
     let st; try { st = fs.statSync(f); } catch { throw new Error(tz("模块包缺文件：{file}", { file: rel })); }
-    if (st.size !== n || (await sha256File(f)) !== h) throw new Error(tz("模块包里的文件校验不符：{file}", { file: rel }));
+    if (st.size !== n || (await sha256File(f, null, st.size)) !== h) throw new Error(tz("模块包里的文件校验不符：{file}", { file: rel }));
     job.done += st.size;
   }
   // 搬进去：.ok 最后写，中途被打断就是「没装」，重装会覆盖、卸载按 FILES 删

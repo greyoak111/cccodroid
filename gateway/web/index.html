@@ -108,10 +108,13 @@
       </button>
     </div>
     <button id="side-new" class="side-new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span data-i18n>新对话</span></button>
+    <!-- 导航和最近对话合成一段一起滚：平时和分开时一样，放不下时导航跟着往上走（#24） -->
+    <div id="side-scroll" class="side-scroll">
     <nav id="side-nav" class="side-nav"></nav>
 
     <!-- 最近的对话：单行条目，按置顶 / 今天 / 昨天 / 更早分组；长按（右键）出菜单。搜索、多选、导入、回收站在「对话」整页 -->
     <div id="side-recent" class="side-recent"></div>
+    </div>
 
     <button id="side-acct" class="side-acct">
       <span class="acct-av" id="acct-av">C</span>
@@ -146,7 +149,18 @@
     <!-- 用量：本应用的使用统计 + 耗电（原来在设置里） -->
     <!-- 项目 / 定时任务（照稿）：内容全由 app.js 画，列表与详情同一页，返回键先回列表 -->
     <section id="tab-projects" class="tab-pane hidden"></section>
+    <!-- 脉络：会话亲缘图（地图本体 /lineage/map.js；页里只有一个会自由滚的东西，见规划书 §11.5） -->
+    <section id="tab-lineage" class="tab-pane hidden">
+      <div class="lin-tools"><div class="seg-scroll"><span class="seg" id="lin-bands"></span></div>
+        <button type="button" class="lin-chip lin-how" id="lin-how" data-i18n>怎么看</button>
+        <button type="button" class="lin-chip lin-fill hidden" id="lin-fill"></button>
+        <label class="lin-misc"><span data-i18n>显示杂项</span><input type="checkbox" class="sw" id="lin-misc"></label></div>
+      <div class="lin-state hidden" id="lin-state"></div>
+      <div id="lin-map"></div>
+      <div class="lin-tour hidden" id="lin-tour"><div id="lt-map"></div><div class="lt-panel" id="lt-panel" role="dialog"></div></div>
+    </section>
     <section id="tab-sched" class="tab-pane hidden"></section>
+    <section id="tab-bookmarks" class="tab-pane hidden"></section>
     <section id="tab-usage" class="tab-pane hidden">
       <!-- 用量（照设计稿）：一排数字（额度、今天、本月、缓存命中）→ 每天用量柱状图（可切表格）→ 按型号占比 → 最费的对话 / 耗电 → 月报与数据管理。
            数据：额度来自 /api/login/status；token 来自网关的使用统计（home/ccapp-usage.json，按小时记）；耗电来自 /api/energy -->
@@ -439,6 +453,10 @@
           <div class="srow">
             <div class="sl"><b data-i18n>正文字号</b><p data-i18n>对话和输入框里的字</p></div>
             <div class="sc"><span class="seg" id="seg-fs"><button data-fs="s" data-i18n>小</button><button data-fs="m" data-i18n>中</button><button data-fs="l" data-i18n>大</button></span></div>
+          </div>
+          <div class="srow">
+            <div class="sl"><b data-i18n>界面动效</b><p data-i18n>侧栏、菜单、整页的进出和完成提示；跟随系统时，系统开了「减少动态效果」就不放</p></div>
+            <div class="sc"><span class="seg" id="seg-motion"><button data-mo="auto" data-i18n>跟随系统</button><button data-mo="on" data-i18n>开</button><button data-mo="off" data-i18n>关</button></span></div>
           </div>
           <div class="srow">
             <div class="sl"><b data-i18n>回车键</b><p data-i18n>手机键盘没有 Shift，想多行输入就选换行</p></div>
@@ -892,6 +910,7 @@
 <script src="/langs.js"></script>
 <script src="/i18n.js"></script>
 <script src="/layout.js"></script>
+<script src="/lineage/map.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

@@ -4,7 +4,8 @@
 //   < 840 CSS px：单栏，文件 / 查看器 / 终端照旧盖满屏幕（窄屏行为一字不改）
 //   ≥ 840：两栏 —— 对话 + 右侧工作区；文件 / 查看器 / 终端开在右边，不盖对话
 //   ≥ 1000：三栏 —— 再把侧栏（会话 / 设置 / 能力 / 扩展）常驻在左边，可收起
-//   高度 < 500（手机横屏）：不加栏，只压缩顶栏和输入区
+//   手机横屏（高 < 500、横着、宽 ≥ 720）：照平板来 —— 侧栏常驻，三个最小宽度各收一档（侧栏 220 / 对话 340 / 窗格 280）。
+//     放得下三栏就三栏；放不下时开着右侧窗格，常驻侧栏临时让位（rotate），窗格关完再回来；让位期间菜单键开的是浮层抽屉
 //
 // 只按窗口宽度分档，不看横竖：手机横屏宽但矮、折叠屏展开近似方形、分屏是半个窗口。
 // 宽 → 窄（分屏、折叠屏合上）时 html 上的类一撤，窗格自动退回浮层，里面的状态原样不动。
@@ -14,30 +15,30 @@
 // 我们的构建链不带 Jetpack WindowManager，拿铰链位置要靠外壳（或社区的改版）调这个接口。
 (function () {
   "use strict";
-  const W2 = 840, W3 = 1000, SHORT = 500;
-  const MIN_CHAT = 380, MIN_PANE = 320;
+  const W2 = 840, W3 = 1000, SHORT = 500, LAND_W = 720;
+  let MIN_CHAT = 380, MIN_PANE = 320;   // 手机横屏时 apply() 改小一档
   const PANES = ["files", "viewer", "git", "term", "browser"];   // 宽屏时进右侧工作区的
   const tk = (s) => s;   // 词条键：先登记（扫描器认它），显示时 tr()
   const NAMES = { files: tk("文件"), viewer: tk("查看"), git: tk("版本"), term: tk("终端"), browser: tk("浏览器") };
   // 浏览器窗格是外壳的原生视图，永远浮在页面上面 —— 这些浮层开着时得先把它藏起来，不然会被它挡住
   const COVERS = ["lightbox", "sheet", "popup", "drawer", "dropzone", "set-ov"];   // set-ov：设置卡片是模态，盖在窗格上面
   const LS_RATIO = "cc_lay_ratio", LS_DOCK = "cc_lay_dock", LS_LW = "cc_lay_lw", LS_DW = "cc_lay_dw";
-  const MIN_SIDE = 240, MAX_SIDE = 560;
+  let MIN_SIDE = 240; const MAX_SIDE = 560;
   const root = document.documentElement;
   const $ = (id) => document.getElementById(id);
   const tr = (s) => (window.I18N && I18N.t ? I18N.t(s) : s);
 
-  let tier = 1, avoid = null, hooks = {}, ovCover = false;   // ovCover：app.js 的浮层管理说有弹层盖着
+  let tier = 1, avoid = null, hooks = {}, ovCover = false, ready = false, land = false, rotate = false;   // ovCover：app.js 的浮层管理说有弹层盖着
   const recent = [];                                       // 打开顺序，最后一个在最上面
   const isOpen = (id) => { const el = $(id); return !!el && !el.classList.contains("hidden"); };
   const rtl = () => root.getAttribute("dir") === "rtl";
-  const docked = () => tier >= 3 && localStorage.getItem(LS_DOCK) !== "0";
+  const docked = () => tier >= 3 && !rotate && localStorage.getItem(LS_DOCK) !== "0";
 
   // 常驻侧栏宽度：拖过就用拖的（像素），没拖过按窗口宽度给个默认；总要给对话留够 MIN_CHAT
   function leftWidth() {
     if (!docked()) return 0;
     const saved = parseFloat(localStorage.getItem(LS_LW));
-    const w = saved > 0 ? saved : 286;     // 默认照设计稿
+    const w = saved > 0 ? saved : land ? 240 : 286;     // 默认照设计稿；手机横屏窄一点
     return Math.round(Math.max(MIN_SIDE, Math.min(MAX_SIDE, innerWidth - MIN_CHAT, w)));
   }
 
@@ -62,23 +63,30 @@
   let rz = 0;
   function apply() {
     const w = innerWidth, h = innerHeight;
-    const nt = w >= W3 ? 3 : w >= W2 ? 2 : 1;
+    land = h < SHORT && w > h && w >= LAND_W;
+    MIN_CHAT = land ? 340 : 380; MIN_PANE = land ? 280 : 320; MIN_SIDE = land ? 220 : 240;
+    const nt = land || w >= W3 ? 3 : w >= W2 ? 2 : 1;
     const was = tier, wasDocked = root.classList.contains("dock-l");
     tier = nt;
     root.dataset.lay = String(tier);
     root.classList.toggle("short", h < SHORT);
+    root.classList.toggle("land", land);
+    // 先看右侧开着哪些窗格：手机横屏放不下三栏时，开着窗格就让常驻侧栏让位
+    for (const id of PANES) { const i = recent.indexOf(id); if (!isOpen(id) && i >= 0) recent.splice(i, 1); }
+    const open = recent.filter(isOpen);
+    rotate = land && open.length > 0 && w < MIN_SIDE + MIN_CHAT + MIN_PANE;
 
     // 左侧常驻侧栏：进三栏时展开（除非用户收起过），退出三栏时收回去，别留一个盖满屏幕的抽屉
+    // 收常驻栏要赶在摘 dock-l 之前：摘掉后侧栏会先变回盖满屏的抽屉（整屏遮罩 + 毛玻璃）闪一帧
     const dock = docked();
+    if (!dock && wasDocked && hooks.closeDrawer) hooks.closeDrawer(true);
     root.classList.toggle("dock-l", dock);
     if (dock && !wasDocked && isOpen("drawer") === false && hooks.openDrawer) hooks.openDrawer();
-    if (!dock && wasDocked && hooks.closeDrawer) hooks.closeDrawer(true);
+    if (dock && !wasDocked && ready && hooks.dockIn) hooks.dockIn();   // 启动时那次不放
     root.style.setProperty("--lw", leftWidth() + "px");
     root.style.setProperty("--dw", drawerWidth() + "px");
 
     // 右侧工作区
-    for (const id of PANES) { const i = recent.indexOf(id); if (!isOpen(id) && i >= 0) recent.splice(i, 1); }
-    const open = recent.filter(isOpen);
     const right = tier >= 2 && open.length > 0;
     root.classList.toggle("has-right", right);
     root.classList.toggle("ws-multi", right && open.length > 1);
@@ -225,7 +233,7 @@
 
   window.CCLayout = {
     // app.js 启动时交过来：openDrawer() 展开侧栏并加载数据，closeDrawer(force) 收起
-    init(h) { hooks = h || {}; watch(); splitter(); sideSplitter(); drawerSplitter(); apply(); },
+    init(h) { hooks = h || {}; watch(); splitter(); sideSplitter(); drawerSplitter(); apply(); ready = true; },
     tier: () => tier,
     docked,
     // 宽屏下处于停靠状态的右侧窗格，按"最近打开在后"排；返回手势先关最后一个
@@ -234,7 +242,7 @@
     raise,
     // 三栏时顶栏菜单键：常驻 ↔ 收起
     toggleDock() {
-      if (tier < 3) return false;
+      if (tier < 3 || rotate) return false;   // 让位期间：交给菜单键原来那套（浮层抽屉）
       const on = !(docked() && isOpen("drawer"));
       localStorage.setItem(LS_DOCK, on ? "1" : "0");
       if (on) hooks.openDrawer && hooks.openDrawer(); else hooks.closeDrawer && hooks.closeDrawer(true);
@@ -242,6 +250,14 @@
       return true;
     },
     collapse() { if (tier >= 3) localStorage.setItem(LS_DOCK, "0"); apply(); },
+    // 三栏时收起过的侧栏要叫回来：一律回到常驻，不走窄屏那套盖在对话上的抽屉（遮罩 + 毛玻璃）——
+    // 以前菜单键回常驻、横滑和别的入口却开出抽屉，同一块屏两种侧栏。返回 true 表示已接手
+    expand() {
+      if (tier < 3 || rotate || docked()) return false;
+      localStorage.setItem(LS_DOCK, "1");
+      apply();
+      return true;
+    },
     setAvoid(x) { avoid = x == null ? null : +x; apply(); },
     cover(on) { ovCover = !!on; placeBrowser(); },
     apply,

@@ -25,6 +25,8 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
   // 出错要看得见：脚本一挂界面就是死的，把原因写到顶栏副标题上，
   // 而不是让人对着一个不动的东西猜。
   const showErr = (msg) => {
+    // 顶栏只放得下一行，截图常被截断：最近 5 条完整的存起来（cc.errLog），排障时能拿到文件和行号
+    try { const l = JSON.parse(localStorage.getItem("cc.errLog") || "[]"); l.push({ at: Date.now(), msg: String(msg).slice(0, 600) }); localStorage.setItem("cc.errLog", JSON.stringify(l.slice(-5))); } catch {}
     const el = document.getElementById("sub-title");
     if (el) { el.textContent = t("界面脚本出错：{msg}", { msg }); el.className = "err"; }
   };
@@ -32,7 +34,9 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     // 光秃秃的「Script error.」没有文件和行号：是从外壳 evaluateJavascript 注入的代码里冒出去的错，WebView 把细节抹了。
     // 写在顶栏上谁也看不懂，只进控制台；外壳注入的每段代码自己 try 住交给 __ccErr，页面这边的入口也用 guardHook 包着
     if (!e.filename && /^Script error\.?$/.test(e.message || "")) { console.warn("[cc] 外壳注入的脚本出错（细节被 WebView 隐去）"); return; }
-    showErr(e.message || String(e.error));
+    // 带上出错位置（app.js 是拼起来的一整份，行号用 scripts/appjs.mjs 对回分段）
+    const at = e.filename ? `[${e.filename.split("/").pop().split("?")[0]}:${e.lineno}:${e.colno}] ` : "";   // 放前头：顶栏截断时位置还在
+    showErr(at + (e.message || String(e.error)));
   });
   // 外壳（MainActivity）直接调用的入口：在页面自己的代码里接住错误，按原文报，不让它变成「Script error.」
   // 外壳注入的代码接住错误后交到这里（MainActivity.guarded / caught）：name 是哪个入口
@@ -78,7 +82,8 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     }
     function drop(it) {
       stack = stack.filter((x) => x !== it);
-      it.el.remove();
+      // 淡出再移走（MO 在下面定义，调用时早已就绪）；淡出途中又被打开（重新进栈）就不删
+      MO.outRemove(it.el, () => !!find(it.el));
       try { it.onClose && it.onClose(); } catch (e) { console.error(e); }
     }
     function close(el) { const it = el && find(el); if (it) drop(it); else if (el) el.remove(); sync(); }
@@ -87,8 +92,10 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
       const kind = o.kind || "menu";
       closeAll(kind === "modal" ? null : "menu");
       if (!el.isConnected) document.body.appendChild(el);
+      const again = !!find(el);
       stack.push({ el, kind, anchor: o.anchor || null, onClose: o.onClose, place: o.place, keep: !!o.keep, cover: !!o.cover, w0: innerWidth });
       sync();
+      if (!again) MO.enterOv(el, o.anchor);
       return el;
     }
     // 锚点上开着的菜单（同一个按钮再点 = 收起）
@@ -115,6 +122,208 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     // 别处直接 remove() 掉的也要跟上（窗格让位状态别卡住）
     new MutationObserver(() => { if (stack.length) sync(); }).observe(document.body, { childList: true });
     return { open, close, closeAll, at, top, back, isOpen: (el) => !!(el && el.isConnected && find(el)) };
+  })();
+
+  // ── 动效：弹簧曲线 ────────────────────────────────────────────────
+  // 只做「交代东西从哪来、去哪了」的动效，只动 transform / opacity；流式正文、对话区滚动、长列表一律不加。
+  // 弹簧按物理积分出 0→1 的进度：一份写成 CSS @keyframes（多段 linear —— Chrome 104 没有 linear() 缓动也能播），
+  // 一份给 Web Animations 现算帧。时间轴：对照稿「适中」档（×1.6）再提速 1.1 倍（10-26 真机看完定的）；
+  // 固定时长的淡入淡出、退场、错开间隔也乘同一个系数 K（样式里是 var(--mo-x)），快慢一起变。三档：
+  //   snap 面板 / 整页（过冲约 2%）· pop 小件 / 菜单（约 9%）· soft 不过冲（逐项错开、大块位移）
+  // 进场弹、退场干脆（150ms 左右缓入，不弹）。设置「界面动效」：跟随系统（默认；系统开了减少动态效果就不放）/ 开 / 关
+  //   → html[data-motion=on|off]；样式里的动效都挂在 html[data-motion="on"] 下面
+  const MO = (() => {
+    // BOUNCE：回弹力度（冲过头的那一截乘它，节奏和时长不变）；10-27 用户定 0.4（试过 0.85、0.6）
+    const SPR = { snap: [420, 30], pop: [520, 26], soft: [320, 36] }, SPEED = 1.1, BOUNCE = 0.4, TEMPO = 1.6 / SPEED, K = 1 / SPEED, OUT = "cubic-bezier(.4,0,1,1)";
+    const k = (ms) => Math.round(ms * K);
+    const root = document.documentElement, cache = {};
+    const reduce = window.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
+    const pref = () => { try { return localStorage.getItem("cc.motion") || "auto"; } catch { return "auto"; } };
+    const on = () => root.dataset.motion === "on";
+    const rtl = () => root.dir === "rtl";
+    function curve(name) {
+      if (cache[name]) return cache[name];
+      const [k, c] = SPR[name], dt = 1 / 240, pts = [0];
+      let x = 0, v = 0, t = 0, next = 1 / 60, still = 0;
+      while (t < 2) {
+        v += (k * (1 - x) - c * v) * dt; x += v * dt; t += dt;
+        if (t >= next) { pts.push(x); next += 1 / 60; }
+        still = Math.abs(1 - x) < 0.002 && Math.abs(v) < 0.02 ? still + 1 : 0;
+        if (still > 8) break;
+      }
+      pts.push(1);
+      for (let i = 0; i < pts.length; i++) if (pts[i] > 1) pts[i] = 1 + (pts[i] - 1) * BOUNCE;
+      return (cache[name] = { pts, ms: Math.round((pts.length - 1) * 1000 / 60 * TEMPO) });
+    }
+    const ms = (name) => curve(name).ms;
+    // 关键帧（写进 <style id="mo-kf">）：名字 → [弹簧档, 每一帧的声明]
+    const lin = (a, b, p) => +(a + (b - a) * p).toFixed(3);
+    const KF = {
+      "mo-drawer": ["snap", (p) => `transform:translateX(${lin(-100, 0, p)}%)`],
+      "mo-drawer-r": ["snap", (p) => `transform:translateX(${lin(100, 0, p)}%)`],
+      "mo-page": ["snap", (p) => `transform:translateX(${lin(100, 0, p)}%)`],
+      "mo-page-r": ["snap", (p) => `transform:translateX(${lin(-100, 0, p)}%)`],
+      "mo-pop": ["pop", (p) => `opacity:${Math.min(1, lin(0, 2, p))};transform:scale(${lin(.86, 1, p)})`],
+      "mo-rise": ["soft", (p) => `opacity:${Math.min(1, lin(0, 1.4, p))};transform:translateY(${lin(10, 0, p)}px)`],
+      "mo-item": ["soft", (p) => `opacity:${Math.min(1, lin(0, 1.4, p))};transform:translateX(${lin(-12, 0, p)}px)`],
+      "mo-item-r": ["soft", (p) => `opacity:${Math.min(1, lin(0, 1.4, p))};transform:translateX(${lin(12, 0, p)}px)`],
+      "mo-drop": ["soft", (p) => `opacity:${Math.min(1, lin(0, 1.5, p))};transform:translateY(${lin(-5, 0, p)}px)`],
+      "mo-card": ["snap", (p) => `opacity:${Math.min(1, lin(0, 2, p))};transform:translateY(${lin(24, 0, p)}px)`],
+      "mo-tick": ["pop", (p) => `transform:scale(${lin(.6, 1, p)})`],
+      "mo-bump": ["pop", (p) => `transform:scale(${lin(1.1, 1, p)})`],
+      "mo-phase": ["pop", (p) => `opacity:${Math.min(1, lin(0, 1.6, p))};transform:translateY(${lin(8, 0, p)}px)`],
+      "mo-back": ["snap", (p) => `opacity:${lin(.6, 1, p)};transform:translateX(${lin(-6, 0, p)}%)`],
+      "mo-back-r": ["snap", (p) => `opacity:${lin(.6, 1, p)};transform:translateX(${lin(6, 0, p)}%)`],
+      "mo-sheet": ["snap", (p) => `transform:translateY(${lin(100, 0, p)}%)`],
+      "mo-pane": ["soft", (p) => `opacity:${Math.min(1, lin(0, 1.4, p))};transform:translateX(${lin(28, 0, p)}px)`],
+      "mo-pane-r": ["soft", (p) => `opacity:${Math.min(1, lin(0, 1.4, p))};transform:translateX(${lin(-28, 0, p)}px)`],
+      "mo-toast": ["pop", (p) => `opacity:${Math.min(1, lin(0, 2, p))};transform:translate(-50%,${lin(14, 0, p)}px) scale(${lin(.94, 1, p)})`],
+      "mo-zoom": ["pop", (p) => `opacity:${Math.min(1, lin(0, 2, p))};transform:scale(${lin(.92, 1, p)})`],
+    };
+    function inject() {
+      let css = ":root{" + ["snap", "pop", "soft"].map((n) => `--mo-${n}:${ms(n)}ms`).join(";") + `;--mo-x:${K.toFixed(4)}}`;
+      for (const [name, [pre, fn]] of Object.entries(KF)) {
+        const { pts } = curve(pre), n = pts.length - 1;
+        css += `@keyframes ${name}{` + pts.map((p, i) => `${(i / n * 100).toFixed(2)}%{${fn(p)}}`).join("") + "}";
+      }
+      const st = document.createElement("style"); st.id = "mo-kf"; st.textContent = css;
+      document.head.appendChild(st);
+    }
+    function apply() {
+      const p = pref(), v = p === "on" || (p === "auto" && !reduce.matches) ? "on" : "off";
+      if (root.dataset.motion !== v) root.dataset.motion = v;
+      document.querySelectorAll("#seg-motion [data-mo]").forEach((b) => b.classList.toggle("on", b.dataset.mo === p));
+    }
+    function set(v) { try { localStorage.setItem("cc.motion", v); } catch {} apply(); }
+    /** 现算帧播一次弹簧（给不挂 CSS 类的零散小件）：fn(p) → 样式对象；播完清掉，样式回到原样 */
+    function spring(el, name, fn, delay = 0) {
+      if (!on() || !el || !el.animate) return null;
+      const { pts } = curve(name);
+      const a = el.animate(pts.map(fn), { duration: ms(name), delay, easing: "linear", fill: "backwards" });
+      a.finished.then(() => a.cancel(), () => {});
+      return a;
+    }
+    /** 播一个 CSS 关键帧：时长按档位；用 Web Animations 的话会和元素自己的 CSS 动画打架，这里走 class 切换 */
+    function play(el, cls, ttl) {
+      if (!on() || !el) return;
+      el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+      clearTimeout(el["_mo_" + cls]);
+      // 摘类名时元素自己原本的动画（比如 .msg 的淡入）会被浏览器当成新动画重播一遍 —— 看着就是「又渲染了一次」。
+      // 摘掉后把刚起头的那几个直接拨到结尾
+      el["_mo_" + cls] = setTimeout(() => {
+        el.classList.remove(cls);
+        if (el.getAnimations && window.CSSAnimation)
+          for (const a of el.getAnimations()) if (a instanceof CSSAnimation && a.effect && a.effect.target === el && (a.currentTime || 0) < 50) a.finish();
+      }, ttl || 1200);
+    }
+    /** 退场：给 el 挂 cls（样式里是干脆的缓入），ms 后执行 done；期间又打开了就 cancel 掉 */
+    function leave(el, cls, dur, done) {
+      cancel(el); stopJs(el);
+      if (!on()) return done();
+      el.classList.add(cls);
+      el._moLeave = { cls, t: setTimeout(() => { el._moLeave = null; el.classList.remove(cls); done(); }, k(dur)) };
+    }
+    /** 停掉元素上还在播的脚本动画（弹簧尾巴约 0.6 秒，期间它压着 transform —— 不停掉的话，
+     *  紧接着的退场 / 手指拖动都看不出效果，松手才「啪」地跳过去）。CSS 动画不动，由类名管 */
+    function stopJs(el) {
+      if (!el || !el.getAnimations) return;
+      for (const a of el.getAnimations()) if (!(window.CSSAnimation && a instanceof CSSAnimation) && !(window.CSSTransition && a instanceof CSSTransition)) a.cancel();
+    }
+    /** 回程：内容马上要被换掉 / 藏掉时，留一张它的替身播退场（push 往右滑走、back 往左退一点变暗、fade 淡掉、drop 往下沉）。
+     *  替身插在原元素旁边（above = 盖在新内容上面，否则垫在下面），吃得到同样的样式；播完删掉 */
+    function ghost(el, kind, above = true) {
+      if (!on() || !el || !el.isConnected || !el.animate) return;
+      const r = el.getBoundingClientRect(); if (!r.width || !r.height) return;
+      const g = el.cloneNode(true);
+      g.querySelectorAll("canvas, video, iframe").forEach((x) => x.remove());
+      g.classList.remove("hidden", "mo-in-push", "mo-in-back", "mo-in-rise", "mo-in-pane", "mo-in-pane-back");
+      // id 照留（按 id 写的样式才吃得到）：替身插在真身后面，getElementById / querySelector 拿到的总是真身
+      g.classList.add("mo-ghost");   // 按类名批量切 hidden 的地方要跳过它（:not(.mo-ghost)）
+      g.setAttribute("aria-hidden", "true"); g.inert = true;
+      Object.assign(g.style, { position: "fixed", left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px",
+        margin: "0", pointerEvents: "none", zIndex: above ? "5" : "0", animation: "none", overflow: "hidden", boxSizing: "border-box" });
+      const st = el.scrollTop; el.after(g); if (st) g.scrollTop = st;
+      // 祖先带 transform 时 fixed 是相对它定位的：量一下偏了多少，拨回来
+      const q = g.getBoundingClientRect();
+      if (Math.abs(q.left - r.left) > .5 || Math.abs(q.top - r.top) > .5) { g.style.left = 2 * r.left - q.left + "px"; g.style.top = 2 * r.top - q.top + "px"; }
+      // 原来是被滚动容器裁着的（整页里的长列表）：替身也只露容器里那一块，别盖到标题栏上
+      for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        if (!/auto|scroll|hidden/.test(getComputedStyle(p).overflowY)) continue;
+        const c = p.getBoundingClientRect();
+        const t = Math.max(0, c.top - r.top), b = Math.max(0, r.bottom - c.bottom);
+        if (t || b) g.style.clipPath = `inset(${t}px 0 ${b}px 0)`;
+        break;
+      }
+      if (!above) el.style.zIndex = el.style.zIndex || "1";
+      const s = rtl() ? -1 : 1;
+      const fr = { push: [{ transform: "none" }, { transform: `translateX(${100 * s}%)` }],
+        back: [{ transform: "none", opacity: 1 }, { transform: `translateX(${-18 * s}%)`, opacity: .4 }],
+        fade: [{ opacity: 1 }, { opacity: 0 }],
+        drop: [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(16px)" }] }[kind];
+      const dur = kind === "back" ? ms("snap") * .5 : k(170);
+      const a = g.animate(fr, { duration: dur, easing: kind === "back" ? "cubic-bezier(.2,.8,.2,1)" : OUT, fill: "forwards" });
+      const fin = () => { g.remove(); if (!above && el.style.zIndex === "1") el.style.zIndex = ""; };
+      a.finished.then(fin, fin);
+    }
+    function cancel(el) { const l = el && el._moLeave; if (!l) return; clearTimeout(l.t); el.classList.remove(l.cls); el._moLeave = null; }
+    /** 浮层收起：先淡出（小浮层再缩一点），再移走；还在 OV 栈里的说明又被打开了，不删 */
+    function outRemove(el, still) {
+      if (!on() || !el.animate || !el.isConnected) return el.remove();
+      el.style.pointerEvents = "none";
+      const big = el._moFull;
+      const a = el.animate(big ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.96)" }], { duration: k(big ? 150 : 120), easing: OUT, fill: "forwards" });
+      const fin = () => { a.cancel(); el.style.pointerEvents = ""; if (!still()) el.remove(); };
+      a.finished.then(fin, fin);
+    }
+    /** OV 登记的浮层统一入场：铺满屏的（带遮罩的弹层）遮罩淡入、里面的卡片浮上来；
+     *  贴着锚点的小浮层（速览卡、型号面板、权限菜单）从锚点那一侧弹出来。.pop-menu 由样式自己管。
+     *  放在微任务里量：调用方 OV.open 之后才摆位置，绘制之前还来得及 */
+    function enterOv(el, anchor) {
+      if (!on() || !el.animate || el.classList.contains("pop-menu")) return;
+      const hold = el.animate([{ opacity: 0 }, { opacity: 0 }], { duration: 1000, fill: "both" });   // 量好之前先别露出来
+      Promise.resolve().then(() => {
+        hold.cancel();
+        if (!el.isConnected) return;
+        const r = el.getBoundingClientRect();
+        const full = el._moFull = r.width >= innerWidth - 2 && r.height >= innerHeight - 2;
+        if (full) {
+          el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: k(180), easing: "ease-out" });
+          const card = [...el.children].find((c) => { const q = c.getBoundingClientRect(); return q.width && q.height && (q.width < innerWidth - 2 || q.height < innerHeight - 2); });
+          const ar = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+          const q = card && card.getBoundingClientRect();
+          if (q && q.width >= innerWidth - 2 && q.bottom >= innerHeight - 2) {
+            // 窄屏贴底铺满宽度的面板（型号面板在手机上）：像底部菜单一样从下面弹上来
+            spring(card, "snap", (p) => ({ transform: `translateY(${lin(100, 0, p)}%)` }));
+          }
+          else if (card && ar && ar.width) {
+            // 透明铺满、贴着按钮出现的面板（型号面板在宽屏）：卡片从按钮那一侧弹出来
+            card.style.transformOrigin = `${Math.max(12, Math.min(q.width - 12, ar.left + ar.width / 2 - q.left))}px ${q.top >= ar.top + ar.height / 2 ? "0" : "100%"}`;
+            spring(card, "pop", (p) => ({ opacity: Math.min(1, p * 2), transform: `scale(${lin(.9, 1, p)})` }));
+          }
+          else if (card) spring(card, "soft", (p) => ({ opacity: Math.min(1, p * 1.4), transform: `translateY(${lin(14, 0, p)}px) scale(${lin(.97, 1, p)})` }));
+          else spring(el, "snap", (p) => ({ transform: `translateX(${lin(rtl() ? -100 : 100, 0, p)}%)` }));   // 窄屏铺满的弹层：像整页一样推进来
+          return;
+        }
+        const ar = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+        el.style.transformOrigin = ar ? `${Math.max(12, Math.min(r.width - 12, ar.left + ar.width / 2 - r.left))}px ${r.top >= ar.top + ar.height / 2 ? "0" : "100%"}` : "50% 50%";
+        spring(el, "pop", (p) => ({ opacity: Math.min(1, p * 2), transform: `scale(${lin(.9, 1, p)})` }));
+      });
+    }
+    /** 面板收起：挂退场类，dur 后真正藏起来（加 hidden）；then 在藏起来之后做（清内容之类）。中途又打开要先 cancel */
+    function hide(el, cls, dur = 170, then) {
+      if (!el || el.classList.contains("hidden")) { if (then) then(); return; }
+      leave(el, cls, dur, () => { el.classList.add("hidden"); if (then) then(); });
+    }
+    /** 窗格（文件 / 查看器 / git / 终端）的退场类：宽屏停靠在右边就淡出，窄屏铺满就往右滑出去 */
+    const paneOut = () => (root.classList.contains("has-right") ? "mo-out-fade" : "mo-out-push");
+    /** 一组元素逐项错开：前 max 个挂 .mo-st 并设 --i（样式里 animation-delay 按它算）；之后重新渲染出来的没有这个类，不会再播 */
+    function stagger(els, max = 12) { let i = 0; for (const el of els) { if (i >= max) break; el.classList.add("mo-st"); el.style.setProperty("--i", i++); } }
+
+    inject(); apply();
+    if (reduce.addEventListener) reduce.addEventListener("change", apply);
+    document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("#seg-motion [data-mo]"); if (b) set(b.dataset.mo); });
+    document.addEventListener("DOMContentLoaded", apply);
+    return { paneOut, stopJs, ghost, on, ms, rtl, spring, play, leave, cancel, hide, outRemove, enterOv, stagger, apply, set };
   })();
   // 项目 / 定时任务的状态（模块在 openPage 前；这两个要在启动早期就可用）
   var PJ = { list: [], colors: [], ws: "", cur: null, detail: null, loaded: false, effLevels: [] };
@@ -159,21 +368,23 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
 
   let toastTimer = null;
   function toast(msg, isErr) {
+    MO.cancel(toastEl);
     toastEl.textContent = msg;
     toastEl.className = isErr ? "err" : "";
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.add("hidden"), isErr ? 4200 : 3200);
+    toastTimer = setTimeout(() => MO.hide(toastEl, "mo-out-fade", 150), isErr ? 4200 : 3200);
   }
   // 带一个按钮的提示条（撤销之类），多停几秒
   function toastAct(msg, label, fn) {
+    MO.cancel(toastEl);
     toastEl.textContent = msg + " ";
     const b = document.createElement("button");
     b.className = "toast-act"; b.textContent = label;
-    b.onclick = () => { toastEl.classList.add("hidden"); fn(); };
+    b.onclick = () => { MO.hide(toastEl, "mo-out-fade", 150); fn(); };
     toastEl.appendChild(b);
     toastEl.className = "";
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 7000);
+    toastTimer = setTimeout(() => MO.hide(toastEl, "mo-out-fade", 150), 7000);
   }
   // ── 保存到（A4）：外壳有 CCApp.saveAs 时，下载 / 导出一律走系统「保存到」面板 ──
   //  不要存储权限，也不会把文件落进用户打不开的私有目录。结果由外壳回调 __ccSaved
@@ -207,7 +418,7 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
   }
   const shareIco = () => `<svg class="ico-share" viewBox="0 0 24 24">${ICONS.share}</svg>`;
 
-  function setStatus(text, cls) { chatStatus = [text, cls || ""]; if (!curPage) { subEl.textContent = text; subEl.className = cls || ""; } }
+  function setStatus(text, cls) { chatStatus = [text, cls || ""]; if (!curPage) { subEl.textContent = text + (cls === "ok" ? archSub() : ""); subEl.className = cls || ""; } }
 
   // ── 跨刷新要记住的东西 ────────────────────────────────────────────
   //  界面代码一变网关就会让前端自动 reload（uiTag 机制）。要是会话号只存在内存里，
@@ -230,21 +441,36 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
   }
   // 自动跟到底：用户一往上滑就停，回到底部附近再恢复。
   // 以前只看"离底部 <160px"，生成中每来一条事件就把正在惯性滑动的画面拽回去，表现为"滑不动、只能一点点拖"
-  let stick = true, progTop = -1;
+  // 生成中往上翻会抖（#34）：跟底判断原本攒到 rAF 里做，而吐字每帧都 scrollDown，手指刚往上拖的那一帧还按「贴底」拽回去。
+  // 现在：手指按着就不跟；scroll 事件里当场比 scrollTop（不读排版），比我们上次滚到的位置靠上 = 用户往上翻了，立刻停跟
+  // 只认手指（按着或刚松手的惯性里）：内容变矮时浏览器会把 scrollTop 夹小，那不是用户往上翻
+  let stick = true, progTop = -1, touching = false, touchEndAt = 0;
+  // 网关整轮重放（切会话 / 重连续不上）期间为真，到 sync 为止：那些是已经说过的话，正文直接整段显示，不再匀速吐一遍（#36）
+  let busReplay = false;
+  // 这次打开应用后进过的会话：再切回来不重播入场动画
+  const seenSessions = new Set();
+  chatEl.addEventListener("touchstart", () => { touching = true; }, { passive: true });
+  const touchOff = () => { touching = false; touchEndAt = Date.now(); };
+  chatEl.addEventListener("touchend", touchOff, { passive: true });
+  chatEl.addEventListener("touchcancel", touchOff, { passive: true });
+  chatEl.addEventListener("wheel", (e) => { if (e.deltaY < 0) stick = false; }, { passive: true });
   // 对话区只挂一个 scroll 监听，事件里不读排版，攒到下一帧统一处理：跟底判断、翻到顶加载更早的、↓ 圆钮
   const chatScrollHooks = [];
   let chatScrollRaf = 0;
   chatEl.addEventListener("scroll", () => {
+    const byHand = touching || Date.now() - touchEndAt < 2000;
+    if (byHand && progTop >= 0 && chatEl.scrollTop < progTop - 1) stick = false;
     if (chatScrollRaf) return;
     chatScrollRaf = requestAnimationFrame(() => {
       chatScrollRaf = 0;
-      if (chatEl.scrollTop !== progTop) stick = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 40;  // 不是我们自己滚的
+      // 不是我们自己滚的；手指操作期间要真到底（4px）才恢复跟随，否则往上拖的前 40px 会被判回「贴底」又拽下去
+      if (chatEl.scrollTop !== progTop) stick = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < (byHand ? 4 : 40);
       for (const f of chatScrollHooks) f();
     });
   }, { passive: true });
   function scrollDown(force) {
     if (force) stick = true;
-    else if (!stick) return;
+    else if (!stick || touching) return;
     chatEl.scrollTop = chatEl.scrollHeight;
     progTop = chatEl.scrollTop;
   }
@@ -550,14 +776,14 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     $("lightbox-cap").textContent = path.split("/").pop();
     lightboxEl.dataset.path = path;
     $("lightbox-dl").innerHTML = shareIco() + esc(t("分享"));
-    lightboxEl.classList.remove("hidden");
+    MO.cancel(lightboxEl); lightboxEl.classList.remove("hidden");
   }
   lightboxEl.addEventListener("click", (e) => {
-    if (e.target === lightboxEl || e.target.id === "lightbox-close") lightboxEl.classList.add("hidden");
+    if (e.target === lightboxEl || e.target.id === "lightbox-close") MO.hide(lightboxEl, "mo-out-fade");
     if (e.target.closest("#lightbox-dl")) shareFile(lightboxEl.dataset.path);
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") lightboxEl.classList.add("hidden");
+    if (e.key === "Escape") MO.hide(lightboxEl, "mo-out-fade");
   });
 
   // 代码复制 + 图片点击（事件委托）

@@ -664,7 +664,8 @@ const idx = FROZEN ? {
   provides: new Map(), date: PLAN.snapshot,
 } : await loadIndex(COMP ? [...REPOS, ...(COMP.repos || []).map((n) => MAN.extraRepos[n])] : REPOS);
 let baseDeps = [];          // 组件依赖链里、由底座提供的包（名字 + 底座里的版本）：市场据此判断换底座后要不要重新真机验证
-let { names, missing } = FROZEN ? { names: Object.keys(FROZEN).sort(), missing: [] } : closure(idx, COMP ? COMP.roots : rootsFor(opt("groups")));
+// 整包按划分里的 full 取（旧划分没有这一项就是全部）；按块打时后面换成那一块的包
+let { names, missing } = FROZEN ? { names: (!opt("block") && PLAN.full ? PLAN.full : Object.keys(FROZEN)).slice().sort(), missing: [] } : closure(idx, COMP ? COMP.roots : rootsFor(opt("groups")));
 // 模块化：build --block <id> --plan <modules.plan.json> 只打划分里这一块的包
 const BLOCK = PLAN && opt("block") ? (PLAN.blocks.find((b) => b.id === opt("block")) || (() => { throw new Error("划分里没有这一块: " + opt("block")); })()) : null;
 const EXTRAS = !COMP && (!BLOCK || BLOCK.kind === "base");          // 替身、上游原件、Python 预编译只跟基础走
@@ -754,8 +755,14 @@ function makePlan() {
   const [ad, ai] = sz(names), blocksDl = [P.base, ...P.layers.map((l) => [...l.names]), ...Object.values(P.modules).map((m) => m.names)].reduce((s, ns) => s + sz(ns)[0], 0);
   console.log(`  全部装上：占用 ${mb(ai)}，下载 ${mb(blocksDl)}（比整包多下 ${mb(blocksDl - ad)}，是共用小包的重复）`);
   if (P.missing.length) console.log("⚠ 无法满足: " + [...new Set(P.missing)].join("; "));
+  // 整包（给只认整包的旧 App，以及从整包升上来时「装上全部模块」的那份清单）只含 full 不为 false 的模块：
+  // 后加的大模块（Go、Node 生态）旧用户本来就没有，别让他们升级时平白多下几百 MB
+  const fullMods = Object.keys(MAN.modules).filter((id) => MAN.modules[id].full !== false);
+  const full = closure(idx, rootsFor(fullMods.flatMap((id) => MAN.modules[id].groups).join(","))).names.sort();
+  const [fd, fi] = sz(full);
+  console.log(`  整包（不含 ${Object.keys(MAN.modules).filter((id) => MAN.modules[id].full === false).join("、") || "—"}）：${full.length} 包，下载 ${mb(fd)}，解包 ${mb(fi)}`);
   const plan = {
-    snapshot: idx.date, base: P.baseId, sharedMinMB: MAN.sharedMinMB || 50,
+    snapshot: idx.date, base: P.baseId, sharedMinMB: MAN.sharedMinMB || 50, full,
     records: Object.fromEntries(names.map((n) => { const p = idx.pkgs.get(n);
       return [n, { version: p.version, file: p.file, sha256: p.sha256, size: p.size, isize: p.isize, source: p.source, homepage: p.homepage, deps: p.deps, repo: p.repo.name || "main" }]; })),
     blocks: [
@@ -811,6 +818,7 @@ if (cmd === "modules") {
     format: 1, compat: 1, target, snapshot: plan.snapshot, base: plan.base, built: new Date().toISOString(),
     modules: locks.map((l) => ({
       id: l.id, kind: l.kind, required: !!(def[l.id] || {}).required, deps: l.deps, users: l.users || [],
+      full: (def[l.id] || {}).full !== false,   // false：整包里没有它，整包用户升级时不当成已装
       name: (def[l.id] || {}).name || { zh: "共享运行库", en: "Shared libraries" },
       desc: (def[l.id] || {}).desc || { zh: `被 ${l.users.join("、")} 共用的大库，没有模块用到时自动卸载。`, en: `Large library shared by ${l.users.join(", ")}; removed automatically when no module needs it.` },
       uses: (def[l.id] || {}).uses || [], dir: l.dir,

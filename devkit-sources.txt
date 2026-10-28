@@ -1,1 +1,1 @@
-https://github.com/greyoak111/cccodroid/releases/download/devkit-2026.10.22.3/
+https://github.com/greyoak111/cccodroid/releases/download/devkit-2026.10.28/

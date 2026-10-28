@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="cc.codroid"
-    android:versionCode="73"
-    android:versionName="0.4.8">
+    android:versionCode="81"
+    android:versionName="0.4.16">
 
     <!-- targetSdk 28：29 起禁止执行应用可写目录里的程序（W^X），工具链只能「经加载器」跑（Env.applyLoader）。
          build.sh 的 TARGET_SDK=36 会改这一行出 36 的包；下面为 36 加的声明在 28 的包里都不改变行为 -->
@@ -119,6 +119,19 @@
             android:authorities="cc.codroid.share"
             android:exported="false"
             android:grantUriPermissions="true" />
+
+        <!-- 内部文件借给别的文件管理器（MT、系统「文件」）：安卓上私有目录没法靠 chmod 放开，
+             只能走系统文件访问框架；权限只经系统选择器一次性授出，作用域只有 home/workspace（见 Docs.java） -->
+        <provider
+            android:name=".Docs"
+            android:authorities="cc.codroid.docs"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
 
         <!-- 应用内部回调：安装结果、通知栏填的配对码。不导出 -->
         <receiver android:name=".Events" android:exported="false" />

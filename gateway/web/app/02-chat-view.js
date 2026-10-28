@@ -57,6 +57,7 @@
     resend: '<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>',
     fork: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10"/><path d="M18 9c0 5-7 4-11.2 8.6"/>',
     rewind: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
+    mark: '<path d="M7 3.5h10a1 1 0 0 1 1 1V20l-6-4.2L6 20V4.5a1 1 0 0 1 1-1z"/>',
     del: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/>',
   };
   const UI_I = {
@@ -90,8 +91,9 @@
       ? `<button class="u-ref img" data-p="${esc(p)}"><img src="${fileUrl(p)}" alt="" loading="lazy"></button>`
       : `<button class="u-ref" data-p="${esc(p)}">${FILE}<span>${esc(p.split("/").pop())}</span></button>`).join("")}</div>`;
   }
-  function renderUser(text, parent) {
+  function renderUser(text, parent, uuid) {
     const b = mkMsg("user", null, parent);
+    if (uuid) b.parentElement.dataset.uuid = uuid;   // 书签落点
     userTextOf.set(b.parentElement, text);
     const [body, refs] = splitRefs(text);
     setHtml(b, body ? renderMd(body) : "");
@@ -105,12 +107,13 @@
     }
     const acts = document.createElement("div");
     acts.className = "msg-acts";
-    acts.innerHTML = actBtn("copy", t("复制")) + actBtn("resend", t("重发")) + actBtn("rewind", t("回退到这里")) + actBtn("del", t("删除"));
+    acts.innerHTML = actBtn("copy", t("复制")) + actBtn("resend", t("重发")) + actBtn("rewind", t("回退到这里")) + actBtn("mark", t("书签")) + actBtn("del", t("删除"));
     acts.addEventListener("click", (e) => {
       const a = e.target.closest("button")?.dataset.a;
       if (a === "copy") { copyText(text); toast(t("已复制")); }
       if (a === "resend") { inputEl.value = text; autoGrow(); inputEl.focus(); }
       if (a === "rewind") rewindTo(b.parentElement);
+      if (a === "mark") toggleMark(b.parentElement);
       if (a === "del") deleteMsg(b.parentElement, "user");
     });
     b.parentElement.appendChild(acts);
@@ -125,7 +128,6 @@
   const THINK_TAIL = 4000;
   const THINK_CAP  = 200000;
   const THINK_TICK = 250;
-  const PAINT_TICK = 60;
   const DOTS = `<div class="dots"><span></span><span></span><span></span></div>`;
   const fmtChars = (n) => (n < 1000 ? t("{n} 字", { n }) : t("{n}k 字", { n: (n / 1000).toFixed(1) }));
 
@@ -148,39 +150,60 @@
     return best;
   }
 
+  // 匀速吐字：厂商常常一口吐一大段（几十上百字），原样贴上去就是一顿一顿地跳。
+  // 收到的先进缓冲，每 STREAM_TICK 吐一截；积压越多吐得越快（约 STREAM_STEPS 步追平），不会越落越远。
+  // 只管显示，text 永远是收全了的；回复结束 / 切到后台时一次补齐
+  const STREAM_TICK = 33, STREAM_STEPS = 8;
   function TextBlock(parent, live) {
     const el = document.createElement("div");
     el.className = "txt";
     const frozen = document.createElement("div"), tail = document.createElement("div");
     el.append(frozen, tail);
     parent.appendChild(el);
-    let text = "", fz = 0, timer = 0;
+    let text = "", fz = 0, timer = 0, shown = 0, ending = false;
+    el._src = () => text;   // 书签：没有 uuid 时按正文开头去文件里认领
 
     function paint(final) {
       if (timer) { clearTimeout(timer); timer = 0; }
+      if (final) shown = text.length;
+      const vis = text.slice(0, shown);
+      if (fz > vis.length) { frozen.innerHTML = ""; fz = 0; }
       if (!final) {
-        const idx = safeSplit(text, fz);
+        const idx = safeSplit(vis, fz);
         if (idx > fz) {
           const c = document.createElement("div");
-          setHtml(c, renderMd(text.slice(fz, idx)));
+          setHtml(c, renderMd(vis.slice(fz, idx)));
           frozen.appendChild(c);
           fz = idx;
         }
-        tail.innerHTML = renderMd(text.slice(fz)); enhanceMd(tail);   // 光标不跟在每段正文后面：整条回复只留一个，见 AssistantView 的 liveTail
+        tail.innerHTML = renderMd(vis.slice(fz)); enhanceMd(tail);   // 光标不跟在每段正文后面：整条回复只留一个，见 AssistantView 的 liveTail
       } else {
-        setHtml(tail, renderMd(text.slice(fz)));
+        setHtml(tail, renderMd(vis.slice(fz)));
       }
       scrollDown();
     }
+    function tick() {
+      timer = 0;
+      const left = text.length - shown;
+      if (document.hidden || left <= 0) { if (ending) return paint(true); shown = text.length; return paint(false); }
+      let n = Math.max(2, Math.ceil(left / (ending ? 3 : STREAM_STEPS)));
+      // 别把一个代理对（emoji、生僻字）劈成两半
+      const c = text.charCodeAt(shown + n - 1); if (c >= 0xd800 && c <= 0xdbff) n++;
+      shown = Math.min(text.length, shown + n);
+      paint(false);
+      if (shown < text.length || ending) timer = setTimeout(tick, STREAM_TICK);
+    }
+    const kick = () => { if (!timer) timer = setTimeout(tick, STREAM_TICK); };
     return {
       kind: "text",
-      append(t) { text += t; if (!timer) timer = setTimeout(() => paint(false), PAINT_TICK); },
-      set(t) { text = t; if (live) { if (!timer) timer = setTimeout(() => paint(false), PAINT_TICK); } else paint(true); },
-      finish() { if (live) paint(true); },
+      append(t) { text += t; if (busReplay) shown = text.length; kick(); },
+      set(t) { text = t; if (live) { shown = Math.min(shown, text.length); kick(); } else paint(true); },
+      finish() { if (!live) return; if (shown >= text.length) paint(true); else { ending = true; kick(); } },
       /** 从末尾删掉 n 个字（流断了、那半截不算数）；冻结的段落可能也在里面，整块重画 */
-      drop(n) { text = text.slice(0, Math.max(0, text.length - n)); frozen.innerHTML = ""; fz = 0; paint(!live); return text.length; },
+      drop(n) { text = text.slice(0, Math.max(0, text.length - n)); shown = Math.min(shown, text.length); frozen.innerHTML = ""; fz = 0; paint(!live); return text.length; },
       remove() { if (timer) { clearTimeout(timer); timer = 0; } el.remove(); },
       get text() { return text; },
+      el,
     };
   }
 
@@ -305,6 +328,7 @@
         api.state = ok ? "ok" : "err";
         st.className = "tool-state " + (ok ? "ok" : "err");
         st.textContent = ok ? t("完成") : t("失败");
+        if (live && !busReplay) { MO.play(st, "mo-tick", 1400); if (ok) MO.play(card, "mo-ok", 1400); }
         // 后台子代理：工具结果只是「已启动」，真正跑完靠 sub_done
         if (isAgent && ok && /^Async agent launched/.test(result.text) && !(sub && sub.done)) { st.className = "tool-state run"; st.textContent = t("后台运行"); }
         if (built) { built = false; build(); }
@@ -389,7 +413,13 @@
     el.innerHTML = `<button class="tg-head" type="button"></button><div class="tg-body"></div>`;
     parent.appendChild(el);
     const head = el.firstChild, body = el.lastChild, members = [], inner = [];
-    head.addEventListener("click", () => el.classList.toggle("open"));
+    // 收起整组时，组里展开着的步骤、子代理过程、思考也一起收回去 —— 不然下次点开还是一大片摊着（群友 10-27）
+    head.addEventListener("click", () => {
+      if (!el.classList.toggle("open")) {
+        body.querySelectorAll(".tool.open, .tool-sub.open").forEach((x) => x.classList.remove("open"));
+        body.querySelectorAll("details[open]").forEach((d) => { d.open = false; });
+      }
+    });
     function refresh() {
       const n = members.length;
       el.classList.toggle("single", n < 2);

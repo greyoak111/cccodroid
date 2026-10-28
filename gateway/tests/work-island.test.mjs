@@ -9,7 +9,7 @@ function make(opts = {}) {
   const sent = [];
   let runs = [];
   const core = createWorkIsland({
-    send: (action, title, text, since) => sent.push({ action, title, text, since }),
+    send: (action, title, text, since, state) => sent.push({ action, title, text, since, state }),
     runs: () => runs,
     lang: () => "zh",
     graceMs: 20,
@@ -27,7 +27,30 @@ test("开始与工具：先「正在干活」，再跟着 tool_use 变", () => {
   assert.equal(sent.at(-1).title, "正在干活");
   assert.equal(sent.at(-1).text, "正在处理…");
   core.handleEvent({ type: "tool_use", name: "Read" });
+  assert.equal(sent.at(-1).title, "读文件");
   assert.equal(sent.at(-1).text, "用 读文件…");
+  assert.equal(sent.at(-1).state, "reading");
+});
+
+test("清单：TodoWrite 显示已完成/总数", () => {
+  const { core, sent } = make();
+  core.handleEvent({ type: "run_start", startedAt: Date.now() });
+  core.handleEvent({
+    type: "tool_use",
+    name: "TodoWrite",
+    input: {
+      todos: [
+        { status: "completed" },
+        { status: "completed" },
+        { status: "pending" },
+        { status: "in_progress" },
+        { status: "pending" },
+      ],
+    },
+  });
+  assert.equal(sent.at(-1).title, "整理清单");
+  assert.equal(sent.at(-1).text, "清单 2/5");
+  assert.equal(sent.at(-1).state, "planning");
 });
 
 test("完成：任务完成 + 用时，8 秒后收起", async () => {
@@ -39,6 +62,7 @@ test("完成：任务完成 + 用时，8 秒后收起", async () => {
   const done = sent.find((x) => x.action === "DONE");
   assert.ok(done, "应发 DONE");
   assert.equal(done.title, "任务完成");
+  assert.equal(done.state, "done");
   assert.match(done.text, /^用时 /);
   await sleep(50);
   assert.ok(sent.some((x) => x.action === "IDLE"), "应发 IDLE");
@@ -81,12 +105,64 @@ test("等确认：标题变「等你确认」，文案带工具名", () => {
   assert.match(sent.at(-1).text, /执行命令/);
 });
 
-test("错误：只显示「出错了」，不转发 message", () => {
+test("错误：标题「出错了」，正文固定一句，不转发 message", () => {
   const { core, sent } = make();
   core.handleEvent({ type: "run_start", startedAt: Date.now() });
   core.handleEvent({ type: "error", message: "/secret/path token=abc" });
-  assert.equal(sent.at(-1).text, "出错了");
-  assert.ok(!sent.at(-1).text.includes("secret"));
+  assert.equal(sent.at(-1).title, "出错了");
+  assert.equal(sent.at(-1).text, "这一轮出错了");
+  assert.equal(sent.at(-1).state, "error");
+  assert.ok(!JSON.stringify(sent.at(-1)).includes("secret"));
+});
+
+test("清单：tasks 事件只数已完成/总数，不带 subject 原文", () => {
+  const { core, sent } = make();
+  core.handleEvent({ type: "run_start", startedAt: Date.now() });
+  core.handleEvent({
+    type: "tasks",
+    tasks: [
+      { status: "completed", subject: "SECRET A", active: "doing secret" },
+      { status: "completed", subject: "SECRET B" },
+      { status: "in_progress", subject: "SECRET C" },
+    ],
+  });
+  assert.equal(sent.at(-1).title, "整理清单");
+  assert.equal(sent.at(-1).text, "清单 2/3");
+  assert.equal(sent.at(-1).state, "planning");
+  assert.ok(!JSON.stringify(sent.at(-1)).includes("SECRET"));
+});
+
+test("清单清空：tasks 为 null 时不报错也不改岛", () => {
+  const { core, sent } = make();
+  core.handleEvent({ type: "run_start", startedAt: Date.now() });
+  const before = sent.length;
+  core.handleEvent({ type: "tasks", tasks: null });
+  assert.equal(sent.length, before);
+});
+
+test("TaskUpdate：归到整理清单 / planning", () => {
+  const { core, sent } = make();
+  core.handleEvent({ type: "run_start", startedAt: Date.now() });
+  core.handleEvent({ type: "tool_use", name: "TaskUpdate" });
+  assert.equal(sent.at(-1).title, "整理清单");
+  assert.equal(sent.at(-1).state, "planning");
+});
+
+test("MCP 长工具名：不原样上岛，显示「调用工具」", () => {
+  const { core, sent } = make();
+  core.handleEvent({ type: "run_start", startedAt: Date.now() });
+  core.handleEvent({ type: "tool_use", name: "mcp__device__notify" });
+  assert.equal(sent.at(-1).title, "调用工具");
+  assert.equal(sent.at(-1).text, "调用工具…");
+  assert.equal(sent.at(-1).state, "working");
+});
+
+test("英文：认不出的工具显示 Using a tool", () => {
+  const { core, sent } = make({ lang: () => "en" });
+  core.handleEvent({ type: "run_start", startedAt: Date.now() });
+  core.handleEvent({ type: "tool_use", name: "mcp__device__notify" });
+  assert.equal(sent.at(-1).title, "Using a tool");
+  assert.equal(sent.at(-1).text, "Using a tool…");
 });
 
 test("英文：Working / Using a command…", () => {
@@ -94,7 +170,9 @@ test("英文：Working / Using a command…", () => {
   core.handleEvent({ type: "run_start", startedAt: Date.now() });
   assert.equal(sent.at(-1).title, "Working");
   core.handleEvent({ type: "tool_use", name: "Bash" });
+  assert.equal(sent.at(-1).title, "Running");
   assert.equal(sent.at(-1).text, "Using a command…");
+  assert.equal(sent.at(-1).state, "running");
 });
 
 test("节流：一秒半内只发一条，补发最后那条", async () => {

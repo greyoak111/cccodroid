@@ -2051,3 +2051,149 @@
 2051	Work Island (ColorOS)
 2052	Muestra lo que hace Claude en el Fluid Cloud de ColorOS 16
 2053	Requiere instalar aparte la app Work Island. Al activarlo, «trabajando», «esperando tu confirmación» y «terminado» aparecen en la cápsula de la isla, que se oculta 8 segundos después de terminar. Por ahora solo se ha probado en ColorOS 16 / Android 16.
+2054	Linaje
+2055	Mover a Varios
+2056	Quitar de Varios
+2057	Varios
+2058	Mover todo a la papelera
+2059	¿Mover las {n} sesiones de Varios a la papelera?
+2060	{n} movidas a la papelera (recuperables durante {d} días)
+2061	Esta sesión aún no tiene registro
+2062	Retrocedida desde «{t}» · {d}
+2063	Bifurcada desde «{t}» · {d}
+2064	Aún sin título
+2065	Editar título
+2066	Nuevo título
+2067	Ver en Linaje
+2068	Próximamente
+2069	Volver a ahora
+2070	Ahora
+2071	Retrocedido desde «{t}»
+2072	Bifurcado desde «{t}»
+2073	Proviene de una sesión eliminada
+2074	Fusionado desde {list}
+2075	Retomado de {list}
+2076	{n} sesiones derivadas
+2077	{n} capítulos
+2078	Aún no hay sesiones
+2079	Capítulos y títulos
+2080	Fusionar…
+2081	No se pudo cargar el linaje: {e}
+2082	Indexando sesiones… {d}/{n}
+2083	Otras carpetas
+2084	La vista de linaje no se cargó. Vuelve a abrir la app.
+2085	Aún no hay sesiones. Tras unas cuantas conversaciones, aquí verás cómo se relacionan.
+2086	{n} sesiones · {m} vínculos
+2087	desde {d}
+2088	Mostrar varios
+2089	Capítulo {n}
+2090	No se encontró el inicio del capítulo; se abrió en lo más reciente
+2091	Titulando {d}/{n} · Detener
+2092	No se pudo completar el titulado: {e}
+2093	{n} capítulos titulados
+2094	, {n} fallaron
+2095	Completar títulos · {n}
+2096	Usar el modelo global predeterminado {m} ({p}) para titular {c} capítulos de {s} sesiones.
+2097	Usa el resumen de compactación al final de cada capítulo, sin releer todo. Unas {k} llamadas, ~{i} tokens de entrada y ~{o} de salida (estimación alta; normalmente menos).
+2098	Puedes cambiar estos títulos cuando quieras, y el archivado de la IA los sustituirá después. ¿Empezar?
+2099	No quedan capítulos por titular
+2100	Proyecto de ejemplo
+2101	Refactorizar la pasarela
+2102	Dividir el módulo de rutas
+2103	Conectar el bus de eventos
+2104	Completar la reanudación tras cortes
+2105	Pruebas de carga y cierre
+2106	Probar otro enfoque de rutas
+2107	Retroceder y replantear
+2108	Retomar la guía de uso
+2109	Unir los dos enfoques
+2110	Unificar la API tras unir
+2111	Añadir pruebas
+2112	Experimento descartado
+2113	Probar un modelo nuevo
+2114	Revisión diaria
+2115	Escribir las notas semanales
+2116	Ordenar el avance de la semana
+2117	Ordena mis fotos en carpetas por fecha
+2118	En tu linaje real, esto salta al inicio del capítulo {n} de esa sesión.
+2119	En tu linaje real, esto abre los capítulos de «{t}»; toca uno para ir a su inicio.
+2120	Los botones no hacen nada en el recorrido; úsalos en tu linaje real.
+2121	Paso {n} de {m}
+2122	Salir del recorrido
+2123	Hecho
+2124	Atrás
+2125	Empezar de nuevo
+2126	Ver mi linaje
+2127	Siguiente
+2128	Un mapa de metro de tus sesiones
+2129	Arrastra
+2130	Arrastrar el mapa
+2131	Pellizca para ampliar el tiempo
+2132	Ampliar una vez
+2133	Toca una línea
+2134	Selecciona «Refactorizar la pasarela»
+2135	Estación = compactación = capítulo
+2136	Toca una estación
+2137	Tipos de líneas
+2138	Selecciona «Unir los dos enfoques»
+2139	Tareas programadas, varios y papelera
+2140	Selecciona «Revisión diaria»
+2141	Ya sabes leerlo
+2142	En vertical es un árbol con sangría
+2143	Desplázate
+2144	Desplazar la lista
+2145	Toca una fila
+2146	Cómo leer una fila
+2147	El tiempo va de izquierda a derecha, lo más reciente a la derecha. Cada línea es una sesión, agrupada en franjas por proyecto.
+2148	Los círculos de una línea son estaciones; luego las vemos. Un punto azul que late es una sesión en marcha.
+2149	Mantén pulsado y arrastra el mapa en cualquier dirección; al soltar sigue deslizándose un poco.
+2150	Las fechas solo se mueven en horizontal y los proyectos solo en vertical, así nunca te pierdes.
+2151	Pellizca o separa dos dedos para ampliar solo el eje del tiempo; las líneas no engordan.
+2152	Con ratón, mantén Ctrl y usa la rueda.
+2153	Toca dos veces un hueco vacío, o «Volver a ahora» arriba a la derecha, para regresar al borde derecho con el zoom normal.
+2154	Toca la línea «Refactorizar la pasarela». Se ilumina su familia —lo que se bifurcó, se unió o la retomó— y el resto se atenúa.
+2155	Abajo a la derecha aparece una tarjeta con su origen y cada capítulo.
+2156	Cada vez que una sesión se compacta termina un capítulo y se dibuja una estación. Sobre la línea elegida ves el título de cada capítulo.
+2157	El «a1b2·3» delante de cada capítulo es su número de archivo: 4 primeros caracteres de la sesión · capítulo. Basta con decirlo.
+2158	Prueba a tocar cualquier estación.
+2159	Una línea que sale de otra a mitad es una bifurcación; la que gira justo en el cruce es un retroceso (volver a un punto y rehacer).
+2160	Una flecha que entra es una unión: la sesión nueva tomó material de varias líneas. Una línea punteada fina es un antiguo «lee la otra sesión y continúa».
+2161	Toca «Unir los dos enfoques» para ver de dónde viene.
+2162	Una línea discontinua con puntos es una tarea programada; cada punto es una ejecución.
+2163	Una línea gris discontinua es una sesión en la papelera; selecciónala para restaurarla desde la tarjeta. Las sesiones varias (probar un modelo, saludar) y las de una sola pregunta están ocultas hasta activar «Mostrar varios».
+2164	Toca «Revisión diaria».
+2165	Un título gris indica que el capítulo aún no tiene título archivado; su primera pregunta ocupa su lugar. «Completar títulos» los rellena todos de una vez.
+2166	A partir de ahora la IA titula sola las sesiones nuevas, un capítulo por compactación.
+2167	Una sesión por fila, la más reciente arriba. Lo que se bifurca o se une va sangrado bajo su origen.
+2168	Gira la tableta en horizontal para ver el mapa de metro completo.
+2169	En vertical solo se desplaza arriba y abajo, sin chocar con otros gestos.
+2170	En tu linaje real, tocar una fila muestra los capítulos de esa sesión; toca uno para ir a su inicio.
+2171	Prueba a tocar «Refactorizar la pasarela».
+2172	«a1b2·4» es el número de archivo: 4 primeros caracteres de la sesión · capítulo. Luego vienen las fechas y el número de capítulos.
+2173	Tras «←» aparece de dónde se retomó o unió. Un título gris aún no está archivado; su primera pregunta ocupa su lugar.
+2174	Un círculo discontinuo es una tarea programada, seguida de cuántas veces se ejecutó. Las sesiones en la papelera aparecen en gris.
+2175	Las sesiones varias (probar un modelo, saludar) y las de una sola pregunta están ocultas hasta activar «Mostrar varios».
+2176	«Completar títulos» en la barra titula de una vez los capítulos antiguos sin título. A partir de ahora la IA titula sola las sesiones nuevas, un capítulo por compactación.
+2177	¿Primera vez? Toca «Cómo leerlo» arriba a la derecha: dos minutos para aprender
+2178	Cómo leerlo
+2179	Animaciones de la interfaz
+2180	Entrada y salida de la barra lateral, menús y páginas, y avisos de finalización. Si sigue al sistema, se desactivan cuando «Reducir movimiento» está activo
+2181	Herram. de desarrollo
+2182	Elegir elemento
+2183	Toca cualquier parte de la página para añadirla al mensaje
+2184	Añadido al mensaje: ahora di qué cambiar
+2185	{sel} en {path}:
+2186	Iniciar sesión
+2187	Tamaño del registro local
+2188	Tamaño del archivo de registro de esta conversación en el dispositivo, incluidos mensajes y llamadas a herramientas. No es la longitud de contexto actual del modelo, ni el uso de tokens ni el coste. El registro original se conserva tras compactar el contexto, así que sigue creciendo.
+2189	Marcador
+2190	Marcador quitado
+2191	Marcador añadido
+2192	Esta conversación aún no se ha guardado. Añade el marcador cuando termine la primera respuesta.
+2193	Esta conversación ya tiene {n} marcadores. Borra algunos primero.
+2194	No se encontró este mensaje en el registro de la conversación. Inténtalo de nuevo en un momento.
+2195	No se encontró la posición del marcador. Se abrió en el último mensaje.
+2196	Aún no hay marcadores. Toca el botón de marcador bajo una pregunta o respuesta para marcar ese punto.
+2197	Pregunta
+2198	Respuesta
+2199	(Sin título)

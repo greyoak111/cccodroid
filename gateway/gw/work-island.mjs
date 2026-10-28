@@ -18,25 +18,27 @@ import { createWorkIsland } from "./work-island-core.mjs";
 const PKG = process.env.WORK_ISLAND_PKG || "com.dafeiyu.workisland";
 const SVC = PKG + "/.IslandService";
 
-function amArgs(action, title, text, since) {
+function amArgs(action, title, text, since, state) {
   const a = ["start-foreground-service", "--user", "0", "-n", SVC, "-a", PKG + "." + action];
   if (title) a.push("--es", "title", title);
   if (text) a.push("--es", "text", text);
+  if (state) a.push("--es", "state", state);
   if (since) a.push("--el", "since", String(since));
   return a;
 }
 
 let warned = false;
-function amSend(action, title, text, since) {
-  execFile("am", amArgs(action, title, text, since), { timeout: 8000 }, (e, out, err) => {
+function amSend(action, title, text, since, state) {
+  // 用绝对路径：PATH 里的包装脚本在部分环境会返回非零，实际却已经送达。
+  execFile("/system/bin/am", amArgs(action, title, text, since, state), { timeout: 8000 }, (e, out, err) => {
     if (!e || warned) return;
     warned = true;
     log(`[work-island] am 失败（应用没装或服务未就绪？后面不再重复）：${e.message} ${String(err || "").slice(0, 120)}`);
   });
 }
-function amSendSync(action, title, text, since) {
+function amSendSync(action, title, text, since, state) {
   try {
-    execFileSync("am", amArgs(action, title, text, since), { timeout: 3000, stdio: "ignore" });
+    execFileSync("/system/bin/am", amArgs(action, title, text, since, state), { timeout: 3000, stdio: "ignore" });
   } catch {}
 }
 
@@ -53,9 +55,18 @@ function detectApp(cb) {
   if (process.env.CCAPP_WORK_ISLAND === "1") return cb(true);
   if (process.env.CCAPP_WORK_ISLAND === "0") return cb(false);
   // pm 默认按“当前用户”查；应用 uid 会撞 INTERACT_ACROSS_USERS（asks to run as user 10），
-  // 必须显式 --user 0。包可见性由 AndroidManifest 的 <queries> 解决。
-  execFile("pm", ["list", "packages", "--user", "0", PKG], { timeout: 3000 }, (e, out) => {
-    cb(!e && String(out).includes("package:" + PKG));
+  // 必须显式 --user 0。但 Android 16 上包可见性会把 pm list 裁成「只剩自己」，
+  // 列不出来不等于没装——再用 am 探一次服务（显式组件不受 list 过滤影响）。
+  const probe = () => execFile("/system/bin/am",
+    ["start-foreground-service", "--user", "0", "-n", SVC, "-a", PKG + ".IDLE"],
+    { timeout: 4000 }, (e2, out2, err2) => {
+      const msg = String(err2 || "");
+      // 只有明确的「找不到」才算没装；超时/权限之类的错误当作装了，交给后续 am 重试。
+      cb(!(e2 && /not found|does not exist|does not have|unable to find/i.test(msg)));
+    });
+  execFile("/system/bin/pm", ["list", "packages", "--user", "0", PKG], { timeout: 3000 }, (e, out) => {
+    if (!e && String(out).includes("package:" + PKG)) return cb(true);
+    probe();
   });
 }
 

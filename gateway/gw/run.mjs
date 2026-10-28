@@ -14,9 +14,13 @@ import { handleLocalCommand } from "./modelcmd.mjs";
 import { LL, ensureLlama, localCustomActive } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt } from "./usage.mjs";
 import { PREVIEW_HINT, TASKS_HINT, contextWindowOf, promptTokens, toolsHint, translate } from "./stream.mjs";
+import { archiveHint } from "./archive.mjs";
 import { findSessionFile, peekSession } from "./sessions.mjs";
 import { projectById, projectDefaults, projectOfDir } from "./projects.mjs";
 import { sessModel, sessProvider, setSessModel } from "./sessmodel.mjs";
+
+// 必须由人回答的工具：全部放行也照问（问题、计划审批）
+const HUMAN_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 /** 这一轮在哪个目录跑：显式指定 → 接着的会话当初的 cwd（--resume 只在同一 cwd 下找得到）→ 项目目录 → 工作区 */
 const isDirSync = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
@@ -141,6 +145,9 @@ export async function startRun(item) {
     "--verbose",
     "--include-partial-messages",
     "--permission-mode", permMode,
+    // 只是让「全部放行」可选、不默认打开：不带它，跑到一半切到全部放行会被 claude 拒绝（bypass_not_launched），
+    // 界面却显示已切换 —— 群友反馈「一直全部放行还要授权」的原因之一（2.1.308 实测）
+    "--allow-dangerously-skip-permissions",
     // 要确认的工具调用走 stdout 的 control_request(can_use_tool) 来问我们，前端出卡片，用户点了再回 stdin。
     // 不加这个，-p 模式下 claude 不问，直接按拒绝处理（实测：工具结果 "…needs approval"）
     "--permission-prompt-tool", "stdio",
@@ -161,7 +168,9 @@ export async function startRun(item) {
   // 端侧只补一句身份（--bare 的提示自称 Claude，小模型会照着说），几十 token，不拖慢首字
   const localHint = !P.local ? "" : lcust && lcust.systemPrompt ? lcust.systemPrompt
     : `You are ${model}, a small open model running locally on the user's Android device through llama.cpp (not Claude). Reply in the user's language; keep answers short.`;
-  const appendPrompt = [P.local ? localHint : toolsHint(), !P.nativeModels && !P.local ? TASKS_HINT : "", P.local ? "" : PREVIEW_HINT, SETTINGS.appendSystemPrompt].filter(Boolean).join("\n\n");
+  // 建档（脉络）：常驻规则 + 这一轮该不该先建档（见 archive.mjs）
+  const arch = P.local ? null : await archiveHint(run.sessionId).catch(() => null);
+  const appendPrompt = [P.local ? localHint : toolsHint(), !P.nativeModels && !P.local ? TASKS_HINT : "", P.local ? "" : PREVIEW_HINT, arch?.rule, SETTINGS.appendSystemPrompt].filter(Boolean).join("\n\n");
   if (appendPrompt) argv.push("--append-system-prompt", appendPrompt);
   // claude 没有 --output-style 参数（传了直接 unknown option，整条消息失败）；它是 settings 里的 outputStyle。
   // 密钥读取器也在这里（见 settingsArgs）
@@ -186,15 +195,17 @@ export async function startRun(item) {
   const [cmd0, args0] = claudeCmd(argv);
   const child = spawn(cmd0, args0, {
     cwd,
-    env: claudeEnv({ model, provider: P }),
+    // CCAPP_RUN_ID / CCAPP_GW_PORT：建档命令 cc-archive 靠它们告诉网关「这是哪一轮」
+    env: { ...claudeEnv({ model, provider: P }), CCAPP_RUN_ID: String(run.id), CCAPP_GW_PORT: String(CFG.port) },
     stdio: ["pipe", "pipe", "pipe"],
     detached: true,            // 当进程组长，中断时好整组带走（见 killTree）
   });
   run.child = child;
   if (item.timeoutMs > 0) run.limitTimer = setTimeout(() => { run.timedOut = true; log(`⏱ 超过时长上限 ${Math.round(item.timeoutMs / 60000)} 分钟，停止`); abortRun(run); }, item.timeoutMs);
   child.stdin.on("error", () => {});
-  const writeUser = (text) => child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content: text } }) + "\n");
-  writeUser(message);
+  const writeUser = (content) => child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n");
+  // 该建档时，提醒作为本轮消息的第二段跟进去：读用户消息的地方只认第一段、或跳过 <…> 开头的段，历史 / 搜索 / 分叉比对都看不见它。斜杠命令不带（包成两段 claude 就不认它是命令了）
+  writeUser(arch?.note && !message.trim().startsWith("/") ? [{ type: "text", text: message }, { type: "text", text: `<system-reminder>\n${arch.note}\n</system-reminder>` }] : message);
   run.inputOpen = true;
   run.pendingInject = [];      // 已写进 stdin、还没被 claude 吃进去的插话
   run.bgTasks = 0;             // claude 报的后台任务数（见 feed）
@@ -216,7 +227,8 @@ export async function startRun(item) {
   run.perms = new Map();
   const writeCtl = (o) => { try { child.stdin.write(JSON.stringify(o) + "\n"); return true; } catch { return false; } };
   let ctlN = 0;
-  run.setMode = (mode) => run.inputOpen && writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "set_permission_mode", mode } });
+  run.permMode = permMode;
+  run.setMode = (mode) => { run.permMode = mode; return run.inputOpen && writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "set_permission_mode", mode } }); };
   // 停掉一个后台任务（stop_task 控制请求；claude 停完会再报一次 background_tasks_changed）
   run.stopTask = (taskId) => run.inputOpen && run.bgList.some((t) => t.id === taskId) &&
     writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "stop_task", task_id: taskId } });
@@ -261,6 +273,12 @@ export async function startRun(item) {
         (run.denied = run.denied || []).push(p.tool);
         writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: { behavior: "deny",
           message: "This is an unattended scheduled run: nobody can approve this action, so it is denied. Do not retry it; finish with what you can do and say what was blocked." } } });
+        return;
+      }
+      // 全部放行时 claude 不该再来问；来了（子代理没继承到模式之类）就直接放行，必须由人回答的（AskUserQuestion 等）照问
+      if (run.permMode === "bypassPermissions" && !p.interactive && !HUMAN_TOOLS.has(p.tool)) {
+        log(`✓ 全部放行，自动允许 ${p.tool}${p.agentId ? "（子代理）" : ""} ${String(p.input.command || p.input.file_path || p.input.url || "").slice(0, 60)}`);
+        writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: { behavior: "allow", updatedInput: p.input } } });
         return;
       }
       run.perms.set(id, p);
@@ -330,7 +348,8 @@ export async function startRun(item) {
     if (ev.type === "control_request") return onControl(ev);
     // 清单工具一出结果就推，不等 4 秒轮询
     if (ev.type === "user" && ev.tool_use_result && (ev.tool_use_result.task || ev.tool_use_result.statusChange || ev.tool_use_result.updatedFields)) setImmediate(() => tasksCheck(run.sessionId));
-    if (ev.type === "control_response") return;          // 我们发的 set_permission_mode 的回执
+    // 我们发的 set_permission_mode 的回执：被拒要记下来（以前直接丢掉，切了没生效也看不出来）
+    if (ev.type === "control_response") { if (ev.response && ev.response.subtype === "error") log(`⚠️ claude 拒绝了控制请求：${String(ev.response.error || ev.response.error_code || "").slice(0, 160)}`); return; }
     if (ev.type === "assistant" && Array.isArray(ev.message && ev.message.content)) {
       let n = 0;
       for (const c of ev.message.content) if (c && c.type === "tool_use" && c.id && !run.usageTools.has(c.id)) { run.usageTools.add(c.id); n++; }

@@ -1098,11 +1098,9 @@ html:not(.ws-multi) #browser{padding-top:var(--safe-tp)}
   #fs-body{flex-direction:column}
   #fs-body .fs-preview{flex:0 0 auto;max-height:46vh}
 }
-/* 手机横屏：矮，不加栏，只压缩顶栏和输入区 */
+/* 手机横屏（矮）：只压缩顶栏和输入区的内边距，不藏东西；栏数照平板来（layout.js 的 land） */
 html.short #topbar{padding-top:var(--safe-tt);padding-bottom:2px}
 html.short #composer{padding-top:5px;padding-bottom:calc(var(--safe-b) + 5px)}
-html.short #hint-row:not(:has(#draft-chip:not(.hidden))){display:none}
-html.short #hint-row > :not(#draft-chip){display:none}
 /* 侧栏变窄（常驻左栏 / 小手机）时：标签和按钮别把字挤成竖排，放不下就换行 */
 .tab,.row-actions .btn{white-space:nowrap}
 .row-actions{flex-wrap:wrap}
@@ -2046,6 +2044,11 @@ body{line-height:1.6}
 html.dock-l .drawer-panel,.drawer-panel{padding:var(--safe-tt) 8px 0}
 .side-head{padding:0 2px 6px;gap:6px}
 .side-brand{padding-inline-start:6px}
+/* 常驻侧栏的标题行和主顶栏共用一条中线（#31）：标题行内容高 = 顶栏边框盒（--tbh，随字号 / 两行标题实测）减去上内边距、下内边距 2、底边 1。
+   两边上内边距都是 --safe-tt，内容各自居中，中线就重合。手机横屏顶栏没有下内边距、侧栏上内边距是 2px（不是 --safe-tt），
+   中线 = safe-tt + (tbh - safe-tt - 1)/2 = 2 + 高/2，解出 高 = tbh + safe-tt - 5 */
+html.dock-l .side-head{box-sizing:content-box;height:calc(var(--tbh,44px) - var(--safe-tt) - 3px)}
+html.dock-l.land .side-head{height:calc(var(--tbh,40px) + var(--safe-tt) - 5px)}
 .side-new{margin:4px 0 6px;padding:9px 12px;border-radius:12px;font-size:15px;font-weight:600}
 .side-nav{gap:0;padding:2px 0 0}
 .nav-item{padding:8px 12px;border-radius:10px;font-size:15px;gap:12px}
@@ -2053,6 +2056,12 @@ html.dock-l .drawer-panel,.drawer-panel{padding:var(--safe-tt) 8px 0}
 html.dock-l .side-recent,.side-recent{margin:0 -8px;padding:6px 8px 8px}
 .side-recent h4,.side-recent h4:first-child{margin:10px 12px 4px;font-size:12px;letter-spacing:0}
 html.dock-l .side-acct,.side-acct{margin:8px -8px 0;padding:16px 16px calc(var(--safe-b) + 16px);line-height:1.3}
+/* 标题和「新对话」钉在上、账户行钉在下，中间导航 + 最近对话是一个滚动区（#24：全勾上常驻项、展开「更多」在矮屏上放得下也划得到）。
+   滚动条贴边：外扩 8px 再用内边距收回来；只有滚动过才在「新对话」底下显一道细线，平时和原来一样干净 */
+.side-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;margin:0 -8px;padding:0 8px;
+  border-top:1px solid transparent;transition:border-color .15s}
+.side-scroll.scrolled{border-top-color:var(--line)}
+#side-scroll>.side-recent{flex:none;min-height:0;overflow:visible;margin:0;padding:6px 0 8px}
 /* 输入区：发送键 34、标签 12px */
 #btn-send{width:34px;height:34px;flex:0 0 34px}
 #hint-row .chip,#perm-chip,#draft-chip{font-size:12px;line-height:1.6}
@@ -2132,6 +2141,10 @@ html.dock-l .side-acct,.side-acct{margin:8px -8px 0;padding:16px 16px calc(var(-
 #tab-settings.set-list .set-cats .chev{width:18px;height:18px;color:var(--fg)}
 /* 横屏设置卡片：宽 800、高按黄金比例（宽 ÷ 1.618），矮屏时上下各让出状态栏 + 16 */
 #set-ov:not(.narrow) .set-sheet{width:min(800px,calc(100vw - 64px));height:auto;aspect-ratio:1.618;max-height:calc(100vh - 2 * (var(--safe-t) + 16px))}
+/* 手机横屏：宽屏设置铺满整屏（不是压成一条的卡片），左分类右内容照旧 */
+html.short #set-ov:not(.narrow){background:var(--bg);align-items:stretch;justify-content:stretch}
+html.short #set-ov:not(.narrow) .set-sheet{width:100%;height:100%;aspect-ratio:auto;max-height:none;border-radius:0;box-shadow:none;padding-top:var(--safe-tt)}
+html.short .pj-ov:not(.narrow) .pj-sheet{max-height:calc(100vh - 2 * (var(--safe-t) + 6px))}
 /* 自绘下拉菜单（替代系统选择器）：跟主题走，当前项打勾、强调色 */
 .sel-menu{overflow-y:auto;overscroll-behavior:contain;max-width:min(420px,calc(100vw - 16px));scrollbar-width:thin}
 .sel-menu button{padding:9px 10px}
@@ -2417,10 +2430,11 @@ textarea.pj-field{min-height:89px;resize:vertical;line-height:1.618}
 /* 月报卡片下面的「保存图片 / 分享」别贴着卡片 */
 #us-actions{margin-top:var(--g4)}
 #us-actions > .row-actions{margin-bottom:var(--g3)}
-/* 交界处的圆角（细微）：常驻侧栏的底色在会话区上下两角各包进一个 g3 的内凹圆角，侧栏竖线顺势弯过去，
+/* 交界处的圆角（细微）：角片要压在面板上面（z-index），否则面板那条直竖线穿过角片一直通到顶，和弧线叉成 Y 形（群友 10-27 挑的刺）。
+   常驻侧栏的底色在会话区上下两角各包进一个 g3 的内凹圆角，侧栏竖线顺势弯过去，
    会话区（以及开在它上面的设置等页面）就像嵌在侧栏旁的一张圆角卡片。挂在 #drawer 上，侧栏收起时自然消失 */
 html.dock-l #drawer::before,html.dock-l #drawer::after{
-  content:"";position:absolute;inset-inline-start:calc(100% - 1px);width:var(--g3);height:var(--g3);pointer-events:none;
+  content:"";position:absolute;inset-inline-start:calc(100% - 1px);width:var(--g3);height:var(--g3);pointer-events:none;z-index:1;
   --cc-fil:transparent calc(var(--g3) - 1.5px),var(--line) calc(var(--g3) - 1px),var(--line) calc(var(--g3) - .5px),var(--bg2) var(--g3);
 }
 html.dock-l #drawer::before{top:0;background:radial-gradient(circle at 100% 100%,var(--cc-fil))}
@@ -2464,7 +2478,8 @@ html:not(.dock-l) .drawer-panel{border-start-end-radius:var(--g4);border-end-end
   --font-read:var(--font-serif);
   --fs-chat:14.5px;
 }
-html[data-uifont="system"]{--font-ui:sans-serif;--font-sans:sans-serif}
+/* 跟随系统：界面字体换成系统的；等宽处的中文也别再点名 Noto，交给系统字体兜底（厂商字体主题才盖得到工具卡、数字旁的中文） */
+html[data-uifont="system"]{--font-ui:sans-serif;--font-sans:sans-serif;--mono:"CC Mono",ui-monospace,"Droid Sans Mono",monospace}
 html[data-readfont="sans"]{--font-read:var(--font-ui)}
 html[data-fs="s"]{--fs-chat:13.5px}
 html[data-fs="l"]{--fs-chat:16px}
@@ -2487,10 +2502,13 @@ html:not([data-readfont="sans"]) .msg.bot .bubble :is(h1,h2,h3,h4,strong){font-w
    上：问候语沉到会话区底部；中：输入框；下：示例与使用提示。上下两块按 φ : 1 分剩余高度，
    输入框落在屏幕中线略偏下，和网页版一个位置 */
 #wl-below{display:none}
-html.wel #chat{display:flex;flex-direction:column;justify-content:flex-end;flex:1.618 1 0;min-height:0}
+html.wel #chat{display:flex;flex-direction:column;justify-content:flex-start;flex:1.618 1 0;min-height:0}
+/* 沉底靠 #hist 的 margin-top:auto（第一个子元素 #older 平时是 display:none，挂它身上不生效），不用 justify-content:flex-end —— 后者内容一高就把顶上那截顶出滚动区，滚不回去（手机横屏首屏标题被吃掉） */
+html.wel #hist{margin-top:auto}
 html.wel #composer{border-top-color:transparent;background:none;position:static}
 html.wel #wl-below{display:block;flex:1 1 0;min-height:0;overflow:auto;padding:var(--g3) 12px calc(var(--safe-b) + var(--g4))}
 html.wel .msg.welcome{width:100%;margin-bottom:var(--g4)}
+.msg.welcome.wl-kept,.msg.welcome.wl-kept .wl-mark path,.msg.welcome.wl-kept .wl-mark circle{animation:none!important}.msg.welcome.wl-kept .wl-mark path{stroke-dashoffset:0;opacity:1}.msg.welcome.wl-kept .wl-mark circle{opacity:1}
 html.wel .msg.welcome .who,html.wel .msg.welcome + .msg-acts,html.wel .msg.welcome .msg-acts{display:none}
 .wl-hero{display:flex;align-items:center;justify-content:center;gap:var(--g3);text-align:center;flex-wrap:wrap}
 .wl-mark{width:52px;height:52px;flex:none;fill:none;stroke:var(--fg);stroke-width:2.6;stroke-linecap:round}
@@ -2500,7 +2518,7 @@ html.wel .msg.welcome .who,html.wel .msg.welcome + .msg-acts,html.wel .msg.welco
 .wl-mark path:nth-of-type(2){animation-delay:.12s}.wl-mark path:nth-of-type(3){animation-delay:.24s}
 @keyframes wl-draw{0%{stroke-dashoffset:1;opacity:0}1%{opacity:1}to{stroke-dashoffset:0;opacity:1}}@keyframes wl-dot{to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.wl-mark path,.wl-mark circle{animation:none;stroke-dashoffset:0;opacity:1}}
-.wl-greet{margin:0;font-family:var(--font-serif);font-weight:400;font-size:clamp(19px,4.2cqi,31px);line-height:1.3;letter-spacing:.01em;color:var(--fg)}
+.wl-greet{margin:0;font-family:var(--font-read);font-weight:400;font-size:clamp(19px,4.2cqi,31px);line-height:1.3;letter-spacing:.01em;color:var(--fg)}
 html.wel .msg.welcome .setup-guide{text-align:start;margin-top:var(--g4)}
 /* 首屏的输入框更舒展：两行高，像一张卡片 */
 html.wel #composer-inner{border-radius:20px;padding:var(--g2) var(--g2) var(--g2) var(--g3);box-shadow:0 2px 14px var(--shadow)}
@@ -2518,9 +2536,10 @@ html.wel #hint-row #model-chip::before{display:none !important}
 .wl-chip:hover,.wl-chip:active{background:var(--bg2);color:var(--fg);border-color:var(--accent-dim)}
 .wl-chip svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 .wl-tips{color:var(--fg3)}
-/* 手机横屏太矮：不居中，照常贴底 */
-html.short.wel #chat{flex:1 1 auto}
-html.short.wel #wl-below{display:none}
+/* 矮窗口（分屏半屏之类）：不居中，照常贴底；手机横屏（land）照平板，问候 + 输入框落在中线略偏下 */
+html.short:not(.land).wel #chat{flex:1 1 auto}
+html.short:not(.land).wel #wl-below{display:none}
+html.land.wel #wl-below{padding-top:var(--g2)}
 html .msg.welcome.bot .bubble h1.wl-greet{font-size:clamp(19px,4.2cqi,31px);margin:0;font-weight:400;line-height:1.3}
 /* 首屏输入框：第一行整行写字，第二行左边 ＋、右边发送（同网页版） */
 html.wel #composer-inner{flex-wrap:wrap;align-items:center;row-gap:2px}
@@ -2627,3 +2646,297 @@ html[data-skin="zhuyue"][data-theme="light"] #pages{background:var(--bg2)}
 html[data-skin="zhuyue"] .bubble ol > li::marker{color:var(--zy-blue);font-weight:600}
 html[data-skin="zhuyue"] .sel-menu button.on{color:var(--fg)}
 html[data-skin="zhuyue"] .sel-menu button.on svg{color:var(--zy-blue)}
+
+/* 脉络 · 建档：只多几处灰色小字，不加颜色和图标按钮 */
+#tab-sessions .srow-sess .it-meta .no{color:var(--fg2)}
+.sess-grp .grp-act{margin-inline-start:auto;border:0;background:none;color:var(--fg3);font:inherit;font-size:11.5px;padding:2px 0;cursor:pointer}
+.sess-grp .grp-act:hover{color:var(--err)}
+.pop-menu .pm-no{font-size:12.5px;font-style:normal;font-variant-numeric:tabular-nums;color:var(--fg3);flex:none;min-width:48px}
+.pop-menu button.cur span{font-weight:500}
+.pop-menu button.dim{opacity:.45;cursor:default}
+.pop-menu button.dim:hover{background:none}
+.pop-menu .pm-head.pm-link{cursor:pointer;border-radius:9px;padding-top:6px;padding-bottom:6px}
+.pop-menu .pm-head.pm-link:hover{background:var(--bg2);color:var(--fg2)}
+.pop-menu.lineage{min-width:280px}
+.pop-menu.lineage button span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ── 脉络页（照稿 lineage-draft/lineage.html；地图本体 web/lineage/map.js，教程页共用）──────────────
+   手势规则见规划书 §11.5：整页不滚，地图是唯一自由滚的；项目条只横滚，卡片章节只竖滚 */
+html.pg-lineage #page-body{overflow:hidden;padding:0}
+#page-body > #tab-lineage{max-width:none;height:100%;display:flex;flex-direction:column}
+.lin-tools{display:flex;align-items:center;gap:10px;padding:8px 16px;flex:none}
+/* 项目切换条：项目一多就溢出，自己横滚（规则 9）；只吃横向手势、滚到头不外传，右缘渐隐提示还有 */
+.lin-tools .seg-scroll{flex:0 1 auto;min-width:0;overflow-x:auto;touch-action:pan-x;overscroll-behavior-x:contain;scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 20px),transparent)}
+.lin-tools .seg-scroll::-webkit-scrollbar{display:none}
+.lin-tools .seg{white-space:nowrap;margin-inline-end:16px}
+.lin-misc{flex:none;margin-inline-start:auto;display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg3);white-space:nowrap}
+.lin-state{flex:1;display:grid;place-items:center;color:var(--fg3);font-size:13px;padding:24px;text-align:center}
+.lin-state.hidden{display:none}
+#lin-map{flex:1;min-height:0}
+.lmap{position:relative;--lm-track:#4a4a4a;--lm-grid:#1c1c1c;--lm-blue:var(--zy-blue,var(--accent))}
+html[data-theme="light"] .lmap{--lm-track:#c4c4c4;--lm-grid:#f4f4f4}
+.lmap .lm-canvas{position:absolute;inset:0;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.lmap.tree .lm-canvas{display:none}
+.lmap svg{display:block}
+.lm-main,.lm-axis,.lm-band{position:absolute;left:0;top:0;will-change:transform}
+.lm-axis{height:30px;background:var(--bg);z-index:2;pointer-events:none}
+.lm-axis::after{content:"";position:absolute;left:0;right:0;bottom:-8px;height:8px;background:linear-gradient(var(--bg),transparent)}
+.lm-band{width:120px;z-index:1;pointer-events:none}
+.lm-band div{position:absolute;left:0;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 22px 2px 16px;font:600 11px var(--font-ui);color:var(--fg3);letter-spacing:.4px;background:linear-gradient(90deg,var(--bg) 70%,transparent)}
+.lm-now{position:absolute;left:16px;bottom:16px;z-index:3;display:none;font:inherit;font-size:12.5px;padding:6px 12px;border-radius:16px;border:1px solid var(--line);background:var(--bg);color:var(--fg2);box-shadow:0 4px 14px var(--shadow)}
+.lm-now.show{display:block}
+.lmap .lm-grid{stroke:var(--lm-grid);stroke-width:1}
+.lmap .lm-brk{stroke:var(--line);stroke-dasharray:2 4}
+.lmap .lm-sep{stroke:var(--line)}
+.lmap .lm-nowline{stroke:var(--lm-blue);stroke-width:1;opacity:.55}
+.lmap .lm-run{fill:var(--lm-blue)}
+.lmap .t-title{font:500 12.5px var(--font-ui);fill:var(--fg2);paint-order:stroke;stroke:var(--bg);stroke-width:5px;stroke-linejoin:round}
+.lmap .t-title.ghost{fill:var(--fg3);font-weight:400}
+.lmap .t-title.t-ch{font-size:12px;font-weight:400}
+.lmap .t-title.t-ch.cur{fill:var(--fg);font-weight:600}
+.lmap .t-title.t-ch.ghost{fill:var(--fg3)}
+.lmap .t-axis{font:11px var(--mono);fill:var(--fg3);stroke:none}
+.lmap .t-now{font:10.5px var(--mono);fill:var(--lm-blue)}
+.lmap .dim{opacity:.22;transition:opacity .2s}
+/* 选中后的卡片：.pop-menu 的材质；章节多了在卡片里竖滚，滚到头不带动地图 */
+.lm-card{position:absolute;right:16px;bottom:16px;z-index:4}
+.lm-cardbox{width:330px;max-width:calc(100vw - 48px);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 32px var(--shadow);padding:14px 14px 12px}
+.lm-cardbox h3{margin:0;font-size:15px;font-weight:500;line-height:1.4}
+.lm-cardbox h3.ghost{color:var(--fg2);font-weight:400}
+.lm-cardbox .meta{margin-top:4px;font:12px/1.4 var(--font-ui);color:var(--fg3);display:flex;gap:10px;flex-wrap:wrap}
+.lm-cardbox .meta .no{color:var(--fg2)}
+.lm-cardbox .src{margin-top:8px;font-size:12px;color:var(--fg3)}
+.lm-cardbox .src b{color:var(--fg2);font-weight:400}
+.lm-cardbox ol{list-style:none;margin:10px 0 0;padding:8px 0 0;border-top:1px solid var(--line);max-height:168px;overflow-y:auto;overscroll-behavior:contain}
+.lm-cardbox li{display:flex;gap:10px;align-items:baseline;padding:4px 0;font-size:13.5px;cursor:pointer}
+.lm-cardbox li i{font-style:normal;font-size:12px;color:var(--fg3);min-width:48px;font-variant-numeric:tabular-nums}
+.lm-cardbox li span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lm-cardbox li small{font-size:12px;color:var(--fg3);white-space:nowrap}
+.lm-cardbox li.cur span{font-weight:500}
+.lm-cardbox li.ghost span{color:var(--fg3)}
+.lm-cardbox .acts{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.lm-cardbox .acts button{font:inherit;font-size:13px;border-radius:9px;padding:7px 12px;border:1px solid var(--line);background:none;color:var(--fg2)}
+.lm-cardbox .acts button.pri{background:var(--fg);color:var(--bg);border-color:var(--fg);font-weight:600}
+.lm-cardbox .acts button.off{opacity:.45}
+/* 手机：缩进树，行样式同会话页；只竖滚 */
+.lm-tree{display:none}
+.lmap.tree .lm-tree{display:block;position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;padding:0 0 calc(var(--safe-b, 0px) + 16px)}
+.lm-grp{font-size:11px;color:var(--fg3);margin:8px 16px 0;padding:6px 0}
+.lm-trow{position:relative;display:flex;align-items:center;min-height:58px;padding:9px 12px 9px 0;cursor:pointer}
+.lm-trow .gut{flex:none;position:relative;align-self:stretch}
+.lm-trow .gut svg{position:absolute;left:0;top:0;overflow:visible}
+.lm-trow .main{flex:1;min-width:0}
+.lm-trow .tt{font-size:14.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lm-trow .mm{margin-top:3px;font:12px/1.4 var(--font-ui);color:var(--fg3);display:flex;gap:10px;flex-wrap:wrap}
+.lm-trow .mm .no{color:var(--fg2)}
+.lm-trow.ghost .tt{color:var(--fg3);font-weight:400}
+.lm-trow.sel{background:var(--bg3)}
+.lm-empty{padding:40px 16px;text-align:center;color:var(--fg3);font-size:13px}
+/* 会话里压缩处的章节分隔（脉络里点站 / 章标题落在这里） */
+.ch-sep{max-width:900px;margin:22px auto 18px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg3);line-height:1.4;border-radius:6px}
+.ch-sep::before,.ch-sep::after{content:"";flex:1 1 24px;min-width:16px;height:1px;background:var(--line)}
+.ch-sep .ch-n{color:var(--zy-blue,var(--accent));white-space:nowrap}
+.ch-sep .ch-t{color:var(--fg2);min-width:0;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-sep .ch-t.ghost{color:var(--fg3)}
+.ch-sep .ch-no{font-family:var(--mono);font-size:11px;white-space:nowrap}
+.ch-sep.hit-flash{animation:chflash 2.4s ease-out}
+@keyframes chflash{0%,30%{background:var(--bg3)}100%{background:transparent}}
+.lmap .lm-st{cursor:pointer}
+/* 脉络页工具栏右侧的小钮：「怎么看」「补档」；跑的时候蓝字，没看过教程时「怎么看」带个蓝点 */
+.lin-tools .lin-chip{flex:none;white-space:nowrap;background:none;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--fg2);cursor:pointer;position:relative}
+.lin-tools .lin-chip.on{color:var(--zy-blue,var(--accent));border-color:currentColor}
+.lin-tools .lin-chip:active{background:var(--bg3)}
+.lin-tools .lin-how{margin-inline-start:auto}
+.lin-tools .lin-how ~ .lin-misc{margin-inline-start:0}
+.lin-tools .lin-how.new::after{content:"";position:absolute;top:-2px;inset-inline-end:-2px;width:7px;height:7px;border-radius:50%;background:var(--zy-blue,var(--accent))}
+/* 脉络导览：盖在脉络页上，同一份 map.js 画假数据；步骤卡片横屏在左下、竖屏贴底 */
+#tab-lineage{position:relative}
+.lin-tour{position:absolute;inset:0;z-index:6;background:var(--bg);display:flex;flex-direction:column}
+.lin-tour.hidden{display:none}
+#lt-map{flex:1;min-height:0}
+.lt-panel{position:absolute;inset-inline-start:16px;bottom:calc(var(--safe-b, 0px) + 16px);width:min(360px,calc(100% - 32px));background:var(--bg2);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px 12px;z-index:7}
+.lin-tour.tree .lt-panel{inset-inline:0;bottom:0;width:auto;border-radius:12px 12px 0 0;border-width:1px 0 0;padding-bottom:calc(var(--safe-b, 0px) + 12px)}
+.lin-tour.tree #lt-map .lm-tree{padding-bottom:240px}
+.lt-panel .lt-step{font-size:11.5px;color:var(--fg3);display:flex;align-items:center;gap:8px}
+.lt-panel .lt-dots{display:flex;gap:4px}
+.lt-panel .lt-dots i{width:5px;height:5px;border-radius:50%;background:var(--line)}
+.lt-panel .lt-dots i.on{background:var(--zy-blue,var(--accent))}
+.lt-panel .lt-x{margin-inline-start:auto;background:none;border:0;color:var(--fg3);font-size:12px;cursor:pointer;padding:2px 4px}
+.lt-panel h4{margin:8px 0 6px;font-size:15px;font-weight:600;color:var(--fg)}
+.lt-panel p{margin:0 0 6px;font-size:13px;line-height:1.6;color:var(--fg2)}
+.lt-panel .lt-do{display:flex;align-items:center;gap:6px;margin:8px 0 2px;font-size:12.5px;color:var(--fg3)}
+.lt-panel .lt-do::before{content:"";width:12px;height:12px;border-radius:50%;border:1.5px solid currentColor;flex:none;box-sizing:border-box}
+.lt-panel .lt-do.ok{color:var(--zy-blue,var(--accent))}
+.lt-panel .lt-do.ok::before{background:currentColor;box-shadow:inset 0 0 0 2px var(--bg2)}
+.lt-panel .lt-note{font-size:12px;color:var(--fg3);margin-top:4px}
+.lt-panel .lt-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+.lt-panel .lt-btns button{border:1px solid var(--line);background:none;color:var(--fg2);border-radius:8px;padding:5px 12px;font-size:12.5px;cursor:pointer}
+.lt-panel .lt-btns button.pri{background:var(--zy-blue,var(--accent));border-color:transparent;color:#fff}
+.lt-panel .lt-btns button:active{opacity:.8}
+/* 窄屏：项目条独占一行，「怎么看 / 补档 / 显示杂项」换到下一行，长语言也不出屏 */
+@media (max-width:599px){
+  .lin-tools{flex-wrap:wrap;row-gap:6px}
+  .lin-tools .seg-scroll{flex:1 1 100%}
+}
+/* 时间轴始终从左往右：地图各层钉 LTR（阿拉伯语界面也一样），卡片里的文字仍跟界面方向 */
+.lmap .lm-canvas{direction:ltr}
+html[dir="rtl"] .lmap .lm-card,html[dir="rtl"] .lmap .lm-now{direction:rtl}
+
+/* ── 动效（app/01-core.js 的 MO）──────────────────────────────────────
+   mo-drawer / mo-pop / mo-page / mo-rise / mo-item / mo-drop / mo-card / mo-tick / mo-bump / mo-back 这些关键帧
+   由脚本按弹簧算出来写进 <style id="mo-kf">，时长是 --mo-snap / --mo-pop / --mo-soft；这里只管谁在什么时候用哪个。
+   进场弹、退场干脆（.17s 缓入）。html[data-motion="off"] 时一条都不生效，保持原来的样子 */
+@keyframes mo-fade-in{from{opacity:0}}
+@keyframes mo-fade-out{to{opacity:0}}
+@keyframes mo-slide-out{to{transform:translateX(-100%)}}
+@keyframes mo-slide-out-r{to{transform:translateX(100%)}}
+@keyframes mo-push-out{to{transform:translateX(100%)}}
+@keyframes mo-push-out-r{to{transform:translateX(-100%)}}
+@keyframes mo-ring{0%{opacity:0}20%{opacity:1}100%{opacity:0}}
+@keyframes mo-sweep{0%{transform:scaleX(0);opacity:1}40%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+@keyframes mo-dim{from{opacity:1}}
+/* 侧栏：遮罩淡入、面板弹出、条目错开跟上；收起时滑回去（常驻左栏不放） */
+html[data-motion="on"]:not(.dock-l) .drawer-panel{animation:mo-drawer var(--mo-snap) linear}
+html[data-motion="on"]:not(.dock-l)[dir="rtl"] .drawer-panel{animation-name:mo-drawer-r}
+html[data-motion="on"] #drawer.mo-enter{animation:mo-fade-in calc(.2s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #drawer.mo-items .mo-st{animation:mo-item var(--mo-soft) linear both;animation-delay:calc((70ms + var(--i,0) * 45ms) * var(--mo-x,1))}
+html[data-motion="on"][dir="rtl"] #drawer.mo-items .mo-st{animation-name:mo-item-r}
+#drawer.mo-shut{pointer-events:none}   /* 收起由脚本按当前位置播（closeDrawer），这里只挡点击 */
+/* 弹出菜单：从锚点那一侧长出来（原点由脚本按锚点设），条目错开落下 */
+html[data-motion="on"] .pop-menu{animation:mo-pop var(--mo-pop) linear}
+html[data-motion="on"] .pop-menu > .mo-st{animation:mo-drop var(--mo-soft) linear both;animation-delay:calc(var(--i,0) * 40ms * var(--mo-x,1))}
+/* 通用的进退场类（脚本 MO.play / MO.hide 挂上、播完摘掉）：
+   mo-in-push 从右推进来（窄屏整页、设置的一类、项目详情）· mo-in-back 从左边一点点回来（返回上一层）
+   mo-in-rise 浮上来（宽屏整页、换会话、新会话问候）· mo-in-pane / mo-in-pane-back 宽屏页内前进 / 后退的短位移
+   mo-out-push 往右滑出去 · mo-out-fade 淡掉 · mo-out-sheet 底部菜单滑下去。退场带 !important：压过元素自己的进场动画 */
+html[data-motion="on"] .mo-in-push{animation:mo-page var(--mo-snap) linear}
+html[data-motion="on"][dir="rtl"] .mo-in-push{animation-name:mo-page-r}
+html[data-motion="on"] .mo-in-back{animation:mo-back var(--mo-snap) linear}
+html[data-motion="on"][dir="rtl"] .mo-in-back{animation-name:mo-back-r}
+html[data-motion="on"] .mo-in-rise{animation:mo-rise var(--mo-soft) linear}
+html[data-motion="on"] .mo-in-pane{animation:mo-pane var(--mo-soft) linear}
+html[data-motion="on"] .mo-in-pane-back,html[data-motion="on"][dir="rtl"] .mo-in-pane{animation:mo-pane-r var(--mo-soft) linear}
+html[data-motion="on"][dir="rtl"] .mo-in-pane-back{animation-name:mo-pane}
+html[data-motion] .mo-out-push{animation:mo-push-out calc(.17s * var(--mo-x,1)) cubic-bezier(.4,0,1,1) both!important;pointer-events:none}
+html[data-motion][dir="rtl"] .mo-out-push{animation-name:mo-push-out-r!important}
+html[data-motion] .mo-out-fade{animation:mo-fade-out calc(.17s * var(--mo-x,1)) cubic-bezier(.4,0,1,1) both!important;pointer-events:none}
+html[data-motion] .mo-out-sheet{animation:mo-fade-out calc(.17s * var(--mo-x,1)) cubic-bezier(.4,0,1,1) both!important;pointer-events:none}
+html[data-motion] .mo-out-sheet .sheet-panel{animation:mo-sheet-out calc(.17s * var(--mo-x,1)) cubic-bezier(.4,0,1,1) both!important}
+html[data-motion] #sheet.pop.mo-out-sheet .sheet-panel{animation:mo-fade-out calc(.14s * var(--mo-x,1)) cubic-bezier(.4,0,1,1) both!important}
+@keyframes mo-sheet-out{to{transform:translateY(100%)}}
+/* 右侧窗格（文件 / 查看器 / git / 终端）：宽屏停靠在右边时从右侧浮进来，窄屏铺满时像整页一样推进来 */
+html[data-motion="on"]:not(.has-right) :is(#files,#viewer,#git,#term):not(.hidden){animation:mo-page var(--mo-snap) linear}
+html[data-motion="on"][dir="rtl"]:not(.has-right) :is(#files,#viewer,#git,#term):not(.hidden){animation-name:mo-page-r}
+html[data-motion="on"].has-right :is(#files,#viewer,#git,#term):not(.hidden){animation:mo-pane var(--mo-soft) linear}
+html[data-motion="on"][dir="rtl"].has-right :is(#files,#viewer,#git,#term):not(.hidden){animation-name:mo-pane-r}
+/* 底部「＋」菜单：窄屏从底下弹上来，宽屏贴着 ＋ 号弹出；斜杠 / @ 浮窗浮上来；看图淡入、图片放大一点点落定；提示条弹上来 */
+html[data-motion="on"] #sheet:not(.hidden){animation:mo-fade-in calc(.18s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #sheet:not(.hidden) .sheet-panel{animation:mo-sheet var(--mo-snap) linear}
+html[data-motion="on"] #sheet.pop:not(.hidden) .sheet-panel{animation:mo-zoom var(--mo-pop) linear;transform-origin:20% 100%}
+html[data-motion="on"] #popup:not(.hidden){animation:mo-rise var(--mo-soft) linear}
+html[data-motion="on"] #lightbox:not(.hidden){animation:mo-fade-in calc(.2s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #lightbox:not(.hidden) #lightbox-img{animation:mo-zoom var(--mo-pop) linear}
+html[data-motion="on"] #toast:not(.hidden){animation:mo-toast var(--mo-pop) linear}
+/* 脉络导览：遮罩淡入、里面浮上来 */
+html[data-motion="on"] #lin-tour:not(.hidden){animation:mo-fade-in calc(.2s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #lin-tour:not(.hidden) > *{animation:mo-rise var(--mo-soft) linear}
+/* 设置弹窗：宽屏遮罩淡入、面板浮上来；窄屏从右推进来 */
+html[data-motion="on"] #set-ov:not(.narrow){animation:mo-fade-in calc(.18s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #set-ov:not(.narrow) .set-sheet{animation:mo-sheet-in calc(.2s * var(--mo-x,1)) cubic-bezier(.2,.8,.2,1)}   /* 宽屏设置：原地轻轻放大淡入，不上下走 */
+@keyframes mo-sheet-in{from{opacity:0;transform:scale(.97)}}
+html[data-motion="on"] .mo-in-fade{animation:mo-fade-in calc(.16s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] #set-ov.narrow{animation:mo-page var(--mo-snap) linear}
+html[data-motion="on"][dir="rtl"] #set-ov.narrow{animation-name:mo-page-r}
+/* 工具卡跑完：「完成」弹一下，卡片边缘闪一圈绿 */
+html[data-motion="on"] .tool-state.mo-tick{display:inline-block;animation:mo-tick var(--mo-pop) linear}
+html[data-motion="on"] .tool.mo-ok{position:relative}
+html[data-motion="on"] .tool.mo-ok::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1.5px var(--ok);pointer-events:none;animation:mo-ring calc(1.1s * var(--mo-x,1)) ease-out both}
+/* 跳章落地：章名一顶、蓝线从起点扫到终点再淡掉 */
+.ch-sep{position:relative}
+.ch-sep .mo-sweep{position:absolute;inset-inline:0;top:50%;height:2px;margin-top:-1px;background:var(--zy-blue,var(--accent));transform:scaleX(0);transform-origin:left;opacity:0;pointer-events:none}
+html[dir="rtl"] .ch-sep .mo-sweep{transform-origin:right}
+html[data-motion="on"] .ch-sep.mo-hit .mo-sweep{animation:mo-sweep calc(1.6s * var(--mo-x,1)) cubic-bezier(.2,.8,.2,1)}
+html[data-motion="on"] .ch-sep.mo-hit :is(.ch-n,.ch-t){animation:mo-bump var(--mo-pop) linear}
+/* 脉络选线：其余的线退暗，卡片弹上来，逐章题名浮出 */
+html[data-motion="on"] .lmap.mo-pick .lm-main .dim{animation:mo-dim calc(.32s * var(--mo-x,1)) ease-out}
+html[data-motion="on"] .lmap.mo-pick .lm-cardbox{animation:mo-card var(--mo-snap) linear both}
+html[data-motion="on"] .lmap.mo-pick .t-ch{animation:mo-rise var(--mo-soft) linear both;animation-delay:calc(.08s * var(--mo-x,1))}
+
+
+/* 手机上的工具包模块行：命令一长串只露两行（整份在展开里）；右侧大小 + 按钮别把标题挤没 */
+@media (max-width:680px){
+  #mod-list .xr-sub{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+  #pages .xr-r{gap:8px}
+  #pages .xr-r .num{min-width:0}
+}
+
+
+/* ── 手机横屏密度（html.land，layout.js 判定：高 < 500、横着、宽 ≥ 720）──────────
+   370 来高的屏，平板那套留白太奢侈：字号小一号，行距、内边距、按钮、行高各收一档；不藏功能 */
+html.land body{font-size:14px}
+html.land #chat{line-height:1.6;padding:8px 12px 4px}
+html.land .icon-btn{width:34px;height:34px;flex-basis:34px}
+html.land .icon-btn svg{width:19px;height:19px}
+html.land #topbar{padding-bottom:0;min-height:0}
+html.land #topbar #title-block{line-height:1.2}
+html.land #composer{padding:4px 10px calc(var(--safe-b) + 3px)}
+html.land #composer-inner{padding:3px 4px 3px 6px}
+html.land #hint-row{margin-top:1px;font-size:12px}
+/* 侧栏 */
+html.land .drawer-panel{padding-top:2px}
+html.land .nav-item{padding:5px 10px;font-size:14px;gap:10px}
+html.land .nav-item svg{width:17px;height:17px}
+/* 首屏：问候小一号、标识缩小、输入框一行起 */
+html.land.wel .msg.welcome{margin-bottom:var(--g2)}
+html.land .wl-mark{width:34px;height:34px}
+html.land .wl-greet,html.land .msg.welcome.bot .bubble h1.wl-greet{font-size:21px}
+html.land.wel .msg.welcome .setup-guide{margin-top:var(--g2)}
+html.land.wel #input{min-height:calc(1.45em + 12px)}
+html.land.wel #composer-inner{border-radius:16px;padding:4px 6px 4px 10px}
+html.land.wel #hint-row{margin-top:2px}
+/* 设置：表头、分类、每一行都收紧 */
+html.land .set-shead{padding:3px 6px}
+html.land .set-shead h3{font-size:15px}
+html.land .set-wrap{grid-template-columns:168px minmax(0,1fr);gap:18px}
+html.land .set-cats button{padding:5px 10px;font-size:14px}
+html.land .set-h{margin:0 0 6px;font-size:16px}
+html.land .set-cat{padding:0 14px}
+html.land .set-cat .set-h{margin:8px 0 0}
+html.land .srow{padding:8px 0;gap:12px}
+html.land .sblock{padding:4px 0 8px}
+html.land .sblock > .srow.sub{padding:6px 0}
+html.land .sblock.prov-card{padding:2px 0 8px}
+html.land #tab-settings .set-cats{width:168px;padding:4px 6px}
+html.land #tab-settings .set-cats button{padding:5px 10px}
+html.land #tab-settings .set-main{padding:0 14px 16px}
+html.land #tab-settings .set-cat .set-h{margin:8px 0 2px;font-size:16px}
+html.land #tab-settings .srow{padding:7px 0;gap:12px}
+html.land .side-new{padding:6px 12px;margin:2px 0 4px;font-size:14px}
+html.land .side-acct{padding:5px 14px calc(var(--safe-b) + 5px);margin-top:4px}
+html.land .acct-av{width:28px;height:28px}
+html.land .msg.bot .bubble{line-height:1.65}
+/* 型号弹层整体是一个滚动容器（像侧栏）：强度、接口、清单一起滚，不再让清单在剩下的缝里自己滚 —— 矮屏上那条缝常常一行都不剩 */
+.mp-panel,#model-pick.pop .mp-panel{overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.mp-panel > *{flex:none}
+.mp-list,#model-pick.pop .mp-list{flex:none;overflow:visible;min-height:0}
+.pop-menu{max-height:calc(100vh - 16px);overflow-y:auto;overscroll-behavior:contain}
+#perm-menu{overflow-y:auto;overscroll-behavior:contain}
+
+/* 会话列表的记录大小：点开有说明（#35），外观同旁边的小字 */
+.it-meta .ss-size{all:unset;cursor:pointer;color:inherit;font:inherit}
+.it-meta .ss-size:active{opacity:.6}
+.pop-menu.ss-size-tip{max-width:min(320px,90vw)}
+.pop-menu.ss-size-tip .pm-head{white-space:normal;overflow:visible;line-height:1.5;font-size:12.5px}
+.pop-menu.ss-size-tip .pm-head:first-child{color:var(--fg);font-weight:600;font-size:13.5px}
+
+/* 书签（0.4.17）：按钮行加了的显示实心；落点那一段淡淡底色闪一下；书签页沿用项目页的行 */
+.msg-acts button[data-a="mark"].on{color:var(--accent)}
+.msg-acts button[data-a="mark"].on svg{fill:currentColor}
+.bm-hit{animation:bmhit 2.4s ease-out}
+@keyframes bmhit{0%,30%{background:var(--bg3);box-shadow:-6px 0 0 var(--bg3),6px 0 0 var(--bg3)}100%{background:transparent;box-shadow:none}}
+#tab-bookmarks .bm-row{cursor:pointer;gap:8px;align-items:center}
+#tab-bookmarks .bm-ex{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal}
+#tab-bookmarks .bm-del{background:transparent;border:0;color:var(--fg3);width:32px;height:32px;border-radius:8px;display:grid;place-items:center;flex:none;padding:0}
+#tab-bookmarks .bm-del svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+#tab-bookmarks .bm-del:active{background:var(--bg3);color:var(--fg)}

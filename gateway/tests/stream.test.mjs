@@ -77,3 +77,17 @@ test("子代理的增量不算主线程的半截", () => {
   translate({ type: "stream_event", parent_tool_use_id: null, event: { type: "message_start", message: { id: "m2", usage: { input_tokens: 1 } } } }, ctx);
   assert.equal(out.filter((e) => e.type === "discard_partial").length, 0);
 });
+
+test("工具参数大块到达（官方接口）：参数写完时补报最后的字数，不停在开头那几个字", () => {
+  const se = (event) => ({ type: "stream_event", event });
+  const big = '"ls -la /sdcard && echo ' + "x".repeat(500) + '"}';
+  const flags = {}, out = [];
+  const feed = (ev) => translate(ev, { sse: (e) => out.push(e), flags, onInit() {}, onResult() {}, onReplay() {}, provider: {} });
+  feed(se({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t1", name: "Bash", input: {} } }));
+  feed(se({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"command": ' } }));
+  feed(se({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: big } }));   // 同一个节流窗口里
+  feed(se({ type: "content_block_stop", index: 0 }));
+  const last = out.filter((e) => e.type === "phase" && e.phase === "tool").pop();
+  assert.equal(last.chars, '{"command": '.length + big.length);
+  clearTimeout(flags.toolTimer);
+});

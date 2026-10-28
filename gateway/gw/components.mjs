@@ -216,13 +216,28 @@ async function compList(force) {
   return { supported: true, devkit: dk ? (dk.sha256 || "").slice(0, 12) : null, indexError: ix.error, refreshing: !!ix.refreshing, items };
 }
 
-export function sha256File(f, job) {
+// 给了 size 且是小文件就一次读完再算：逐个开流对成千个小文件很慢（gpu-driver-glibc 末尾 5600 多个小文件，
+// 平板上流式 7 秒、整读 0.4 秒，慢机上几分钟，进度看着像卡死）。整读会占住事件循环，循环里配合 breathe() 让一让
+const SMALL_FILE = 1 << 20;
+export function sha256File(f, job, size) {
+  if (size !== undefined && size < SMALL_FILE) {
+    try { const b = fs.readFileSync(f); if (job) job.done += b.length; return Promise.resolve(crypto.createHash("sha256").update(b).digest("hex")); }
+    catch (e) { return Promise.reject(e); }
+  }
   return new Promise((resolve, reject) => {
     const h = crypto.createHash("sha256"), s = fs.createReadStream(f, { highWaterMark: 1 << 20 });
     s.on("data", (c) => { h.update(c); if (job) job.done += c.length; });
     s.on("end", () => resolve(h.digest("hex")));
     s.on("error", reject);
   });
+}
+
+// 长时间同步核对时隔几十毫秒让出一次事件循环，别让界面请求、SSE 干等
+let lastBreath = 0;
+export async function breathe() {
+  if (Date.now() - lastBreath < 40) return;
+  await new Promise((r) => setImmediate(r));
+  lastBreath = Date.now();
 }
 
 export function compRun(job, cmd, args, opts = {}) {
@@ -487,12 +502,15 @@ async function compRunInstall(id, b, job) {
   catch (e) { if (!job.cancelled) fs.rmSync(gz, { force: true }); throw e; }
   const lx = `libexec/devkit/components/${id}`;
   const man = fs.readFileSync(path.join(tree, "usr", lx, "MANIFEST"), "utf8").trim().split("\n");
+  // 进度按清单里的字节算：索引的 installed 是装好后的总占用（含链接等），按它算永远到不了头，看着像卡住
+  job.total = man.reduce((a, l) => a + (Number(l.split(" ")[1]) || 0), 0);
   for (const line of man) {
+    await breathe();
     if (job.cancelled) throw new Error("cancelled");
     const [h, n, ...rest] = line.split(" "), rel = rest.join(" ");
     const f = path.join(tree, "usr", rel);
     let st; try { st = fs.statSync(f); } catch { throw new Error(tz("组件包缺文件：{file}", { file: rel })); }
-    if (st.size !== Number(n) || (await sha256File(f)) !== h) throw new Error(tz("组件包里的文件校验不符：{file}", { file: rel }));
+    if (st.size !== Number(n) || (await sha256File(f, null, st.size)) !== h) throw new Error(tz("组件包里的文件校验不符：{file}", { file: rel }));
     job.done += st.size;
   }
   // 3) 切换：先写"安装中"的记录（被打断就是 damaged，可以重装或卸载），再逐个搬进 $PREFIX

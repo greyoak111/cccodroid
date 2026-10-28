@@ -33,6 +33,7 @@ echo "▸ assets"
 rm -rf "$A/assets/app"; mkdir -p "$A/assets/app/web" "$A/assets/app/scripts" "$A/assets/app/bin"
 cp "$SRC/server.mjs" "$A/assets/app/"
 mkdir -p "$A/assets/app/gw"; cp "$SRC/gw/"*.mjs "$A/assets/app/gw/"     # 网关的各功能模块
+mkdir -p "$A/assets/app/archive"; cp "$SRC/archive/"* "$A/assets/app/archive/"   # 建档规范与交档命令（脉络，见 gw/archive.mjs）
 for f in "$SRC/web/"*; do case "$f" in *.bak*) ;; *) cp -R "$f" "$A/assets/app/web/";; esac; done
 cp "$A/assets/scripts/"* "$A/assets/app/scripts/"
 cp "$A/assets/bin/"* "$A/assets/app/bin/"

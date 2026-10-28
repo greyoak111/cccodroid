@@ -112,7 +112,7 @@ export async function routeSettings(req, res, u, p) {
         const a = path.join(process.env.CCAPP_NATIVE_LIB, "libldlinux.so"), b = path.join(PATHS.glibcLib, "ld-linux-aarch64.so.1");
         try { ldso = fs.readFileSync(a).equals(fs.readFileSync(b)) ? "same" : "differ"; } catch { ldso = "missing"; }
       }
-      return sendJson(res, 200, { pref: pref(), active: process.env.CCAPP_EXEC || "direct", must, targetSdk: sdk, ldso });
+      return sendJson(res, 200, { pref: pref(), active: process.env.CCAPP_EXEC || "direct", must, targetSdk: sdk, ldso, pid: process.pid });   // pid：界面靠它认出重启后的新网关
     }
     if (req.method === "POST") {
       const b = JSON.parse((await readBody(req)) || "{}");

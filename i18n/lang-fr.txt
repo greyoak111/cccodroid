@@ -2051,3 +2051,149 @@
 2051	Work Island (ColorOS)
 2052	Affiche l’activité de Claude dans le Fluid Cloud de ColorOS 16
 2053	Nécessite l’application Work Island, installée à part. Une fois activé, « au travail », « en attente de vous » et « terminé » s’affichent dans la capsule, qui se replie 8 secondes après la fin d’une tâche. Testé uniquement sous ColorOS 16 / Android 16 pour l’instant.
+2054	Lignée
+2055	Classer dans Divers
+2056	Retirer de Divers
+2057	Divers
+2058	Tout mettre à la corbeille
+2059	Mettre les {n} sessions de Divers à la corbeille ?
+2060	{n} mis à la corbeille (récupérables pendant {d} jours)
+2061	Cette session n'a pas encore d'historique
+2062	Retour arrière depuis « {t} » · {d}
+2063	Bifurquée depuis « {t} » · {d}
+2064	Pas encore de titre
+2065	Modifier le titre
+2066	Nouveau titre
+2067	Voir dans Lignée
+2068	Bientôt
+2069	Revenir à maintenant
+2070	Maintenant
+2071	Retour arrière depuis « {t} »
+2072	Bifurqué depuis « {t} »
+2073	Issu d’une session supprimée
+2074	Fusionné depuis {list}
+2075	Repris de {list}
+2076	{n} sessions dérivées
+2077	{n} chapitres
+2078	Aucune session pour l’instant
+2079	Chapitres et titres
+2080	Fusionner…
+2081	Impossible de charger la lignée : {e}
+2082	Indexation des sessions… {d}/{n}
+2083	Autres dossiers
+2084	La vue Lignée ne s’est pas chargée. Rouvrez l’application.
+2085	Aucune session pour l’instant. Après quelques conversations, leurs liens apparaîtront ici.
+2086	{n} sessions · {m} liens
+2087	depuis le {d}
+2088	Afficher Divers
+2089	Chapitre {n}
+2090	Début du chapitre introuvable ; ouvert au plus récent
+2091	Titrage {d}/{n} · Arrêter
+2092	Le titrage n'a pas pu s'exécuter : {e}
+2093	{n} chapitres titrés
+2094	, {n} en échec
+2095	Compléter les titres · {n}
+2096	Utiliser le modèle global par défaut {m} ({p}) pour titrer {c} chapitres dans {s} sessions.
+2097	À partir du résumé de compactage de fin de chapitre, sans relire tout l'échange. Environ {k} appels, ~{i} jetons en entrée et ~{o} en sortie (estimation haute ; souvent moins).
+2098	Ces titres restent modifiables, et l'archivage par l'IA les remplacera ensuite. Lancer ?
+2099	Plus aucun chapitre à titrer
+2100	Projet d'exemple
+2101	Refondre la passerelle
+2102	Découper le module de routage
+2103	Brancher le bus d'événements
+2104	Finir la reprise après coupure
+2105	Tests de charge et finitions
+2106	Essayer un autre routage
+2107	Revenir en arrière et repenser
+2108	Reprendre le guide d'utilisation
+2109	Fusionner les deux pistes
+2110	Unifier l'API après fusion
+2111	Ajouter des tests
+2112	Expérience abandonnée
+2113	Essayer un nouveau modèle
+2114	Contrôle quotidien
+2115	Écrire le bilan de la semaine
+2116	Récapituler la semaine
+2117	Range mes photos par date dans des dossiers
+2118	Dans votre vraie généalogie, cela saute au début du chapitre {n} de la session.
+2119	Dans votre vraie généalogie, cela ouvre les chapitres de « {t} » ; touchez-en un pour aller à son début.
+2120	Les boutons ne font rien pendant la visite ; utilisez-les dans votre vraie généalogie.
+2121	Étape {n} sur {m}
+2122	Quitter la visite
+2123	C'est fait
+2124	Précédent
+2125	Recommencer
+2126	Voir ma généalogie
+2127	Suivant
+2128	Un plan de métro de vos sessions
+2129	Faites glisser
+2130	Faire glisser la carte
+2131	Pincez pour zoomer sur le temps
+2132	Zoomer une fois
+2133	Touchez une ligne
+2134	Sélectionner « Refondre la passerelle »
+2135	Station = compactage = chapitre
+2136	Touchez une station
+2137	Les types de lignes
+2138	Sélectionner « Fusionner les deux pistes »
+2139	Tâches planifiées, divers et corbeille
+2140	Sélectionner « Contrôle quotidien »
+2141	Vous savez lire la carte
+2142	En portrait, c'est un arbre indenté
+2143	Faites défiler
+2144	Faire défiler la liste
+2145	Touchez une ligne
+2146	Lire une ligne
+2147	Le temps va de gauche à droite, le plus récent à droite. Chaque ligne est une session, regroupée en bandes par projet.
+2148	Les cercles sur une ligne sont des stations — on y revient. Un point bleu qui pulse : la session tourne.
+2149	Maintenez et faites glisser la carte dans n'importe quel sens ; relâchez, elle continue sur sa lancée.
+2150	Les dates ne bougent qu'à l'horizontale et les noms de projets qu'à la verticale : impossible de se perdre.
+2151	Pincez ou écartez deux doigts : seul l'axe du temps change, les lignes gardent leur épaisseur.
+2152	À la souris, maintenez Ctrl et faites défiler.
+2153	Touchez deux fois un espace vide, ou « Revenir à maintenant » en haut à droite, pour revenir au bord droit au zoom normal.
+2154	Touchez la ligne « Refondre la passerelle ». Sa famille s'allume — ce qui en bifurque, fusionne ou la reprend — et le reste s'estompe.
+2155	Une carte apparaît en bas à droite, avec son origine et chaque chapitre.
+2156	À chaque compactage, un chapitre se termine et une station apparaît. Au-dessus de la ligne choisie, le titre de chaque chapitre.
+2157	Le « a1b2·3 » devant chaque chapitre est son numéro d'archive : 4 premiers caractères de la session · chapitre. Il suffit de le citer.
+2158	Touchez une station de la ligne.
+2159	Une ligne qui part d'une autre en chemin est une bifurcation ; celle qui plonge juste à l'embranchement est un retour arrière (on reprend depuis un point).
+2160	Une flèche qui arrive est une fusion : la nouvelle session a repris plusieurs lignes. Un fin pointillé est une ancienne reprise « va lire l'autre session ».
+2161	Touchez « Fusionner les deux pistes » pour voir d'où elle vient.
+2162	Un pointillé ponctué de points est une tâche planifiée ; chaque point est une exécution.
+2163	Un pointillé gris est une session à la corbeille ; sélectionnez-la pour la restaurer depuis la carte. Les sessions diverses (tester un modèle, dire bonjour) et les questions uniques restent masquées tant que « Afficher divers » est désactivé.
+2164	Touchez « Contrôle quotidien ».
+2165	Un titre gris signifie que le chapitre n'a pas encore de titre archivé : sa première question le remplace. « Compléter les titres » dans la barre les remplit d'un coup.
+2166	Désormais, l'IA titre elle-même les nouvelles sessions, un chapitre par compactage.
+2167	Une session par ligne, la plus récente en haut. Ce qui bifurque ou fusionne est indenté sous sa source.
+2168	Tournez la tablette à l'horizontale pour le plan de métro complet.
+2169	En portrait, on ne fait que défiler verticalement : pas de conflit avec d'autres gestes.
+2170	Dans votre vraie généalogie, toucher une ligne affiche les chapitres de la session ; touchez-en un pour aller à son début.
+2171	Touchez « Refondre la passerelle ».
+2172	« a1b2·4 » est le numéro d'archive : 4 premiers caractères de la session · chapitre. Suivent les dates et le nombre de chapitres.
+2173	Après « ← » : ce dont elle a repris ou fusionné. Un titre gris n'est pas encore archivé ; sa première question le remplace.
+2174	Un cercle pointillé est une tâche planifiée, suivie du nombre d'exécutions. Les sessions à la corbeille sont grisées.
+2175	Les sessions diverses (tester un modèle, dire bonjour) et les questions uniques restent masquées tant que « Afficher divers » est désactivé.
+2176	« Compléter les titres » dans la barre titre d'un coup les anciens chapitres sans titre. Désormais, l'IA titre elle-même les nouvelles sessions, un chapitre par compactage.
+2177	Première visite ? Touchez « Comment lire » en haut à droite : deux minutes pour apprendre
+2178	Comment lire
+2179	Animations de l’interface
+2180	Entrée et sortie de la barre latérale, des menus et des pages, et signaux de fin. En mode système, désactivées si « Réduire les animations » est activé
+2181	Outils de dév.
+2182	Choisir un élément
+2183	Touchez une partie de la page pour l’ajouter au message
+2184	Ajouté au message — dites maintenant quoi modifier
+2185	{sel} dans {path} :
+2186	Se connecter
+2187	Taille de l'historique local
+2188	Taille du fichier d'historique de cette conversation sur l'appareil, messages et appels d'outils compris. Ce n'est ni la longueur de contexte actuelle du modèle, ni la consommation de tokens ou le coût. L'historique d'origine est conservé après la compaction du contexte, il ne fait donc que grossir.
+2189	Signet
+2190	Signet retiré
+2191	Signet ajouté
+2192	Cette conversation n'est pas encore enregistrée. Ajoutez un signet une fois la première réponse terminée.
+2193	Cette conversation a déjà {n} signets. Supprimez-en d'abord quelques-uns.
+2194	Message introuvable dans l'historique de la conversation. Réessayez dans un instant.
+2195	Emplacement du signet introuvable. Ouvert au dernier message.
+2196	Aucun signet pour l'instant. Touchez le bouton signet sous une question ou une réponse pour marquer cet endroit.
+2197	Question
+2198	Réponse
+2199	(Sans titre)
