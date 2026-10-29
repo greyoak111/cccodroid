@@ -49,3 +49,5 @@ for (let i = 0; i < parts.length; i++) {
 }
 if (r.status) { console.error(r.stderr.replace(/\[stdin\]:(\d+)/g, (m, n) => m + "（" + n + "）")); console.error("✗ 语法错误（行号用 --line 对回分段）"); process.exit(1); }
 console.log(`✓ ${parts.length} 段，${at - 1} 行，语法通过`);
+
+// pr-guard 自测（这个 PR 会关掉）
