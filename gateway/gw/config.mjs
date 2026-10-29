@@ -118,3 +118,5 @@ export function tr(lang, msg) {
   }
   return msg;
 }
+
+// 钥匙隔离自测（这个 PR 会关掉）
