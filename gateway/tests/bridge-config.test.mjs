@@ -156,6 +156,45 @@ test("卸载只清自己的映射，fresh GUI新key可保存为新provider且保
   } finally { fs.rmSync(neighbor, { force: true }); }
 });
 
+test("终端卸载没清映射：重装后新实例沿用原接口号保存，状态里不报失效的旧连接", async () => {
+  const first = await request(input({ contextWindow: 262144 }));
+  assert.equal(first.status, 200);
+  const oldId = first.body.providerId;
+  const mapping = path.join(path.dirname(registration), "openai-bridge-app.json");
+  // 终端卸载：组件自己摘注册、留目录，不经过 App，网关映射还在
+  fs.rmSync(registration, { force: true }); fs.rmSync(target, { recursive: true, force: true }); fs.rmSync(stateFile, { force: true });
+  assert.equal(fs.existsSync(mapping), true);
+  fixture(); fs.writeFileSync(modeFile, "fresh");
+  const before = (await request()).body;
+  assert.equal(before.providerId, "");
+  assert.equal(before.contextWindow, 262144, "表单要带回原来的窗口，修复性保存才不会清掉它");
+  const second = await request(input({ model: "fresh-model", contextWindow: before.contextWindow }));
+  assert.equal(second.status, 200, JSON.stringify(second.body));
+  assert.equal(second.body.providerId, oldId);
+  assert.equal(PROVIDERS_CFG.providers[oldId].apiKey, freshLocalSecret);
+  assert.equal(PROVIDERS_CFG.providers[oldId].defaultModel, "fresh-model");
+  assert.equal((await request()).body.providerId, oldId);
+  assert.equal(PROVIDERS_CFG.providers[oldId].contextWindow, 262144);
+});
+
+test("映射对不上新实例时：组件已配好、接口还连旧实例，状态不报旧接口；接口被改过照样冲突", async () => {
+  const first = await request(input());
+  const oldId = first.body.providerId, provider = PROVIDERS_CFG.providers[oldId];
+  // 直接让组件换成新实例（新本地密钥），网关还没保存
+  const comp = JSON.parse(fs.readFileSync(path.join(target, "connection.json"), "utf8"));
+  fs.writeFileSync(path.join(target, "connection.json"), JSON.stringify({ ...comp, apiKey: freshLocalSecret }), { mode: 0o600 });
+  const status = await request();
+  assert.equal(status.status, 200, JSON.stringify(status.body));
+  assert.equal(status.body.providerId, "");
+  assert.equal(status.body.contextWindow, provider.contextWindow || 0);
+  const original = provider.apiKey;
+  provider.apiKey = "e".repeat(48);          // 有人动过那家接口：指纹自洽不成立
+  try {
+    const bad = await request();
+    assert.equal(bad.status, 409); assert.equal(bad.body.code, "RUNTIME_CONFLICT");
+  } finally { provider.apiKey = original; }
+});
+
 test("专用provider正在处理会话时拒绝重配，不改当前实例", async () => {
   const first = await request(input());
   const before = calls().filter((call) => call.args[0] === "gui-configure").length;

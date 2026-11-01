@@ -309,21 +309,32 @@ export function clearBridgeConfigMapping(id) {
 }
 
 const localFingerprint = (connection) => crypto.createHash("sha256").update(connection.baseUrl + "\0" + connection.apiKey).digest("hex");
-function configuredProvider(connection) {
+/** 映射记的那家接口：{ id, stale }。stale = 桥实例换过了（卸载后重装、本地密钥是新的），那家接口还连着旧实例：
+ *  保存时沿用这个接口号改成新连接，状态里先不报（旧连接已失效，别让「新建会话使用」选到它）。
+ *  判据：映射指纹对不上当前连接，但那家接口自己的地址 + 密钥仍和映射指纹吻合 —— 说明映射与接口都没被动过，只是实例换了。
+ *  从终端卸载不经过 App，映射没人清，以前这里一律报冲突、配置页从此打不开 */
+function mappedProvider(connection) {
   let state;
   try { state = regularJson(providerStateFile(), 4096); }
-  catch (error) { if (error.code === "ENOENT") return ""; throw failure("RUNTIME_CONFLICT"); }
+  catch (error) { if (error.code === "ENOENT") return { id: "", stale: false }; throw failure("RUNTIME_CONFLICT"); }
   if (!object(state) || state.schema !== 1 || state.id !== ID || typeof state.providerId !== "string" ||
-      !/^custom-[1-9][0-9]*$/.test(state.providerId) || state.fingerprint !== localFingerprint(connection)) throw failure("RUNTIME_CONFLICT");
+      !/^custom-[1-9][0-9]*$/.test(state.providerId) || typeof state.fingerprint !== "string") throw failure("RUNTIME_CONFLICT");
   const provider = PROVIDERS_CFG.providers[state.providerId];
-  if (!provider) return "";
-  if (!provider.custom || provider.login || provider.local || provider.baseUrl !== connection.baseUrl || provider.apiKey !== connection.apiKey ||
-      provider.authStyle !== "bearer" || provider.modelsUrl || provider.endpoints?.length || provider.apiKeyEnv || Object.keys(provider.extraEnv || {}).length) throw failure("RUNTIME_CONFLICT");
-  return state.providerId;
+  if (!provider) return { id: "", stale: false };
+  if (!provider.custom || provider.login || provider.local || provider.authStyle !== "bearer" || provider.modelsUrl ||
+      provider.endpoints?.length || provider.apiKeyEnv || Object.keys(provider.extraEnv || {}).length) throw failure("RUNTIME_CONFLICT");
+  if (state.fingerprint === localFingerprint(connection)) {
+    if (provider.baseUrl !== connection.baseUrl || provider.apiKey !== connection.apiKey) throw failure("RUNTIME_CONFLICT");
+    return { id: state.providerId, stale: false };
+  }
+  if (typeof provider.baseUrl !== "string" || typeof provider.apiKey !== "string" ||
+      !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{3,4}$/.test(provider.baseUrl) || !/^[0-9a-f]{48}$/.test(provider.apiKey) ||
+      state.fingerprint !== localFingerprint(provider)) throw failure("RUNTIME_CONFLICT");
+  return { id: state.providerId, stale: true };
 }
 
 async function saveProvider(connection, contextWindow = 0) {
-  const id = configuredProvider(connection);
+  const { id } = mappedProvider(connection);
   if (id && [...RUNS.values()].some((run) => !run.ended && run.provider === id)) throw failure("BUSY");
   // 复用唯一现有持久化入口，让内存 RAW 与磁盘同时更新；不是发请求，也不调用 test/active。
   const body = Buffer.from(JSON.stringify({ ...(id ? { id } : {}), label: "OpenAI API 本地协议桥", baseUrl: connection.baseUrl,
@@ -347,8 +358,12 @@ export async function bridgeConfigStatus() {
   try {
     const view = statusView(await invokeComponent("gui-status"));
     if (view.configured) assertGuiOwnership();
-    const providerId = view.configured ? configuredProvider(defaultConnection(view.model)) : "";
-    return { ok: true, ...view, providerId, contextWindow: validWindow(providerId && PROVIDERS_CFG.providers[providerId]?.contextWindow) };
+    // 实例换过（stale）不报接口号，但窗口照旧带回表单：修复性保存不该把用户设过的窗口清零。没配置时读映射出错就当没有
+    let m = { id: "", stale: false };
+    if (view.configured) m = mappedProvider(defaultConnection(view.model));
+    else try { m = mappedProvider({ baseUrl: "", apiKey: "" }); } catch {}
+    const providerId = m.stale ? "" : m.id;
+    return { ok: true, ...view, providerId, contextWindow: validWindow(m.id && PROVIDERS_CFG.providers[m.id]?.contextWindow) };
   } catch (error) {
     if (error.code === "not_installed") return { ok: true, installed: false, configured: false, hasKey: false, endpoint: "", model: "", localReady: false, local: { state: "stopped" } };
     throw error;
