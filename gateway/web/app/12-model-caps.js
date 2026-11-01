@@ -237,7 +237,8 @@
       if (id) localStorage.setItem(RECENT_KEY, JSON.stringify([id, ...recentIds().filter((x) => x !== id)].slice(0, 6)));
       close();
       if (!switching && id === cur() && own() && own().model != null) return;   // 跟随默认时点同一个也算「单独选」：钉住，默认再改它也不变
-      try { await pickSessModel(switching ? { provider: to, model: id } : { model: id }); } catch (er) { return er.stale || toast(er.message, true); }
+      // 新会话：型号是给这家的，连同厂商一起钉住 —— 不然之后再挑个默认别家的项目，界面和真跑各认一家（审查 B18）
+      try { await pickSessModel(switching || !view.sessionId ? { provider: to, model: id } : { model: id }); } catch (er) { return er.stale || toast(er.message, true); }
       paintModel(chipName());
       loadCtxModel();
       if (switching) toast(t("这个会话改用「{name}」，下一条消息起生效", { name: provLabel(to) }));

@@ -5,6 +5,7 @@ import { CFG, PATHS, log, tz } from "./config.mjs";
 import { isLoginMode, noteLoggedIn } from "./models.mjs";
 import { claudeArgv, claudeEnv } from "./claude.mjs";
 import { RUNS } from "./runs.mjs";
+import { providerById } from "./providers.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { toFront } from "./local.mjs";
 import { RATE_LIMITS, clearRateLimits } from "./stream.mjs";
@@ -117,7 +118,8 @@ export async function routeLogin(req, res, u, p) {
     return sendJson(res, 200, { ok: true });
   }
   if (req.method === "POST" && p === "/api/login/logout") {
-    if (RUNS.size && isLoginMode()) return sendJson(res, 409, { error: "busy", message: tz("这一轮还在生成，等它跑完再退出登录。") });
+    // 看每一轮实际用的那家，不只看全局默认：全局是第三方、某个会话单独选了官方账户时也算（审查 B19）
+    if ([...RUNS.values()].some((r) => !r.ended && isLoginMode(providerById(r.provider) || undefined))) return sendJson(res, 409, { error: "busy", message: tz("这一轮还在生成，等它跑完再退出登录。") });
     const r = await runAuth(["logout"]);
     AUTH_CACHE = null;
     if (r.code === 0) noteLoggedIn(false);

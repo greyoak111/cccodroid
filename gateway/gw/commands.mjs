@@ -21,24 +21,35 @@ function cmdDir(scope, dir) {
   return path.join(d, ".claude", "commands");
 }
 
-/** 拆 frontmatter：只认开头 --- … --- 里的 key: value 单行；其余原样当正文 */
+/** 拆 frontmatter：description / argument-hint 读出来给界面改，其余项原样留着。
+ *  一项 = 顶格的 key: 行 + 后面缩进的续行。以前只认单行，description: | 这种多行写法被读成「|」、
+ *  续行留进 extra，保存后成了非法 YAML（审查 B22） */
 export function parseCmd(txt) {
   const out = { description: "", hint: "", body: String(txt || ""), extra: "" };
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(out.body);
   if (!m) return out;
   out.body = out.body.slice(m[0].length);
-  const keep = [];
+  const items = [];
   for (const line of m[1].split(/\r?\n/)) {
-    const kv = /^([A-Za-z-]+):\s*(.*)$/.exec(line);
-    const v = kv ? kv[2].trim().replace(/^(["'])(.*)\1$/, "$2") : "";
-    if (kv && kv[1] === "description") out.description = v;
-    else if (kv && kv[1] === "argument-hint") out.hint = v;
-    else if (line.trim()) keep.push(line);   // allowed-tools、model 这类我们不改的项：原样留着
+    if (items.length && (/^[ \t]/.test(line) || !line.trim())) items[items.length - 1].push(line);
+    else items.push([line]);
+  }
+  const keep = [];
+  for (const it of items) {
+    const kv = /^([A-Za-z-]+):\s*(.*)$/.exec(it[0]);
+    const key = kv && (kv[1] === "description" ? "description" : kv[1] === "argument-hint" ? "hint" : "");
+    if (!key) { while (it.length > 1 && !it[it.length - 1].trim()) it.pop(); if (it.some((l) => l.trim())) keep.push(it.join("\n")); continue; }
+    const head = kv[2].trim(), rest = it.slice(1).map((l) => l.trim()).filter(Boolean);
+    let v;
+    if (/^[|>][+-]?\d*$/.test(head)) v = rest.join(head[0] === "|" ? "\n" : " ");   // 块标量：界面上是一行，换行变空格见 saveCmd
+    else v = [head, ...rest].filter(Boolean).join(" ").replace(/^(["'])([\s\S]*)\1$/, "$2");
+    out[key] = v;
   }
   out.extra = keep.join("\n");
   return out;
 }
-const yq = (s) => (/^[\w\s一-鿿，。、（）()<>\[\].-]*$/.test(s) && !/^\s|\s$/.test(s) ? s : JSON.stringify(s));
+// 开头是 [ ] - . 或数字的裸写会被 YAML 读成数组 / 列表 / 数字：一律加引号（DeepSeek 复核 低-3）
+const yq = (s) => (/^[\w\s一-鿿，。、（）()<>\[\].-]*$/.test(s) && !/^\s|\s$/.test(s) && !/^[\[\]\-.\d]/.test(s) ? s : JSON.stringify(s));
 export function formatCmd({ description, hint, body, extra }) {
   const fm = [];
   if (description) fm.push(`description: ${yq(description)}`);

@@ -9,7 +9,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { CFG, LIVE, log, tz } from "./config.mjs";
 import { dec, NEXT, readBody, sendJson } from "./http.mjs";
-import { END_HOOKS, enqueue } from "./queue.mjs";
+import { END_HOOKS, QUEUE, START_GUARDS, enqueue } from "./queue.mjs";
 import { capList } from "./settings-store.mjs";
 import { RUNS } from "./runs.mjs";
 import { publish } from "./bus.mjs";
@@ -171,6 +171,14 @@ const NULL_AT = new Map();  // 排不出下次时间的任务上次重算的时�
 const MANUAL = new Set();   // 手动「立刻跑一次」还没落到队列里的任务
 const RUNNING = new Map();   // key → { taskId, startedAt, attempt, trial }
 let keyN = 0;
+/** 在跑 / 排着的任务。排队中的条目被用户在队列里 ✕ 掉（或清空）时没有结束钩子来删它：
+ *  队列和运行里都已找不到的就清掉，不然任务一直显示「在跑」、到点不关、手动跑一直 409（DeepSeek 复核 中-1） */
+function runningNow() {
+  const alive = new Set();
+  for (const x of [...QUEUE, ...RUNS.values()]) if (x.sched && x.sched.key) alive.add(x.sched.key);
+  for (const k of [...RUNNING.keys()]) if (!alive.has(k)) RUNNING.delete(k);
+  return [...RUNNING.values()];
+}
 const WAITING = new Set();   // 到点了、正排队等别的对话跑完的任务 id：计时别把它当成「没排上 / 时间已过」（审查 B17）
 async function fire(t, { reason = "due", attempt = 0, trial = false } = {}) {
   if (trial) return fireNow(t, { reason, attempt, trial });
@@ -221,7 +229,7 @@ async function fireNow(t, { reason, attempt, trial }) {
     if (last) message = `${tz("（上一次的结果，供参考）")}\n${last.full}\n\n---\n\n${message}`;
   }
   const key = "s" + Date.now().toString(36) + (++keyN);
-  RUNNING.set(key, { taskId: t.id, startedAt: Date.now(), attempt, trial });
+  RUNNING.set(key, { taskId: t.id, startedAt: Date.now(), attempt, trial, reason });
   const item = enqueue({
     internal: true, message, projectId: p ? p.id : null,
     sessionId: t.session === "same" && t.lastSid ? t.lastSid : null,
@@ -232,6 +240,19 @@ async function fireNow(t, { reason, attempt, trial }) {
   if (!trial) { t.lastFiredAt = Date.now(); save(); }
   return item;
 }
+
+// 入队之后、真开跑之前任务被删 / 被关：不跑了，记一笔跳过（DeepSeek 复核 中-2；入队前那道见 fireNow）
+START_GUARDS.push((q) => {
+  const ctx = q.sched && RUNNING.get(q.sched.key);
+  if (!ctx || ctx.trial) return true;
+  const t = byId(ctx.taskId);
+  if (t && (ctx.reason !== "due" || t.on)) return true;
+  RUNNING.delete(q.sched.key);
+  const msg = tz("排队时任务被关掉或删了");
+  log(`⏭ 定时任务${t ? "「" + t.name + "」" : ""}跳过：${msg}`);
+  if (t) addRun({ taskId: t.id, at: Date.now(), st: "skip", msg });
+  return false;
+});
 
 // 一轮结束：记运行记录、改会话名、通知、重试
 END_HOOKS.push((run, f) => {
@@ -274,7 +295,7 @@ END_HOOKS.push((run, f) => {
 function tick() {
   const now = Date.now();
   const gap = DB.lastTick ? now - DB.lastTick : 0;
-  const live = new Set([...RUNNING.values()].map((x) => x.taskId));
+  const live = new Set(runningNow().map((x) => x.taskId));
   for (const t of DB.tasks) {
     if (!t.on) continue;
     if (t.nextAt == null) {
@@ -360,7 +381,7 @@ export async function routeSched(req, res, u, p) {
     return sendJson(res, 200, { tasks: DB.tasks.map(summary), missed: DB.missed, sids: DB.sids.slice(-2000),
       budget: { daily: DB.dailyBudget, today: costToday(), month: monthStats() },
       allowLogin: !!DB.allowLogin, loginTasks: DB.tasks.filter(usesLogin).map((t) => t.id), fx: await Promise.race([usdCny().catch(() => null), new Promise((r) => setTimeout(() => r(null), 1500))]),   // 汇率：中文界面把美元花费换成人民币；取不到就照美元
-      running: [...RUNNING.values()].map((x) => x.taskId) });
+      running: runningNow().map((x) => x.taskId) });
   }
   if (p === "/api/sched" && req.method === "POST") {
     const b = await body();
@@ -404,7 +425,7 @@ export async function routeSched(req, res, u, p) {
   const t = byId(dec(m[1]));
   if (!t) return sendJson(res, 404, { error: tz("任务不存在") });
   const sub = m[2] || "";
-  if (!sub && req.method === "GET") return sendJson(res, 200, { task: summary(t), runs: RUNLOG.filter((r) => r.taskId === t.id).slice(-100).reverse().map(({ full, ...r }) => r), running: [...RUNNING.values()].some((x) => x.taskId === t.id) });
+  if (!sub && req.method === "GET") return sendJson(res, 200, { task: summary(t), runs: RUNLOG.filter((r) => r.taskId === t.id).slice(-100).reverse().map(({ full, ...r }) => r), running: runningNow().some((x) => x.taskId === t.id) });
   if (!sub && req.method === "PATCH") {
     const b = await body();
     try { clean(b, {}); } catch (e) { return sendJson(res, 400, { error: e.message }); }
@@ -423,7 +444,7 @@ export async function routeSched(req, res, u, p) {
   if (sub === "/run" && req.method === "POST") {
     const b = await body();
     // 同一任务手动跑还没结束（在排队或在跑）就别再起一次：连点会重复执行、重复花钱（审查 E05 / v0.5.3 B5）
-    if (MANUAL.has(t.id) || [...RUNNING.values()].some((r) => r.taskId === t.id)) return sendJson(res, 409, { error: tz("这个任务已经在跑了") });
+    if (MANUAL.has(t.id) || runningNow().some((r) => r.taskId === t.id)) return sendJson(res, 409, { error: tz("这个任务已经在跑了") });
     MANUAL.add(t.id);
     const go = fire(t, { reason: "manual", trial: !!b.trial }).finally(() => MANUAL.delete(t.id));
     // 有对话在跑时 fire 会排队等最多 30 分钟：别让请求一直挂着，先回「已排队」
@@ -441,4 +462,4 @@ export async function routeSched(req, res, u, p) {
   }
   return NEXT;
 }
-export const _schedForTest = { fire, tick, DB, runlog: () => RUNLOG };   // 只给测试用
+export const _schedForTest = { fire, tick, DB, runlog: () => RUNLOG, running: () => runningNow() };   // 只给测试用

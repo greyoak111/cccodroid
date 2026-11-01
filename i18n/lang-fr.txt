@@ -2583,3 +2583,12 @@
 2583	Afficher {n} lignes de plus ({total} au total)
 2584	Déroulé trop long : seule la partie la plus récente est affichée
 2585	{n} autre(s) conversation(s) ont été interrompue(s) en même temps ; elles sont marquées « Interrompu » dans la liste des conversations.
+2586	{name} est corrompu dans l'archive ; il n'a pas été importé
+2587	git a dépassé le délai ({s} s) ; git et les hooks lancés ont été arrêtés
+2588	Ce fournisseur est en cours d'utilisation. Modifiez son adresse ou sa clé une fois ce tour terminé.
+2589	Cette réponse ne correspond pas à l'historique. Rouvrez la conversation puis réessayez.
+2590	La question de cette réponse a été supprimée : elle est désormais liée à la réponse précédente et ne peut pas être supprimée seule.
+2591	La question de cette réponse a été supprimée : la réponse ne peut plus être supprimée seule. Annulez cette suppression, ou supprimez d'abord la réponse puis la question.
+2592	{n} fichier(s) joint(s) au brouillon de la conversation précédente
+2593	Pas en UTF-8
+2594	Ce fichier est encodé en {enc}. L'enregistrer corromprait l'original : lecture seule.

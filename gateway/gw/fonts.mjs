@@ -119,8 +119,7 @@ export async function routeFonts(req, res, u, p) {
   if (req.method === "GET" && p === "/api/fonts") return sendJson(res, 200, { items: load().map(pub), max: FONT_MAX, count: FONT_COUNT });
 
   if (req.method === "POST" && p === "/api/fonts") {
-    const list = load();
-    if (list.length >= FONT_COUNT) return sendJson(res, 400, { error: "too many", message: "最多导入 10 个字体，先删掉一个再导入" });
+    if (load().length >= FONT_COUNT) return sendJson(res, 400, { error: "too many", message: "最多导入 10 个字体，先删掉一个再导入" });
     let buf;
     try { buf = await readBodyBuf(req, FONT_MAX); }
     catch { return sendJson(res, 413, { error: "too large", message: "字体文件不能超过 40 MB" }); }
@@ -130,6 +129,10 @@ export async function routeFonts(req, res, u, p) {
       return sendJson(res, 400, { error: "bad format", message: ttc ? "这是字体集合（.ttc），浏览器用不了；请换成单个的 ttf / otf" : "不是能用的字体文件，只支持 ttf、otf、woff、woff2" });
     }
     const sha = crypto.createHash("sha256").update(buf).digest("hex");
+    // 清单在读完上传之后再取：上传那几秒里别的导入 / 删除已经改过它，用开头那份会互相覆盖、把删掉的写回来（审查 B21）。
+    // 从这里到 save 没有 await，不会再交错
+    const list = load();
+    if (list.length >= FONT_COUNT) return sendJson(res, 400, { error: "too many", message: "最多导入 10 个字体，先删掉一个再导入" });
     const dup = list.find((f) => f.sha === sha);
     if (dup) return sendJson(res, 200, { ok: true, font: pub(dup), dup: true });
     const raw = path.basename(u.searchParams.get("name") || "").slice(0, 120);

@@ -720,14 +720,21 @@ function lost() {
   const d = db(), have = onDisk();
   return Object.keys(d.pkgs).filter((n) => !have.has(n));
 }
+// 要装回的包名先落盘、装成功才删：以前先删旧记录再下载，索引或下载一失败清单就没了，再 restore 说「没有要装回的」（审查 B24）
+const PENDING = () => path.join(STATE, "restore-pending.json");
+function pendingRestore() {
+  try { const j = JSON.parse(fs.readFileSync(PENDING(), "utf8")); return Array.isArray(j) ? j.filter((n) => typeof n === "string" && n) : []; } catch { return []; }
+}
 function restore() {
-  const d = db(), gone = lost();
-  if (!gone.length) { console.log("没有要装回的"); return; }
-  const manual = gone.filter((n) => !d.pkgs[n].auto);
+  const d = db(), gone = lost(), pend = pendingRestore();
+  if (!gone.length && !pend.length) { console.log("没有要装回的"); return; }
+  const manual = [...new Set([...pend, ...gone.filter((n) => !d.pkgs[n].auto)])];
+  writeJson(PENDING(), manual);
   for (const n of gone) delete d.pkgs[n];                      // 旧记录作废，按新工具包重新求解
   writeJson(DB, d);
   console.log(`工具包更新后要装回：${manual.join("、")}`);
-  install(manual, { unverified: true, upgrade: true });
+  if (manual.length) install(manual, { unverified: true, upgrade: true });
+  fs.rmSync(PENDING(), { force: true });
 }
 
 // ── 入口 ───────────────────────────────────────────────────────────────
@@ -743,6 +750,7 @@ if (MUT.includes(sub)) lock();
 if (sub !== "restore") {
   const l = lost();
   if (l.length) console.error(`提示：工具包换过版本，之前用 pkg 装的 ${l.filter((n) => !db().pkgs[n].auto).join("、") || l.join("、")} 已不在，运行 pkg restore 装回`);
+  else if (pendingRestore().length) console.error(`提示：上次 pkg restore 没装完（${pendingRestore().join("、")}），再运行一次 pkg restore 接着装`);
 }
 try {
   switch (sub) {

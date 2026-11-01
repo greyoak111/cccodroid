@@ -162,6 +162,22 @@ function usageImport(extraOnly) {
             if (m.id && m.usage) msgs.set(m.id, [h, m.usage, m.model, e.sessionId]);
           }
         }
+        // 子代理的 token 记在 <会话>/subagents/*.jsonl：实时统计（usageMeter 的 scanSubs）算它们，补算也要算，不然历史偏低（审查 B29）。
+        // 只算 token；提问数、轮数、工具数照旧只看主会话
+        const sid = f.slice(0, -6), sub = path.join(PATHS.projects, d, sid, "subagents");
+        let subs = [];
+        try { subs = fs.readdirSync(sub).filter((x) => x.endsWith(".jsonl")); } catch {}
+        for (const sf of subs) {
+          const rs = (await import("node:readline")).createInterface({ input: fs.createReadStream(path.join(sub, sf)), crlfDelay: Infinity });
+          for await (const line of rs) {
+            if (line.length < 20 || !line.includes('"type":"assistant"')) continue;
+            let e; try { e = JSON.parse(line); } catch { continue; }
+            const m = e.message || {};
+            if (e.type !== "assistant" || !e.timestamp || !m.id || !m.usage || !m.model || m.model === "<synthetic>") continue;
+            const h = Math.floor(Date.parse(e.timestamp) / 3600e3);
+            if (h < until) msgs.set(m.id, [h, m.usage, m.model, e.sessionId || sid]);
+          }
+        }
       }
     }
     for (const [h, u, model, sid] of msgs.values()) {

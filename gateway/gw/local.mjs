@@ -313,6 +313,12 @@ function modelFetch(e, urls) {
   if (fs.existsSync(dst)) throw new Error(tz("已经有同名模型了"));
   const job = { phase: "downloading", done: 0, total: e.bytes || 0, err: "", cancelled: false, child: null, url: e.url || "" };
   MDL.set(e.id, job);
+  // 半截文件只按文件名对上不够：同名换了链接（内容不同）还续传，就成了前半 A、后半 B 的拼接，GGUF 头照样过（审查 B25）。
+  // 旁边记一笔来源（目录里的按 sha256，没有就按链接），对不上先删掉半截从头下
+  const meta = part + ".src", src = e.sha256 ? "sha256:" + e.sha256 : "url:" + (e.url || urls[0] || "");
+  let had = ""; try { had = fs.readFileSync(meta, "utf8"); } catch {}
+  if (had !== src) { try { fs.rmSync(part, { force: true }); } catch {} }
+  try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(meta, src); } catch {}
   // 贴链接下的没有目录里的大小可核：剩余空间低于 1 GB 就停，别把存储灌满（审查 10-30 第九份 后端低5）
   const tick = setInterval(() => {
     if (job.phase !== "downloading") return;
@@ -348,12 +354,13 @@ function modelFetch(e, urls) {
         if (head.toString("latin1") !== "GGUF") { fs.rmSync(part, { force: true }); throw new Error(tz("下下来的不是 GGUF 模型文件（已删除）")); }
       }
       fs.renameSync(part, dst);
+      try { fs.rmSync(meta, { force: true }); } catch {}
       MDL.delete(e.id);
       expireModelCache();
       log(`[local] 模型已下载 ${e.id}`);
     } catch (er) {
       if (job.lowSpace) { try { fs.rmSync(part, { force: true }); } catch {} er = new Error(tz("存储空间不够了")); job.cancelled = false; }
-      else if (job.cancelled) { MDL.delete(e.id); try { fs.rmSync(part, { force: true }); } catch {} return; }
+      else if (job.cancelled) { MDL.delete(e.id); try { fs.rmSync(part, { force: true }); fs.rmSync(meta, { force: true }); } catch {} return; }
       Object.assign(job, { phase: "error", err: er.message });
       log(`[local] 模型下载失败 ${e.id}：${er.message}`);
     } finally { clearInterval(tick); }

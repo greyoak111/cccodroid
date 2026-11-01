@@ -2586,4 +2586,13 @@ window.I18N_DICT["fr"] = {
   "再显示 {n} 行（共 {total} 行）": "Afficher {n} lignes de plus ({total} au total)",
   "过程太长，只显示最近的部分": "Déroulé trop long : seule la partie la plus récente est affichée",
   "另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。": "{n} autre(s) conversation(s) ont été interrompue(s) en même temps ; elles sont marquées « Interrompu » dans la liste des conversations.",
+  "压缩包里的 {name} 损坏了，没有导入": "{name} est corrompu dans l'archive ; il n'a pas été importé",
+  "git 超时（{s} 秒），已结束它和它启动的钩子": "git a dépassé le délai ({s} s) ; git et les hooks lancés ont été arrêtés",
+  "这一家正在用，等这一轮跑完再改地址或密钥。": "Ce fournisseur est en cours d'utilisation. Modifiez son adresse ou sa clé une fois ce tour terminé.",
+  "这条回复和会话记录对不上，重新打开会话再删。": "Cette réponse ne correspond pas à l'historique. Rouvrez la conversation puis réessayez.",
+  "这条回复的提问已经删掉了，它和上一轮的回复连在一起，没法单独删。": "La question de cette réponse a été supprimée : elle est désormais liée à la réponse précédente et ne peut pas être supprimée seule.",
+  "这条回复的提问已经删掉了，没法再单独删它。撤销刚才的删除，或者先删回复再删提问。": "La question de cette réponse a été supprimée : la réponse ne peut plus être supprimée seule. Annulez cette suppression, ou supprimez d'abord la réponse puis la question.",
+  "{n} 个文件已附加到刚才那个会话的草稿": "{n} fichier(s) joint(s) au brouillon de la conversation précédente",
+  "非 UTF-8": "Pas en UTF-8",
+  "这个文件是 {enc} 编码，存回去会损坏原文，只能查看": "Ce fichier est encodé en {enc}. L'enregistrer corromprait l'original : lecture seule.",
 };

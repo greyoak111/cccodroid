@@ -80,8 +80,9 @@ async function previewGrant(p, net) {
   return { url: `http://localhost:${port}/${cap}/${path.basename(r.file).split("/").map(encodeURIComponent).join("/")}`, mtime: r.mtime, net: g.net };
 }
 function previewServe(req, res) {
-  // 网址里带着能力令牌：页面里点外链时别把它当 Referer 带出去（审查 v0.5.7 L2）。setHeader 先放，下面各处 writeHead 都会带上
-  res.setHeader("referrer-policy", "no-referrer");
+  // 网址里带着能力令牌：页面里点外链时别把它当 Referer 带出去（审查 v0.5.7 L2）。setHeader 先放，下面各处 writeHead 都会带上。
+  // same-origin 而不是 no-referrer：外站照样一个字节都拿不到，预览服务自己要靠 Referer 给 /assets/x.svg 这种站点绝对路径找回凭证（审查 B30）
+  res.setHeader("referrer-policy", "same-origin");
   const fail = (code, msg) => { res.writeHead(code, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }); res.end(msg); };
   const host = String(req.headers.host || "").toLowerCase();
   if (host !== `localhost:${PREVIEW.port}` && host !== `127.0.0.1:${PREVIEW.port}`) return fail(421, "bad host");

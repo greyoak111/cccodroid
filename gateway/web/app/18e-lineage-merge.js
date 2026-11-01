@@ -174,7 +174,7 @@
     }
     async function step3() {
       stepMo(3);
-      if (!W.text) W.text = compose();
+      if (!W.text) { W.text = compose(); W.mats = src.map((s) => s.mat); }
       body.innerHTML = `<div class="pj-hint">${esc(t("这就是新会话的第一条消息，可以直接改。末尾那句落款别删：设备之间迁移时靠它认出来源。"))}</div><div class="mg-ed"></div>`;
       foot.innerHTML = `<button class="btn sm ghost" data-back>${esc(t("上一步"))}</button><span class="mg-cnt"></span><button class="btn sm" data-send>${esc(t("开始新会话"))}</button>`;
       const box = body.querySelector(".mg-ed"), cnt = foot.querySelector(".mg-cnt");
@@ -212,7 +212,9 @@
         }
         if (W.step === 2) {
           const g = body.querySelector(".mg-goal").value, p = body.querySelector(".mg-proj").value;
-          if (g !== W.goal) W.text = "";   // 目标改了重拼；只换项目不动已改过的预览
+          // 目标改了、或回第 1 步换过材料（换装法、改勾选会重取 s.mat）都重拼；只换项目不动已改过的预览。
+          // 以前只看目标：材料换了正文还是旧的，来源却按新材料记（审查 B12）
+          if (g !== W.goal || !W.mats || src.some((s, i) => s.mat !== W.mats[i])) W.text = "";
           W.goal = g; W.proj = p;
           return step3();
         }

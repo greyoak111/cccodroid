@@ -214,7 +214,10 @@ server.listen(CFG.port, "127.0.0.1", () => {
 setTimeout(async () => {
   try {
     if (PROVIDER.nativeModels) return;
-    const ms = await fetchModels(true);
+    // 清单要拉几秒：这期间用户切了厂商或选了别的型号，结果就作废（不能拿 A 家清单改 B 家的型号，审查 B27）
+    const P0 = PROVIDER, m0 = SETTINGS.model;
+    const ms = await fetchModels(true, P0);
+    if (PROVIDER !== P0 || PROVIDER.id !== P0.id || SETTINGS.model !== m0) return;
     if (!ms.length || !SETTINGS.model) return;
     if (!ms.some((m) => m.id === SETTINGS.model)) {
       const old = SETTINGS.model;

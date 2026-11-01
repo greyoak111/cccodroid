@@ -2583,3 +2583,12 @@
 2583	Mostrar {n} filas más ({total} en total)
 2584	Proceso demasiado largo: solo se muestra la parte más reciente
 2585	Otras {n} conversaciones se interrumpieron a la vez; aparecen marcadas como «Interrumpido» en la lista de conversaciones.
+2586	{name} está dañado dentro del archivo; no se importó
+2587	git superó el tiempo límite ({s} s); se detuvieron git y los hooks que inició
+2588	Este proveedor está en uso. Cambia su dirección o clave cuando termine este turno.
+2589	Esta respuesta no coincide con el historial. Vuelve a abrir la conversación e inténtalo de nuevo.
+2590	La pregunta de esta respuesta ya se eliminó; ahora está unida a la respuesta anterior y no se puede eliminar por separado.
+2591	La pregunta de esta respuesta ya se eliminó, así que la respuesta no se puede eliminar sola. Deshaz esa eliminación, o elimina primero la respuesta y después la pregunta.
+2592	{n} archivo(s) adjuntado(s) al borrador de la conversación anterior
+2593	No es UTF-8
+2594	Este archivo está codificado en {enc}. Guardarlo dañaría el original, así que solo se puede ver.

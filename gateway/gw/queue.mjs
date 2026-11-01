@@ -175,6 +175,9 @@ function record(run, ev) {
   else { if (ev.type === "run_tokens") run.tokAt = run.log.length; run.log.push({ ...ev }); }
 }
 
+/** 开跑前的最后一道核对（定时任务：入队后任务被删 / 被关就不跑）。返回 false = 丢掉这条 */
+export const START_GUARDS = [];
+const startable = (q) => START_GUARDS.every((g) => { try { return g(q) !== false; } catch (e) { log("开跑核对出错: " + e.message); return true; } });
 /** 一轮结束时要知道的模块（定时任务记运行记录）在这里挂；钩子出错不影响收尾 */
 export const END_HOOKS = [];
 export function endRun(run, fields = {}) {
@@ -272,6 +275,7 @@ export function pump() {
   for (let i = 0; i < QUEUE.length && RUNS.size < maxParallel(); ) {
     const q = QUEUE[i];
     if (q.held) { i++; continue; }                  // 停止时挂起的不自动发，也不挡后面新发的
+    if (!startable(q)) { QUEUE.splice(i, 1); publishState(); continue; }
     const lane = laneOfItem(q), key = sidOfLane(lane) || lane;
     if (blocked.has(key) || laneRun(lane)) { blocked.add(key); i++; continue; }
     blocked.add(key);

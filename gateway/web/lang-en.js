@@ -2620,5 +2620,14 @@ window.I18N_DICT.en = {
   "上下文 {used} · 容量未知": "Context {used} · capacity unknown",
   "再显示 {n} 行（共 {total} 行）": "Show {n} more rows ({total} in total)",
   "过程太长，只显示最近的部分": "Long run: only the most recent part is shown",
-  "另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。": "{n} other conversation(s) were interrupted at the same time; they're marked \"Interrupted\" in the conversation list."
+  "另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。": "{n} other conversation(s) were interrupted at the same time; they're marked \"Interrupted\" in the conversation list.",
+  "压缩包里的 {name} 损坏了，没有导入": "{name} in the archive is corrupted; it was not imported",
+  "git 超时（{s} 秒），已结束它和它启动的钩子": "git timed out ({s}s); it and the hooks it started were stopped",
+  "这一家正在用，等这一轮跑完再改地址或密钥。": "This provider is in use. Change its URL or key after the current turn finishes.",
+  "这条回复和会话记录对不上，重新打开会话再删。": "This reply doesn't match the session record. Reopen the session and try again.",
+  "这条回复的提问已经删掉了，它和上一轮的回复连在一起，没法单独删。": "The question for this reply was deleted, so it is now joined to the previous reply and can't be deleted on its own.",
+  "这条回复的提问已经删掉了，没法再单独删它。撤销刚才的删除，或者先删回复再删提问。": "The question for this reply was deleted, so the reply can't be deleted on its own. Undo that deletion, or delete the reply first and then the question.",
+  "{n} 个文件已附加到刚才那个会话的草稿": "{n} file(s) attached to the draft of the session you just left",
+  "非 UTF-8": "Not UTF-8",
+  "这个文件是 {enc} 编码，存回去会损坏原文，只能查看": "This file is {enc}-encoded. Saving it would corrupt the original, so it is view-only."
 };

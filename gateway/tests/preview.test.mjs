@@ -25,8 +25,8 @@ test("预览凭证：页面资源照常，点路径和私钥不交", async () =>
   const base = r.url.replace(/index\.html$/, "");
   const code = async (rel) => (await fetch(base + rel)).status;
   assert.equal(await code("index.html"), 200);
-  assert.equal((await fetch(base + "index.html")).headers.get("referrer-policy"), "no-referrer", "带令牌的网址别当 Referer 带出去");
-  assert.equal((await fetch(base + "nope.html")).headers.get("referrer-policy"), "no-referrer");
+  assert.equal((await fetch(base + "index.html")).headers.get("referrer-policy"), "same-origin", "带令牌的网址只给同源当 Referer（外站拿不到；预览服务自己靠它给站点绝对路径找凭证）");
+  assert.equal((await fetch(base + "nope.html")).headers.get("referrer-policy"), "same-origin");
   assert.equal(await code("assets/app.js"), 200);
   assert.equal(await code(".well-known/a.json"), 200);
   for (const rel of [".env", ".git/config", "certs/server.key", "id_ed25519", "assets/../.env"]) assert.equal(await code(rel), 403, rel);

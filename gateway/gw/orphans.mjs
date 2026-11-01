@@ -24,12 +24,12 @@ const TTL = 14 * 86400e3;
 const readLines = (f) => { try { return fs.readFileSync(f, "utf8").split("\n").filter(Boolean); } catch { return []; } };
 const manPath = (l) => l.split(" ").slice(2).join(" ");
 
-/** 有主的路径（相对 $PREFIX）：各包清单 + 工具包 / 模块清单 + 已装组件 */
-function ownedPaths() {
+/** 底座认领的路径（相对 $PREFIX）：各包清单 + 工具包 / 模块清单。skip 里的 .list（相对路径）不算 —— 组件卸载时排除它自己带进来的包清单 */
+export function baseOwnedPaths(skip) {
   const s = new Set();
   const info = path.join(PREFIX, "var/lib/dpkg/info");
   try {
-    for (const f of fs.readdirSync(info)) if (f.endsWith(".list"))
+    for (const f of fs.readdirSync(info)) if (f.endsWith(".list") && !(skip && skip.has("var/lib/dpkg/info/" + f)))
       for (const l of readLines(path.join(info, f))) { const i = l.indexOf("/files/usr/"); if (i >= 0) s.add(l.slice(i + 11)); }
   } catch {}
   const dk = path.join(PREFIX, "libexec/devkit");
@@ -42,6 +42,12 @@ function ownedPaths() {
     for (const l of readLines(path.join(d, "FILES"))) s.add(l);
     for (const f of ["MANIFEST", "MANIFEST.local"]) for (const l of readLines(path.join(d, f))) s.add(manPath(l));
   }
+  return s;
+}
+
+/** 有主的路径：底座 + 已装组件 */
+function ownedPaths() {
+  const s = baseOwnedPaths();
   for (const [id, rec] of compRecords()) for (const r of compNeeds(id, rec)) s.add(r);
   return s;
 }

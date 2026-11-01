@@ -122,7 +122,7 @@ export async function zipToFile(file, entries) {
   finally { try { fs.closeSync(fd); } catch {} }
 }
 
-/** 读 zip 的中央目录（不读数据）：[{ name, method, csize, usize, data }]，data 是数据在文件里的起点 */
+/** 读 zip 的中央目录（不读数据）：[{ name, method, crc, csize, usize, data }]，data 是数据在文件里的起点 */
 export function zipEntries(file) {
   const fd = fs.openSync(file, "r");
   try {
@@ -140,7 +140,7 @@ export function zipEntries(file) {
     let p = 0;
     for (let i = 0; i < n; i++) {
       if (p + 46 > cdLen || cd.readUInt32LE(p) !== 0x02014b50) throw new Error(tz("zip 目录损坏"));
-      const method = cd.readUInt16LE(p + 10), csize = cd.readUInt32LE(p + 20), usize = cd.readUInt32LE(p + 24);
+      const method = cd.readUInt16LE(p + 10), crc = cd.readUInt32LE(p + 16), csize = cd.readUInt32LE(p + 20), usize = cd.readUInt32LE(p + 24);
       const nlen = cd.readUInt16LE(p + 28), xlen = cd.readUInt16LE(p + 30), clen = cd.readUInt16LE(p + 32), lo = cd.readUInt32LE(p + 42);
       const name = cd.toString("utf8", p + 46, p + 46 + nlen).replace(/\\/g, "/");
       p += 46 + nlen + xlen + clen;
@@ -149,7 +149,7 @@ export function zipEntries(file) {
       if (fs.readSync(fd, lh, 0, 30, lo) < 30 || lh.readUInt32LE(0) !== 0x04034b50) throw new Error(tz("zip 目录损坏"));
       const data = lo + 30 + lh.readUInt16LE(26) + lh.readUInt16LE(28);
       if (data + csize > size) throw new Error(tz("zip 目录损坏"));
-      out.push({ name, method, csize, usize, data });
+      out.push({ name, method, crc, csize, usize, data });
     }
     return out;
   } finally { fs.closeSync(fd); }
@@ -158,14 +158,23 @@ export function zipEntries(file) {
 /** 把一条解到 dst。budget = { left }：实际解出来的字节从里面扣（目录里写的大小可能是假的），扣光就停 */
 export async function zipExtract(file, ent, dst, budget, map) {
   const tooBig = () => new Error(tz("压缩包解开后太大，没有导入"));
-  if (ent.csize === 0) { fs.writeFileSync(dst, ""); return; }
+  if (ent.csize === 0) {
+    if (ent.usize || ent.crc) throw new Error(tz("压缩包里的 {name} 损坏了，没有导入", { name: ent.name }));
+    fs.writeFileSync(dst, ""); return;
+  }
   const src = fs.createReadStream(file, { start: ent.data, end: ent.data + ent.csize - 1, highWaterMark: CHUNK });
   const steps = [src];
   if (ent.method === 8) steps.push(zlib.createInflateRaw());
-  steps.push(new Transform({ transform(c, _e, cb) { if ((budget.left -= c.length) < 0) return cb(tooBig()); cb(null, c); } }));
+  // 解出来的原字节按目录里的 CRC 和长度核对（在改写之前）：压缩数据坏了一个 bit，inflate 往往照样解得开、JSON 也还合法，
+  // 不核就把变了质的历史当成功导进来（审查 B15）。核不上就报错，调用方不会发布这份文件
+  let crc = 0, n = 0;
+  steps.push(new Transform({
+    transform(c, _e, cb) { if ((budget.left -= c.length) < 0) return cb(tooBig()); crc = zlib.crc32(c, crc); n += c.length; cb(null, c); },
+    flush(cb) { cb((crc >>> 0) !== ent.crc || (ent.usize !== ZIP32 && n !== ent.usize) ? new Error(tz("压缩包里的 {name} 损坏了，没有导入", { name: ent.name })) : null); },
+  }));
   if (map) steps.push(lineMapper(map));
   steps.push(fs.createWriteStream(dst));
-  await pipeline(...steps);
+  try { await pipeline(...steps); } catch (e) { fs.rmSync(dst, { force: true }); throw e; }
 }
 
 /** 请求体直接落盘（不进内存），返回字节数；超过 max 就停。App 按次签名的请求照 readBodyBuf 核体哈希 */

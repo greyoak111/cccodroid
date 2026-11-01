@@ -69,14 +69,17 @@ function projectFor(sid, projectId) {
  *  over：新会话还没会话号，前端暂存的选择 { provider, model, effort }。
  *  effortRun：真跑时的思考强度 —— 跟来的档位那家模型不支持时，换成它支持的（标签上显示这个） */
 export function effectiveModel(sid, projectId, over) {
-  let r = sessModel(sid);
+  let r = sessModel(sid), pending = false;
   if (over && (over.provider || over.model != null || over.effort != null)) {
+    pending = true;
     const p = over.provider && providerById(over.provider);
-    r = { model: over.model != null ? over.model : p ? "" : null, effort: over.effort != null ? over.effort : null, provider: p ? p.id : PROVIDER.id };
+    // 没给厂商：和 run.mjs 的 pickProvider 一样往下落（项目默认 → 全局），不能先按全局那家解释（审查 B18）
+    r = { model: over.model != null ? over.model : p ? "" : null, effort: over.effort != null ? over.effort : null, provider: p ? p.id : null };
   }
   const pin = r && r.model != null;
   const pdef = projectDefaults(projectFor(sid, projectId));
-  const pp = (pin && providerById(r.provider)) || (pdef.provider && providerById(pdef.provider)) || PROVIDER;
+  // 存下的记录没写厂商按全局（同 sessProvider）；新会话暂存的没写厂商才往下落
+  const pp = (pin && (r.provider || !pending) && providerById(r.provider)) || (pdef.provider && providerById(pdef.provider)) || PROVIDER;
   const model = pin ? r.model
     : (pp.id === (pdef.provider || PROVIDER.id) ? pdef.model : "") || (pp.id === PROVIDER.id ? SETTINGS.model || "" : "");
   const effort = (r && r.effort != null ? r.effort : pdef.effort || SETTINGS.effort) || "";

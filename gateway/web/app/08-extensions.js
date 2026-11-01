@@ -926,12 +926,14 @@
   $("ext-s-catbox").addEventListener("toggle", () => { if ($("ext-s-catbox").open) loadSkillCat(); });
 
   // ── 官方 MCP 注册表：搜索 → 条目里展开小表单（名字、装法、环境变量 / 请求头）→ 交给 claude mcp add ──
-  const mcpCat = { q: "", next: "", npx: false, items: new Map() };
+  const mcpCat = { q: "", next: "", npx: false, items: new Map(), seq: 0 };
   const mcpShort = (n) => (String(n).split("/").pop() || "mcp").replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64);
   async function searchMcpCat(more) {
     const box = $("ext-mcp-cat");
     if (!more) { mcpCat.q = $("ext-mcp-q").value.trim(); mcpCat.next = ""; mcpCat.items.clear(); box.innerHTML = `<div class="tiny">${t("正在查注册表…")}</div>`; }
+    const my = ++mcpCat.seq;
     const r = await api(`/api/ext/catalog/mcp?q=${encodeURIComponent(mcpCat.q)}&cursor=${encodeURIComponent(more ? mcpCat.next : "")}`).catch((e) => ({ ok: false, message: e.message }));
+    if (my !== mcpCat.seq) return;   // 之后又搜过 / 又点过「再显示」：迟到的旧回执不许盖掉新结果、串用游标（审查 B26）
     const old = box.querySelector(".mcpcat-more"); if (old) old.remove();
     if (!r.ok) { box.insertAdjacentHTML(more ? "beforeend" : "afterbegin", `<div class="tiny err">${esc(r.message || "")}</div>`); if (!more) box.querySelector(".tiny:not(.err)")?.remove(); return; }
     mcpCat.npx = r.npx; mcpCat.next = r.next;

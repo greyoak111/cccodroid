@@ -2586,4 +2586,13 @@ window.I18N_DICT["es"] = {
   "再显示 {n} 行（共 {total} 行）": "Mostrar {n} filas más ({total} en total)",
   "过程太长，只显示最近的部分": "Proceso demasiado largo: solo se muestra la parte más reciente",
   "另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。": "Otras {n} conversaciones se interrumpieron a la vez; aparecen marcadas como «Interrumpido» en la lista de conversaciones.",
+  "压缩包里的 {name} 损坏了，没有导入": "{name} está dañado dentro del archivo; no se importó",
+  "git 超时（{s} 秒），已结束它和它启动的钩子": "git superó el tiempo límite ({s} s); se detuvieron git y los hooks que inició",
+  "这一家正在用，等这一轮跑完再改地址或密钥。": "Este proveedor está en uso. Cambia su dirección o clave cuando termine este turno.",
+  "这条回复和会话记录对不上，重新打开会话再删。": "Esta respuesta no coincide con el historial. Vuelve a abrir la conversación e inténtalo de nuevo.",
+  "这条回复的提问已经删掉了，它和上一轮的回复连在一起，没法单独删。": "La pregunta de esta respuesta ya se eliminó; ahora está unida a la respuesta anterior y no se puede eliminar por separado.",
+  "这条回复的提问已经删掉了，没法再单独删它。撤销刚才的删除，或者先删回复再删提问。": "La pregunta de esta respuesta ya se eliminó, así que la respuesta no se puede eliminar sola. Deshaz esa eliminación, o elimina primero la respuesta y después la pregunta.",
+  "{n} 个文件已附加到刚才那个会话的草稿": "{n} archivo(s) adjuntado(s) al borrador de la conversación anterior",
+  "非 UTF-8": "No es UTF-8",
+  "这个文件是 {enc} 编码，存回去会损坏原文，只能查看": "Este archivo está codificado en {enc}. Guardarlo dañaría el original, así que solo se puede ver.",
 };

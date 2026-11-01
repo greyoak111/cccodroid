@@ -116,7 +116,8 @@ export function forkSession(id, userText, after, { before = false, uuid = "", la
 // 文件检查点（file-history-snapshot）、摘要这些不在对话链上的行不动。
 const EDITS_DIR = path.join(TRASH_DIR, ".edits");
 const UNDO = new Map();
-const ORPHAN_HEADS = new Map();   // 会话号 → 提问被删掉的那几轮回复的第一行 uuid（见 deleteMessage 里的 B04）   // 会话号 → 最近一次删消息的 { backup, size, mtime }：撤销前核对文件没再变过
+// UNDO：会话号 → 最近一次删消息的 { backup, size, mtime }：撤销前核对文件没再变过
+const ORPHAN_HEADS = new Map();   // 会话号 → 提问被删掉的那几轮回复的第一行 uuid（见 deleteMessage 里的 B04）
 const CHAIN_TYPES = new Set(["user", "assistant", "system", "progress", "attachment"]);
 export function deleteMessage(id, userText, after, which, uuid = "", replyUuid = "") {
   if (runOfSession(id)) return { ok: false, status: 409, message: tz("这个会话正在生成中，等它答完再删。") };
@@ -143,7 +144,7 @@ export function deleteMessage(id, userText, after, which, uuid = "", replyUuid =
     if (!parentOf.has(replyUuid)) return { ok: false, status: 409, message: tz("这条回复和会话记录对不上，重新打开会话再删。") };
     const heads = ORPHAN_HEADS.get(id), order = [...parentOf.keys()];
     if (heads && order.slice(0, order.indexOf(replyUuid) + 1).some((u) => heads.has(u)))
-      return { ok: false, status: 409, message: tz("这条回复的提问已经删掉了，它和上一轮的回复连在一起，没法单独删。") };
+      return { ok: false, status: 409, message: tz("这条回复的提问已经删掉了，没法再单独删它。撤销刚才的删除，或者先删回复再删提问。") };
   }
   const up = (u) => { let n = 0; while (u && parentOf.has(u) && n++ < 100000) u = parentOf.get(u); return u; };
   const bdir = EDITS_DIR;

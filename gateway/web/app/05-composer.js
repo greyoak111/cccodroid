@@ -417,9 +417,11 @@
   // 只在用户切会话（openSession）时换；重连、新会话拿到会话号都不经过这里，正在打的字不会被换掉
   const DRAFTS_KEY = "cc.drafts";
   function draftsRead() { try { const o = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "{}"); return o && typeof o === "object" && !Array.isArray(o) ? o : {}; } catch { return {}; } }
+  let draftEpoch = 0;   // 换过几次会话草稿：上传回执据此判断附件栏还是不是发起时那个会话的
   function draftSwap(from, to) {
     const all = draftsRead(), k0 = from || "", k1 = to || "";
     if (k0 === k1) return;
+    draftEpoch++;
     const text = inputEl.value, att = state.attachments.slice();
     if (text.trim() || att.length) all[k0] = { text, att, at: Date.now() }; else delete all[k0];
     const d = all[k1];
@@ -440,6 +442,10 @@
     const list = [...files];
     if (!list.length) return [];
     const done = [];
+    // 上传途中切了会话：回执要落回发起的那个会话的草稿，不能塞进现在这个（审查 B08）
+    const ep0 = draftEpoch, key0 = view.sessionId || "";
+    const mine = () => draftEpoch === ep0 || (view.sessionId || "") === key0;
+    let away = 0;
     for (const f of list) {
       // 大文件（粘贴 / 拖进来的；从选择器挑的 App 壳已经分流了）：网关流式落盘，这里只提示一下要等
       if (f.size > BIG_ATT) toast(t("「{name}」较大（{s}），正在收进工作区…", { name: f.name, s: fmtSize(f.size) }));
@@ -451,8 +457,12 @@
         if (!r.ok) throw new Error("HTTP " + r.status);
         const j = await r.json();
         done.push(j);
-        if (insert) {
-          state.attachments.push(j);
+        if (insert && mine()) state.attachments.push(j);
+        else if (insert) {
+          const all = draftsRead(), d = all[key0] || { text: "", att: [] };
+          d.att = [...(Array.isArray(d.att) ? d.att : []), j]; d.at = Date.now(); all[key0] = d;
+          try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
+          away++;
         }
       } catch (e) {
         toast(t("「{name}」附加失败：{msg}", { name: f.name, msg: e.message }), true);
@@ -460,7 +470,9 @@
     }
     if (done.length) {
       renderAttachments();
-      toast(t("已附加 {n} 个文件", { n: done.length }));
+      // 一部分落在这里、一部分回了原会话：两句都说（DeepSeek 复核 低-6）
+      const here = done.length - away;
+      toast([here ? t("已附加 {n} 个文件", { n: here }) : "", away ? t("{n} 个文件已附加到刚才那个会话的草稿", { n: away }) : ""].filter(Boolean).join("；"));
     }
     return done;
   }

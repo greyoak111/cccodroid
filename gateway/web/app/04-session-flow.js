@@ -856,6 +856,8 @@
   }
   function queuedInView(q) {
     if (q.sessionId) return q.sessionId === view.sessionId;
+    // 网关重启恢复的、还没建会话的那条：界面重载后 runIds/cids 都清了，认不出是哪页的，放到新对话页（审查 B28）
+    if (q.intr && !view.sessionId) return true;
     return view.runIds.has(q.id) || (!!q.follow && view.runIds.has(q.follow)) || (!!q.cid && view.cids.has(q.cid));
   }
   function pickViewRun() {
@@ -907,6 +909,9 @@
     const item = e.target.closest(".qitem");
     if (!item) return;
     if (e.target.closest(".q-x")) return post("/api/queue/remove", { id: item.dataset.id });
-    if (e.target.closest(".q-now")) return post("/api/queue/promote", { id: item.dataset.id });
+    if (e.target.closest(".q-now")) {
+      if (!view.sessionId) view.runIds.add(item.dataset.id);   // 新对话页放行的：跑起来的这一轮 id 就是它，视图跟上
+      return post("/api/queue/promote", { id: item.dataset.id });
+    }
   });
 

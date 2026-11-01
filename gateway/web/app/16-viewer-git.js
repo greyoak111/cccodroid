@@ -474,12 +474,24 @@
     }
   });
 
+  /** 按字节认编码（审查 B06）：以前一律当 UTF-8 读，UTF-16 / GBK 的字节变成替代字符，保存时连原文一起写坏；UTF-8 的 BOM 也会丢。
+   *  enc 非空 = 不是 UTF-8：照它解出来给人看，但只读 —— 浏览器只会编 UTF-8，存回去必然有损 */
+  function vwDecode(b) {
+    if (b[0] === 0xff && b[1] === 0xfe) return { text: new TextDecoder("utf-16le").decode(b), enc: "UTF-16LE", bom: false };
+    if (b[0] === 0xfe && b[1] === 0xff) return { text: new TextDecoder("utf-16be").decode(b), enc: "UTF-16BE", bom: false };
+    const bom = b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf;
+    try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(b), enc: "", bom }; }
+    catch {
+      try { return { text: new TextDecoder("gb18030", { fatal: true }).decode(b), enc: "GBK", bom: false }; }
+      catch { return { text: new TextDecoder("utf-8").decode(b), enc: t("非 UTF-8"), bom: false }; }
+    }
+  }
   function vwText() { if (VW.ed) return VW.ed.getText(); const ta = $("vw-text"); return ta ? ta.value : VW.text; }
   function vwDropEd() { if (VW.ed) { try { VW.ed.destroy(); } catch {} VW.ed = null; } }
 
   /** 顶栏小字：大小 · git 状态 · 字数（md 编辑时） */
   function vwInfo() {
-    let s = fmtSize(VW.size) + (VW.gitInfo || "");
+    let s = fmtSize(VW.size) + (VW.enc ? " · " + VW.enc + " · " + t("只读") : "") + (VW.gitInfo || "");
     if (VW.ed) {
       const w = VW.ed.words();
       s += " · " + (w == null ? t("统计字数…") : t("{n} 字", { n: w.toLocaleString() }));
@@ -547,7 +559,7 @@
       const r = await fetch(fileUrl(VW.path));
       if (!r.ok) throw new Error("HTTP " + r.status);
       mtime = Number(r.headers.get("x-mtime")) || 0;
-      text = await r.text();
+      ({ text, enc: VW.enc, bom: VW.bom } = vwDecode(new Uint8Array(await r.arrayBuffer())));
     } catch (e) {
       if (gen === VW.gen) $("vw-body").innerHTML = `<div class="vw-empty">${t("读取失败")}: ${esc(e.message)}</div>`;
       return;
@@ -838,12 +850,13 @@
   function vwRenderText(mode) {
     vwDropEd();
     VW.mode = mode;
-    if (mode === "edit" && isMd(VW.path) && !VW.plainMd) { vwRenderActs(); return vwMdEditor(); }
+    if (mode === "edit" && isMd(VW.path) && !VW.plainMd && !VW.enc) { vwRenderActs(); return vwMdEditor(); }
     if (mode === "md") vwMdPreview(VW.text);
     else {
       $("vw-body").innerHTML = `<div class="vw-edwrap"><div class="vw-gut"><div class="vw-gut-in"></div></div><textarea id="vw-text" class="mono ${VW.wrap ? "" : "nowrap"}" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea></div>`;
       const ta = $("vw-text");
       ta.value = VW.text;
+      ta.readOnly = !!VW.enc;
       gutAttach(ta);
       ta.addEventListener("input", () => { if (!VW.dirty) { VW.dirty = true; vwRenderActs(); } draftSave(); gutSchedule(); });
       ta.addEventListener("keydown", (e) => {
@@ -984,12 +997,13 @@
     // 还没读完（或读失败）就没有正文可存：存了就是拿空内容盖掉文件
     if (!VW.ready || !VW.mtime && VW.size) return toast(t("文件还没读完，等一下再保存"), true);
     if (VW.saving) return;
+    if (VW.enc) return toast(t("这个文件是 {enc} 编码，存回去会损坏原文，只能查看", { enc: VW.enc }), true);
     const text = vwText(), gen = VW.gen, path = VW.path;
     let r;
     VW.saving = true;
     try {
       r = await fetch(`/api/file/save?path=${encodeURIComponent(path)}&mtime=${VW.mtime}${force ? "&force=1" : ""}`, {
-        method: "POST", body: text,
+        method: "POST", body: (VW.bom ? "\uFEFF" : "") + text,   // 原文带 BOM 的照样带回去
       });
     } catch (e) { VW.saving = false; return toast(t("保存失败：{msg}", { msg: e.message }), true); }
     VW.saving = false;
@@ -1005,7 +1019,8 @@
     if (!r.ok) return toast(t("保存失败：{msg}", { msg: j.error || r.status }), true);
     VW.mtime = j.mtime; VW.size = j.size;
     // 保存在途时又改了：存下去的只是那一刻的版本，新改的还没存，别把「未保存」清掉（审查 C-002）
-    if (vwText() === text) { VW.text = text; VW.dirty = false; draftClear(); } else VW.text = text;
+    // 切到预览时没有编辑器，VW.text 就是缓冲本身（存着更新的版本）：那时不能拿回执里的旧版盖掉它（审查 B07）
+    if (vwText() === text) { VW.text = text; VW.dirty = false; draftClear(); } else if (VW.ed || $("vw-text")) VW.text = text;
     vwInfo();
     vwRenderActs();
     toast(t("已保存"));

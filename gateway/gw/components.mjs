@@ -12,6 +12,7 @@ import { ghProxy, pget } from "./pget.mjs";
 import { retireManagedBridge } from "./managed-bridge.mjs";
 import { clearBridgeConfigMapping, handleBridgeConfig, handleBridgeModels } from "./bridge-config.mjs";
 import { archiveProblem, parseTarListing } from "./archive-check.mjs";
+import { baseOwnedPaths } from "./orphans.mjs";
 
 /** 前端文件（web/ 下全部，含 i18n.js 与各语言词典）的最后修改时间戳。界面拿它来判断「我是不是该刷新了」——
  *  这样以后只改 web/ 也能自动生效，不用重开 App。 */
@@ -361,6 +362,9 @@ export function compBaseDeps(id, sha) {
 function compRemoveFiles(id, rec) {
   const others = [];
   for (const [oid, orec] of compRecords()) if (oid !== id) others.push({ id: oid, rec: orec, needs: compNeeds(oid, orec), gained: [] });
+  // 工具包升级后新底座 / 模块可能接管了同名路径，旧记录还写着它：底座认领的一律不删（审查 B23）
+  const base = baseOwnedPaths(new Set(rec.files || []));
+  let baseKept = 0;
   const dirs = new Set();
   // Python 运行时在旁边的 __pycache__ 里生成 .pyc（不在组件清单里）：删 .py 时一并删掉，不然卸载后留下几十 MB
   const pyc = new Map();
@@ -368,6 +372,7 @@ function compRemoveFiles(id, rec) {
   for (const r of rec.files || []) {
     const keeper = others.find((o) => o.needs.has(r));
     if (keeper) { keeper.gained.push(r); continue; }
+    if (base.has(r)) { baseKept++; continue; }
     try { fs.unlinkSync(path.join(PREFIX, r)); } catch {}
     for (let d = path.dirname(r); d && d !== "."; d = path.dirname(d)) dirs.add(d);
     if (r.endsWith(".py")) {
@@ -382,6 +387,7 @@ function compRemoveFiles(id, rec) {
     compWriteRecord(o.id, o.rec);
     log(`[comp] ${id}：${o.gained.length} 个文件 ${o.id} 也要用，留下归它`);
   }
+  if (baseKept) log(`[comp] ${id}：${baseKept} 个文件现在归工具包，留下`);
   // 由深到浅删掉变空的目录（工具包自己的目录不空，自然删不掉）
   for (const d of [...dirs].sort((a, b) => b.length - a.length)) { try { fs.rmdirSync(path.join(PREFIX, d)); } catch {} }
   const sk = rec.skill && skillDst(rec.skill);
