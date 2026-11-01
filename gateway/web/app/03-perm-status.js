@@ -463,6 +463,8 @@
     const sid = view.sessionId;
     if (!sid) return toast(t("这个会话还没存下来，答完一轮再删"), true);
     if (isBusy()) return toast(t("正在生成，等它答完再删"), true);
+    // 提问已经删掉的回复：它在记录里和上一轮的回复连在一起，分不开了，不能再按「前面最近的提问」反推（那会把上一轮的回复一起删掉，审查 B04）
+    if (which !== "user" && msgEl.dataset.orphan) return toast(t("这条回复的提问已经删掉了，没法再单独删它。撤销刚才的删除，或者先删回复再删提问。"), true);
     const users = [...chatEl.querySelectorAll(".msg.user")].filter((u) => userTextOf.has(u));
     let turn = which === "user" ? msgEl : null;
     if (!turn) for (const u of users) if (u.compareDocumentPosition(msgEl) & Node.DOCUMENT_POSITION_FOLLOWING) turn = u;
@@ -472,9 +474,16 @@
     try {
       const r = await api("/api/session/" + encodeURIComponent(sid) + "/delmsg", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ userText: userTextOf.get(turn), after, which, uuid: turn.dataset.uuid || "" }),
+        // 回复自己的 uuid 一起带上：网关核对它确实在要删的那一轮里，对不上就拒绝，绝不删错
+        body: JSON.stringify({ userText: userTextOf.get(turn), after, which, uuid: turn.dataset.uuid || "",
+          replyUuid: which === "user" ? "" : (msgEl.querySelector("[data-uuid]")?.dataset.uuid || "") }),
       });
-      if (which === "user") { userTextOf.delete(msgEl); msgEl.remove(); } else msgEl.remove();
+      if (which === "user") {
+        // 它后面那几条回复（到下一条提问为止）成了没有提问的回复：标上，之后不许单独删
+        const all = [...chatEl.querySelectorAll(".msg")];
+        for (const m of all.slice(all.indexOf(msgEl) + 1)) { if (m.classList.contains("user")) break; if (m.classList.contains("bot")) m.dataset.orphan = "1"; }
+        userTextOf.delete(msgEl); msgEl.remove();
+      } else msgEl.remove();
       toastAct(t("已删除"), t("撤销"), async () => {
         try {
           await api("/api/session/" + encodeURIComponent(sid) + "/undodel", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ undo: r.undo }) });

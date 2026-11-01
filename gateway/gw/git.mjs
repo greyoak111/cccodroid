@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { CFG, log, tz } from "./config.mjs";
 import { realWorkspace } from "./sessionops.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
@@ -21,12 +21,28 @@ function gitArgs(args) {
   const extra = args[0] === "diff" || args[0] === "show" || args[0] === "log" ? ["--no-ext-diff", "--no-textconv"] : [];
   return [...pre, `--attr-source=${EMPTY_TREE}`, args[0], ...extra, ...args.slice(1)];
 }
+// GIT_LITERAL_PATHSPECS：前端给的都是确切文件名，report[1].txt 不能当通配把 report1.txt 一起撤销 / 提交（审查 B03）
+// 超时整组杀：提交时的钩子是 git 的子孙，只杀 git 本身它们还会接着写文件、和用户重试撞在一起（审查 B20）。
+// 新开进程组（spawn 的 detached；execFile 不认这个选项），到点 kill(-pid)；等 close（stdio 全关）才返回，等于等整组收尾
 function git(cwd, args, { input, timeout = 30000, max = GIT_MAX } = {}) {
   return new Promise((resolve) => {
-    const c = execFile("git", gitArgs(args),
-      { cwd, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C.UTF-8" }, timeout, maxBuffer: max * 2, encoding: "utf8" },
-      (err, out, errOut) => resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, out: out || "", err: (errOut || (err && err.code === "ENOENT" ? "找不到 git" : err?.message) || "").trim() }));
-    if (input != null) { c.stdin.end(input); }
+    let timedOut = false, spawnErr = null, over = false;
+    const out = [], errs = []; let outLen = 0, errLen = 0;
+    const c = spawn("git", gitArgs(args), { cwd, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_LITERAL_PATHSPECS: "1", LC_ALL: "C.UTF-8" }, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    const killGroup = () => { try { process.kill(-c.pid, "SIGKILL"); } catch { try { c.kill("SIGKILL"); } catch {} } };
+    const timer = setTimeout(() => { timedOut = true; killGroup(); }, timeout);
+    c.stdout.on("data", (d) => { outLen += d.length; if (outLen > max * 2) { over = true; killGroup(); } else out.push(d); });
+    c.stderr.on("data", (d) => { errLen += d.length; if (errLen <= max * 2) errs.push(d); });
+    c.on("error", (e) => { spawnErr = e; });
+    c.on("close", (code) => {
+      clearTimeout(timer);
+      const errOut = Buffer.concat(errs).toString("utf8");
+      const err = timedOut ? tz("git 超时（{s} 秒），已结束它和它启动的钩子", { s: Math.round(timeout / 1000) })
+        : spawnErr ? (spawnErr.code === "ENOENT" ? "找不到 git" : spawnErr.message) : over ? "输出太长" : errOut;
+      resolve({ code: timedOut || spawnErr || over ? (code || 1) : (code ?? 1), out: Buffer.concat(out).toString("utf8"), err: String(err || "").trim() });
+    });
+    c.stdin.on("error", () => {});
+    if (input != null) c.stdin.end(input); else c.stdin.end();
   });
 }
 /** 抓取 / 拉取 / 推送：联网，最长 3 分钟。
@@ -82,11 +98,11 @@ function gitPrivate(d) {
   if (ws && under(d, ws) && !priv.some((rr) => under(rr, ws))) return false;
   return priv.some((rr) => under(d, rr) || under(rr, d));
 }
-/** 仓库里的相对路径：前端给的可能是绝对路径 */
-/** 仓库里的相对路径：前端给的可能是绝对路径，且 /sdcard 与 /storage/emulated/0 是同一处，按真实路径比（文件删了就解析它的目录） */
+/** 仓库里的相对路径：前端给的可能是绝对路径，且 /sdcard 与 /storage/emulated/0 是同一处，按真实路径比。
+ *  只解析所在目录、最后一级照字面留着：它自己是符号链接时，git 条目是链接本身，跟过去会撤销 / 删掉它指向的文件（审查 B02） */
 function gitRel(root, f) {
   let a = path.isAbsolute(f) ? f : path.join(root, f);
-  try { a = fs.realpathSync(a); } catch { try { a = path.join(fs.realpathSync(path.dirname(a)), path.basename(a)); } catch {} }
+  try { a = path.join(fs.realpathSync(path.dirname(a)), path.basename(a)); } catch {}
   const r = path.relative(root, a);
   return r.startsWith("..") || path.isAbsolute(r) ? null : r;
 }
@@ -331,3 +347,4 @@ export async function routeGit(req, res, u, p) {
   if (p.startsWith("/api/git/")) return handleGit(req, res, p, u);
   return NEXT;
 }
+export const _gitForTest = git;   // 只给测试用

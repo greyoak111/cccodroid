@@ -11,7 +11,7 @@
 // 会话记录一个字节都不改。
 import fs from "node:fs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { neutralizeMarkers } from "./integrity.mjs";
+import { neutralizeMarkers, isInjected } from "./integrity.mjs";
 import { dropExtra, recordExtra } from "./lineage-store.mjs";
 import { lineageByShort, lineageFile, lineageRecord } from "./lineage.mjs";
 import { findSessionFile } from "./sessions.mjs";
@@ -27,7 +27,7 @@ function promptOf(e) {
   const c = e.message && e.message.content;
   if (Array.isArray(c) && c.some((b) => b && b.type === "tool_result")) return "";
   const t = textOf(c);
-  return t && !t.startsWith("<") ? t : "";
+  return t && !isInjected(t) ? t : "";
 }
 
 /** 读文件尾部若干字节里的完整行（第一行可能是半截，丢掉） */

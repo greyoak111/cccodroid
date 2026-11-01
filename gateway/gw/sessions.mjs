@@ -11,6 +11,7 @@ import { chapterView } from "./archive-core.mjs";
 import { runOfSession } from "./runs.mjs";
 import { archiveBrief, archiveDb, archivedTitle } from "./archive-store.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
+import { isInjected } from "./integrity.mjs";
 
 // ── 会话重命名表 ──────────────────────────────────────────────────────
 export let NAMES = {};
@@ -62,8 +63,8 @@ function peekSessionRaw(file) {
       }
       if (!text && typeof ev.content === "string" && ev.type === "queue-operation") text = ev.content;
 
-      if (text && ev.type === "user" && !text.startsWith("<")) { firstMsg = text; break; }
-      if (text && !firstMsg && !text.startsWith("<")) firstMsg = text;
+      if (text && ev.type === "user" && !isInjected(text)) { firstMsg = text; break; }
+      if (text && !firstMsg && !isInjected(text)) firstMsg = text;
     }
   } catch {}
   title = firstMsg.replace(/\s+/g, " ").trim().slice(0, 90);
@@ -129,14 +130,31 @@ function searchText(line) {
   const c = ev.message?.content, out = [];
   if (typeof c === "string") out.push(c);
   else if (Array.isArray(c)) for (const b of c) if (b && b.type === "text" && typeof b.text === "string") out.push(b.text);
-  return out.filter((t) => t && !t.startsWith("<")).join(" ").replace(/\s+/g, " ").trim();
+  return out.filter((t) => t && !isInjected(t)).join(" ").replace(/\s+/g, " ").trim();
+}
+// 增量的前提是文件只往后追加。删消息（整份重写）、撤销（抄回备份）、导入覆盖都不是：长度可能还变长了，
+// 照旧偏移接着读会留着已删的命中、漏掉恢复的正文（审查 B14）。所以记下 inode 和偏移前 64 字节，对不上就从头建
+const SEARCH_TAIL = 64;
+async function indexTail(fh, off) {
+  if (!off) return "";
+  const n = Math.min(SEARCH_TAIL, off), buf = Buffer.alloc(n);
+  const { bytesRead } = await fh.read(buf, 0, n, off - n);
+  return buf.subarray(0, bytesRead).toString("base64");
 }
 async function indexSessionFile(file, size) {
   let e = SEARCH_IDX.get(file);
   if (!e || size < e.off) e = { off: 0, text: "", lower: "" };
+  if (e.off) {
+    const fh = await fs.promises.open(file, "r");
+    try {
+      const st = await fh.stat();
+      if (st.ino !== e.ino || (await indexTail(fh, e.off)) !== e.tail) e = { off: 0, text: "", lower: "" };
+    } finally { await fh.close(); }
+  }
   if (size > e.off) {
     const fh = await fs.promises.open(file, "r");
     try {
+      e.ino = (await fh.stat()).ino;
       let pos = e.off, rest = Buffer.alloc(0);
       const parts = [];
       while (pos < size) {
@@ -152,6 +170,7 @@ async function indexSessionFile(file, size) {
         await new Promise((r) => setImmediate(r));   // 别一口气把事件循环占住
       }
       e.off = pos - rest.length;   // 半行留到下次
+      e.tail = await indexTail(fh, e.off);
       if (parts.length) {
         const add = (e.text ? "\n" : "") + parts.join("\n");
         e.text += add; e.lower += add.toLowerCase();
@@ -439,7 +458,7 @@ export async function routeSessions(req, res, u, p) {
     if (req.method === "POST" && (action === "delmsg" || action === "undodel")) {
       const b = JSON.parse((await readBody(req)) || "{}");
       let r;
-      try { r = action === "delmsg" ? deleteMessage(id, String(b.userText || ""), Number(b.after) || 0, b.which === "user" ? "user" : "bot", String(b.uuid || "").slice(0, 64)) : undoDelete(id, String(b.undo || "")); }
+      try { r = action === "delmsg" ? deleteMessage(id, String(b.userText || ""), Number(b.after) || 0, b.which === "user" ? "user" : "bot", String(b.uuid || "").slice(0, 64), String(b.replyUuid || "").slice(0, 64)) : undoDelete(id, String(b.undo || "")); }
       catch (e) { r = { ok: false, status: 500, message: e.message }; }
       return sendJson(res, r.ok ? 200 : r.status, r.ok ? r : { ok: false, error: action, message: tr(LAST_LANG, r.message) });
     }

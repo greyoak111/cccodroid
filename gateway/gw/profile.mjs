@@ -11,6 +11,7 @@ import { CFG } from "./config.mjs";
 import { NEXT, readBodyBuf, sendJson } from "./http.mjs";
 import { lineageFile, lineageGraph, lineageRecord } from "./lineage.mjs";
 import { agentFilesOf } from "./transcript.mjs";
+import { isInjected } from "./integrity.mjs";
 
 const SID = /^[0-9a-f-]{36}$/i;
 const BIG_LINE = 2 << 20;          // 超过这么长的行（大段工具结果）不 JSON.parse，正则摘要点
@@ -63,7 +64,7 @@ function promptOf(e) {
   const c = e.message && e.message.content;
   if (Array.isArray(c) && c.some((b) => b && b.type === "tool_result")) return "";
   const t = textOf(c);
-  return t && !t.startsWith("<") ? t : "";
+  return t && !isInjected(t) ? t : "";
 }
 /** 工具调用的一句话说明：文件路径 / 命令 / 描述，取最像人话的那个 */
 function labelOf(name, input) {

@@ -171,7 +171,13 @@ const NULL_AT = new Map();  // 排不出下次时间的任务上次重算的时�
 const MANUAL = new Set();   // 手动「立刻跑一次」还没落到队列里的任务
 const RUNNING = new Map();   // key → { taskId, startedAt, attempt, trial }
 let keyN = 0;
+const WAITING = new Set();   // 到点了、正排队等别的对话跑完的任务 id：计时别把它当成「没排上 / 时间已过」（审查 B17）
 async function fire(t, { reason = "due", attempt = 0, trial = false } = {}) {
+  if (trial) return fireNow(t, { reason, attempt, trial });
+  WAITING.add(t.id);
+  try { return await fireNow(t, { reason, attempt, trial }); } finally { WAITING.delete(t.id); }
+}
+async function fireNow(t, { reason, attempt, trial }) {
   const skip = (msg) => { log(`⏭ 定时任务「${t.name}」跳过：${msg}`); if (!trial) addRun({ taskId: t.id, at: Date.now(), st: "skip", msg }); };
   if (!trial) {
     if (t.until?.kind === "date" && t.until.date && Date.now() > new Date(t.until.date + "T23:59:59").getTime()) { t.on = false; refreshNext(t); save(); return skip(tz("已过有效期，任务已关")); }
@@ -203,6 +209,8 @@ async function fire(t, { reason = "due", attempt = 0, trial = false } = {}) {
       }
     }
   }
+  // 排队那 30 秒里被删 / 被关、而别的对话又正好在醒来前结束：循环条件直接为假，循环里那道检查没走到（审查 B16）。入队前再看一眼
+  if (!trial && (byId(t.id) !== t || (reason === "due" && !t.on))) return skip(tz("排队时任务被关掉或删了"));
   const p = t.projectId ? projectById(t.projectId) : null;
   const perm = t.perm === "proj" ? { permissionMode: "acceptEdits" }
     : t.perm === "custom" ? { permissionMode: "default", allowedTools: capList(String(t.tools || "").split(/[,，\n]/).map((x) => x.trim()).filter(Boolean), 200, 512, 8192) }
@@ -266,9 +274,12 @@ END_HOOKS.push((run, f) => {
 function tick() {
   const now = Date.now();
   const gap = DB.lastTick ? now - DB.lastTick : 0;
+  const live = new Set([...RUNNING.values()].map((x) => x.taskId));
   for (const t of DB.tasks) {
     if (!t.on) continue;
     if (t.nextAt == null) {
+      // 正排队或正在跑：只跑一次的任务这时 nextAt 已是空的，别当成「时间已过」把它关掉记一笔跳过（审查 B17）
+      if (WAITING.has(t.id) || live.has(t.id)) continue;
       // 只跑一次、时间已过还没跑过：关掉并记一笔，免得界面一直显示启用却永远不跑（审查 v0.5.3 B7）
       if (t.freq?.kind === "once" && !t.pausedUntil) { t.on = false; addRun({ taskId: t.id, at: now, st: "skip", msg: tz("只跑一次的时间已过，任务已关") }); continue; }
       // 排不出下次的（如 2 月 31 日）每 30 秒重算一遍要扫满一年：一小时看一次就够
@@ -430,3 +441,4 @@ export async function routeSched(req, res, u, p) {
   }
   return NEXT;
 }
+export const _schedForTest = { fire, tick, DB, runlog: () => RUNLOG };   // 只给测试用

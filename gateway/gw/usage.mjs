@@ -6,6 +6,7 @@ import { CFG, LIVE, HERE, PATHS, PREFIX, log, tz } from "./config.mjs";
 import { claudeEnv, readLedger } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { devPrivStatus } from "./devside.mjs";
+import { isInjected } from "./integrity.mjs";
 
 // ── 本应用耗电统计（设置页「耗电」卡）──────────────────────────────────────────
 // 应用身份能直接量的只有自己进程的 CPU 时间（/proc/<pid>/stat，同 uid 的进程才看得见）；
@@ -117,7 +118,7 @@ export function usageMeter(ctx) {
 // 用户自己打的字才算一次对话：斜杠命令、命令回显、系统注入的不算
 export const usageIsPrompt = (text) => {
   const s = String(text || "").trimStart();
-  return !!s && !s.startsWith("/") && !/^<(command-|local-command|bash-|system-reminder|task-notification)/.test(s) && !s.startsWith("Caveat: ");
+  return !!s && !s.startsWith("/") && !isInjected(s) && !s.startsWith("Caveat: ");
 };
 const usageText = (content) => typeof content === "string" ? content
   : Array.isArray(content) && !content.some((c) => c && c.type === "tool_result") ? content.filter((c) => c && c.type === "text").map((c) => c.text).join("\n") : "";

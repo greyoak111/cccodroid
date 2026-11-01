@@ -316,7 +316,8 @@ export function enqueue(body) {
   // claude 会在当前这一步（比如一次工具调用）结束后把它并进对话，同一轮里接着干 —— 和终端里边干边打字一样。
   // 塞不进去（这一轮已在收尾、或者不是同一个会话）就排到队首，这一轮一结束马上发。
   const busyRun = laneRun(laneOfItem(item));
-  if (busyRun && busyRun.idle && tryInject(busyRun, item)) { item.injected = true; publishState(); return item; }
+  // 定时任务不走这条：塞进别人的轮次，它自己的工具限制、无人值守、时长上限都没了，结束时也认不出是它（审查 B05）。排队等那一轮结束
+  if (busyRun && busyRun.idle && !item.sched && tryInject(busyRun, item)) { item.injected = true; publishState(); return item; }
   if ((body.mode === "inject" || body.mode === "interrupt") && busyRun) {
     if (tryInject(busyRun, item)) { item.injected = true; return item; }
     QUEUE.unshift(item);

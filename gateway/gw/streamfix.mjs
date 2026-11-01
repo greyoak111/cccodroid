@@ -37,7 +37,7 @@ export function fixedBaseUrl(baseUrl) {
 
 /** SSE 修补状态机：feed 进上游原文，吐出要发给 claude 的文本；finish 在上游结束时调用，返回补的尾巴或 null（= 该断就断） */
 export function sseRepairer() {
-  let buf = "", started = false, gotStop = false, gotMsgStop = false, outTokens = 0;
+  let buf = "", cr = "", started = false, gotStop = false, gotMsgStop = false, outTokens = 0;
   const open = new Set(), kinds = new Map();
   let hasOutput = false, hasTool = false;
   const done = () => started && !gotMsgStop && open.size === 0 && hasOutput;
@@ -85,12 +85,16 @@ export function sseRepairer() {
   }
   return {
     feed(chunk) {
-      buf += chunk.replace(/\r\n?/g, "\n");
+      // 块尾的 \r 先留着：CRLF 正好切在两块之间时，单独把 \r 换成 \n 会多出一个空行，把事件名和 data 拆开（审查 B10）
+      let c = cr + chunk; cr = "";
+      if (c.endsWith("\r")) { cr = "\r"; c = c.slice(0, -1); }
+      buf += c.replace(/\r\n?/g, "\n");
       let out = "", i;
       while ((i = buf.indexOf("\n\n")) >= 0) { const raw = buf.slice(0, i); buf = buf.slice(i + 2); if (raw.trim()) out += block(raw); }
       return out;
     },
     finish() {
+      if (cr) { buf += "\n"; cr = ""; }
       let out = buf.trim() ? block(buf) : ""; buf = "";
       if (gotMsgStop) return out;
       if (done()) { log("streamfix: 上游没收尾，补 message_delta/message_stop"); return out + tail(); }

@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { isInjected } from "./integrity.mjs";
 
 const CHAIN = new Set(["user", "assistant", "system"]);
 const HEAD = 4096;   // 开头这么多字节的哈希：变了说明文件被整个改写过（删消息、回退修正），要重扫
@@ -26,7 +27,7 @@ function userText(e) {
   const c = e.message?.content;
   if (Array.isArray(c) && c.some((b) => b?.type === "tool_result")) return "";
   const t = typeof c === "string" ? c : Array.isArray(c) ? (c.find((b) => b?.type === "text")?.text || "") : "";
-  return t && !t.startsWith("<") ? t : "";
+  return t && !isInjected(t) ? t : "";
 }
 
 export function emptyRecord(id) {

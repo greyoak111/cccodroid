@@ -69,6 +69,8 @@
     };
     for (const sh of document.styleSheets) { let rs; try { rs = sh.cssRules; } catch { continue; } walk(rs); }
     // 变量：规则里用到的，按地图根元素此刻的计算值写死（外观 / 强调色 / 深浅色都跟着导出那一刻）
+    // 样式里用户能定的值（字体名、强调色）去掉尖括号；要在下面拼变量前定义（以前定义在后面，导出 HTML 必抛 TDZ，审查 B13）
+    const cssv = (s) => String(s).replace(/[<>]/g, "");
     const el = $("lin-map"), cs = getComputedStyle(el), vars = new Set();
     for (const c of css) for (const m of c.matchAll(/var\(--([\w-]+)/g)) vars.add(m[1]);
     const root = [...vars].map((v) => `--${v}:${cssv(cs.getPropertyValue("--" + v).trim() || "initial")}`).join(";");
@@ -78,7 +80,6 @@
     const safe = (s) => s.replace(/<\/(script|style)/gi, "<\\/$1");
     // 数据（会话标题、章名都在里面）塞进 <script>：< 一律写成 \u003c，标题里夹 <!--<script 之类也搅不乱解析；样式里用户能定的值（字体名、强调色）同理
     const js = (v) => JSON.stringify(v).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
-    const cssv = (s) => String(s).replace(/[<>]/g, "");
     const model = { ...LIN.model, now: Date.now() };
     const bg = getComputedStyle(document.body).backgroundColor, fg = getComputedStyle(document.body).color;
     return `<!doctype html>

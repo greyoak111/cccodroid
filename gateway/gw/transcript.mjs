@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { LAST_LANG, tr, tz } from "./config.mjs";
 import { promptTokens } from "./stream.mjs";
+import { isInjected } from "./integrity.mjs";
 
 // ── 读会话记录：分页翻 transcript、子代理 ─────────────────────────────
 /** 工具参数里的长字符串截短 —— 历史里一个 Write 工具能带几百 KB 的文件内容，
@@ -39,9 +40,9 @@ export function transcriptItems(ev) {
     if (ev.isCompactSummary) { out.push({ role: "note", text: tr(LAST_LANG, tz("（此前的对话已被压缩成摘要）")), compact: true, uuid: ev.uuid || null }); return out; }
     const c = ev.message?.content;
     if (typeof c === "string") {
-      if (c && !c.startsWith("<")) out.push({ role: "user", text: c, uuid: ev.uuid || null });
+      if (c && !isInjected(c)) out.push({ role: "user", text: c, uuid: ev.uuid || null });
     } else if (Array.isArray(c)) {
-      const texts = c.filter((x) => x.type === "text" && x.text && !x.text.startsWith("<")).map((x) => x.text);
+      const texts = c.filter((x) => x.type === "text" && x.text && !isInjected(x.text)).map((x) => x.text);
       // 「图片随消息发」时原话里已有 @图片路径，不再补一行 [图片]
       if (c.some((x) => x.type === "image") && !texts.some((x) => /@\/\S+\.(png|jpe?g|gif|webp)\b/i.test(x))) texts.push("[图片]");
       if (texts.length) out.push({ role: "user", text: texts.join("\n"), uuid: ev.uuid || null });

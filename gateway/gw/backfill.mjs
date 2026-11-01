@@ -19,6 +19,7 @@ import { findSessionFile } from "./sessions.mjs";
 import { archiveDb } from "./archive-store.mjs";
 import { fileChapter } from "./archive.mjs";
 import { validateTitle } from "./archive-core.mjs";
+import { isInjected } from "./integrity.mjs";
 
 const SUM_HEAD = 1000, SUM_TAIL = 1400, OPEN_MAX = 1600, BATCH_CHARS = 48000, BATCH_N = 24;
 const zh = () => /^zh/i.test(LAST_LANG);
@@ -79,7 +80,7 @@ async function promptsFrom(file, off) {
       let e; try { e = JSON.parse(s); } catch { continue; }
       if (e.type !== "user" || e.isSidechain) continue;
       const t = textOf(e.message && e.message.content).trim();
-      if (!t || t.startsWith("<") || t.startsWith("Caveat:")) continue;
+      if (!t || isInjected(t) || t.startsWith("Caveat:")) continue;
       qs.push(t.replace(/\s+/g, " ").slice(0, 160));
     }
   }

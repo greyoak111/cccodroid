@@ -16,6 +16,7 @@ import { fileChapter } from "./archive.mjs";
 import { validateTitle } from "./archive-core.mjs";
 import { _promptsFrom, ask, parseTitles, userPrompt } from "./backfill.mjs";
 import fs from "node:fs";
+import { isInjected } from "./integrity.mjs";
 
 const REPLY_HEAD = 700, REPLY_TAIL = 500, SCAN = 4 << 20, LINE_CAP = 1 << 20, CHUNK = 256 << 10;
 const TRIED = new Set();   // 每个会话只试一次（网关重启后清空无妨：有题名的会被下面的判断挡住）
@@ -58,7 +59,7 @@ async function firstReply(file) {
       const c = e.message && e.message.content;
       if (Array.isArray(c) && c.some((x) => x && x.type === "tool_result")) return;
       const t = textOf(c).trim();
-      if (!t || t.startsWith("<") || t.startsWith("Caveat:")) return;
+      if (!t || isInjected(t) || t.startsWith("Caveat:")) return;
       if (seenQ) return false;
       seenQ = true;
       return;

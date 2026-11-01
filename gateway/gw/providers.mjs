@@ -386,6 +386,11 @@ function upsertProvider(id, b) {
     if (!/^https?:\/\//.test(cur.baseUrl || "")) return { error: "bad_baseUrl", message: tz("端点地址要以 http:// 或 https:// 开头") };
     cur.baseUrl = cur.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");   // claude 自己会补 /v1/messages
   }
+  // 正在用这家的轮次已经拿了旧地址，密钥却是每次现读（apiKeyHelper / keyOf 按 id 取新的）：改连接会拼出「旧地址 + 新密钥」，
+  // 和删除一样等它跑完（审查 B01）。只改默认型号、窗口、名字这些不碍事，照常放行
+  const conn = (v) => [v.apiKey, v.baseUrl, v.authStyle, v.endpoint].map((x) => String(x || "")).join("\0");
+  if (!isNew && conn(PROVIDERS_RAW.providers[id] || {}) !== conn(cur) && [...RUNS.values()].some((r) => !r.ended && r.provider === id))
+    return { error: "busy", status: 409, message: tz("这一家正在用，等这一轮跑完再改地址或密钥。") };
   PROVIDERS_RAW.providers[id] = cur;
   saveProvidersRaw();
   if (id === PROVIDER.id) applyProvider();
@@ -738,7 +743,7 @@ export async function routeProviders(req, res, u, p) {
     const k = String(b.apiKey || "").trim();
     if (!k) return sendJson(res, 400, { error: "empty" });
     const r = upsertProvider(b.provider ? String(b.provider) : PROVIDER.id, { apiKey: k });
-    return sendJson(res, r.error ? 400 : 200, r);
+    return sendJson(res, r.error ? r.status || 400 : 200, r);
   }
   // ── 厂商列表（供界面切换用）──
   if (req.method === "GET" && p === "/api/providers") {
@@ -754,7 +759,7 @@ export async function routeProviders(req, res, u, p) {
   if (req.method === "POST" && p === "/api/providers/save") {
     const b = JSON.parse((await readBody(req)) || "{}");
     const r = upsertProvider(b.id ? String(b.id) : null, b);
-    return sendJson(res, r.error ? 400 : 200, r);
+    return sendJson(res, r.error ? r.status || 400 : 200, r);
   }
   if (req.method === "POST" && p === "/api/providers/delete") {
     const b = JSON.parse((await readBody(req)) || "{}");

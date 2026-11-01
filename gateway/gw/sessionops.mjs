@@ -9,7 +9,7 @@ import { claudeCmd, claudeEnv, killTree } from "./claude.mjs";
 import { LAST_SESSION, forgetSession, runOfSession } from "./runs.mjs";
 import { forgetChild, recordPrimary } from "./lineage-store.mjs";
 import { lineageForget } from "./lineage.mjs";
-import { checkSession, neutralizeMarkers, resealAfterEdit, sealSession } from "./integrity.mjs";
+import { checkSession, neutralizeMarkers, resealAfterEdit, sealSession, isInjected } from "./integrity.mjs";
 import { forEachLine, lineWriter, zipEntries, zipExtract, zipToFile } from "./bigfile.mjs";
 
 // ── 会话管理：回收站 / 导出 / 导入 ─────────────────────────────────────
@@ -30,9 +30,9 @@ const forkNorm = (t) => String(t || "").replace(/\[图片\]/g, "").replace(/\s+/
 function forkUserText(ev) {
   if (!ev || ev.type !== "user" || ev.isSidechain || ev.isMeta || ev.isCompactSummary) return null;
   const c = ev.message?.content;
-  if (typeof c === "string") return c && !c.startsWith("<") ? c : null;
+  if (typeof c === "string") return c && !isInjected(c) ? c : null;
   if (!Array.isArray(c)) return null;
-  const texts = c.filter((x) => x.type === "text" && x.text && !x.text.startsWith("<")).map((x) => x.text);
+  const texts = c.filter((x) => x.type === "text" && x.text && !isInjected(x.text)).map((x) => x.text);
   // 「图片随消息发」时原话里已有 @图片路径，不再补一行 [图片]
   if (c.some((x) => x.type === "image") && !texts.some((x) => /@\/\S+\.(png|jpe?g|gif|webp)\b/i.test(x))) texts.push("[图片]");
   return texts.length ? texts.join("\n") : null;
@@ -115,9 +115,10 @@ export function forkSession(id, userText, after, { before = false, uuid = "", la
 // claude 下一轮 --resume 沿 parentUuid 回溯时就看不到它们了。改前整份抄进回收站的 .edits/（留 30 天），撤销就是抄回来。
 // 文件检查点（file-history-snapshot）、摘要这些不在对话链上的行不动。
 const EDITS_DIR = path.join(TRASH_DIR, ".edits");
-const UNDO = new Map();   // 会话号 → 最近一次删消息的 { backup, size, mtime }：撤销前核对文件没再变过
+const UNDO = new Map();
+const ORPHAN_HEADS = new Map();   // 会话号 → 提问被删掉的那几轮回复的第一行 uuid（见 deleteMessage 里的 B04）   // 会话号 → 最近一次删消息的 { backup, size, mtime }：撤销前核对文件没再变过
 const CHAIN_TYPES = new Set(["user", "assistant", "system", "progress", "attachment"]);
-export function deleteMessage(id, userText, after, which, uuid = "") {
+export function deleteMessage(id, userText, after, which, uuid = "", replyUuid = "") {
   if (runOfSession(id)) return { ok: false, status: 409, message: tz("这个会话正在生成中，等它答完再删。") };
   const loc = locateUserTurn(id, userText, after, uuid);
   if (!loc.ok) return loc;
@@ -130,10 +131,20 @@ export function deleteMessage(id, userText, after, which, uuid = "") {
     if (i < from || (which === "user" ? i !== from : i === from) || !l.trim()) return;
     let ev; try { ev = JSON.parse(l); } catch { return; }
     if (which !== "user" && !(CHAIN_TYPES.has(ev.type) && !ev.isSidechain)) return;
+    // 回复中途压缩过：压缩边界和摘要是章节分界，不属于这条回复。删了它章号整体前移、按章号存的题名就套错章（审查 B11）
+    if (which !== "user" && (ev.isCompactSummary || (ev.type === "system" && ev.subtype === "compact_boundary"))) return;
     drop.add(i);
     if (ev.uuid) parentOf.set(ev.uuid, ev.parentUuid ?? null);
   });
   if (!drop.size) return { ok: false, status: 409, message: tz("这条消息在会话记录里没有可删的内容。") };
+  // 界面给了回复自己的 uuid：它必须在这一轮要删的行里；而且不能落在「提问已删掉的回复」起点或之后——那时界面把它当成单独一轮，
+  // 记录里它却和上一轮的回复连成一片，按轮删会把上一轮的回复一起带走（审查 B04）。重新打开会话后两段画成一个气泡，带的是前一段的 uuid，照常放行
+  if (which !== "user" && replyUuid) {
+    if (!parentOf.has(replyUuid)) return { ok: false, status: 409, message: tz("这条回复和会话记录对不上，重新打开会话再删。") };
+    const heads = ORPHAN_HEADS.get(id), order = [...parentOf.keys()];
+    if (heads && order.slice(0, order.indexOf(replyUuid) + 1).some((u) => heads.has(u)))
+      return { ok: false, status: 409, message: tz("这条回复的提问已经删掉了，它和上一轮的回复连在一起，没法单独删。") };
+  }
   const up = (u) => { let n = 0; while (u && parentOf.has(u) && n++ < 100000) u = parentOf.get(u); return u; };
   const bdir = EDITS_DIR;
   fs.mkdirSync(bdir, { recursive: true });
@@ -157,6 +168,15 @@ export function deleteMessage(id, userText, after, which, uuid = "") {
   resealAfterEdit(id, found.file, dirty);
   PEEK_CACHE.delete(found.file);
   lineageForget(id);
+  if (which === "user") {
+    // 记下这一轮回复的起点：之后界面再单独删它，要能认出来（文件已经换掉，按旧行号从备份里找）
+    let head = null;
+    forEachLine(path.join(bdir, backup), (l, i) => {
+      if (head || i <= from || i >= to || !l.trim()) return head ? false : undefined;
+      try { const ev = JSON.parse(l); if (ev.uuid && CHAIN_TYPES.has(ev.type) && !ev.isSidechain) head = ev.uuid; } catch {}
+    });
+    if (head) { if (!ORPHAN_HEADS.has(id)) ORPHAN_HEADS.set(id, new Set()); ORPHAN_HEADS.get(id).add(head); }
+  }
   const st = fs.statSync(found.file);
   UNDO.set(id, { backup, size: st.size, mtime: st.mtimeMs });
   log(`删消息 ${id.slice(0, 8)}：第 ${best + 1} 轮的${which === "user" ? "提问" : "回复"}，${drop.size} 行`);
@@ -177,6 +197,7 @@ export function undoDelete(id, backup) {
   resealAfterEdit(id, found.file, dirty);
   PEEK_CACHE.delete(found.file);
   UNDO.delete(id);
+  ORPHAN_HEADS.delete(id);   // 抄回删之前的样子：提问回来了，界面也整份重开
   log(`撤销删消息 ${id.slice(0, 8)}`);
   return { ok: true };
 }
