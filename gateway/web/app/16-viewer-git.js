@@ -452,8 +452,9 @@
     if (a === "devtools") { VW.picking = false; try { localStorage.setItem("cc.pvDevtools", pvDevtools() ? "0" : "1"); } catch {} vwRenderActs(); return vwHtmlReload(); }
     if (a === "openweb") {
       if (!VW.pv) return;
-      // 浏览器里没有查看器那层「不联网」拦截（整页跳外站拦不住）：没开联网的先问一句（10-31 复核）
-      if (!VW.pv.net && !confirm(t("在浏览器里打开就没有「不联网」的保护了：网页里的脚本能把它所在文件夹里的文件发到别处。只对你信得过的网页这样做。"))) return;
+      // 浏览器里没有查看器那层「不联网」拦截（整页跳外站拦不住），也没有 App 壳的网络拦截：
+      // 开没开联网都先问一句（10-31 复核；11-01 独立审查低-9）
+      if (!confirm(t("在浏览器里打开就没有查看器的保护了：网页里的脚本能把它所在文件夹里的文件发到别处，也能访问本机上的其他服务。只对你信得过的网页这样做。"))) return;
       openWeb(VW.pv.url);
       return;
     }

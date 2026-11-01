@@ -415,8 +415,15 @@ final class Priv {
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                     String who = caller(pid), tool = req.optString("tool");
                     // 读剪贴板：你从别的应用复制的密码、验证码都在里面，每次都要点头
+                    JSONObject da = req.optJSONObject("args");
                     if ("clipboard_read".equals(tool) && !ask(Tr.t("设备工具：读取剪贴板"), who, "dev:clipboard_read", false)) {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("用户没有允许读剪贴板（cccodroid 不在前台时也会直接拒绝）"));
+                    // 写剪贴板能把你刚复制的收款地址悄悄换掉；打开能把浏览器弹到钓鱼网址、把号码填进拨号盘。
+                    // 直连套接字的调用不经 Claude 那层确认，这里每次都问（11-01 独立审查低-4）
+                    } else if ("clipboard_write".equals(tool) && !ask(Tr.t("设备工具：写入剪贴板") + "\n\n" + clip(da == null ? "" : da.optString("text", "")), who, "dev:clipboard_write", false)) {
+                        resp = new JSONObject().put("ok", false).put("message", Tr.t("用户没有允许写剪贴板（cccodroid 不在前台时也会直接拒绝）"));
+                    } else if ("open".equals(tool) && !ask(Tr.t("设备工具：打开") + "\n\n" + clip(da == null ? "{}" : da.toString(2)), who, "dev:open", false)) {
+                        resp = new JSONObject().put("ok", false).put("message", Tr.t("用户没有允许打开（cccodroid 不在前台时也会直接拒绝）"));
                     } else resp = DeviceTools.call(ctx, req);
                     audit(t0, who, new JSONObject().put("argv", new JSONArray().put("[" + Tr.t("设备工具") + "] " + tool)), resp.optBoolean("ok", true) ? 0 : 1, System.currentTimeMillis() - t0);
                     break;
@@ -562,7 +569,7 @@ final class Priv {
             && !ask((argv.length >= 3 && "-c".equals(argv[1]) ? argv[2] : String.join(" ", argv)) + (e != null ? "\n\n[env] " + e : ""), who,
                 a + "\0" + req.optString("cwd", "/") + "\0" + e, trustable(argv, req.optString("cwd", "/"), e))) {
             audit(t0, who, req, 126, 0);
-            frame(out, 4, Tr.t("这条特权命令要你在 cccodroid 里点「允许」才会执行（只有 dumpsys、pm list、settings get、logcat 这类查看命令不用问）。这次没有允许，没有执行。cccodroid 不在前台、或者已经有一条在等确认时，会直接拒绝。").getBytes(StandardCharsets.UTF_8));
+            frame(out, 4, Tr.t("这条特权命令要你在 cccodroid 里点「允许」才会执行（只有带服务名的 dumpsys、pm list、settings get 这类查看命令不用问）。这次没有允许，没有执行。cccodroid 不在前台、或者已经有一条在等确认时，会直接拒绝。").getBytes(StandardCharsets.UTF_8));
             frameExit(out, 126);
             return null;
         }
@@ -607,6 +614,11 @@ final class Priv {
     private static final int AUDIT_MAX = 1 << 20;
 
     /** 发起方：看连上来的那个进程（priv.mjs）继承的环境变量，再看它的父进程是不是 cc-mem */
+    /** 确认框里摆出来的内容：太长就留头尾（对话框超过 4000 字直接拒） */
+    private static String clip(String x) {
+        return x.length() <= 3000 ? x : x.substring(0, 1500) + "\n…（" + Tr.f("共 {0} 字", x.length()) + "）…\n" + x.substring(x.length() - 1500);
+    }
+
     private static String caller(int pid) {
         if (pid <= 0) return "?";
         try {

@@ -2592,3 +2592,6 @@
 2592	{n} archivo(s) adjuntado(s) al borrador de la conversación anterior
 2593	No es UTF-8
 2594	Este archivo está codificado en {enc}. Guardarlo dañaría el original, así que solo se puede ver.
+2595	Formato de nombre no válido
+2596	Parámetros de solicitud no válidos
+2597	Abrirla en el navegador quita la protección del visor: los scripts de la página pueden enviar a otro sitio los archivos de su carpeta y acceder a otros servicios de este dispositivo. Hazlo solo con páginas de confianza.

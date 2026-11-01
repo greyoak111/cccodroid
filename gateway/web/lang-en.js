@@ -2629,5 +2629,8 @@ window.I18N_DICT.en = {
   "这条回复的提问已经删掉了，没法再单独删它。撤销刚才的删除，或者先删回复再删提问。": "The question for this reply was deleted, so the reply can't be deleted on its own. Undo that deletion, or delete the reply first and then the question.",
   "{n} 个文件已附加到刚才那个会话的草稿": "{n} file(s) attached to the draft of the session you just left",
   "非 UTF-8": "Not UTF-8",
-  "这个文件是 {enc} 编码，存回去会损坏原文，只能查看": "This file is {enc}-encoded. Saving it would corrupt the original, so it is view-only."
+  "这个文件是 {enc} 编码，存回去会损坏原文，只能查看": "This file is {enc}-encoded. Saving it would corrupt the original, so it is view-only.",
+  "名字格式不对": "Invalid name format",
+  "请求参数不对": "Invalid request parameters",
+  "在浏览器里打开就没有查看器的保护了：网页里的脚本能把它所在文件夹里的文件发到别处，也能访问本机上的其他服务。只对你信得过的网页这样做。": "Opening it in the browser drops the viewer's protection: scripts on the page can send files from its folder elsewhere and reach other services on this device. Only do this for pages you trust."
 };

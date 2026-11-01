@@ -213,7 +213,8 @@ export async function routeFiles(req, res, u, p) {
     let real;
     try { real = fs.realpathSync(q); } catch { return sendJson(res, 404, { error: "not found", path: q }); }
     let st; try { st = fs.statSync(real); } catch (e) { return sendJson(res, 404, { error: e.message }); }
-    if (st.isDirectory()) return sendJson(res, 200, { path: real, dir: true });
+    // 目录也过同一道闸：不然私有目录、运行时目录在不在、真实路径是什么都探得出来（11-01 独立审查低-1）
+    if (st.isDirectory()) return pathBlocked(real) ? sendJson(res, 403, { error: "forbidden" }) : sendJson(res, 200, { path: real, dir: true });
     const r = safeFilePath(real);
     if (r.error) return sendJson(res, r.status || 404, { error: r.error });
     return sendJson(res, 200, { path: r.file, dir: false, size: r.size, mtime: r.mtime, kind: fileKind(r.file, false) });

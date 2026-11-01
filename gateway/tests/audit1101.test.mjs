@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { CFG } from "../gw/config.mjs";
 import { NEXT } from "../gw/http.mjs";
 import { routeGit } from "../gw/git.mjs";
@@ -298,7 +298,9 @@ test("B21 两个字体同时导入：两个都留下；导入中途删掉的不�
   assert.ok(!now.includes("old.ttf"), "删掉的没被写回");
 });
 
-test("B22 多行说明的自定义命令：在界面里改了正文再保存，frontmatter 还是合法 YAML、其他项原样", async () => {
+test("B22 多行说明的自定义命令：在界面里改了正文再保存，frontmatter 还是合法 YAML、其他项原样", async (t) => {
+  // 用 yq 当独立的 YAML 解析器核对；没装的机器跳过（11-01 独立审查）
+  if (spawnSync("yq", ["--version"]).error) return t.skip("没有 yq");
   const { commandRoutes, parseCmd } = await import("../gw/commands.mjs");
   const go = await serve(commandRoutes(() => []));
   const dir = path.join(process.env.HOME, ".claude", "commands");

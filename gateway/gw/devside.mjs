@@ -214,6 +214,17 @@ async function claudeVersions(force) {
   return data;
 }
 
+// /api/app/* 各操作收哪些字段（对照 Priv.java、Updater.set、Notify.set、DeviceTools.set）
+const APP_FIELDS = {
+  upd_apply: { item: "string", version: "string" },
+  upd_set: { auto: "boolean", channel: "string", version: "string", flavor: "string" },
+  upd_verify: { full: "boolean" }, upd_repair: { full: "boolean" },
+  share_file: { path: "string", mime: "string" },
+  shz_pair: { code: "string" }, shz_autostart: { enable: "boolean" },
+  notify_set: { done: "boolean", ask: "boolean" },
+  dev_set: { on: "boolean", tool: "string", enabled: "boolean", a11y: "string", idle: "number" },
+};
+
 // ── 路由：/api/mem/status /api/mem/clear /api/priv/status /api/priv/request /api/priv/open /api/priv/audit /api/priv/keepalive /api/app/ ──
 export async function routeDevside(req, res, u, p) {
   if (req.method === "GET" && p === "/api/claude/versions") {
@@ -247,7 +258,15 @@ export async function routeDevside(req, res, u, p) {
     const op = p.slice(9);
     const OPS = ["upd_status", "upd_check", "upd_apply", "upd_set", "upd_verify", "upd_repair", "share_logs", "share_file", "shz_install", "shz_activate", "shz_pair", "shz_autostart", "shz_repair", "open_app_settings", "freeze_ack", "notify_status", "notify_set", "notify_settings", "dev_status", "dev_set", "a11y_settings"];
     if (!OPS.includes(op)) return sendJson(res, 404, { ok: false, message: tz("未知操作") });
-    const b = req.method === "POST" ? JSON.parse((await readBody(req)) || "{}") : {};
+    const raw = req.method === "POST" ? JSON.parse((await readBody(req)) || "{}") : {};
+    // 只转各操作认的字段、认的类型：应用那头也逐项校验，这里再挡一道（11-01 独立审查低-3）
+    const b = {};
+    for (const [k, ty] of Object.entries(APP_FIELDS[op] || {})) {
+      const v = raw && raw[k];
+      if (v === undefined) continue;
+      if (typeof v !== ty || (ty === "string" && v.length > 4096) || (ty === "number" && !Number.isFinite(v))) return sendJson(res, 400, { ok: false, message: tz("请求参数不对") });
+      b[k] = v;
+    }
     if (!PREFIX) return sendJson(res, 200, await devApp(op, b));
     return sendJson(res, 200, await privCall({ ...b, op }));
   }

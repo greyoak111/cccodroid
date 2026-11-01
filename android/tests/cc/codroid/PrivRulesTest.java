@@ -22,7 +22,6 @@ public final class PrivRulesTest {
         sh(false, "am set-bg-restriction-level 'com.foo' restricted");
         sh(false, "dumpsys batterystats --checkin");
         sh(false, "id -u");
-        sh(false, "logcat -d -t 200 | grep cccodroid");
         sh(false, "pm path com.foo");
         want(false, "/system/bin/dumpsys", "battery");
         sh(false, "dumpsys battery 2>/dev/null >/dev/null");
@@ -68,6 +67,26 @@ public final class PrivRulesTest {
         sh(true, "ls -laR /sdcard");
         sh(true, "sort -o /sdcard/x /sdcard/y");
         sh(true, "logcat -f /sdcard/x");
+        // 11-01 独立审查：裸 dumpsys、全机日志、读共享存储
+        sh(true, "dumpsys");
+        sh(true, "dumpsys 2>/dev/null");
+        sh(true, "logcat -d -t 200 | grep cccodroid");
+        want(true, "/system/bin/logcat", "-d");
+        sh(true, "cat /sdcard/DCIM/a.jpg");
+        sh(true, "head -c 100 /storage/emulated/0/Download/x");
+        sh(true, "grep -f/sdcard/pat /proc/version");
+        sh(true, "tail /storage/1234-5678/x");
+        sh(true, "wc -l /mnt/user/0/emulated/0/x");
+        sh(true, "cat sdcard/x");
+        sh(true, "dumpsys -t 10");
+        sh(true, "dumpsys --proto");
+        sh(true, "dumpsys --priority NORMAL");
+        sh(true, "dumpsys --skip meminfo");
+        sh(false, "dumpsys -t 10 meminfo");
+        sh(true, "grep -fsdcard/pat /system/build.prop");
+        sh(true, "grep -e x sdcard/a.txt");
+        sh(false, "ls /sdcard/Download");
+        sh(false, "dumpsys meminfo | grep -i total");
         sh(true, "settings --user 0 get secure x");
         sh(true, "cmd package install x");
         sh(true, "cmd activity start x");
@@ -102,7 +121,15 @@ public final class PrivRulesTest {
         if (PrivRules.risky(new String[]{"/system/bin/sh", "-c", "cat ../Android/obb/x"}, false, "/sdcard/Download") != true) { fail++; System.out.println("FAIL ../ 应当要问"); }
         if (PrivRules.risky(new String[]{"/system/bin/sh", "-c", "cat Android/obb/x"}, false, "/sdcard") != true) { fail++; System.out.println("FAIL 相对 Android/obb 应当要问"); }
         if (PrivRules.risky(new String[]{"/system/bin/sh", "-c", "cat dev/input/event3"}, false, "/") != true) { fail++; System.out.println("FAIL 根目录下相对 dev/ 应当要问"); }
-        if (PrivRules.risky(new String[]{"/system/bin/sh", "-c", "cat notes/a.txt"}, false, "/sdcard/Documents") != false) { fail++; System.out.println("FAIL 共享存储里的相对路径不该问"); }
+        if (PrivRules.risky(new String[]{"/system/bin/sh", "-c", "cat notes/a.txt"}, false, "/sdcard/Documents") != true) { fail++; System.out.println("FAIL 共享存储里读文件应当要问"); }
+        if (PrivRules.risky(new String[]{"/system/bin/sh", "-c", "grep token a.txt"}, false, "/sdcard/Documents") != true) { fail++; System.out.println("FAIL 共享存储里 grep 应当要问"); }
+        // cc-mem 在共享存储里的工作目录下跑：管道里的 grep / tail / sort 没有文件参数，不该问（DeepSeek 复核中-1）
+        for (String c : new String[]{"echo @LRU; dumpsys activity lru; echo @PROC; dumpsys activity processes | grep -E '^ +\\*[A-Z]+\\* |packageList='",
+                "cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN | tail -1", "pm list packages | sort -u", "dumpsys meminfo | head -n 20 | cut -d : -f 1"})
+            if (PrivRules.risky(new String[]{"/system/bin/sh", "-c", c}, false, "/sdcard/DeepSeekHarness") != false) { fail++; System.out.println("FAIL 共享存储工作目录下的管道不该问：" + c); }
+        for (String c : new String[]{"tail -n 5 log.txt", "head -n5 a", "sort -k 2 x.csv", "grep -e x a.txt", "wc -l a.txt"})
+            if (PrivRules.risky(new String[]{"/system/bin/sh", "-c", c}, false, "/sdcard/DeepSeekHarness") != true) { fail++; System.out.println("FAIL 共享存储工作目录下读文件应当要问：" + c); }
+        if (PrivRules.risky(new String[]{"/system/bin/sh", "-c", "dumpsys meminfo"}, false, "/sdcard/Documents") != false) { fail++; System.out.println("FAIL 共享存储里 dumpsys 不该问"); }
         sh(true, "ps -A -o ARGS");
         sh(true, "dumpsys location");
         sh(true, "dumpsys account");
@@ -111,13 +138,14 @@ public final class PrivRulesTest {
         sh(true, "dumpsys --proto account");
         sh(true, "dumpsys -T 5000 --priority NORMAL location");
         sh(true, "top -b -n 1");
-        sh(false, "grep dev /sdcard/a.txt");
+        sh(false, "grep dev /system/build.prop"); sh(true, "grep dev /sdcard/a.txt");
         sh(false, "settings get global data_roaming");
         sh(false, "cat /system/build.prop");
         sh(false, "dumpsys activity processes 2>/dev/null");
         if (PrivRules.risky(new String[]{"dumpsys"}, true, null) != true) { fail++; System.out.println("FAIL 带环境变量的请求应当要问"); }
         if (PrivRules.risky(new String[]{"cat", "x"}, false, "/sdcard/Android/data/com.v") != true) { fail++; System.out.println("FAIL 工作目录在 Android/data 应当要问"); }
-        if (PrivRules.risky(new String[]{"cat", "x"}, false, "/sdcard/Download") != false) { fail++; System.out.println("FAIL 工作目录在共享存储不该问"); }
+        if (PrivRules.risky(new String[]{"ls", "x"}, false, "/sdcard/Download") != false) { fail++; System.out.println("FAIL 工作目录在共享存储 ls 不该问"); }
+        if (PrivRules.risky(new String[]{"cat", "x"}, false, "/sdcard/Download") != true) { fail++; System.out.println("FAIL 工作目录在共享存储 cat 应当要问"); }
         // 要问：装卸应用、改权限、改系统设置
         sh(true, "pm install /sdcard/evil.apk");
         sh(true, "pm install-create -S 123");
@@ -170,7 +198,7 @@ public final class PrivRulesTest {
         want(true, "/system/bin/pm", "install", "x");
         want(true, "/system/bin/sh", "/sdcard/x.sh");
         // 引号里的通配、普通的花括号命令组不算
-        sh(false, "logcat -d | grep 'cc.codroid*'");
+        sh(true, "logcat -d | grep 'cc.codroid*'");
         sh(false, "{ echo a; echo b; }");
         sh(false, "pm list packages | grep install");
         sh(true, "printf '\\160\\155' > /x");

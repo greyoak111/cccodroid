@@ -32,8 +32,9 @@ fs.mkdirSync(path.join(prefix, "bin"), { recursive: true });
 fs.symlinkSync(curl, path.join(prefix, "bin", "curl"));
 installRegistryFlock(prefix, home, tmp); // 只写本轮假 PREFIX；锁协议测试不依赖开发机 util-linux / toybox。
 
-// 在 cccodroid 里跑时环境里有二十几个 CCAPP_* 指着真数据：一个不留全删，再只设测试要的（审查 L18）
-const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("CCAPP_")));
+// 在 cccodroid 里跑时环境里有二十几个 CCAPP_* 指着真数据：一个不留全删，再只设测试要的（审查 L18）。
+// 网关给 claude 注入的 CLAUDE_CODE_* / ANTHROPIC_*（上下文窗口、接口地址…）也会漏进被测的 claudeEnv，一并去掉（11-01 独立审查）
+const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CCAPP_|CLAUDE_CODE_|ANTHROPIC_)/.test(k)));
 const env = { ...clean, CCAPP_TEST: "1", CCAPP_HOME: home, HOME: home, CCAPP_WORKSPACE: workspace, CCAPP_PREFIX: prefix, CCAPP_PORT: "8799", CCAPP_LOG: path.join(tmp, "gateway.log"), CCAPP_TMP: tmp };
 
 const r = spawnSync(process.execPath, ["--test", "--test-concurrency=1", ...files.map((f) => path.join(TESTS, f))], { env, stdio: "inherit", cwd: ROOT });

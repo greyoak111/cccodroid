@@ -124,10 +124,11 @@ final class PrivRules {
     }
 
     // ── 白名单：查看类命令，以及 cc-mem 用到的停后台 ──
+    // logcat 不在里面：shell 读得到全机所有应用的日志（不少应用把令牌、手机号打进日志），应用自己只读得到自己的（11-01 独立审查中-2）
     private static final Set<String> FREE = new HashSet<>(Arrays.asList(
         "dumpsys", "getprop", "id", "whoami", "uname", "uptime", "df", "nproc", "free", "getenforce",
         "ls", "cat", "head", "tail", "grep", "egrep", "wc", "stat", "echo", "printf", "sort", "uniq", "cut", "tr",
-        "logcat", "pm", "cmd", "am", "settings", "appops", "device_config", "wm", "true", "false"));
+        "pm", "cmd", "am", "settings", "appops", "device_config", "wm", "true", "false"));
     private static final Set<String> PM_RO = new HashSet<>(Arrays.asList(
         "list", "path", "dump", "resolve-activity", "query-activities", "query-services", "query-receivers", "has-feature"));
     // am start 不在里面：能免问把浏览器弹到任意网址、拨号盘预填号码，拿来钓鱼（v0514 审查低-1）。
@@ -157,6 +158,13 @@ final class PrivRules {
         for (int i = 1; i < c.size(); i++) a.add(c.get(i).startsWith(QMARK) ? c.get(i).substring(1) : c.get(i));
         // 带斜杠的相对路径按工作目录拼出来再认一遍
         for (String x : a) if (!pathOk(x) || (!x.startsWith("/") && x.indexOf('/') >= 0 && !pathOk(base + "/" + x))) return false;
+        // 读文件内容的命令碰共享存储要问：没给应用存储权限时 shell 照样读得到（11-01 独立审查中-2）。
+        // 参数里哪儿写着共享存储的路径都算；再按各命令的选项认出真正的文件参数，相对路径按工作目录拼出来再认
+        //（工作目录在共享存储里时 cat notes.txt 也是读那里；管道里的 grep 'x'、tail -1 没有文件参数，不问）
+        if (READERS.contains(name)) {
+            for (String x : a) if (shared(x)) return false;
+            for (String f : fileArgs(name, a)) if (!f.equals("-") && !f.startsWith("/") && shared(base + "/" + f)) return false;
+        }
         String sub = a.isEmpty() ? "" : a.get(0);
         switch (name) {
             case "pm": return PM_RO.contains(sub);
@@ -165,14 +173,22 @@ final class PrivRules {
             case "appops": return "get".equals(sub) || "query-op".equals(sub);
             case "wm": return a.size() == 1 && ("size".equals(sub) || "density".equals(sub));
             case "am": return AM_OK.contains(sub);
-            case "dumpsys":
+            case "dumpsys": {
+                // 不带服务名就是把全部服务（剪贴板、账户、Wi-Fi…）一起转出来：dumpsys、dumpsys -t 10、dumpsys --proto 都是；
+                // --skip 是「除了这几个全转」（11-01 独立审查中-1 及 DeepSeek 复核）
+                String svc = null;
+                for (int i = 0; i < a.size() && svc == null; i++) {
+                    String x = a.get(i);
+                    if (x.equals("--skip")) return false;
+                    if (x.equals("-t") || x.equals("-T") || x.equals("--priority")) { i++; continue; }
+                    if (!x.startsWith("-")) svc = x;
+                }
+                if (svc == null) return false;
                 // 服务名前面能夹选项（dumpsys -t 10 clipboard、--proto account）：哪个位置出现都算（10-31 四轮复核）
                 for (String x : a) { String l = x.toLowerCase(Locale.ROOT); if (DUMP_PRIVATE.contains(l) || l.startsWith("wifi")) return false; }   // wifiaware / wifip2p 等同族
                 for (int i = 1; i < a.size(); i++) if (DUMP_ACT.matcher(a.get(i).replaceFirst("^-+", "")).matches()) return false;
                 return true;
-            case "logcat":
-                for (String x : a) if (x.matches("-[A-Za-z]*[cfGP].*|--(clear|file|buffer-size|prune).*")) return false;
-                return true;
+            }
             case "grep": case "egrep":
                 for (String x : a) if (x.matches("-[A-Za-z]*[rRd].*|--(recursive|dereference-recursive|directories).*")) return false;
                 return true;
@@ -214,6 +230,51 @@ final class PrivRules {
         if (n.indexOf('/') < 0) return !n.equals("..");
         return !PRIVATE.matcher(n).find();
     }
+
+    private static final Set<String> READERS = new HashSet<>(Arrays.asList(
+        "cat", "head", "tail", "grep", "egrep", "wc", "sort", "uniq", "cut"));
+    // 带值的选项（toybox 的写法）：值紧跟在后面（-n5、-fpat）或是下一个词；FILE_OPT 里的值是文件
+    private static final java.util.Map<String, String> VAL_OPT = new java.util.HashMap<>();
+    private static final java.util.Map<String, String> FILE_OPT = new java.util.HashMap<>();
+    static {
+        VAL_OPT.put("grep", "efmABCSMdD"); FILE_OPT.put("grep", "f"); VAL_OPT.put("egrep", "efmABCSMdD"); FILE_OPT.put("egrep", "f");
+        VAL_OPT.put("head", "nc"); VAL_OPT.put("tail", "ncs"); VAL_OPT.put("cut", "bcfFCOd");
+        VAL_OPT.put("sort", "kto"); FILE_OPT.put("sort", "o"); VAL_OPT.put("uniq", "fsw");
+    }
+
+    /** 认出命令要读的文件参数（grep 第一个位置参数是模式，除非给了 -e / -f）。长选项 --x=值 的值一律当文件看 */
+    static List<String> fileArgs(String name, List<String> a) {
+        String val = VAL_OPT.getOrDefault(name, ""), file = FILE_OPT.getOrDefault(name, "");
+        List<String> files = new ArrayList<>(), pos = new ArrayList<>();
+        boolean pat = false, rest = false;
+        for (int i = 0; i < a.size(); i++) {
+            String x = a.get(i);
+            if (rest || x.equals("-") || !x.startsWith("-")) { pos.add(x); continue; }
+            if (x.equals("--")) { rest = true; continue; }
+            if (x.startsWith("--")) {
+                int eq = x.indexOf('=');
+                if (eq > 0) files.add(x.substring(eq + 1));
+                if (x.startsWith("--regexp") || x.startsWith("--file")) pat = true;
+                continue;
+            }
+            for (int j = 1; j < x.length(); j++) {
+                char c = x.charAt(j);
+                if (val.indexOf(c) < 0) continue;
+                String v = j + 1 < x.length() ? x.substring(j + 1) : (i + 1 < a.size() ? a.get(++i) : "");
+                if (file.indexOf(c) >= 0) files.add(v);
+                if (c == 'e' || c == 'f') pat = true;
+                break;
+            }
+        }
+        if ((name.equals("grep") || name.equals("egrep")) && !pat && !pos.isEmpty()) pos.remove(0);
+        files.addAll(pos);
+        return files;
+    }
+
+    // 参数里夹着的也算（--file=/sdcard/x、-f/sdcard/x）
+    private static final Pattern SHARED = Pattern.compile("(?i)(?:^|/)(?:sdcard|storage|mnt)(?:/|$)");
+
+    static boolean shared(String x) { return SHARED.matcher(norm(x)).find(); }
 
     static boolean sharedPath(String x) { return x.matches("/(sdcard|storage/emulated/0)(/.*)?"); }
 

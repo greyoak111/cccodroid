@@ -48,7 +48,9 @@ public class SysEvents extends BroadcastReceiver {
             ShizukuSetup s = ShizukuSetup.get(c);
             s.prefs().edit().putLong("bootSeen", System.currentTimeMillis()).apply();
             if (s.prefs().getBoolean("autostart", true) && s.prefs().getBoolean("paired", false) && s.hasWss() && new Env(c).devkitReady())
-                c.startForegroundService(new Intent(c, GatewayService.class).setAction(GatewayService.ACTION_BOOT));
+                // 有的 ROM 开机时不让起前台服务（ForegroundServiceStartNotAllowedException）：别让广播接收器崩掉
+                try { c.startForegroundService(new Intent(c, GatewayService.class).setAction(GatewayService.ACTION_BOOT).putExtra(MainActivity.IK, MainActivity.intentKey(c))); }
+                catch (RuntimeException e) { android.util.Log.w("cccodroid", "开机起网关被拒：" + e); }
         }
     }
 }

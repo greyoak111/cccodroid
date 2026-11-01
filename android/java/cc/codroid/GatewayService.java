@@ -108,8 +108,8 @@ public class GatewayService extends Service {
     @Override public int onStartCommand(Intent i, int flags, int id) {
         // 只认自己通知里那个「停止」：服务是导出的，有跨用户权限的进程（shell、别的拿了 Shizuku 的应用）也能发；对不上就当普通启动（审查 v0.5.9 B5）
         String ik = i == null ? null : i.getStringExtra(MainActivity.IK);
-        if (i != null && ACTION_STOP.equals(i.getAction()) && ik != null
-                && java.security.MessageDigest.isEqual(ik.getBytes(), MainActivity.intentKey(this).getBytes())) {
+        boolean mine = ik != null && java.security.MessageDigest.isEqual(ik.getBytes(), MainActivity.intentKey(this).getBytes());
+        if (i != null && ACTION_STOP.equals(i.getAction()) && mine) {
             stopping = true;
             killGateway();
             ShizukuSetup.get(this).onExit();
@@ -117,7 +117,8 @@ public class GatewayService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        if (i != null && ACTION_BOOT.equals(i.getAction())) ShizukuSetup.get(this).reactivateAsync(true);
+        // 开机重新激活 Shizuku 也只认自己的开机广播带来的口令（11-01 独立审查低-6）
+        if (i != null && ACTION_BOOT.equals(i.getAction()) && mine) ShizukuSetup.get(this).reactivateAsync(true);
         if (supervisor == null || !supervisor.isAlive()) {
             supervisor = new Thread(this::supervise, "gateway-supervisor");
             supervisor.start();

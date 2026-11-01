@@ -361,7 +361,8 @@
     // 导出的图另画一张：多了右上角的头像与昵称
     const p = profile(), cv = document.createElement("canvas");
     let img = null;
-    if (p.av) { img = new Image(); img.src = p.av; try { await img.decode(); } catch { img = null; } }
+    // 头像只认本地图（data:image）：外链进 canvas 一来画不出（跨源污染），二来等于替外站报到（11-01 独立审查）
+    if (p.av && /^data:image\//.test(p.av)) { img = new Image(); img.src = p.av; try { await img.decode(); } catch { img = null; } }
     usDraw(cv, usMonthStats(y, m), { name: profName(), img });
     const data = cv.toDataURL("image/png");
     return { name, data, file: (await post("/api/usage/card", { name, data: data.split(",")[1] })).file };

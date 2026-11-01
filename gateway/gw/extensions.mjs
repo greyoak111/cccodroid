@@ -74,7 +74,13 @@ async function listPlugins(q, offset, withAvailable) {
 
 /** 安装：有的插件要靠执行一条命令装（或拉包时要跑 headersHelper）。claude 会先把这条命令亮出来，
  *  不经人点头不装 —— 这里也一样：先不带确认跑一次，拿到命令和它的 sha256 交给界面，用户同意后再带 --accept-command 装。 */
+// 界面传来的名字、地址原样进 claude 的命令行：横线开头会被当成 claude 自己的选项（11-01 独立审查低-2）
+function badArg(...xs) {
+  return xs.some((x) => x != null && (!x || x.length > 1024 || x.startsWith("-") || /[\x00-\x1f\x7f]/.test(x)));
+}
+
 async function installPlugin(id, accept) {
+  if (badArg(id, accept)) return { ok: false, message: tz("名字格式不对") };
   const r = await extRun(["plugin", "install", id, "--json", ...(accept ? ["--accept-command", accept] : [])], 600000);
   const j = lastJson(r.out) || {};
   const shown = j.shownCommand || j.command;
@@ -85,6 +91,7 @@ async function installPlugin(id, accept) {
 }
 
 async function pluginOp(op, id) {
+  if (badArg(id)) return { ok: false, message: tz("名字格式不对") };
   const args = op === "uninstall" ? ["plugin", "uninstall", id, "--json"] : ["plugin", op, id];
   const r = await extRun(args, 120000);
   const j = lastJson(r.out) || {};
@@ -98,6 +105,7 @@ async function listMarketplaces() {
 }
 
 async function marketplaceOp(op, arg) {
+  if (badArg(String(arg ?? ""))) return { ok: false, message: tz("名字格式不对") };
   const r = await extRun(["plugin", "marketplace", op, arg], 300000);
   if (r.code === 0) PLUGIN_CATALOG = null;
   return r.code === 0 ? { ok: true } : { ok: false, message: cliMsg(r) };
@@ -137,6 +145,7 @@ async function addMcp(b) {
 }
 
 async function removeMcp(name) {
+  if (badArg(String(name ?? ""))) return { ok: false, message: tz("名字格式不对") };
   const r = await extRun(["mcp", "remove", String(name)], 60000);
   return r.code === 0 ? { ok: true } : { ok: false, message: cliMsg(r) };
 }
