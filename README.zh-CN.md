@@ -168,7 +168,7 @@ cccodroid.apk（Java 外壳：安装器 + 前台服务 + WebView）
 - **等长前缀改写**：Termux 的程序在编译期写死了 `/data/data/com.termux/` 前缀。包名 `cc.codroid` 与 `com.termux` 一样是 10 个字符，于是逐字节替换就能让 RUNPATH、shebang、配置路径全部指对，不需要 `LD_LIBRARY_PATH`、包装脚本或二进制补丁。zip / jmod 归档内部的条目同样改写。详见 [devkit/README.md](devkit/README.md)。
 - **seccomp**：安卓给应用进程装了系统调用白名单，白名单外的调用直接用 SIGSYS 杀进程。Android 14 不放行 `epoll_pwait2`，Claude Code 一启动就会被杀。[`seccomp-enosys.c`](android/native/seccomp-enosys.c) 把这类调用改成返回 ENOSYS，让程序走自己的回退路径；静态二进制用 `enosys-run` 从外面（ptrace）做同一件事。
 - **targetSdk 36**：安卓 10 起，targetSdk 29 以上的应用不能直接执行自己数据目录里的文件。常规包仍是 targetSdk 28；36 版把 glibc 加载器放进 APK 的原生库目录（系统允许执行那里），bionic 程序经 `/system/bin/linker64` 启动，再由一个 exec 垫片（[`exec-shim.c`](android/native/exec-shim.c)）在每次启动程序时自动改写成这两种方式之一。两套包功能一样，全部组件都在 36 版上实机跑过。
-- **网关访问控制**：网关只监听 127.0.0.1，且 `/api/*` 必须带应用私有目录里的 256 位令牌，并校验 Host 与 Origin。手机上别的应用、浏览器里的网页都驱动不了它。
+- **网关访问控制**：网关只听两个回环地址：界面走专用的 127.0.0.2，127.0.0.1 留给本机工具。`/api/*` 必须带应用私有目录里的 256 位令牌，并校验 Host 与 Origin；会话 Cookie 只认从 127.0.0.2 进来的请求，内置浏览器拦掉这个地址，Cookie 就不会落到同机别的服务手里。App 自己发的请求不带令牌原文，而是按次签名（HMAC，签进时间戳、一次性随机数、本次启动编号、监听地址、方法和请求体哈希），截到了也没法重放。App 交凭据前还会先让网关用令牌回一道 HMAC 题，证明端口上答话的是真网关。手机上别的应用、浏览器里的网页都驱动不了它。
 - **凭据**：账户登录由 Claude Code 自己完成。网关只把授权地址交给系统浏览器，不读取、不保存 claude.ai 的凭据；一次性授权码也不经过它（见[条款与合规](#条款与合规)）。第三方 API Key 存在应用私有目录，通过 `apiKeyHelper` 交给 claude，不进环境变量。
 
 ## 工程演进
