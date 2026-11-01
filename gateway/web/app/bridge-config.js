@@ -6,11 +6,11 @@
   const t = (s, vars) => window.I18N ? window.I18N.t(s, vars) : s.replace(/\{(\w+)\}/g, (m, k) => vars && k in vars ? String(vars[k]) : m);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const API = "/api/components/openai-bridge/config", MODELS_API = "/api/components/openai-bridge/models";
-  const MODEL_DELAY = 650, MODEL_LIMIT = 500, MODEL_TIMEOUT = 15000;
+  const MODEL_DELAY = 650, MODEL_LIMIT = 500, MODEL_TIMEOUT = 15000, SUGGEST_MAX = 100;
   let panel = null, options = {}, snapshot = null, busy = false, seq = 0, returnTop = 0;
   // Discovery state contains only IDs/origins and cancellation handles, never a key or key fingerprint.
   let modelsTimer = null, modelsDeadline = null, modelsAbort = null, modelsSeq = 0;
-  let modelItems = [], modelsConnected = false, currentOrigin = "", consentOrigin = "";
+  let modelItems = [], modelsConnected = false, currentOrigin = "", consentOrigin = "", suggestAt = -1;
   const readError = (status, code) => {
     if (code === "BUSY") return t("本地桥正在使用或卸载中，请稍后重试；当前会话保持不变。");
     if (code === "RUNTIME_CONFLICT") return t("已有桥安装不能自动迁移，请先备份并由你处理原安装；未覆盖或卸载。");
@@ -81,7 +81,7 @@
         <div class="field"><label for="bc-endpoint">${esc(t("API 地址"))}</label><input id="bc-endpoint" type="url" dir="ltr" inputmode="url" enterkeyhint="next" placeholder="https://api.example.com/v1" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="2048" aria-describedby="bc-endpoint-hint bc-endpoint-error bc-endpoint-preview" required><p class="bc-hint" id="bc-endpoint-hint">${esc(t("填写服务商的 API 地址，不是官网登录页。"))}</p><p class="bc-error hidden" id="bc-endpoint-error"></p><p class="bc-hint mono hidden" id="bc-endpoint-preview" dir="ltr"></p></div>
         <div class="field"><label for="bc-key">${esc(t("API Key"))}</label><div class="bc-key-wrap"><input id="bc-key" type="password" dir="ltr" enterkeyhint="next" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off" maxlength="1024" aria-describedby="bc-key-hint bc-key-error"><button type="button" class="bc-eye" data-bc="eye" aria-label="${esc(t("显示密钥"))}" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div><p class="bc-hint" id="bc-key-hint"></p><p class="bc-error hidden" id="bc-key-error"></p></div>
         <div class="bc-discovery"><label class="bc-model-consent" for="bc-model-consent"><input id="bc-model-consent" type="checkbox" aria-describedby="bc-model-origin bc-model-status"><span>${esc(t("允许自动读取模型清单（会将 API Key 发往所填服务，不发送对话、不调用模型）"))}</span></label><p class="bc-hint mono" id="bc-model-origin" dir="ltr"></p><div class="bc-model-feedback"><p class="bc-hint" id="bc-model-status" role="status" aria-live="polite" aria-atomic="true"></p><button class="btn ghost sm bc-model-retry" type="button" id="bc-model-retry" data-bc="models-retry">${esc(t("重试读取清单"))}</button></div></div>
-        <div class="field"><label for="bc-model">${esc(t("模型名称"))}</label><input id="bc-model" type="text" dir="ltr" enterkeyhint="done" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="200" placeholder="${esc(t("输入搜索或手填模型名称"))}" list="bc-model-list" aria-describedby="bc-model-hint bc-model-error bc-model-status" required><datalist id="bc-model-list"></datalist><p class="bc-hint" id="bc-model-hint">${esc(t("可输入搜索清单，也可按服务商提供的名称手填。"))}</p><p class="bc-error hidden" id="bc-model-error"></p></div>
+        <div class="field"><label for="bc-model">${esc(t("模型名称"))}</label><input id="bc-model" type="text" dir="ltr" enterkeyhint="done" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="200" placeholder="${esc(t("输入搜索或手填模型名称"))}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="bc-model-list" aria-describedby="bc-model-hint bc-model-error bc-model-status" required><ul class="bc-suggest hidden" id="bc-model-list" role="listbox" aria-label="${esc(t("模型清单"))}"></ul><p class="bc-hint" id="bc-model-hint">${esc(t("可输入搜索清单，也可按服务商提供的名称手填。"))}</p><p class="bc-error hidden" id="bc-model-error"></p></div>
         <div class="field"><label for="bc-ctx">${esc(t("上下文窗口（可选）"))}</label><input id="bc-ctx" type="text" dir="ltr" inputmode="numeric" enterkeyhint="done" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="12" placeholder="1048576 / 256k / 1m" aria-describedby="bc-ctx-hint bc-ctx-error"><p class="bc-hint" id="bc-ctx-hint">${esc(t("模型能读多少 token。不填按 200k 算，自动压缩线也到不了更高。"))}</p><p class="bc-error hidden" id="bc-ctx-error"></p></div>
         <p class="bc-hint bc-privacy">${esc(t("对话、工具结果和图片将发往你填写的服务。"))}</p>
         <button class="btn" id="bc-save" type="submit">${esc(t("保存配置"))}</button><p class="bc-hint bc-center" id="bc-save-note" role="status">${esc(t("保存不调用远端模型，也不切换当前会话"))}</p>
@@ -104,8 +104,8 @@
     });
     for (const name of ["endpoint", "key", "model"]) $("bc-" + name).addEventListener("input", () => {
       $("bc-" + name).removeAttribute("aria-invalid"); $("bc-" + name + "-error").classList.add("hidden");
-      // The native datalist filters locally; model editing must not inspect keys or re-fetch.
-      if (name === "model") return;
+      // 模型清单在本地过滤；改模型名不看密钥、不重新读取
+      if (name === "model") { suggestAt = -1; renderSuggest(true); return; }
       cancelModels(true);
       if (name === "endpoint") {
         const endpoint = endpointOf($("bc-endpoint").value);
@@ -119,6 +119,26 @@
       }
       scheduleModels();
     });
+    // 原生 datalist 的弹层在安卓 WebView 上不贴输入框、半透明叠在页面上，改成排在输入框下面的列表
+    const model = $("bc-model"), list = $("bc-model-list");
+    model.addEventListener("focus", () => { suggestAt = -1; renderSuggest(true); });
+    model.addEventListener("blur", () => renderSuggest(false));
+    model.addEventListener("keydown", (e) => {
+      const n = list.children.length;
+      if (e.key === "Escape" && n) { e.preventDefault(); renderSuggest(false); }
+      else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !e.isComposing) {
+        e.preventDefault();
+        if (!n) { renderSuggest(true); return; }
+        suggestAt = e.key === "ArrowDown" ? (suggestAt + 1) % n : (suggestAt <= 0 ? n - 1 : suggestAt - 1);
+        renderSuggest(true);
+        // 只滚列表自己，scrollIntoView 会连外层页面一起滚
+        const li = list.children[suggestAt];
+        if (li) list.scrollTop = Math.min(Math.max(list.scrollTop, li.offsetTop + li.offsetHeight - list.clientHeight), li.offsetTop);
+      } else if (e.key === "Enter" && !e.isComposing && suggestAt >= 0 && n) { e.preventDefault(); pickSuggest(list.children[suggestAt].dataset.value); }
+    });
+    // 按住列表项时别让输入框失焦（失焦就收起了）；滑动、拖滚动条照常
+    for (const ev of ["pointerdown", "mousedown"]) list.addEventListener(ev, (e) => { if (e.target.closest("li[data-value]")) e.preventDefault(); });
+    list.addEventListener("click", (e) => { const li = e.target.closest("li[data-value]"); if (li) pickSuggest(li.dataset.value); });
     $("bc-model-consent").addEventListener("change", () => {
       const endpoint = endpointOf($("bc-endpoint").value);
       consentOrigin = $("bc-model-consent").checked && !endpoint.error ? endpoint.origin : "";
@@ -169,15 +189,33 @@
   function updateSaveNote(saving = false) {
     $("bc-save-note").textContent = saving ? t("正在保存并检查本地桥，不调用远端模型…") : modelsConnected ? t("读取清单已连接服务，尚未验证模型推理；保存不调用远端模型，也不切换当前会话。") : t("保存不调用远端模型，也不切换当前会话");
   }
-  function renderModels() {
+  // 输入为空或正好是清单里某一项时列全部，否则按包含过滤；太长只列前 SUGGEST_MAX 个，继续输入缩小
+  function renderSuggest(open) {
     if (!panel) return;
-    const list = $("bc-model-list");
+    const list = $("bc-model-list"), input = $("bc-model");
+    if (open === undefined) open = !list.classList.contains("hidden");
+    const q = input.value.trim().toLowerCase();
+    const items = !open || document.activeElement !== input ? []
+      : (q && !modelItems.some((id) => id.toLowerCase() === q) ? modelItems.filter((id) => id.toLowerCase().includes(q)) : modelItems).slice(0, SUGGEST_MAX);
+    if (suggestAt >= items.length) suggestAt = -1;
     list.textContent = "";
-    for (const id of modelItems) {
-      const option = document.createElement("option");
-      option.value = id; option.textContent = id; list.appendChild(option);
-    }
+    items.forEach((id, i) => {
+      const li = document.createElement("li");
+      li.id = "bc-model-opt-" + i; li.setAttribute("role", "option"); li.dataset.value = id; li.textContent = id;
+      li.setAttribute("aria-selected", String(i === suggestAt));
+      list.appendChild(li);
+    });
+    list.classList.toggle("hidden", !items.length);
+    input.setAttribute("aria-expanded", String(!!items.length));
+    if (suggestAt >= 0) input.setAttribute("aria-activedescendant", "bc-model-opt-" + suggestAt);
+    else input.removeAttribute("aria-activedescendant");
   }
+  function pickSuggest(id) {
+    const input = $("bc-model");
+    input.value = id; input.removeAttribute("aria-invalid"); $("bc-model-error").classList.add("hidden");
+    suggestAt = -1; renderSuggest(false);
+  }
+  function renderModels() { renderSuggest(); }
   function cancelModels(clear = false) {
     const pending = modelsTimer !== null || !!modelsAbort;
     ++modelsSeq;

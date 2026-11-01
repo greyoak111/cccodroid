@@ -774,7 +774,7 @@
         av.tool(m.id, m.name, m.input);
         if (AG.byTool.has(m.id)) agTouch(agCardFor(m.id));   // 联络簿先到、卡片所在的这页后到
         const c = m.sub && view.sessionId && TOOL_CARDS.get(m.id), sid = view.sessionId;
-        const mk = (tid) => async () => (await api(`/api/session/${encodeURIComponent(sid)}/agent?tool=${encodeURIComponent(tid)}`)).items || [];
+        const mk = (tid) => async () => { const r = await api(`/api/session/${encodeURIComponent(sid)}/agent?tool=${encodeURIComponent(tid)}`), it = r.items || []; it.more = !!r.more; return it; };
         if (c && c.isAgent) c.subLazy(mk(m.id), mk);
       }
     }

@@ -73,6 +73,8 @@
   }
 
   const SHEET_MAX_R = 5000, SHEET_MAX_C = 200;
+  // 行、列各封顶还不够：两格隔得远（A1 和 CV1000）就是十万个空格子。按总格数分段画，余下的点「再显示」续上（#73）
+  const SHEET_CELLS = 20000;
   async function vwSheet() {
     const still = vwTake();
     vwActs([[t("原版式"), "aspdf"]]);
@@ -97,6 +99,7 @@
       const b = e.target.closest(".vw-tab"); if (b) vwSheetShow(Number(b.dataset.i));
     });
     box.querySelector(".vw-grid-wrap").addEventListener("click", (e) => {
+      if (e.target.closest(".vw-more")) { VW.sheetMore && VW.sheetMore(); return; }
       const td = e.target.closest("td[data-c]"); if (!td) return;
       box.querySelectorAll("td.sel").forEach((x) => x.classList.remove("sel"));
       td.classList.add("sel");
@@ -166,7 +169,9 @@
     h += `</colgroup><thead><tr><th class="corner"></th>`;
     for (let c = rg.s.c; c <= c1; c++) if (!hid(c)) h += `<th>${X.utils.encode_col(c)}</th>`;
     h += `</tr></thead><tbody>`;
-    for (let r = rg.s.r; r <= r1; r++) {
+    const rowsHtml = (from, to) => {
+    let h = "";
+    for (let r = from; r <= to; r++) {
       if (hidR(r)) continue;
       h += `<tr data-r="${r}"><th>${r + 1}</th>`;
       for (let c = rg.s.c; c <= c1; c++) {
@@ -180,11 +185,28 @@
       }
       h += `</tr>`;
     }
+    return h;
+    };
+    // 合并的 rowspan 跨段也没事：续上的行插进同一个 tbody，被盖住的格子本来就不画
+    let visC = 0; for (let c = rg.s.c; c <= c1; c++) if (!hid(c)) visC++;
+    const step = Math.max(50, Math.floor(SHEET_CELLS / Math.max(1, visC)));
+    let done = Math.min(r1, rg.s.r + step - 1);
+    h += rowsHtml(rg.s.r, done);
     h += `</tbody></table>`;
+    const moreLabel = () => t("再显示 {n} 行（共 {total} 行）", { n: Math.min(step, r1 - done), total: r1 - rg.s.r + 1 });
+    if (done < r1) h += `<button type="button" class="btn ghost sm vw-more">${esc(moreLabel())}</button>`;
     const cut = rg.e.r > r1 || rg.e.c > c1;
     if (cut) h += `<div class="vw-cut tiny">${t("表太大，只显示了前 {r} 行、{c} 列；完整内容请用「原版式」或下载后用别的应用看", { r: r1 - rg.s.r + 1, c: c1 - rg.s.c + 1 })}</div>`;
     wrap.innerHTML = h;
     wrap.scrollTop = 0; wrap.scrollLeft = 0;
+    VW.sheetMore = () => {
+      if (VW.sheetI !== i || done >= r1) return;
+      const to = Math.min(r1, done + step);
+      wrap.querySelector(".vw-grid tbody").insertAdjacentHTML("beforeend", rowsHtml(done + 1, to));
+      done = to;
+      const more = wrap.querySelector(".vw-more");
+      if (done >= r1) more?.remove(); else if (more) more.textContent = moreLabel();
+    };
     $("vw-info").textContent = `${fmtSize(VW.size)} · ${name} · ${X.utils.encode_range({ s: rg.s, e: rg.e })}`;
   }
 

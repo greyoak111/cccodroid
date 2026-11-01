@@ -611,7 +611,9 @@
   // 纯 textarea 没有行号：左边一列跟着滚动。自动换行时一行可能占好几行高，用一个看不见的镜像层量出每行的实际位置。
   // 标记对的是磁盘上的版本和上次提交（没保存的修改不算，存完重新算）：绿 = 新加的行，蓝 = 改过的行，红三角 = 这里删过东西。
   const GUT_MAX = 20000;                // 再长的文件不画行号，免得量一次卡半天
-  let gutTimer = 0, gutRO = null;
+  let gutTimer = 0, gutRO = null, gutRaf = 0;
+  // 量过的每行高度：一行折成几行只看这行的字和宽度，没改的行直接沿用（#74：以前每停一次打字就把全文件重量重画）
+  let gutM = null;   // { key, lines, hs, tops, r0, r1 }
   /** 统一 diff → Map(新文件行号 → { type, old:[原来的行] }) */
   function gutMarks(diff) {
     const m = new Map();
@@ -637,7 +639,10 @@
   }
   function gutAttach(ta) {
     const gin = ta.parentElement.querySelector(".vw-gut-in");
-    ta.addEventListener("scroll", () => { gin.style.transform = `translateY(${-ta.scrollTop}px)`; }, { passive: true });
+    ta.addEventListener("scroll", () => {
+      gin.style.transform = `translateY(${-ta.scrollTop}px)`;
+      if (!gutRaf) gutRaf = requestAnimationFrame(() => { gutRaf = 0; gutPaint(false); });   // 行号只画看得见的一段，滚出去再补
+    }, { passive: true });
     if (gutRO) gutRO.disconnect();
     gutRO = new ResizeObserver(() => gutSchedule());
     gutRO.observe(ta);
@@ -650,38 +655,64 @@
   function gutSchedule() { clearTimeout(gutTimer); gutTimer = setTimeout(gutDraw, 120); }
   function gutDraw() {
     const ta = $("vw-text"); if (!ta) return;
-    const wrap = ta.parentElement, gut = wrap.querySelector(".vw-gut"), gin = wrap.querySelector(".vw-gut-in");
-    if (ta.value.length > 2 * 1024 * 1024) { gut.classList.add("hidden"); return; }
+    const wrap = ta.parentElement, gut = wrap.querySelector(".vw-gut");
+    if (ta.value.length > 2 * 1024 * 1024) { gut.classList.add("hidden"); gutM = null; return; }
     const lines = ta.value.split("\n");
-    if (lines.length > GUT_MAX) { gut.classList.add("hidden"); return; }
+    if (lines.length > GUT_MAX) { gut.classList.add("hidden"); gutM = null; return; }
     gut.classList.remove("hidden");
     gut.style.width = (String(lines.length).length * 7.2 + 18) + "px";
-    // 镜像层：和 textarea 同宽同字体同换行规则，逐行量位置
     const cs = getComputedStyle(ta);
-    const mir = document.createElement("div");
-    mir.className = "vw-mirror mono";
-    mir.style.cssText = `position:absolute;visibility:hidden;left:0;top:0;width:${ta.clientWidth}px;box-sizing:border-box;padding:${cs.padding};font:${cs.font};line-height:${cs.lineHeight};tab-size:${cs.tabSize};white-space:${cs.whiteSpace};word-break:${cs.wordBreak};overflow-wrap:${cs.overflowWrap}`;
-    const frag = document.createDocumentFragment();
-    for (const l of lines) { const d = document.createElement("div"); d.textContent = l || " "; frag.appendChild(d); }
-    mir.appendChild(frag);
-    wrap.appendChild(mir);
-    const kids = mir.children, marks = VW.gitMarks;
-    const lh = parseFloat(cs.lineHeight) || 19.5;
+    const key = [ta.clientWidth, cs.padding, cs.font, cs.lineHeight, cs.tabSize, cs.whiteSpace, cs.wordBreak, cs.overflowWrap].join("|");
+    const n = lines.length, hs = new Array(n);
+    // 和上次比：头尾没变的行沿用高度，只量中间改过的那几行
+    let a = 0, b = 0;
+    if (gutM && gutM.key === key) {
+      const old = gutM.lines, m = old.length;
+      while (a < n && a < m && lines[a] === old[a]) { hs[a] = gutM.hs[a]; a++; }
+      while (b < n - a && b < m - a && lines[n - 1 - b] === old[m - 1 - b]) { hs[n - 1 - b] = gutM.hs[m - 1 - b]; b++; }
+    }
+    if (a + b < n) {
+      // 镜像层：和 textarea 同宽同字体同换行规则，只放要量的行
+      const mir = document.createElement("div");
+      mir.className = "vw-mirror mono";
+      mir.style.cssText = `position:absolute;visibility:hidden;left:0;top:0;width:${ta.clientWidth}px;box-sizing:border-box;padding:0 ${cs.paddingRight} 0 ${cs.paddingLeft};font:${cs.font};line-height:${cs.lineHeight};tab-size:${cs.tabSize};white-space:${cs.whiteSpace};word-break:${cs.wordBreak};overflow-wrap:${cs.overflowWrap}`;
+      const frag = document.createDocumentFragment();
+      for (let i = a; i < n - b; i++) { const d = document.createElement("div"); d.textContent = lines[i] || " "; frag.appendChild(d); }
+      mir.appendChild(frag);
+      wrap.appendChild(mir);
+      const kids = mir.children;
+      for (let i = 0; i < kids.length; i++) hs[a + i] = kids[i].offsetHeight;
+      mir.remove();
+    }
+    const tops = new Float64Array(n + 1);
+    tops[0] = parseFloat(cs.paddingTop) || 0;
+    for (let i = 0; i < n; i++) tops[i + 1] = tops[i] + hs[i];
+    gutM = { key, lines, hs, tops, r0: -1, r1: -1 };
+    gutPaint(true);
+  }
+  /** 只画视口上下各多一屏的行号和标记；force：内容变了，整段重画 */
+  function gutPaint(force) {
+    const ta = $("vw-text"), M = gutM; if (!ta || !M) return;
+    const gin = ta.parentElement.querySelector(".vw-gut-in"), n = M.lines.length;
+    const view = ta.clientHeight || 600, y0 = ta.scrollTop - view, y1 = ta.scrollTop + 2 * view;
+    const find = (y) => { let lo = 0, hi = n; while (lo < hi) { const mid = (lo + hi) >> 1; if (M.tops[mid + 1] <= y) lo = mid + 1; else hi = mid; } return lo; };
+    const i0 = Math.min(find(y0), Math.max(0, n - 1)), i1 = Math.min(n - 1, find(y1));
+    // 还在已画的那段里：不用动
+    if (!force && M.r0 >= 0 && find(ta.scrollTop) >= M.r0 && Math.min(find(ta.scrollTop + view), n - 1) <= M.r1) return;   // 贴底时 find 会给 n
+    const marks = VW.gitMarks, lh = parseFloat(getComputedStyle(ta).lineHeight) || 19.5;
     let html = "";
-    for (let i = 0; i < kids.length; i++) {
-      const top = kids[i].offsetTop, ln = i + 1, mk = marks && marks.get(ln);
+    for (let i = i0; i <= i1; i++) {
+      const top = M.tops[i], ln = i + 1, mk = marks && marks.get(ln);
       html += `<div class="gl" style="top:${top}px;height:${lh}px;line-height:${lh}px">${ln}</div>`;
       if (mk) html += mk.type === "del"
         ? `<div class="gm del" data-ln="${ln}" style="top:${top - 4}px" title="${esc(t("这里删掉了 {n} 行", { n: mk.old.length }))}"></div>`
-        : `<div class="gm ${mk.type}" data-ln="${ln}" style="top:${top}px;height:${kids[i].offsetHeight}px"></div>`;
+        : `<div class="gm ${mk.type}" data-ln="${ln}" style="top:${top}px;height:${M.hs[i]}px"></div>`;
     }
     // 文件末尾删掉的行：标在最后一行下面
-    if (marks) for (const [ln, mk] of marks) if (ln > kids.length && mk.type === "del") {
-      const last = kids[kids.length - 1];
-      html += `<div class="gm del" data-ln="${ln}" style="top:${last.offsetTop + last.offsetHeight - 4}px"></div>`;
-    }
-    mir.remove();
+    if (marks && i1 === n - 1) for (const [ln, mk] of marks) if (ln > n && mk.type === "del")
+      html += `<div class="gm del" data-ln="${ln}" style="top:${M.tops[n] - 4}px"></div>`;
     gin.innerHTML = html;
+    M.r0 = i0; M.r1 = i1;
     gin.style.transform = `translateY(${-ta.scrollTop}px)`;
   }
   /** 点标记：这一处原来是什么样 */

@@ -252,7 +252,7 @@
     let r = g;
     if (own() || !r) try { r = await api("/api/models" + sidQ()); } catch { return; }
     if (my !== ctxSeq) return;
-    if (r.contextWindow) state.ctxTotal = r.contextWindow;
+    state.ctxTotal = Number(r.contextWindow) || 0;   // 0 = 这个型号不知道窗口：别沿用上一个型号的分母（#68）
     state.compactAt = Number(r.compactLine ?? r.autoCompactWindow) || 0;   // 生效的那条（超过模型窗口不算数，#67）
     updateCtx(state.ctxUsed, state.ctxTotal);
   }

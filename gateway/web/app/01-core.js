@@ -536,9 +536,18 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
   }, { passive: true });
   // 本地图片回复说完才拿到尺寸、把内容撑高：贴着底的接着跟下去（审查 #48 06-03）。load 不冒泡，捕获阶段接
   chatEl.addEventListener("load", (e) => { if (e.target.tagName === "IMG") scrollDown(); }, true);
+  // 整轮重放时一条事件滚一次会逐条强制排版（上千张卡就是上千次），合并到每帧一次（#69）
+  let scrollRaf = 0;
   function scrollDown(force) {
     if (force) stick = true;
     else if (!stick || touching) return;
+    if (busReplay) {
+      if (!scrollRaf) scrollRaf = requestAnimationFrame(() => {
+        scrollRaf = 0;
+        if (stick && !touching) { chatEl.scrollTop = chatEl.scrollHeight; progTop = chatEl.scrollTop; }
+      });
+      return;
+    }
     chatEl.scrollTop = chatEl.scrollHeight;
     progTop = chatEl.scrollTop;
   }

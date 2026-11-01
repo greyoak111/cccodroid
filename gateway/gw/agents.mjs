@@ -225,10 +225,49 @@ export function settleAgentRecs(recs, liveIds = new Set()) {
 
 /** 旧会话（没有联络簿的）：从 claude 自己的记录里推出同样格式的记录，只在内存里给界面看，不往项目里写文件。
  *  派出 = subagents/agent-*.meta.json；联络 = 主会话和各子代理记录里的 SendMessage；结束 = meta.finished + 最后一段正文 */
+// 导入的 / 旧代理会话每次打开代理卡都要现推：按文件大小和改动时间记住结果，别回回全量扫（#72）
+const BACKFILL_CACHE = new Map(), BACKFILL_KEEP = 16;
 export function backfillAgents(sessionFile) {
   const sub = path.join(sessionFile.replace(/\.jsonl$/, ""), "subagents");
   let names; try { names = fs.readdirSync(sub).filter((n) => n.endsWith(".meta.json")); } catch { return []; }
-  const lines = (f) => { const out = []; try { forEachLine(f, (l) => { if (l) try { out.push(JSON.parse(l)); } catch {} }); } catch {} return out; };
+  const sig = [sessionFile, ...names.sort(), ...names.map((n) => path.join(sub, n.replace(/\.meta\.json$/, ".jsonl")))]
+    .map((p) => { try { const st = fs.statSync(p); return p + ":" + st.size + ":" + st.mtimeMs; } catch { return p; } }).join("|");
+  const hit = BACKFILL_CACHE.get(sessionFile);
+  if (hit && hit.sig === sig) return hit.recs.map((r) => ({ ...r }));
+  const recs = backfillScan(sessionFile, sub, names);
+  BACKFILL_CACHE.delete(sessionFile); BACKFILL_CACHE.set(sessionFile, { sig, recs });
+  while (BACKFILL_CACHE.size > BACKFILL_KEEP) BACKFILL_CACHE.delete(BACKFILL_CACHE.keys().next().value);
+  return recs.map((r) => ({ ...r }));
+}
+function backfillScan(sessionFile, sub, names) {
+  // 只解析用得上的行：发 SendMessage 的、它们的结果、首尾两行（时间）、最后一条带正文的回复；
+  // 动辄几十 MB 的工具结果行只做一次字符串查找就跳过，也不留在内存里（#72）
+  const lines = (f) => {
+    const out = [], ids = [];
+    let first = null, lastLine = "", textLine = "";
+    const parse = (l) => { try { return JSON.parse(l); } catch { return null; } };
+    try {
+      forEachLine(f, (l) => {
+        if (!l) return;
+        if (first === null) first = parse(l);
+        lastLine = l;
+        if (l.includes('"SendMessage"')) {
+          const ev = parse(l);
+          if (ev) { out.push(ev); if (ev.type === "assistant") for (const c of ev.message?.content || []) if (c.type === "tool_use" && c.name === "SendMessage" && c.id) ids.push(c.id); }
+        } else if (ids.length && l.includes('"tool_result"') && ids.some((id) => l.includes(id))) {
+          // 子串只是初筛（别的结果正文里也可能原样带着这个 id），解析后按 tool_use_id 精确认，认不上就不留
+          const ev = parse(l);
+          if (ev && (ev.message?.content || []).some?.((c) => c.type === "tool_result" && ids.includes(c.tool_use_id))) out.push(ev);
+        }
+        // 结果正文里出现的同样字样是转义过的（\"type\"），不会误中
+        if (l.includes('"type":"assistant"') && l.includes('"type":"text"')) textLine = l;
+      });
+    } catch {}
+    const lastEv = lastLine ? parse(lastLine) : null, textEv = textLine ? parse(textLine) : null;
+    let lastText = "";
+    if (textEv?.type === "assistant") for (const c of textEv.message?.content || []) if (c.type === "text" && c.text) lastText = c.text;
+    return { evs: out, first, last: lastEv, lastText };
+  };
   const agents = [];
   for (const n of names) {
     let m; try { m = JSON.parse(fs.readFileSync(path.join(sub, n), "utf8")); } catch { continue; }
@@ -259,15 +298,14 @@ export function backfillAgents(sessionFile) {
       }
     }
   };
-  sends(lines(sessionFile), "main", 0);
+  sends(lines(sessionFile).evs, "main", 0);
   for (const a of agents) {
-    const evs = lines(a.f);
-    const t0 = Date.parse(evs[0]?.timestamp) || a.at;
+    const { evs, first, last: lastEv, lastText } = lines(a.f);
+    const t0 = Date.parse(first?.timestamp) || a.at;
     recs.push({ at: t0, k: "spawn", id: a.id, tool: a.m.toolUseId || "", name: String(a.m.description || a.m.agentType || "agent").slice(0, 60),
                 parent: a.m.parentAgentId || null, depth: a.m.spawnDepth || (a.m.parentAgentId ? 2 : 1), bg: a.m.requestShape === "background", file: null, by: a.m.parentAgentId || "main" });
     sends(evs, a.id, t0);
-    let last = ""; for (const ev of evs) if (ev.type === "assistant") for (const c of ev.message?.content || []) if (c.type === "text" && c.text) last = c.text;
-    if (a.m.finished) recs.push({ at: Date.parse(evs[evs.length - 1]?.timestamp) || t0, k: "done", id: a.id, status: "done", why: clip(firstLine(last), WHY_MAX), file: null });
+    if (a.m.finished) recs.push({ at: Date.parse(lastEv?.timestamp) || t0, k: "done", id: a.id, status: "done", why: clip(firstLine(lastText), WHY_MAX), file: null });
   }
   return recs.sort((x, y) => x.at - y.at);
 }

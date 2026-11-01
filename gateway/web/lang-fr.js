@@ -2581,4 +2581,8 @@ window.I18N_DICT["fr"] = {
   "别的会话也能用：点输入栏下的模型标签，在接口一行选它。": "Utilisable aussi dans d'autres conversations : touchez l'étiquette du modèle sous la saisie et choisissez-le dans la ligne des fournisseurs.",
   "填好地址、密钥和模型就能用；上下文窗口选填。": "Renseignez l'adresse, la clé et le modèle, c'est tout ; la fenêtre de contexte est facultative.",
   "打一个诊断包，经系统分享发出去。\n\n包里有：\n· 版本与设备：cccodroid / Android 版本、机型、芯片、剩余空间\n· 开发工具包：装的是哪一版、更新与自检状态\n· 最近的日志：本应用的系统日志、网关日志的最后一段\n· 修复账本：安装、校验、修复做过哪些、成没成\n· 网络：开没开 VPN，应用连不连得上几个下载源（只记结果）\n\n已经去掉：\n· 密钥、令牌、登录凭据、邮箱\n· 你发给 Claude 的消息内容\n· 会话记录本身不在包里\n\n继续？": "Créer un paquet de diagnostic et l'envoyer via le partage du système.\n\nInclus :\n· Version et appareil : cccodroid / version d'Android, modèle, puce, espace libre\n· Kit de développement : version installée, état des mises à jour et de l'autotest\n· Journaux récents : journal système de l'app, fin du journal de la passerelle\n· Registre de réparation : installations, vérifications, réparations et leur résultat\n· Réseau : VPN actif ou non, et si l'app peut joindre quelques sources de téléchargement (résultats seulement)\n\nRetiré :\n· Clés, jetons, identifiants de connexion, adresses e-mail\n· Le contenu de vos messages à Claude\n· Les conversations elles-mêmes ne sont pas incluses\n\nContinuer ?",
+  "模型清单": "Liste des modèles",
+  "上下文 {used} · 容量未知": "Contexte {used} · capacité inconnue",
+  "再显示 {n} 行（共 {total} 行）": "Afficher {n} lignes de plus ({total} au total)",
+  "过程太长，只显示最近的部分": "Déroulé trop long : seule la partie la plus récente est affichée",
 };

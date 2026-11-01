@@ -70,8 +70,9 @@ export function transcriptItems(ev) {
  *  现在：异步、按 256KB 块往回读，凑够 limit 条且停在一轮对话的开头（用户消息）就收手。
  *  cursor = 这一页最早那行的字节偏移，下次带 before=cursor 接着往前翻；0 表示到头了。
  *
- *  excludeFrom：正在生成的那一轮由事件总线实时推，这里按时间戳把它剔掉，免得画两遍。 */
-export async function readSessionPage(file, { before = null, limit = 40, excludeFrom = 0 } = {}) {
+ *  excludeFrom：正在生成的那一轮由事件总线实时推，这里按时间戳把它剔掉，免得画两遍。
+ *  pick(ev)：一行转成哪些条目，默认 transcriptItems（子代理记录全是侧链，要自己转，#71） */
+export async function readSessionPage(file, { before = null, limit = 40, excludeFrom = 0, pick = transcriptItems } = {}) {
   const CH = 256 * 1024, MAX_SCAN = 12 * 1024 * 1024;
   const fh = await fs.promises.open(file, "r");
   try {
@@ -115,7 +116,7 @@ export async function readSessionPage(file, { before = null, limit = 40, exclude
             }
           }
           if (ev && !(excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) {
-            const its = transcriptItems(ev);
+            const its = pick(ev);
             if (its.length) {
               items.unshift(...its);
               turnStart = its[0].role === "user";
@@ -138,7 +139,7 @@ export async function readSessionPage(file, { before = null, limit = 40, exclude
 
 /** 从字节位置 after **往后**读一页（脉络跳到某一章用）。
  *  after 不在行首时先跳到下一行开头；凑够 limit 条后停在下一轮对话开头（用户消息）之前 —— 和往前翻一样，
- *  页的边界都落在一轮的开头，工具调用和它的结果不会被切到两页。
+ *  页的边界都落在一轮的开头。一轮里工具调用太多时到 limit*4 就在行边界收页，这时一次调用和它的结果可能分在两页（结果由前端待贴表补上）。
  *  返回 { items, from, next, size }：from 是这一页第一行的偏移（往前翻用 before=from），next 是下一页的起点；next === size 表示到底了。
  *  excludeFrom：时间戳不早于它的行不给（界面里正实时显示的那几轮）。 */
 export async function readSessionForward(file, { after = 0, limit = 40, excludeFrom = 0 } = {}) {
@@ -176,6 +177,8 @@ export async function readSessionForward(file, { after = 0, limit = 40, excludeF
         if (!its.length) continue;
         // 够数了、又碰到下一轮的开头：这一行留给下一页
         if (items.length >= limit && its[0].role === "user" && lineAt > from) return { items, from, next: lineAt, size };
+        // 一轮里工具调用成百上千、中间没有下一条用户正文：和往前翻一样封顶 limit*4，不然一页能吞下整轮（#70）
+        if (items.length >= limit * 4 && lineAt > from) return { items, from, next: lineAt, size };
         items.push(...its);
       }
       base += start; rest = Buffer.from(data.subarray(start));

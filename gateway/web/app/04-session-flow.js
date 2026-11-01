@@ -43,7 +43,21 @@
     if (total) state.ctxTotal = total;
     const line = state.compactAt && state.ctxTotal ? Math.min(state.compactAt, state.ctxTotal) : state.compactAt || 0;
     const scale = line > 0 ? line : (state.ctxTotal || 0);
-    if (!scale) return;
+    if (!scale) {
+      // 第三方接口不报窗口、也没设压缩线：没刻度就只报已用量，不画进度（以前整条藏掉，用量也看不到）
+      // 新对话清零时收起，别残留上个会话的数
+      if (!state.ctxUsed) {
+        $("ctxctx").textContent = ""; ctxFill.style.width = "0%";
+        if (!ctxBar.classList.contains("has-q")) ctxBar.classList.add("hidden");   // 额度速览还挂在这条上就留着
+        saveUiState(); return;
+      }
+      ctxBar.classList.remove("hidden", "warn", "danger");
+      ctxFill.style.width = "0%";
+      ctxBar.style.setProperty("--p", "0%");
+      $("ctxctx").textContent = t("上下文 {used} · 容量未知", { used: fmtTok(state.ctxUsed) });
+      saveUiState();
+      return;
+    }
     const pct = Math.min(100, Math.round((state.ctxUsed / scale) * 100));
     ctxBar.classList.remove("hidden", "warn", "danger");
     if (pct >= 100) ctxBar.classList.add("danger");
@@ -652,13 +666,17 @@
         const pc = ev.parent && TOOL_CARDS.get(ev.parent);
         if (ev.parent) agStep(ev.parent, ev.name, ev.input);
         if (pc && pc.isAgent) { pc.sub(ev.id, ev.name, ev.input); break; }
+        // 父卡在更早的历史页里没加载：子步骤别落成主流程卡（绕过懒渲染、成百上千张）；翻到父卡时过程按需从代理记录读（#69）
+        if (ev.parent) break;
         av.tool(ev.id, ev.name, ev.input); break;
       }
       case "ag":             agApply(ev, av); break;
       case "sub_text":       TOOL_CARDS.get(ev.parent)?.subText?.(ev.text); break;
       case "sub_progress":   TOOL_CARDS.get(ev.parent)?.subProgress?.(ev.desc); break;
       case "sub_done":       TOOL_CARDS.get(ev.parent)?.subDone?.(ev.status); break;
-      case "tool_result":    toolResult(ev.id, ev.ok, ev.text); av.toolDone(ev.id); scrollDown(); break;
+      case "tool_result":
+        if (ev.parent && !TOOL_CARDS.get(ev.parent)) break;   // 同上：父卡不在，结果也不攒进待贴表
+        toolResult(ev.id, ev.ok, ev.text); av.toolDone(ev.id); scrollDown(); break;
       case "phase":          av.phase(ev); break;
       // 压缩中的状态会连来好几条：同一次压缩只留一行，压完原地换成结果（#67）
       case "compacting":     av.phase(null); av.noteK("cmp" + cmpGen, t("正在压缩上下文…")); scrollDown(); break;

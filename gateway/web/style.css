@@ -1383,6 +1383,7 @@ mark.jump-hit{background:#f5c54266;color:inherit;border-radius:2px}
 .vw-grid tbody th{position:sticky;inset-inline-start:0;z-index:1;background:var(--bg2);color:var(--fg2);font-weight:400;text-align:center}
 .vw-grid th.corner{inset-inline-start:0;z-index:3}
 .vw-cut{padding:8px 10px;color:var(--fg2)}
+.vw-grid-wrap .vw-more{display:block;margin:10px;position:sticky;left:10px}
 .vw-cellbar{min-height:18px;padding:0 4px;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono)}
 .vw-cellbar:empty{display:none}
 .vw-tabs{display:flex;gap:4px;overflow-x:auto;flex:0 0 auto;padding-bottom:2px}
@@ -3221,6 +3222,7 @@ html.fold-table:not(.wel) #composer{min-height:var(--fbelow);box-sizing:border-b
 html[data-motion="on"] .tool.mo-flash{position:relative}
 html[data-motion="on"] .tool.mo-flash::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1.5px var(--accent);pointer-events:none;animation:mo-ring calc(1.1s * var(--mo-x,1)) ease-out both}
 .agc .fpath{border:0;text-decoration:none}
+.ts-skipped{cursor:default}
 .ts-older{display:block;width:100%;background:none;border:0;border-bottom:1px solid var(--tool-sep);color:var(--fg3);font:inherit;font-size:11.5px;padding:5px 18px;text-align:start;cursor:pointer}
 
 /* ── 导入的字体（0.4.20）：自选按钮选中后写字体名；清单每行用字体本身显示名字 ── */
@@ -3442,6 +3444,10 @@ html[data-motion="on"] .lin-prof .mo-ghost .mo-st,html[data-motion="on"] .lin-pr
 #bridge-config-panel .field input[aria-invalid="true"]{border-color:var(--err)}
 #bridge-config-panel .bc-hint{font-size:12px;line-height:1.8;color:var(--fg2);margin:7px 0 0}
 #bridge-config-panel .bc-error{font-size:12px;line-height:1.7;color:var(--err);margin:7px 0 0}
+#bridge-config-panel .bc-suggest{position:relative;list-style:none;margin:6px 0 0;padding:4px;max-height:232px;overflow-y:auto;overscroll-behavior:contain;border:1px solid var(--line);border-radius:min(var(--radius),9px);background:var(--input-bg,var(--bg))}
+#bridge-config-panel .bc-suggest li{min-height:44px;display:flex;align-items:center;padding:6px 12px;border-radius:min(var(--radius),6px);font-family:var(--mono);font-size:14px;line-height:1.4;overflow-wrap:anywhere;cursor:pointer}
+#bridge-config-panel .bc-suggest li[aria-selected="true"],#bridge-config-panel .bc-suggest li:active{background:var(--bg3)}
+@media (hover:hover){#bridge-config-panel .bc-suggest li:hover{background:var(--bg3)}}
 #bridge-config-panel .bc-key-wrap{position:relative}
 #bridge-config-panel .bc-key-wrap input{padding-inline-end:54px}
 #bridge-config-panel .bc-eye{position:absolute;inset-inline-end:1px;top:1px;width:46px;height:46px;display:grid;place-items:center;background:none;border:0;color:var(--fg2);cursor:pointer}

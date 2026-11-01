@@ -390,7 +390,9 @@
         if (cut) {
           const box = document.createElement("div"), more = document.createElement("button");
           more.type = "button"; more.className = "ts-older"; more.textContent = t("更早的 {n} 步", { n: cut });
-          box.appendChild(more); s.list.prepend(box);
+          box.appendChild(more);
+          const skipped = s.list.querySelector(":scope > .ts-skipped");   // 「前面没加载」的说明总在最顶上
+          if (skipped) skipped.after(box); else s.list.prepend(box);
           const older = q.slice(0, cut);
           (s.older = s.older || []).push(older);              // 还没建的更早步骤：停止时也要收
           more.addEventListener("click", (e) => { e.stopPropagation(); more.remove(); s.older = s.older.filter((x) => x !== older); for (const c of older) s.kids.push(realize(c, box)); });
@@ -507,12 +509,21 @@
           s.now.textContent = t("加载中…");
           try {
             const items = await load();
+            // 先按「收着」只记数据，再走 openSub 那套「一次只建最近 SUB_SHOW 步」；以前展开着来就逐项全建（#71）
+            const wasOpen = s.box.classList.contains("open");
+            s.box.classList.remove("open");
+            if (items.more) {
+              const note = document.createElement("div");
+              note.className = "ts-older ts-skipped"; note.textContent = t("过程太长，只显示最近的部分");
+              s.list.prepend(note);
+            }
             for (const m of items) {
               if (m.role === "tool_use") { const k = api.sub(m.id, m.name, m.input); if (mk && (m.name === "Agent" || m.name === "Task") && k && k.subLazy) k.subLazy(mk(m.id), mk); }
               else if (m.role === "tool_result") toolResult(m.id, m.ok, m.text);
               else if (m.role === "assistant") api.subText(m.text);
             }
             s.now.textContent = items.length ? "" : t("没有记录");
+            if (wasOpen) openSub();
           } catch (e) { s.now.textContent = e.message; s.lazy = null; }
         };
       },

@@ -117,7 +117,17 @@ function ui(initial = fresh()) {
     modelCalls: () => calls.filter((call) => call.url.endsWith("/models")),
     configPosts: () => calls.filter((call) => call.url.endsWith("/config") && call.method === "POST"),
     checkbox: () => [...nodes.values()].find((el) => el.tagName === "INPUT" && el.type === "checkbox"),
-    modelList: () => get(get("bc-model").getAttribute("list")),
+    // 建议列表只在输入框有焦点时渲染：聚焦读一遍再还原（value 取自 data-value）；
+    // 默认清空输入读全量，传 filtered 按当前输入过滤
+    modelList: (filtered = false) => {
+      const input = get("bc-model"), list = get(input.getAttribute("aria-controls")), prev = document.activeElement, typed = input.value;
+      if (!list) return undefined;
+      if (!filtered) input.value = "";
+      document.activeElement = input; (input.listeners.focus || []).forEach((fn) => fn({}));
+      const children = list.children.map((el) => ({ value: el.dataset.value, tagName: el.tagName, children: el.children, attributes: el.attributes }));
+      (input.listeners.blur || []).forEach((fn) => fn({})); document.activeElement = prev; input.value = typed;
+      return { tagName: list.tagName, children };
+    },
     pendingTimers: () => timers.size,
     async advance(ms) {
       const target = now + ms; let count = 0;
@@ -405,7 +415,7 @@ test("bridge models: the visible opt-in defaults off and API/key/model edits alo
     assert.equal(u.confirms.length, 0);
     assert.equal(u.get("bc-model").disabled, false);
     assert.equal(u.get("bc-model").tagName, "INPUT", "manual model entry is never replaced with a fixed select");
-    assert.equal(u.modelList()?.tagName, "DATALIST", "the editable model field supplies native search suggestions");
+    assert.equal(u.modelList()?.tagName, "UL", "the editable model field supplies in-flow search suggestions (no native datalist popup)");
     u.change(checkbox.id, false); await u.advance(2000);
     assert.equal(u.calls.length, 1, "an explicit false consent must still make zero models requests");
   }
@@ -552,10 +562,10 @@ test("bridge models: remote IDs are untrusted text-valued option nodes, never in
   const checkbox = u.checkbox(); assert.ok(checkbox); u.change(checkbox.id, true); await u.advance(650);
   const list = u.modelList();
   assert.deepEqual(list.children.map((el) => el.value).sort(), [malicious, ampersands, "safe-model"].sort());
-  assert.ok(list.children.every((el) => el.tagName === "OPTION"));
+  assert.ok(list.children.every((el) => el.tagName === "LI"));
   assert.ok(list.children.every((el) => el.children.length === 0));
   assert.ok(list.children.every((el) => !Object.keys(el.attributes).some((name) => /^on/i.test(name))));
-  assert.ok(u.createdTags.slice(tagsBefore).every((tag) => tag === "OPTION"), "a remote model name cannot become an img/script element");
+  assert.ok(u.createdTags.slice(tagsBefore).every((tag) => tag === "LI"), "a remote model name cannot become an img/script element");
   assert.ok(!u.htmlWrites.slice(writesBefore).some(({ html }) => html.includes(malicious) || html.includes(ampersands)), "model IDs must use value/textContent rather than innerHTML");
   assert.equal(u.get("bc-model").value, "");
   assert.equal(u.configPosts().length, 0);
@@ -688,7 +698,10 @@ test("bridge models: explicit retry uses current credentials once, and controls 
   assert.equal(retry.disabled, false);
   assert.deepEqual(u.modelList().children.map((el) => el.value), ["synthetic-retried-model"]);
   u.input("model", "RETRIED");
-  assert.deepEqual(u.modelList().children.map((el) => el.value), ["synthetic-retried-model"], "search uses the existing native datalist without another request");
+  assert.deepEqual(u.modelList(true).children.map((el) => el.value), ["synthetic-retried-model"], "search filters the existing list without another request");
+  u.input("model", "no-such");
+  assert.deepEqual(u.modelList(true).children, [], "non-matching input hides suggestions but stays editable");
+  assert.equal(u.get("bc-model").value, "no-such");
   assert.equal(u.modelCalls().length, 2);
   await u.click("models-retry"); await u.advance(0); assert.equal(u.modelCalls().length, 3);
   u.change(checkbox.id, false);
@@ -782,4 +795,24 @@ test("bridge models: edited key or origin aborts a previous request and late fet
     assert.equal(u.modelCalls().length, 2);
     assert.equal(u.configPosts().length, 0);
   }
+});
+
+test("bridge models: suggestion list supports arrow keys, Enter picks and Escape closes without submitting", async () => {
+  const u = ui(); await u.open(); fill(u);
+  u.models(() => reply({ ok: true, models: [{ id: "alpha-model" }, { id: "beta-model" }], truncated: false }));
+  const checkbox = u.checkbox(); u.change(checkbox.id, true); await u.advance(650);
+  const input = u.get("bc-model"), list = u.get("bc-model-list"), key = (k) => { let prevented = false; for (const fn of input.listeners.keydown || []) fn({ key: k, isComposing: false, preventDefault() { prevented = true; } }); return prevented; };
+  input.value = ""; u.document.activeElement = input; for (const fn of input.listeners.focus || []) fn({});
+  assert.deepEqual(list.children.map((el) => el.dataset.value), ["alpha-model", "beta-model"]);
+  assert.equal(input.getAttribute("aria-expanded"), "true");
+  assert.equal(key("Enter"), false, "Enter without a highlighted option is left to the form");
+  key("ArrowDown"); key("ArrowDown");
+  assert.equal(input.getAttribute("aria-activedescendant"), "bc-model-opt-1");
+  assert.equal(key("Enter"), true);
+  assert.equal(input.value, "beta-model");
+  assert.ok(list.classList.contains("hidden"));
+  for (const fn of input.listeners.focus || []) fn({});
+  assert.equal(key("Escape"), true);
+  assert.ok(list.classList.contains("hidden"));
+  assert.equal(u.configPosts().length, 0);
 });
