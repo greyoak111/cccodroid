@@ -63,7 +63,7 @@ public class BrowserActivity extends Activity implements BrowserPane.Host {
     }
 
     @Override protected void onPause() { super.onPause(); pane.pause(); }
-    @Override protected void onResume() { super.onResume(); pane.resume(); }
+    @Override protected void onResume() { super.onResume(); FrameRate.apply(this); pane.resume(); }
     @Override protected void onDestroy() {
         if (pane != null) pane.destroy();
         super.onDestroy();

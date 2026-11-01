@@ -265,12 +265,18 @@ public class MainActivity extends Activity {
         if (has && web != null && web.getParent() != null && getCurrentFocus() == null) web.requestFocus();
     }
 
-    @Override protected void onResume() { super.onResume(); visible = true; applyLandBars(); Battery.foreground(true);
+    /** 帧率心跳：小米上应用自己的帧率靠广播告诉 PowerKeeper；它重启或名单被重置后，靠这里补回来 */
+    private final Runnable fpsBeat = new Runnable() {
+        @Override public void run() { FrameRate.apply(MainActivity.this); ui.postDelayed(this, 30000); }
+    };
+
+    @Override protected void onResume() { super.onResume(); visible = true; applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
+        ui.removeCallbacks(fpsBeat); ui.postDelayed(fpsBeat, 30000);
         if (pane != null) pane.resume();
         pushWall();
         getSystemService(android.app.NotificationManager.class).cancel(41);    // Priv.toFront 的「点此回来」
         Notify.get(this).onForeground(); }                                    // 确认卡就在眼前，通知撤掉
-    @Override protected void onPause() { visible = false; Battery.foreground(false); super.onPause();
+    @Override protected void onPause() { ui.removeCallbacks(fpsBeat); visible = false; Battery.foreground(false); super.onPause();
         if (pane != null) pane.pause();
         Notify.get(this).onBackground(); }                                    // 还有没答的确认：现在补发通知
 
