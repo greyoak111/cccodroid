@@ -167,6 +167,27 @@ cccodroid.apk (Java shell: installer + foreground service + WebView)
 - **Gateway access control**: the gateway listens on 127.0.0.1 only, and every `/api/*` request must carry a 256-bit token from the app's private directory; Host and Origin are checked as well. Other apps and web pages on the phone cannot drive it.
 - **Credentials**: account sign-in is done by Claude Code itself. The gateway hands the authorization URL to the system browser and never reads or stores claude.ai credentials; it does not handle the one-time authorization code either (see [Terms and compliance](#terms-and-compliance)). Third-party API keys live in the app's private directory and reach claude through `apiKeyHelper`, never through environment variables.
 
+## Engineering history
+
+From the first commit to v0.5.19 took 20 days: 570 commits and 104 releases. The table groups the work by engineering phase; every row can be traced in the commit history and on the [Releases](https://github.com/greyoak111/cccodroid/releases) page.
+
+| Phase | Versions | Key engineering |
+|---|---|---|
+| Prototype | before the repo | Proven inside [DeepSeek Harness](https://github.com/woaiys3/deepseek-harness-android-app): the official linux-arm64 Claude Code launched directly by the glibc loader, with a bionic-side local reverse proxy because glibc couldn't resolve DNS; a Java + WebView shell with a Node gateway; claude processes owned by the gateway and streamed to the UI over an SSE event bus |
+| Skeleton | 0.1.0 – 0.1.2 | Foreground-service keep-alive; toolchain assembled from official Termux packages and run natively after same-length prefix relocation; official package download and verification; seccomp SIGSYS turned into ENOSYS (plus `enosys-run` for static binaries); Shizuku privileged commands through an in-app socket; gateway token plus Host / Origin checks |
+| Distribution and ecosystem | 0.1.3 – 0.3.0 | Update chain: hash-based versioning, resumable replacement, MANIFEST verification and repair; component market: recipe → CI → ed25519-signed index → on-device verification marks; parallel sessions; `enosys-run -f` covering the whole process tree; i18n across shell and gateway; multi-source Claude Code downloads where mirrored packages must still pass the official manifest, PGP and npm signature checks; CI builds for every PR |
+| Restructuring | 0.3.4 – 0.4.0 | Gateway split into a routing layer plus feature modules under `gw/`; front end split into parts under `web/app/` that the gateway joins and serves; toolkit installed and removed per module, with signed module manifests; active reconciliation of records against disk; per-session model and provider, so sessions pinned to different providers run in parallel; targetSdk 36: exec through linker64 and an ld.so shipped in the APK, with an exec shim, shipped as twin 28 / 36 APKs; scheduled tasks woken by system alarms |
+| Experience and original features | 0.4.1 – 0.5.0 | Segmented parallel downloads with fallback routes; `gw/streamfix.mjs` adds the missing end-of-stream events to third-party streaming replies so whole answers aren't regenerated; gateway tests wired into CI and the release gate; Lineage: a session ancestry graph with archive IDs and windowed lazy loading; one motion system for every enter and exit; subagent cards and a contact log; UI settings consolidated into `ccapp-ui.json`; releases reduced to one pipeline (build → verify → publish → site link check) |
+| Hardening | 0.5.1 – 0.5.19 | More than ten rounds of external review: atomic writes, an environment-variable deny-list, every manifest signed and bound to its release against replay; the UI moved to a dedicated loopback address, 127.0.0.2, with per-request HMAC signatures to the gateway instead of the raw token; a PreToolUse hook that asks again before sensitive actions; integrity seals on prompts and session logs; PR poisoning screening, with the release signing key released only to main; an allow-list for privileged commands, with a native confirmation for everything outside it |
+
+Rules the project has held to throughout:
+
+- **Launch the official package, never modify it.** Claude Code comes from official channels only. Mirrors are fallback routes held to the same checks. The APK never bundles Claude Code.
+- **No root, no proot.** The toolchain runs natively. Platform limits are handled with prefix relocation, the seccomp shim and the loader, and privileged actions go only through Shizuku.
+- **The gateway owns runs.** The UI only subscribes to events, so a page reload, going to the background or parallel sessions never interrupt a turn in progress.
+- **Verify before trusting.** Toolkits, modules, component indexes, notices and release lists are checked against ed25519 or PGP signatures bound to a specific release.
+- **Every change gets verified.** Gateway tests run only through the runner, every release and toolkit publish step checks hashes, and components state whether they have been verified on a real device.
+
 ## Terms and compliance
 
 cccodroid aims to follow [Anthropic's terms for products that run Claude Code](https://code.claude.com/docs/en/legal-and-compliance). Below is exactly what the app does, so you can judge for yourself:
