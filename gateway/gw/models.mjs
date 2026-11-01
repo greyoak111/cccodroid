@@ -11,7 +11,16 @@ import { effectiveAutoCompact } from "./stream.mjs";
 // ── 模型清单（按厂商拉，10 分钟缓存，失败用该厂商的 fallback）─────────
 // MODELS 是全局生效那家的清单（老代码直接读它）；每家各自的缓存在 CACHE（0.3.16 起各会话可以用不同的家）
 export let MODELS = null, MODELS_AT = 0, MODELS_FOR = null;
-const CACHE = new Map();   // 厂商 id → { list, at }
+const CACHE = new Map();   // 厂商 id → { list, at, sig }
+// 清单按「这家此刻的配置」存取：保存前拿到的旧接口对象晚些才去拉，拉回来也只记在旧指纹名下，新配置读不到（#77 复核 M1）。
+// MODELS_FOR 存的也是指纹：切了全局接口，上一家的 MODELS 不会被当成新家的
+// 前提：接口对象的字段不原地改（改配置都走 upsertProvider / applyProvider 整体换新对象），否则 WeakMap 里的指纹会过时
+const SIGS = new WeakMap();
+function sigOf(p) {
+  let s = SIGS.get(p);
+  if (s === undefined) { s = JSON.stringify([p.id, p.baseUrl, p.modelsUrl, p.modelsAuth, p.defaultModel, p.fastModel, p.contextWindow, p.fallbackModels]); SIGS.set(p, s); }
+  return s;
+}
 
 /** 把不同厂商的 /models 响应归一成同一种形状。
  *  两家形状不同：DeepSeek 用 context_window/max_output_tokens/effort.supported_levels，
@@ -225,18 +234,20 @@ function withCatalog(list, p) {
 }
 
 // 清空 / 让它过期：别的模块改不了这几个变量（ES 模块的导入是只读的），走这两个函数
-export function dropModelCache() { MODELS = null; MODELS_AT = 0; MODELS_FOR = null; CACHE.clear(); }
-export function expireModelCache() { MODELS_AT = 0; for (const c of CACHE.values()) c.at = 0; }
+// 代次：接口配置一改就加一。改之前发出去、改之后才回来的清单请求只交给当时的调用方，不再写回缓存（#77）
+let CACHE_GEN = 0;
+export function dropModelCache() { CACHE_GEN++; MODELS = null; MODELS_AT = 0; MODELS_FOR = null; CACHE.clear(); }
+export function expireModelCache() { CACHE_GEN++; MODELS_AT = 0; for (const c of CACHE.values()) c.at = 0; }   // 在途的旧结果别把过期的又续上（复核 L1）
 
 /** p：哪家（缺省 = 全局生效的）。按家各缓存 10 分钟；全局那家的结果同时放进 MODELS */
 export async function fetchModels(force, p = PROVIDER) {
-  const list = await fetchModelsOf(p, force);
-  if (p.id === PROVIDER.id) { MODELS = list; MODELS_AT = Date.now(); MODELS_FOR = p.id; }
+  const gen = CACHE_GEN, list = await fetchModelsOf(p, force);
+  if (gen === CACHE_GEN && p.id === PROVIDER.id) { MODELS = list; MODELS_AT = Date.now(); MODELS_FOR = sigOf(p); }
   return list;
 }
 async function fetchModelsOf(p, force) {
-  const c = CACHE.get(p.id);
-  const keep = (list, ttl = true) => { CACHE.set(p.id, { list, at: ttl ? Date.now() : 0 }); return list; };
+  const sig = sigOf(p), c0 = CACHE.get(p.id), c = c0 && c0.sig === sig ? c0 : null, gen = CACHE_GEN;
+  const keep = (list, ttl = true) => { if (gen === CACHE_GEN) CACHE.set(p.id, { list, at: ttl ? Date.now() : 0, sig }); return list; };
   if (!force && c && c.at && Date.now() - c.at < 600000) return c.list;
 
   if (p.local) return keep(localModels(), false);   // 端侧：模型目录里有什么就是什么（每次现扫，刚放进去的文件马上能选）
@@ -291,18 +302,19 @@ export function inlineModels(url) {
   } catch { return null; }
 }
 
+function cacheOf(p) { const c = CACHE.get(p.id); return c && c.sig === sigOf(p) ? c : null; }
 /** 已缓存的那家清单（不发请求）；没拉过就是目录里写的（配了内嵌清单就用它，冷启动也拿得到窗口） */
 export function cachedModels(p = PROVIDER) {
-  const c = CACHE.get(p.id);
-  const list = (c && c.list) || (p.id === PROVIDER.id && MODELS);
+  const c = cacheOf(p);
+  const list = (c && c.list) || (MODELS_FOR === sigOf(p) && MODELS);
   if (list) return withWindows(list);
   const inline = inlineModels(p.modelsUrl);
   return withWindows(withConfigured(inline ? mergeKnown(inline, p.fallbackModels) : p.fallbackModels || [], p));
 }
 /** 这家的清单拉过没有（过期的也算）：拉过就不必让这一轮干等网络 */
 export function modelsCached(p = PROVIDER) {
-  const c = CACHE.get(p.id);
-  return !!((c && c.list) || (p.id === PROVIDER.id && MODELS));
+  const c = cacheOf(p);
+  return !!((c && c.list) || (MODELS_FOR === sigOf(p) && MODELS));
 }
 
 /** 厂商的 /models 多是 OpenAI 形状：不报窗口，还混着向量、语音、画图模型。
@@ -350,7 +362,9 @@ export async function routeModels(req, res, u, p) {
     const bp = (u.searchParams.get("browse") && providerById(u.searchParams.get("browse"))) || pp;
     const ms = withWindows(await fetchModels(u.searchParams.get("refresh") === "1", bp));
     const own = withWindows(bp === pp ? ms : cachedModels(pp));
-    const cur = own.find((m) => m.id === now.model) || own.find((m) => m.id === pp.defaultModel) || own[0] || {};
+    // 只认同名：指定了（或那家有默认型号）却不在清单里，能力和窗口就是不知道，别借第一项的（#82，和 currentModelInfo 一致）
+    const want = now.model || pp.defaultModel;
+    const cur = (want ? own.find((m) => m.id === want) : own[0]) || {};
     return sendJson(res, 200, {
       models: ms,
       current: now.model || null,

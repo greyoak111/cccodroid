@@ -1,21 +1,23 @@
 import { log } from "./config.mjs";
 import { SETTINGS, saveSettings } from "./settings-store.mjs";
-import { PROVIDER } from "./providers.mjs";
+import { PROVIDER, providerById } from "./providers.mjs";
 import { effortLevelsOf, fetchModels, normEffort } from "./models.mjs";
 import { effectiveAutoCompact } from "./stream.mjs";
-import { effectiveModel, sessProvider, setSessModel } from "./sessmodel.mjs";
+import { effectiveModel, setSessModel } from "./sessmodel.mjs";
 
 // ── /model 与 /effort：由网关本地处理 ─────────────────────────────────
 // 为什么不让 claude 自己处理：它自带的 /model 只改「当前会话」，
 // 而 GUI 每次调用都是新进程 —— 下一条消息就忘了。所以由网关记：
 // 0.3.16 起：在会话里打 → 只改这个会话（sid）；新会话里打（还没会话号）→ 改全局默认。
 export async function handleLocalCommand(name, arg, reply, sid) {
-  // 会话钉在别家时，清单、档位、校验都按那家
-  const P = sid ? sessProvider(sid) : PROVIDER;
-  const models = await fetchModels(true, P);
+  // 清单、档位、校验都按这个会话真跑的那家：钉的 → 项目默认 → 全局（和 run.mjs、/api/models 同一套，#78）
   const now = effectiveModel(sid);
+  const P = providerById(now.provider) || PROVIDER;
+  const models = await fetchModels(false, P);   // 只是读清单：走 10 分钟缓存，项目那家清单地址慢时别每次干等
   const curId = now.model, curEff = now.effort;
-  const cur = models.find((m) => m.id === curId) || models[0];
+  // 只认同名的：指定的型号不在清单里就当不知道窗口，别借默认或第一项的（#82）；没指定才按那家默认 / 第一项
+  const want = curId || P.defaultModel;
+  const cur = want ? models.find((m) => m.id === want) : models[0];
   const commit = (patch) => {
     if (sid) return setSessModel(sid, patch);
     if (patch.model !== undefined) SETTINGS.model = patch.model || null;

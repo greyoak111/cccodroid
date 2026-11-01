@@ -404,7 +404,7 @@ export async function startRun(item) {
     RUN_SESSIONS.set(run.id, run.sessionId);
     if (RUN_SESSIONS.size > 500) RUN_SESSIONS.delete(RUN_SESSIONS.keys().next().value);
     rememberSession(run.sessionId);
-    if (item.pin) setSessModel(run.sessionId, item.pin);   // 新会话首条带来的选择：有了会话号就记上
+    if (item.pin) setSessModel(run.sessionId, item.pin, item.projectId);   // 新会话首条带来的选择：有了会话号就记上
     if (item.mergeFrom && !item.sessionId) { recordExtra(run.sessionId, item.mergeFrom); item.mergeFrom = null; }   // 汇合：当场记来源（事后推断不出来）
     saveRunMark();                       // 标记里补上会话号：被杀之后「继续」要靠它 --resume
     if (!SESSIONS.has(init.session_id)) {

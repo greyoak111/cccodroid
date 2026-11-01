@@ -245,12 +245,15 @@
   }
   const switchWarn = (to) => t("这个会话改用「{name}」接着聊？\n\n之前的对话会整段交给新接口的模型重新读：提示缓存从头算，费用按新接口计；个别工具调用记录别家模型可能读不懂。", { name: provLabel(to) });
 
-  // 上下文用量条的满刻度按当前会话的模型；跟随默认时直接用全局那份（loadModels 顺手传进来）
+  // 上下文用量条的满刻度按当前会话的模型；会话真跑的就是全局那个型号时直接用全局那份（loadModels 顺手传进来）。
+  // 没单独选过也不一定跟全局一样：项目可以有自己的默认接口 / 型号（#79），所以按网关算好的 sessEff 比，对不上就单查
   let ctxSeq = 0;
+  const sameAsGlobal = (g) => !own() && !!state.sessEff && state.sessEff.provider === g.provider
+    && (state.sessEff.model || state.sessEff.defaultModel || "") === (g.current || g.defaultModel || "");
   async function loadCtxModel(g) {
     const my = ++ctxSeq;
     let r = g;
-    if (own() || !r) try { r = await api("/api/models" + sidQ()); } catch { return; }
+    if (!r || !sameAsGlobal(r)) try { r = await api("/api/models" + sidQ()); } catch { return; }
     if (my !== ctxSeq) return;
     state.ctxTotal = Number(r.contextWindow) || 0;   // 0 = 这个型号不知道窗口：别沿用上一个型号的分母（#68）
     state.compactAt = Number(r.compactLine ?? r.autoCompactWindow) || 0;   // 生效的那条（超过模型窗口不算数，#67）
@@ -258,9 +261,13 @@
   }
 
   /** 模型与 effort 档位都从厂商的 /models 实时拉。设置页的下拉框是全局默认 */
+  let modelsSeq = 0;
   async function loadModels(refresh) {
+    const my = ++modelsSeq;
     try {
       const r = await api("/api/models" + (refresh ? "?refresh=1" : ""));
+      // 连着改型号时清单响应可能乱序回来：只认最后一次发出的，旧的别把下拉框和容量盖回去（#80）
+      if (my !== modelsSeq) return null;          // null = 被后一次顶掉了（不是失败），调用方别拿原始设置去盖
       MODELS = r.models || [];
       if (r.providers) state.provList = r.providers;
       const sel = $("set-model");
@@ -303,9 +310,8 @@
       tsel.value = tv;
       renderEffort(r.effortLevels || [], r.effort || "", r.effortDefault);
 
-      // 用量条：总刻度用厂商给的真实窗口，但设了压缩窗口就改以它为满刻度
-      // 接口没回窗口时（登录态 / 老缓存），用清单里这个模型自己的值兜底
-      if (!r.contextWindow) r.contextWindow = (MODELS.find((m) => m.id === curId) || {}).context_window || 0;
+      // 用量条：总刻度用厂商给的真实窗口，但设了压缩窗口就改以它为满刻度。
+      // 网关回 0 就是不知道：别拿下拉框落在的那一项兜底，那可能是别的型号（#82）
       loadCtxModel(r);
       const cur = MODELS.find((m) => m.id === curId);
       if (cur) {
@@ -324,10 +330,13 @@
         $("model-info").innerHTML =
                     t("该厂商由 claude 自己决定模型，没有可切换的清单。要指定就改 <code>ccapp-providers.json</code> 的 <code>defaultModel</code>。");
       } else $("model-info").textContent = "";    // 上一家的能力说明别留着（审查 #52 D-03）
-      acPaint((cur && cur.context_window) || state.ctxTotal, r.autoCompactWindow);
+      // 设置页是全局默认：只按全局型号的窗口画，不借顶栏当前会话的 state.ctxTotal（#76）
+      acPaint(Number(r.contextWindow) || 0, r.autoCompactWindow);
       return true;
     } catch (e) {
+      if (my !== modelsSeq) return null;
       $("model-info").textContent = t("拉取模型清单失败：{msg}", { msg: e.message });
+      return false;
     }
   }
 
@@ -399,7 +408,7 @@
       await loadProviders();
       // 清单拉成功时下拉框已经按网关算好的「实际生效」选上了；再拿原始设置盖一遍，
       // 存的值这家不支持（比如 high，这家只有 low/medium）就成了空白（审查 D-03）。拉失败才退回原始值
-      if (!(await loadModels())) {
+      if ((await loadModels()) === false) {
         $("set-model").value = state.settings.model || "";
         $("set-effort").value = state.settings.effort || "";
       }

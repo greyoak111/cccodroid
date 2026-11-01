@@ -1071,7 +1071,7 @@
         if (typeof window.CCBridgeConfig?.open !== "function") return toast(t("配置界面尚未就绪，请刷新后重试"), true);
         cb.disabled = true;
         try {
-          await window.CCBridgeConfig.open({ anchor: cb, useNew: async ({ provider, model }) => {
+          await window.CCBridgeConfig.open({ anchor: cb, saved: () => { loadProviders(); loadModels(); refreshSessModel(); }, useNew: async ({ provider, model }) => {
             // 只有用户点「新建会话使用」才选接口；暂存在新会话，不改全局默认和旧会话。
             newConversation(); closeDrawer();
             await pickSessModel({ provider, model });

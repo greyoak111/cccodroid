@@ -434,11 +434,14 @@
   // 转发走外壳的系统分享面板（CCApp.shareText）；外壳没有这个接口时退回 Web Share，都没有就复制并说明。
   // 提问和回复底下一律四个键（提问：复制 / 重发 / 回退 / 删除；回复：复制 / 转发 / 分叉 / 删除），别因为环境不同少一个
   function replyActs(msgEl, getText) {
-    if (!getText() || msgEl.querySelector(":scope > .msg-acts")) return;
+    if (msgEl.querySelector(":scope > .msg-acts")) return;
+    // 没有正文（只跑了工具就被中断）也要能删，以前整排按钮不出、这条回复删不掉；复制 / 转发 / 分叉 / 书签只给有正文的
+    const hasText = !!getText(), sys = msgEl.classList.contains("sys");
+    if (!hasText && sys) return;
     const acts = document.createElement("div");
     acts.className = "msg-acts";
-    acts.innerHTML = actBtn("copy", t("复制")) + actBtn("share", t("转发")) +
-      (msgEl.classList.contains("sys") ? "" : actBtn("fork", t("从这里分叉")) + actBtn("mark", t("书签")) + actBtn("del", t("删除")));
+    acts.innerHTML = (hasText ? actBtn("copy", t("复制")) + actBtn("share", t("转发")) : "") +
+      (sys ? "" : (hasText ? actBtn("fork", t("从这里分叉")) + actBtn("mark", t("书签")) : "") + actBtn("del", t("删除")));
     acts.addEventListener("click", (e) => {
       const a = e.target.closest("button")?.dataset.a, text = getText();
       if (a === "copy") { copyText(text); toast(t("已复制")); }

@@ -13,7 +13,7 @@
     paintSetCats();
     renderSideNav();
     closeDrawer();
-    loadProviders(); loadPriv(); loadUpd(); loadNotify(); loadDev(); loadReconcile(false); loadFonts(); renderTbList(); renderAccent(); renderMsgActs();
+    loadProviders(); loadModels(); loadPriv(); loadUpd(); loadNotify(); loadDev(); loadReconcile(false); loadFonts(); renderTbList(); renderAccent(); renderMsgActs();
     // 焦点进模态：不然键盘 / 读屏还停在被盖住的背景上（审查 P2-12）
     // 窄屏的分类列表没有选中项、关闭键也藏着：落到第一个看得见的控件（审查 #52 P2-12）
     requestAnimationFrame(() => { if (setOpen) focusInto($("set-ov"), $("set-cats").querySelector("button.on:not(.hidden)")); });

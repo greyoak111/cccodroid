@@ -42,11 +42,12 @@ export function sessProvider(sid) {
 }
 /** 记下（只改给了的字段）。model 为 "" 表示「接口默认」，也是一种选择 */
 export function clearSessModel(sid) { if (sid && DB[sid]) { delete DB[sid]; save(); } }
-export function setSessModel(sid, patch) {
+export function setSessModel(sid, patch, projectId) {
   if (!sid) return;
   const old = sessModel(sid) || {};
-  // 没指明接口：沿用这个会话现在用的那家（钉过的那家，或全局生效的）
-  const r = { model: old.model ?? null, effort: old.effort ?? null, provider: sessProvider(sid).id, at: Date.now() };
+  // 没指明接口：沿用这个会话现在真跑的那家（钉过的那家 → 项目默认 → 全局生效的），别把项目会话钉回全局（#78）。
+  // projectId：新会话首条记 pin 时会话文件可能还没落盘，按文件反推不出项目，由调用方给（复核 M2）
+  const r = { model: old.model ?? null, effort: old.effort ?? null, provider: effectiveModel(sid, projectId).provider, at: Date.now() };
   // 指明了接口就钉住它（哪怕和全局是同一家：全局以后再切，这个会话也不跟）
   if (patch.provider && (patch.provider !== r.provider || r.model == null)) {
     r.provider = String(patch.provider);
@@ -81,7 +82,8 @@ export function effectiveModel(sid, projectId, over) {
   const effort = (r && r.effort != null ? r.effort : pdef.effort || SETTINGS.effort) || "";
   let effortRun = effort;
   if (effort && !pp.local) {
-    const list = cachedModels(pp), mi = list.find((m) => m.id === (model || pp.defaultModel)) || list[0] || {};
+    // 只认同名（和 /api/models、currentModelInfo 一致，#82）：清单里没有这个型号就不拿第一项的档位表去校验
+    const want = model || pp.defaultModel, list = cachedModels(pp), mi = (want ? list.find((m) => m.id === want) : list[0]) || {};
     if (!effortLevelsOf(mi, pp).includes(effort)) effortRun = normEffort(mi, effort, pp) || "";
   }
   return { model, effort, effortRun, provider: pp.id, ownProvider: pp.id !== PROVIDER.id, own: !!r,

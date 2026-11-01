@@ -398,6 +398,7 @@
     try {
       const data = await request(body); if (id !== seq || !visible()) return;
       snapshot = safeSnapshot(data);
+      if (typeof options.saved === "function") options.saved();   // 窗口 / 模型可能变了：设置页滑块、顶栏刻度跟着重取（#76）
       if (!snapshot.configured || !snapshot.hasKey) { notice(t("配置未完成，请检查字段后重试。")); return; }
       showSaved(); $("bc-saved-title").focus({ preventScroll: true });
       if (snapshot.local.state !== "ready") notice(t("配置已保存，但本地桥尚未就绪；不会切换接口，可修改配置后重试。"));
@@ -407,6 +408,7 @@
       else if (err.field === "apiKey") error("key", t("请重新填写 API Key；更换服务地址时不能沿用旧密钥。"));
       else if (err.field === "contextWindow") error("ctx", t("填 1024 到 16777216 之间的整数，也可以写 256k、1m；不知道就留空。"));
       else if (err.field === "model") error("model", t("请输入准确的模型名称，不要包含逗号或换行。"));
+      if (err.saved && typeof options.saved === "function") options.saved();
       if (err.saved) notice(t("配置已保存，但本地桥尚未就绪；不会切换接口，可修改配置后重试。"));
       else notice(err.status === 409 ? t("本地桥正在使用或卸载中，请稍后重试；当前会话保持不变。") : t("保存配置未完成；请检查本地状态后重试，当前会话保持不变。"));
     } finally { body.apiKey = ""; if (id === seq) setBusy(false); }

@@ -164,9 +164,11 @@ export async function setBridgeUpstream(url) {
 export function currentModelInfo(id = SETTINGS.model, p = PROVIDER) {
   const list = cachedModels(p);
   if (!Array.isArray(list) || !list.length) return {};
-  if (!id) return list[0] || {};
-  // 只认同名的：清单里没有这个型号就当不知道，别借第一项的窗口（128k 的型号借来 1M 会越窗，#57）
-  return list.find((m) => m.id === id) || {};
+  // 没指定就是那家的默认型号（claudeEnv 的 ANTHROPIC_MODEL 也是这么取的），没默认才是清单第一项
+  const want = id || p.defaultModel;
+  if (!want) return list[0] || {};
+  // 只认同名的：清单里没有这个型号就当不知道，别借第一项的窗口（128k 的型号借来 1M 会越窗，#57 #82）
+  return list.find((m) => m.id === want) || {};
 }
 
 /** o.model：这一轮用的模型（会话自己的、定时任务 / 项目指定的）；不给就按全局设置。

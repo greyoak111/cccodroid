@@ -679,6 +679,7 @@
     const id = state.provView;
     await loadProviders();
     if (id === state.providerActive) await loadModels(true);
+    refreshSessModel();   // 默认型号可能改了：跟随默认（或钉在这家默认型号上）的会话标签跟着重画（#81）
     if (thenTest) {
       const p = state.providers.find((x) => x.id === id);
       if (p && p.hasKey) testAndShow(id);

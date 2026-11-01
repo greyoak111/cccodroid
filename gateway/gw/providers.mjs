@@ -701,8 +701,8 @@ export function keyOf(p) {
 }
 
 /** 应用当前厂商：更新上游与密钥。
- *  模型清单缓存无需在此清除 —— fetchModels 以 MODELS_FOR===PROVIDER.id 为键，
- *  换厂商自然失效。 */
+ *  模型清单缓存无需在此清除 —— 缓存按接口配置指纹存取（models.mjs 的 sigOf），
+ *  换厂商自然对不上。 */
 export function applyProvider() {
   PROVIDER = resolveProvider();
   CFG.upstream = PROVIDER.baseUrl || BUILTIN_PROVIDER.baseUrl;
