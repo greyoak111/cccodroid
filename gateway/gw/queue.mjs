@@ -95,26 +95,44 @@ export function saveRunMark() {
     fs.renameSync(RUN_MARK + ".tmp", RUN_MARK);
   } catch {}
 }
+// 中断记录是个列表：并行时一次会断好几轮，每个会话都要有自己的「继续」卡（群友 Yhaizg 11-01：升级时三个会话在跑，只提示了一个）
+// 旧版本存的是单条对象，读的时候包成列表
+const INTR_MAX = 20;
+const intrList = (v) => (Array.isArray(v) ? v : v ? [v] : []).filter((e) => e && typeof e === "object" && e.id).slice(-INTR_MAX);
 export let INTERRUPTED = (() => {
-  try { const j = JSON.parse(fs.readFileSync(INTR_FILE, "utf8")); if (j && j.id) return j; } catch {}
-  return null;
+  try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))); } catch {}
+  return [];
 })();
-export function setInterrupted(v) {
-  INTERRUPTED = v;
-  try { v ? fs.writeFileSync(INTR_FILE, JSON.stringify(v), { mode: 0o600 }) : fs.rmSync(INTR_FILE, { force: true }); } catch {}
+export function setInterrupted(list) {
+  INTERRUPTED = intrList(list);
+  try {
+    if (!INTERRUPTED.length) return fs.rmSync(INTR_FILE, { force: true });
+    fs.writeFileSync(INTR_FILE + ".tmp", JSON.stringify(INTERRUPTED), { mode: 0o600 });   // 写到一半被杀不留半个 JSON
+    fs.renameSync(INTR_FILE + ".tmp", INTR_FILE);
+  } catch {}
+}
+/** 这个会话（没建立会话的轮次：sid 为空）又跑起来了或被忽略：去掉它的中断记录 */
+export function clearInterrupted(sid) {
+  const left = INTERRUPTED.filter((e) => (e.sessionId || "") !== (sid || ""));
+  if (left.length !== INTERRUPTED.length) setInterrupted(left);
 }
 /** 启动时调一次：上一任留下的标记 → 中断记录 + 挂起的队列 */
-function recoverRunMark() {
+export function recoverRunMark() {
   let m;
   try { m = JSON.parse(fs.readFileSync(RUN_MARK, "utf8")); } catch { return; }
   finally { try { fs.rmSync(RUN_MARK, { force: true }); } catch {} }
-  // 并行时可能同时断了好几轮：「继续」卡只挂最近开始的那一轮，其余的会话内容都在，用户打开接着聊就行
+  // 并行时可能同时断了好几轮：每个会话各记一条，各挂各的「继续」卡
   const runs = (Array.isArray(m.runs) ? m.runs : m.run ? [m.run] : []).filter((r) => r && r.id && !r.done).sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
   for (const r of runs) {
     if (r.sessionId) RUN_SESSIONS.set(r.id, r.sessionId);
     log(`⚠️ 上一轮没跑完就被结束了（会话 ${r.sessionId || "未建立"}），已标为中断`);
   }
-  if (runs.length) setInterrupted({ ...runs[runs.length - 1], at: Date.now() });
+  if (runs.length) {
+    const now = Date.now(), fresh = runs.map((r) => ({ ...r, at: now }));
+    // 上次没处理的中断记录留着；同一个会话以这次的为准
+    const sids = new Set(fresh.map((r) => r.sessionId || ""));
+    setInterrupted([...INTERRUPTED.filter((e) => !sids.has(e.sessionId || "")), ...fresh]);
+  }
   for (const q of Array.isArray(m.queue) ? m.queue : []) {
     if (!q || !q.id || typeof q.message !== "string") continue;
     if (!q.sessionId && q.follow && RUN_SESSIONS.get(q.follow)) q.sessionId = RUN_SESSIONS.get(q.follow);
@@ -340,7 +358,9 @@ export async function routeQueue(req, res, u, p) {
     return sendJson(res, 200, { ok: true, id: item.id, injected: !!item.injected, started: RUNS.has(item.id) });
   }
   if (req.method === "POST" && p === "/api/interrupted/dismiss") {
-    setInterrupted(null);
+    // 带 id 只忽略那一条；不带（旧界面）全清
+    let b; try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
+    setInterrupted(b && typeof b.id === "string" ? INTERRUPTED.filter((e) => e.id !== b.id) : []);
     publishState();
     return sendJson(res, 200, { ok: true });
   }

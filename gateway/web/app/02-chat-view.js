@@ -23,7 +23,7 @@
     tasksHide: "",       // 全部完成后点 ✕ 收起时的清单指纹；清单一变就重新露出来
   };
   // run / queue 只算当前视图的（本会话正在跑的那一轮、本会话排着的）；runs / queueAll 是网关上的全部
-  const srv = { run: null, queue: [], runs: [], queueAll: [], max: 3, connected: false };
+  const srv = { run: null, queue: [], runs: [], queueAll: [], intr: [], max: 3, connected: false };
   const runViews = new Map();     // runId → { av, startedAt }
   const TOOL_CARDS = new Map();   // tool_use id → 卡片（结果可能在另一页、另一个气泡里）
   /** 历史页被裁掉：页里的卡片（含收着的子代理步骤）从索引里放掉，不然整页 DOM 还被这里拽着（审查 #49 P3-7） */

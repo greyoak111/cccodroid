@@ -345,6 +345,7 @@
     const list = (state.sessions || []).filter((x) => !x.misc || x.id === view.sessionId);
     const live = new Set(srv.runs.filter((x) => !x.idle).map((x) => x.sessionId).filter(Boolean));
     const ask = new Set(srv.runs.filter((x) => x.perms && x.perms.length).map((x) => x.sessionId).filter(Boolean));
+    const intr = new Set((srv.intr || []).map((x) => x.sessionId).filter(Boolean));
     const d0 = new Date(); d0.setHours(0, 0, 0, 0);
     const t0 = d0.getTime(), y0 = t0 - 86400000;
     const groups = [[t("置顶"), list.filter((x) => x.pinned), "pin"], [t("今天"), [], "today"], [t("昨天"), [], "yday"], [t("更早"), [], "older"]];
@@ -354,7 +355,7 @@
     const cur = view.sessionId && list.find((x) => x.id === view.sessionId);
     if (cur && cur.title && cur.title !== view.title) view.title = cur.title;
     paintTitle();   // 顶栏状态行后面的档号 / 日期也跟着会话列表变
-    const row = (x) => `<button class="sr-item${x.id === view.sessionId ? " on" : ""}" data-sid="${esc(x.id)}" title="${esc(x.title)}">${ask.has(x.id) ? '<i class="sr-dot ask"></i>' : live.has(x.id) ? '<i class="sr-dot"></i>' : ""}<span>${esc(x.title)}</span></button>`;
+    const row = (x) => `<button class="sr-item${x.id === view.sessionId ? " on" : ""}" data-sid="${esc(x.id)}" title="${esc(x.title)}">${ask.has(x.id) ? '<i class="sr-dot ask"></i>' : live.has(x.id) ? '<i class="sr-dot"></i>' : intr.has(x.id) ? `<i class="sr-dot intr" title="${esc(t("已中断"))}"></i>` : ""}<span>${esc(x.title)}</span></button>`;
     box.innerHTML = list.length
       ? groups.filter(([, l]) => l.length).map(([g, l, k]) => {
           // 分组可以收起：点标题切换，收起时标出有几个；记在本机

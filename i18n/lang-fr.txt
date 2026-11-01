@@ -2582,3 +2582,4 @@
 2582	Contexte {used} · capacité inconnue
 2583	Afficher {n} lignes de plus ({total} au total)
 2584	Déroulé trop long : seule la partie la plus récente est affichée
+2585	{n} autre(s) conversation(s) ont été interrompue(s) en même temps ; elles sont marquées « Interrompu » dans la liste des conversations.

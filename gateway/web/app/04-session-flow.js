@@ -711,9 +711,10 @@
       if (ev.run.sessionId) view.sessionId = ev.run.sessionId;
       else { view.sessionId = null; view.runIds.add(ev.run.id); }
       saveUiState();
-    } else if (helloCount === 1 && !ev.run && ev.interrupted?.sessionId && !view.sessionId) {
-      // 刚打开、上一轮是被系统杀掉的：直接回到那个会话，「继续」卡就挂在它底下
-      view.sessionId = ev.interrupted.sessionId;
+    } else if (helloCount === 1 && !ev.run && !view.sessionId && intrList(ev.interrupted).pop()?.sessionId) {
+      // 刚打开、上一轮是被系统杀掉的：直接回到最近开始的那个会话，「继续」卡就挂在它底下；其余的在会话列表里标着
+      // （最近那轮还没建会话就留在新会话页，「重发」卡在这里）
+      view.sessionId = intrList(ev.interrupted).pop().sessionId;
       saveUiState();
     }
     const keepRuns = new Set(view.runIds), keepCids = new Set(view.cids);
@@ -787,6 +788,7 @@
   // ── 忙闲与排队（都以网关为准）──────────────────────────────────────
   function applyState(s) {
     srv.runs = s.runs || (s.run ? [s.run] : []);
+    srv.intr = intrList(s.interrupted);
     srv.queueAll = s.queue || [];
     if (s.maxParallel) srv.max = s.maxParallel;
     pickViewRun();
@@ -805,28 +807,33 @@
     // 别的会话在等你确认：当前视图看不到它的卡片，状态栏和会话列表里提醒
     const elsewhere = srv.runs.filter((r) => r !== srv.run && r.perms && r.perms.length);
     if (elsewhere.length) setStatus(t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
-    const live = srv.runs.map((r) => (r.sessionId || "") + (r.perms && r.perms.length ? "!" : "") + (r.idle ? "~" : "")).join(",");
+    const live = srv.runs.map((r) => (r.sessionId || "") + (r.perms && r.perms.length ? "!" : "") + (r.idle ? "~" : "")).join(",") + "|" + srv.intr.map((e) => e.sessionId || "").join(",");
     if (live !== srv.liveKey) { srv.liveKey = live; renderSessions(); }
     renderPermBar();                 // 放最后：有待确认项时状态栏要显示「等你确认」
     renderInterrupted(s.interrupted);
     renderRunStrip();
   }
 
-  /** 上一轮被系统结束（App 连同网关被杀）：在那个会话底部挂一张卡，给「继续」 */
-  function renderInterrupted(it) {
+  /** 网关给的中断记录：列表（旧网关是单条对象或 null） */
+  function intrList(v) { return (Array.isArray(v) ? v : v ? [v] : []).filter((e) => e && e.id); }
+  /** 上一轮被系统结束（App 连同网关被杀）：每个被打断的会话底部各挂一张卡，给「继续」 */
+  function renderInterrupted(list) {
     let el = $("intr-card");
-    const here = it && !srv.run && (it.sessionId ? it.sessionId === view.sessionId : !view.sessionId);
-    if (!here) { el?.remove(); return; }
-    if (el && el.dataset.id === it.id && el.parentNode === liveEl) return;
+    const all = intrList(list);
+    const it = srv.run ? null : all.filter((e) => (e.sessionId ? e.sessionId === view.sessionId : !view.sessionId)).pop();
+    if (!it) { el?.remove(); return; }
+    const others = new Set(all.map((e) => e.sessionId).filter((s) => s && s !== it.sessionId)).size;
+    if (el && el.dataset.id === it.id && el.dataset.n === String(others) && el.parentNode === liveEl) return;
     el?.remove();
     const b = mkMsg("sys", t("已中断"), liveEl);
-    el = b.closest(".msg"); el.id = "intr-card"; el.dataset.id = it.id;
+    el = b.closest(".msg"); el.id = "intr-card"; el.dataset.id = it.id; el.dataset.n = String(others);
     const when = new Date(it.startedAt || it.at).toLocaleString();
     setHtml(b, `<p>${esc(t("这一轮没跑完：App 在后台被系统结束了（{when} 开始的）。", { when }))}</p>
       <blockquote>${esc(String(it.text || "").slice(0, 300))}</blockquote>
       <p class="perm-sub">${esc(it.sessionId
         ? t("已经做完的部分都在会话里。点「继续」让 Claude 从断开的地方接着做。")
         : t("会话还没来得及建立，Claude 没收到这条消息。点「重发」把它放回输入框。"))}</p>
+      ${others ? `<p class="perm-sub">${esc(t("另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。", { n: others }))}</p>` : ""}
       <div class="perm-acts"><button class="primary" data-a="go">${esc(it.sessionId ? t("继续") : t("重发"))}</button>
       <button data-a="no">${esc(t("忽略"))}</button></div>`);
     b.querySelector(".perm-acts").addEventListener("click", async (e) => {
@@ -835,7 +842,7 @@
       el.remove();
       if (a === "go" && it.sessionId) return send(t("上一轮被系统中断了，请从断开的地方接着做完。"));
       if (a === "go") { inputEl.value = it.text || ""; autoGrow(); inputEl.focus(); }
-      api("/api/interrupted/dismiss", { method: "POST" }).catch(() => {});
+      api("/api/interrupted/dismiss", { method: "POST", body: JSON.stringify({ id: it.id }) }).catch(() => {});
     });
     scrollDown(true);
   }

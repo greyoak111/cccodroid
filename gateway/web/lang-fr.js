@@ -2585,4 +2585,5 @@ window.I18N_DICT["fr"] = {
   "上下文 {used} · 容量未知": "Contexte {used} · capacité inconnue",
   "再显示 {n} 行（共 {total} 行）": "Afficher {n} lignes de plus ({total} au total)",
   "过程太长，只显示最近的部分": "Déroulé trop long : seule la partie la plus récente est affichée",
+  "另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。": "{n} autre(s) conversation(s) ont été interrompue(s) en même temps ; elles sont marquées « Interrompu » dans la liste des conversations.",
 };

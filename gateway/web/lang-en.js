@@ -2619,5 +2619,6 @@ window.I18N_DICT.en = {
   "模型清单": "Model list",
   "上下文 {used} · 容量未知": "Context {used} · capacity unknown",
   "再显示 {n} 行（共 {total} 行）": "Show {n} more rows ({total} in total)",
-  "过程太长，只显示最近的部分": "Long run: only the most recent part is shown"
+  "过程太长，只显示最近的部分": "Long run: only the most recent part is shown",
+  "另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。": "{n} other conversation(s) were interrupted at the same time; they're marked \"Interrupted\" in the conversation list."
 };

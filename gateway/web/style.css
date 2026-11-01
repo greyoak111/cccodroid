@@ -508,6 +508,7 @@ html.dock-l .side-recent{margin:0 -12px;padding:0 12px 8px}
 .sr-item.on{background:var(--bg4);font-weight:500}
 .sr-dot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--ok);animation:sr-pulse 1.4s infinite}
 .sr-dot.ask{background:var(--warn)}
+.sr-dot.intr{background:var(--warn);animation:none}
 @keyframes sr-pulse{50%{opacity:.3}}
 .sr-all{display:block;margin:6px 12px 0;padding:4px 0;border:0;background:none;color:var(--fg3);font:inherit;font-size:12.5px;cursor:pointer}
 .sr-all:hover{color:var(--accent)}

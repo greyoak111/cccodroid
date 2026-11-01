@@ -2582,3 +2582,4 @@
 2582	Contexto {used} · capacidad desconocida
 2583	Mostrar {n} filas más ({total} en total)
 2584	Proceso demasiado largo: solo se muestra la parte más reciente
+2585	Otras {n} conversaciones se interrumpieron a la vez; aparecen marcadas como «Interrumpido» en la lista de conversaciones.
