@@ -107,6 +107,12 @@ One user hit this on a Samsung tablet (One UI, Android 16): the launch screen st
 
 **Workaround:** update to the latest version first. If it gets stuck there, give it a minute or two instead of swiping the app away and reopening it, since every restart begins the wait from scratch. Once it opens, send a diagnostics bundle from Settings → Troubleshooting.
 
+## 9. The chat area occasionally goes blank and won't scroll (investigating)
+
+One user hit this on a Xiaomi phone (HyperOS, Android 16): after a cold start they opened a long chat, and while the top bar and input box were there, the message area stayed blank and didn't respond to a dozen or more swipes; the only way out was to swipe the app away and reopen it. The diagnostics showed the gateway running normally, no UI errors, and no automatic unfreeze (each swipe was short). The trigger isn't known yet; it may be the same kind of WebView problem as item 2.
+
+**Workaround:** first long-press the title in the top bar for about 0.6 s (unfreeze), or switch to another chat and back. If neither helps, reopen the app, send a diagnostics bundle from Settings → Troubleshooting, and tell us what you were doing right before (just launched the app, just opened that chat, or came back from the background).
+
 ## For developers: tests can create fake bugs
 
 Item 1 is tied to automated testing (item 2 has been confirmed not to be). Before fixing a problem like this, make sure it **also happens with no tests running**:
