@@ -174,6 +174,7 @@ public final class Share extends ContentProvider {
         Tr.t("· 开发工具包：装的是哪一版（校验哈希）、更新与自检状态\n") +
         Tr.t("· 最近的日志：本应用的系统日志、网关日志的最后一段\n") +
         Tr.t("· 修复账本：安装、校验、修复做过哪些、成没成\n") +
+        Tr.t("· 网络：开没开 VPN，应用连不连得上几个下载源（只记结果）\n") +
         Tr.t("\n已经去掉：\n") +
         Tr.t("· 密钥、令牌、登录凭据、邮箱\n") +
         Tr.t("· 你发给 Claude 的消息内容（日志里只留「提问了一次」）\n") +
@@ -186,7 +187,7 @@ public final class Share extends ContentProvider {
         dir.mkdirs();
         File[] old = dir.listFiles();
         if (old != null) for (File o : old) if (o.getName().startsWith("cccodroid-logs-")) o.delete();
-        String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(new Date());
+        String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.ROOT).format(new Date());
         File out = new File(dir, "cccodroid-logs-" + stamp + ".zip");
         JSONObject parts = new JSONObject();
         try (ZipOutputStream z = new ZipOutputStream(new FileOutputStream(out))) {
@@ -230,7 +231,85 @@ public final class Share extends ContentProvider {
             sb.append("安全模式 ").append(new File(env.home, ".ccapp-safe-mode").exists()).append('\n');
             sb.append("\n更新状态\n").append(Updater.get(c).status().toString(1)).append('\n');
         } catch (Exception e) { sb.append("（诊断信息不全：").append(e).append("）\n"); }
+        envFails(env, sb);
+        netProbe(c, env, sb);
         return scrub(sb.toString());
+    }
+
+    /** 本机自检没过的项（网关跑完写在 ~/.cccodroid-env.json；以前诊断包只看得到「失败 10 项」） */
+    private static void envFails(Env env, StringBuilder sb) {
+        File f = new File(env.home, ".cccodroid-env.json");
+        if (!f.isFile()) return;
+        try {
+            JSONObject j = new JSONObject(new String(java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
+            org.json.JSONArray fail = j.optJSONArray("fail");
+            sb.append("\n本机自检：通过 ").append(j.optInt("pass")).append(" 项，失败 ").append(fail == null ? 0 : fail.length()).append(" 项\n");
+            for (int i = 0; fail != null && i < Math.min(fail.length(), 40); i++) sb.append("  ✗ ").append(fail.optString(i)).append('\n');
+        } catch (Exception e) { sb.append("（读不了自检结果：").append(e.getMessage()).append("）\n"); }
+    }
+
+    // 下载 Claude Code / 组件 / 更新要连的几个地方
+    private static final String[] PROBE_HOSTS = { "downloads.claude.ai", "cccodroid.net", "dl.cccodroid.net", "registry.npmmirror.com", "registry.npmjs.org", "github.com" };
+
+    /** 网络：系统看到的网络状态 + Java 解析 + 应用自己的 curl 连一下（并行，总共最多十来秒）。
+     *  安装失败常见的是「Java 能下、原生程序出不去」（VPN / 联网控制），两边都测才分得清。只记结果，不发任何内容 */
+    private static void netProbe(Context c, Env env, StringBuilder sb) {
+        sb.append("\n网络\n");
+        try {
+            android.net.ConnectivityManager cm = c.getSystemService(android.net.ConnectivityManager.class);
+            android.net.Network n = cm.getActiveNetwork();
+            android.net.NetworkCapabilities nc = n == null ? null : cm.getNetworkCapabilities(n);
+            String kind = nc == null ? "无" : nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ? "WLAN"
+                : nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) ? "移动数据" : "其他";
+            sb.append("当前网络 ").append(kind)
+              .append("  VPN ").append(nc != null && nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN))
+              .append("  系统已验证可上网 ").append(nc != null && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED))
+              .append("  后台数据限制 ").append(cm.getRestrictBackgroundStatus()).append("（1=未限制 2=白名单 3=受限）\n");
+        } catch (Exception e) { sb.append("（读不了网络状态：").append(e.getMessage()).append("）\n"); }
+        File curl = new File(env.usr, "bin/curl");
+        final String[] res = new String[PROBE_HOSTS.length];
+        Thread[] ts = new Thread[PROBE_HOSTS.length];
+        for (int i = 0; i < PROBE_HOSTS.length; i++) {
+            final int k = i;
+            ts[i] = new Thread(() -> res[k] = probeHost(env, curl, PROBE_HOSTS[k]), "probe");
+            ts[i].start();
+        }
+        long end = System.currentTimeMillis() + 15000;
+        for (int i = 0; i < ts.length; i++) {
+            try { ts[i].join(Math.max(1, end - System.currentTimeMillis())); } catch (InterruptedException ignored) {}
+            sb.append("  ").append(PROBE_HOSTS[i]).append("  ").append(res[i] != null ? res[i] : "（没来得及测完）").append('\n');
+        }
+    }
+
+    private static String probeHost(Env env, File curl, String host) {
+        StringBuilder r = new StringBuilder();
+        long t0 = System.currentTimeMillis();
+        try {
+            // getAllByName 没有超时：DNS 黑洞时会一直卡，单独放个线程只等 4 秒
+            java.util.concurrent.FutureTask<java.net.InetAddress[]> dns = new java.util.concurrent.FutureTask<>(() -> java.net.InetAddress.getAllByName(host));
+            Thread dt = new Thread(dns, "probe-dns"); dt.setDaemon(true); dt.start();
+            java.net.InetAddress[] a = dns.get(4, java.util.concurrent.TimeUnit.SECONDS);
+            r.append("Java 解析 ").append(a.length > 0 ? a[0].getHostAddress() : "空").append(" ").append(System.currentTimeMillis() - t0).append("ms");
+        } catch (java.util.concurrent.TimeoutException e) { r.append("Java 解析超时（4 秒）");
+        } catch (java.util.concurrent.ExecutionException e) { r.append("Java 解析失败 ").append(e.getCause() == null ? "?" : e.getCause().getClass().getSimpleName());
+        } catch (Exception e) { r.append("Java 解析失败 ").append(e.getClass().getSimpleName()); }
+        if (!curl.isFile()) return r.append("  （没有 curl）").toString();
+        Process p = null;
+        try {
+            ProcessBuilder pb = new ProcessBuilder(env.cmd(curl.getPath(), "-sS", "-o", "/dev/null", "-w", "HTTP %{http_code} %{remote_ip} %{time_total}s",
+                "--connect-timeout", "5", "--max-time", "10", "https://" + host + "/"));
+            env.apply(pb.environment());
+            pb.directory(env.home);
+            pb.redirectErrorStream(true);
+            p = pb.start();
+            String out = readAll(p.getInputStream()).trim().replace('\n', ' ');
+            if (!p.waitFor(12, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS); return r.append("  curl 卡住").toString(); }
+            r.append("  curl rc=").append(p.exitValue()).append(' ').append(out.length() > 200 ? out.substring(0, 200) : out);
+        } catch (Exception e) {
+            r.append("  curl 起不来：").append(e.getMessage());
+            if (p != null) { p.destroyForcibly(); try { p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {} }
+        }
+        return r.toString();
     }
 
     /** 本进程能读到的只有自己的日志（安卓 4.1 起），正好 */

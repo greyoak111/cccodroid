@@ -2614,5 +2614,6 @@ window.I18N_DICT.en = {
   "上下文窗口填 1024 到 16777216 之间的整数，也可以写 256k、1m": "Context window must be a whole number from 1024 to 16777216, or e.g. 256k / 1m",
   "接口设置里填的": "from provider settings",
   "别的会话也能用：点输入栏下的模型标签，在接口一行选它。": "Other chats can use it too: tap the model tag below the input box and pick it in the provider row.",
-  "填好地址、密钥和模型就能用；上下文窗口选填。": "Fill in the address, key and model and you're set; the context window is optional."
+  "填好地址、密钥和模型就能用；上下文窗口选填。": "Fill in the address, key and model and you're set; the context window is optional.",
+  "打一个诊断包，经系统分享发出去。\n\n包里有：\n· 版本与设备：cccodroid / Android 版本、机型、芯片、剩余空间\n· 开发工具包：装的是哪一版、更新与自检状态\n· 最近的日志：本应用的系统日志、网关日志的最后一段\n· 修复账本：安装、校验、修复做过哪些、成没成\n· 网络：开没开 VPN，应用连不连得上几个下载源（只记结果）\n\n已经去掉：\n· 密钥、令牌、登录凭据、邮箱\n· 你发给 Claude 的消息内容\n· 会话记录本身不在包里\n\n继续？": "Create a diagnostics bundle and send it through the system share sheet.\n\nIncluded:\n· Version and device: cccodroid / Android version, model, chip, free space\n· Dev toolkit: which build is installed, update and self-check status\n· Recent logs: this app's system log, the tail of the gateway log\n· Repair ledger: installs, checks and repairs, and whether they worked\n· Network: whether a VPN is on and whether the app can reach a few download sources (results only)\n\nRemoved:\n· Keys, tokens, login credentials, email addresses\n· The content of your messages to Claude\n· Conversation transcripts are not included\n\nContinue?"
 };

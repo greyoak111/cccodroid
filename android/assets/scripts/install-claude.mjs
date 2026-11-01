@@ -44,11 +44,22 @@ const say = (s) => console.log(s);
 const die = (s) => { console.log("✗ " + s); process.exit(1); };
 
 
-/** 小文件：curl 拿到内存，失败再试一次，还不行返回 null（不抛） */
+// curl 退出码 → 人话（只认最常见的几种，其余报原码）；诊断包里靠它分清是断网、DNS、被墙还是证书
+const CURL_WHY = { 5: "代理地址解析失败", 6: "域名解析失败", 7: "连不上", 22: "服务器报错", 28: "超时", 35: "TLS 握手失败", 52: "服务器没回应", 56: "连接被中断", 60: "证书校验失败", 77: "读不到根证书" };
+let lastWhy = "";
+const why = (r) => {
+  if (r.error) return r.error.code === "ENOENT" ? "找不到 curl" : r.error.code === "ENOBUFS" ? "回来的内容超出上限" : "curl 起不来：" + r.error.code;
+  if (r.signal) return "curl 被系统杀掉：" + r.signal;
+  let line = String(r.stderr || "").trim().split("\n").pop().replace(/^curl: \(\d+\)\s*/, "").slice(0, 120);
+  if (/proxy/i.test(line)) line = "";   // 代理地址可能是内网主机名，不进日志（诊断包会带出去）
+  return (CURL_WHY[r.status] || "curl 退出码 " + r.status) + (line ? " · " + line : "");
+};
+/** 小文件：curl 拿到内存，失败再试一次，还不行返回 null（不抛）；失败原因留在 lastWhy */
 function small(url, t = 20) {
   for (let i = 0; i < 2; i++) {
     const r = spawnSync(CURL, ["-fsSL", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "10", "--max-time", String(t), url], { maxBuffer: 32 << 20 });
-    if (r.status === 0) return r.stdout;
+    if (r.status === 0) { lastWhy = ""; return r.stdout; }
+    lastWhy = why(r);
   }
   return null;
 }
@@ -73,6 +84,18 @@ if (CHANNEL === "--recheck") {
   process.exit(bad ? 3 : 0);
 }
 
+// 全部来源都失败时按原因给提示：国内镜像也秒败多半不是线路问题，是这台机器上应用联不了网
+const whys = [];
+function hint(ws) {
+  const all = (re) => ws.length && ws.every((w) => re.test(w || ""));
+  if (ws.length && ws.every((w) => !w)) return "每个来源都回了内容，但都不是版本号：要装的版本可能不存在，或渠道写错了（每个来源的情况见上面）";
+  if (all(/找不到 curl|curl 起不来/)) return "curl 跑不起来：开发工具包可能没装好，先到设置里修复工具包再装";
+  if (all(/域名解析|代理地址/)) return "所有域名都解析不了。多半是应用被禁止联网，或 VPN / 代理的 DNS 没接上：到系统设置里确认 cccodroid 可以用 WLAN 和移动数据，关掉 VPN 或切到全局模式后重试";
+  if (all(/证书|TLS|根证书/)) return "所有来源的 HTTPS 都校验不过。多半是系统时间不对，或网络里有抓包 / 代理替换了证书：校准时间、关掉抓包软件后重试";
+  if (all(/超时|连不上|中断|没回应/)) return "所有来源都连不上。检查网络是否通畅，开着 VPN 的话试试关掉或换个节点后重试";
+  return "检查网络后重试（每个来源的原因见上面）";
+}
+
 // ── 1. 版本号 ───────────────────────────────────────────────
 let VER = isVer(CHANNEL) ? CHANNEL : "";
 if (!VER) {
@@ -81,11 +104,13 @@ if (!VER) {
     ...MIRRORS.map(([n, u]) => [n, () => small(`${u}/${CHANNEL}`)]),
     ...REGISTRIES.map(([n, u]) => [n, () => { const j = jsonOf(small(`${u}/-/package/${PKG.replace("/", "%2f")}/dist-tags`)); return j && j[CHANNEL] ? Buffer.from(j[CHANNEL]) : null; }]),
   ]) {
+    lastWhy = "";
     const v = (get() || "").toString().trim();
     if (isVer(v)) { VER = v; say(`版本 ${VER}（${CHANNEL}，来自${name}）`); break; }
-    say(`  ${name}取不到版本号，换下一个…`);
+    say(`  ${name}取不到版本号：${lastWhy || "回来的内容不是版本号"}，换下一个…`);
+    whys.push(lastWhy);
   }
-  if (!VER) die("所有来源都取不到版本号：检查网络后重试");
+  if (!VER) die("所有来源都取不到版本号：" + hint(whys));
 } else say(`版本 ${VER}`);
 
 // ── 2. 官方清单（信任锚 ①）──────────────────────────────────
