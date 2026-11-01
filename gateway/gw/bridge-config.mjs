@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import crypto from "node:crypto";
 import { CFG, PREFIX, log, tz } from "./config.mjs";
+import { componentEnv as sharedComponentEnv } from "./component-env.mjs";
 import { readBodyBuf, sendJson } from "./http.mjs";
 import { RUNS } from "./runs.mjs";
 import { PROVIDERS_CFG, routeProviders } from "./providers.mjs";
@@ -81,11 +82,10 @@ function componentEntry() {
   } catch { throw failure("not_installed"); }
 }
 
-function componentEnv() {
-  const env = Object.fromEntries(["LANG", "TZ", "TMPDIR", "ANDROID_ROOT", "ANDROID_DATA", "LD_PRELOAD", "LD_LIBRARY_PATH"]
-    .filter((name) => process.env[name]).map((name) => [name, process.env[name]]));
-  return { ...env, HOME: CFG.home, PREFIX, PATH: [path.join(PREFIX, "bin"), "/system/bin", "/system/xbin"].join(":") };
-}
+// HOME 是信任根：宿主给的若是别名（/data/data ↔ /data/user/0），在根这一层规范成真实路径，
+// 组件拿到的 HOME、manifest 里的 target、这里的归属检查才是同一个；根以下各级仍逐级要求不是链接（#66 第 4 项）
+const HOME_ROOT = () => { try { return fs.realpathSync(CFG.home); } catch { return CFG.home; } };
+const componentEnv = () => sharedComponentEnv(HOME_ROOT(), PREFIX);
 
 function stopLauncher(child, signal) {
   if (!child?.pid) return;
@@ -181,13 +181,13 @@ function statusView(result) {
 }
 
 function assertGuiOwnership() {
-  const target = path.join(CFG.home, ".local", "share", "ccr-bridge-kit");
+  const home = HOME_ROOT(), target = path.join(home, ".local", "share", "ccr-bridge-kit");
   let stat;
   try { stat = fs.lstatSync(target); }
   catch (error) { if (error.code === "ENOENT") return; throw failure("RUNTIME_CONFLICT"); }
   if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(target) !== target) throw failure("RUNTIME_CONFLICT");
   try {
-    for (const dir of [CFG.home, path.join(CFG.home, ".local"), path.join(CFG.home, ".local", "share"), target])
+    for (const dir of [home, path.join(home, ".local"), path.join(home, ".local", "share"), target])
       if (fs.realpathSync(dir) !== path.resolve(dir)) throw failure("RUNTIME_CONFLICT");
     const manifest = regularJson(path.join(target, ".ccr-bridge-kit.json"), 1 << 20);
     if (!object(manifest) || manifest.id !== "ccr-bridge-kit" || manifest.target !== target || manifest.guiManaged !== true) throw failure("RUNTIME_CONFLICT");
@@ -196,13 +196,13 @@ function assertGuiOwnership() {
 
 function defaultConnection(model) {
   // 绝不相信 CLI 返回的 connectionPath 或注册里的任意 runtimeDir，只读默认专用实例。
-  const target = path.join(CFG.home, ".local", "share", "ccr-bridge-kit");
+  const home = HOME_ROOT(), target = path.join(home, ".local", "share", "ccr-bridge-kit");
   try {
-    for (const dir of [CFG.home, path.join(CFG.home, ".local"), path.join(CFG.home, ".local", "share"), target,
-      path.join(CFG.home, ".cccodroid"), path.join(CFG.home, ".cccodroid", "services")]) {
+    for (const dir of [home, path.join(home, ".local"), path.join(home, ".local", "share"), target,
+      path.join(home, ".cccodroid"), path.join(home, ".cccodroid", "services")]) {
       if (fs.realpathSync(dir) !== path.resolve(dir)) throw failure("RUNTIME_CONFLICT");
     }
-    const registration = regularJson(path.join(CFG.home, ".cccodroid", "services", ID + ".json"), 4096);
+    const registration = regularJson(path.join(home, ".cccodroid", "services", ID + ".json"), 4096);
     const connection = regularJson(path.join(target, "connection.json"), 4096);
     if (!object(registration) || registration.schema !== 1 || registration.id !== ID || registration.runtimeDir !== target ||
         typeof registration.instanceId !== "string" || !/^[0-9a-f]{32}$/.test(registration.instanceId) ||
@@ -216,7 +216,7 @@ function defaultConnection(model) {
 }
 
 function validateInput(body, modelsOnly = false) {
-  const fields = modelsOnly ? ["endpoint", "apiKey", "consent"] : ["endpoint", "apiKey", "model", "consent"];
+  const fields = modelsOnly ? ["endpoint", "apiKey", "consent"] : ["endpoint", "apiKey", "model", "contextWindow", "consent"];
   if (!object(body) || Object.keys(body).some((key) => !fields.includes(key)) || body.consent !== true) throw failure("consent_required");
   const endpoint = normalizeBridgeEndpoint(body.endpoint);
   if (body.apiKey !== undefined && typeof body.apiKey !== "string") throw failure("invalid_key", "apiKey");
@@ -225,6 +225,16 @@ function validateInput(body, modelsOnly = false) {
   if (modelsOnly) return { endpoint, apiKey };
   if (typeof body.model !== "string" || !body.model.trim() || body.model.length > 200 || /[,\u0000-\u001f\u007f]/.test(body.model)) throw failure("invalid_model", "model");
   return { endpoint, apiKey, model: body.model.trim() };
+}
+
+const validWindow = (v) => (Number.isInteger(v) && v >= 1024 && v <= 16777216 ? v : 0);
+/** 上下文窗口（可选，宿主自己记，不交给组件）：空 = 不知道；填了要在 1k–16M 之间（#67） */
+function contextWindowInput(body) {
+  const v = body?.contextWindow;
+  if (v === undefined || v === null || v === "" || Number(v) === 0) return 0;   // 和 providers 一致："0" 也算清空
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1024 || n > 16777216) throw failure("invalid_context_window", "contextWindow");
+  return n;
 }
 
 function modelsView(result, apiKey = "") {
@@ -278,13 +288,13 @@ export async function handleBridgeModels(req, res, signal) {
   }
 }
 
-const providerStateFile = () => path.join(CFG.home, ".cccodroid", "services", "openai-bridge-app.json");
+const providerStateFile = () => path.join(HOME_ROOT(), ".cccodroid", "services", "openai-bridge-app.json");
 
 export function clearBridgeConfigMapping(id) {
   if (id !== ID) return false;
   let fd;
   try {
-    fd = fs.openSync(CFG.home, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    fd = fs.openSync(HOME_ROOT(), fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
     // 只解开本桥的非秘密映射；不跟随父目录链接，也不删除保留的 provider 或运行配置。
     for (const name of [".cccodroid", "services"]) {
       const next = fs.openSync(`/proc/self/fd/${fd}/${name}`, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
@@ -312,12 +322,12 @@ function configuredProvider(connection) {
   return state.providerId;
 }
 
-async function saveProvider(connection) {
+async function saveProvider(connection, contextWindow = 0) {
   const id = configuredProvider(connection);
   if (id && [...RUNS.values()].some((run) => !run.ended && run.provider === id)) throw failure("BUSY");
   // 复用唯一现有持久化入口，让内存 RAW 与磁盘同时更新；不是发请求，也不调用 test/active。
   const body = Buffer.from(JSON.stringify({ ...(id ? { id } : {}), label: "OpenAI API 本地协议桥", baseUrl: connection.baseUrl,
-    apiKey: connection.apiKey, defaultModel: connection.model, fastModel: connection.model, authStyle: "bearer" }));
+    apiKey: connection.apiKey, defaultModel: connection.model, fastModel: connection.model, authStyle: "bearer", contextWindow }));
   const req = Readable.from([body]);
   Object.assign(req, { method: "POST", headers: {}, ccBodySha: crypto.createHash("sha256").update(body).digest("hex") });
   let response, status;
@@ -338,7 +348,7 @@ export async function bridgeConfigStatus() {
     const view = statusView(await invokeComponent("gui-status"));
     if (view.configured) assertGuiOwnership();
     const providerId = view.configured ? configuredProvider(defaultConnection(view.model)) : "";
-    return { ok: true, ...view, providerId };
+    return { ok: true, ...view, providerId, contextWindow: validWindow(providerId && PROVIDERS_CFG.providers[providerId]?.contextWindow) };
   } catch (error) {
     if (error.code === "not_installed") return { ok: true, installed: false, configured: false, hasKey: false, endpoint: "", model: "", localReady: false, local: { state: "stopped" } };
     throw error;
@@ -346,7 +356,7 @@ export async function bridgeConfigStatus() {
 }
 
 export async function saveBridgeConfig(body) {
-  const input = validateInput(body);
+  const input = validateInput(body), contextWindow = contextWindowInput(body);
   let saved = false, release;
   try {
     const current = await bridgeConfigStatus();
@@ -365,8 +375,8 @@ export async function saveBridgeConfig(body) {
     if (!view.configured || view.endpoint !== input.endpoint || view.model !== input.model) throw failure("component_response");
     saved = true;
     assertGuiOwnership();
-    const providerId = await saveProvider(defaultConnection(view.model));
-    return { ok: true, saved, ...view, providerId };
+    const providerId = await saveProvider(defaultConnection(view.model), contextWindow);
+    return { ok: true, saved, ...view, providerId, contextWindow };
   } catch (error) { error.saved = saved; throw error; }
   finally { release?.(); input.apiKey = ""; }
 }
@@ -379,11 +389,11 @@ export async function handleBridgeConfig(req, res) {
     try { body = JSON.parse((await readBodyBuf(req, 16384)).toString("utf8")); } catch { throw failure("invalid_input"); }
     return sendJson(res, 200, await saveBridgeConfig(body));
   } catch (error) {
-    const codes = ["BUSY", "RUNTIME_CONFLICT", "not_installed", "component_spawn", "component_failed", "component_response", "component_timeout", "KEY_REQUIRED", "KEY_HOST_CHANGED", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key", "invalid_model", "provider_save_failed"];
+    const codes = ["BUSY", "RUNTIME_CONFLICT", "not_installed", "component_spawn", "component_failed", "component_response", "component_timeout", "KEY_REQUIRED", "KEY_HOST_CHANGED", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key", "invalid_model", "invalid_context_window", "provider_save_failed"];
     const code = codes.includes(error.code) ? error.code : "config_failed";
     const status = ["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(code) ? 409 : 400;
     log(`[bridge-config] ${req.method === "POST" ? "save" : "status"} failed stage=${code}`);
     return sendJson(res, status, { ok: false, saved: error.saved === true, localReady: false, code,
-      ...(["endpoint", "apiKey", "model"].includes(error.field) ? { field: error.field } : {}), message: failure(code).message });
+      ...(["endpoint", "apiKey", "model", "contextWindow"].includes(error.field) ? { field: error.field } : {}), message: failure(code).message });
   }
 }

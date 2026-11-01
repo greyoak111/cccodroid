@@ -816,7 +816,7 @@
       gutAttach(ta);
       ta.addEventListener("input", () => { if (!VW.dirty) { VW.dirty = true; vwRenderActs(); } draftSave(); gutSchedule(); });
       ta.addEventListener("keydown", (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); vwSave(false); }
+        if ((e.ctrlKey || e.metaKey) && String(e.key || "").toLowerCase() === "s") { e.preventDefault(); vwSave(false); }
         else if (e.key === "Tab" && !e.ctrlKey && !e.altKey) { e.preventDefault(); document.execCommand("insertText", false, "\t"); }
       });
     }

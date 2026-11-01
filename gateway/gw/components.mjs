@@ -295,9 +295,12 @@ function compOrphans(list, selfId) {
   for (const [id, rec] of compRecords()) if (id !== selfId) for (const r of compNeeds(id, rec)) owned.add(r);
   const out = new Set();
   for (const r of list) {
-    // 只管 bin/：carryOver 只搬过 bin/ 这类目录；share/ 下的目录索引、缓存（gschemas.compiled 等）本来就不在清单里，不能动
-    if (!r.startsWith("bin/") || owned.has(r)) continue;
-    try { if (fs.lstatSync(path.join(PREFIX, r)).isFile()) out.add(r); } catch {}
+    // 只管 bin/：carryOver 只搬过 bin/ 这类目录；share/ 下的目录索引、缓存（gschemas.compiled 等）本来就不在清单里，不能动。
+    // 另加组件自己的命名空间 lib/<id>/、share/<id>/：手工装过、旧版残留的同名入口没人认领，
+    // 留着就成了「新包旧入口」，装完显示成功却用不了（#66 第 1 项）
+    const own = selfId && (r.startsWith("lib/" + selfId + "/") || r.startsWith("share/" + selfId + "/"));
+    if (!(r.startsWith("bin/") || own) || owned.has(r)) continue;
+    try { const st = fs.lstatSync(path.join(PREFIX, r)); if (st.isFile() || (own && st.isSymbolicLink())) out.add(r); } catch {}
   }
   return out;
 }

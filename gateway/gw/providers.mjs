@@ -346,7 +346,7 @@ function providerView(id, v) {
     login: !!v.login, nativeModels: !!v.nativeModels, local: !!v.local,
     baseUrl: v.baseUrl || "", modelsUrl: v.modelsUrl || "", authStyle: v.authStyle || "bearer",
     endpoints: (v.endpoints || []).map((e) => ({ id: e.id, label: e.label, labelEn: e.labelEn || "" })), endpoint: v.endpoint || null,
-    defaultModel: v.defaultModel || null, fastModel: v.fastModel || null, inlineImages: !!v.inlineImages,
+    defaultModel: v.defaultModel || null, fastModel: v.fastModel || null, inlineImages: !!v.inlineImages, contextWindow: Number(v.contextWindow) || 0,
     keyUrl: v.keyUrl || null, hint: v.hint || "", hintEn: v.hintEn || "",
     hasKey: !!key, keyTail: key ? key.slice(-4) : "",
     active: id === PROVIDER.id,
@@ -375,13 +375,21 @@ function upsertProvider(id, b) {
     for (const k of ["label", "baseUrl", "modelsUrl"]) if (k in b) cur[k] = str(b[k]);
     if ("authStyle" in b) cur.authStyle = b.authStyle === "x-api-key" ? "x-api-key" : "bearer";
     cur.modelsAuth = cur.authStyle || "bearer";
+    // 上下文窗口（自己声明）：上游清单不报窗口、或者根本没清单时，默认/快速模型就按它算（#67）
+    if ("contextWindow" in b) {
+      const n = Number(b.contextWindow);
+      if (b.contextWindow === null || b.contextWindow === "" || n === 0) delete cur.contextWindow;
+      else if (Number.isInteger(n) && n >= 1024 && n <= 16777216) cur.contextWindow = n;
+      else return { error: "bad_context_window", message: tz("上下文窗口填 1024 到 16777216 之间的整数，也可以写 256k、1m") };
+    }
     if (!cur.label) cur.label = id;
     if (!/^https?:\/\//.test(cur.baseUrl || "")) return { error: "bad_baseUrl", message: tz("端点地址要以 http:// 或 https:// 开头") };
     cur.baseUrl = cur.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");   // claude 自己会补 /v1/messages
   }
   PROVIDERS_RAW.providers[id] = cur;
   saveProvidersRaw();
-  if (id === PROVIDER.id) { applyProvider(); dropModelCache(); }
+  if (id === PROVIDER.id) applyProvider();
+  dropModelCache();   // 会话可能钉在不是全局的这家上：哪家改了都清，免得清单/窗口还是旧的
   log(`[provider] 已保存 ${id}${"apiKey" in b && str(b.apiKey) ? "（含密钥）" : ""}`);
   return { ok: true, id, provider: providerView(id, PROVIDERS_CFG.providers[id]) };
 }

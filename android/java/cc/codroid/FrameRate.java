@@ -89,7 +89,7 @@ final class FrameRate {
         int[] m = modes(c);
         if (m.length == 0) return want > 0 ? want : 60;
         int best = m[0];
-        for (int r : m) if (Math.abs(r - want) < Math.abs(best - want)) best = r;
+        for (int r : m) if (Math.abs(r - want) <= Math.abs(best - want)) best = r;   // 升序遍历，等距时取高档（刷新率宁高勿低）
         return best;
     }
 }

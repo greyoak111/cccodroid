@@ -208,6 +208,16 @@ export function applyCatalog(list, cat, keys) {
 
 // 目录有 6 MB，国内常要好几秒、甚至撞上超时：不让模型清单干等。没有就后台去拉，先出不带窗口的清单；
 // 拉到后让清单缓存过期，下次打开设置就补上。过期的旧目录照用，后台换新
+/** 自定义接口在设置里写的默认/快速模型：上游不给清单时也列出来，面板里点得到（#66 第 5 项）。
+ *  窗口用用户在接口设置里声明的 contextWindow（只给这两个型号补），没声明就是 0 = 不知道，不瞎编（#67） */
+export function withConfigured(list, p) {
+  if (!p || !p.custom || p.local || p.login) return list;
+  const n = Number(p.contextWindow), cw = Number.isInteger(n) && n >= 1024 && n <= 16777216 ? n : 0;   // 手改配置文件塞的怪值不认
+  const ids = [...new Set([p.defaultModel, p.fastModel].filter((x) => typeof x === "string" && x))];
+  if (!list.length) return ids.map((id) => ({ id, context_window: cw, max_output_tokens: 0, input_modalities: ["text"], effort: null, configured: true }));
+  return cw ? list.map((m) => (ids.includes(m.id) && !m.context_window ? { ...m, context_window: cw, configured: true } : m)) : list;
+}
+
 function withCatalog(list, p) {
   if (!list.some((m) => !m.context_window)) return list;
   if (!CAT || Date.now() - CAT_AT >= CATALOG_TTL) loadCatalog().then((c) => { if (c) expireModelCache(); });
@@ -235,7 +245,7 @@ async function fetchModelsOf(p, force) {
   // 写在配置里的内嵌清单（data:application/json,…）：本地解析，不发请求、不带密钥，网络那边的同主机限制不用放宽（#57）
   const inline = inlineModels(p.modelsUrl);
   if (inline) {
-    const list = withCatalog(mergeKnown(inline, p.fallbackModels), p);
+    const list = withConfigured(withCatalog(mergeKnown(inline, p.fallbackModels), p), p);
     if (list.length) return keep(list);
   }
 
@@ -254,7 +264,7 @@ async function fetchModelsOf(p, force) {
       }
       const r = await fetchKeyed(p.modelsUrl, { headers, signal: AbortSignal.timeout(15000) });
       if (r.ok) {
-        const list = withCatalog(mergeKnown(normalizeModels(await fetchJsonCapped(r)), p.fallbackModels), p);
+        const list = withConfigured(withCatalog(mergeKnown(normalizeModels(await fetchJsonCapped(r)), p.fallbackModels), p), p);
         if (list.length) {
           log(`[${p.id}] 模型清单：${list.map((m) => m.id).join(", ")}`);
           return keep(list);
@@ -266,7 +276,7 @@ async function fetchModelsOf(p, force) {
     }
   }
   return keep(c && c.list ? c.list
-    : (p.fallbackModels || []).map((m) => ({ context_window: 0, max_output_tokens: 0, input_modalities: ["text"], effort: null, ...m })));
+    : withConfigured((p.fallbackModels || []).map((m) => ({ context_window: 0, max_output_tokens: 0, input_modalities: ["text"], effort: null, ...m })), p));
 }
 /** data: 形式的内嵌清单 → 归一后的列表；不是 data: 或解不开就 null。只认 JSON，限 256 KB */
 export function inlineModels(url) {
@@ -287,7 +297,7 @@ export function cachedModels(p = PROVIDER) {
   const list = (c && c.list) || (p.id === PROVIDER.id && MODELS);
   if (list) return withWindows(list);
   const inline = inlineModels(p.modelsUrl);
-  return withWindows(inline ? mergeKnown(inline, p.fallbackModels) : p.fallbackModels || []);
+  return withWindows(withConfigured(inline ? mergeKnown(inline, p.fallbackModels) : p.fallbackModels || [], p));
 }
 /** 这家的清单拉过没有（过期的也算）：拉过就不必让这一轮干等网络 */
 export function modelsCached(p = PROVIDER) {
@@ -318,6 +328,13 @@ export function normEffort(model, want, p = PROVIDER) {
   const ok = effortLevelsOf(model, p);
   if (ok.includes(want)) return want;
   return (model && model.effort && model.effort.default_level) || null;
+}
+
+/** 压缩线 = min(设置的自动压缩窗口, 模型窗口)；第三方型号不知道窗口时 claude 按 200k 算 */
+export function compactLineOf(set, win, p) {
+  if (!set) return null;
+  const w = win > 0 ? win : (p && !p.nativeModels && !p.local ? 200000 : 0);
+  return w ? Math.min(set, w) : set;
 }
 
 // ── 路由：/api/models ──
@@ -352,6 +369,9 @@ export async function routeModels(req, res, u, p) {
       contextWindow: Number(cur.context_window) || 0,
       maxOutputTokens: Number(cur.max_output_tokens) || 0,
       autoCompactWindow: effectiveAutoCompact(),
+      // 真正生效的压缩线：设得比模型窗口还大时，claude 按窗口来（不知道窗口的第三方型号按 200k 算），
+      // 界面别把 528k 当成压缩线报（#67）。设置页的输入框仍显示 autoCompactWindow
+      compactLine: compactLineOf(effectiveAutoCompact(), Number(cur.context_window) || 0, pp),
     });
   }
   return NEXT;

@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import { CFG, PREFIX, log, tz } from "./config.mjs";
+import { componentEnv as sharedComponentEnv } from "./component-env.mjs";
 
 const ID = "openai-bridge";
 const ENTRY = "lib/openai-bridge/component.cjs";
@@ -216,11 +217,8 @@ function binding(endpoint) {
   return installedBinding(stored);
 }
 
-function componentEnv() {
-  const env = Object.fromEntries(["LANG", "TZ", "TMPDIR", "ANDROID_ROOT", "ANDROID_DATA", "LD_PRELOAD", "LD_LIBRARY_PATH"]
-    .filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
-  return { ...env, HOME: CFG.home, PREFIX, PATH: [path.join(PREFIX, "bin"), "/system/bin", "/system/xbin"].join(":") };
-}
+// HOME 在信任根这一层规范成真实路径，和 bridge-config 的归属检查一致（#66 第 4 项）
+const componentEnv = () => { let home = CFG.home; try { home = fs.realpathSync(home); } catch {} return sharedComponentEnv(home, PREFIX); };
 
 function signalLauncher(child, signal) {
   if (!child?.pid) return;

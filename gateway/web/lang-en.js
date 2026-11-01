@@ -2604,5 +2604,15 @@ window.I18N_DICT.en = {
   "在模型选单里显示": "Show in the model picker",
   "关掉后输入栏的模型选单里不列这一家，配置和密钥照留，随时能再打开。没登录的官方账户、没下过模型的端侧本来就不列。": "When off, this provider isn't listed in the model picker under the input box. Its settings and key are kept, and you can turn it back on anytime. A Claude account that isn't signed in, or an on-device model with nothing downloaded, is never listed anyway.",
   "正在用的接口总会列在选单里": "The provider in use is always listed",
-  "这一家还没就绪（没登录或没下模型），先到设置里配好": "This provider isn't ready yet (not signed in, or no model downloaded). Set it up in Settings first."
+  "这一家还没就绪（没登录或没下模型），先到设置里配好": "This provider isn't ready yet (not signed in, or no model downloaded). Set it up in Settings first.",
+  "上下文窗口（可选）": "Context window (optional)",
+  "模型能读多少 token。不填按 200k 算，自动压缩线也到不了更高。": "How many tokens the model can read. Left blank, 200k is assumed and the auto-compact line can't go higher.",
+  "上下文窗口": "Context window",
+  "未填（按 200k 算）": "Not set (200k assumed)",
+  "填 1024 到 16777216 之间的整数，也可以写 256k、1m；不知道就留空。": "Enter a whole number from 1024 to 16777216, or e.g. 256k / 1m. Leave blank if unsure.",
+  "上下文窗口（选填，token 数，如 1048576；不填按 200k 算）": "Context window (optional, tokens, e.g. 1048576; blank = 200k)",
+  "上下文窗口填 1024 到 16777216 之间的整数，也可以写 256k、1m": "Context window must be a whole number from 1024 to 16777216, or e.g. 256k / 1m",
+  "接口设置里填的": "from provider settings",
+  "别的会话也能用：点输入栏下的模型标签，在接口一行选它。": "Other chats can use it too: tap the model tag below the input box and pick it in the provider row.",
+  "填好地址、密钥和模型就能用；上下文窗口选填。": "Fill in the address, key and model and you're set; the context window is optional."
 };

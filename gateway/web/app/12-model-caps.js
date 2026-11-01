@@ -210,7 +210,7 @@
     const meta = (md) => {
       if (!md) return null;
       const ctx = md.context_window ? Math.round(md.context_window / 1024) + "k" : "";
-      return { text: [md.name && md.name !== md.id ? md.name : "", ctx].filter(Boolean).join(" · "), img: (md.input_modalities || []).includes("image") };
+      return { text: [md.name && md.name !== md.id ? md.name : "", md.configured ? t("接口设置里填的") : "", ctx].filter(Boolean).join(" · "), img: (md.input_modalities || []).includes("image") };
     };
     function paintList() {
       const kw = q.value.trim().toLowerCase();
@@ -253,7 +253,7 @@
     if (own() || !r) try { r = await api("/api/models" + sidQ()); } catch { return; }
     if (my !== ctxSeq) return;
     if (r.contextWindow) state.ctxTotal = r.contextWindow;
-    state.compactAt = Number(r.autoCompactWindow) || 0;
+    state.compactAt = Number(r.compactLine ?? r.autoCompactWindow) || 0;   // 生效的那条（超过模型窗口不算数，#67）
     updateCtx(state.ctxUsed, state.ctxTotal);
   }
 

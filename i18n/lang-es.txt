@@ -2567,3 +2567,13 @@
 2567	Si lo desactivas, este proveedor no aparece en el selector de modelos bajo el cuadro de texto. Su configuración y su clave se conservan y puedes volver a activarlo cuando quieras. Una cuenta de Claude sin sesión iniciada o un modelo en el dispositivo sin modelos descargados no aparecen de todos modos.
 2568	El proveedor en uso siempre aparece
 2569	Este proveedor aún no está listo (sin sesión iniciada o sin modelo descargado). Configúralo primero en Ajustes.
+2570	Ventana de contexto (opcional)
+2571	Cuántos tokens puede leer el modelo. Si se deja vacío se asume 200k y la línea de compactación no puede ser mayor.
+2572	Ventana de contexto
+2573	Sin indicar (se asume 200k)
+2574	Entero entre 1024 y 16777216, o 256k / 1m. Déjalo vacío si no lo sabes.
+2575	Ventana de contexto (opcional, tokens, p. ej. 1048576; vacío = 200k)
+2576	La ventana de contexto debe ser un entero entre 1024 y 16777216, o 256k / 1m
+2577	de los ajustes del proveedor
+2578	También sirve en otras conversaciones: toca la etiqueta del modelo bajo el cuadro de texto y elígelo en la fila de proveedores.
+2579	Rellena la dirección, la clave y el modelo y listo; la ventana de contexto es opcional.

@@ -693,7 +693,8 @@
       },
       note(t, solid) { undot(); last = null; if (solid) any = true; bubble.insertAdjacentHTML("beforeend", `<p class="run-note">${esc(t)}</p>`); keepTail(); },
       // 同一个 key 的提示原地更新（加载模型、读提示的进度），不一条条往下堆
-      noteK(k, t) {
+      noteK(k, t, solid) {
+        if (solid) any = true;
         const ex = [...bubble.querySelectorAll(".run-note[data-k]")].find((n) => n.dataset.k === k);
         if (ex) { ex.textContent = t; return; }
         undot(); last = null;

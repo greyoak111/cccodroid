@@ -2,6 +2,7 @@
   // 「用时 · ↓token · 金额」；每个会话记住最后一轮，切走再回来还在（以前跑着时挂的是上一轮的数，切会话就没了）
   const STAT_KEY = "cc.turnStat";
   let statLast = {}, statIv = 0, statRun = null;
+  let cmpGen = 0;   // 第几次压缩：「正在压缩」和「已压缩」共用一行的键
   try { statLast = JSON.parse(localStorage.getItem(STAT_KEY) || "{}") || {}; } catch {}
   function statPaint() {
     const rv = runViews.get(statRun);
@@ -36,11 +37,11 @@
     if (n < 999500) return (n / 1000).toFixed(n < 9950 ? 1 : 0) + "k";
     return (n / 1e6).toFixed(2) + "M";
   }
-  /** 刻度以【自动压缩窗口】为准；没设才退回模型窗口 */
+  /** 刻度以【自动压缩窗口】为准；没设才退回模型窗口。设得比窗口还大时 claude 按窗口压，刻度也按窗口（#67） */
   function updateCtx(used, total) {
     if (used != null) state.ctxUsed = used;
     if (total) state.ctxTotal = total;
-    const line = state.compactAt || 0;
+    const line = state.compactAt && state.ctxTotal ? Math.min(state.compactAt, state.ctxTotal) : state.compactAt || 0;
     const scale = line > 0 ? line : (state.ctxTotal || 0);
     if (!scale) return;
     const pct = Math.min(100, Math.round((state.ctxUsed / scale) * 100));
@@ -659,10 +660,11 @@
       case "sub_done":       TOOL_CARDS.get(ev.parent)?.subDone?.(ev.status); break;
       case "tool_result":    toolResult(ev.id, ev.ok, ev.text); av.toolDone(ev.id); scrollDown(); break;
       case "phase":          av.phase(ev); break;
-      case "compacting":     av.phase(null); av.note(t("正在压缩上下文…")); scrollDown(); break;
+      // 压缩中的状态会连来好几条：同一次压缩只留一行，压完原地换成结果（#67）
+      case "compacting":     av.phase(null); av.noteK("cmp" + cmpGen, t("正在压缩上下文…")); scrollDown(); break;
       case "note":           av.noteK(ev.key, ev.text); scrollDown(); break;
       case "compacted":
-        av.note(ev.pre != null && ev.post != null
+        av.noteK("cmp" + cmpGen++, ev.pre != null && ev.post != null
           ? t("上下文已压缩：{pre} → {post} tokens", { pre: ev.pre.toLocaleString(), post: ev.post.toLocaleString() })
           : t("上下文已压缩"), true);
         if (ev.post != null) updateCtx(ev.post, state.ctxTotal);

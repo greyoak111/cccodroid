@@ -74,7 +74,7 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     .filter((x) => !x.disabled && x.getClientRects().length && getComputedStyle(x).visibility !== "hidden");
   // 最近一次操作是不是键盘：手指点的时候程序聚焦到按钮上，WebView 刚加载完会把它当键盘焦点描上选中框
   let kbNav = false;
-  document.addEventListener("keydown", (e) => { if (e.key === "Tab" || e.key.startsWith("Arrow")) kbNav = true; }, true);
+  document.addEventListener("keydown", (e) => { const k = e.key; if (typeof k === "string" && (k === "Tab" || k.startsWith("Arrow"))) kbNav = true; }, true);   // 合成事件可能不带 key（#66）
   document.addEventListener("pointerdown", () => { kbNav = false; }, true);
   /** 焦点挪进模态：已经在里面就不动；用键盘才落到第一个控件，否则聚焦容器本身（审查 #52 P2-12） */
   function focusInto(root, prefer) {

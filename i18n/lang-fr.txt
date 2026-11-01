@@ -2567,3 +2567,13 @@
 2567	Désactivé, ce fournisseur n’apparaît plus dans le sélecteur de modèle sous la zone de saisie. Ses réglages et sa clé sont conservés ; vous pouvez le réactiver à tout moment. Un compte Claude non connecté ou un modèle sur l’appareil sans modèle téléchargé n’y figure de toute façon pas.
 2568	Le fournisseur utilisé est toujours affiché
 2569	Ce fournisseur n’est pas encore prêt (pas connecté, ou aucun modèle téléchargé). Configurez-le d’abord dans les Réglages.
+2570	Fenêtre de contexte (facultatif)
+2571	Nombre de tokens que le modèle peut lire. Vide : 200k est supposé et le seuil de compactage ne peut pas aller plus haut.
+2572	Fenêtre de contexte
+2573	Non renseigné (200k supposé)
+2574	Entier entre 1024 et 16777216, ou 256k / 1m. Laissez vide en cas de doute.
+2575	Fenêtre de contexte (facultatif, en tokens, ex. 1048576 ; vide = 200k)
+2576	La fenêtre de contexte doit être un entier entre 1024 et 16777216, ou 256k / 1m
+2577	saisi dans les réglages
+2578	Utilisable aussi dans d'autres conversations : touchez l'étiquette du modèle sous la saisie et choisissez-le dans la ligne des fournisseurs.
+2579	Renseignez l'adresse, la clé et le modèle, c'est tout ; la fenêtre de contexte est facultative.

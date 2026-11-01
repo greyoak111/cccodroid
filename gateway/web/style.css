@@ -3431,6 +3431,8 @@ html[data-motion="on"] .lin-prof .mo-ghost .mo-st,html[data-motion="on"] .lin-pr
 #bridge-config-panel .bc-heading{margin:10px 0 22px}
 #bridge-config-panel h2{font-size:21px;line-height:1.45;font-weight:600;margin:0}
 #bridge-config-panel .bc-heading p{font-size:13px;color:var(--fg2);margin:7px 0 0}
+#bridge-config-panel .bc-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+#bridge-config-panel .bc-actions .btn{flex:1 1 140px;margin:0}
 #bridge-config-panel .bc-card{padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
 #bridge-config-panel h3{font-size:16px;font-weight:600;margin:0 0 24px}
 #bridge-config-panel .field{margin-bottom:24px}
@@ -3462,8 +3464,10 @@ html[data-motion="on"] .lin-prof .mo-ghost .mo-st,html[data-motion="on"] .lin-pr
 #bridge-config-panel .bc-summary > div + div{border-top:1px solid var(--line)}
 #bridge-config-panel dt{color:var(--fg2);min-width:70px;flex:none}
 #bridge-config-panel dd{margin:0;min-width:0;overflow-wrap:anywhere}
+#bridge-config-panel dd.mono{font-size:12.5px;line-height:1.65;word-break:break-all}
 #bridge-config-panel .bc-status{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--fg2);margin-bottom:16px}
 #bridge-config-panel .bc-ready{color:var(--ok);font-weight:500}
+#bridge-config-panel .bc-ready::before,#bridge-config-panel .bc-pending::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-inline-end:7px;vertical-align:1px}
 #bridge-config-panel .bc-pending{color:var(--fg2);font-weight:500}
 html[data-skin="goucheng"] #bridge-config-panel .bc-card{box-shadow:4px 4px 0 var(--gc-hard)}
 @media (max-width:420px){#bridge-config-panel .bc-card{padding:18px}#bridge-config-panel h2{font-size:19px}#bridge-config-panel .bc-summary > div{gap:10px}}
