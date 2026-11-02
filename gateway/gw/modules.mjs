@@ -62,17 +62,28 @@ function missingChain(mj, id, out = [], seen = new Set()) {
   return out;
 }
 
-/** 谁在用这一块：已装的模块（deps 含它）、已装的组件（依赖的底座包落在这块里、别的已装块又没有） */
+/** pkg 装的包：{ 名字: 记录 }（files/pkg/installed.json，在工具包目录之外） */
+function pkgRecords() {
+  try { return JSON.parse(fs.readFileSync(path.join(path.dirname(PREFIX), "pkg", "installed.json"), "utf8")).pkgs || {}; } catch { return {}; }
+}
+/** 谁在用这一块：已装的模块（deps 含它）、已装的组件（依赖的底座包落在这块里、别的已装块又没有）、
+ *  pkg 装的包（Depends 里有这块独有的包，#104 05-002）。组件判断不了依赖的（旧记录 + 没有索引）也算在用：宁可拦下，不能删坏 */
 function modDependents(mj, id) {
   const mods = (mj.modules || []).filter((m) => m.id !== id && modInstalled(mj, m.id) && (m.deps || []).includes(id) && m.kind !== "shared").map((m) => m.id);
   const mine = new Set((blockOf(mj, id).packages || []).map((p) => p.name));
   for (const m of mj.modules || []) if (m.id !== id && modInstalled(mj, m.id)) for (const p of m.packages || []) mine.delete(p.name);
   const comps = [];
   for (const [cid, rec] of compRecords()) {
-    const deps = compBaseDeps(cid, rec.sha256);
-    if (deps && deps.some((n) => mine.has(n))) comps.push(cid);
+    const deps = compBaseDeps(cid, rec.sha256, rec);
+    if (!deps ? mine.size > 0 : deps.some((n) => mine.has(n))) comps.push(cid);
   }
-  return { modules: mods, components: comps };
+  const pkgs = [];
+  for (const [name, r] of Object.entries(pkgRecords())) {
+    // Depends 是 Debian 格式：「a (>= 1), b | c」—— 备选里有一个落在这块就算（保守）
+    const names = String((r && r.deps) || "").split(/[,|]/).map((x) => x.trim().split(/[\s(:]/)[0]).filter(Boolean);
+    if (names.some((n) => mine.has(n))) pkgs.push(name);
+  }
+  return { modules: mods, components: comps, pkgs };
 }
 
 function modList() {
@@ -82,7 +93,7 @@ function modList() {
   const dk = devkitIdentity() || {};
   const items = (mj.modules || []).map((m) => {
     const job = MOD_JOBS.get(m.id), inst = modInstalled(mj, m.id);
-    const dep = inst ? modDependents(mj, m.id) : { modules: [], components: [] };
+    const dep = inst ? modDependents(mj, m.id) : { modules: [], components: [], pkgs: [] };
     return {
       id: m.id, kind: m.kind, required: !!m.required, name: m.name, desc: m.desc, uses: m.uses || [],
       deps: m.deps || [], users: m.users || [], commands: m.commands || [], key: m.key || [],
@@ -236,7 +247,7 @@ function modRemove(id) {
   for (const j of MOD_JOBS.values()) if (!j.finished) return { ok: false, message: tz("有模块正在安装，等它结束再试") };
   if (!modInstalled(mj, id)) return { ok: false, message: "not installed" };
   const dep = modDependents(mj, id);
-  if (dep.modules.length || dep.components.length) return { ok: false, usedBy: dep, message: tz("{names} 要用它，先卸载那些", { names: [...dep.modules, ...dep.components].join("、") }) };
+  if (dep.modules.length || dep.components.length || dep.pkgs.length) return { ok: false, usedBy: dep, message: tz("{names} 要用它，先卸载那些", { names: [...dep.modules, ...dep.components, ...dep.pkgs.map((n) => "pkg " + n)].join("、") }) };
   const gone = [id];
   for (const l of (m.deps || []).map((d) => blockOf(mj, d)).filter((b) => b && b.kind === "shared" && modInstalled(mj, b.id))) {
     const still = (mj.modules || []).some((o) => o.id !== id && o.kind === "module" && (o.deps || []).includes(l.id) && modInstalled(mj, o.id));
@@ -246,7 +257,7 @@ function modRemove(id) {
   const keep = new Set();
   for (const o of mj.modules || []) if (!gone.includes(o.id) && modInstalled(mj, o.id)) for (const r of filesOf(o)) keep.add(r);
   for (const [cid, rec] of compRecords()) for (const r of compNeeds(cid, rec)) keep.add(r);
-  try { for (const p of Object.values(JSON.parse(fs.readFileSync(path.join(path.dirname(PREFIX), "pkg", "installed.json"), "utf8")).pkgs || {})) for (const r of p.files || []) keep.add(r); } catch {}
+  for (const p of Object.values(pkgRecords())) for (const r of (p && p.files) || []) keep.add(r);
   let n = 0;
   for (const g of gone) {
     const b = blockOf(mj, g), files = filesOf(b);

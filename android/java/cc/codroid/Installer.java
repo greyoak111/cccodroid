@@ -997,13 +997,14 @@ final class Installer {
                 if (type == 'L') longName = cstr(body, 0, body.length);
                 else if (type == 'K') longLink = cstr(body, 0, body.length);
                 else if (type == 'x') {
-                    String pax = new String(body, StandardCharsets.UTF_8);
-                    for (int i = 0; i < pax.length(); ) {
-                        int sp = pax.indexOf(' ', i), len;
+                    // 长度是字节数（含中文的路径一个字三字节）：在字节上往前走，切出一条再按 UTF-8 解（#104 05-006）
+                    for (int i = 0; i < body.length; ) {
+                        int sp = i, len;
+                        while (sp < body.length && body[sp] != ' ') sp++;
                         // 每条是「长度 空格 键=值 换行」：长度读不出、不往前走、越过结尾都算坏包，抛 IOException 走清理
-                        try { len = Integer.parseInt(pax.substring(i, sp)); } catch (RuntimeException e) { throw new IOException(Tr.t("tar 损坏：pax 记录格式不对")); }
-                        if (len <= sp - i + 1 || i + len > pax.length()) throw new IOException(Tr.t("tar 损坏：pax 记录格式不对"));
-                        String kv = pax.substring(sp + 1, i + len - 1);
+                        try { len = Integer.parseInt(new String(body, i, sp - i, StandardCharsets.US_ASCII)); } catch (RuntimeException e) { throw new IOException(Tr.t("tar 损坏：pax 记录格式不对")); }
+                        if (sp >= body.length || len <= sp - i + 1 || i + len > body.length) throw new IOException(Tr.t("tar 损坏：pax 记录格式不对"));
+                        String kv = new String(body, sp + 1, i + len - 1 - (sp + 1), StandardCharsets.UTF_8);
                         int eq = kv.indexOf('=');
                         if (kv.startsWith("path=")) longName = kv.substring(eq + 1);
                         if (kv.startsWith("linkpath=")) longLink = kv.substring(eq + 1);

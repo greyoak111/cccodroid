@@ -282,10 +282,12 @@ async function customAnalyze(src) {
 async function customFetchLibs(want, deps, have, log2) {
   const ix = await glibcRepoIndex();
   const cache = path.join(CUSTOM_DIR, ".cache"), got = [];
+  // 仓库里找不到、或包里没有这个文件的：一路记着，最后报「还缺」。以前每轮把 want 清空，补进来的库自己缺的二级依赖找不到就悄悄丢了（#104 05-011）
+  const miss = new Set();
   fs.mkdirSync(deps, { recursive: true });
   for (let round = 0; want.size && round < 6; round++) {
     const byPkg = new Map();
-    for (const n of want) { if (have.has(n)) continue; const p = ix.lib.get(n); if (p && ix.pk.has(p)) (byPkg.get(p) || byPkg.set(p, []).get(p)).push(n); }
+    for (const n of want) { if (have.has(n)) continue; const p = ix.lib.get(n); if (p && ix.pk.has(p)) (byPkg.get(p) || byPkg.set(p, []).get(p)).push(n); else miss.add(n); }
     want = new Set();
     for (const [pkg, names] of byPkg) {
       const m = ix.pk.get(pkg), deb = path.join(cache, path.basename(m.file));
@@ -313,8 +315,8 @@ async function customFetchLibs(want, deps, have, log2) {
       const libd = path.join(tmp, GLIBC_REPO_LIB);
       for (const n of names) {
         if (have.has(n)) continue;
-        let real; try { real = fs.realpathSync(path.join(libd, n)); } catch { continue; }
-        if (!real.startsWith(tmp + path.sep)) continue;
+        let real; try { real = fs.realpathSync(path.join(libd, n)); } catch { miss.add(n); continue; }
+        if (!real.startsWith(tmp + path.sep)) { miss.add(n); continue; }
         fs.copyFileSync(real, path.join(deps, n)); fs.chmodSync(path.join(deps, n), 0o755);
         have.add(n); got.push({ soname: n, pkg, version: m.version });
         const e = elfInfo(path.join(deps, n));
@@ -325,7 +327,7 @@ async function customFetchLibs(want, deps, have, log2) {
   }
   // 下载的 .deb 只是中转（gcc-libs 就 20 多 MB），用完删掉；索引留着
   for (const f of fs.readdirSync(cache)) if (f.endsWith(".deb")) fs.rmSync(path.join(cache, f), { force: true });
-  return { got, still: [...want].filter((n) => !have.has(n)) };
+  return { got, still: [...new Set([...miss, ...want])].filter((n) => !have.has(n)) };   // 6 轮还没补完的也算缺
 }
 
 // patchelf 写进程序的解释器：一律用工具包里的 ld.so —— 路径固定。PATHS.loader 在「经加载器」时是 APK 里那份，

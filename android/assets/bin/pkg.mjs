@@ -297,7 +297,10 @@ function solve(roots, { upgrade = false } = {}) {
   const ix = index(), have = onDisk(), base = baseVersions(), mine = db().pkgs;
   const order = [], seen = new Set(), problems = [];
   const installedVer = (n) => (mine[n] ? mine[n].version : base.get(n));
+  // 上次没装完的（记录还是 installing：.list 写了，文件或 postinst 没跑完就被杀）不算装好，要重新放一遍（#104 05-003）
+  const broken = (n) => !!mine[n] && mine[n].state !== "ok";
   const satisfied = (a) => {
+    if (have.has(a.name) && broken(a.name)) return false;
     if (have.has(a.name)) {
       const v = installedVer(a.name);
       if (!v || verOk(v, a.op, a.ver)) return true;
@@ -327,11 +330,11 @@ function solve(roots, { upgrade = false } = {}) {
   };
   for (const r of roots) {
     const n = ix.pkgs.has(r) ? r : (ix.provides.get(r) || [])[0] || r;
-    if (have.has(n) && !(upgrade && mine[n])) continue;
+    if (have.has(n) && !(upgrade && mine[n]) && !broken(n)) continue;
     visit(n, null);
   }
-  // 已经是这个版本的（restore / upgrade 时会碰到）不再装
-  return { order: order.filter((n) => !(have.has(n) && (!mine[n] || mine[n].version === ix.pkgs.get(n).v))), problems };
+  // 已经是这个版本的（restore / upgrade 时会碰到）不再装；没装完的照样装
+  return { order: order.filter((n) => broken(n) || !(have.has(n) && (!mine[n] || mine[n].version === ix.pkgs.get(n).v))), problems };
 }
 
 // ── 下载 ───────────────────────────────────────────────────────────────
@@ -610,7 +613,8 @@ function install(names, { unverified = false, auto = false, upgrade = false } = 
     if (!real) { const near = [...ix.pkgs.keys()].filter((k) => k.includes(n)).slice(0, 6); die(`仓库里没有 ${n}${near.length ? "。相近的：" + near.join(" ") : ""}`); }
     if (EXCLUDE.has(real)) die(`${real} 是给 Termux App 本身用的，在 cccodroid 里没有意义`);
     if (have.has(real) && !mine[real]) { console.log(`${real} 已在工具包里（${baseVersions().get(real) || "版本未知"}），不用装`); continue; }
-    if (have.has(real) && mine[real] && !upgrade) { console.log(`${real} ${mine[real].version} 已经装了`); continue; }
+    if (have.has(real) && mine[real] && mine[real].state !== "ok") console.log(`${real} 上次没装完，接着装`);
+    else if (have.has(real) && mine[real] && !upgrade) { console.log(`${real} ${mine[real].version} 已经装了`); continue; }
     if (!VERIFIED[real] && !unverified && !auto) die(`${real} 还没在 cccodroid 上验证过。确定要试就加 --unverified：pkg install --unverified ${real}\n本机实测过的：${Object.keys(VERIFIED).join(" ")}`);
     roots.push(real);
   }

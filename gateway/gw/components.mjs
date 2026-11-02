@@ -349,8 +349,11 @@ export function compRecords() {
   } catch {}
   return out;
 }
-/** 组件依赖链里由底座提供的包（索引里这个构建的 baseDeps）；索引没给时为 null（不知道） */
-export function compBaseDeps(id, sha) {
+/** 组件依赖链里由底座提供的包。先看安装记录（装的时候记下的，#104 05-001），旧记录没有就查索引里这个构建的 baseDeps ——
+ *  内存里还没有索引（刚启动、离线）先读磁盘缓存；都查不到为 null（不知道） */
+export function compBaseDeps(id, sha, rec) {
+  if (rec && Array.isArray(rec.baseDeps)) return rec.baseDeps.filter((d) => typeof d === "string");
+  compLoadDiskCache();
   const e = compIndexCache.data && compIndexCache.data.components && compIndexCache.data.components[id];
   const b = e && (e.builds || []).find((x) => x.sha256 === sha);
   return b && Array.isArray(b.baseDeps) ? b.baseDeps.map((d) => (typeof d === "string" ? d : d.name)) : null;
@@ -572,7 +575,9 @@ async function compRunInstall(id, b, job) {
   const old = compRecord(id);
   if (old) compRemoveFiles(id, old);                // 升级 / 重装：先清掉上一版（别的组件也要用的留下）
   const rec = { id, source: b.source || "", version: b.version, upstream: b.upstream, base: b.base, sha256: b.sha256, bin: b.bin || [],
-    requires: b.requires || [], skill: "", state: "installing", at: Date.now(), files: [], shared: [] };
+    requires: b.requires || [], skill: "", state: "installing", at: Date.now(), files: [], shared: [],
+    // 依赖的底座包：卸工具包模块时据此判断有没有组件在用。不记的话要靠索引，刚启动 / 离线 / 索引里这个构建没了就判断不了（#104 05-001）
+    ...(Array.isArray(b.baseDeps) ? { baseDeps: b.baseDeps.map((d) => (typeof d === "string" ? d : d && d.name)).filter(Boolean) } : {}) };
   // 先按包内文件清单记下"将要放进去的文件"：搬到一半被杀也能按它卸干净
   const list = [];
   (function walk(rel) {

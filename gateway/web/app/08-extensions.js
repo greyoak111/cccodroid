@@ -69,7 +69,7 @@
       const deps = (m.deps || []).filter((d) => byId[d] && !byId[d].required);
       if (deps.length) desc += '<div class="tiny">' + t("依赖：{list}", { list: listOf(deps.map(nameOf)) }) + "</div>";
       if (m.kind === "shared" && (m.users || []).length) desc += '<div class="tiny">' + t("给这些模块用：{list}", { list: listOf(m.users.map(nameOf)) }) + "</div>";
-      const used = [...(m.usedBy.modules || []).map(nameOf), ...(m.usedBy.components || []).map((c) => esc(c))];
+      const used = [...(m.usedBy.modules || []).map(nameOf), ...(m.usedBy.components || []).map((c) => esc(c)), ...(m.usedBy.pkgs || []).map((n) => "pkg " + esc(n))];
       if (used.length) desc += '<div class="tiny">' + t("正在用它的：{list}", { list: listOf(used) }) + "</div>";
       if (m.error) desc += '<div class="tiny err">' + esc(m.error) + "</div>";
       // 命令与包：点开看全部

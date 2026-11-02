@@ -320,9 +320,11 @@ function* readTar(buf) {
     if (type === "K") { longLink = str(body); continue; }
     if (type === "x") {
       pax = {};
-      for (let s = body.toString(), i = 0; i < s.length;) {
-        const sp = s.indexOf(" ", i), len = parseInt(s.slice(i, sp), 10);
-        const kv = s.slice(sp + 1, i + len - 1), eq = kv.indexOf("=");
+      // 长度是字节数：在 Buffer 上往前走，切出一条再按 UTF-8 解 —— 按字符走，中文路径会把后面的换行带进名字（#104 05-006）
+      for (let i = 0; i < body.length;) {
+        const sp = body.indexOf(0x20, i), len = parseInt(body.toString("latin1", i, sp), 10);
+        if (sp < 0 || !(len > sp - i + 1) || i + len > body.length) throw new Error("tar 损坏：pax 记录格式不对");
+        const kv = body.toString("utf8", sp + 1, i + len - 1), eq = kv.indexOf("=");
         pax[kv.slice(0, eq)] = kv.slice(eq + 1); i += len;
       }
       continue;
