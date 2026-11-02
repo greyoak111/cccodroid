@@ -449,6 +449,18 @@
           const imgs = peek.querySelectorAll(".inline-img");
           if (imgs.length) peek.replaceChildren(...imgs);
           else peek.remove();
+          // 读不到的图（root 才能读的 /data/adb、别的应用私有目录、find 列出来但其实不在的）在这里只会剩一行打不开的路径，
+          // 还把整个步骤组撑着收不起来（群友 11-02）。工具预览里读不到就直接拿掉；路径在展开的结果里照样看得到。
+          // 捕获阶段先拦下，不让 makeInlineImg 换成那行「读不到」的链接
+          if (!peek.dataset.quiet) {
+            peek.dataset.quiet = "1";
+            peek.addEventListener("error", (e) => {
+              if (e.target.tagName !== "IMG") return;
+              e.stopPropagation();
+              e.target.closest(".inline-img")?.remove();
+              if (!peek.querySelector(".inline-img")) { peek.remove(); api.onChange && api.onChange(); }
+            }, true);
+          }
         }
         api.onChange && api.onChange();
       },
@@ -549,6 +561,8 @@
       // 失败、待确认时样式（:has）已经把组摊开了，组本身却没有 open：按眼前看到的来，第一下就收（审查 #48 UI07-05）
       const showing = el.classList.contains("open") || body.getClientRects().length > 0;
       el.classList.toggle("open", !showing);
+      // 带图片预览的卡（.tool-peek）会被样式一直撑开，光去掉 open 收不起来：记一个「用户收了」压过它（群友 11-02）
+      el.classList.toggle("shut", showing);
       if (showing) {
         body.querySelectorAll(".tool.open, .tool-sub.open").forEach((x) => x.classList.remove("open"));
         body.querySelectorAll("details[open]").forEach((d) => { d.open = false; });

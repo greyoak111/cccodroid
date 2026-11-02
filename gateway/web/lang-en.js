@@ -2632,5 +2632,6 @@ window.I18N_DICT.en = {
   "这个文件是 {enc} 编码，存回去会损坏原文，只能查看": "This file is {enc}-encoded. Saving it would corrupt the original, so it is view-only.",
   "名字格式不对": "Invalid name format",
   "请求参数不对": "Invalid request parameters",
-  "在浏览器里打开就没有查看器的保护了：网页里的脚本能把它所在文件夹里的文件发到别处，也能访问本机上的其他服务。只对你信得过的网页这样做。": "Opening it in the browser drops the viewer's protection: scripts on the page can send files from its folder elsewhere and reach other services on this device. Only do this for pages you trust."
+  "在浏览器里打开就没有查看器的保护了：网页里的脚本能把它所在文件夹里的文件发到别处，也能访问本机上的其他服务。只对你信得过的网页这样做。": "Opening it in the browser drops the viewer's protection: scripts on the page can send files from its folder elsewhere and reach other services on this device. Only do this for pages you trust.",
+  "批准，按当前模式执行（{m}）": "Approve, keep current mode ({m})"
 };

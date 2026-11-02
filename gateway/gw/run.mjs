@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { spawn } from "node:child_process";
-import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
+import { CFG, LAST_LANG, PATHS, log, tr, tz, permModeAction } from "./config.mjs";
 import { SETTINGS, capList } from "./settings-store.mjs";
 import { PERM_MODES, PROVIDER, billAfterRun, keyOf, noteTokens, providerById } from "./providers.mjs";
 import { ALIAS_SEEN, effortLevelsOf, fetchModels, isLoginMode, modelsCached, normEffort } from "./models.mjs";
@@ -339,7 +339,10 @@ export async function startRun(item) {
     if (resp.interrupt) holdLane(run);
     log(`${resp.behavior === "allow" ? "✓ 允许" : "✗ 拒绝"} ${p.tool}${a.always && resp.updatedPermissions ? "（始终）" : ""}${a.interrupt ? "（并停止）" : ""}`);
     emit({ type: "perm_resolved", id, behavior: resp.behavior, always: !!resp.updatedPermissions, interrupt: !!a.interrupt });
-    if (a.mode && PERM_MODES.includes(a.mode)) setPermMode(a.mode);
+    // 批准时顺带切模式，规则见 config.mjs permModeAction；"run" 只把这一轮从计划模式带回原模式，全局设置不动（项目默认可能和全局不同）
+    const act = permModeAction(resp.behavior, a.mode, run.permMode);
+    if (act === "global") setPermMode(a.mode);
+    else if (act === "run") run.setMode(a.mode);
     publishState();
     return true;
   };

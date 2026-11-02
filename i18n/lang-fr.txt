@@ -2595,3 +2595,4 @@
 2595	Format de nom invalide
 2596	Paramètres de requête invalides
 2597	L'ouvrir dans le navigateur retire la protection de la visionneuse : les scripts de la page peuvent envoyer ailleurs les fichiers de son dossier et accéder à d'autres services de cet appareil. Ne le faites que pour des pages de confiance.
+2598	Approuver, garder le mode actuel ({m})

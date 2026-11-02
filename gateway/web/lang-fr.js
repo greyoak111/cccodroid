@@ -2598,4 +2598,5 @@ window.I18N_DICT["fr"] = {
   "名字格式不对": "Format de nom invalide",
   "请求参数不对": "Paramètres de requête invalides",
   "在浏览器里打开就没有查看器的保护了：网页里的脚本能把它所在文件夹里的文件发到别处，也能访问本机上的其他服务。只对你信得过的网页这样做。": "L'ouvrir dans le navigateur retire la protection de la visionneuse : les scripts de la page peuvent envoyer ailleurs les fichiers de son dossier et accéder à d'autres services de cet appareil. Ne le faites que pour des pages de confiance.",
+  "批准，按当前模式执行（{m}）": "Approuver, garder le mode actuel ({m})",
 };

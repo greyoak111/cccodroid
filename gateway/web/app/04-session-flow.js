@@ -793,6 +793,7 @@
     if (s.maxParallel) srv.max = s.maxParallel;
     pickViewRun();
     if (srv.run?.permMode) setPermChip(srv.run.permMode);   // 这一轮实际在用的模式，以网关为准（安全通告 GHSA-2w6p）
+    refreshPlanActs();
     const busy = isBusy();
     syncPlaceholder();
     syncInterject();

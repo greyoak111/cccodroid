@@ -2595,3 +2595,4 @@
 2595	Formato de nombre no válido
 2596	Parámetros de solicitud no válidos
 2597	Abrirla en el navegador quita la protección del visor: los scripts de la página pueden enviar a otro sitio los archivos de su carpeta y acceder a otros servicios de este dispositivo. Hazlo solo con páginas de confianza.
+2598	Aprobar y mantener el modo actual ({m})

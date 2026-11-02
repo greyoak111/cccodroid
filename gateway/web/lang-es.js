@@ -2598,4 +2598,5 @@ window.I18N_DICT["es"] = {
   "名字格式不对": "Formato de nombre no válido",
   "请求参数不对": "Parámetros de solicitud no válidos",
   "在浏览器里打开就没有查看器的保护了：网页里的脚本能把它所在文件夹里的文件发到别处，也能访问本机上的其他服务。只对你信得过的网页这样做。": "Abrirla en el navegador quita la protección del visor: los scripts de la página pueden enviar a otro sitio los archivos de su carpeta y acceder a otros servicios de este dispositivo. Hazlo solo con páginas de confianza.",
+  "批准，按当前模式执行（{m}）": "Aprobar y mantener el modo actual ({m})",
 };
