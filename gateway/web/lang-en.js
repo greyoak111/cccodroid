@@ -2633,5 +2633,21 @@ window.I18N_DICT.en = {
   "名字格式不对": "Invalid name format",
   "请求参数不对": "Invalid request parameters",
   "在浏览器里打开就没有查看器的保护了：网页里的脚本能把它所在文件夹里的文件发到别处，也能访问本机上的其他服务。只对你信得过的网页这样做。": "Opening it in the browser drops the viewer's protection: scripts on the page can send files from its folder elsewhere and reach other services on this device. Only do this for pages you trust.",
-  "批准，按当前模式执行（{m}）": "Approve, keep current mode ({m})"
+  "批准，按当前模式执行（{m}）": "Approve, keep current mode ({m})",
+  "一个 API 可配置多个模型，上下文窗口自动填写。": "Configure multiple models for one API, with context windows filled automatically.",
+  "搜索或手填后添加模型；已添加的模型可分别设置窗口和默认项。": "Search or enter a model, then add it. Set each model's context window and choose a default.",
+  "优先采用接口返回的窗口，未提供时默认 200,000 token；可手动修改。": "Uses the context window returned by the API, or 200,000 tokens if unavailable. You can edit it manually.",
+  "添加模型": "Add model",
+  "已添加的模型": "Added models",
+  "最多可添加 100 个模型。": "You can add up to 100 models.",
+  "设为默认": "Set as default",
+  "自动恢复已停止，修改配置不会解除；请先诊断，再明确重置恢复次数。": "Auto-recovery has stopped; changing the configuration will not clear this state. Run diagnostics first, then explicitly reset the recovery attempt count.",
+  "桥补丁校验失败，自动恢复已停止；请先诊断并修复，保存配置不会解除故障。": "Bridge patch verification failed and auto-recovery has stopped. Run diagnostics and fix the problem first; saving the configuration will not clear the fault.",
+  "本地桥已停用，不能供新会话使用；请先确认组件状态，保存配置不会解除停用。": "The local bridge is disabled and cannot be used for new sessions. Check the component status first; saving the configuration will not re-enable it.",
+  "本地桥组件暂不可用，可能正在更新或安装不完整；请先检查组件，不会自动重置恢复次数。": "The local bridge component is temporarily unavailable; it may be updating or incompletely installed. Check the component first. The recovery attempt count will not be reset automatically.",
+  "桥运行副本需要更新；请先检查组件版本，当前不能供新会话使用。": "The bridge runtime copy needs an update. Check the component version first; it cannot be used for new sessions yet.",
+  "本地桥尚未就绪，请先检查本地诊断；当前会话保持不变，保存配置不会重置恢复次数。": "The local bridge isn't ready. Check local diagnostics first. The current session is unchanged, and saving the configuration will not reset the recovery attempt count.",
+  "自动恢复次数已耗尽": "Auto-recovery attempts exhausted",
+  "桥补丁校验失败": "Bridge patch verification failed",
+  "本地桥已停用": "Local bridge disabled"
 };

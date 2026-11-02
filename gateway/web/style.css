@@ -3452,6 +3452,11 @@ html[data-motion="on"] .lin-prof .mo-ghost .mo-st,html[data-motion="on"] .lin-pr
 #bridge-config-panel .bc-suggest li{min-height:44px;display:flex;align-items:center;padding:6px 12px;border-radius:min(var(--radius),6px);font-family:var(--mono);font-size:14px;line-height:1.4;overflow-wrap:anywhere;cursor:pointer}
 #bridge-config-panel .bc-suggest li[aria-selected="true"],#bridge-config-panel .bc-suggest li:active{background:var(--bg3)}
 @media (hover:hover){#bridge-config-panel .bc-suggest li:hover{background:var(--bg3)}}
+#bridge-config-panel .bc-selected{display:grid;gap:10px;margin:16px 0 24px}
+#bridge-config-panel .bc-selected:empty{display:none}
+#bridge-config-panel .bc-model-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px;border:1px solid var(--line);border-radius:min(var(--radius),9px)}
+#bridge-config-panel .bc-model-row > span{flex:1 1 100%;min-width:0;overflow-wrap:anywhere;font-size:13px}
+#bridge-config-panel .bc-model-row .btn{flex:1 1 80px;margin:0}
 #bridge-config-panel .bc-key-wrap{position:relative}
 #bridge-config-panel .bc-key-wrap input{padding-inline-end:54px}
 #bridge-config-panel .bc-eye{position:absolute;inset-inline-end:1px;top:1px;width:46px;height:46px;display:grid;place-items:center;background:none;border:0;color:var(--fg2);cursor:pointer}

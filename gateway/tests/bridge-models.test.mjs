@@ -306,6 +306,15 @@ test("响应只投影 id 与 truncated，不透传组件额外字段或假Key", 
   else failed(result, "MODELS_INVALID_RESPONSE");
 });
 
+test("模型窗口只投影合法context_window，其他远端内容不透传、不把输出上限当窗口", async () => {
+  const models = [{ id: "large", context_window: 1048576, apiKey: upstreamSecret },
+    { id: "unknown", max_tokens: 32000 }, { id: "bad-string", context_window: "1000000" },
+    { id: "bad-negative", context_window: -1 }, { id: "bad-fraction", context_window: 1234.5 },
+    { id: "bad-huge", context_window: 16777217 }];
+  control({ reply: protocol({ models }) });
+  success(await request(), [{ id: "large", context_window: 1048576 }, ...models.slice(1).map((m) => ({ id: m.id }))]);
+});
+
 test("恶意组件把本次 API Key 伪装成合法 model id 时不得回显到 HTTP", async () => {
   const before = snapshot();
   control({ mode: "echo-key" }); failed(await request(), "MODELS_INVALID_RESPONSE");

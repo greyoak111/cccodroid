@@ -2596,3 +2596,19 @@
 2596	Parámetros de solicitud no válidos
 2597	Abrirla en el navegador quita la protección del visor: los scripts de la página pueden enviar a otro sitio los archivos de su carpeta y acceder a otros servicios de este dispositivo. Hazlo solo con páginas de confianza.
 2598	Aprobar y mantener el modo actual ({m})
+2599	Configura varios modelos para una API; sus ventanas de contexto se rellenan automáticamente.
+2600	Busca o escribe un modelo y añádelo. Ajusta su ventana de contexto y elige uno predeterminado.
+2601	Se usa la ventana devuelta por la API o, si falta, 200,000 tokens. Puedes editarla manualmente.
+2602	Añadir modelo
+2603	Modelos añadidos
+2604	Puedes añadir hasta 100 modelos.
+2605	Establecer como predeterminado
+2606	La recuperación automática se ha detenido; cambiar la configuración no elimina este estado. Ejecuta el diagnóstico primero y luego restablece explícitamente el contador de intentos de recuperación.
+2607	Falló la verificación del parche del puente y se detuvo la recuperación automática. Ejecuta el diagnóstico y corrige el problema primero; guardar la configuración no elimina el fallo.
+2608	El puente local está desactivado y no se puede usar en nuevas conversaciones. Comprueba primero el estado del componente; guardar la configuración no lo vuelve a activar.
+2609	El componente del puente local no está disponible temporalmente; puede estar actualizándose o tener una instalación incompleta. Comprueba primero el componente. El contador de intentos de recuperación no se restablecerá automáticamente.
+2610	La copia de ejecución del puente necesita actualizarse. Comprueba primero la versión del componente; aún no se puede usar en nuevas conversaciones.
+2611	El puente local aún no está listo. Comprueba primero el diagnóstico local. La conversación actual no cambia y guardar la configuración no restablece el contador de intentos de recuperación.
+2612	Intentos de recuperación automática agotados
+2613	Falló la verificación del parche del puente
+2614	Puente local desactivado

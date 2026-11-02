@@ -1,18 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { Readable } from "node:stream";
 import crypto from "node:crypto";
 import { CFG, PREFIX, log, tz } from "./config.mjs";
 import { componentEnv as sharedComponentEnv } from "./component-env.mjs";
 import { readBodyBuf, sendJson } from "./http.mjs";
 import { RUNS } from "./runs.mjs";
-import { PROVIDERS_CFG, routeProviders } from "./providers.mjs";
+import { PROVIDERS_CFG, upsertProvider } from "./providers.mjs";
 import { beginManagedBridgeConfiguration } from "./managed-bridge.mjs";
 
 const ID = "openai-bridge", ENTRY = "lib/openai-bridge/component.cjs";
-const MODELS_MAX_BYTES = 128 << 10;
-const COMPONENT_ERRORS = ["INVALID_INPUT", "KEY_REQUIRED", "KEY_HOST_CHANGED", "RUNTIME_CONFLICT", "BUSY"];
+const MODELS_MAX_BYTES = 128 << 10, CONFIG_MAX_BYTES = 128 << 10, CONFIG_MODEL_LIMIT = 100;
+const DEFAULT_CONTEXT_WINDOW = 200000;
+const validModel = (id) => typeof id === "string" && !!id.trim() && id === id.trim() && id.length <= 200 && !/[,\u0000-\u001f\u007f-\u009f]/.test(id);
+const LOCAL_ERRORS = ["RECOVERY_EXHAUSTED", "PATCH_VERIFICATION_FAILED", "COMPONENT_DISABLED", "LOCAL_START_FAILED", "COMPONENT_UNAVAILABLE", "UPDATE_REQUIRED"];
+const COMPONENT_ERRORS = ["INVALID_INPUT", "KEY_REQUIRED", "KEY_HOST_CHANGED", "RUNTIME_CONFLICT", "BUSY", ...LOCAL_ERRORS];
 const modelsUnavailable = () => tz("暂时无法读取模型清单，可重试或手填模型。");
 const MODELS_ERRORS = {
   MODELS_AUTH: () => tz("API Key 未获授权，请检查后重试。"),
@@ -110,7 +112,7 @@ function invokeComponent(command, input, signal) {
   const isModels = command === "gui-models", abortSignal = isModels ? signal : undefined;
   if (abortSignal?.aborted) return Promise.reject(failure("MODELS_FAILED"));
   const entry = componentEntry();
-  const stdoutLimit = isModels ? MODELS_MAX_BYTES : 16384;
+  const stdoutLimit = isModels ? MODELS_MAX_BYTES : CONFIG_MAX_BYTES;
   const responseCode = isModels ? "MODELS_INVALID_RESPONSE" : "component_response";
   const failedCode = isModels ? "MODELS_FAILED" : "component_failed";
   return new Promise((resolve, reject) => {
@@ -172,12 +174,18 @@ function invokeComponent(command, input, signal) {
 function statusView(result) {
   if (!object(result) || result.schema !== 1 || result.id !== ID || typeof result.configured !== "boolean" ||
       typeof result.localReady !== "boolean" || typeof result.hasKey !== "boolean") throw failure("component_response");
-  if (!result.configured) return { installed: true, configured: false, hasKey: false, endpoint: "", model: "", localReady: false, local: { state: "stopped" } };
-  if (result.hasKey !== true || typeof result.model !== "string" || !result.model || result.model.length > 200 || /[,\u0000-\u001f\u007f]/.test(result.model)) throw failure("component_response");
+  if (!result.configured) return { installed: true, configured: false, hasKey: false, endpoint: "", model: "", models: [], localReady: false, local: { state: "stopped" } };
+  if (result.hasKey !== true || !validModel(result.model)) throw failure("component_response");
+  const models = result.models === undefined ? [result.model] : result.models;
+  if (!Array.isArray(models) || !models.length || models.length > CONFIG_MODEL_LIMIT || !models.every(validModel) ||
+      new Set(models).size !== models.length || !models.includes(result.model)) throw failure("component_response");
   const endpoint = normalizeBridgeEndpoint(result.endpoint);
   if (endpoint !== result.endpoint) throw failure("component_response");
-  return { installed: true, configured: true, hasKey: true, endpoint, model: result.model, localReady: result.localReady,
-    local: { state: result.localReady ? "ready" : "stopped" } };
+  const localError = LOCAL_ERRORS.includes(result.localError) ? result.localError : result.localError ? "LOCAL_START_FAILED" : "";
+  // 故障标记优先于残存进程的 /health；配置页不能给实际 ensure 会拒绝的实例放行。
+  const localReady = result.localReady && !localError;
+  return { installed: true, configured: true, hasKey: true, endpoint, model: result.model, models: [...models], localReady,
+    ...(localError ? { localError } : {}), local: { state: localError ? "error" : localReady ? "ready" : "stopped", ...(localError ? { code: localError } : {}) } };
 }
 
 function assertGuiOwnership() {
@@ -203,7 +211,7 @@ function defaultConnection(model) {
       if (fs.realpathSync(dir) !== path.resolve(dir)) throw failure("RUNTIME_CONFLICT");
     }
     const registration = regularJson(path.join(home, ".cccodroid", "services", ID + ".json"), 4096);
-    const connection = regularJson(path.join(target, "connection.json"), 4096);
+    const connection = regularJson(path.join(target, "connection.json"), CONFIG_MAX_BYTES);
     if (!object(registration) || registration.schema !== 1 || registration.id !== ID || registration.runtimeDir !== target ||
         typeof registration.instanceId !== "string" || !/^[0-9a-f]{32}$/.test(registration.instanceId) ||
         Object.keys(registration).some((key) => !["schema", "id", "endpoint", "runtimeDir", "instanceId"].includes(key))) throw failure("RUNTIME_CONFLICT");
@@ -216,25 +224,64 @@ function defaultConnection(model) {
 }
 
 function validateInput(body, modelsOnly = false) {
-  const fields = modelsOnly ? ["endpoint", "apiKey", "consent"] : ["endpoint", "apiKey", "model", "contextWindow", "consent"];
+  const fields = modelsOnly ? ["endpoint", "apiKey", "consent"] : ["endpoint", "apiKey", "model", "models", "contextWindow", "consent"];
   if (!object(body) || Object.keys(body).some((key) => !fields.includes(key)) || body.consent !== true) throw failure("consent_required");
   const endpoint = normalizeBridgeEndpoint(body.endpoint);
   if (body.apiKey !== undefined && typeof body.apiKey !== "string") throw failure("invalid_key", "apiKey");
   const apiKey = (body.apiKey || "").trim();
   if ((body.apiKey || "").length > 1024 || /[\u0000-\u001f\u007f]/.test(body.apiKey || "") || /\s/.test(apiKey)) throw failure("invalid_key", "apiKey");
   if (modelsOnly) return { endpoint, apiKey };
-  if (typeof body.model !== "string" || !body.model.trim() || body.model.length > 200 || /[,\u0000-\u001f\u007f]/.test(body.model)) throw failure("invalid_model", "model");
-  return { endpoint, apiKey, model: body.model.trim() };
+  if (typeof body.model !== "string" || !validModel(body.model.trim())) throw failure("invalid_model", "model");
+  const model = body.model.trim();
+  const models = body.models === undefined ? undefined : configuredModelsInput(body.models, model);
+  return { endpoint, apiKey, model, ...(models?.length > 1 ? { models: models.map((item) => item.id) } : {}) };
 }
 
 const validWindow = (v) => (Number.isInteger(v) && v >= 1024 && v <= 16777216 ? v : 0);
-/** 上下文窗口（可选，宿主自己记，不交给组件）：空 = 不知道；填了要在 1k–16M 之间（#67） */
+// 窗口由宿主按型号记，不交给组件；缺省按 200k，旧单型号请求仍接受清空。
 function contextWindowInput(body) {
   const v = body?.contextWindow;
   if (v === undefined || v === null || v === "" || Number(v) === 0) return 0;   // 和 providers 一致："0" 也算清空
   const n = Number(v);
   if (!Number.isInteger(n) || n < 1024 || n > 16777216) throw failure("invalid_context_window", "contextWindow");
   return n;
+}
+
+function configuredModelsInput(raw, model) {
+  if (!Array.isArray(raw) || !raw.length || raw.length > CONFIG_MODEL_LIMIT) throw failure("invalid_model", "model");
+  const seen = new Set();
+  const models = raw.map((item) => {
+    if (!object(item) || Object.keys(item).some((key) => !["id", "contextWindow"].includes(key)) ||
+        !validModel(item.id) || seen.has(item.id)) throw failure("invalid_model", "model");
+    seen.add(item.id);
+    return { id: item.id, contextWindow: contextWindowInput(item) || DEFAULT_CONTEXT_WINDOW };
+  });
+  if (!seen.has(model)) throw failure("invalid_model", "model");
+  return models;
+}
+
+// 只接受我们自己生成的纯本地清单，不能借多模型放开任意 modelsUrl 或远端地址。
+const inlineModelList = (models) => "data:application/json;base64," + Buffer.from(JSON.stringify({ data: models.map((m) => ({ id: m.id, context_window: m.contextWindow })) })).toString("base64");
+function providerModels(provider) {
+  if (!provider?.modelsUrl) return null;
+  const prefix = "data:application/json;base64,";
+  if (typeof provider.modelsUrl !== "string" || !provider.modelsUrl.startsWith(prefix) || provider.modelsUrl.length > 180 << 10) throw failure("RUNTIME_CONFLICT");
+  try {
+    const data = JSON.parse(Buffer.from(provider.modelsUrl.slice(prefix.length), "base64").toString("utf8"));
+    if (!object(data) || Object.keys(data).length !== 1 || !Array.isArray(data.data)) throw failure("RUNTIME_CONFLICT");
+    const models = configuredModelsInput(data.data.map((m) => {
+      if (!object(m) || Object.keys(m).some((k) => !["id", "context_window"].includes(k)) || !validWindow(m.context_window)) throw failure("RUNTIME_CONFLICT");
+      return { id: m.id, contextWindow: m.context_window };
+    }), provider.defaultModel);
+    if (inlineModelList(models) !== provider.modelsUrl) throw failure("RUNTIME_CONFLICT");
+    return models;
+  } catch { throw failure("RUNTIME_CONFLICT"); }
+}
+function modelWindows(view, provider) {
+  const known = providerModels(provider) || [];
+  const ids = view.models?.length ? view.models : known.map((m) => m.id);
+  return ids.map((id) => ({ id, contextWindow: known.find((m) => m.id === id)?.contextWindow ||
+    (id === provider?.defaultModel ? validWindow(provider?.contextWindow) : 0) || DEFAULT_CONTEXT_WINDOW }));
 }
 
 function modelsView(result, apiKey = "") {
@@ -245,7 +292,8 @@ function modelsView(result, apiKey = "") {
     const id = object(model) ? model.id : undefined;
     if (typeof id !== "string" || !id.trim() || id.length > 200 || /[,\u0000-\u001f\u007f]/.test(id) || ids.has(id) || (apiKey && id.includes(apiKey))) throw failure("MODELS_INVALID_RESPONSE");
     ids.add(id);
-    return { id };
+    const contextWindow = validWindow(model.context_window);
+    return { id, ...(contextWindow ? { context_window: contextWindow } : {}) };
   });
   const view = { ok: true, models, truncated: result.truncated };
   if (Buffer.byteLength(JSON.stringify(view)) > MODELS_MAX_BYTES) throw failure("MODELS_TOO_LARGE");
@@ -309,6 +357,17 @@ export function clearBridgeConfigMapping(id) {
 }
 
 const localFingerprint = (connection) => crypto.createHash("sha256").update(connection.baseUrl + "\0" + connection.apiKey).digest("hex");
+const modelsFingerprint = (provider) => provider.modelsUrl ? crypto.createHash("sha256").update(provider.modelsUrl).digest("hex") : "";
+const validFingerprints = (value) => object(value) && typeof value.fingerprint === "string" && /^[0-9a-f]{64}$/.test(value.fingerprint) &&
+  (value.modelsFingerprint === undefined || (typeof value.modelsFingerprint === "string" && /^[0-9a-f]{64}$/.test(value.modelsFingerprint)));
+const sameFingerprints = (value, provider) => value.fingerprint === localFingerprint(provider) && (value.modelsFingerprint || "") === modelsFingerprint(provider);
+function writeProviderState(value) {
+  const file = providerStateFile(), temp = file + "." + crypto.randomBytes(6).toString("hex") + ".tmp";
+  try {
+    fs.writeFileSync(temp, JSON.stringify(value), { flag: "wx", mode: 0o600 });
+    fs.renameSync(temp, file);
+  } finally { try { fs.unlinkSync(temp); } catch {} }
+}
 /** 映射记的那家接口：{ id, stale }。stale = 桥实例换过了（卸载后重装、本地密钥是新的），那家接口还连着旧实例：
  *  保存时沿用这个接口号改成新连接，状态里先不报（旧连接已失效，别让「新建会话使用」选到它）。
  *  判据：映射指纹对不上当前连接，但那家接口自己的地址 + 密钥仍和映射指纹吻合 —— 说明映射与接口都没被动过，只是实例换了。
@@ -318,39 +377,41 @@ function mappedProvider(connection) {
   try { state = regularJson(providerStateFile(), 4096); }
   catch (error) { if (error.code === "ENOENT") return { id: "", stale: false }; throw failure("RUNTIME_CONFLICT"); }
   if (!object(state) || state.schema !== 1 || state.id !== ID || typeof state.providerId !== "string" ||
-      !/^custom-[1-9][0-9]*$/.test(state.providerId) || typeof state.fingerprint !== "string") throw failure("RUNTIME_CONFLICT");
+      !/^custom-[1-9][0-9]*$/.test(state.providerId) || !validFingerprints(state) ||
+      (state.pending !== undefined && !validFingerprints(state.pending))) throw failure("RUNTIME_CONFLICT");
   const provider = PROVIDERS_CFG.providers[state.providerId];
   if (!provider) return { id: "", stale: false };
-  if (!provider.custom || provider.login || provider.local || provider.authStyle !== "bearer" || provider.modelsUrl ||
+  if (!provider.custom || provider.login || provider.local || provider.authStyle !== "bearer" ||
       provider.endpoints?.length || provider.apiKeyEnv || Object.keys(provider.extraEnv || {}).length) throw failure("RUNTIME_CONFLICT");
-  if (state.fingerprint === localFingerprint(connection)) {
+  providerModels(provider);
+  // 只有写前记录的精确旧/新组合可恢复；删掉清单或换成第三种清单仍是冲突。
+  const current = sameFingerprints(state, provider) ? state
+    : state.pending && sameFingerprints(state.pending, provider) ? state.pending : null;
+  if (!current) throw failure("RUNTIME_CONFLICT");
+  if (current.fingerprint === localFingerprint(connection)) {
     if (provider.baseUrl !== connection.baseUrl || provider.apiKey !== connection.apiKey) throw failure("RUNTIME_CONFLICT");
     return { id: state.providerId, stale: false };
   }
   if (typeof provider.baseUrl !== "string" || typeof provider.apiKey !== "string" ||
-      !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{3,4}$/.test(provider.baseUrl) || !/^[0-9a-f]{48}$/.test(provider.apiKey) ||
-      state.fingerprint !== localFingerprint(provider)) throw failure("RUNTIME_CONFLICT");
+      !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{3,4}$/.test(provider.baseUrl) || !/^[0-9a-f]{48}$/.test(provider.apiKey)) throw failure("RUNTIME_CONFLICT");
   return { id: state.providerId, stale: true };
 }
 
-async function saveProvider(connection, contextWindow = 0) {
+function saveProvider(connection, contextWindow = 0, models = [{ id: connection.model, contextWindow: contextWindow || DEFAULT_CONTEXT_WINDOW }]) {
   const { id } = mappedProvider(connection);
   if (id && [...RUNS.values()].some((run) => !run.ended && run.provider === id)) throw failure("BUSY");
-  // 复用唯一现有持久化入口，让内存 RAW 与磁盘同时更新；不是发请求，也不调用 test/active。
-  const body = Buffer.from(JSON.stringify({ ...(id ? { id } : {}), label: "OpenAI API 本地协议桥", baseUrl: connection.baseUrl,
-    apiKey: connection.apiKey, defaultModel: connection.model, fastModel: connection.model, authStyle: "bearer", contextWindow }));
-  const req = Readable.from([body]);
-  Object.assign(req, { method: "POST", headers: {}, ccBodySha: crypto.createHash("sha256").update(body).digest("hex") });
-  let response, status;
-  const res = { writeHead(code) { status = code; }, end(data) { response = JSON.parse(String(data)); } };
-  const url = new URL("http://127.0.0.1/api/providers/save");
-  await routeProviders(req, res, url, url.pathname);
-  if (status !== 200 || response?.ok !== true || !/^custom-[1-9][0-9]*$/.test(response.id || "")) throw failure("provider_save_failed");
-  const file = providerStateFile(), temp = file + "." + crypto.randomBytes(6).toString("hex") + ".tmp";
-  try {
-    fs.writeFileSync(temp, JSON.stringify({ schema: 1, id: ID, providerId: response.id, fingerprint: localFingerprint(connection) }), { flag: "wx", mode: 0o600 });
-    fs.renameSync(temp, file);
-  } finally { try { fs.unlinkSync(temp); } catch {} }
+  // 复用同一个同步持久化入口；先记非秘密指纹事务，避免接口已落盘而映射写失败后永久锁死。
+  const modelsUrl = inlineModelList(models), next = { fingerprint: localFingerprint(connection), modelsFingerprint: modelsFingerprint({ modelsUrl }) };
+  const previous = id && PROVIDERS_CFG.providers[id], previousState = id ? regularJson(providerStateFile(), 4096) : null;
+  const response = upsertProvider(id || null, { label: "OpenAI API 本地协议桥", baseUrl: connection.baseUrl,
+    apiKey: connection.apiKey, defaultModel: connection.model, fastModel: connection.model, authStyle: "bearer", contextWindow, modelsUrl }, (providerId) => {
+    writeProviderState({ schema: 1, id: ID, providerId, ...(previous ? {
+      fingerprint: localFingerprint(previous), ...(previous.modelsUrl ? { modelsFingerprint: modelsFingerprint(previous) } : {}), pending: next,
+    } : next) });
+    return () => { if (previousState) writeProviderState(previousState); else clearBridgeConfigMapping(ID); };
+  });
+  if (response?.ok !== true || !/^custom-[1-9][0-9]*$/.test(response.id || "")) throw failure("provider_save_failed");
+  writeProviderState({ schema: 1, id: ID, providerId: response.id, ...next });
   return response.id;
 }
 
@@ -362,8 +423,14 @@ export async function bridgeConfigStatus() {
     let m = { id: "", stale: false };
     if (view.configured) m = mappedProvider(defaultConnection(view.model));
     else try { m = mappedProvider({ baseUrl: "", apiKey: "" }); } catch {}
-    const providerId = m.stale ? "" : m.id;
-    return { ok: true, ...view, providerId, contextWindow: validWindow(m.id && PROVIDERS_CFG.providers[m.id]?.contextWindow) };
+    const provider = m.id && PROVIDERS_CFG.providers[m.id], models = modelWindows(view, provider), known = providerModels(provider);
+    const matches = !view.configured || (provider && provider.defaultModel === view.model &&
+      JSON.stringify((known || [{ id: provider.defaultModel }]).map((item) => item.id)) === JSON.stringify(view.models));
+    const localError = view.localError || (!matches && !m.stale ? "LOCAL_START_FAILED" : "");
+    const blocked = localError ? { localReady: false, localError, local: { state: "error", code: localError } } : {};
+    return { ok: true, ...view, ...blocked, models, providerId: m.stale || !matches ? "" : m.id,
+      contextWindow: models.find((item) => item.id === view.model)?.contextWindow ||
+        (!view.configured && provider ? validWindow(provider.contextWindow) : 0) };
   } catch (error) {
     if (error.code === "not_installed") return { ok: true, installed: false, configured: false, hasKey: false, endpoint: "", model: "", localReady: false, local: { state: "stopped" } };
     throw error;
@@ -371,7 +438,10 @@ export async function bridgeConfigStatus() {
 }
 
 export async function saveBridgeConfig(body) {
-  const input = validateInput(body), contextWindow = contextWindowInput(body);
+  const input = validateInput(body);
+  const models = body.models === undefined ? [{ id: input.model, contextWindow: contextWindowInput(body) || DEFAULT_CONTEXT_WINDOW }]
+    : configuredModelsInput(body.models, input.model);
+  const contextWindow = models.find((item) => item.id === input.model).contextWindow;
   let saved = false, release;
   try {
     const current = await bridgeConfigStatus();
@@ -387,11 +457,12 @@ export async function saveBridgeConfig(body) {
     const configured = await invokeComponent("gui-configure", input);
     saved = configured?.schema === 1 && configured.id === ID && configured.configured === true;
     const view = statusView(configured);
-    if (!view.configured || view.endpoint !== input.endpoint || view.model !== input.model) throw failure("component_response");
+    if (!view.configured || view.endpoint !== input.endpoint || view.model !== input.model ||
+        JSON.stringify(view.models) !== JSON.stringify(models.map((item) => item.id))) throw failure("component_response");
     saved = true;
     assertGuiOwnership();
-    const providerId = await saveProvider(defaultConnection(view.model), contextWindow);
-    return { ok: true, saved, ...view, providerId, contextWindow };
+    const providerId = await saveProvider(defaultConnection(view.model), contextWindow, models);
+    return { ok: true, saved, ...view, models, providerId, contextWindow };
   } catch (error) { error.saved = saved; throw error; }
   finally { release?.(); input.apiKey = ""; }
 }
@@ -401,10 +472,10 @@ export async function handleBridgeConfig(req, res) {
     if (req.method === "GET") return sendJson(res, 200, await bridgeConfigStatus());
     if (req.method !== "POST") return sendJson(res, 405, { ok: false, code: "method" });
     let body;
-    try { body = JSON.parse((await readBodyBuf(req, 16384)).toString("utf8")); } catch { throw failure("invalid_input"); }
+    try { body = JSON.parse((await readBodyBuf(req, CONFIG_MAX_BYTES)).toString("utf8")); } catch { throw failure("invalid_input"); }
     return sendJson(res, 200, await saveBridgeConfig(body));
   } catch (error) {
-    const codes = ["BUSY", "RUNTIME_CONFLICT", "not_installed", "component_spawn", "component_failed", "component_response", "component_timeout", "KEY_REQUIRED", "KEY_HOST_CHANGED", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key", "invalid_model", "invalid_context_window", "provider_save_failed"];
+    const codes = ["BUSY", "RUNTIME_CONFLICT", "not_installed", "component_spawn", "component_failed", "component_response", "component_timeout", "KEY_REQUIRED", "KEY_HOST_CHANGED", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key", "invalid_model", "invalid_context_window", "provider_save_failed", ...LOCAL_ERRORS];
     const code = codes.includes(error.code) ? error.code : "config_failed";
     const status = ["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(code) ? 409 : 400;
     log(`[bridge-config] ${req.method === "POST" ? "save" : "status"} failed stage=${code}`);

@@ -2596,3 +2596,19 @@
 2596	Paramètres de requête invalides
 2597	L'ouvrir dans le navigateur retire la protection de la visionneuse : les scripts de la page peuvent envoyer ailleurs les fichiers de son dossier et accéder à d'autres services de cet appareil. Ne le faites que pour des pages de confiance.
 2598	Approuver, garder le mode actuel ({m})
+2599	Configurez plusieurs modèles pour une API, avec remplissage automatique des fenêtres de contexte.
+2600	Recherchez ou saisissez un modèle, puis ajoutez-le. Réglez sa fenêtre et choisissez un modèle par défaut.
+2601	La fenêtre renvoyée par l'API est utilisée, ou 200,000 tokens si elle manque. Vous pouvez la modifier.
+2602	Ajouter un modèle
+2603	Modèles ajoutés
+2604	Vous pouvez ajouter jusqu'à 100 modèles.
+2605	Définir par défaut
+2606	La récupération automatique est arrêtée ; modifier la configuration ne lève pas cet état. Lancez d'abord le diagnostic, puis réinitialisez explicitement le compteur des tentatives de récupération.
+2607	La vérification du correctif du pont a échoué et la récupération automatique est arrêtée. Lancez d'abord le diagnostic et corrigez le problème ; enregistrer la configuration ne supprime pas la panne.
+2608	Le pont local est désactivé et ne peut pas être utilisé pour de nouvelles conversations. Vérifiez d'abord l'état du composant ; enregistrer la configuration ne le réactive pas.
+2609	Le composant du pont local est temporairement indisponible : une mise à jour est peut-être en cours ou son installation est incomplète. Vérifiez d'abord le composant. Le compteur des tentatives de récupération ne sera pas réinitialisé automatiquement.
+2610	La copie d'exécution du pont doit être mise à jour. Vérifiez d'abord la version du composant ; elle ne peut pas encore être utilisée pour de nouvelles conversations.
+2611	Le pont local n'est pas encore prêt. Consultez d'abord le diagnostic local. La conversation actuelle reste inchangée et enregistrer la configuration ne réinitialise pas le compteur des tentatives de récupération.
+2612	Tentatives de récupération automatique épuisées
+2613	Échec de la vérification du correctif du pont
+2614	Pont local désactivé

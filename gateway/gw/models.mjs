@@ -256,7 +256,7 @@ async function fetchModelsOf(p, force) {
   // 写在配置里的内嵌清单（data:application/json,…）：本地解析，不发请求、不带密钥，网络那边的同主机限制不用放宽（#57）
   const inline = inlineModels(p.modelsUrl);
   if (inline) {
-    const list = withConfigured(withCatalog(mergeKnown(inline, p.fallbackModels), p), p);
+    const list = withConfigured(withCatalog(mergeKnown(inline, p.fallbackModels, true), p), p);
     if (list.length) return keep(list);
   }
 
@@ -309,7 +309,7 @@ export function cachedModels(p = PROVIDER) {
   const list = (c && c.list) || (MODELS_FOR === sigOf(p) && MODELS);
   if (list) return withWindows(list);
   const inline = inlineModels(p.modelsUrl);
-  return withWindows(withConfigured(inline ? mergeKnown(inline, p.fallbackModels) : p.fallbackModels || [], p));
+  return withWindows(withConfigured(inline ? mergeKnown(inline, p.fallbackModels, true) : p.fallbackModels || [], p));
 }
 /** 这家的清单拉过没有（过期的也算）：拉过就不必让这一轮干等网络 */
 export function modelsCached(p = PROVIDER) {
@@ -318,11 +318,11 @@ export function modelsCached(p = PROVIDER) {
 }
 
 /** 厂商的 /models 多是 OpenAI 形状：不报窗口，还混着向量、语音、画图模型。
- *  去掉明显不能对话的，窗口拿目录里已知的补上（不知道就留 0，不瞎编） */
-function mergeKnown(list, known) {
+ *  自动发现去掉明显不能对话的；用户显式内嵌的清单不凭名字过滤。窗口按同名补，不知道就留 0。 */
+function mergeKnown(list, known, configured = false) {
   const byId = new Map((known || []).map((m) => [m.id, m]));
   return list
-    .filter((m) => !/embed|rerank|tts|asr|whisper|speech|audio|wanx|cogview|cogvideo|image-|moderation/i.test(m.id))
+    .filter((m) => configured || !/embed|rerank|tts|asr|whisper|speech|audio|wanx|cogview|cogvideo|image-|moderation/i.test(m.id))
     .map((m) => {
       const k = byId.get(m.id);
       if (!k) return m;

@@ -6,9 +6,11 @@ import path from "node:path";
 import http from "node:http";
 import { routeComponents } from "../gw/components.mjs";
 import { normalizeBridgeEndpoint } from "../gw/bridge-config.mjs";
-import { PROVIDER, PROVIDERS_CFG } from "../gw/providers.mjs";
+import { PROVIDER, PROVIDERS_CFG, upsertProvider } from "../gw/providers.mjs";
 import { SETTINGS } from "../gw/settings-store.mjs";
 import { RUNS } from "../gw/runs.mjs";
+import { cachedModels, fetchModels, routeModels } from "../gw/models.mjs";
+import { claudeEnv } from "../gw/claude.mjs";
 
 const home = process.env.CCAPP_HOME, prefix = process.env.CCAPP_PREFIX;
 const root = fs.mkdtempSync(path.join(process.env.CCAPP_WORKSPACE, "bridge-config-"));
@@ -30,7 +32,7 @@ let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{
  const write=(p,v)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(v),{mode:0o600});};
  if(mode==='conflict'){console.error(JSON.stringify({schema:1,id:'openai-bridge',error:{code:'RUNTIME_CONFLICT',message:'must not forward '+${JSON.stringify(upstreamSecret)}}}));process.exitCode=1;return;}
  let state=fs.existsSync(stateFile)?JSON.parse(fs.readFileSync(stateFile,'utf8')):null;
- const view=()=>({schema:1,id:'openai-bridge',configured:!!state,endpoint:state?.endpoint||'',model:state?.model||'',hasKey:!!state,localReady:!!state&&mode!=='not-ready',apiKey:${JSON.stringify(upstreamSecret)},keyTail:'LEAK',connectionPath:'/untrusted/path'});
+ const view=()=>({schema:1,id:'openai-bridge',configured:!!state,endpoint:state?.endpoint||'',model:state?.model||'',...(state?.models?{models:state.models}:{}),hasKey:!!state,localReady:!!state&&mode!=='not-ready',...(mode.startsWith('local:')?{localError:mode.slice(6)}:{}),apiKey:${JSON.stringify(upstreamSecret)},keyTail:'LEAK',connectionPath:'/untrusted/path'});
  if(command==='gui-status'){console.log(JSON.stringify(view()));return;}
  if(command==='uninstall'){fs.rmSync(reg,{force:true});return;}
  if(command!=='gui-configure'){process.exitCode=2;return;}
@@ -238,6 +240,26 @@ test("落盘成功但本地未就绪独立报告，不冒充远端连接成功",
   assert.equal(result.body.local.state, "stopped");
 });
 
+for (const code of ["RECOVERY_EXHAUSTED", "PATCH_VERIFICATION_FAILED", "COMPONENT_DISABLED", "LOCAL_START_FAILED", "COMPONENT_UNAVAILABLE", "UPDATE_REQUIRED"]) test(`本地错误${code}在状态和连续保存中保留，健康残存进程也不能就绪`, async () => {
+  fs.writeFileSync(modeFile, "local:" + code);
+  for (let i = 0; i < 3; i++) {
+    const saved = await request(input());
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.configured, true); assert.equal(saved.body.saved, true);
+    assert.equal(saved.body.localReady, false); assert.equal(saved.body.localError, code);
+    assert.deepEqual(saved.body.local, { state: "error", code });
+    const status = await request();
+    assert.equal(status.body.localReady, false); assert.equal(status.body.localError, code);
+    assert.deepEqual(status.body.local, { state: "error", code });
+  }
+});
+
+test("未知本地错误不透传组件消息或秘密，按通用故障失败关闭", async () => {
+  fs.writeFileSync(modeFile, "local:" + upstreamSecret);
+  const result = await request(input());
+  assert.equal(result.body.localReady, false); assert.equal(result.body.localError, "LOCAL_START_FAILED");
+});
+
 test("已有同版手工实例没有GUI标记时不接管或调用configure", async () => {
   await request(input());
   const manifest = path.join(target, ".ccr-bridge-kit.json");
@@ -275,4 +297,191 @@ test("配置保存占用组件槽，重复保存/卸载/取消都不能交错", 
   assert.equal((await request({ id: "openai-bridge" }, "/api/components/cancel")).body.message, "busy");
   assert.equal((await pending).status, 200);
   assert.equal(calls().filter((call) => call.args[0] === "gui-configure").length, 1);
+});
+
+test("同一桥保存多个模型，窗口逐模型持久化，冷缓存/会话切换/CLI环境各取各的", async () => {
+  const active = PROVIDER.id, setting = SETTINGS.provider;
+  const models = [{ id: "large-model", contextWindow: 1048576 }, { id: "gpt-4o-audio-preview", contextWindow: 128000 }, { id: "image-aware-chat" }];
+  const result = await request(input({ model: "large-model", models }));
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  const id = result.body.providerId, provider = PROVIDERS_CFG.providers[id];
+  const expected = [...models.slice(0, 2), { id: "image-aware-chat", contextWindow: 200000 }];
+  assert.deepEqual(result.body.models, expected);
+  assert.deepEqual((await request()).body.models, expected);
+  const disk = JSON.parse(fs.readFileSync(path.join(home, "ccapp-providers.json"), "utf8")).providers[id];
+  assert.equal(disk.modelsUrl, provider.modelsUrl);
+  for (const list of [cachedModels(provider), await fetchModels(true, provider)])
+    assert.deepEqual(list.map((m) => [m.id, m.context_window]), expected.map((m) => [m.id, m.contextWindow]));
+  for (const m of expected) {
+    assert.equal(claudeEnv({ model: m.id, provider }).CLAUDE_CODE_MAX_CONTEXT_TOKENS, String(m.contextWindow));
+    const url = new URL("http://127.0.0.1/api/models?provider=" + id + "&model=" + m.id);
+    let body;
+    await routeModels({ method: "GET" }, { writeHead() {}, end(text) { body = JSON.parse(text); } }, url, url.pathname);
+    assert.equal(body.current, m.id); assert.equal(body.contextWindow, m.contextWindow);
+    assert.deepEqual(body.models.map((item) => item.id), expected.map((item) => item.id));
+  }
+  assert.equal(PROVIDER.id, active); assert.equal(SETTINGS.provider, setting);
+  assert.deepEqual(calls().find((call) => call.args[0] === "gui-configure").fields.sort(), ["apiKey", "endpoint", "model", "models"]);
+});
+
+test("旧单模型配置可读且保存缺省窗口为200000，不借其他型号的窗口", async () => {
+  const result = await request(input());
+  assert.equal(result.body.contextWindow, 200000);
+  assert.deepEqual(result.body.models, [{ id: "fixture-model", contextWindow: 200000 }]);
+  const next = await request(input({ apiKey: "", model: "other", models: [{ id: "fixture-model", contextWindow: 1048576 }, { id: "other" }] }));
+  assert.equal(next.status, 200);
+  assert.equal(next.body.contextWindow, 200000);
+  assert.equal(next.body.providerId, result.body.providerId);
+});
+
+test("多模型请求校验默认项/重复/数量/控制字符/上下文，失败不调用组件", async () => {
+  for (const models of [[], ["fixture-model"], [{ id: "other" }], [{ id: "fixture-model" }, { id: "fixture-model" }],
+    [{ id: "fixture-model", url: "https://untrusted.invalid" }], [{ id: "fixture-model", contextWindow: 12.5 }],
+    [{ id: "fixture-model" }, { id: "bad\u0085model" }], Array.from({ length: 101 }, (_, i) => ({ id: i ? "m" + i : "fixture-model" }))]) {
+    assert.equal((await request(input({ models }))).status, 400);
+  }
+  assert.deepEqual(calls(), []);
+});
+
+test("仅允许归属匹配的规范内嵌清单，远端/被改过的清单仍冲突", async () => {
+  const result = await request(input({ models: [{ id: "fixture-model" }, { id: "other" }] }));
+  const provider = PROVIDERS_CFG.providers[result.body.providerId], original = provider.modelsUrl;
+  for (const value of ["", undefined, "https://other.invalid/models", "data:application/json," + encodeURIComponent('{"data":[{"id":"fixture-model"}]}'),
+    "data:application/json;base64," + Buffer.from(JSON.stringify({ data: [{ id: "fixture-model", context_window: 1024 }] })).toString("base64")]) {
+    if (value === undefined) delete provider.modelsUrl; else provider.modelsUrl = value;
+    assert.equal((await request()).body.code, "RUNTIME_CONFLICT");
+    const before = calls().filter((call) => call.args[0] === "gui-configure").length;
+    assert.equal((await request(input())).body.code, "RUNTIME_CONFLICT");
+    assert.equal(calls().filter((call) => call.args[0] === "gui-configure").length, before);
+  }
+  provider.modelsUrl = original;
+  assert.equal((await request()).status, 200);
+});
+
+test("清单映射最终写入失败仍可读和重试，只认写前记录的精确旧新指纹", async () => {
+  const models = [{ id: "fixture-model", contextWindow: 1048576 }, { id: "second", contextWindow: 128000 }];
+  const first = await request(input({ models })), id = first.body.providerId;
+  const mapping = path.join(path.dirname(registration), "openai-bridge-app.json");
+  const originalUrl = PROVIDERS_CFG.providers[id].modelsUrl, writeFileSync = fs.writeFileSync;
+  let failed = false;
+  fs.writeFileSync = function(file, ...args) {
+    if (!failed && String(file).startsWith(mapping + ".") && String(file).endsWith(".tmp") && PROVIDERS_CFG.providers[id].modelsUrl !== originalUrl) {
+      failed = true; const error = new Error("fixture write failure"); error.code = "ENOSPC"; throw error;
+    }
+    return writeFileSync.call(this, file, ...args);
+  };
+  const updated = [{ ...models[0], contextWindow: 512000 }, models[1]];
+  try {
+    const partial = await request(input({ models: updated }));
+    assert.equal(failed, true); assert.equal(partial.status, 400); assert.equal(partial.body.saved, true);
+  } finally { fs.writeFileSync = writeFileSync; }
+  const checked = await request();
+  assert.equal(checked.status, 200, JSON.stringify(checked.body)); assert.equal(checked.body.providerId, id);
+  assert.deepEqual(checked.body.models, updated);
+  const { spawnSync } = await import("node:child_process");
+  const cold = spawnSync(process.execPath, ["--input-type=module", "-e", `const {bridgeConfigStatus}=await import(${JSON.stringify(new URL("../gw/bridge-config.mjs", import.meta.url).href)});console.log(JSON.stringify(await bridgeConfigStatus()));`], { env: process.env, encoding: "utf8", timeout: 10000 });
+  assert.equal(cold.status, 0, "fresh gateway must recognize the precise pending transaction");
+  assert.deepEqual(JSON.parse(cold.stdout).models, updated);
+  const provider = PROVIDERS_CFG.providers[id], validUrl = provider.modelsUrl;
+  for (const value of ["", "https://elsewhere.invalid/models", "data:application/json;base64," + Buffer.from(JSON.stringify({ data: [{ id: "fixture-model", context_window: 1024 }] })).toString("base64")]) {
+    provider.modelsUrl = value;
+    assert.equal((await request()).body.code, "RUNTIME_CONFLICT");
+  }
+  provider.modelsUrl = validUrl;
+  const retried = await request(input({ models: updated }));
+  assert.equal(retried.status, 200, JSON.stringify(retried.body)); assert.equal(retried.body.providerId, id);
+  assert.deepEqual((await request()).body.models, updated);
+  assert.equal("pending" in JSON.parse(fs.readFileSync(mapping, "utf8")), false);
+});
+
+test("首次接口保存映射准备失败不产生无归属接口，恢复写盘后可正常保存", async () => {
+  const mapping = path.join(path.dirname(registration), "openai-bridge-app.json"), before = Object.keys(PROVIDERS_CFG.providers);
+  const writeFileSync = fs.writeFileSync; let failed = false;
+  fs.writeFileSync = function(file, ...args) {
+    if (!failed && String(file).startsWith(mapping + ".") && String(file).endsWith(".tmp")) {
+      failed = true; const error = new Error("fixture write failure"); error.code = "ENOSPC"; throw error;
+    }
+    return writeFileSync.call(this, file, ...args);
+  };
+  try { const result = await request(input()); assert.equal(result.status, 400); assert.equal(result.body.saved, true); }
+  finally { fs.writeFileSync = writeFileSync; }
+  assert.equal(failed, true); assert.deepEqual(Object.keys(PROVIDERS_CFG.providers), before);
+  assert.equal(fs.existsSync(mapping), false);
+  const retried = await request(input()); assert.equal(retried.status, 200, JSON.stringify(retried.body));
+  assert.equal(Object.keys(PROVIDERS_CFG.providers).length, before.length + 1);
+});
+
+test("接口文件写入失败保留旧内存和磁盘，写前事务允许原接口正常重试", async () => {
+  const models = [{ id: "fixture-model", contextWindow: 1048576 }, { id: "second", contextWindow: 128000 }];
+  const first = await request(input({ models })), id = first.body.providerId;
+  const originalUrl = PROVIDERS_CFG.providers[id].modelsUrl, file = path.join(home, "ccapp-providers.json"), disk = fs.readFileSync(file);
+  const writeFileSync = fs.writeFileSync; let failed = false;
+  fs.writeFileSync = function(name, ...args) {
+    if (!failed && String(name) === file + ".tmp") {
+      failed = true; const error = new Error("fixture write failure"); error.code = "ENOSPC"; throw error;
+    }
+    return writeFileSync.call(this, name, ...args);
+  };
+  const updated = [{ ...models[0], contextWindow: 512000 }, models[1]];
+  try { assert.equal((await request(input({ models: updated }))).status, 400); }
+  finally { fs.writeFileSync = writeFileSync; }
+  assert.equal(failed, true); assert.equal(PROVIDERS_CFG.providers[id].modelsUrl, originalUrl);
+  assert.deepEqual(fs.readFileSync(file), disk); assert.deepEqual((await request()).body.models, models);
+  const retried = await request(input({ models: updated }));
+  assert.equal(retried.status, 200, JSON.stringify(retried.body)); assert.equal(retried.body.providerId, id);
+  assert.deepEqual((await request()).body.models, updated);
+});
+
+test("首次provider写入失败撤销预备映射，普通接口复用ID后不会卡死桥或被覆盖", async () => {
+  const file = path.join(home, "ccapp-providers.json"), mapping = path.join(path.dirname(registration), "openai-bridge-app.json");
+  const writeFileSync = fs.writeFileSync; let failed = false;
+  fs.writeFileSync = function(name, ...args) {
+    if (!failed && String(name) === file + ".tmp") {
+      failed = true; const error = new Error("fixture write failure"); error.code = "ENOSPC"; throw error;
+    }
+    return writeFileSync.call(this, name, ...args);
+  };
+  try { assert.equal((await request(input())).status, 400); }
+  finally { fs.writeFileSync = writeFileSync; }
+  assert.equal(failed, true); assert.equal(fs.existsSync(mapping), false);
+  const unrelated = upsertProvider(null, { baseUrl: "https://unrelated.example.invalid", label: "Unrelated fixture" });
+  assert.equal(unrelated.ok, true);
+  const protectedProvider = structuredClone(PROVIDERS_CFG.providers[unrelated.id]);
+  const pending = await request(); assert.equal(pending.status, 200); assert.equal(pending.body.providerId, ""); assert.equal(pending.body.localReady, false);
+  const saved = await request(input()); assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.notEqual(saved.body.providerId, unrelated.id); assert.deepEqual(PROVIDERS_CFG.providers[unrelated.id], protectedProvider);
+});
+
+test("provider落盘失败且组件已换默认模型：不借旧默认窗口，不将不一致接口提供新会话", async () => {
+  const models = [{ id: "fixture-model", contextWindow: 1048576 }, { id: "second", contextWindow: 128000 }];
+  const first = await request(input({ models }));
+  const updated = [...models, { id: "new-default", contextWindow: 64000 }], file = path.join(home, "ccapp-providers.json"), writeFileSync = fs.writeFileSync;
+  let failed = false;
+  fs.writeFileSync = function(name, ...args) {
+    if (!failed && String(name) === file + ".tmp") {
+      failed = true; const error = new Error("fixture write failure"); error.code = "ENOSPC"; throw error;
+    }
+    return writeFileSync.call(this, name, ...args);
+  };
+  try { assert.equal((await request(input({ model: "new-default", models: updated }))).status, 400); }
+  finally { fs.writeFileSync = writeFileSync; }
+  assert.equal(failed, true);
+  const pending = await request();
+  assert.equal(pending.status, 200, JSON.stringify(pending.body)); assert.equal(pending.body.providerId, "");
+  assert.equal(pending.body.localReady, false); assert.equal(pending.body.localError, "LOCAL_START_FAILED");
+  assert.deepEqual(pending.body.models, [...models, { id: "new-default", contextWindow: 200000 }]);
+  const saved = await request(input({ model: "new-default", models: updated }));
+  assert.equal(saved.status, 200, JSON.stringify(saved.body)); assert.equal(saved.body.providerId, first.body.providerId);
+  assert.deepEqual(saved.body.models, updated); assert.equal(saved.body.localReady, true);
+});
+
+test("100个长Unicode模型可保存，超过128KiB配置拒绝且不执行组件", async () => {
+  const models = Array.from({ length: 100 }, (_, i) => ({ id: String(i).padStart(3, "0") + "模".repeat(197), contextWindow: 200000 }));
+  const result = await request(input({ model: models[0].id, models }));
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.deepEqual((await request()).body.models, models);
+  const before = calls().length;
+  // readBodyBuf 超限主动断开连接，不保证能再把 JSON 错误送到已关闭的 socket。
+  await assert.rejects(request(input({ apiKey: "x".repeat(128 * 1024) })));
+  assert.equal(calls().length, before);
 });
