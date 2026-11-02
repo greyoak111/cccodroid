@@ -2625,5 +2625,9 @@
 2625	Le modèle local {model} est utilisé dans une autre conversation ; changez de modèle quand il aura fini
 2626	Repliez puis rouvrez pour réessayer
 2627	{n} arrêté(s)
+2628	En file d'attente : une tâche d'arrière-plan tourne encore et ce tour n'accepte plus de messages. Touchez « Envoyer maintenant » pour arrêter la tâche et envoyer
+2629	{n} en attente · Une tâche d'arrière-plan tourne encore ; ce tour n'accepte plus de messages avant qu'elle se termine · « Envoyer maintenant » l'arrête et envoie
+2630	Envoyer maintenant arrêtera d'abord {n} tâche(s) d'arrière-plan en cours. Continuer ?
+2631	Ce tour n'accepte plus de commandes : les {n} tâches d'arrière-plan seront arrêtées ensemble. Continuer ?
 2632	{n} non arrêté(s) : {list}
 2633	(État du dernier contrôle ; celui-ci a échoué : {msg})

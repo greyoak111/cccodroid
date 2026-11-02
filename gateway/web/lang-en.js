@@ -2663,6 +2663,10 @@ window.I18N_DICT.en = {
   "端侧模型 {model} 正在另一个会话里用，等它答完再换模型": "The on-device model {model} is busy in another session; switch models after it finishes",
   "收起再点开可重试": "Collapse and reopen to retry",
   "{n} 已停止": "{n} stopped",
+  "已排队：后台任务还在跑，这一轮收不进新消息了。点「立即发送」会停掉后台任务再发": "Queued: a background task is still running and this turn can't take new messages. Tap \"Send now\" to stop the background task and send",
+  "待发 {n} 条 · 后台任务还在跑，这一轮收不进新消息了，要等它结束 · 点「立即发送」会停掉后台任务再发": "{n} waiting · A background task is still running and this turn can't take new messages until it ends · Tap \"Send now\" to stop it and send",
+  "立即发送要先停掉还在跑的 {n} 个后台任务。继续？": "Sending now will first stop {n} background task(s) that are still running. Continue?",
+  "这一轮已经收不进指令，只能把 {n} 个后台任务一起停掉。继续？": "This turn can no longer take commands, so all {n} background tasks have to be stopped together. Continue?",
   "{n} 个没停下：{list}": "{n} didn't stop: {list}",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(This is the status from the last check; this check failed: {msg})"
 };

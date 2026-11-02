@@ -29,6 +29,8 @@ import { ensureManagedBridge } from "./managed-bridge.mjs";
 
 // 必须由人回答的工具：全部放行也照问（问题、计划审批）
 const HUMAN_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
+// 空闲中后台任务自己跑完、claude 却一直没起新一轮：这么久没动静才关 stdin 收尾（我们发过 stop_task 的 6 秒）。环境变量只给测试用
+const IDLE_CLOSE_MS = Number(process.env.CCAPP_IDLE_CLOSE_MS) || 120000;
 
 /** 这一轮在哪个目录跑：显式指定 → 接着的会话当初的 cwd（--resume 只在同一 cwd 下找得到）→ 项目目录 → 工作区 */
 const isDirSync = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
@@ -313,7 +315,7 @@ export async function startRun(item) {
   run.setMode = (mode) => { run.permMode = mode; return run.inputOpen && writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "set_permission_mode", mode } }); };
   // 停掉一个后台任务（stop_task 控制请求；claude 停完会再报一次 background_tasks_changed）
   run.stopTask = (taskId) => run.inputOpen && run.bgList.some((t) => t.id === taskId) &&
-    writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "stop_task", task_id: taskId } });
+    writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "stop_task", task_id: taskId } }) && (run.stopAsked = true);
   run.answerPerm = (id, a) => {
     const p = run.perms.get(id);
     if (!p || run.ended || run.aborted) return false;
@@ -486,9 +488,11 @@ export async function startRun(item) {
       if (run.idle && run.bgTasks) emit({ type: "run_idle", bg: run.bgTasks });
       publishState();                    // 明细跟着状态走（runInfo.bgList），断线重连也补得上
       // 空闲中后台任务全没了：任务自己跑完时 claude 会接着起一轮（之后的 result 会关 stdin）；
-      // 被 stop_task 停掉的只排进它的队列、不起新一轮，这一轮就永远挂着。等 6 秒没动静就收尾
+      // 被 stop_task 停掉的只排进它的队列、不起新一轮，这一轮就永远挂着：我们发过 stop_task 的等 6 秒没动静就收尾。
+      // 自己跑完的不能这么快关：上下文大时 claude 起新一轮的第一个字常常超过 6 秒，stdin 先关了，那一轮里再起的后台任务
+      // （比如重开一条 SSH 隧道）就成了插话发不进、停止按不动的死局，消息永远排着（11-02 群友）。这种只留个兜底
       clearTimeout(run.idleClose);
-      if (run.idle && !run.bgTasks) run.idleClose = setTimeout(() => { if (run.idle && !run.bgTasks && !run.ended) closeInput(); }, 6000);
+      if (run.idle && !run.bgTasks) run.idleClose = setTimeout(() => { if (run.idle && !run.bgTasks && !run.ended) closeInput(); }, run.stopAsked ? 6000 : IDLE_CLOSE_MS);
     }
     // 空闲中 claude 又动起来了（后台任务回报、或用户发来的新消息）：重新算「生成中」。
     // 只认主会话自己的事件：后台子代理的消息也从这条流出来（带 parent_tool_use_id），它们说话不等于主会话开了新一轮——
@@ -496,6 +500,7 @@ export async function startRun(item) {
     const mainEv = !ev.parent_tool_use_id && !ev.isSidechain;
     if (run.idle && mainEv && (ev.type === "assistant" || ev.type === "stream_event" || (ev.type === "system" && ev.subtype === "init"))) {
       run.idle = false; resultStale = true;
+      run.stopAsked = false;   // 发过的 stop_task 只管那一次空闲；新一轮之后再空闲，照「自己跑完」的兜底算（DeepSeek 复核 中-1）
       emit({ type: "run_busy", startedAt: Date.now() });
       publishState();
     }
@@ -531,7 +536,7 @@ export async function startRun(item) {
     run.perms.clear();                // 卡片随 run_end 一起作废（前端按 run_end 收起）
     if (run.pendingInject.length) {
       log(`插话 ${run.pendingInject.length} 条没来得及送达，退回队首`);
-      QUEUE.unshift(...run.pendingInject.map((it) => ({ ...it, injected: false, held: !!(run.aborted || run.laneHeld) })));
+      QUEUE.unshift(...run.pendingInject.map((it) => ({ ...it, injected: false, held: !!((run.aborted && !run.retired) || run.laneHeld) })));
       run.pendingInject = [];
     }
     const ms = Date.now() - t0;
@@ -616,6 +621,12 @@ export async function routeRun(req, res, u, p) {
   if (req.method === "POST" && p === "/api/task/stop") {
     const b = JSON.parse((await readBody(req)) || "{}");
     const run = RUNS.get(String(b.runId || ""));
+    // 输入已经关了（见 IDLE_CLOSE_MS）：stop_task 送不进去，只能连 claude 带它的后台任务一起结束。排着的消息不挂起，结束就发
+    if (run && run.idle && !run.inputOpen && !run.ended && run.bgList.some((t) => t.id === String(b.taskId || ""))) {
+      log(`■ 停后台任务 ${String(b.taskId).slice(0, 12)}：这一轮的输入已关，结束整个进程`);
+      abortRun(run, { hold: false });
+      return sendJson(res, 200, { ok: true, whole: true });
+    }
     if (!run || !run.stopTask || !run.stopTask(String(b.taskId || ""))) return sendJson(res, 409, { error: "gone", message: tz("这个后台任务已经结束了") });
     log(`■ 停后台任务 ${String(b.taskId).slice(0, 12)}`);
     return sendJson(res, 200, { ok: true });

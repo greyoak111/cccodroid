@@ -2628,6 +2628,10 @@ window.I18N_DICT["es"] = {
   "端侧模型 {model} 正在另一个会话里用，等它答完再换模型": "El modelo local {model} se está usando en otra conversación; cambia de modelo cuando termine",
   "收起再点开可重试": "Contrae y vuelve a abrir para reintentar",
   "{n} 已停止": "{n} detenido(s)",
+  "已排队：后台任务还在跑，这一轮收不进新消息了。点「立即发送」会停掉后台任务再发": "En cola: una tarea en segundo plano sigue en marcha y este turno ya no acepta mensajes. Toca «Enviar ahora» para detenerla y enviar",
+  "待发 {n} 条 · 后台任务还在跑，这一轮收不进新消息了，要等它结束 · 点「立即发送」会停掉后台任务再发": "{n} pendientes · Una tarea en segundo plano sigue en marcha; este turno no acepta mensajes hasta que termine · «Enviar ahora» la detiene y envía",
+  "立即发送要先停掉还在跑的 {n} 个后台任务。继续？": "Enviar ahora detendrá primero {n} tarea(s) en segundo plano. ¿Continuar?",
+  "这一轮已经收不进指令，只能把 {n} 个后台任务一起停掉。继续？": "Este turno ya no acepta órdenes, así que hay que detener juntas las {n} tareas en segundo plano. ¿Continuar?",
   "{n} 个没停下：{list}": "{n} no se detuvieron: {list}",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(Es el estado de la última consulta; esta vez falló: {msg})",
 };

@@ -59,7 +59,7 @@ import { routeModules } from "./gw/modules.mjs";
 import { cleanOrphans, routeOrphans } from "./gw/orphans.mjs";
 import { customRefresh, routeCustom } from "./gw/custom.mjs";
 import { routeBus } from "./gw/bus.mjs";
-import { routeQueue } from "./gw/queue.mjs";
+import { recoverRunMark, routeQueue } from "./gw/queue.mjs";
 import { routeLogin } from "./gw/login.mjs";
 import { routeRun } from "./gw/run.mjs";
 import { routeOffice } from "./gw/office.mjs";
@@ -184,6 +184,8 @@ function guardSlots(srv) {
 guardSlots(server); guardSlots(uiServer);
 // 主地址被占（EADDRINUSE 之类）：记一笔再退出，GatewayService 会重拉；以前没挂监听，直接抛成未捕获异常、日志里什么都没有（审查 v0513b 低-9）
 server.on("error", (e) => { log(`⚠️ 主地址 127.0.0.1:${CFG.port} 监听失败：${e.code || e.message}，退出等重拉`); setTimeout(() => process.exit(1), 200); });
+// 上一任留下的运行标记：等所有模块都求值完再收（放在 queue.mjs 顶层会撞循环引用——sessionops 的 SID_RE 还没初始化，带会话的排队消息一恢复网关就崩，11-02 群友日志）
+try { recoverRunMark(); } catch (e) { log("恢复上次的运行标记失败：" + (e.stack || e.message)); }
 uiServer.listen(CFG.port, UI_HOST);
 server.listen(CFG.port, "127.0.0.1", () => {
   log(`claude-apk 网关 v3 已启动  http://127.0.0.1:${CFG.port}`);

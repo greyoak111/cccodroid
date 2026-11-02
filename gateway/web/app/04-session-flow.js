@@ -777,7 +777,9 @@
   // 这一轮画出来的消息记下 run 号；收尾时标上存没存稳（加书签时数「后面同样的话」要用，审查 #52 S2-02）
   function tagRun(el, runId) { if (el && el.classList.contains("msg")) el.dataset.run = runId; }
   function onRunEnd(ev) {
-    for (const m of chatEl.querySelectorAll(`.msg[data-run="${CSS.escape(ev.runId)}"]`)) m.dataset.done = ev.failed || ev.aborted ? "bad" : "ok";
+    // retired：答完了、只剩后台任务，用户点了停止 / 立即发送把它整轮结束——回答是完整的，不算中断
+    const cut = ev.aborted && !ev.retired;
+    for (const m of chatEl.querySelectorAll(`.msg[data-run="${CSS.escape(ev.runId)}"]`)) m.dataset.done = ev.failed || cut ? "bad" : "ok";
     if (view.goalClearAfter && view.goalClearAfter.runId === ev.runId) {
       const sid = view.goalClearAfter.sid || ev.sessionId;
       view.goalClearAfter = null;
@@ -808,14 +810,15 @@
       // 压缩线的刻度在 loadModels 里刷（以前只有切模型才会调它，所以设完要切一次模型才看得到）
       if (ev.localCommand === "autocompact") loadModels();
     } else {
-      av.finish(ev.aborted);
-      if (ev.aborted) { av.note(t("已中断")); agStopAll(ev.at); }
+      av.finish(cut);
+      if (cut) { av.note(t("已中断")); agStopAll(ev.at); }
+      else if (ev.retired) agStopAll(ev.at);   // 后台子代理随进程一起停了
       const st = statBits(ev, rv.out);
       if (st) { statEl.textContent = st; statSave(view.sessionId || ev.sessionId, st); }
     }
     // 普通一轮出错网关给的是 isError（启动失败才是 failed），两个都要认（审查 #51 第3项）
     if (ev.failed || ev.isError) setStatus(t("失败"), "err");
-    else if (ev.aborted) setStatus(t("已中断"), "warn");
+    else if (cut) setStatus(t("已中断"), "warn");
     else setStatus(t("就绪"), "ok");
     scrollDown();
     loadSessions();
@@ -926,6 +929,8 @@
           : busy ? t("待发 {n} 条 · 当前这一轮结束后依次发出", { n: q.length })
           // 真到并行上限才这么说；否则是这个会话上一轮还挂着（等后台任务 / 收尾），别让人以为开了好几个会话
           : atCap() ? t("同时在跑的会话已到上限（{max} 个），有空位就依次发出 · 待发 {n} 条", { max: srv.max, n: q.length })
+          // 答完了、只剩后台任务（比如一条一直开着的隧道），输入又已经关了：不点立即发送就要等到它自己结束
+          : srv.run?.sealed ? t("待发 {n} 条 · 后台任务还在跑，这一轮收不进新消息了，要等它结束 · 点「立即发送」会停掉后台任务再发", { n: q.length })
           : t("待发 {n} 条 · 这个会话的上一轮还没完全结束（后台任务在跑或正在收尾），结束后依次发出", { n: q.length })}</span>
         <button class="q-clear">${t("全部清除")}</button>
       </div>
@@ -948,6 +953,7 @@
     if (!item) return;
     if (e.target.closest(".q-x")) return post("/api/queue/remove", { id: item.dataset.id });
     if (e.target.closest(".q-now")) {
+      if (srv.run?.sealed && srv.run.bg && !confirm(t("立即发送要先停掉还在跑的 {n} 个后台任务。继续？", { n: srv.run.bg }))) return;
       if (!view.sessionId) view.runIds.add(item.dataset.id);   // 新对话页放行的：跑起来的这一轮 id 就是它，视图跟上
       return post("/api/queue/promote", { id: item.dataset.id });
     }

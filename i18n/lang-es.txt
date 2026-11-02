@@ -2625,5 +2625,9 @@
 2625	El modelo local {model} se está usando en otra conversación; cambia de modelo cuando termine
 2626	Contrae y vuelve a abrir para reintentar
 2627	{n} detenido(s)
+2628	En cola: una tarea en segundo plano sigue en marcha y este turno ya no acepta mensajes. Toca «Enviar ahora» para detenerla y enviar
+2629	{n} pendientes · Una tarea en segundo plano sigue en marcha; este turno no acepta mensajes hasta que termine · «Enviar ahora» la detiene y envía
+2630	Enviar ahora detendrá primero {n} tarea(s) en segundo plano. ¿Continuar?
+2631	Este turno ya no acepta órdenes, así que hay que detener juntas las {n} tareas en segundo plano. ¿Continuar?
 2632	{n} no se detuvieron: {list}
 2633	(Es el estado de la última consulta; esta vez falló: {msg})

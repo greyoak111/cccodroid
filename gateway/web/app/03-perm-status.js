@@ -353,6 +353,8 @@
       return;
     }
     if (b.classList.contains("rs-stop") && srv.run) {
+      // 输入已关时停不了单个任务，只能整轮结束：不止一个就先说清楚
+      if (srv.run.sealed && srv.run.bg > 1 && !confirm(t("这一轮已经收不进指令，只能把 {n} 个后台任务一起停掉。继续？", { n: srv.run.bg }))) return;
       b.disabled = true;
       api("/api/task/stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId: srv.run.id, taskId: b.dataset.task }) })
         .catch((err) => { b.disabled = false; toast(err.message, true); });

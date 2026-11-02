@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CFG, LIVE, LAST_LANG, log, tr, tz } from "./config.mjs";
+import { CFG, LAST_LANG, log, tr, tz } from "./config.mjs";
 import { SETTINGS, saveSettings, capList } from "./settings-store.mjs";
 import { PERM_MODES, PROVIDER, keyOf, providerById } from "./providers.mjs";
 import { effectiveModel } from "./sessmodel.mjs";
@@ -47,7 +47,8 @@ const newRunId = () => `r${BOOT}${(++RUN_N).toString(36)}`;
 const runInfo = (r) => r && {
   id: r.id, cid: r.cid, text: r.text.slice(0, 2000), sessionId: r.sessionId, follow: r.follow, startedAt: r.startedAt,
   perms: r.perms ? [...r.perms.values()] : [],
-  idle: !!r.idle, bg: r.bgTasks || 0, bgList: r.bgList || [], auto: r.auto || null, permMode: r.permMode || null,
+  // sealed：答完了、后台任务还在，但 stdin 已关——插话、停单个任务都送不进去，只能等它结束或整个停掉
+  idle: !!r.idle, sealed: !!r.idle && !r.inputOpen && !r.ended, bg: r.bgTasks || 0, bgList: r.bgList || [], auto: r.auto || null, permMode: r.permMode || null,
 };
 
 /** 改权限模式：存进设置（下一轮沿用），正在跑的那一轮当场切（set_permission_mode） */
@@ -147,7 +148,6 @@ export function recoverRunMark() {
   }
   if (QUEUE.length) { log(`  排队的 ${QUEUE.length} 条消息已放回队列（挂起，等用户点 ⚡）`); saveRunMark(); }
 }
-if (LIVE) recoverRunMark();
 
 // 逐字增量太碎：攒 40ms 合成一条再发，其它事件到来前先冲掉，保证顺序不乱
 export function runEmit(run, ev) {
@@ -201,14 +201,15 @@ export function endRun(run, fields = {}) {
   setImmediate(pump);
 }
 
-export function abortRun(run) {
+export function abortRun(run, { hold = true } = {}) {
   if (!run || run.ended) return false;
   run.aborted = true;
   run.readyAbort?.abort();
   // 停止要和排队的消息严格隔开：此刻排着的一律挂起，不许这一轮一结束就自动发出去
   // （以前点停止反而是"立刻发下一条"）。用户点 ⚡ 才发；停止之后新发的消息不受影响，照常先跑
-  // 并行时只挂起这个会话自己排着的，别的会话不受影响
-  holdLane(run);
+  // 并行时只挂起这个会话自己排着的，别的会话不受影响。
+  // hold:false 只给「答完了、只剩后台任务、输入已关」的那种：用户要的是让排着的消息发出去，不是停对话
+  if (hold) holdLane(run); else run.retired = true;   // retired：这一轮的回答早就完整了，收尾别报成「已中断」
   if (run.child) {
     const c = run.child;
     killTree(c);
@@ -388,7 +389,11 @@ export async function routeQueue(req, res, u, p) {
       const it = QUEUE.splice(i, 1)[0];
       it.held = false;                      // 挂起的消息靠这个放行
       const lr = laneRun(laneOfItem(it));
-      if (!(lr && tryInject(lr, it))) QUEUE.unshift(it);
+      if (!(lr && tryInject(lr, it))) {
+        QUEUE.unshift(it);
+        // 那一轮答完了、只剩后台任务，输入又已经关了：这条只能等它结束。用户点了 ⚡ 就是不等——连同后台任务结束它，收尾后这条接着发
+        if (lr && lr.idle && !lr.inputOpen && !lr.ended) { log("⚡ 上一轮只剩后台任务且输入已关，结束它好发出排着的消息"); abortRun(lr, { hold: false }); }
+      }
     } else if (act === "edit") {
       const t = String(b.text || "").trim();
       if (t.length > MSG_MAX) return sendJson(res, 413, { error: "too_long", message: tz("这条消息太长了（超过 200 万字），改成文件发吧。") });
