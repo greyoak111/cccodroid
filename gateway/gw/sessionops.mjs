@@ -11,6 +11,7 @@ import { forgetChild, recordPrimary } from "./lineage-store.mjs";
 import { lineageForget } from "./lineage.mjs";
 import { checkSession, neutralizeMarkers, resealAfterEdit, sealSession, isInjected } from "./integrity.mjs";
 import { forEachLine, lineWriter, zipEntries, zipExtract, zipToFile } from "./bigfile.mjs";
+import { archiveDb, archiveImport, saveArchive } from "./archive-store.mjs";
 
 // ── 会话管理：回收站 / 导出 / 导入 ─────────────────────────────────────
 // 回收站放在 claude 的 projects 目录之外（它看不见，--resume 也就找不回来），同一文件系统，挪进挪出都是 rename。
@@ -486,7 +487,9 @@ export async function exportSessions(ids) {
     entries.push({ name: `sessions/${id}.jsonl`, file: found.file });
     const side = path.join(PATHS.projects, found.project, id);
     if (fs.existsSync(side)) walk(side, `sessions/${id}`);
-    list.push({ id, title: NAMES[id] || meta.title, renamed: !!NAMES[id], cwd: meta.cwd, mtime: fs.statSync(found.file).mtimeMs });
+    // 建档（章节题名、状态、卷关系）也带上：只带 jsonl 的话，换台机器导回来整理过的章节全没了（#98 03-001）
+    const arch = archiveDb().sessions[id];
+    list.push({ id, title: NAMES[id] || meta.title, renamed: !!NAMES[id], cwd: meta.cwd, mtime: fs.statSync(found.file).mtimeMs, ...(arch ? { archive: arch } : {}) });
   }
   if (!list.length) throw new Error(tz("没有可导出的会话"));
   entries.unshift({ name: "manifest.json", data: JSON.stringify({ format: "cccodroid-sessions", version: 1, exportedAt: Date.now(), sessions: list }, null, 1) });
@@ -531,6 +534,7 @@ export async function importSessions(file) {
     try { const ev = JSON.parse(l); if (ev.cwd) ev.cwd = ws; return JSON.stringify(ev); } catch { return l; }
   };
   // 后面某条坏了会抛错跳出：前面已经放好的几条，标题照样要落盘（#98 03-002），并告诉前端放好了哪些
+  let archDirty = false;
   try { for (const s of manifest.sessions || []) {
     const id = String(s.id || "");
     if (!SID_RE.test(id)) continue;
@@ -559,8 +563,9 @@ export async function importSessions(file) {
     if (s.mtime) try { fs.utimesSync(dst, new Date(), new Date(s.mtime)); } catch {}
     sealSession(id, dst, { flag: "imported" });   // 包里的历史谁都能写：第一次接着聊时提醒模型（见 integrity.mjs）
     if (s.renamed && s.title) NAMES[id] = String(s.title).slice(0, 120);
+    if (archiveImport(id, s.archive)) archDirty = true;
     res.imported.push(id);
   } } catch (e) { e.imported = res.imported; throw e; }
-  finally { saveNames(); }
+  finally { saveNames(); if (archDirty && !saveArchive()) log("导入会话：档案没写进去"); }
   return res;
 }

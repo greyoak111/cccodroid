@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CFG } from "./config.mjs";
 import { NEXT, readBodyBuf, sendJson } from "./http.mjs";
-import { lineageFile, lineageGraph, lineageRecord } from "./lineage.mjs";
+import { lineageFile, lineageGraph, lineageRecord, lineageStamp } from "./lineage.mjs";
 import { agentFilesOf } from "./transcript.mjs";
 import { isInjected } from "./integrity.mjs";
 
@@ -80,17 +80,29 @@ const CACHE = new Map();
 function remember(k, v) { CACHE.delete(k); CACHE.set(k, v); while (CACHE.size > 24) CACHE.delete(CACHE.keys().next().value); return v; }
 
 /** 第 n 章的轮。返回 { n, chapters, from, to, turns, kids } 或 { error } */
+// 整张亲缘图一个代次只算一次（遍历全部会话，不轻）：各会话长出去的边（子会话、种类、落点、子会话题名）做成签名进缓存键
+let GRAPH = null;
+async function graphNow() {
+  const st = lineageStamp();
+  if (GRAPH?.st === st) return GRAPH;
+  const g = await lineageGraph(), titles = new Map(g.nodes.map((x) => [x.id, x.title])), kids = new Map();
+  for (const e of g.edges) kids.set(e.parent, (kids.get(e.parent) || "") + [e.child, e.kind, e.at || "", titles.get(e.child) || ""].join("|") + ",");
+  return (GRAPH = { st, g, kids });
+}
+
 export async function chapterProfile(id, n) {
   const rec = await lineageRecord(id), file = lineageFile(id);
   if (!rec || !file) return { error: "not_found" };
   const C = rec.compacts.length;
   if (!(n >= 1 && n <= C + 1)) return { error: "no_chapter" };
   const from = n >= 2 ? rec.compacts[n - 2].off : 0, to = n <= C ? rec.compacts[n - 1].off : rec.off;
-  const key = `${id}:${n}:${from}:${to}`;
+  // 键里还要有：一共几章（章末刚压缩时 to 不变，但这一章已经结束了）、从这个会话长出去的边（新分叉）——
+  // 只按字节范围认，新分叉、刚压缩都还显示旧的（#98 03-006）
+  const { g, kids } = await graphNow();
+  const key = `${id}:${n}:${C}:${from}:${to}:${kids.get(id) || ""}`;
   if (CACHE.has(key)) return remember(key, CACHE.get(key));
 
   // 这一章里长出去的子会话：边的 at 是父会话里的一条消息 uuid，落在哪一轮就挂在哪一轮
-  const g = await lineageGraph();
   const names = new Map(g.nodes.map((x) => [x.id, x]));
   const kidsAt = new Map(), tailKids = [];
   for (const e of g.edges) {
@@ -189,7 +201,10 @@ export async function turnDetail(id, from, to) {
   const n = 1 + rec.compacts.filter((c) => c.off <= from).length;
   const ch = await chapterProfile(id, n);
   if (ch.error || !ch.turns.some((u) => u.off === from && to <= u.end)) return { error: "bad_range" };
-  const key = `t:${id}:${from}:${to}`;
+  // 后台子代理在主记录不动的情况下接着写自己的记录、最后把 meta 标成完成：键里带上它们的大小和修改时间（#98 03-006）
+  let subSig = "";
+  for (const [, f] of agentFilesOf(file)) for (const x of [f, f.replace(/\.jsonl$/, ".meta.json")]) { try { const st = fs.statSync(x); subSig += st.size + "." + st.mtimeMs + ","; } catch {} }
+  const key = `t:${id}:${from}:${to}:${subSig}`;
   if (CACHE.has(key)) return remember(key, CACHE.get(key));
   // 没缓存的大轮一次只读一个：一轮最多 RANGE_MAX，几个请求同时来就是几倍的读盘和解析（审查 v0513b 低-30）
   const prev = TD_LOCK;

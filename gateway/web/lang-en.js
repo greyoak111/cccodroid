@@ -2659,5 +2659,7 @@ window.I18N_DICT.en = {
   "一次只能撤销一个文件": "You can only discard one file at a time",
   "{f} 那里已经有个文件了，先挪开再撤销": "There's already a file at {f}; move it away before discarding",
   "判断不了是不是连着 Wi-Fi": "Couldn't tell whether Wi-Fi is connected",
+  "摘录至少勾一轮": "Pick at least one round for the excerpt",
+  "端侧模型 {model} 正在另一个会话里用，等它答完再换模型": "The on-device model {model} is busy in another session; switch models after it finishes",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(This is the status from the last check; this check failed: {msg})"
 };

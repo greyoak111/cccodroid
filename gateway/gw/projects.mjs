@@ -8,13 +8,14 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, PATHS, log, tz } from "./config.mjs";
 import { dec, NEXT, readBody, sendJson } from "./http.mjs";
-import { PEEK_CACHE, findSessionFile, listSessions } from "./sessions.mjs";
+import { PEEK_CACHE, findSessionFile, listSessions, peekSession } from "./sessions.mjs";
 import { trashSession } from "./sessionops.mjs";
 import { termEnv } from "./terminal.mjs";
 import { killTree } from "./claude.mjs";
 import { runOfSession } from "./runs.mjs";
 import { checkSession, resealAfterEdit } from "./integrity.mjs";
 import { rewriteLines } from "./bigfile.mjs";
+import { lineageForget } from "./lineage.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-projects.json");
 // 项目颜色：和界面强调色同一套饱和度，按顺序分配（用户可改）
@@ -112,17 +113,32 @@ export function moveSession(sid, projectId) {
   if (projectId && !p) throw new Error(tz("项目不存在"));
   const cwd = p ? real(p.path) : real(CFG.workspace);
   const dir = path.join(PATHS.projects, projectSlug(cwd));
-  if (path.dirname(found.file) === dir) return { ok: true, same: true };
+  // 目录名只是 cwd 把非字母数字换成 -：slug-a 和 slug_a 落在同一个目录。目录相同不等于已经在目标项目，
+  // 记录里的 cwd 不一样就照样改写（原地换），只是附件目录不用搬（#98 03-004）
+  const inPlace = path.dirname(found.file) === dir;
+  if (inPlace && peekSession(found.file).cwd === cwd) return { ok: true, same: true };
   fs.mkdirSync(dir, { recursive: true });
   const dirty = checkSession(sid, found.file);   // 改写 cwd 前先核对，搬完重新封签：网关自己改的不算外部改动，原本不干净的也不洗白
-  const dst = path.join(dir, sid + ".jsonl");
+  const dst = inPlace ? found.file + ".mv" : path.join(dir, sid + ".jsonl");
   const st = fs.statSync(found.file);
   // 按行流式改写（gw/bigfile.mjs）：1 GB 以上的会话整份读成字符串会超过 V8 单串上限
-  rewriteLines(found.file, dst, (l) => {
-    if (!l.includes('"cwd"')) return l;
-    try { const ev = JSON.parse(l); if (ev.cwd) ev.cwd = cwd; return JSON.stringify(ev); } catch { return l; }
-  });
+  // 中途写不下（ENOSPC 之类）：删掉半成品再报错，原记录没动（DeepSeek 复核 #4）
+  try {
+    rewriteLines(found.file, dst, (l) => {
+      if (!l.includes('"cwd"')) return l;
+      try { const ev = JSON.parse(l); if (ev.cwd) ev.cwd = cwd; return JSON.stringify(ev); } catch { return l; }
+    });
+  } catch (e) { fs.rmSync(dst, { force: true }); throw e; }
   try { fs.utimesSync(dst, st.atime, st.mtime); } catch {}
+  if (inPlace) {
+    fs.renameSync(dst, found.file);
+    resealAfterEdit(sid, found.file, dirty);
+    PEEK_CACHE.delete(found.file); lineageForget(sid);   // 脉络按大小认缓存：等长路径改写后大小不变，得明说重读（#98 03-005）
+    log(`📁 会话 ${sid.slice(0, 8)} → ${p ? "项目 " + p.name : "工作区"}（同一目录，改写 cwd）`);
+    return { ok: true };
+  }
+  // 同名目录（子代理记录、超长工具结果）搬不过去就整个不搬：删掉刚写的新记录、原会话原样留着，报错（#98 03-003）。
+  // 以前吞掉这个错接着删原记录，附件留在旧目录，新位置的会话读不到子代理过程
   const side = path.join(path.dirname(found.file), sid);
   if (isDir(side)) {
     try { fs.renameSync(side, path.join(dir, sid)); }
@@ -130,7 +146,7 @@ export function moveSession(sid, projectId) {
   }
   fs.rmSync(found.file, { force: true });
   resealAfterEdit(sid, dst, dirty);
-  PEEK_CACHE.delete(found.file);
+  PEEK_CACHE.delete(found.file); lineageForget(sid);
   log(`📁 会话 ${sid.slice(0, 8)} → ${p ? "项目 " + p.name : "工作区"}`);
   return { ok: true };
 }

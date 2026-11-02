@@ -42,7 +42,13 @@ export function parseCmd(txt) {
     const head = kv[2].trim(), rest = it.slice(1).map((l) => l.trim()).filter(Boolean);
     let v;
     if (/^[|>][+-]?\d*$/.test(head)) v = rest.join(head[0] === "|" ? "\n" : " ");   // 块标量：界面上是一行，换行变空格见 saveCmd
-    else v = [head, ...rest].filter(Boolean).join(" ").replace(/^(["'])([\s\S]*)\1$/, "$2");
+    else {
+      // 引号里的要按 YAML 的规矩解开转义：只去掉外层引号，存一次多一层反斜杠，越存越多（#97 02-009）
+      const raw = [head, ...rest].filter(Boolean).join(" ");
+      if (/^"[\s\S]*"$/.test(raw)) { try { v = JSON.parse(raw); } catch { v = raw.slice(1, -1); } }
+      else if (/^'[\s\S]*'$/.test(raw)) v = raw.slice(1, -1).replace(/''/g, "'");
+      else v = raw;
+    }
     out[key] = v;
   }
   out.extra = keep.join("\n");

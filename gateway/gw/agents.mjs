@@ -166,7 +166,7 @@ export function agentBook(run, { emit }) {
           let file = null;
           if (body.length > LONG && ensureDir()) {
             const base = me?.dir || dir;
-            file = write(path.join(base, "msgs", `${stamp()}-${slug(me ? me.name : "main")}-to-${slug(toName)}.md`), body + "\n");
+            file = write(path.join(base, "msgs", `${stamp()}-${slug(me ? me.name : "main")}-to-${slug(toName)}-${slug(String(c.id).slice(-8))}.md`), body + "\n");
           }
           const m = { mid: c.id, from: who(me), to, why: clip(String(c.input.summary || "").trim() || firstLine(body), WHY_MAX), file };
           sends.set(c.id, m);

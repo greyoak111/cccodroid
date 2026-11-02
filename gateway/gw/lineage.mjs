@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CFG, PATHS, log } from "./config.mjs";
 import { NEXT, sendJson } from "./http.mjs";
-import { NAMES, PINS } from "./sessions.mjs";
+import { NAMES, NAMES_REV, PINS } from "./sessions.mjs";
 import { archiveDb, archivedTitle } from "./archive-store.mjs";
 import { chapterView } from "./archive-core.mjs";
 import { runOfSession } from "./runs.mjs";
@@ -86,6 +86,9 @@ export function lineageForget(sid) {
   if (RECS.delete(sid)) { dirty = true; gen++; }
 }
 
+/** 索引与亲缘边的代次戳：变了才需要重算整张图（剖面按它缓存各会话的子边） */
+export function lineageStamp() { return gen + ":" + JSON.stringify(lineageDb().edges).length + ":" + Object.keys(NAMES).length + ":" + NAMES_REV; }
+
 /** 并发请求共用一次刷新 */
 export function lineageRefresh() {
   if (!building) building = refresh().finally(() => { building = null; });
@@ -105,7 +108,7 @@ export async function lineageRecord(sid) {
 }
 
 function parentsNow() {
-  const db = lineageDb(), key = gen + ":" + JSON.stringify(db.edges).length + ":" + Object.keys(NAMES).length;
+  const db = lineageDb(), key = lineageStamp();
   if (memo?.key !== key) memo = { key, map: inferParents(RECS, { names: NAMES, explicit: db.edges }) };
   return memo.map;
 }

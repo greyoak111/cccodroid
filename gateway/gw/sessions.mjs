@@ -15,11 +15,26 @@ import { isInjected } from "./integrity.mjs";
 
 // ── 会话重命名表 ──────────────────────────────────────────────────────
 export let NAMES = {};
-try { NAMES = JSON.parse(fs.readFileSync(PATHS.names, "utf8")); } catch {}
+{
+  let raw = null;
+  try { raw = fs.readFileSync(PATHS.names, "utf8"); } catch {}
+  if (raw != null) {
+    try { NAMES = JSON.parse(raw); } catch { NAMES = null; }
+    // 文件坏了（解析不了、或是 null / 数组之类）：当没有，别让整个会话列表跟着抛错（#98 03-012）；
+    // 原件留一份底稿再说——下次改名就会把它覆盖掉（DeepSeek 复核 #9，同档案的 .bad- 底稿）
+    if (!NAMES || typeof NAMES !== "object" || Array.isArray(NAMES)) {
+      NAMES = {};
+      try { fs.copyFileSync(PATHS.names, PATHS.names + ".bad-" + Date.now()); } catch {}
+    }
+  }
+}
 // 会话标题只在这里定：用户改过的 > 建档的最新一章题名 > 第一句提问。列表、详情、搜索都走它，免得顶栏和侧栏各说各的（#44）
 const sessionTitle = (id, meta) => NAMES[id] || archivedTitle(id) || meta.title;
 
+// 改名表的版本：每次落盘加一。脉络/剖面的缓存戳带上它，改名（键数不变）也会重建（DeepSeek 复核 #6）
+export let NAMES_REV = 0;
 export function saveNames() {
+  NAMES_REV++;
   try { fs.writeFileSync(PATHS.names, JSON.stringify(NAMES, null, 2), { mode: 0o600 }); } catch {}
 }
 // 置顶表：会话号 → 置顶时刻

@@ -205,7 +205,10 @@ export function createWorkIsland(opts = {}) {
   function start(run, text) {
     if (active) {
       if (run && run.id) active.id = run.id;
-      return update(text);
+      // 已经在显示了：state 快照每次都会走到这里，别把「等你确认」之类刷回「正在干活」（#97 02-010）。
+      // 状态变化由各自的事件（perm_resolved、phase…）来改
+      if (text) update(text);
+      return;
     }
     clearPending();
     if (doneTimer) { clearTimeout(doneTimer); doneTimer = null; }

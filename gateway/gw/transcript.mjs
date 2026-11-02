@@ -228,7 +228,14 @@ export async function readSessionForward(file, { after = 0, limit = 40, excludeF
       if (rest.length > 64 << 20) { base += rest.length; rest = Buffer.alloc(0); }   // 单行超长：跳过
       if (scanned >= MAX_SCAN && items.length) return { items, from, next: base, size };
     }
-    // 最后一行没换行（还在写）：当作到底了 —— 再往后的内容走事件总线实时来，不然界面会反复来要一页空的
+    // 最后一行没换行：是完整的 JSON 就照样算（导入的、被打断的记录末行常不带换行，#98 03-009）；
+    // 解析不了就是还在写，当作到底了 —— 再往后的内容走事件总线实时来，不然界面会反复来要一页空的。
+    // 正在跑的那一轮的行由 excludeFrom 挡掉，不会和实时来的重复
+    const tail = rest.toString("utf8").trim();
+    if (tail && items.length < limit * 4) {
+      let ev = null; try { ev = JSON.parse(tail); } catch {}
+      if (ev && !(excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) items.push(...transcriptItems(ev));
+    }
     return { items, from, next: size, size };
   } finally {
     await fh.close();
@@ -254,8 +261,33 @@ export async function findLineOffset(file, uuid, start = 0) {
       if (data.length - keep > 64 << 20) keep = data.length - needle.length;   // 单行超长：只留够跨块匹配的一截
       base += keep; carry = Buffer.from(data.subarray(keep));
     }
-    return -1;
+    return await findLineLoose(fh, size, uuid, Math.max(0, Math.min(Number(start) || 0, size)));
   } finally { await fh.close(); }
+}
+/** 慢路：旧的 / 外部写的 jsonl 冒号后面带空格（"uuid": "…"），紧凑写法的字面量找不到（#98 03-008）。
+ *  逐行看：含这个 uuid 的行再按 "uuid" 键核一遍（parentUuid、leafUuid 也含它，不算） */
+async function findLineLoose(fh, size, uuid, pos) {
+  if (!/^[\w-]{1,100}$/.test(uuid)) return -1;
+  const CH = 4 << 20, val = Buffer.from(uuid), key = new RegExp(`"uuid"\\s*:\\s*"${uuid}"`);
+  let carry = Buffer.alloc(0), base = pos;
+  while (pos < size) {
+    const chunk = Buffer.alloc(Math.min(CH, size - pos)); await fh.read(chunk, 0, chunk.length, pos);
+    pos += chunk.length;
+    const data = carry.length ? Buffer.concat([carry, chunk]) : chunk;
+    let st = 0, hit = data.indexOf(val);
+    while (hit >= 0) {                              // 只看含 uuid 的那几行；一块里没有就整块跳过
+      st = data.lastIndexOf(10, hit) + 1;
+      let nl = data.indexOf(10, hit);
+      if (nl === -1) { if (pos >= size) nl = data.length; else break; }   // 文件最后一行可能没有换行；否则等下一块凑齐
+      if (key.test(data.toString("utf8", st, nl))) return base + st;
+      st = nl + 1; hit = data.indexOf(val, st);
+    }
+    if (hit < 0) st = Math.max(st, data.lastIndexOf(10) + 1);
+    st = Math.min(st, data.length);
+    if (data.length - st > 64 << 20) return -1;    // 单行超长还没完：这条路不管了
+    base += st; carry = Buffer.from(data.subarray(st));
+  }
+  return -1;
 }
 /** 偏移 off 是不是某行的行首、且那一行含这个 uuid（核对索引给的偏移还准不准）。
  *  uuid 在行里排在 message 后面，压缩摘要那行常有十几 KB，所以要读完整行再看 */
@@ -273,6 +305,6 @@ export async function lineHas(file, off, uuid) {
       if (nl >= 0) break;
       pos += bytesRead;
     }
-    return line.includes(needle);
+    return line.includes(needle) || (/^[\w-]{1,100}$/.test(uuid) && new RegExp(`"uuid"\\s*:\\s*"${uuid}"`).test(line.toString("utf8")));   // 冒号后带空格的旧格式（#98 03-008）
   } catch { return false; } finally { await fh.close(); }
 }

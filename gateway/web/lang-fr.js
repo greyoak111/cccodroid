@@ -2624,5 +2624,7 @@ window.I18N_DICT["fr"] = {
   "一次只能撤销一个文件": "Vous ne pouvez annuler qu’un fichier à la fois",
   "{f} 那里已经有个文件了，先挪开再撤销": "Un fichier existe déjà à {f} ; déplacez-le avant d’annuler",
   "判断不了是不是连着 Wi-Fi": "Impossible de savoir si le Wi-Fi est connecté",
+  "摘录至少勾一轮": "Cochez au moins un tour pour l’extrait",
+  "端侧模型 {model} 正在另一个会话里用，等它答完再换模型": "Le modèle local {model} est utilisé dans une autre conversation ; changez de modèle quand il aura fini",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(État du dernier contrôle ; celui-ci a échoué : {msg})",
 };

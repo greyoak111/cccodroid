@@ -116,6 +116,8 @@ export async function ensureLlama(want, note) {
   if (LL.child && LL.sig === sig && LL.state === "ready" && await llamaHealthy()) return m;
   if (llStarting && LL.sig === sig) { await llStarting; return m; }
   if (llStarting) { try { await llStarting; } catch {} }
+  // 只有一个服务、一个槽：另一个会话正用着它答题时换模型，会把那边的生成掐断（#97 02-007）。这边先报错，等那边答完
+  if (LL.child && LL.sig !== sig && LL.run && !LL.run.ended) throw new Error(tz("端侧模型 {model} 正在另一个会话里用，等它答完再换模型", { model: LL.id }));
   if (LL.child) llamaStop("换模型或参数");
   llStarting = llamaStart(m, note).finally(() => { llStarting = null; });
   await llStarting;

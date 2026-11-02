@@ -201,6 +201,8 @@
       }
       if (b.hasAttribute("data-next")) {
         if (W.step === 1) {
+          // 摘录一轮都没勾：别往下走。不传 uuids 后端会默认取最后一轮，等于把用户取消的又带回去（#98 03-015）
+          if (src.some((s) => s.how === "excerpt" && s.picked && !s.picked.size)) return toast(t("摘录至少勾一轮"), true);
           b.disabled = true; b.textContent = t("取材料…");
           try { await fetchAll(); }
           catch (err) {

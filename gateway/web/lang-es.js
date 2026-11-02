@@ -2624,5 +2624,7 @@ window.I18N_DICT["es"] = {
   "一次只能撤销一个文件": "Solo puedes descartar un archivo a la vez",
   "{f} 那里已经有个文件了，先挪开再撤销": "Ya hay un archivo en {f}; muévelo antes de descartar",
   "判断不了是不是连着 Wi-Fi": "No se pudo saber si hay conexión Wi-Fi",
+  "摘录至少勾一轮": "Marca al menos una ronda para el extracto",
+  "端侧模型 {model} 正在另一个会话里用，等它答完再换模型": "El modelo local {model} se está usando en otra conversación; cambia de modelo cuando termine",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(Es el estado de la última consulta; esta vez falló: {msg})",
 };
