@@ -186,7 +186,7 @@ final class Updater {
     }
 
     /** 换安装包方案。只能 36 的机器要切 28：拒绝（装上去系统也不认）。返回 null = 已切，否则是拒绝的原因 */
-    String setFlavor(String want) {
+    synchronized String setFlavor(String want) {
         if (!want.equals("auto") && !want.equals("28") && !want.equals("36")) return Tr.t("未知的安装包方案");
         if (want.equals("28") && !only36().isEmpty())
             return Tr.t("这台机器的系统已经不让装 targetSdk 28 的版本，切过去会装不上，所以没有切换。") + "\n" + only36();
@@ -194,7 +194,9 @@ final class Updater {
         prefs().edit().putString("flavor", want).apply();
         Log.i(TAG, "安装包方案 → " + want + "（要下 " + wantFlavor() + "，装着 " + flavor() + "）");
         // 要的和装着的不一样：马上查一次，查到就照自动更新的规则下（用户在设置页点「安装」走系统确认）
-        if (app.file != null && !app.file.getName().endsWith("-" + wantFlavor() + ".apk")) { app.file.delete(); app.url = null; }
+        // 在途的那份不删不清（05-008）：下完 checkApkSigner 会按方案拒掉，之后的检查再按新方案找
+        boolean moving = "downloading".equals(app.state) || "installing".equals(app.state);
+        if (!moving && app.file != null && !app.file.getName().endsWith("-" + wantFlavor() + ".apk")) { app.file.delete(); app.url = null; }
         if (!"downloading".equals(app.state) && !"installing".equals(app.state)) app.set("unknown", "");
         checkAsync(true);
         return null;
@@ -449,7 +451,14 @@ final class Updater {
         return "0";
     }
 
-    private void checkApp(JSONArray rels) throws Exception {
+    // 和 apply 同一把锁：apply 占槽与这里改目标不会交错（05-008）
+    private synchronized void checkApp(JSONArray rels) throws Exception {
+        // 正在下 / 正在装 / 下好了在等工具包换完再装：url、文件、哈希都是在途任务的，别换成新查到的，
+        // 状态也别动（审查 #105 05-008，同工具包 checkDevkit；等工具包那段与在途时打成 uptodate 见 DeepSeek 复核 b7 中-5、低-10）。
+        // 新版等这一份走完再查
+        // 刚下完（ready）而工具包在动：下载线程马上就要 deferApp，置 appWaiting 前这一下也不能换（DeepSeek 复核 b7r2 低-1）
+        if ("downloading".equals(app.state) || "installing".equals(app.state) || appWaiting
+            || "ready".equals(app.state) && devkitMoving()) return;
         for (int i = 0; i < rels.length(); i++) {
             JSONObject r = rels.getJSONObject(i);
             String tag = r.optString("tag_name");
@@ -474,8 +483,7 @@ final class Updater {
                 app.sha = d.startsWith("sha256:") ? d.substring(7) : null;
                 app.file = new File(env.files, "updates/cccodroid-" + app.latest + "-" + want + ".apk");
                 String note = swap ? Tr.f("换成 targetSdk {0} 的安装包", want) : r.optBoolean("prerelease") ? Tr.t("预览版") : "";
-                if (!"downloading".equals(app.state) && !"installing".equals(app.state))
-                    app.set(app.file.isFile() && app.file.length() == app.size ? "ready" : "available", note);
+                app.set(app.file.isFile() && app.file.length() == app.size ? "ready" : "available", note);
                 return;
             }
             app.set("error", Tr.f("v{0} 里没有 {1}", app.latest, name));
@@ -764,7 +772,9 @@ final class Updater {
         return v.matches("\\d+\\.\\d+\\.\\d+[\\w.+-]*") && !claude.current.isEmpty() && cmpVer(v, claude.current) < 0;
     }
 
-    JSONObject apply(String id, boolean user, String version) {
+    // synchronized + 起线程前先把状态占上（审查 #105 05-007）：每个 Priv 连接一条线程，两次请求挨得近时，
+    // 以前都只看到旧状态、各起一份下载/安装，共用 .part 与临时目录互相踩
+    synchronized JSONObject apply(String id, boolean user, String version) {
         Item it = id.equals("app") ? app : id.equals("devkit") ? devkit : id.equals("claude") ? claude : null;
         JSONObject r = new JSONObject();
         try {
@@ -777,6 +787,7 @@ final class Updater {
                 if (ver.isEmpty()) ver = claude.latest;
                 if (ver.isEmpty()) return r.put("ok", false).put("message", Tr.t("先检查更新"));
                 final String v = ver;
+                claude.set("installing", "");
                 new Thread(() -> installClaude(v), "upd-claude").start();
                 return r.put("ok", true).put("message", claude.current.isEmpty() ? Tr.f("开始安装 Claude Code {0}", v) : Tr.t("开始更新 Claude Code"));
             }
@@ -786,10 +797,11 @@ final class Updater {
                 return r.put("ok", false).put("message", Tr.t("没有可用的更新，先检查"));
             }
             if ("ready".equals(it.state)) {
-                if (it == app) { new Thread(this::installApp, "upd-install").start(); return r.put("ok", true).put("message", Tr.t("正在安装")); }
+                if (it == app) { app.set("installing", ""); new Thread(this::installApp, "upd-install").start(); return r.put("ok", true).put("message", Tr.t("正在安装")); }
                 if (user) { new Thread(this::startDevkitApply, "upd-devkit").start(); return r.put("ok", true).put("message", Tr.t("正在替换开发工具包")); }
                 return r.put("ok", true).put("message", Tr.t("已下载，等待安装"));
             }
+            it.set("downloading", "");
             new Thread(() -> download(it, user), "upd-dl-" + id).start();
             return r.put("ok", true).put("message", Tr.t("开始下载"));
         } catch (Exception e) {

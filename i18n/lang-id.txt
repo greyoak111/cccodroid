@@ -2625,4 +2625,5 @@
 2625	Model di perangkat {model} sedang dipakai di percakapan lain; ganti model setelah selesai menjawab
 2626	Tutup lalu buka lagi untuk mencoba ulang
 2627	{n} dihentikan
+2632	{n} tidak berhenti: {list}
 2633	(Ini status dari pengecekan terakhir; kali ini gagal: {msg})

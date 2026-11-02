@@ -165,7 +165,7 @@ final class DeviceTools {
     }
 
     // ── 各个工具 ─────────────────────────────────────────────────────────
-    private static JSONObject deviceStatus(Context c) throws Exception {
+    static JSONObject deviceStatus(Context c) throws Exception {
         JSONObject r = new JSONObject().put("ok", true);
         Intent bat = c.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
         if (bat != null) {
@@ -231,11 +231,19 @@ final class DeviceTools {
         AtomicReference<T> out = new AtomicReference<>();
         AtomicReference<Exception> err = new AtomicReference<>();
         CountDownLatch done = new CountDownLatch(1);
+        // 0 排着 / 1 已开始 / 2 已作废。超时时还没开始的作废掉（审查 #107 09-013）：以前只是不等了，
+        // 主线程闲下来照样执行，工具已经报了错、剪贴板却在之后被写了
+        java.util.concurrent.atomic.AtomicInteger st = new java.util.concurrent.atomic.AtomicInteger();
         new Handler(Looper.getMainLooper()).post(() -> {
+            if (!st.compareAndSet(0, 1)) return;
             try { out.set(f.call()); } catch (Exception e) { err.set(e); }
             done.countDown();
         });
-        if (!done.await(5, TimeUnit.SECONDS)) throw new Exception("timeout");
+        if (!done.await(5, TimeUnit.SECONDS)) {
+            if (st.compareAndSet(0, 2)) throw new Exception("timeout");
+            // 已经在主线程上跑了：等它跑完，结果照实报
+            if (!done.await(10, TimeUnit.SECONDS)) throw new Exception("timeout");
+        }
         if (err.get() != null) throw err.get();
         return out.get();
     }

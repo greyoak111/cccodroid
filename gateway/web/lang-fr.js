@@ -2628,5 +2628,6 @@ window.I18N_DICT["fr"] = {
   "端侧模型 {model} 正在另一个会话里用，等它答完再换模型": "Le modèle local {model} est utilisé dans une autre conversation ; changez de modèle quand il aura fini",
   "收起再点开可重试": "Repliez puis rouvrez pour réessayer",
   "{n} 已停止": "{n} arrêté(s)",
+  "{n} 个没停下：{list}": "{n} non arrêté(s) : {list}",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(État du dernier contrôle ; celui-ci a échoué : {msg})",
 };

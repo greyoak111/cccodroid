@@ -174,7 +174,9 @@ function plan() {
     changed = false;
     const doomed = new Set(apps.filter((a) => !a.protect).map((a) => a.pkg));
     for (const lp of loaded) {
-      if (lp.own.some((p) => doomed.has(p))) continue;     // 它自己就属于要停的包
+      // 整个进程都归要停的包，才算会死。以前只要有一个归属包要停就跳过 —— 白名单包和别的包同进程时，
+      // 停那个包会把白名单包的进程一起带走（#107 09-011）：有一个归属包要留，进程就得活，它加载的包全保护
+      if (lp.own.length && lp.own.every((p) => doomed.has(p))) continue;
       for (const p of lp.pkgs) {
         if (!doomed.has(p)) continue;
         const a = apps.find((x) => x.pkg === p);
@@ -198,10 +200,14 @@ function pssByPid() {
   return m;
 }
 
+/** 停一批包，逐个带回成败：{ stopped, failed }。以前整串只看最后一条的退出码，某个包没停下也报成停了（#107 09-003）。
+ *  用 && / || 接 echo 标记（不用 $?：特权命令免问规则认不清变量，会逐条弹确认） */
 function stopPkgs(pkgs, hard) {
-  if (!pkgs.length) return;
+  if (!pkgs.length) return { stopped: [], failed: [] };
   const verb = hard ? "am force-stop" : "am stop-app";
-  priv(pkgs.map((p) => `${verb} ${sh(p)}`).join("; "), 60000);
+  const out = priv(pkgs.map((p) => `${verb} ${sh(p)} && echo @ok ${sh(p)} || echo @fail ${sh(p)}`).join("; "), 60000).out;
+  const ok = new Set([...out.matchAll(/^@ok (\S+)\s*$/gm)].map((m) => m[1]));
+  return { stopped: pkgs.filter((p) => ok.has(p)), failed: pkgs.filter((p) => !ok.has(p)) };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -216,7 +222,10 @@ async function cmdStatus(json) {
   const mem = meminfo();
   const { cfg, apps } = plan();
   const pss = pssByPid();
-  for (const a of apps) a.pss = a.pids.reduce((s, p) => s + (pss[p] || 0), 0);
+  // 一个进程加载了几个包：它的 PSS 按包数均摊，不然合计按包重复算（#107 09-012）
+  const share = new Map();
+  for (const a of apps) for (const p of a.pids) share.set(p, (share.get(p) || 0) + 1);
+  for (const a of apps) a.pss = Math.round(a.pids.reduce((s, p) => s + (pss[p] || 0) / share.get(p), 0));
   apps.sort((x, y) => y.pss - x.pss);
   if (json) return console.log(JSON.stringify({ enabled: cfg.enabled, whitelist: cfg.whitelist, mem, apps }, null, 1));
   console.log(`内存管家：${cfg.enabled ? "已开启" : "未开启（设置里打开）"}`);
@@ -241,12 +250,14 @@ async function cmdClear(hard, dry, json) {
   const { cfg, apps } = plan();
   if (!dry) requireEnabled(cfg);
   const targets = apps.filter((a) => !a.protect).map((a) => a.pkg);
-  if (!dry) { stopPkgs(targets, hard); await sleep(1500); }
+  let r = { stopped: targets, failed: [] };
+  if (!dry) { r = stopPkgs(targets, hard); await sleep(1500); }
   const after = meminfo();
-  const res = { dryRun: dry, mode: hard ? "force-stop" : "stop-app", stopped: targets, availableBefore: before.available, availableAfter: after.available };
+  const res = { dryRun: dry, mode: hard ? "force-stop" : "stop-app", stopped: r.stopped, failed: r.failed, availableBefore: before.available, availableAfter: after.available };
   if (json) return console.log(JSON.stringify(res));
   if (!targets.length) return console.log("没有可停的后台应用。");
-  console.log(`${dry ? "（演练，没真停）将要" : "已"}${hard ? "强制停止" : "停止"} ${targets.length} 个：${targets.join("、")}`);
+  if (r.stopped.length) console.log(`${dry ? "（演练，没真停）将要" : "已"}${hard ? "强制停止" : "停止"} ${r.stopped.length} 个：${r.stopped.join("、")}`);
+  if (r.failed.length) console.log(`没停下 ${r.failed.length} 个：${r.failed.join("、")}`);
   if (!dry) console.log(`可用内存 ${GB(before.available)} → ${GB(after.available)}`);
 }
 
@@ -256,8 +267,7 @@ async function cmdRun(argv) {
   const { cfg, apps } = plan();
   requireEnabled(cfg);
   const start = meminfo();
-  const first = apps.filter((a) => !a.protect).map((a) => a.pkg);
-  stopPkgs(first, true);
+  const first = stopPkgs(apps.filter((a) => !a.protect).map((a) => a.pkg), true).stopped;
   try { priv("am compact system", 20000); } catch {}
   await sleep(800);
   const ready = meminfo();
@@ -265,16 +275,22 @@ async function cmdRun(argv) {
 
   const revived = new Map();            // 包名 → 复活被压次数
   const tamedNow = new Set();
-  let minAvail = ready.available, busy = false, done = false;
+  let minAvail = ready.available, busy = false, done = false, off = false;
   const tick = setInterval(() => {
     const m = meminfo().available;
     if (m < minAvail) minAvail = m;
-    if (busy || done) return;
+    if (busy || done || off) return;
     busy = true;
     try {
-      const back = plan().apps.filter((a) => !a.protect).map((a) => a.pkg);
+      // 跑着的时候用户在设置里关了内存管家：不再清后台，这一轮限制过的恢复原级别；命令本身照常跑完（#107 09-002）
+      if (!config().enabled) {
+        off = true;
+        for (const p of tamedNow) try { if (untame(p).code === 0) tamedNow.delete(p); } catch {}
+        console.error("cc-mem: 内存管家关掉了，不再清后台" + (tamedNow.size ? `（这几个没恢复成：${[...tamedNow].join("、")}，可 cc-mem untame）` : ""));
+        return;
+      }
+      const back = stopPkgs(plan().apps.filter((a) => !a.protect).map((a) => a.pkg), true).stopped;
       if (back.length) {
-        stopPkgs(back, true);
         for (const p of back) {
           const n = (revived.get(p) || 0) + 1;
           revived.set(p, n);
@@ -311,9 +327,18 @@ function tame(p) {
   return { r, prev: st.tamed[p] };
 }
 
+// 恢复一个包原来的后台级别（tame 记下的）；返回 priv 结果
+function untame(p) {
+  const st = readJson(STATE_FILE, { tamed: {} });
+  const prev = st.tamed[p] || "adaptive_bucket";
+  const r = priv(`am set-bg-restriction-level ${sh(p)} ${sh(prev)}`);
+  if (r.code === 0) { delete st.tamed[p]; fs.writeFileSync(STATE_FILE, JSON.stringify(st, null, 2), { mode: 0o600 }); }
+  return { ...r, prev };
+}
+
 function cmdTame(pkgs, undo) {
   const cfg = config();
-  requireEnabled(cfg);
+  if (!undo) requireEnabled(cfg);             // 恢复随时可以：关了内存管家以后正要靠它把限制解开
   const st = readJson(STATE_FILE, { tamed: {} });
   for (const p of pkgs) {
     if (!PKG_RE.test(p)) { console.error(`跳过非法包名：${p}`); continue; }

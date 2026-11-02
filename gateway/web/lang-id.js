@@ -2628,5 +2628,6 @@ window.I18N_DICT["id"] = {
   "端侧模型 {model} 正在另一个会话里用，等它答完再换模型": "Model di perangkat {model} sedang dipakai di percakapan lain; ganti model setelah selesai menjawab",
   "收起再点开可重试": "Tutup lalu buka lagi untuk mencoba ulang",
   "{n} 已停止": "{n} dihentikan",
+  "{n} 个没停下：{list}": "{n} tidak berhenti: {list}",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(Ini status dari pengecekan terakhir; kali ini gagal: {msg})",
 };

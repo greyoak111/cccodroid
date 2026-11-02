@@ -507,9 +507,13 @@
       memOut("", t("正在清理…"));
       const r = await api("/api/mem/clear", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch((e2) => ({ ok: false, message: e2.message }));
       if (!r.ok) return memOut("err", "✗ " + (r.message || t("失败")));
-      memOut("ok", r.stopped.length
+      // 没停下的单独说（#107 09-003）：以前全算停了
+      const failed = r.failed || [];
+      const msg = r.stopped.length
         ? t("✓ 停了 {n} 个，可用内存 {a} → {b}", { n: r.stopped.length, a: GB(r.availableBefore), b: GB(r.availableAfter) })
-        : t("没有可停的后台应用"));
+        : failed.length ? "" : t("没有可停的后台应用");
+      const bad = failed.length ? t("{n} 个没停下：{list}", { n: failed.length, list: failed.slice(0, 8).join("、") + (failed.length > 8 ? " …" : "") }) : "";
+      memOut(failed.length ? "err" : "ok", [msg, bad].filter(Boolean).join("；"));
     }
   });
 

@@ -88,15 +88,20 @@ final class Notify {
         if (!askOn()) clearAsks();
     }
 
-    void start() {
-        if (loop != null && loop.isAlive()) return;
+    // 服务快速停了又起（审查 #105 06-006）：以前先看旧线程还活着就返回、stopping 却没复位，旧线程随后退出，就再没人订阅了。
+    // 现在先复位让旧线程接着干；它恰好已经走出循环的，退出时自己看到没在停，再起一条
+    synchronized void start() {
         stopping = false;
+        if (loop != null && loop.isAlive()) return;
+        spawn();
+    }
+    private void spawn() {
         loop = new Thread(this::run, "notify-events");
         loop.setDaemon(true);
         loop.start();
     }
 
-    void stop() { stopping = true; }
+    synchronized void stop() { stopping = true; }
 
     /** 界面回到前台：确认通知都撤掉（卡片就在眼前） */
     void onForeground() { clearAsks(); }
@@ -141,6 +146,7 @@ final class Notify {
             }
             sleep(2000);
         }
+        synchronized (this) { if (!stopping && loop == Thread.currentThread()) spawn(); }
     }
 
     private void onEvent(String json) {
@@ -203,7 +209,8 @@ final class Notify {
         // 网关自己发起的空闲压缩（auto=idle）不是用户等着的那一轮，不通知；定时任务按它自己的通知设置走 sched_note
         if (ev.optBoolean("sched")) return;
         if (ev.optBoolean("aborted") || !ev.optString("auto").isEmpty() || MainActivity.visible || !doneOn()) return;
-        boolean failed = ev.has("error") && !ev.isNull("error");
+        // 网关的 run_end 用 failed / isError 表示没成（审查 #105 06-004：以前只看 error 字段，网关从来不带，一律报「已完成」）
+        boolean failed = ev.optBoolean("failed") || ev.optBoolean("isError") || ev.has("error") && !ev.isNull("error");
         String sid = sidOf(ev);
         // 每个会话各留最新一条：并行时几个会话先后跑完，不互相顶掉
         nm.notify(TAG_DONE, sid.isEmpty() ? ID_DONE : sid.hashCode(), new Notification.Builder(ctx, CH_DONE)
@@ -314,10 +321,14 @@ final class Notify {
             int code = h.getResponseCode();
             Log.i(TAG, "通知里拒绝 " + id + " → HTTP " + code);
             h.disconnect();
+            // 拒绝送到了，或者这项已经答过 / 不在了（409 / 404）：通知撤掉
+            if (code == 200 || code == 409 || code == 404) { c.getSystemService(NotificationManager.class).cancel(TAG_ASK, id.hashCode()); return; }
         } catch (Exception e) {
             Log.w(TAG, "通知里拒绝失败", e);
         }
-        c.getSystemService(NotificationManager.class).cancel(TAG_ASK, id.hashCode());
+        // 没送到（审查 #105 06-005）：通知留着，那一轮其实还在等确认；告诉用户去应用里处理
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+            android.widget.Toast.makeText(c, Tr.t("拒绝没送到，打开应用里处理这项确认"), android.widget.Toast.LENGTH_LONG).show());
     }
 
     private static String firstOf(JSONObject o, String... keys) {

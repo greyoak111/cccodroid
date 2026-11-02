@@ -323,22 +323,25 @@ extern char **environ;
 
 int execv(const char *path, char *const argv[]) { return execve(path, argv, environ); }
 
-/* 在 PATH 里找；找不到返回 0 */
+/* 在 PATH 里找；找不到返回 0。空项（开头、中间、结尾的冒号）是当前目录，同 execvp（审查 #108 09-007） */
 static const char *which(const char *f, char *out, size_t cap) {
     if (has(f, '/')) return f;
     const char *P = getenv("PATH");
     if (!P) P = "/system/bin";
     size_t fl = slen(f);
-    while (*P) {
+    for (;;) {
         size_t n = 0;
         while (P[n] && P[n] != ':') n++;
-        if (n && n + 1 + fl + 1 <= cap) {
-            for (size_t i = 0; i < n; i++) out[i] = P[i];
-            out[n] = '/';
-            for (size_t i = 0; i <= fl; i++) out[n + 1 + i] = f[i];
+        const char *d = n ? P : ".";
+        size_t dl = n ? n : 1;
+        if (dl + 1 + fl + 1 <= cap) {
+            for (size_t i = 0; i < dl; i++) out[i] = d[i];
+            out[dl] = '/';
+            for (size_t i = 0; i <= fl; i++) out[dl + 1 + i] = f[i];
             if (exists(out)) return out;
         }
-        P += n; if (*P) P++;
+        if (!P[n]) break;
+        P += n + 1;
     }
     return 0;
 }

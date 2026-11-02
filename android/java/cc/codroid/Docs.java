@@ -270,8 +270,15 @@ public final class Docs extends DocumentsProvider {
         File f = fileOf(docId);
         if (f.equals(home)) throw new FileNotFoundException("不能删根");
         // 链接只删它本身，别顺着删到链接指向的地方（可能在作用域外）
-        if (isSymlink(f)) f.delete(); else deleteTree(f);
+        // 删不掉要报出去（审查 #105 06-003）：以前不看返回值，删失败也当成功。删了一半的照样通知刷新，让文件管理器看到剩下的
+        boolean ok = isSymlink(f) ? f.delete() || !exists(f) : deleteTree(f);
         changed(f.getParentFile());
+        if (!ok) throw new FileNotFoundException("删除失败：" + f.getName());
+    }
+
+    /** 连悬空链接也算在（File.exists 跟着链接走，悬空的会说不在） */
+    private static boolean exists(File f) {
+        return java.nio.file.Files.exists(f.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
     }
 
     /** 这个目录的内容变了：通知正在看它的文件管理器刷新 */
@@ -280,12 +287,15 @@ public final class Docs extends DocumentsProvider {
         catch (FileNotFoundException ignored) {}
     }
 
-    private static void deleteTree(File f) {
+    /** 全删掉了返回 true；有一项删不掉（或本来就不在之外的失败）返回 false，其余能删的照删 */
+    private static boolean deleteTree(File f) {
+        boolean ok = true;
         if (!isSymlink(f) && f.isDirectory()) {
             File[] kids = f.listFiles();
-            if (kids != null) for (File k : kids) deleteTree(k);
+            if (kids == null) ok = false;
+            else for (File k : kids) ok &= deleteTree(k);
         }
-        f.delete();
+        return (f.delete() || !exists(f)) && ok;
     }
 
     @Override

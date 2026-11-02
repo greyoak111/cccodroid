@@ -42,6 +42,9 @@ public class GatewayService extends Service {
     private volatile boolean stopping;
     private Thread supervisor;
 
+    /** 服务这会儿在不在（常驻通知里点了停止之后为 false） */
+    static boolean serviceUp() { return self != null; }
+
     static void start(Context c) {
         Intent i = new Intent(c, GatewayService.class);
         // targetSdk ≥ 31：后台（非精确闹钟、没在电池优化白名单）拉前台服务会抛 ForegroundServiceStartNotAllowedException，别让它崩掉调用方

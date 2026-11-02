@@ -166,14 +166,7 @@ static long get_syscall_nr(pid_t pid, siginfo_t *si) {
 }
 
 /* 跟进模式：exec 之后是不是自己要用 ptrace 的工具 —— 是就放手（连同它以后的子进程） */
-static int wants_ptrace(pid_t pid) {
-    char path[64], exe[512];
-    snprintf(path, sizeof path, "/proc/%d/exe", (int)pid);
-    ssize_t n = readlink(path, exe, sizeof exe - 1);
-    if (n <= 0) return 0;
-    exe[n] = 0;
-    const char *base = strrchr(exe, '/');
-    base = base ? base + 1 : exe;
+static int detach_name(const char *base) {
     static const char *builtin[] = { "gdb", "gdbserver", "strace", "ltrace", "lldb", "lldb-server",
                                      "valgrind", "proot", "seccomp-enosys-run", NULL };
     for (int i = 0; builtin[i]; i++) if (strcmp(base, builtin[i]) == 0) return 1;
@@ -188,6 +181,54 @@ static int wants_ptrace(pid_t pid) {
             if (!e) break;
             p = e + 1;
         }
+    }
+    return 0;
+}
+
+static const char *base_of(const char *p) { const char *b = strrchr(p, '/'); return b ? b + 1 : p; }
+
+static int ends_with(const char *s, const char *t) {
+    size_t a = strlen(s), b = strlen(t);
+    return a >= b && strcmp(s + a - b, t) == 0;
+}
+
+/* 经加载器跑的（targetSdk 36：exec 垫片把 exec 改成 linker64 / APK 里的 glibc ld.so）：内核眼里的程序是加载器，
+   真正的程序在命令行里 —— linker64 是第二个参数；glibc ld.so 跳过它自己的选项后第一个（审查 #108 09-006） */
+static int loader_target(pid_t pid, char *out, size_t cap) {
+    char path[64], buf[4096];
+    snprintf(path, sizeof path, "/proc/%d/cmdline", (int)pid);
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    ssize_t n = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (n <= 0) return 0;
+    buf[n] = 0;
+    static const char *withval[] = { "--argv0", "--library-path", "--preload", "--audit", "--inhibit-rpath",
+                                     "--glibc-hwcaps-prepend", "--glibc-hwcaps-mask", NULL };
+    char *p = buf, *end = buf + n;
+    p += strlen(p) + 1;                              /* 跳过 argv[0]（加载器自己） */
+    while (p < end) {
+        if (strncmp(p, "--", 2) != 0) { snprintf(out, cap, "%s", p); return 1; }
+        int skip = 0;
+        for (int i = 0; withval[i]; i++) if (strcmp(p, withval[i]) == 0) skip = 1;
+        p += strlen(p) + 1;
+        if (skip && p < end) p += strlen(p) + 1;
+    }
+    return 0;
+}
+
+static int wants_ptrace(pid_t pid) {
+    char path[64], exe[512];
+    snprintf(path, sizeof path, "/proc/%d/exe", (int)pid);
+    ssize_t n = readlink(path, exe, sizeof exe - 1);
+    if (n <= 0) return 0;
+    exe[n] = 0;
+    const char *base = base_of(exe);
+    if (detach_name(base)) return 1;
+    if (strcmp(base, "linker64") == 0 || strcmp(base, "linker") == 0 ||
+        ends_with(base, "libldlinux.so") || ends_with(base, "ld-linux-aarch64.so.1")) {
+        char prog[512];
+        if (loader_target(pid, prog, sizeof prog)) return detach_name(base_of(prog));
     }
     return 0;
 }
@@ -338,7 +379,8 @@ int main(int argc, char **argv) {
     }
     if (!WIFSTOPPED(status)) {
         /* 还没进跟踪就结束了（比如 exec 失败） */
-        return WIFEXITED(status) ? WEXITSTATUS(status) : 127;
+        /* 被信号结束的照 shell 的规矩报 128+信号（审查 #108 09-008）：以前一律 127，和「找不到命令」混在一起 */
+        return WIFEXITED(status) ? WEXITSTATUS(status) : WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 127;
     }
 
     add_known(pid);

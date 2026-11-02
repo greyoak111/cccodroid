@@ -77,7 +77,9 @@ final class Usb {
         CountDownLatch done = new CountDownLatch(1);
         BroadcastReceiver r = new BroadcastReceiver() {
             @Override public void onReceive(Context x, Intent i) {
-                done.countDown();
+                // 只认这台设备的结果（审查 #107 09-005）：同时在问两台时，A 的回复以前会让还在等确认的 B 提前收工、报「被拒绝」
+                UsbDevice got = i.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                if (got == null || d.getDeviceName().equals(got.getDeviceName())) done.countDown();
             }
         };
         if (android.os.Build.VERSION.SDK_INT >= 33) c.registerReceiver(r, new IntentFilter(ACTION), 4 /* RECEIVER_NOT_EXPORTED */);
@@ -86,7 +88,8 @@ final class Usb {
             Intent i = new Intent(ACTION).setPackage(c.getPackageName());
             // 系统要往这个 Intent 里填 EXTRA_DEVICE / EXTRA_PERMISSION_GRANTED，所以必须可变
             int flags = android.os.Build.VERSION.SDK_INT >= 31 ? 0x02000000 /* FLAG_MUTABLE */ : 0;
-            m.requestPermission(d, PendingIntent.getBroadcast(c, 0, i, flags));
+            // 每台设备一个请求码：同一个 PendingIntent 被两次请求共用时，系统填进去的结果会互相覆盖
+            m.requestPermission(d, PendingIntent.getBroadcast(c, d.getDeviceId(), i, flags));
             done.await(timeoutSec, TimeUnit.SECONDS);
         } finally {
             c.unregisterReceiver(r);

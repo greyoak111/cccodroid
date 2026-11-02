@@ -144,8 +144,11 @@ final class ShizukuSetup {
 
     // ── 下载 + 安装 ──────────────────────────────────────────────────────
     void install(boolean thenActivate) {
-        if (busy) return;
-        busy = true;
+        synchronized (this) { if (busy) return; busy = true; }
+        startInstall(thenActivate);
+    }
+    /** 调用方已经占着 busy：下载安装线程接手，跑完由它放掉 */
+    private void startInstall(boolean thenActivate) {
         activateAfterInstall = thenActivate;
         new Thread(() -> {
             try {
@@ -169,7 +172,11 @@ final class ShizukuSetup {
                 Apk.install(ctx, f, "shizuku");
             } catch (Exception e) {
                 set("error", Tr.t("装 Shizuku 失败：") + e.getMessage() + Tr.t("。也可以去 https://shizuku.rikka.app/download/ 手动下载"));
-            } finally { busy = false; }
+            } finally {
+                // 下载期间又点了「激活」（排队了）：交给装好之后的 onInstalled 去激活，别留在队列里等下一次 idle
+                // 才冒出来；这里也不能走 idle()：系统安装框还没点，马上激活会再下一份（DeepSeek 复核 b7 低-8）
+                synchronized (ShizukuSetup.this) { busy = false; if (activateQueued) { activateQueued = false; activateAfterInstall = true; } }
+            }
         }, "shz-install").start();
     }
 
@@ -190,7 +197,7 @@ final class ShizukuSetup {
         new Thread(() -> {
             try { doActivate(); }
             catch (Exception e) { set("error", e.getMessage()); }
-            finally { idle(); }
+            finally { if (handedOff) handedOff = false; else idle(); }
         }, "shz-activate").start();
     }
 
@@ -200,8 +207,11 @@ final class ShizukuSetup {
         if (again) activate();
     }
 
+    private volatile boolean handedOff;   // 这一轮激活把 busy 交给了安装线程（见 doActivate）
     private void doActivate() throws Exception {
-        if (!Priv.installed()) { synchronized (this) { busy = false; } install(true); return; }
+        // 没装：busy 直接交给安装线程（审查 #107 09-014）。以前先放掉再 install 重新占，激活线程收尾时又把它清了，
+        // 下载还在跑就能再点出一份下载 / 安装
+        if (!Priv.installed()) { handedOff = true; startInstall(true); return; }
         if (Priv.running()) { requestPermission(); return; }
         if (Build.VERSION.SDK_INT < 30) {
             set("error", Tr.t("安卓 11 以下没有无线调试，需要用电脑执行一次：adb shell ") + starter()); return;

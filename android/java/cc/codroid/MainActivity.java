@@ -136,8 +136,18 @@ public class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         if (fold != null) fold.stop();
+        // 放掉这一个界面占着的东西（审查 #105 06-008）：窗格的 500ms 轮询、两个 WebView、网页的选文件回调、
+        // 静态回调里捕获的本界面（新界面 showWeb 时会换成它自己的，这里只清还指着自己的）
+        ui.removeCallbacksAndMessages(null);
+        closePane(false);
+        if (fileCb != null) { try { fileCb.onReceiveValue(null); } catch (Exception ignored) {} fileCb = null; }
+        if (web != null) { try { ((android.view.ViewGroup) web.getParent()).removeView(web); } catch (Exception ignored) {} web.destroy(); web = null; }
+        if (Env.onBoot == myOnBoot) Env.onBoot = null;
+        if (GatewayService.onSquat == mySquat) GatewayService.onSquat = null;
         super.onDestroy();
     }
+    private java.util.function.Consumer<String> myOnBoot;
+    private Runnable mySquat;
 
     @Override public void onRequestPermissionsResult(int code, String[] p, int[] r) {
         if (code == 1) boot();   // 没给也照样跑：工作区退回私有目录
@@ -222,7 +232,7 @@ public class MainActivity extends Activity {
                 askBatteryExemption();
                 say(Tr.t("等待网关…"));
                 for (int i = 0; i < 120 && !ping(); i++) Thread.sleep(500);
-                ui.post(() -> { showWeb(); booted = true; handle(pending); pending = null; });
+                ui.post(() -> { if (isDestroyed()) return; showWeb(); booted = true; handle(pending); pending = null; });
                 // 后台快速自检：只看文件在不在，缺了就提示修复
                 if (!upd.devkitMoving() && !upd.devkitStaged()) upd.verifyAsync(false);
             } catch (Exception e) {
@@ -271,6 +281,8 @@ public class MainActivity extends Activity {
     };
 
     @Override protected void onResume() { super.onResume(); visible = true; applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
+        // 在后台从常驻通知点了「停止」、界面还活着：回来时把网关服务拉起来（审查 #105 06-007）。以前只有 boot 起服务，回来只能对着连不上的页面
+        if (booted && !GatewayService.serviceUp()) GatewayService.start(this);
         ui.removeCallbacks(fpsBeat); ui.postDelayed(fpsBeat, 30000);
         if (pane != null) pane.resume();
         pushWall();
@@ -495,11 +507,22 @@ public class MainActivity extends Activity {
                 String name = displayName(u).replaceAll("[^\\w.\\-()\\u4e00-\\u9fff]+", "_").replaceAll("^[.\\s]+", "");
                 if (name.length() > 120) name = name.substring(name.length() - 120);
                 String stamp = new java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.US).format(new java.util.Date());
-                java.io.File out = new java.io.File(dir, stamp + "-" + (name.isEmpty() ? "shared.bin" : name));
-                for (int k = 2; out.exists(); k++) out = new java.io.File(dir, stamp + "-" + k + "-" + name);
+                String base = name.isEmpty() ? "shared.bin" : name;
+                // 独占创建占住名字（审查 #105 06-011，同 attachBig）：两批分享同一秒进来、同名，以前都过了 exists 检查、写进同一个文件
+                java.io.File out = new java.io.File(dir, stamp + "-" + base);
+                try {
+                    for (int k = 2; !out.createNewFile(); k++) {
+                        if (k > 999) throw new java.io.IOException(Tr.t("同名文件太多了"));
+                        out = new java.io.File(dir, stamp + "-" + k + "-" + base);
+                    }
+                } catch (Exception e) {
+                    ui.post(() -> android.widget.Toast.makeText(this, Tr.f("分享的文件没收下：{0}", e.getMessage()), android.widget.Toast.LENGTH_LONG).show());
+                    continue;
+                }
                 InputStream in0;
                 try { in0 = openShared(u); }
                 catch (Exception e) {
+                    out.delete();      // 上面占名建的空文件（DeepSeek 复核 b7 低-6，同 attachBig）
                     ui.post(() -> android.widget.Toast.makeText(this, Tr.f("分享的文件没收下：{0}", e.getMessage()), android.widget.Toast.LENGTH_LONG).show());
                     continue;
                 }
@@ -556,14 +579,16 @@ public class MainActivity extends Activity {
             return f.isFile() && f.canRead() ? c : null;
         } catch (Exception e) { return null; }
     }
-    /** 选择器里挑的大文件：有路径的递路径，没有的后台拷进 uploads/（不经网页） */
-    private void attachBig(java.util.List<Uri> list) {
+    /** 选择器里挑的大文件：有路径的递路径，没有的后台拷进 uploads/（不经网页）。
+     *  事件和分享进来的分开（ccapp-attach-pick）：拷的时候用户可能切了会话，网页按打开选择器时的草稿归位（#105 06-014） */
+    /** big=false：不是因为大才走这里（界面重建后回调没了），别提示「文件较大」 */
+    private void attachBig(java.util.List<Uri> list, boolean big) {
         new Thread(() -> {
             File dir = new File(env.workspace(), "uploads");
             for (Uri u : list) {
                 String real = realPath(u);
-                if (real != null) { toPage("ccapp-attach", real); continue; }
-                ui.post(() -> android.widget.Toast.makeText(this, Tr.t("文件较大，正在收进工作区…"), android.widget.Toast.LENGTH_SHORT).show());
+                if (real != null) { toPage("ccapp-attach-pick", real); continue; }
+                if (big) ui.post(() -> android.widget.Toast.makeText(this, Tr.t("文件较大，正在收进工作区…"), android.widget.Toast.LENGTH_SHORT).show());
                 dir.mkdirs();
                 String name = displayName(u).replaceAll("[^\\w.\\-()\\u4e00-\\u9fff]+", "_").replaceAll("^[.\\s]+", "");
                 if (name.length() > 120) name = name.substring(name.length() - 120);
@@ -573,7 +598,7 @@ public class MainActivity extends Activity {
                 File out = new File(dir, stamp + "-" + base);
                 try {
                     for (int k = 2; !out.createNewFile(); k++) {
-                        if (k > 999) throw new java.io.IOException("name");
+                        if (k > 999) throw new java.io.IOException(Tr.t("同名文件太多了"));
                         out = new File(dir, stamp + "-" + k + "-" + base);
                     }
                 } catch (Exception e) {
@@ -632,9 +657,11 @@ public class MainActivity extends Activity {
         try { java.nio.file.Files.copy(a.toPath(), b.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING); a.delete(); return true; }
         catch (Exception e) { return false; }
     }
-    private void toPage(String event, String value) {
+    private void toPage(String event, String value) { toPage(event, value, 0); }
+    /** 界面还没起来（进程被收掉后从选择器 / 相机回来，boot 还在走）：等一会儿再递，别丢 */
+    private void toPage(String event, String value, int n) {
         ui.post(() -> {
-            if (web == null) return;
+            if (web == null) { if (n < 300) ui.postDelayed(() -> toPage(event, value, n + 1), 200); return; }
             web.evaluateJavascript("(function f(n){try{if(window.__cc&&window.__cc.view){window.dispatchEvent(new CustomEvent(" + org.json.JSONObject.quote(event)
                 + ",{detail:{value:" + org.json.JSONObject.quote(value) + "}}))}else if(n<150)setTimeout(function(){f(n+1)},200)}" + caught(event) + "})(0)", null);
         });
@@ -927,7 +954,7 @@ public class MainActivity extends Activity {
                 shown.countDown();
             });
             try {
-                shown.await();
+                if (!awaitShown(shown)) return;
                 say(Tr.t("从本地文件安装开发工具包…"));
                 boolean done = installLocal(new Installer(env, new Installer.Progress() {
                     public void step(String m) { say(m); }
@@ -940,7 +967,7 @@ public class MainActivity extends Activity {
                 try { Thread.sleep(4000); } catch (InterruptedException ignored) {}
             }
             try { for (int i = 0; i < 120 && !ping(); i++) Thread.sleep(500); } catch (InterruptedException ignored) {}
-            ui.post(() -> { showWeb(); booted = true; });
+            ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; } });
         }, "devkit-local").start();
     }
 
@@ -979,7 +1006,7 @@ public class MainActivity extends Activity {
                 shown.countDown();
             });
             try {
-                shown.await();
+                if (!awaitShown(shown)) return;
                 say(Tr.t("卸载开发工具包…"));
                 GatewayService.pause(true);
                 try { ins.uninstallDevkit(); }
@@ -990,43 +1017,54 @@ public class MainActivity extends Activity {
                 Ledger.add(env, "uninstall", false, e.getMessage(), null);
                 say("✗ " + e.getMessage());
             }
-            ui.post(this::boot);
+            ui.post(() -> { if (!isDestroyed()) boot(); });
         }, "uninstall").start();
+    }
+
+    /** 等进度页换上来。界面在这之前被销毁的话（onDestroy 清掉了还没执行的 post），永远等不到：
+     *  不再干等，返回 false 让调用的放弃（DeepSeek 复核 b7 高-1：以前 DEVKIT_APPLYING 会永久卡在 true） */
+    private boolean awaitShown(CountDownLatch l) throws InterruptedException {
+        while (!l.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)) if (isDestroyed()) return false;
+        return true;
     }
 
     private void toast(String m) { ui.post(() -> android.widget.Toast.makeText(this, m, android.widget.Toast.LENGTH_LONG).show()); }
 
     /** 替换工具包：网关要停，界面切回进度页，装完再回来 */
+    // 已经在替换了：再来的请求（连点「安装」、两条 Priv 连接）不另起一份（审查 #105 05-007）
+    private static final java.util.concurrent.atomic.AtomicBoolean DEVKIT_APPLYING = new java.util.concurrent.atomic.AtomicBoolean();
     private void applyDevkitUi() {
         Updater upd = Updater.get(this);
         if (!upd.devkitStaged()) { upd.apply("devkit", true); return; }     // 还没下：先下，下完会再走到这里
-        new Thread(() -> {
-            if (Updater.gatewayBusy()) {
-                ui.post(() -> android.widget.Toast.makeText(this, Tr.t("有任务正在跑，等它结束再更新开发工具包"), android.widget.Toast.LENGTH_LONG).show());
-                return;
-            }
-            CountDownLatch shown = new CountDownLatch(1);
-            ui.post(() -> {
-                if (web != null) { web.destroy(); web = null; }
-                booted = false;
-                buildSetupUi();
-                shown.countDown();
-            });
-            try {
-                shown.await();
-                say(Tr.t("更新开发工具包…"));
-                upd.applyDevkit(new Installer(env, new Installer.Progress() {
-                    public void step(String m) { say(m); }
-                    public void bytes(long d, long t) { progress(d, t); }
-                }));
-                say(Tr.t("✓ 开发工具包已更新，等待网关…"));
-            } catch (Exception e) {
-                say("✗ " + e.getMessage());
-                say(Tr.t("（旧的工具包已经不在了的话，划掉应用重新打开会重新安装）"));
-            }
-            try { for (int i = 0; i < 120 && !ping(); i++) Thread.sleep(500); } catch (InterruptedException ignored) {}
-            ui.post(() -> { showWeb(); booted = true; });
-        }, "devkit-apply").start();
+        if (!DEVKIT_APPLYING.compareAndSet(false, true)) return;
+        new Thread(() -> { try { applyDevkitRun(upd); } finally { DEVKIT_APPLYING.set(false); } }, "devkit-apply").start();
+    }
+    private void applyDevkitRun(Updater upd) {
+        if (Updater.gatewayBusy()) {
+            ui.post(() -> android.widget.Toast.makeText(this, Tr.t("有任务正在跑，等它结束再更新开发工具包"), android.widget.Toast.LENGTH_LONG).show());
+            return;
+        }
+        CountDownLatch shown = new CountDownLatch(1);
+        ui.post(() -> {
+            if (web != null) { web.destroy(); web = null; }
+            booted = false;
+            buildSetupUi();
+            shown.countDown();
+        });
+        try {
+            if (!awaitShown(shown)) return;
+            say(Tr.t("更新开发工具包…"));
+            upd.applyDevkit(new Installer(env, new Installer.Progress() {
+                public void step(String m) { say(m); }
+                public void bytes(long d, long t) { progress(d, t); }
+            }));
+            say(Tr.t("✓ 开发工具包已更新，等待网关…"));
+        } catch (Exception e) {
+            say("✗ " + e.getMessage());
+            say(Tr.t("（旧的工具包已经不在了的话，划掉应用重新打开会重新安装）"));
+        }
+        try { for (int i = 0; i < 120 && !ping(); i++) Thread.sleep(500); } catch (InterruptedException ignored) {}
+        ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; } });
     }
 
     /** assets/app → files/app。内容哈希写在 .tag 里，没变就不动 */
@@ -1380,6 +1418,11 @@ public class MainActivity extends Activity {
 
     @SuppressLint("SetJavaScriptEnabled")
     private void showWeb() {
+        // 后台线程（首装、替换工具包）收尾时界面可能已经被划掉：别在死掉的界面上新建 WebView，
+        // 也别把新界面设好的 onBoot / onSquat 抢回来（DeepSeek 复核 b7 高-2）
+        if (isDestroyed()) return;
+        // 下面 removeAllViews 会把窗格摘掉；字段不清的话窗格从此一片空白、关不掉（同上 中-3）
+        if (pane != null) closePane(true);
         askPerms();
         // 网页调试默认关：开着时任何连上 adb 的电脑都能读页面（含网关令牌）。
         // 要调试就在终端里 touch ~/.webdebug，重开应用生效；只有本机终端写得进私有目录
@@ -1408,6 +1451,17 @@ public class MainActivity extends Activity {
         // 本机网关之外的地址一律交给系统浏览器：登录授权页、"去官网创建 Key" 之类。
         // 在 WebView 里打开登录页会被 Google 等拒绝，而且 OAuth 回调要回到浏览器才能跳 localhost。
         web.setWebViewClient(new WebViewClient() {
+            // 渲染进程被系统收掉 / 崩了（审查 #105 06-009）：不接的话默认把整个应用带走（网关服务、在跑的任务跟着遭殃）。
+            // 换一个新的 WebView 重新载入界面，和替换工具包后回到界面走同一条路
+            @Override public boolean onRenderProcessGone(WebView v, android.webkit.RenderProcessGoneDetail d) {
+                android.util.Log.w("cccodroid", "界面渲染进程没了 crash=" + d.didCrash());
+                if (v.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) v.getParent()).removeView(v);
+                v.destroy();
+                if (v != web) return true;
+                web = null;
+                if (!isDestroyed()) ui.post(() -> { if (web == null && !isDestroyed()) showWeb(); });
+                return true;
+            }
             // 只管整页跳转：查看器里 HTML 预览的 iframe 在里面点链接，留在预览里，别当外链甩出去
             @Override public boolean shouldOverrideUrlLoading(WebView v, android.webkit.WebResourceRequest req) {
                 if (!req.isForMainFrame()) return false;
@@ -1603,7 +1657,7 @@ public class MainActivity extends Activity {
             }
         });
         // 网关换了一个（重启、崩溃重拉）：它只认按新启动号派生的 Cookie，这里种上，界面的事件总线重连时就接上了（审查 S1）
-        Env.onBoot = (v) -> ui.post(() -> {
+        Env.onBoot = myOnBoot = (v) -> ui.post(() -> {
             android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
             cm.setCookie("http://" + Env.HOST + ":" + Env.PORT, "cc_t_" + Env.PORT + "=" + v + "; Path=/; HttpOnly; SameSite=Strict");
             // 旧版种在 127.0.0.1 上的那份清掉：网关已经不认了，留着只会被别的端口收走
@@ -1612,7 +1666,7 @@ public class MainActivity extends Activity {
             if (squatShown) { squatShown = false; loadUi(); }
         });
         // 守护线程发现端口被占：正开着的界面马上换成说明页；占用解除、网关起来后（onBoot）再接回界面
-        GatewayService.onSquat = () -> ui.post(() -> { if (web != null && !squatShown && isOwnGateway(web.getUrl())) showSquatted(); });
+        GatewayService.onSquat = mySquat = () -> ui.post(() -> { if (web != null && !squatShown && isOwnGateway(web.getUrl())) showSquatted(); });
         loadUi();
         // 平时启动沿用正在扫的那个标识（不重播进场）；从安装页过来就新起一个居中的
         boolean dark = uiDark();
@@ -1947,7 +2001,13 @@ public class MainActivity extends Activity {
             }).start();
             return;
         }
-        if (req == 7 && fileCb != null) {
+        if (req == 7 && fileCb == null) {
+            // 选文件期间界面被系统收掉重建过（审查 #105 06-010）：网页的回调没了，选的文件照大附件那样递路径 / 收进 uploads，别静默丢掉
+            Uri[] all = chooserResult(res, data);
+            if (all != null && all.length > 0) attachBig(java.util.Arrays.asList(all), false);
+            return;
+        }
+        if (req == 7) {
             // 附件大小门限：超过 BIG_ATTACH 的不交给网页（网页要把整个文件经 fetch 送进网关，几百 MB 时界面和网关都扛不住），
             // 在这边处理 —— 共享存储里有真实路径的只递路径，Claude 按路径自己读；没有的（云盘、别的应用私有的）在后台流式拷进 uploads/
             Uri[] all = chooserResult(res, data);
@@ -1957,7 +2017,7 @@ public class MainActivity extends Activity {
             java.util.ArrayList<Uri> small = new java.util.ArrayList<>(), big = new java.util.ArrayList<>();
             for (Uri u : all) (sizeOf(u) > BIG_ATTACH ? big : small).add(u);
             cb.onReceiveValue(small.isEmpty() ? null : small.toArray(new Uri[0]));
-            if (!big.isEmpty()) attachBig(big);
+            if (!big.isEmpty()) attachBig(big, true);
         }
     }
 
