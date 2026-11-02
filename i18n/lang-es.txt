@@ -2620,3 +2620,4 @@
 2620	No se pudo leer la lista de cambios del repositorio; no se descartó nada
 2621	Solo puedes descartar un archivo a la vez
 2622	Ya hay un archivo en {f}; muévelo antes de descartar
+2633	(Es el estado de la última consulta; esta vez falló: {msg})

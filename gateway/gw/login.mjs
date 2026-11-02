@@ -87,20 +87,35 @@ function runAuth(args, timeoutMs = 20000) {
   });
 }
 export let AUTH_CACHE = null;
+let AUTH_GOOD = null;   // 最后一次问出结果的状态
 export async function authStatus(force) {
   if (!force && AUTH_CACHE && Date.now() - AUTH_CACHE.at < 30000) return AUTH_CACHE.v;
   const r = await runAuth(["status"]);
   let j = {};
-  try { j = JSON.parse(r.out.slice(r.out.indexOf("{"))); } catch {}
+  // JSON 前后可能夹着别的输出（警告之类，里面也可能有花括号）：从第一个 { 起，结尾从后往前逐个 } 试
+  const at = r.out.indexOf("{");
+  for (let e = r.out.lastIndexOf("}"), n = 0; at >= 0 && e > at && n < 50; e = r.out.lastIndexOf("}", e - 1), n++) {
+    try { j = JSON.parse(r.out.slice(at, e + 1)); break; } catch {}
+  }
+  if (!j || typeof j !== "object") j = {};
   // 只转出界面要显示的几项；令牌之类的东西它本来也不报
+  // 问不出结果（claude 起不来、超时、输出解析不了）：不能当成「未登录」—— 有上次问出的就沿用并标明是旧的，
+  // 没有就标「不知道」，把原因带给界面（#102 04-010）
+  // 退出码是 0 也一样：解析不出 loggedIn 就不算知道（DeepSeek 复核 #2）；只有输出明说没登录才给确定的 false
+  if (typeof j.loggedIn !== "boolean" && !/not logged in|not authenticated/i.test(r.out || "")) {
+    const error = String(r.out || "").trim().split("\n").pop().slice(0, 300) || "exit " + r.code;
+    const v = AUTH_GOOD ? { ...AUTH_GOOD, stale: true, error } : { loggedIn: false, authMethod: "none", email: null, org: null, plan: null, unknown: true, error };
+    AUTH_CACHE = { at: Date.now(), v };
+    return v;
+  }
   const v = {
     loggedIn: !!j.loggedIn, authMethod: j.authMethod || "none",
     email: j.email || j.account?.email || null,
     org: j.orgName || j.organization?.name || null,
     plan: j.subscriptionType || j.plan || null,
   };
-  AUTH_CACHE = { at: Date.now(), v };
-  if (r.code === 0 || j.loggedIn != null) noteLoggedIn(v.loggedIn);   // 问不出结果（claude 没装好）就别下结论
+  AUTH_CACHE = { at: Date.now(), v }; AUTH_GOOD = v;
+  noteLoggedIn(v.loggedIn);
   return v;
 }
 
@@ -129,7 +144,7 @@ export async function routeLogin(req, res, u, p) {
     if ([...RUNS.values()].some((r) => !r.ended && isLoginMode(providerById(r.provider) || undefined))) return sendJson(res, 409, { error: "busy", message: tz("这一轮还在生成，等它跑完再退出登录。") });
     const r = await runAuth(["logout"]);
     AUTH_CACHE = null;
-    if (r.code === 0) noteLoggedIn(false);
+    if (r.code === 0) { noteLoggedIn(false); AUTH_GOOD = null; }
     clearRateLimits();
     return sendJson(res, 200, { ok: r.code === 0, output: r.out.slice(-500) });
   }

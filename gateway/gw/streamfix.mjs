@@ -120,7 +120,13 @@ function handle(req, res) {
   const mod = target.protocol === "https:" ? https : http;
   const up = mod.request(target, { method: req.method, headers }, (ur) => {
     const sse = isMsg && /text\/event-stream/i.test(String(ur.headers["content-type"] || ""));
-    if (!sse) { res.writeHead(ur.statusCode || 502, ur.headers); ur.pipe(res); return; }
+    if (!sse) {
+      res.writeHead(ur.statusCode || 502, ur.headers); ur.pipe(res);
+      // pipe 不管来源半路断：上游没收完就断了，下游也立刻断，claude 马上重试，不用干等自己的超时（#102 04-007）
+      const cut = () => { if (!ur.complete) res.destroy(); };
+      ur.on("aborted", cut); ur.on("error", cut); ur.on("close", cut);
+      return;
+    }
     const h = { ...ur.headers };
     delete h["content-length"]; delete h["content-encoding"]; delete h["transfer-encoding"];
     res.writeHead(ur.statusCode || 200, h);

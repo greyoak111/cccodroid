@@ -176,14 +176,17 @@
   }
   function paintLoginState(st, p) {
     const el = $("login-state"); if (!el) return;
+    // 这次没问出来、沿用上次的结果：标明是旧的，带上原因（DeepSeek 复核 #3）
+    const staleNote = st.stale ? `<br><span class="tiny">${esc(t("（这是上次查询的状态，这次没问出来：{msg}）", { msg: st.error || "" }))}</span>` : "";
     if (st.loggedIn) {
       el.className = "prov-state ok";
             el.innerHTML = (st.email ? t("✓ 已登录：<b>{email}</b>", { email: esc(st.email) }) : t("✓ 已登录")) +
         (st.plan ? ` · ${esc(st.plan)}` : "") + (st.org ? `<br><span class="tiny">${esc(st.org)}</span>` : "") +
-        quotaHtml(st.limits);
+        quotaHtml(st.limits) + staleNote;
     } else {
       el.className = "prov-state warn";
-      el.textContent = st.pending ? t("等待浏览器里完成授权…") : t("未登录");
+      el.textContent = st.pending ? t("等待浏览器里完成授权…") : st.unknown ? t("查询失败：{msg}", { msg: st.error || "" }) : t("未登录");
+      if (staleNote && !st.pending) el.innerHTML += staleNote;
     }
     $("login-actions").innerHTML = (st.pending
       ? `<button class="btn sm ghost" data-act="cancel">${t("取消登录")}</button>`

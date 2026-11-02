@@ -36,6 +36,14 @@ else if ((USAGE.v || 1) < 2 && USAGE.imported) setTimeout(() => usageImport(true
 function usageBucket(hours, h) {
   return hours[h] || (hours[h] = { m: 0, t: 0, tl: 0, i: 0, o: 0, c: 0, s: [], md: {}, mt: {}, st: {} });
 }
+function usageMerge(dst, src, sign) {
+  for (const k of ["m", "t", "tl", "i", "o", "c"]) dst[k] = Math.max(0, (dst[k] || 0) + sign * (src[k] || 0));
+  for (const k of ["md", "mt", "st"]) for (const [n, v] of Object.entries(src[k] || {})) {
+    const x = ((dst[k] ||= {})[n] || 0) + sign * v;
+    if (x > 0) dst[k][n] = x; else delete dst[k][n];
+  }
+  if (sign > 0) for (const id of src.s || []) if (!(dst.s ||= []).includes(id) && dst.s.length < 200) dst.s.push(id);
+}
 export function usageAdd(d, sid, model, ts) {
   if (USAGE.off) return;
   const b = usageBucket(USAGE.hours, Math.floor((ts || Date.now()) / 3600e3));
@@ -129,6 +137,8 @@ function usageImport(extraOnly) {
   return usageImporting || (usageImporting = (async () => {
     // extraOnly：老数据（v1）补上 c / mt / st 三项，别的照旧（实时记下的、后来删掉的会话也还在）
     const until = Math.floor((extraOnly ? Date.now() : USAGE.since) / 3600e3);
+    // 实时统计从 since 那一刻起记：since 所在的那个小时，since 之前的部分也要补（以前按整点切，整小时丢了，#102 04-011）
+    const before = extraOnly ? (ts) => Math.floor(ts / 3600e3) < until : (ts) => ts < USAGE.since;
     const hours = {}, seenU = new Set(), seenTool = new Set(), msgs = new Map();
     let files = 0, prompts = 0;
     let dirs = [];
@@ -145,7 +155,7 @@ function usageImport(extraOnly) {
           let e; try { e = JSON.parse(line); } catch { continue; }
           if (e.isSidechain || !e.timestamp) continue;
           const ts = Date.parse(e.timestamp), h = Math.floor(ts / 3600e3);
-          if (!(h < until)) continue;
+          if (!before(ts)) continue;
           const m = e.message || {};
           if (e.type === "user" && m.role === "user") {
             if (e.isMeta || e.isCompactSummary || (e.uuid && seenU.has(e.uuid))) continue;
@@ -174,8 +184,8 @@ function usageImport(extraOnly) {
             let e; try { e = JSON.parse(line); } catch { continue; }
             const m = e.message || {};
             if (e.type !== "assistant" || !e.timestamp || !m.id || !m.usage || !m.model || m.model === "<synthetic>") continue;
-            const h = Math.floor(Date.parse(e.timestamp) / 3600e3);
-            if (h < until) msgs.set(m.id, [h, m.usage, m.model, e.sessionId || sid]);
+            const ts = Date.parse(e.timestamp), h = Math.floor(ts / 3600e3);
+            if (before(ts)) msgs.set(m.id, [h, m.usage, m.model, e.sessionId || sid]);
           }
         }
       }
@@ -196,7 +206,13 @@ function usageImport(extraOnly) {
     }
     // 换掉上次补算的（since 之前的实时数据——比如清空后重新补——也一并以这次为准）
     for (const k of Object.keys(USAGE.hours)) if (+k < until) delete USAGE.hours[k];
+    const edge = hours[until]; delete hours[until];
     for (const [k, b] of Object.entries(hours)) USAGE.hours[k] = { ...b, x: 1 };
+    // 交界那个小时：实时记的（since 之后）加上补算的（since 之前）。上次补进去的记在 xi 里，重补时先减掉，不重复算
+    const live = USAGE.hours[until];
+    if (live?.xi) usageMerge(live, live.xi, -1);
+    if (edge) { const b = usageBucket(USAGE.hours, until); usageMerge(b, edge, 1); b.xi = edge; }
+    else if (live) delete live.xi;
     USAGE.imported = Date.now();
     USAGE.v = 2;
     usageSave(true);

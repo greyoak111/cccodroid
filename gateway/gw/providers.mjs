@@ -559,7 +559,19 @@ async function queryBalance(v, k) {
 function noteBalance(id, cur, bal) {
   if (!Number.isFinite(bal)) return;
   const b = billOf(id);
-  if (b.currency && b.currency !== cur) { b.last = null; }      // 换了币种（换了线路）：重新起算
+  if (b.currency && b.currency !== cur) {
+    // 换了币种（换了线路、双币余额谁多换了）：余额基准重新起算；已记的消费是旧币种的，不能直接贴上新币种（#102 04-009）。
+    // 人民币/美元之间按手上的汇率折过去；折不了就把旧账本收起来另存，从零记
+    b.last = null;
+    const r = FX && FX.rate, k = r && b.currency === "CNY" && cur === "USD" ? 1 / r : r && b.currency === "USD" && cur === "CNY" ? r : 0;
+    if (k) { b.spends = b.spends.map(([t, v]) => [t, +(v * k).toFixed(6)]); b.spentOld = +(b.spentOld * k).toFixed(6); }
+    else if (b.spends.length || b.spentOld) {
+      (b.oldLedgers ||= []).push({ currency: b.currency, spent: +(b.spentOld + b.spends.reduce((a, x) => a + x[1], 0)).toFixed(6), until: Date.now() });
+      if (b.oldLedgers.length > 10) b.oldLedgers.shift();
+      b.spends = []; b.spentOld = 0;
+    }
+    log(`[账本] ${id} 币种 ${b.currency} → ${cur}${k ? "，旧消费按汇率折算" : "，旧账本另存"}`);
+  }
   b.currency = cur;
   const now = Date.now();
   if (b.last && Number.isFinite(b.last.bal)) {
@@ -796,3 +808,4 @@ export async function routeProviders(req, res, u, p) {
 
 // 设置已在 settings-store.mjs 载入；本模块的变量此时都已初始化，在这里解析生效厂商（原来在 settings.mjs 顶层调，单独导入时会撞死区）
 applyProvider();
+export const _billForTest = { noteBalance, billOf };   // 只给测试用

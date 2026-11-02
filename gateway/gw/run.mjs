@@ -395,7 +395,9 @@ export async function startRun(item) {
     try { child.stdin.end(); } catch {}
   };
 
-  let buf = "", stderr = "", lastResult = null;
+  // lastResult 只证明「它那一轮」答完了：后台回报 / 插话会在同一进程里再起一轮，
+  // 那一轮还没出 result 就异常退出时，不能拿旧的 result 报成功（#96 02-002）。resultStale 记「之后又动起来了」
+  let buf = "", stderr = "", lastResult = null, resultStale = false;
   // 开了 --include-partial-messages，正文已经逐字发过，assistant 事件别重复整段
   const flags = { gotDelta: false, isCmd };
   const onInit = (init) => {
@@ -425,9 +427,23 @@ export async function startRun(item) {
     publishState();
   };
   const onResult = (r) => {
-    lastResult = r;
+    lastResult = r; resultStale = false;
     run.meter.result(r, !isCmd);         // 斜杠命令不算一轮对话，但 /compact 这类真花了的 token 照记
-    if (run.pendingInject.length) return;
+    // 接口账本每个 result 各记各的：同一进程后台回报、插话会出好几个 result，只在结束时记最后一个会少记（#102 04-008）
+    noteTokens(run.provider, r.usage);
+    // 定时任务的单次花费上限：后台回报 / 插话会在同一进程里接着花，每出一个 result 就核一次，超了当场停（#98 03-010）。
+    // 一轮之内 claude 不报花费，这一轮本身超出的部分只能在它答完时发现
+    run.costSeen = Math.max(run.costSeen || 0, Number(r.total_cost_usd) || 0);
+    if (item.limitCost > 0 && run.costSeen > item.limitCost && !run.overBudget) {
+      run.overBudget = true;
+      // 本来就要收尾的（没有插话、没有后台任务）让它正常结束，留下回复；还要接着干的当场停
+      if (run.pendingInject.length || run.bgTasks) {
+        log(`💸 花费 $${run.costSeen.toFixed(4)} 超过单次上限 $${item.limitCost}，停止`);
+        abortRun(run);
+        return;
+      }
+    }
+    if (run.pendingInject.length) { resultStale = true; return; }   // 插话还没送到：claude 接着还要答一轮
     if (!run.bgTasks) return closeInput();
     // 答完了，只是后台任务（本地服务之类）还在跑：界面上算这一轮结束，进程和 stdin 留着等任务回报
     run.idle = true;
@@ -479,7 +495,7 @@ export async function startRun(item) {
     // 以前不分，主会话答完「请稍等」、子代理一开口，界面就又是「生成中」加一个空的「连接中」，一直挂到子代理跑完
     const mainEv = !ev.parent_tool_use_id && !ev.isSidechain;
     if (run.idle && mainEv && (ev.type === "assistant" || ev.type === "stream_event" || (ev.type === "system" && ev.subtype === "init"))) {
-      run.idle = false;
+      run.idle = false; resultStale = true;
       emit({ type: "run_busy", startedAt: Date.now() });
       publishState();
     }
@@ -504,7 +520,7 @@ export async function startRun(item) {
     if (/error|Error|failed|ENOENT|EACCES/.test(s)) log(`[claude!] ${s.trim().slice(0, 300)}`);
   });
 
-  const finish = (code) => {
+  const finish = (code, signal) => {
     if (buf.trim()) feed(buf.trim());
     buf = "";
     run.meter.close();                   // 中断 / 被杀也走这里：子代理记录最后扫一遍
@@ -519,16 +535,25 @@ export async function startRun(item) {
       run.pendingInject = [];
     }
     const ms = Date.now() - t0;
+    // 定时任务已经花掉的（崩了、没出 result 也一样）：按 0 记会让它当作没花钱再重试（DeepSeek 复核 #1）
+    const spent = () => (run.sched && run.costSeen ? { costRaw: run.costSeen } : {});
     if (run.aborted) {
       log(`⏹ 已中断 (${ms}ms)`);
-      return endRun(run, { durationMs: ms, ...(run.outTok ? { usage: { output_tokens: run.outTok } } : {}) });
+      return endRun(run, { durationMs: ms, ...(run.retired ? { retired: true } : {}), ...(run.outTok ? { usage: { output_tokens: run.outTok } } : {}), ...(run.sched && run.costSeen ? { costRaw: run.costSeen } : {}) });
+    }
+    // 最后一个 result 之后又起了一轮、没等到它的 result 就异常退出：按失败算，别沿用上一轮的成功
+    if (lastResult && resultStale && (code !== 0 || signal)) {
+      const hint = signal ? `生成中断（${signal}）` : `生成失败（退出码 ${code}）`;
+      log(`✖ ${hint}（上一轮已答完，接着的这一轮没答完）${stderr ? " :: " + stderr.trim().slice(0, 300) : ""}`);
+      billAfterRun(run.provider);
+      emit({ type: "error", message: hint, detail: stderr.trim().slice(0, 1200) });
+      return endRun(run, { failed: true, durationMs: ms, ...spent() });
     }
     if (lastResult) {
       const localCmd = lastResult.local_command || null;
       log(`✔ 完成 ${ms}ms  ${lastResult.num_turns || "?"} 轮  ` +
           `上下文=${flags.contextTokens ?? "?"} out=${lastResult.usage?.output_tokens ?? "?"}  ` +
           `$${Number(lastResult.total_cost_usd || 0).toFixed(5)}${localCmd ? "  [" + localCmd + "]" : ""}`);
-      noteTokens(run.provider, lastResult.usage);
       billAfterRun(run.provider);
       if (!isCmd && !lastResult.is_error && run.sessionId) idleArm(run.sessionId, flags);
       if (!isCmd && !P.local && !lastResult.is_error) settlePathNote(run.sessionId, run.paths);
@@ -557,7 +582,7 @@ export async function startRun(item) {
     const hint = code !== 0 ? `生成失败（退出码 ${code}）` : "生成结束但没有返回结果";
     log(`✖ ${hint}${stderr ? " :: " + stderr.trim().slice(0, 300) : ""}`);
     emit({ type: "error", message: hint, detail: stderr.trim().slice(0, 1200) });
-    endRun(run, { failed: true, durationMs: ms });
+    endRun(run, { failed: true, durationMs: ms, ...spent() });
   };
 
   child.on("error", (e) => {

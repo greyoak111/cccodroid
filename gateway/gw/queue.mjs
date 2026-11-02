@@ -90,7 +90,10 @@ export function saveRunMark() {
       // done：已经答完、只是进程还留着等后台任务回报，而且任务也都清零了 —— 这时被结束不算中断
       runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, text: r.text.slice(0, 4000), startedAt: r.startedAt, ...(r.idle && !r.bgTasks ? { done: true } : {}) })),
       // 已经写进 stdin、claude 还没吃进去的插话也算排队的：一起留下
-      queue: [...live.flatMap((r) => (r.pendingInject || []).map((it) => ({ ...it, injected: false }))), ...QUEUE],
+      // 新会话首条还没拿到会话号时跟着发的（只有 follow）：首条已经结束、不在 runs 里了，重启后就认不出属于哪个会话。
+      // 落盘时按 RUN_SESSIONS 把会话号补上（#97 02-005）
+      queue: [...live.flatMap((r) => (r.pendingInject || []).map((it) => ({ ...it, injected: false }))), ...QUEUE]
+        .map((q) => !q.sessionId && q.follow && RUN_SESSIONS.get(q.follow) ? { ...q, sessionId: RUN_SESSIONS.get(q.follow) } : q),
     }), { mode: 0o600 });
     fs.renameSync(RUN_MARK + ".tmp", RUN_MARK);
   } catch {}
@@ -214,7 +217,7 @@ export function abortRun(run) {
       log("⏹ 停止 5 秒后还没收尾，强制关掉 claude 的输出管道");
       killTree(c);
       for (const s of [c.stdin, c.stdout, c.stderr]) try { s?.destroy(); } catch {}
-      setTimeout(() => { if (!run.ended) { try { run.agents?.close(); } catch {} endRun(run, {}); } }, 2000).unref();
+      setTimeout(() => { if (!run.ended) { try { run.agents?.close(); } catch {} endRun(run, run.sched && run.costSeen ? { costRaw: run.costSeen } : {}); } }, 2000).unref();
     }, 5000).unref();
   }
   return true;
@@ -313,7 +316,7 @@ export function enqueue(body) {
     at: Date.now(),
     // 只有网关自己（定时任务）会带的：前端发来的 /api/chat 不许设这些
     ...(body.internal ? { cwd: body.cwd || null, effort: body.effort || null, provider: body.provider || null, sched: body.sched || null, unattended: !!body.unattended,
-      allowedTools: body.allowedTools || null, disallowedTools: body.disallowedTools || null, timeoutMs: body.timeoutMs || 0 } : {}),
+      allowedTools: body.allowedTools || null, disallowedTools: body.disallowedTools || null, timeoutMs: body.timeoutMs || 0, limitCost: +body.limitCost || 0 } : {}),
     ...(body.auto ? { auto: body.auto } : {}),
   };
   // 插话（"inject"，旧前端叫 "interrupt"）：不打断。消息直接写进正在跑的 claude 的 stdin，

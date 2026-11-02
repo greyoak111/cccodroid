@@ -234,7 +234,7 @@ async function fireNow(t, { reason, attempt, trial }) {
     internal: true, message, projectId: p ? p.id : null,
     sessionId: t.session === "same" && t.lastSid ? t.lastSid : null,
     model: t.model || null, effort: t.effort || null, provider: t.provider || null, ...perm,
-    unattended: true, timeoutMs: Math.max(1, +t.limitMin || 15) * 60000, sched: { taskId: t.id, key },
+    unattended: true, timeoutMs: Math.max(1, +t.limitMin || 15) * 60000, limitCost: +t.limitCost || 0, sched: { taskId: t.id, key },
   });
   log(`⏰ 定时任务「${t.name}」开跑（${reason}${trial ? "，试跑" : ""}）`);
   if (!trial) { t.lastFiredAt = Date.now(); save(); }
@@ -262,7 +262,9 @@ END_HOOKS.push((run, f) => {
   const dur = Date.now() - ctx.startedAt, cost = Number(f.costRaw || f.costUsd || 0);
   const text = String(f.finalText || "").trim();
   let st = "ok", msg = text.split("\n").find((l) => l.trim()) || tz("（没有回复）");
+  const over = run.overBudget || (t.limitCost > 0 && cost > t.limitCost);
   if (run.timedOut) { st = "err"; msg = tz("超过时长上限 {m} 分钟，已停", { m: t.limitMin || 15 }); }
+  else if (run.overBudget) { st = "err"; msg = tz("花费 ${c}，超过单次上限 ${m}", { c: cost.toFixed(2), m: t.limitCost }); }
   else if (run.aborted) { st = "err"; msg = tz("被停止"); }
   else if (f.failed || f.isError) { st = "err"; msg = text || tz("出错了"); }
   else if (t.limitCost > 0 && cost > t.limitCost) { st = "err"; msg = tz("花费 ${c}，超过单次上限 ${m}", { c: cost.toFixed(2), m: t.limitCost }); }
@@ -285,7 +287,8 @@ END_HOOKS.push((run, f) => {
   const found = !t.quiet || text.replace(/[\s。.!！]/g, "") !== String(t.quiet).replace(/[\s。.!！]/g, "");
   const want = t.notify === "none" ? false : t.notify === "fail" ? st !== "ok" : t.notify === "found" ? (st !== "ok" || found) : true;
   if (want) note(t, st === "ok" ? tz("定时任务完成：{n}", { n: t.name }) : tz("定时任务没成：{n}", { n: t.name }), msg, sid, st === "ok");
-  if (st === "err" && ctx.attempt < (+t.retry || 0)) {
+  // 超了花费上限不重试：重试就是再花一遍（#98 03-010）
+  if (st === "err" && !over && ctx.attempt < (+t.retry || 0)) {
     clearTimeout(RETRY.get(t.id));
     RETRY.set(t.id, setTimeout(() => { RETRY.delete(t.id); if (byId(t.id) === t) fire(t, { reason: "retry", attempt: ctx.attempt + 1 }); }, 2 * 60000));
   }

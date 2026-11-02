@@ -2623,4 +2623,5 @@ window.I18N_DICT["es"] = {
   "读不出仓库的改动列表，没有撤销": "No se pudo leer la lista de cambios del repositorio; no se descartó nada",
   "一次只能撤销一个文件": "Solo puedes descartar un archivo a la vez",
   "{f} 那里已经有个文件了，先挪开再撤销": "Ya hay un archivo en {f}; muévelo antes de descartar",
+  "（这是上次查询的状态，这次没问出来：{msg}）": "(Es el estado de la última consulta; esta vez falló: {msg})",
 };

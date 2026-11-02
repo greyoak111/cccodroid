@@ -2620,3 +2620,4 @@
 2620	Impossible de lire la liste des modifications du dépôt ; rien n’a été annulé
 2621	Vous ne pouvez annuler qu’un fichier à la fois
 2622	Un fichier existe déjà à {f} ; déplacez-le avant d’annuler
+2633	(État du dernier contrôle ; celui-ci a échoué : {msg})

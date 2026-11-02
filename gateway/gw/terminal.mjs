@@ -142,7 +142,9 @@ function termNew({ cols, rows, login, cwd: want } = {}) {
   };
   // 起不来（ENOENT/EACCES）时只有 error 和 close、没有 exit：这里也得收尾，不然占着名额永远「活着」（审查 v0.5.3 B4）
   child.on("error", (e) => { out(`\r\n[${e.message}]\r\n`); if (child.pid == null) ended(127); });
-  child.on("exit", (code, sig) => ended(code ?? (sig ? 128 : null)));
+  // exit 时管道里可能还有没读完的尾巴：等 close（stdio 都关了）再收尾，最后几行才送得到（#97 02-006）。
+  // 管道万一被漏到别的进程里一直不关，1 秒后照样收尾
+  child.on("exit", (code, sig) => { const c = code ?? (sig ? 128 : null); setTimeout(() => ended(c), 1000).unref?.(); child.once("close", () => ended(c)); });
   TERMS.set(id, t);
   log(`[term] ${id} 打开 ${cols}x${rows} via ${path.basename(pc[0])}`);
   return { ok: true, term: termInfo(t) };

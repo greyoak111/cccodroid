@@ -133,3 +133,25 @@ test("取消通道请求会关闭上游，转发器仍能接受下一次请求",
     STREAMFIX.server.closeAllConnections(); STREAMFIX.server.close();
   }
 });
+
+test("非流式响应半路断（#102 04-007）：下游马上断，不等客户端自己超时", async () => {
+  const up = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json", "content-length": "10000" });
+    res.write('{"partial":');
+    setTimeout(() => res.socket.destroy(), 40);
+  });
+  await new Promise((r) => up.listen(0, "127.0.0.1", r));
+  STREAMFIX.server = null; STREAMFIX.port = 0;
+  startStreamFix();
+  while (!STREAMFIX.port) await new Promise((r) => setTimeout(r, 10));
+  try {
+    const base = fixedBaseUrl(`http://127.0.0.1:${up.address().port}`);
+    const t0 = Date.now();
+    const r = await fetch(base + "/v1/messages", { method: "POST", body: "{}", signal: AbortSignal.timeout(3000) });
+    await assert.rejects(r.text(), (e) => e.name !== "TimeoutError");
+    assert.ok(Date.now() - t0 < 1500, "上游断了下游也该马上断");
+  } finally {
+    up.closeAllConnections(); up.close();
+    STREAMFIX.server.closeAllConnections(); STREAMFIX.server.close();
+  }
+});
