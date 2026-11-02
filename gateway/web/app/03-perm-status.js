@@ -91,14 +91,23 @@
     return t("碰到了密钥或登录凭据：{w}", { w: k > 0 ? w.slice(k + 2) : w });
   }
 
-  function permActions(p) {
+  // 这张卡所属那一轮实际在用的模式：并行时各轮可能不同（项目默认、会话单独选），别拿全局的芯片值猜（DeepSeek 复核 11-02）
+  const runMode = (runId) => (srv.runs.find((r) => r.id === runId) || {}).permMode || state.permissionMode;
+  // 和 gw/config.mjs 的 WIDE_PERM_MODES 是同一张表，改一处要同步另一处
+  const WIDE_MODES = ["bypassPermissions", "auto", "dontAsk"];
+  function permActions(p, runId) {
     if (p.guard) return `
       <button class="pa-allow">${t("允许")}</button>
       <button class="pa-more primary">${t("拒绝 ▾")}</button>`;
-    if (p.tool === "ExitPlanMode") return `
-      <button class="pa-allow primary" data-mode="default">${t("批准，逐项确认执行")}</button>
+    if (p.tool === "ExitPlanMode") {
+      // 用户本来就放得比「自动接受编辑」宽（全部放行等）时，批准计划不该顺手把全局模式降下来（群友反馈）
+      const cur = runMode(runId), keep = WIDE_MODES.includes(cur);
+      return `
+      ${keep ? `<button class="pa-allow primary" data-mode="${esc(cur)}" data-keep="1">${t("批准，按当前模式执行（{m}）", { m: esc(modeLabel(cur)) })}</button>` : ""}
+      <button class="pa-allow${keep ? "" : " primary"}" data-mode="default">${t("批准，逐项确认执行")}</button>
       <button class="pa-allow" data-mode="acceptEdits">${t("批准，自动接受编辑")}</button>
       <button class="pa-more">${t("再改改 ▾")}</button>`;
+    }
     if (p.tool === "AskUserQuestion") return `
       <button class="pa-answer primary">${t("提交回答")}</button>
       <button class="pa-more">${t("不回答 ▾")}</button>`;
@@ -118,7 +127,7 @@
     el.innerHTML = `
       <div class="perm-head"><span class="perm-kind">${uiI("pause")}${kind}</span><span class="perm-tool">${esc(p.tool)}</span>${p.agentId ? `<span class="perm-sub">${t("子代理")}</span>` : ""}</div>
       <div class="perm-body">${permPreview(p)}</div>
-      <div class="perm-acts">${permActions(p)}</div>
+      <div class="perm-acts">${permActions(p, runId)}</div>
       <div class="perm-deny hidden">
         <textarea rows="2" placeholder="${p.tool === "ExitPlanMode" ? t("说说要怎么改（会发回给 Claude）") : t("可选：告诉 Claude 为什么 / 该怎么做")}"></textarea>
         <div class="perm-acts">
@@ -141,7 +150,7 @@
         return;
       }
       const msg = el.querySelector(".perm-deny textarea").value.trim();
-      if (b.classList.contains("pa-allow")) return permAnswer(p.id, { behavior: "allow", mode: b.dataset.mode && b.dataset.mode !== state.permissionMode ? b.dataset.mode : undefined });
+      if (b.classList.contains("pa-allow")) return permAnswer(p.id, { behavior: "allow", mode: b.dataset.mode && (b.dataset.keep || b.dataset.mode !== runMode(runId)) ? b.dataset.mode : undefined });
       if (b.classList.contains("pa-always")) return permAnswer(p.id, { behavior: "allow", always: true });
       if (b.classList.contains("pa-deny")) return permAnswer(p.id, { behavior: "deny", message: msg });
       if (b.classList.contains("pa-stop")) return permAnswer(p.id, { behavior: "deny", message: msg, interrupt: true });
@@ -159,6 +168,15 @@
       }
     });
     return el;
+  }
+
+  // 模式在卡片等着的时候变了（设置里切、别的会话切）：还没答的计划卡按新模式重排按钮，别留着过期的「按当前模式」
+  function refreshPlanActs() {
+    for (const it of PERMS.values()) {
+      if (it.done || !it.el || it.p.tool !== "ExitPlanMode") continue;
+      const acts = it.el.querySelector(".perm-acts"), html = permActions(it.p, it.runId);
+      if (acts && acts.dataset.html !== html) { acts.innerHTML = html; acts.dataset.html = html; }
+    }
   }
 
   async function permAnswer(id, body) {

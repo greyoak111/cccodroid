@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { PATHS, log, reqLang, tr } from "./config.mjs";
 import { localAddr, staticMac } from "./access.mjs";
+import { REMOTE_PAYLOAD_PARTS, isCoreAppPart } from "./app-parts.mjs";
+export { REMOTE_PAYLOAD_PARTS } from "./app-parts.mjs";
 
 // ── HTTP ──────────────────────────────────────────────────────────────
 export const MIME = {
@@ -99,7 +101,7 @@ export function uiTag() {
 // app.js 的源码按功能拆在 web/app/ 下（文件名带序号），这里按文件名顺序原样拼成一个文件下发：
 // 浏览器拿到的仍是同一个闭包，和拆之前逐字节相同。报错里的 app.js 行号用 node scripts/appjs.mjs --line N 对回分段
 export function appParts() {
-  try { return fs.readdirSync(path.join(PATHS.web, "app")).filter((f) => f.endsWith(".js")).sort(); } catch { return []; }
+  try { return fs.readdirSync(path.join(PATHS.web, "app")).filter(isCoreAppPart).sort(); } catch { return []; }
 }
 let appCache = { key: "", data: null };
 export function appJs() {
@@ -126,12 +128,12 @@ export function sendJson(res, code, obj) {
 // 连接和表单只许同源（审查 10-30 第九份 中2）：界面的 fetch / EventSource 全是网关自己的路径，data: / blob: 留给截图转文件；
 // 这样哪怕有一处转义漏了，脚本也没法把会话内容 fetch 到外面去
 // Referrer-Policy：首屏 URL 带着 t= / k=，别经 Referer 漏给任何地方（审查 中8）
-const STATIC_SAFE = {
+export const STATIC_SAFE = {
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   "content-security-policy": "frame-ancestors 'none'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self' data: blob:; form-action 'self'; object-src 'none'; base-uri 'none'",
 };
-const macHdr = (req, data) => {
+export const macHdr = (req, data) => {
   const m = staticMac(req.headers["x-cc-nonce"], String(req.url || ""), data, localAddr(req));
   return m ? { "x-cc-mac": m } : {};
 };
@@ -140,6 +142,7 @@ export function serveStatic(req, res, urlPath) {
   let rel = urlPath === "/" ? "/index.html" : urlPath;
   rel = rel.replace(/^\/+/, "");
   if (rel.includes("..")) return sendJson(res, 403, { error: "forbidden" });
+  if (["remote-view.css", "remote-settings.css"].includes(rel) || rel.startsWith("app/") && REMOTE_PAYLOAD_PARTS.has(rel.slice(4))) return sendJson(res, 404, { error: "not found" });
   if (rel === "app.js") {
     const data = appJs();
     if (data) {

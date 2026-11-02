@@ -29,15 +29,19 @@ public class GatewayService extends Service {
 
     /** 替换工具包期间停住网关（它跑的 node 就在要被换掉的目录里） */
     private static volatile boolean paused;
+    private static final Object serviceOwnerLock = new Object();
     private static volatile GatewayService self;
     static void pause(boolean on) {
-        paused = on;
-        GatewayService s = self;
-        if (on && s != null) s.killGateway();
+        synchronized (serviceOwnerLock) {
+            paused = on;
+            GatewayService s = self;
+            if (on && s != null) s.killGateway();
+        }
     }
 
     private Env env;
-    private Process proc;
+    private final Object processLock = new Object();
+    private volatile Process proc;
     private PowerManager.WakeLock wake;
     private volatile boolean stopping;
     private Thread supervisor;
@@ -71,13 +75,16 @@ public class GatewayService extends Service {
         // 提权中转：和网关同寿命（priv 命令、设置页的 Shizuku 状态都靠它）
         Priv.start(this);
         Battery.watch(this);   // 耗电统计：数亮屏时长
-        self = this;
+        synchronized (serviceOwnerLock) {
+            self = this;
+            // Publish the owner and acquire its shared hosts in one boundary.
+            Notify.get(this).start();
+            RemoteHost.get(this).start();
+        }
         Updater.get(this).loop();
         // Shizuku 掉了（重启、被杀）而用户开着自动激活：自己重新拉起来
         ShizukuSetup.get(this).reactivateAsync(false);
         watchFreeze();
-        // 后台时的完成 / 等确认通知：订阅网关事件流（界面关了也照发）
-        Notify.get(this).start();
     }
 
     /**
@@ -110,11 +117,14 @@ public class GatewayService extends Service {
         String ik = i == null ? null : i.getStringExtra(MainActivity.IK);
         boolean mine = ik != null && java.security.MessageDigest.isEqual(ik.getBytes(), MainActivity.intentKey(this).getBytes());
         if (i != null && ACTION_STOP.equals(i.getAction()) && mine) {
-            stopping = true;
-            killGateway();
-            ShizukuSetup.get(this).onExit();
-            stopForeground(true);
-            stopSelf();
+            synchronized (serviceOwnerLock) {
+                if (self != this) return START_NOT_STICKY;
+                beginStopping();
+                killGateway();
+                ShizukuSetup.get(this).onExit();
+                stopForeground(true);
+                stopSelf();
+            }
             return START_NOT_STICKY;
         }
         // 开机重新激活 Shizuku 也只认自己的开机广播带来的口令（11-01 独立审查低-6）
@@ -128,12 +138,29 @@ public class GatewayService extends Service {
     }
 
     @Override public void onDestroy() {
-        if (self == this) self = null;
-        stopping = true;
-        Notify.get(this).stop();
-        killGateway();
+        beginStopping();
+        synchronized (serviceOwnerLock) {
+            // Stale destruction owns only its threads/wakelock, never a newer
+            // Service's singleton hosts or a Node that it may have adopted.
+            if (self == this) {
+                self = null;
+                Notify.get(this).stop();
+                RemoteHost.get(this).stop();
+                killGateway();
+            }
+        }
+        Thread retired = supervisor;
+        if (retired != null && retired != Thread.currentThread()) {
+            retired.interrupt();
+            try { retired.join(500); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+        }
         if (wake != null && wake.isHeld()) wake.release();
         super.onDestroy();
+    }
+    private void beginStopping() {
+        // Serialize with ProcessBuilder.start + host binding; no late spawn may
+        // publish a child after onDestroy has retired the private host.
+        synchronized (processLock) { stopping = true; }
     }
 
     /** 端口被别的应用占着时回调（MainActivity 把界面换成说明页） */
@@ -142,13 +169,15 @@ public class GatewayService extends Service {
     /** 守护循环：网关退出就重拉；连续快速崩溃时退避，别把电池耗光 */
     private void supervise() {
         long backoff = 1000;
-        while (!stopping) {
+        while (!stopping && self == this) {
             if (paused) { update(Tr.t("正在更新开发工具包…")); sleep(1000); continue; }
             if (!env.devkitReady()) { update(Tr.t("工具链未安装")); sleep(3000); continue; }
             // 走到这里的是接手的网关（不是本服务拉起的，拉起的在下面 waitFor 里，一退出就作废核身份缓存）：
             // 2 秒看一次，缩短它挂掉到发现端口换了人之间的空档（审查 10-30 第九份 中5）
             if (alive()) { update(Tr.t("运行中 · 127.0.0.1:") + Env.PORT); sleep(2000); continue; }
+            if (stopping || self != this) break;
             if (squatted()) {
+                if (stopping || self != this) break;
                 update(Tr.f("端口 {0} 被别的应用占着，网关起不来。重启手机，或卸载最近装的可疑应用", Env.PORT));
                 Env.resetBoot();
                 Runnable cb = onSquat;
@@ -157,27 +186,35 @@ public class GatewayService extends Service {
             }
             long t0 = System.currentTimeMillis();
             try {
-                spawnGateway();
+                final Process owned = spawnGateway();
+                if (owned == null) continue;
                 update(Tr.t("运行中 · 127.0.0.1:") + Env.PORT);
-                int rc = proc.waitFor();
-                Env.resetBoot();             // 网关没了：上一次核身份的缓存作废，别在 3 秒内把签名请求交给接手端口的人
+                int rc = owned.waitFor();
+                RemoteHost.get(this).gatewayExited(owned);
+                synchronized (processLock) { if (proc == owned) proc = null; }
+                // A retired Service must not invalidate a replacement's proof.
+                if (!stopping && self == this) Env.resetBoot();
                 Log.w(TAG, "网关退出 rc=" + rc);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+                break;
             } catch (Exception e) {
-                Log.e(TAG, "网关启动失败", e);
+                if (!stopping) Log.e(TAG, "网关启动失败", e);
             }
-            if (stopping) break;
+            if (stopping || self != this) break;
             backoff = System.currentTimeMillis() - t0 > 60000 ? 1000 : Math.min(backoff * 2, 60000);
             update(Tr.f("网关已退出，{0} 秒后重启", backoff / 1000));
             sleep(backoff);
         }
     }
 
-    private void spawnGateway() throws Exception {
+    private Process spawnGateway() throws Exception {
         env = new Env(this);                 // 每次重读：执行方式（files/.exec-mode）改了，重启网关就生效
         Log.i(TAG, "执行方式 pref=" + Env.execPref(this) + " targetSdk=" + env.targetSdk + " loader=" + env.loader + " ldso=" + env.ldsoMatches());
         File server = new File(env.app, "server.mjs");
         ProcessBuilder pb = new ProcessBuilder(env.cmd(env.bin("node").getPath(), server.getPath(), String.valueOf(Env.PORT)));
         env.apply(pb.environment());
+        RemoteHost.get(this).applyGatewayEnvironment(pb.environment());
         if (env.loader) pb.environment().put("TERMUX_EXEC__PROC_SELF_EXE", env.bin("node").getPath());   // 给 execpath.cjs
         pb.directory(env.app);
         pb.redirectErrorStream(true);
@@ -185,11 +222,21 @@ public class GatewayService extends Service {
         // 一直追加会无限长：起网关前超过 8 MB 就挪成 .1（只留一份旧的 —— 审查 低16）
         if (gout.length() > (8L << 20)) { File old = new File(env.home, "gateway.out.1"); old.delete(); gout.renameTo(old); }
         pb.redirectOutput(ProcessBuilder.Redirect.appendTo(gout));
-        proc = pb.start();
+        // Lock order is service owner -> this Service's process -> RemoteHost.
+        synchronized (serviceOwnerLock) {
+            synchronized (processLock) {
+                if (stopping || paused || self != this) return null;
+                final Process owned = pb.start();
+                proc = owned;
+                RemoteHost.get(this).bindGateway(owned);
+                return owned;
+            }
+        }
     }
 
     private void killGateway() {
-        Process p = proc;
+        final Process p;
+        synchronized (processLock) { p = proc; }
         if (p == null) return;
         // SIGTERM 让网关自己收尾（它会连带杀掉正在跑的 claude 进程树）
         p.destroy();
@@ -199,8 +246,17 @@ public class GatewayService extends Service {
     /** 端口上已经有活的网关（比如服务重建前留下的那个）就别再起一个。
      *  只认证明得了自己的（审查 S1）：以前任何答 200 的都算，探活时还把令牌头带过去了 */
     private boolean alive() {
-        if (proc != null && proc.isAlive()) { Env.proveGateway(); return true; }   // 顺手核一下：网关换过了，Cookie 跟着换
-        return Env.proveGateway();
+        Process owned = proc;
+        if (owned != null && owned.isAlive()) { Env.proveGateway(); return true; }   // 顺手核一下：网关换过了，Cookie 跟着换
+        if (!Env.proveGateway()) return false;
+        // Preserve the proved adopted Node and its local runs. It has no new
+        // stdin capability, so report remote host unavailable instead of killing it.
+        synchronized (serviceOwnerLock) {
+            synchronized (processLock) {
+                if (!stopping && self == this && (proc == null || !proc.isAlive())) RemoteHost.get(this).gatewayAdopted();
+            }
+        }
+        return true;
     }
 
     /** 端口有人占着、又证明不了自己。本应用自己的残留网关（旧版没有 /__proof，或令牌换过）就杀掉、返回 false 照常起；
@@ -228,7 +284,7 @@ public class GatewayService extends Service {
 
     private String last;
     private void update(String text) {
-        if (text.equals(last)) return;
+        if (stopping || self != this || text.equals(last)) return;
         last = text;
         getSystemService(NotificationManager.class).notify(1, note(text));
     }

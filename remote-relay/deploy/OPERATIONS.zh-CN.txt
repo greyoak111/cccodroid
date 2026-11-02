@@ -1,0 +1,122 @@
+轻量中转：本地交付与部署模板（未部署）
+
+1. 边界
+此目录是独立服务，不是手机/平板本地 gateway。生产入口为 src/cli.mjs，
+使用 createTunnelRelayServer；TLS1.3 端到端连接只在两台设备的 02 crypto
+模块终止，中转只路由有界不透明字节。中转不执行工具、不调用模型、不解密。
+旧 src/server.mjs 的 createRelayServer 是保留的信封工厂/测试兼容面，不是生产
+E2EE 路径，不要把 TEST-OPAQUE-NOT-E2EE 夹具当成真实加密能力。
+
+2. 本地命令（在独立开发副本，假凭据与临时目录测试）
+  npm --prefix remote-relay ci --ignore-scripts --no-audit --no-fund
+  npm --prefix remote-relay test
+  npm --prefix remote-relay run check
+  npm --prefix remote-relay audit --omit=dev
+  npm --prefix remote-relay start -- --config /absolute/private/relay.json
+配置示例在 relay.example.json，只是不可用占位符，没有真密钥。配置必须 0600、
+绝对路径；stateFile 也必须绝对路径且其专用父目录由服务用户控制。程序不自动
+读取 HOME、现用 App、真实会话或模型凭据。测试使用随机 loopback 端口和临时文件。
+当前 ws 精确固定 8.22.1，依赖及 lock 只在 remote-relay，不影响 gateway 零依赖。
+Node >=22.18；模板使用 Node 24 LTS。ws 原样包由独立 npm lock integrity 验证。
+
+3. 两种连接凭据注册方式（与 E2EE 身份、会话授权分开）
+A. 推荐集成：两端宿主生成证书/SPKI 身份后，由受信本机初始化调用
+   relay.registerDevice({deviceId: 02 identity.deviceId, token:32字节随机base64url})。
+   或在服务初始私有配置 devices 中预置相同 deviceId/token（首次空状态才生效）。
+   GUI 保存本机 token 于宿主安全存储，不能放 localStorage、聊天或日志。
+   不提供可任意指定 ID 的公网注册接口，不允许重用他人设备 ID。
+B. 可选 owner bootstrap：私有配置设置独立高熵 bootstrapToken 后启用
+   POST https://域名/v1/devices/register，Authorization: Bearer bootstrapToken，
+   Content-Type: application/json，Content-Length必须明确且请求体<=8192字节：
+   {publicKey:P-256的SPKI PEM,signature:标准base64 ECDSA-SHA256签名}。
+   签名原文精确为UTF8的 'cc-remote-register-v1:' + deviceId，deviceId由SPKI DER
+   SHA-256的base64url导出 'dev_' 前缀，与02 identityFromCertificate一致。
+   返回 {v:1,deviceId:由公钥导出的ID,token:随机32字节base64url}。不接受指定ID字段，
+   假签名/非P-256/空body/超限/已注册或已撤销身份均拒绝；不覆盖、不重新发token。
+   GUI(runtime)连接表单可用首次凭证调用一次并交宿主保存返回token。注册绑定连接
+   身份与02公钥身份，但不替代后续TLS私钥持有证明、双方用户配对及会话授权。
+   静态签名只证明该公钥所有权，不声称是fresh challenge；必须同时有bootstrap，
+   且已存ID永不重发token，抓到旧proof不能轮换或接管已有设备。
+bootstrap 是单用户注册能力，拿到它的人可占用设备配额；完成设备注册后从私有
+配置删除 bootstrapToken 并在另行取得重启授权后重启此独立服务。不能改现用网关。
+私有状态只留设备 token 的 SHA-256 摘要（无原 token/无 bootstrap）。设备注册
+不代表配对，配对不代表某会话授权。设备名、会话标题、公开 ID 都不是凭据。
+
+4. WSS/HTTP 接口
+仅开放 /healthz（无设备数据）、/v1/relay（WebSocket）、可选注册路径；其余404。
+HTTP JSON明确Content-Length、application/json、no-store及nosniff；空错误长度为0，
+注册拒绝时Connection:close，避免未读请求体进入下一请求。客户端应限制响应长度。
+标准 Node 内置 WebSocket 连接后5秒内发送：
+  {v:1,op:'auth',deviceId,token}
+成功为 auth.ok {deviceId,relayInstanceId,resyncRequired:true,maxFrameBytes:65536,
+maxChunkBytes:32768}。不支持URL/query token。默认拒绝浏览器 Origin，允许列表可
+显式注入；受控本机 Node 客户端不发送 Origin。公网必须有效 HTTPS/WSS，不能关闭
+证书验证。程序只允许无 TLS 监听 loopback；Caddy 是公开 TLS 入口，两端均出站。
+
+  tunnel.open {tunnelId,toDeviceId,purpose:'pairing'|'peer',offerId?(pairing必须)}
+  -> 双方 tunnel.opened {tunnelId,fromDeviceId,toDeviceId,purpose,offerId?}
+  tunnel.data {tunnelId,data:标准base64}
+  tunnel.close {tunnelId} -> 双方 tunnel.closed {tunnelId,code}
+以上所有 WS JSON 都必须带 v:1/op，不能额外注入 fromDeviceId、URL、工具或路径。
+source由服务器认证连接注入；data每chunk最多32768原始字节，每JSON帧<=65536。
+peer需要已确认设备pair metadata；每连接换代、断开、unpair、设备撤销都会关隧道。
+
+目标先 pair.offer {offerId,expiresAt<=5分钟} -> pair.offered；已认证同用户设备才可
+开 pairing tunnel，配对秘密和公钥确认只在内层TLS由02核实，relay看不到配对秘密。
+02的两端用户明确完成后，各端 pair.confirm {peerDeviceId}；第一端 pair.pending，
+两端一致且对应offer/tunnel仍有效才双方 pair.confirmed。单方重复确认不能成pair。
+pair.cancel {offerId} 取消offer/对应隧道；pair.revoke {peerDeviceId} 双方撤销pair。
+relay的pair.confirm不等于已密码核实，这是可信客户端在02核实后发出的元数据确认；
+被控制的端点不能靠该元数据让另一个端点绕过02公钥pin或会话授权校验。
+
+离线仅允许 wake.hint {hintId,toDeviceId,kind:'invite'|'reminder',expiresAt<=5分钟}，
+源由服务器加入 -> wake.stored；目标重连收到 wake.hint（含 fromDeviceId）。
+目标 wake.ack {fromDeviceId,hintId} -> wake.acked 删除。hint没有正文/标题/命令/审批
+范围，不能代表邀请内容送达；正文必须重建TLS后向host重新取，并核准当前授权。
+所有relay队列状态、TCP成功和hint stored都不等于平板received/applied/已停止。
+
+5. 资源/背压/优先级
+默认最多8设备、8未认证连接（5秒超时）、16pair、16隧道且每设备8、8限时offer。
+每连接最多512KiB/128项应用队列，其中128KiB/16项保留给认证/关闭/配对等系统帧；
+最多一帧进入ws/TCP，socket预算64KiB。发/收token bucket与消息burst均有界。
+慢端超时或队列满关闭整条TLS隧道；不能静默丢一条TLS record继续假装流完整。
+同一TLS stream字节必须FIFO，中转不可按明文语义重排。认证/关闭/配对系统消息高
+优先；停止/审批对历史的语义优先应在设备端进入TLS前调度，或用独立TLS隧道。
+不能宣称opaque relay已经识别并优先执行stop。3Mbps WAN/真实设备吞吐和延迟未验。
+默认hint最多128项/目标64项，单项极小metadata，state文件最多1MiB。到期定时清理。
+
+6. 元数据与重启
+单进程使用Node内置原子JSON事务：临时0600文件、fsync文件、rename、fsync父目录；
+串行更新，上限检查，非法/超大/非0600状态fail closed不覆盖。不要多进程共写同一
+stateFile。只持久化版本、设备tokenHash/可选公钥、已确认pair和TTL metadata hints。
+绝不保存TLS record、会话正文、历史、工具结果、控制队列、模型Key。
+重启只恢复设备/已双端确认pair/未过期hint。在线连接、隧道、offer、部分确认全丢弃。
+端点必须重新连接、重新端到端TLS握手，平板核准hostInstance/grant/run/current待办；
+中转没有会话授权能力，设备pair恢复不能等价于旧授权恢复。旧控制不会自动重放。
+设备撤销不会被原bootstrap配置在下次启动悄悄复活。SIGTERM只停本relay；测试退出0。
+
+7. 模板使用前人工核实（这些动作未执行，需另行授权）
+- 核实云系统/域名/有效证书/持久目录/服务用户。不要在聊天粘贴密码或真实token。
+- Caddyfile只给 /v1/relay /healthz /v1/devices/register，其余404，不启用access log。
+- systemd unit用专用非登录用户、只读系统、0700 StateDirectory、256MiB MemoryMax，
+  不改现用CC服务。journal固定代码日志自带rate limit；若系统支持namespace，可
+  添加LogNamespace=cccodroid-relay并仅在该namespace启用8MiB/3day上限模板。
+  不把journald-relay.conf当全局drop-in，避免更改当前日志策略。
+- container模板为Linux host-network，仅loopback不publish 8765，Caddy在同一host。
+  配置0600/state0700，属主匹配容器1000用户；read-only root、cap_drop、256MiB内存、
+  json-file 1MiB x3轮转。构建前固定受支持Node镜像digest（模板tag不冒充已审计digest）。
+- 仅模板：未运行docker build/compose、未安装systemd/Caddy、未登录或部署云。
+
+8. 备份/升级/回滚
+另行授权操作时，先停独立relay并备份0600 metadata及私有配置到用户控制加密介质；
+不备份TLS记录（本来不存），不导出到公开目录。部署新独立目录后npm ci核对lock，
+本地健康/认证/测试通过再切该relay服务。失败则恢复上一个源码/lock和兼容state快照。
+version2 tunnel state不可直接当旧version1 envelope state，换路径或明确迁移，不默默
+覆盖坏版本。更换/遗失token需受信本机重新登记并撤销旧设备，不能靠知道ID取回令牌。
+日志只固定event/code，不写异常原文/用户ID/正文/token；部署sink仍必须轮转/限额。
+
+9. 已验与未验
+本次内置测试覆盖独立CLI、标准WebSocket auth、配对双确认、token隔离、TTL hint、
+边界/慢端/重启、临时可信证书WSS、02成熟TLS1.3透传01真实受限帧，全部假数据。
+未验：云Caddy/systemd/container启动、真实3Mbps WAN持续负载、2核2GiB RSS、真机锁屏
+切网通知、GUI注册流程、真实会话/模型、安装升级。不得用夹具PASS冒充这些验收。

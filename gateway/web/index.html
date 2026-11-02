@@ -20,6 +20,7 @@
     <div id="app-title">Claude CLI</div>
         <div id="sub-title" data-i18n>连接中…</div>
   </div>
+  <button id="btn-session-menu" class="icon-btn hidden" aria-label="当前会话操作" title="当前会话操作" data-i18n-attr="aria-label,title"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="19" r="1.2"/></svg></button>
   <!-- 工具键横向折叠：常态只露「⋯」，点开从它左边依次滑出，再点收回（状态记在 localStorage cc.tbOpen）。
        冻结脱困不再占按钮：长按标题（见 19-boot.js） -->
   <!-- 设成「常驻」的工具键挪到这里，不跟着折叠（设置 → 通用 → 顶栏按钮；19-boot.js 的 paintTopbar） -->
@@ -147,6 +148,8 @@
       <div id="session-list" class="list"></div>
       <div class="tiny sess-tip" data-i18n>选择、导入、回收站、刷新、断开在标题旁的 ⋯ 里；单个会话点右边的 ⋯ 或长按。</div>
     </section>
+
+    <section id="tab-remote" class="tab-pane hidden"><div id="remotePage" class="hidden" hidden></div></section>
 
     <!-- 用量：本应用的使用统计 + 耗电（原来在设置里） -->
     <!-- 项目 / 定时任务（照稿）：内容全由 app.js 画，列表与详情同一页，返回键先回列表 -->
@@ -406,12 +409,15 @@
           <button data-cat="claude"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.6L20 9.3l-4.4 3.9 1.3 5.8L12 16l-4.9 3 1.3-5.8L4 9.3l5.8-.7z"/></svg><span data-i18n>Claude 行为</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="run"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg><span data-i18n>后台与并行</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="device"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/></svg><span data-i18n>设备与权限</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button data-cat="remote" class="hidden" hidden><svg viewBox="0 0 24 24"><rect x="2" y="4" width="14" height="11" rx="2"/><path d="M6 19h6M9 15v4"/><rect x="17" y="10" width="5" height="11" rx="1"/></svg><span data-i18n>远程托管</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="update"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span data-i18n>更新</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="usage"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span data-i18n>用量与耗电</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
           <button data-cat="trouble"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.5-.5-.5-2.5z"/></svg><span data-i18n>排障</span><svg viewBox="0 0 24 24" class="chev"><path d="M9 6l6 6-6 6"/></svg></button>
         </nav>
         <div class="set-main">
   
+        <div class="set-cat hidden" data-cat="remote"><div class="sblock hidden" id="remoteSettingsPage" hidden></div></div>
+
         <!-- ── 通用 ── -->
         <div class="set-cat hidden" data-cat="general">
           <h3 class="set-h" data-i18n>通用</h3>

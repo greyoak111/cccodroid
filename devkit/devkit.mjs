@@ -30,6 +30,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import crypto from "node:crypto";
 import { execFileSync, execFile } from "node:child_process";
+import { componentHostApiFields } from "./component-host-api.mjs";
 import * as xzNs from "./vendor/xz-decompress/dist/package/xz-decompress.js";
 const xz = xzNs.default ?? xzNs;
 
@@ -623,6 +624,7 @@ const COMP = RECIPE_DIR ? loadRecipe(RECIPE_DIR) : cmd === "component" ? (MAN.co
 const COMP_ID = COMP ? (RECIPE_DIR ? COMP.id : args[1]) : null;
 if (cmd === "component" && !COMP) throw new Error("devkit.json 的 components 里没有: " + args[1]);
 const COMP_BASE = RECIPE_DIR || HERE;          // files 的 src 相对它找
+const COMP_HOST_API = COMP ? componentHostApiFields(COMP) : {};
 
 /** 外部配方：recipe.json + 可选的 skill/ 目录（自动装到 usr/share/cccodroid/components/<id>/skill/） */
 function loadRecipe(dir) {
@@ -1215,6 +1217,7 @@ if (cmd === "build" || cmd === "component") {
       base: { snapshot: BASE.snapshot, gz: BASE.gz.sha256 },
       bin: COMP.bin || [], skill: COMP.skill || "", selftest: COMP.selftest || "", files: manifest.size,
       name: COMP.name, desc: COMP.desc, kind: COMP.kind || "termux", needs: COMP.needs || {}, license: COMP.license || "",
+      ...COMP_HOST_API,
       tar: { file: path.basename(tarFile), ...tarInfo },
       gz: { file: path.basename(tarFile) + ".gz", ...gzInfo },
       installed: itotal + fetchedBytes, snapshot: idx.date, packages: lock, baseDeps,

@@ -2595,3 +2595,284 @@
 2595	Formato de nombre no válido
 2596	Parámetros de solicitud no válidos
 2597	Abrirla en el navegador quita la protección del visor: los scripts de la página pueden enviar a otro sitio los archivos de su carpeta y acceder a otros servicios de este dispositivo. Hazlo solo con páginas de confianza.
+2598	Aprobar y mantener el modo actual ({m})
+2599	El componente de acceso remoto a sesiones está desactivado o aún no está listo
+2600	No se pudo cargar la interfaz del componente remoto. Actualiza el estado del componente e inténtalo de nuevo.
+2601	El estado del componente remoto está incompleto. Actualízalo e inténtalo de nuevo.
+2602	El componente remoto requiere que la aplicación anfitriona admita remoteSession hostApi 1. Actualiza la app.
+2603	La información de versión del componente remoto está incompleta. No se ha cargado su interfaz.
+2604	El componente remoto no se cargó mediante la interfaz de la aplicación anfitriona
+2605	No se pudo suscribir a las actualizaciones del componente remoto. Actualiza e inténtalo de nuevo.
+2606	No se pudieron cargar los estilos del componente remoto. Actualiza el estado del componente e inténtalo de nuevo.
+2607	No se pudo cargar la interfaz del componente remoto o su versión ha cambiado. Actualiza el estado del componente e inténtalo de nuevo.
+2608	Se agotó el tiempo de carga de la interfaz del componente remoto. Actualiza e inténtalo de nuevo.
+2609	No se pudo cambiar el estado del componente remoto
+2610	El estado del componente aún no se ha confirmado. Actualiza y compruébalo.
+2611	Instala y activa el componente de acceso remoto a sesiones en Extensiones
+2612	Se perdió la conexión. Las operaciones no se ponen en cola sin conexión. Vuelve a conectarte y comprueba los resultados.
+2613	Comprobando la autorización y las solicitudes pendientes de la tableta. No se puede operar hasta que termine esta comprobación.
+2614	La tableta ha revocado el acceso remoto. La tarea original continúa en la tableta.
+2615	La autorización de acceso remoto ha caducado. Vuelve a activarla en la tableta.
+2616	La solicitud ya se ha atendido o ha dejado de ser válida. Actualiza para ver el estado actual de la tableta.
+2617	La ejecución o la autorización de la tableta ha cambiado. Comprueba de nuevo la sesión actual.
+2618	No está disponible el alcance completo de la solicitud de aprobación, por lo que no se puede aprobar. Revísala en la tableta.
+2619	Primero conecta y empareja los dispositivos en Ajustes de conexión.
+2620	Primero acepta la invitación de acceso remoto que la tableta ha enviado a este teléfono.
+2621	El contenido supera el límite de transferencia remota. Acorta el texto o consúltalo en la tableta.
+2622	No se pudo confirmar la operación. Actualiza el estado; no vuelvas a enviar la misma instrucción.
+2623	En ejecución
+2624	Este turno ha terminado
+2625	Solicitando la detención…
+2626	Requiere una acción local en la tableta
+2627	Esperando la sincronización del estado
+2628	Tableta en línea
+2629	Comprobando el estado de la tableta…
+2630	Se perdió la conexión
+2631	Aún sin sincronizar
+2632	Enviando…
+2633	La tableta lo ha recibido; se espera la confirmación de entrega a la sesión original
+2634	La tableta lo ha recibido; se espera el resultado del procesamiento
+2635	Rechazado por la tableta
+2636	Resultado por verificar; no se reenviará automáticamente
+2637	La tableta ha confirmado: la ejecución actual se ha detenido
+2638	La tableta ha confirmado: la ejecución original ha terminado
+2639	La tableta ha confirmado: denegado / devuelto para revisión
+2640	La tableta ha confirmado: la respuesta se ha devuelto a la sesión original
+2641	La tableta ha confirmado: plan aprobado; cada ejecución sigue requiriendo su aprobación individual
+2642	La tableta ha confirmado: permitido solo para esta solicitud
+2643	La tableta ha confirmado: añadido a la cola de la sesión original
+2644	La tableta ha confirmado: entregado a la sesión original
+2645	Acuse de procesamiento de la tableta
+2646	Consultar el resultado de la instrucción original
+2647	CC · Se ejecuta en la tableta
+2648	Estado de la sesión
+2649	Desde el teléfono
+2650	En ejecución
+2651	Ver resultado
+2652	La salida está limitada. Esta vista solo muestra contenido ya transferido; no lee archivos de la tableta ni del teléfono.
+2653	Puedes seleccionar varias opciones. Si escribes una respuesta libre, esta tiene prioridad sobre las opciones seleccionadas.
+2654	Respuesta libre
+2655	CC tiene una pregunta
+2656	Esta solicitud implica una operación sensible. Revisa todos los detalles con atención; no se añadirá ningún permiso permanente.
+2657	Aprobar el plan no elimina la confirmación individual de las operaciones que requieren aprobación. No habilita permisos automáticos ni permanentes.
+2658	Se ejecuta solo en la sesión original de la tableta · Solo esta solicitud
+2659	Esta operación debe atenderse localmente en la tableta. El teléfono no puede conceder permisos del sistema.
+2660	Revisa todos los detalles antes de decidir si apruebas.
+2661	Ver plan completo
+2662	Ver todos los detalles
+2663	Permitir una vez
+2664	Devolver para revisión
+2665	Atender en la tableta
+2666	Esta solicitud ya se ha atendido o ha dejado de ser válida
+2667	Motivo de la denegación (opcional)
+2668	Confirmar denegación / devolución para revisión
+2669	Sesiones remotas
+2670	Remoto · {device}
+2671	Tableta
+2672	Solo se muestran las sesiones autorizadas para este teléfono
+2673	Volver a la lista de sesiones remotas
+2674	Volver a la conversación
+2675	Actualizar estado remoto
+2676	Acciones de la sesión remota
+2677	Ajustes de conexión
+2678	Invitación de acceso remoto
+2679	Solo esta sesión · Ver mensajes, responder a solicitudes de aprobación y enviar texto. Aceptar no aprueba ninguna operación de herramientas.
+2680	Rechazar invitación
+2681	Aceptar y abrir
+2682	En línea
+2683	Esperando conexión
+2684	Pendientes de tu confirmación: {n}
+2685	Lista de sesiones remotas
+2686	Cargando sesiones remotas…
+2687	Invitaciones pendientes de aceptación
+2688	Sesiones compartidas con este teléfono
+2689	Aún no hay sesiones remotas
+2690	Selecciona «Conceder acceso al teléfono» en el menú de acciones de la sesión de la tableta para invitar a este teléfono.
+2691	Ver solicitudes pendientes
+2692	Enviar una instrucción de texto a la sesión original de la tableta
+2693	Enviar una instrucción a la sesión original de la tableta…
+2694	Se perdió la conexión. Puedes seguir escribiendo un borrador…
+2695	Solo texto · La tarea original sigue ejecutándose en la tableta
+2696	Los borradores solo se conservan mientras esta vista está abierta. Sin conexión no se envían instrucciones, aprueban solicitudes ni detienen ejecuciones automáticamente.
+2697	Comprobando si la ejecución se ha detenido…
+2698	Detener la ejecución actual
+2699	La tableta ha revocado el acceso remoto
+2700	La autorización de acceso remoto ha caducado
+2701	Se han desactivado los mensajes y controles posteriores y se ha eliminado el contenido temporal. Esto no detiene la tarea original de la tableta.
+2702	Primero acepta la invitación de acceso remoto
+2703	Aceptar solo concede acceso a esta sesión. No aprueba ninguna operación de herramientas.
+2704	El acceso remoto está cerrado
+2705	Se ha eliminado el contenido temporal de la sesión. Comprueba el emparejamiento de dispositivos y la autorización de acceso remoto. Esto no detiene la tarea de la tableta.
+2706	En caché · Última sincronización: {time}
+2707	Mensajes de la sesión remota
+2708	Cargar mensajes anteriores bajo demanda
+2709	Comprobando la autorización y los mensajes recientes de la tableta…
+2710	Aún no hay mensajes recientes. Puedes actualizar el estado actual de la tableta.
+2711	Dispositivo de ejecución
+2712	Descripción de la operación
+2713	Esta solicitud implica una operación sensible. Las comprobaciones de seguridad existentes en la tableta no cambian.
+2714	Arriba se muestra el alcance completo de esta solicitud proporcionado por la tableta. Las rutas son solo para consultar y no abrirán archivos del teléfono.
+2715	Revisado; volver a la sesión
+2716	Plan completo
+2717	Detalles completos de la solicitud de aprobación
+2718	Esta pregunta no se puede omitir de forma remota. Atiéndela localmente en la tableta.
+2719	Selecciona una opción o escribe una respuesta para cada pregunta.
+2720	Salir de esta vista no detiene la tarea de la tableta ni revoca la autorización de acceso concedida por la tableta.
+2721	Salir de la vista y eliminar el contenido temporal
+2722	¿Detener la ejecución actual en la tableta?
+2723	Esto solicita la interrupción de la ejecución actual de la tableta. Los cambios ya realizados y los efectos externos no se desharán automáticamente.
+2724	Detener no revoca el acceso remoto. La ejecución solo se muestra como detenida cuando la tableta confirma que ha terminado.
+2725	Solicitar detención
+2726	La identidad segura de este dispositivo aún no ha terminado de inicializarse, por lo que no se puede confirmar el registro. No borres los datos de la app e informa de este código de error: {code}
+2727	El backend de la función remota aún no está listo. Las operaciones que no se hayan realizado no se mostrarán como exitosas.
+2728	La información de emparejamiento ha caducado. Genera un nuevo código de emparejamiento de un solo uso.
+2729	Este código de emparejamiento ya se ha usado y no se puede volver a usar para emparejar.
+2730	La información de verificación de los dispositivos no coincide. No se ha confirmado el emparejamiento.
+2731	Demasiadas operaciones. Inténtalo de nuevo más tarde.
+2732	La solicitud agotó el tiempo límite o se perdió la conexión. El resultado está por verificar; actualiza el estado y no vuelvas a enviarla.
+2733	Falló la autenticación de la conexión. Comprueba las credenciales y los permisos de acceso en este dispositivo.
+2734	La autorización o el estado del dispositivo ha cambiado. Actualiza y compruébalo de nuevo.
+2735	El estado devuelto está incompleto, así que el resultado está por verificar. Actualiza; esta respuesta no permite confirmar que se haya completado correctamente.
+2736	No se pudo confirmar que la operación remota haya terminado. Comprueba la conexión y actualiza el estado.
+2737	Conexión con el servidor de retransmisión en línea
+2738	Conectando con el servidor de retransmisión
+2739	Falló la conexión con el servidor de retransmisión
+2740	La conexión aún no está configurada
+2741	Conexión con el servidor de retransmisión desconectada
+2742	La página de ajustes remotos aún no está integrada
+2743	Ajustes de acceso remoto a sesiones
+2744	Conéctate al servidor de retransmisión y empareja los dispositivos. Después, envía una invitación de acceso remoto aparte desde el menú de la sesión de la tableta.
+2745	Conexión y dispositivos
+2746	Leyendo ajustes de conexión…
+2747	Dirección HTTPS del servidor
+2748	Nombre de este dispositivo
+2749	Sustituir credenciales de conexión (deja el campo vacío para conservar las actuales)
+2750	Credenciales de conexión iniciales
+2751	Las credenciales solo se envían al backend protegido de este dispositivo. No se vuelven a mostrar ni se guardan en el navegador. La clave privada del dispositivo nunca se envía a esta página.
+2752	Probar conexión real
+2753	Guardar solo almacena la configuración. La prueba contacta realmente con el servidor de retransmisión y comprueba TLS, la autenticación y la conectividad. No llama a ningún modelo.
+2754	Que la conexión con el servidor de retransmisión esté en línea no significa que el canal seguro de extremo a extremo esté listo. El contenido de la sesión solo puede transferirse una vez verificado ese canal.
+2755	Dispositivos emparejados
+2756	Emparejar nuevo dispositivo
+2757	Emparejar dispositivos no concede acceso a ninguna sesión ni aprueba operaciones de herramientas. La tableta debe seleccionar una sesión y enviar una invitación aparte.
+2758	Recibir avisos remotos
+2759	Invitaciones de acceso remoto, operaciones pendientes de confirmación y fin del turno actual de una tarea
+2760	La pantalla de bloqueo solo muestra resúmenes, sin comandos, código fuente, tokens ni botones de aprobación. Para aprobar siempre hay que abrir la app y confirmar cada solicitud individualmente.
+2761	Ejecución en la tableta y privacidad
+2762	Mantén la tableta enchufada y CC abierto. La desconexión nunca aprueba solicitudes automáticamente. Revocar el acceso remoto o desemparejar no detiene la tarea de la tableta.
+2763	Solo se transfieren los mensajes necesarios de las sesiones autorizadas, no todo el proyecto. El código, los registros y el contenido sensible que ya estén en la sesión aún pueden transferirse con esos mensajes.
+2764	Aún no se han consultado las capacidades de aviso. No se puede confirmar la entrega en segundo plano ni en la pantalla de bloqueo.
+2765	Se ha solicitado recibir avisos remotos. La entrega en segundo plano, en la pantalla de bloqueo y al cambiar de red aún requiere verificación en dispositivos reales.
+2766	Los avisos remotos en segundo plano están desactivados. Solo se reciben en tiempo real mientras CC está abierto.
+2767	El permiso de notificaciones del sistema está desactivado. Actívalo manualmente en los ajustes del sistema del dispositivo.
+2768	El permiso de notificaciones del sistema está pendiente de confirmación del usuario.
+2769	La aplicación anfitriona aún no admite avisos remotos en segundo plano. Este ajuste no garantiza la entrega en la pantalla de bloqueo.
+2770	El sistema restringe la conexión en segundo plano. No se garantiza la entrega tras forzar la detención de la app o si el sistema la cierra. Comprueba las solicitudes pendientes al volver a abrirla.
+2771	La conexión en segundo plano no está en marcha. Por ahora solo se reciben avisos en primer plano. Comprueba el permiso de notificaciones y la compatibilidad de la aplicación anfitriona.
+2772	Dispositivo sin nombre
+2773	Desemparejar
+2774	Aún no hay dispositivos emparejados. Introduce un código de emparejamiento de un solo uso en CC en el otro dispositivo; después, verifica y confirma en ambos dispositivos.
+2775	Esperando al otro dispositivo
+2776	Confirmado en este dispositivo; esperando la confirmación del otro
+2777	Emparejamiento pendiente de verificación. No se ha concedido acceso a ninguna sesión.
+2778	Verificar emparejamiento
+2779	Introduce una dirección HTTPS del servidor sin nombre de usuario, contraseña, parámetros de consulta ni fragmento.
+2780	Introduce un nombre de 1–40 caracteres para este dispositivo, sin caracteres de control.
+2781	Introduce las credenciales de conexión iniciales.
+2782	El formato de las credenciales de conexión no es válido. Introdúcelas de nuevo.
+2783	Comprobando la conexión real con el servidor de retransmisión…
+2784	Guardando configuración; aún no se ha confirmado la conexión…
+2785	La prueba de conexión ha devuelto un resultado. Guardar la configuración y emparejar dispositivos siguen requiriendo acciones por separado.
+2786	Configuración guardada. Guardar no confirma que el servidor sea accesible. Prueba la conexión real.
+2787	Resolución DNS
+2788	Certificado TLS válido
+2789	Autenticación de la conexión
+2790	Conexión del protocolo de retransmisión
+2791	Comprobación de conexión real superada (solo esta prueba)
+2792	La conexión no ha superado la verificación. Un formato de dirección válido o un guardado correcto no bastan para determinar que está en línea.
+2793	Superado
+2794	Sin verificar
+2795	Comprobado a las: {time}
+2796	Emparejamiento seguro de dispositivos
+2797	Aún no se ha recibido la identidad del otro dispositivo
+2798	Huella digital del dispositivo
+2799	Aún no se ha proporcionado; no se puede confirmar el emparejamiento
+2800	Código de verificación en ambos dispositivos
+2801	Empareja solo dos dispositivos que te pertenezcan. Los códigos de emparejamiento de un solo uso caducan. Solo se establece la confianza después de verificar la identidad del otro dispositivo y confirmar por separado en ambos dispositivos.
+2802	Generar código de emparejamiento de un solo uso
+2803	O introduce el código de emparejamiento del otro dispositivo
+2804	Conectar y verificar dispositivo
+2805	El código de emparejamiento es una credencial temporal. No lo envíes a desconocidos. La clave privada del dispositivo nunca se muestra en esta página.
+2806	La información de emparejamiento ha caducado. No se ha concedido acceso a ninguna sesión.
+2807	Este intento de emparejamiento ha terminado. No se ha concedido acceso a ninguna sesión.
+2808	Genera un nuevo código de emparejamiento de un solo uso. No reutilices un código anterior.
+2809	Ambos dispositivos han confirmado. El emparejamiento de dispositivos se ha completado.
+2810	Aún no se ha concedido acceso a ninguna sesión. Envía una invitación de acceso remoto desde el menú de la sesión elegida en la tableta. Aceptar una invitación tampoco aprueba operaciones de herramientas.
+2811	Comprueba abajo el nombre y la huella completa de la clave pública del otro dispositivo y asegúrate de que los códigos de verificación coincidan en ambos. Cancela el emparejamiento si el dispositivo no te pertenece o los datos de verificación no coinciden.
+2812	Introduce este código de emparejamiento de un solo uso en los ajustes remotos de CC del otro dispositivo
+2813	Copiar código de emparejamiento completo
+2814	El código de emparejamiento está oculto. Aún puedes esperar al otro dispositivo o cancelar y generar un código nuevo.
+2815	Válido hasta: {time}
+2816	No proporcionado
+2817	Confirmado en este dispositivo; esperando la confirmación del otro. Aún no se puede mostrar el emparejamiento como completado.
+2818	He verificado que el otro dispositivo me pertenece, he comprobado su huella completa y he confirmado que ambos muestran el mismo código de verificación
+2819	El emparejamiento no concede acceso a sesiones ni aprueba nunca solicitudes automáticamente.
+2820	Cancelar emparejamiento
+2821	Actualizar estado
+2822	Confirmar este dispositivo
+2823	Se ha copiado el código de emparejamiento completo. Úsalo solo para emparejar tus propios dispositivos y borra el portapapeles después.
+2824	No se pudo copiar el código de emparejamiento. Selecciona y copia manualmente el código completo.
+2825	Introduce el código de emparejamiento de un solo uso completo y de alta entropía. No se pueden usar códigos numéricos cortos.
+2826	Este emparejamiento ya no está pendiente. Verifica el resultado en la lista de dispositivos. El emparejamiento no se reiniciará automáticamente.
+2827	¿Desemparejar este dispositivo?
+2828	Desemparejar revoca todas las autorizaciones de acceso remoto asociadas a este dispositivo y elimina el contenido remoto temporal de este dispositivo. No detiene la tarea de la tableta. El contenido ya visto o capturado en pantalla no se puede borrar de forma remota.
+2829	Mantener emparejamiento
+2830	Desemparejar y revocar las autorizaciones de acceso asociadas
+2831	Primero selecciona una sesión local válida
+2832	Conceder acceso remoto a esta sesión
+2833	No se puede leer el estado de acceso remoto de esta sesión. No se dará acceso a otras sesiones.
+2834	Gestionar el acceso remoto a esta sesión
+2835	Sesión sin nombre
+2836	Acceso remoto concedido a: {name}
+2837	Dispositivo autorizado
+2838	Invitación enviada; esperando la aceptación en el teléfono: {name}
+2839	Solo esta sesión: ver mensajes, responder a solicitudes de aprobación para esta ocasión y a preguntas necesarias, enviar instrucciones de texto y solicitar una detención. Ninguna solicitud se aprueba automáticamente.
+2840	Autorización de acceso válida hasta: {time}
+2841	Que el teléfono se desconecte no significa que la tarea de la tableta se haya detenido. Revocar solo cierra el acceso remoto; no detiene ni elimina la sesión original.
+2842	¿Revocar el acceso remoto a esta sesión? La tarea original continúa en la tableta y las operaciones ya realizadas no se desharán automáticamente.
+2843	Mantener acceso remoto
+2844	Revocar acceso sin detener la tarea
+2845	Revocar acceso remoto…
+2846	Se ha revocado el acceso remoto a esta sesión. La tarea de la tableta no se ve afectada.
+2847	La autorización de acceso a esta sesión ha caducado.
+2848	Conecta primero el teléfono: no hay dispositivos emparejados disponibles para recibir una invitación. Completa el emparejamiento en la interfaz gráfica de ajustes de CC de ambos dispositivos y vuelve a esta sesión.
+2849	Ir a Ajustes de conexión
+2850	Enviar a dispositivo emparejado
+2851	Selecciona un teléfono y verifica su identidad
+2852	El teléfono puede ver esta sesión, responder a solicitudes de aprobación para esta ocasión y a preguntas necesarias, enviar instrucciones de texto y solicitar una detención. Esta primera versión solo permite un teléfono autorizado por sesión.
+2853	No se da acceso a otras sesiones ni se sincroniza todo el proyecto. El código, los registros o la información sensible que ya estén en esta sesión se transferirán con sus mensajes.
+2854	El teléfono debe aceptar la invitación. Aceptar no aprueba ninguna operación de herramientas; cada solicitud sigue requiriendo confirmación individual. La tableta siempre conserva los controles locales para aprobar, detener y revocar el acceso.
+2855	El servidor de retransmisión está desconectado, así que no se puede enviar una invitación de acceso remoto. Comprueba primero la conexión real.
+2856	Enviar invitación de acceso remoto
+2857	Mantén la tableta enchufada y CC abierto. Los diálogos del sistema deben atenderse localmente en la tableta; no se omiten las comprobaciones de seguridad de la app.
+2858	Este componente requiere actualizar la app CC para proporcionar la interfaz de la aplicación anfitriona
+2859	Se requiere que la aplicación anfitriona admita remoteSession hostApi 1. Actualiza la app.
+2860	Aún no se ha leído el estado del componente remoto
+2861	Aplicación anfitriona incompatible
+2862	Desactivando…
+2863	Componente remoto no disponible
+2864	Cambiando el estado del componente remoto…
+2865	¿Desactivar el componente de acceso remoto a sesiones? Esto revoca las autorizaciones de acceso remoto existentes y borra la caché remota de este dispositivo. Las sesiones y tareas originales continuarán y no se detendrán.
+2866	Activa el componente de acceso remoto a sesiones antes de abrir su configuración
+2867	Componente de acceso remoto a sesiones activado
+2868	El componente aún no está listo. Comprueba su estado.
+2869	Componente de acceso remoto a sesiones desactivado
+2870	¿Desinstalar el componente de acceso remoto a sesiones? Esto revoca las autorizaciones de acceso remoto existentes y borra la caché remota de este dispositivo. Las sesiones y tareas originales continuarán y no se detendrán.
+2871	La autorización de acceso remoto ha cambiado. Comprueba de nuevo la lista.
+2872	La conexión remota aún no se ha restablecido. Abre la lista de sesiones remotas para comprobarlo.
+2873	Conceder acceso al teléfono / Gestionar acceso…
+2874	Los mensajes enviados desde el teléfono que están en cola no se pueden editar ni insertar como intervención aquí. Comprueba primero su estado de entrega.
+2875	Salida del subagente
+2876	El registro de emparejamiento local se ha guardado y se ha recibido la confirmación de que el otro dispositivo ha guardado el suyo.
+2877	Ambos dispositivos han confirmado sus identidades. Aún no se ha verificado si el otro dispositivo ha guardado su registro; compruébalo en el otro dispositivo.
+2878	Desempareja los dispositivos existentes y termina o cancela los emparejamientos pendientes antes de cambiar la dirección del servidor de retransmisión. Las autorizaciones de acceso remoto no se transfieren automáticamente.

@@ -1,0 +1,42 @@
+# Template only; do not run against the current app or gateway.
+# Install this independent source tree and pinned npm ci into /opt/cccodroid-relay.
+# Create a dedicated non-login cccodroid-relay user and owner-only config separately.
+[Unit]
+Description=Single-user encrypted remote-session relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cccodroid-relay
+Group=cccodroid-relay
+WorkingDirectory=/opt/cccodroid-relay
+ExecStart=/usr/bin/node /opt/cccodroid-relay/remote-relay/src/cli.mjs --config /etc/cccodroid-relay/relay.json
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+StateDirectory=cccodroid-relay
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=true
+RestrictRealtime=true
+MemoryMax=256M
+TasksMax=32
+LimitNOFILE=1024
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=30
+
+[Install]
+WantedBy=multi-user.target

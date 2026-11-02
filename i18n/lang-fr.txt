@@ -2595,3 +2595,284 @@
 2595	Format de nom invalide
 2596	Paramètres de requête invalides
 2597	L'ouvrir dans le navigateur retire la protection de la visionneuse : les scripts de la page peuvent envoyer ailleurs les fichiers de son dossier et accéder à d'autres services de cet appareil. Ne le faites que pour des pages de confiance.
+2598	Approuver, garder le mode actuel ({m})
+2599	Le composant d'accès distant aux sessions est désactivé ou n'est pas encore prêt
+2600	Le chargement de l'interface du composant distant a échoué. Actualisez l'état du composant, puis réessayez.
+2601	L'état du composant distant est incomplet. Actualisez, puis réessayez.
+2602	Le composant distant nécessite la prise en charge de remoteSession hostApi 1 par l'application hôte. Mettez l'app à jour.
+2603	Les informations de version du composant distant sont incomplètes. Son interface n'a pas été chargée.
+2604	Le composant distant n'a pas été chargé via l'interface de l'application hôte
+2605	L'abonnement aux mises à jour du composant distant a échoué. Actualisez, puis réessayez.
+2606	Le chargement des styles du composant distant a échoué. Actualisez l'état du composant, puis réessayez.
+2607	Le chargement de l'interface du composant distant a échoué ou sa version a changé. Actualisez l'état du composant, puis réessayez.
+2608	Le délai de chargement de l'interface du composant distant a expiré. Actualisez, puis réessayez.
+2609	Le changement d'état du composant distant a échoué
+2610	L'état du composant n'est pas encore confirmé. Actualisez et vérifiez-le.
+2611	Installez et activez le composant d'accès distant aux sessions dans Extensions
+2612	Connexion perdue. Les opérations ne sont pas mises en file d'attente hors ligne. Reconnectez-vous et vérifiez les résultats.
+2613	Vérification de l'autorisation et des demandes en attente sur la tablette. Les commandes sont indisponibles jusqu'à la fin de cette vérification.
+2614	La tablette a révoqué l'accès distant. La tâche d'origine continue sur la tablette.
+2615	L'autorisation d'accès distant a expiré. Réactivez-la sur la tablette.
+2616	La demande a été traitée ou n'est plus valide. Actualisez pour consulter l'état actuel de la tablette.
+2617	L'exécution ou l'autorisation sur la tablette a changé. Vérifiez à nouveau la session actuelle.
+2618	Le périmètre complet de la demande d'approbation est indisponible : l'approbation est donc bloquée. Examinez la demande sur la tablette.
+2619	Connectez et appairez d'abord vos appareils dans Paramètres de connexion.
+2620	Acceptez d'abord l'invitation d'accès distant envoyée par la tablette à ce téléphone.
+2621	Le contenu dépasse la limite de transfert distant. Raccourcissez le texte ou consultez-le sur la tablette.
+2622	L'opération n'a pas pu être confirmée. Actualisez l'état ; n'envoyez pas à nouveau la même instruction.
+2623	Exécution en cours
+2624	Ce tour est terminé
+2625	Demande d'arrêt en cours…
+2626	Nécessite une intervention locale sur la tablette
+2627	En attente de synchronisation de l'état
+2628	Tablette en ligne
+2629	Vérification de l'état de la tablette…
+2630	Connexion perdue
+2631	Pas encore synchronisé
+2632	Envoi…
+2633	Reçu par la tablette ; en attente de confirmation de remise à la session d'origine
+2634	Reçu par la tablette ; en attente du résultat du traitement
+2635	Rejeté par la tablette
+2636	Résultat à vérifier ; aucun renvoi automatique
+2637	La tablette a confirmé : l'exécution actuelle est arrêtée
+2638	La tablette a confirmé : l'exécution d'origine est terminée
+2639	La tablette a confirmé : refusé / renvoyé pour révision
+2640	La tablette a confirmé : la réponse a été renvoyée à la session d'origine
+2641	La tablette a confirmé : le plan est approuvé ; les exécutions restent soumises à une approbation individuelle
+2642	La tablette a confirmé : autorisé pour cette demande uniquement
+2643	La tablette a confirmé : ajouté à la file d'attente de la session d'origine
+2644	La tablette a confirmé : remis à la session d'origine
+2645	Accusé de traitement de la tablette
+2646	Consulter le résultat de l'instruction d'origine
+2647	CC · Exécution sur la tablette
+2648	État de la session
+2649	Depuis le téléphone
+2650	Exécution en cours
+2651	Voir le résultat
+2652	La sortie est limitée. Cette vue affiche uniquement le contenu déjà transféré ; elle ne lit aucun fichier sur la tablette ou le téléphone.
+2653	Vous pouvez sélectionner plusieurs options. Si vous saisissez une réponse libre, elle prévaut sur vos sélections.
+2654	Réponse libre
+2655	CC a une question
+2656	Cette demande implique une opération sensible. Examinez attentivement tous les détails ; aucune autorisation permanente ne sera ajoutée.
+2657	L'approbation du plan ne dispense pas de confirmer individuellement les opérations nécessitant une approbation. Elle n'active aucune autorisation automatique ou permanente.
+2658	Exécution uniquement dans la session d'origine de la tablette · Cette demande uniquement
+2659	Cette opération doit être traitée localement sur la tablette. Le téléphone ne peut pas accorder de permissions système.
+2660	Examinez tous les détails avant de décider d'approuver ou non.
+2661	Voir le plan complet
+2662	Voir tous les détails
+2663	Autoriser une fois
+2664	Renvoyer pour révision
+2665	Traiter sur la tablette
+2666	Cette demande a été traitée ou n'est plus valide
+2667	Motif du refus (facultatif)
+2668	Confirmer le refus / renvoi pour révision
+2669	Sessions distantes
+2670	Distant · {device}
+2671	Tablette
+2672	Seules les sessions autorisées pour ce téléphone sont affichées
+2673	Retour à la liste des sessions distantes
+2674	Retour à la conversation
+2675	Actualiser l'état distant
+2676	Actions de la session distante
+2677	Paramètres de connexion
+2678	Invitation d'accès distant
+2679	Cette session uniquement · Consulter les messages, répondre aux demandes d'approbation et envoyer du texte. Accepter n'approuve aucune opération d'outil.
+2680	Refuser l'invitation
+2681	Accepter et ouvrir
+2682	En ligne
+2683	En attente de connexion
+2684	En attente de votre confirmation : {n}
+2685	Liste des sessions distantes
+2686	Chargement des sessions distantes…
+2687	Invitations en attente d'acceptation
+2688	Sessions partagées avec ce téléphone
+2689	Aucune session distante pour le moment
+2690	Sélectionnez « Accorder l'accès au téléphone » dans le menu d'actions de la session sur la tablette pour inviter ce téléphone.
+2691	Voir les demandes en attente
+2692	Envoyer une instruction textuelle à la session d'origine de la tablette
+2693	Envoyer une instruction à la session d'origine de la tablette…
+2694	Connexion perdue. Vous pouvez toujours rédiger un brouillon…
+2695	Texte uniquement · La tâche d'origine s'exécute toujours sur la tablette
+2696	Les brouillons ne sont conservés que tant que cette vue est ouverte. Hors ligne, aucune instruction n'est envoyée, aucune demande approuvée ni aucune exécution arrêtée automatiquement.
+2697	Vérification de l'arrêt de l'exécution…
+2698	Arrêter l'exécution actuelle
+2699	Accès distant révoqué par la tablette
+2700	Autorisation d'accès distant expirée
+2701	Les messages et commandes ultérieurs sont désactivés, et le contenu temporaire a été effacé. Cela n'arrête pas la tâche d'origine sur la tablette.
+2702	Acceptez d'abord l'invitation d'accès distant
+2703	Accepter accorde uniquement l'accès à cette session. Cela n'approuve aucune opération d'outil.
+2704	L'accès distant est fermé
+2705	Le contenu temporaire de la session a été effacé. Vérifiez l'appairage des appareils et l'autorisation d'accès distant. Cela n'arrête pas la tâche de la tablette.
+2706	En cache · Dernière synchronisation : {time}
+2707	Messages de la session distante
+2708	Charger les messages plus anciens à la demande
+2709	Vérification de l'autorisation et des messages récents de la tablette…
+2710	Aucun message récent pour le moment. Vous pouvez actualiser l'état actuel de la tablette.
+2711	Appareil d'exécution
+2712	Description de l'opération
+2713	Cette demande implique une opération sensible. Les contrôles de sécurité existants de la tablette restent inchangés.
+2714	Le périmètre complet de cette demande, fourni par la tablette, figure ci-dessus. Les chemins sont affichés à titre informatif et n'ouvriront aucun fichier sur le téléphone.
+2715	Examiné ; retour à la session
+2716	Plan complet
+2717	Détails complets de la demande d'approbation
+2718	Cette question ne peut pas être ignorée à distance. Traitez-la localement sur la tablette.
+2719	Sélectionnez une option ou saisissez une réponse pour chaque question.
+2720	Quitter cette vue n'arrête pas la tâche de la tablette et ne révoque pas l'autorisation d'accès accordée par la tablette.
+2721	Quitter la vue et effacer le contenu temporaire
+2722	Arrêter l'exécution actuelle sur la tablette ?
+2723	Cela demande l'interruption de l'exécution actuelle sur la tablette. Les modifications déjà effectuées et les effets externes ne seront pas annulés automatiquement.
+2724	L'arrêt ne révoque pas l'accès distant. L'exécution n'est affichée comme arrêtée qu'après confirmation de sa fin par la tablette.
+2725	Demander l'arrêt
+2726	L'initialisation de l'identité sécurisée de cet appareil n'est pas terminée ; l'enregistrement ne peut donc pas encore être confirmé. Ne supprimez pas les données de l'app et signalez ce code d'erreur : {code}
+2727	Le backend de la fonction distante n'est pas encore prêt. Les opérations non effectuées ne seront pas affichées comme réussies.
+2728	Les informations d'appairage ont expiré. Générez un nouveau code d'appairage à usage unique.
+2729	Ce code d'appairage a déjà été utilisé et ne peut pas servir à un nouvel appairage.
+2730	Les informations de vérification des appareils ne correspondent pas. L'appairage n'a pas été confirmé.
+2731	Trop d'opérations. Réessayez plus tard.
+2732	Le délai de la demande a expiré ou la connexion a été perdue. Le résultat reste à vérifier ; actualisez l'état et ne soumettez pas à nouveau la demande.
+2733	L'authentification de la connexion a échoué. Vérifiez les identifiants et les droits d'accès sur cet appareil.
+2734	L'autorisation ou l'état de l'appareil a changé. Actualisez et vérifiez à nouveau.
+2735	L'état retourné est incomplet ; le résultat reste donc à vérifier. Actualisez : cette réponse ne permet pas de confirmer la réussite.
+2736	La fin de l'opération distante n'a pas pu être confirmée. Vérifiez la connexion et actualisez l'état.
+2737	Connexion au relais en ligne
+2738	Connexion au relais en cours
+2739	Échec de la connexion au relais
+2740	Connexion pas encore configurée
+2741	Connexion au relais interrompue
+2742	La page des paramètres distants n'est pas encore intégrée
+2743	Paramètres d'accès distant aux sessions
+2744	Connectez-vous au relais et appairez vos appareils, puis envoyez une invitation d'accès distant distincte depuis le menu de la session sur la tablette.
+2745	Connexion et appareils
+2746	Lecture des paramètres de connexion…
+2747	Adresse HTTPS du serveur
+2748	Nom de cet appareil
+2749	Remplacer les identifiants de connexion (laisser vide pour conserver les identifiants actuels)
+2750	Identifiants de connexion initiaux
+2751	Les identifiants sont transmis uniquement au backend protégé de cet appareil. Ils ne sont ni réaffichés ni enregistrés dans le navigateur. La clé privée de l'appareil n'est jamais envoyée à cette page.
+2752	Tester la connexion réelle
+2753	Enregistrer stocke uniquement la configuration. Le test contacte réellement le relais et vérifie TLS, l'authentification et la connectivité. Il ne fait appel à aucun modèle.
+2754	Une connexion au relais en ligne ne signifie pas que le canal sécurisé de bout en bout est prêt. Le contenu des sessions ne peut être transféré qu'après vérification de ce canal.
+2755	Appareils appairés
+2756	Appairer un nouvel appareil
+2757	L'appairage des appareils ne donne accès à aucune session et n'approuve aucune opération d'outil. La tablette doit choisir une session et envoyer une invitation distincte.
+2758	Recevoir les notifications distantes
+2759	Invitations d'accès distant, opérations en attente de confirmation et fin du tour actuel d'une tâche
+2760	L'écran de verrouillage affiche uniquement des résumés, sans commandes, code source, jetons ni boutons d'approbation. Toute approbation nécessite d'ouvrir l'app et de confirmer chaque demande individuellement.
+2761	Exécution sur la tablette et confidentialité
+2762	Gardez la tablette branchée et CC ouvert. Une déconnexion n'approuve jamais automatiquement les demandes. Révoquer l'accès distant ou supprimer l'appairage n'arrête pas la tâche de la tablette.
+2763	Seuls les messages nécessaires des sessions autorisées sont transférés, pas l'ensemble du projet. Le code, les journaux et le contenu sensible déjà présents dans la session peuvent néanmoins être transférés avec ces messages.
+2764	Les capacités de notification n'ont pas encore été lues. La réception en arrière-plan ou sur l'écran de verrouillage ne peut pas être confirmée.
+2765	La réception des notifications distantes a été demandée. Leur réception en arrière-plan, sur l'écran de verrouillage et lors des changements de réseau reste à vérifier sur de vrais appareils.
+2766	Les notifications distantes en arrière-plan sont désactivées. Les notifications en temps réel sont disponibles uniquement lorsque CC est ouvert.
+2767	La permission système de notification est désactivée. Activez-la manuellement dans les paramètres système de l'appareil.
+2768	La permission système de notification attend la confirmation de l'utilisateur.
+2769	L'application hôte ne prend pas encore en charge les notifications distantes en arrière-plan. Ce réglage ne garantit pas leur réception sur l'écran de verrouillage.
+2770	Le système limite la connexion en arrière-plan. La réception n'est pas garantie après un arrêt forcé de l'app ou sa fermeture par le système. Vérifiez les demandes en attente à la réouverture.
+2771	La connexion en arrière-plan n'est pas active. Les notifications ne sont actuellement reçues qu'au premier plan. Vérifiez la permission de notification et la prise en charge par l'application hôte.
+2772	Appareil sans nom
+2773	Supprimer l'appairage
+2774	Aucun appareil appairé pour le moment. Saisissez un code d'appairage à usage unique dans CC sur l'autre appareil, puis vérifiez et confirmez sur les deux appareils.
+2775	En attente de l'autre appareil
+2776	Confirmé sur cet appareil ; en attente de la confirmation de l'autre
+2777	L'appairage attend une vérification. Aucun accès à une session n'a été accordé.
+2778	Vérifier l'appairage
+2779	Saisissez une adresse de serveur HTTPS sans nom d'utilisateur, mot de passe, paramètres de requête ni fragment.
+2780	Saisissez un nom de 1–40 caractères pour cet appareil, sans caractères de contrôle.
+2781	Saisissez les identifiants de connexion initiaux.
+2782	Le format des identifiants de connexion est invalide. Saisissez-les à nouveau.
+2783	Vérification de la connexion réelle au relais…
+2784	Enregistrement de la configuration ; la connexion n'est pas encore confirmée…
+2785	Le test de connexion a renvoyé un résultat. L'enregistrement de la configuration et l'appairage des appareils nécessitent toujours des actions distinctes.
+2786	Configuration enregistrée. L'enregistrement ne confirme pas que le serveur est joignable. Testez la connexion réelle.
+2787	Résolution DNS
+2788	Certificat TLS valide
+2789	Authentification de la connexion
+2790	Connexion au protocole du relais
+2791	Vérification de la connexion réelle réussie (pour ce test uniquement)
+2792	La connexion n'a pas été validée. Un format d'adresse valide ou un enregistrement réussi ne suffit pas à établir qu'elle est en ligne.
+2793	Réussi
+2794	Non vérifié
+2795	Vérifié à : {time}
+2796	Appairage sécurisé des appareils
+2797	L'identité de l'autre appareil n'a pas encore été reçue
+2798	Empreinte de l'appareil
+2799	Pas encore fourni ; impossible de confirmer l'appairage
+2800	Code de vérification sur les deux appareils
+2801	Appairez uniquement deux appareils qui vous appartiennent. Les codes d'appairage à usage unique expirent. La confiance n'est établie qu'après vérification de l'identité de l'autre appareil et confirmation séparée sur les deux appareils.
+2802	Générer un code d'appairage à usage unique
+2803	Ou saisir le code d'appairage de l'autre appareil
+2804	Connecter et vérifier l'appareil
+2805	Le code d'appairage est un identifiant temporaire. Ne l'envoyez pas à des inconnus. La clé privée de l'appareil n'est jamais affichée sur cette page.
+2806	Les informations d'appairage ont expiré. Aucun accès à une session n'a été accordé.
+2807	Cette tentative d'appairage est terminée. Aucun accès à une session n'a été accordé.
+2808	Générez un nouveau code d'appairage à usage unique. Ne réutilisez pas un ancien code.
+2809	Les deux appareils ont confirmé. L'appairage des appareils est terminé.
+2810	Aucun accès à une session n'a encore été accordé. Envoyez une invitation d'accès distant depuis le menu de la session choisie sur la tablette. Accepter une invitation n'approuve pas non plus les opérations d'outils.
+2811	Vérifiez ci-dessous le nom et l'empreinte complète de la clé publique de l'autre appareil, et assurez-vous que les codes de vérification correspondent sur les deux appareils. Annulez l'appairage si l'appareil ne vous appartient pas ou si les informations de vérification ne correspondent pas.
+2812	Saisissez ce code d'appairage à usage unique dans les paramètres distants de CC sur l'autre appareil
+2813	Copier le code d'appairage complet
+2814	Le code d'appairage est masqué. Vous pouvez toujours attendre l'autre appareil, ou annuler et générer un nouveau code.
+2815	Valide jusqu'au : {time}
+2816	Non fourni
+2817	Confirmé sur cet appareil ; en attente de la confirmation de l'autre. L'appairage ne peut pas encore être affiché comme terminé.
+2818	J'ai vérifié que l'autre appareil m'appartient, contrôlé son empreinte complète et confirmé que les deux appareils affichent le même code de vérification
+2819	L'appairage n'accorde pas d'accès aux sessions et n'approuve jamais automatiquement une demande.
+2820	Annuler l'appairage
+2821	Actualiser l'état
+2822	Confirmer cet appareil
+2823	Le code d'appairage complet a été copié. Utilisez-le uniquement pour appairer vos propres appareils, puis effacez le presse-papiers.
+2824	Le code d'appairage n'a pas pu être copié. Sélectionnez et copiez manuellement le code complet.
+2825	Saisissez le code d'appairage à usage unique complet et à forte entropie. Les codes numériques courts ne peuvent pas être utilisés.
+2826	Cet appairage n'est plus en attente. Vérifiez le résultat dans la liste des appareils. L'appairage ne reprendra pas automatiquement.
+2827	Supprimer l'appairage de cet appareil ?
+2828	La suppression de l'appairage révoque toutes les autorisations d'accès distant associées à cet appareil et efface le contenu distant temporaire sur cet appareil. Elle n'arrête pas la tâche de la tablette. Le contenu déjà consulté ou capturé à l'écran ne peut pas être effacé à distance.
+2829	Conserver l'appairage
+2830	Supprimer l'appairage et révoquer les autorisations d'accès associées
+2831	Sélectionnez d'abord une session locale valide
+2832	Accorder l'accès distant à cette session
+2833	Impossible de lire l'état d'accès distant de cette session. Aucune autre session ne sera rendue accessible.
+2834	Gérer l'accès distant à cette session
+2835	Session sans nom
+2836	Accès distant accordé à : {name}
+2837	Appareil autorisé
+2838	Invitation envoyée ; en attente d'acceptation sur le téléphone : {name}
+2839	Cette session uniquement : consulter les messages, répondre aux demandes d'approbation ponctuelles et aux questions nécessaires, envoyer des instructions textuelles et demander un arrêt. Aucune demande d'approbation n'est accordée automatiquement.
+2840	Autorisation d'accès valide jusqu'au : {time}
+2841	La déconnexion du téléphone ne signifie pas que la tâche de la tablette est arrêtée. La révocation ferme uniquement l'accès distant ; elle n'arrête ni ne supprime la session d'origine.
+2842	Révoquer l'accès distant à cette session ? La tâche d'origine continue sur la tablette et les opérations déjà effectuées ne seront pas annulées automatiquement.
+2843	Conserver l'accès distant
+2844	Révoquer l'accès sans arrêter la tâche
+2845	Révoquer l'accès distant…
+2846	L'accès distant à cette session a été révoqué. La tâche de la tablette n'est pas affectée.
+2847	L'autorisation d'accès à cette session a expiré.
+2848	Connectez d'abord votre téléphone : aucun appareil appairé n'est disponible pour recevoir une invitation. Terminez l'appairage dans l'interface graphique des paramètres de CC sur les deux appareils, puis revenez à cette session.
+2849	Ouvrir les paramètres de connexion
+2850	Envoyer à un appareil appairé
+2851	Sélectionnez un téléphone et vérifiez son identité
+2852	Le téléphone peut consulter cette session, répondre aux demandes d'approbation ponctuelles et aux questions nécessaires, envoyer des instructions textuelles et demander un arrêt. Cette première version n'autorise qu'un téléphone par session.
+2853	Aucune autre session n'est rendue accessible et l'ensemble du projet n'est pas synchronisé. Le code, les journaux ou les informations sensibles déjà présents dans cette session seront transférés avec ses messages.
+2854	Le téléphone doit accepter l'invitation. L'acceptation n'approuve aucune opération d'outil ; chaque demande nécessite toujours une confirmation individuelle. La tablette conserve toujours les commandes locales pour approuver, arrêter et révoquer l'accès.
+2855	Le relais est déconnecté ; impossible d'envoyer une invitation d'accès distant. Vérifiez d'abord la connexion réelle.
+2856	Envoyer une invitation d'accès distant
+2857	Gardez la tablette branchée et CC ouvert. Les fenêtres système doivent être traitées localement sur la tablette ; les contrôles de sécurité de l'app ne sont pas contournés.
+2858	Ce composant nécessite une mise à jour de l'app CC pour fournir l'interface de l'application hôte
+2859	La prise en charge de remoteSession hostApi 1 par l'application hôte est requise. Mettez l'app à jour.
+2860	L'état du composant distant n'a pas encore été lu
+2861	Application hôte incompatible
+2862	Désactivation…
+2863	Composant distant indisponible
+2864	Changement d'état du composant distant…
+2865	Désactiver le composant d'accès distant aux sessions ? Cela révoque les autorisations d'accès distant existantes et efface le cache distant de cet appareil. Les sessions et tâches d'origine continuent et ne seront pas arrêtées.
+2866	Activez le composant d'accès distant aux sessions avant d'ouvrir sa configuration
+2867	Composant d'accès distant aux sessions activé
+2868	Le composant n'est pas encore prêt. Vérifiez son état.
+2869	Composant d'accès distant aux sessions désactivé
+2870	Désinstaller le composant d'accès distant aux sessions ? Cela révoque les autorisations d'accès distant existantes et efface le cache distant de cet appareil. Les sessions et tâches d'origine continuent et ne seront pas arrêtées.
+2871	L'autorisation d'accès distant a changé. Vérifiez à nouveau la liste.
+2872	La connexion distante n'est pas encore rétablie. Ouvrez la liste des sessions distantes pour vérifier.
+2873	Accorder l'accès au téléphone / Gérer l'accès…
+2874	Les messages envoyés depuis le téléphone et placés en file d'attente ne peuvent être ni modifiés ni insérés comme intervention ici. Vérifiez d'abord leur état de remise.
+2875	Sortie du sous-agent
+2876	L'enregistrement local de l'appairage est sauvegardé et l'autre appareil a confirmé la sauvegarde du sien.
+2877	Les deux appareils ont confirmé leurs identités. On ne sait pas encore si l'autre appareil a sauvegardé son enregistrement ; vérifiez sur cet appareil.
+2878	Supprimez les appairages existants et terminez ou annulez les appairages en attente avant de changer l'adresse du relais. Les autorisations d'accès distant ne sont pas transférées automatiquement.

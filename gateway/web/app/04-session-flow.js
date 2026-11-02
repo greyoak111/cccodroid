@@ -586,10 +586,10 @@
         view.runIds.add(ev.runId);
         view.lastRunId = ev.runId;
         if (runViews.has(ev.runId)) return;
-        if (ev.auto !== "idle") { renderUser(ev.text, liveEl); tagRun(liveEl.lastElementChild, ev.runId); }
+        if (ev.auto !== "idle") { renderUser(ev.text, liveEl); tagRun(liveEl.lastElementChild, ev.runId); if (ev.sourceDeviceId) { const source = document.createElement("small"); source.className = "muted"; source.textContent = t("来自手机"); liveEl.lastElementChild.appendChild(source); } }
         const av = AssistantView(liveEl, true);
         tagRun(av.msgEl, ev.runId);
-        if (ev.text.trim().startsWith("/")) av.msgEl.classList.add("sys");
+        if (!ev.literalText && ev.text.trim().startsWith("/")) av.msgEl.classList.add("sys");
         if (ev.auto === "idle") av.note(t("会话闲置快一小时，提示缓存快过期了，先自动压缩上下文，下一条消息就不用把整段历史重算一遍。不需要可以在设置里关掉。"), true);
         const timer = RunTimer(ev.startedAt);
         timer.attach(av);
@@ -607,6 +607,7 @@
         rv.av.finish();
         if (rv.av.empty) rv.av.remove();
         renderUser(ev.text, liveEl); tagRun(liveEl.lastElementChild, ev.runId);
+        if (ev.sourceDeviceId) { const source = document.createElement("small"); source.className = "muted"; source.textContent = t("来自手机"); liveEl.lastElementChild.appendChild(source); }
         rv.av = AssistantView(liveEl, true); tagRun(rv.av.msgEl, ev.runId);
         rv.avDone = false;
         if (rv.idle) { rv.idle = false; rv.timer = RunTimer(Date.now()); }   // 空闲时发来的消息：算新的一轮
@@ -793,6 +794,7 @@
     if (s.maxParallel) srv.max = s.maxParallel;
     pickViewRun();
     if (srv.run?.permMode) setPermChip(srv.run.permMode);   // 这一轮实际在用的模式，以网关为准（安全通告 GHSA-2w6p）
+    refreshPlanActs();
     const busy = isBusy();
     syncPlaceholder();
     syncInterject();

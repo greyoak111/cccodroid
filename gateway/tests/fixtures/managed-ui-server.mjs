@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isCoreAppPart } from "../../gw/app-parts.mjs";
 
 const WEB = fileURLToPath(new URL("../../web/", import.meta.url));
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".md": "text/plain", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".woff2": "font/woff2", ".woff": "font/woff", ".json": "application/json" };
@@ -149,6 +150,7 @@ export async function startManagedUiServer() {
         state.unexpected.push(`${req.method} ${p}`);
         return json(res, { ok: false, message: "Synthetic fixture blocks this operation" }, 403);
       }
+      if (p === "/api/components/remote-session/status") return json(res, { ok: true, id: "remote-session", hostApi: 1, installed: false, enabled: false, state: "absent", version: null, assetVersion: null, activationId: null, error: null });
       if (p === "/api/status") return json(res, {
         product: "Synthetic UI acceptance", uiTag: "synthetic-ui", version: "fixture", pid: 0,
         ready: true, provider: "synthetic", providerLabel: "Synthetic (no model)", upstream: "synthetic.invalid",
@@ -190,7 +192,7 @@ export async function startManagedUiServer() {
         return json(res, { ok: false, message: "Unimplemented synthetic endpoint" }, 404);
       }
       if (p === "/app.js") {
-        const dir = path.join(WEB, "app"), parts = (await fs.readdir(dir)).filter((f) => f.endsWith(".js")).sort();
+        const dir = path.join(WEB, "app"), parts = (await fs.readdir(dir)).filter(isCoreAppPart).sort();
         const text = (await Promise.all(parts.map((f) => fs.readFile(path.join(dir, f), "utf8")))).join("");
         state.sourceHashes["app.js"] = createHash("sha256").update(text).digest("hex");
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });

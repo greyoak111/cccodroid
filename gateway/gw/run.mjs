@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { spawn } from "node:child_process";
-import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
+import { CFG, LAST_LANG, PATHS, log, tr, tz, permModeAction } from "./config.mjs";
 import { SETTINGS, capList } from "./settings-store.mjs";
 import { PERM_MODES, PROVIDER, billAfterRun, keyOf, noteTokens, providerById } from "./providers.mjs";
 import { ALIAS_SEEN, effortLevelsOf, fetchModels, isLoginMode, modelsCached, normEffort } from "./models.mjs";
@@ -64,6 +64,8 @@ export async function startRun(item) {
     sessionId: item.sessionId || (item.follow && RUN_SESSIONS.get(item.follow)) || null,
     follow: item.follow,
     cid: item.cid,
+    literalText: item.literalText === true,
+    remoteCommandId: item.remoteCommandId || null, sourceDeviceId: item.sourceDeviceId || null,
     auto: item.auto || null,           // "idle" = 网关自己发起的空闲压缩（界面画成系统提示，不发通知）
     startedAt: Date.now(),
     child: null, aborted: false, ended: false,
@@ -81,11 +83,12 @@ export async function startRun(item) {
   clearInterrupted(run.sessionId);
   if (run.sessionId) { RUN_SESSIONS.set(run.id, run.sessionId); idleDisarm(run.sessionId); }
   const emit = (ev) => runEmit(run, ev);
-  emit({ type: "run_start", text: run.text, sessionId: run.sessionId, follow: run.follow, cid: run.cid, startedAt: run.startedAt, ...(run.auto ? { auto: run.auto } : {}) });
+  emit({ type: "run_start", text: run.text, sessionId: run.sessionId, follow: run.follow, cid: run.cid, startedAt: run.startedAt, ...(run.auto ? { auto: run.auto } : {}), ...(run.remoteCommandId ? { sourceDeviceId: run.sourceDeviceId, source: "phone", literalText: true } : {}) });
   publishState();
 
   const message = run.text;
-  const local = message.trim().match(/^\/(model|models|effort|autocompact)(?:\s+([\s\S]*))?$/);
+  const isCmd = !run.literalText && message.trim().startsWith("/");
+  const local = isCmd && message.trim().match(/^\/(model|models|effort|autocompact)(?:\s+([\s\S]*))?$/);
   if (local) {
     log(`⌘ 本地命令 /${local[1]}${local[2] ? " " + local[2].trim() : ""}`);
     return handleLocalCommand(local[1], (local[2] || "").trim(),
@@ -204,7 +207,7 @@ export async function startRun(item) {
   const appendPrompt = [P.local ? localHint : toolsHint(), !P.nativeModels && !P.local ? TASKS_HINT : "", P.local ? "" : previewHint(cwd), P.local ? "" : integrityHint(), arch?.rule].filter(Boolean).join("\n\n");
   if (appendPrompt) argv.push("--append-system-prompt", appendPrompt);
   // 子代理（连孙代理）统一的联络规矩：用 agentId 发消息、summary 写事由、长内容落文件只发路径（见 agents.mjs）
-  if (!P.local && !message.trim().startsWith("/")) argv.push("--append-subagent-system-prompt", SUBAGENT_HINT + "\n\n" + integrityHint());
+  if (!P.local && !isCmd) argv.push("--append-subagent-system-prompt", SUBAGENT_HINT + "\n\n" + integrityHint());
   // claude 没有 --output-style 参数（传了直接 unknown option，整条消息失败）；它是 settings 里的 outputStyle。
   // 密钥读取器也在这里（见 settingsArgs）
   argv.push(...settingsArgs(P));
@@ -224,13 +227,12 @@ export async function startRun(item) {
   let dirLen = 0;
   for (const d of dirs) { if ((dirLen += d.length) > 24576) { log(`--add-dir 太多，从 ${d} 起没加`); break; } argv.push("--add-dir", d); }
 
-  const isCmd = message.trim().startsWith("/");
   log(`▶ ${isCmd ? "命令" : "提问"} ${message.trim().slice(0, 60).replace(/\s+/g, " ")}  ${run.sessionId ? `(续 ${String(run.sessionId).slice(0, 8)})` : "(新会话)"}  [model=${model || "默认"} effort=${effort || "默认"} style=${SETTINGS.outputStyle || "默认"} perm=${permMode}]`);
   const t0 = Date.now();
 
   // 接口勾了「图片随消息发」：消息里提到的图片再各带一份 image 块（太大的先缩，要等，所以放在起进程前）
   let imgs0 = [];
-  if (!isCmd && wantsInline(P)) { const env = claudeEnv({ model, provider: P }); imgs0 = await inlineImages(message, P, { tmpDir: env.TMPDIR, env }); }
+  if (!run.literalText && !isCmd && wantsInline(P)) { const env = claudeEnv({ model, provider: P }); imgs0 = await inlineImages(message, P, { tmpDir: env.TMPDIR, env }); }
   // 会话封签（见 integrity.mjs）：上一轮之后记录在应用外被改过、或是导入的，这一轮告诉模型别把那段历史当成自己说过的。
   // 起进程前核对：claude --resume 一起来就可能往文件里写
   const sfile = () => run.sessionId ? findSessionFile(String(run.sessionId))?.file : null;
@@ -256,15 +258,15 @@ export async function startRun(item) {
   // 子代理汇总也是这样跟着用户的消息进去（见 takeAgentNote），不单独叫醒主会话
   // 图片块（见 inlineimg.mjs）排在用户原话后面、提醒前面
   // 用户原话里冒充系统的标签（<system-reminder> 之类）先换成全角，只有网关自己加的提醒是真标签（见 integrity.mjs）
-  const withNotes = (msg0, extra, imgs = []) => {
-    const msg = neutralizeMarkers(msg0);
+  const withNotes = (msg0, extra, imgs = [], literalText = false) => {
+    const msg = neutralizeMarkers(literalText && msg0.trim().startsWith("/") ? "[来自手机的普通文字]\n" + msg0 : msg0);
     if (P.local || msg.trim().startsWith("/")) return msg;
     const notes = [msg !== msg0 ? SPOOF_NOTE : "", extra, takeAgentNote(run.cwd, run.sessionId)].filter(Boolean);
     return notes.length || imgs.length ? [{ type: "text", text: msg }, ...imgs, ...notes.map((n) => ({ type: "text", text: `<system-reminder>\n${n}\n</system-reminder>` }))] : msg;
   };
   // 上一轮只写了文件名没写全路径：这一轮的消息带上提醒（见 pathnote.mjs）。命令那轮不带（带了也包不进去，提醒会白白丢掉）
   const pathNote = isCmd || P.local ? "" : takePathNote(run.sessionId);
-  writeUser(withNotes(message, [integNote, arch?.note, pathNote, refN].filter(Boolean).join("\n\n"), imgs0));
+  writeUser(withNotes(message, [integNote, arch?.note, pathNote, refN].filter(Boolean).join("\n\n"), imgs0, run.literalText));
   run.inputOpen = true;
   run.pendingInject = [];      // 已写进 stdin、还没被 claude 吃进去的插话
   run.bgTasks = 0;             // claude 报的后台任务数（见 feed）
@@ -294,7 +296,7 @@ export async function startRun(item) {
     // 插话里的档号也附上那一章的摘要（同步版：只查已有索引，等不起整理）
     let refI = "";
     if (!P.local) try { refI = refNoteSync(item.message, run.sessionId); } catch (e) { log("插话档号引用失败: " + e.message); }
-    try { writeUser(withNotes(item.message, refI || null, inlineImagesSync(item.message, P))); } catch { return false; }
+    try { writeUser(withNotes(item.message, refI || null, item.literalText ? [] : inlineImagesSync(item.message, P), item.literalText === true)); } catch { return false; }
     run.pendingInject.push(item);
     saveRunMark();     // 马上落盘：送达前 App 被强停，下次启动它还能回到队列里，不会凭空消失
     log(`↪ 插话 ${item.message.trim().slice(0, 60).replace(/\s+/g, " ")}`);   // 压成一行：诊断包按行抹掉对话内容
@@ -314,7 +316,8 @@ export async function startRun(item) {
   // 停掉一个后台任务（stop_task 控制请求；claude 停完会再报一次 background_tasks_changed）
   run.stopTask = (taskId) => run.inputOpen && run.bgList.some((t) => t.id === taskId) &&
     writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "stop_task", task_id: taskId } });
-  run.answerPerm = (id, a) => {
+  run.answerPerm = (id, a, { remoteOnce = false } = {}) => {
+    if (remoteOnce && (a.always || a.mode || a.interrupt || a.updatedInput || a.updatedPermissions)) return false;
     const p = run.perms.get(id);
     if (!p || run.ended || run.aborted) return false;
     let resp;
@@ -324,7 +327,7 @@ export async function startRun(item) {
         ? { ...p.input, answers: Object.fromEntries(Object.entries(a.answers).map(([k, v]) => [String(k), String(v)])) }
         : p.input;
       resp = { behavior: "allow", updatedInput: input };
-      if (p.guard) (run.guardOk = run.guardOk || new Set()).add(p.guard.cat);   // 这一轮同类不再问
+      if (p.guard && !remoteOnce) (run.guardOk = run.guardOk || new Set()).add(p.guard.cat);   // 这一轮同类不再问
       // 「始终允许」：只认 claude 自己给的建议（规则 + 目录），前端不能塞任意规则；切模式另走 a.mode
       if (a.always) {
         const ups = (p.suggestions || []).filter((x) => x && (x.type === "addRules" || x.type === "addDirectories"));
@@ -333,13 +336,17 @@ export async function startRun(item) {
     } else {
       resp = { behavior: "deny", message: String(a.message || "").trim().slice(0, 2000) || "用户拒绝了这次操作。", ...(a.interrupt ? { interrupt: true } : {}) };
     }
+    if (remoteOnce && p.tool === "ExitPlanMode" && a.behavior === "allow" && !run.setMode("default")) return false;
     if (!writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: resp } })) return false;
     run.perms.delete(id);
     // 「拒绝并停止」也是停止：这一轮后面排着的别自动发（审查 #49 P2-3）
     if (resp.interrupt) holdLane(run);
     log(`${resp.behavior === "allow" ? "✓ 允许" : "✗ 拒绝"} ${p.tool}${a.always && resp.updatedPermissions ? "（始终）" : ""}${a.interrupt ? "（并停止）" : ""}`);
     emit({ type: "perm_resolved", id, behavior: resp.behavior, always: !!resp.updatedPermissions, interrupt: !!a.interrupt });
-    if (a.mode && PERM_MODES.includes(a.mode)) setPermMode(a.mode);
+    // 批准时顺带切模式，规则见 config.mjs permModeAction；"run" 只把这一轮从计划模式带回原模式，全局设置不动（项目默认可能和全局不同）
+    const act = permModeAction(resp.behavior, a.mode, run.permMode);
+    if (act === "global") setPermMode(a.mode);
+    else if (act === "run") run.setMode(a.mode);
     publishState();
     return true;
   };
@@ -435,9 +442,12 @@ export async function startRun(item) {
     // 第一条回显是本轮的原始消息；之后每条都是一条送达的插话（按写入顺序）
     const said = run.replays === 0 ? message : run.pendingInject[0] && run.pendingInject[0].message;
     if (said && usageIsPrompt(said)) usageAdd({ m: 1 }, run.sessionId);
-    if (run.replays++ === 0) return;
+    if (run.replays++ === 0) {
+      if (run.remoteCommandId) emit({ type: "message_delivered", itemId: item.id, sessionId: run.sessionId, remoteCommandId: run.remoteCommandId, sourceDeviceId: run.sourceDeviceId });
+      return;
+    }
     const it = run.pendingInject.shift();
-    if (it) { emit({ type: "inject", text: it.message, cid: it.cid, itemId: it.id }); saveRunMark(); }
+    if (it) { emit({ type: "inject", text: it.message, cid: it.cid, itemId: it.id, sessionId: run.sessionId, ...(it.remoteCommandId ? { remoteCommandId: it.remoteCommandId, sourceDeviceId: it.sourceDeviceId } : {}) }); saveRunMark(); }
   };
   const feed = (line) => {
     let ev; try { ev = JSON.parse(line); } catch { return; }
@@ -482,6 +492,9 @@ export async function startRun(item) {
     }
     run.agents.feed(ev);
     translate(ev, { sse: emit, flags, onInit, onResult, onReplay, provider: P });
+    // A bounded remote replay needs this boundary even when translate suppresses
+    // already-streamed text. A later partial rollback cannot touch this answer.
+    if (mainEv && ev.type === "assistant" && Array.isArray(ev.message?.content) && ev.message.content.some((c) => c?.type === "text")) emit({ type: "text_commit" });
   };
 
   child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
@@ -502,6 +515,7 @@ export async function startRun(item) {
   });
 
   const finish = (code) => {
+    run.processClosed = true;
     if (buf.trim()) feed(buf.trim());
     buf = "";
     run.meter.close();                   // 中断 / 被杀也走这里：子代理记录最后扫一遍
@@ -512,7 +526,7 @@ export async function startRun(item) {
     run.perms.clear();                // 卡片随 run_end 一起作废（前端按 run_end 收起）
     if (run.pendingInject.length) {
       log(`插话 ${run.pendingInject.length} 条没来得及送达，退回队首`);
-      QUEUE.unshift(...run.pendingInject.map((it) => ({ ...it, injected: false, held: !!(run.aborted || run.laneHeld) })));
+      QUEUE.unshift(...run.pendingInject.map((it) => ({ ...it, injected: false, held: !!(it.remoteCommandId || run.aborted || run.laneHeld) })));
       run.pendingInject = [];
     }
     const ms = Date.now() - t0;

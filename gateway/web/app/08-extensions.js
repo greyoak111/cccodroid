@@ -153,7 +153,26 @@
 
   // ── 可选组件（浏览器组件 = 无头 Chromium）：下载 → 校验 → 换进工具包，进度靠轮询 ──
   let compTimer = 0, compLoad = 0;
-  const compRemoving = new Set();
+  const compRemoving = new Set(), compRemoteBusy = new Set();
+  let compItems = new Map(), compRemoteStamp = "", compRemoteWatch = false, compRemoteTimer = 0;
+  const remoteCompHost = () => typeof remoteComponent !== "undefined" ? remoteComponent : null;
+  const remoteCompCompatible = (c) => !!(remoteCompHost() && c?.id === "remote-session" && c.hostApi?.remoteSession === 1 && c.hostCompatible === true);
+  const remoteCompState = (c) => {
+    const f = c?.feature;
+    return f?.ok === true && f.id === "remote-session" && f.hostApi === 1 && typeof f.installed === "boolean" && typeof f.enabled === "boolean" && ["absent", "disabled", "active", "incompatible", "error", "retiring"].includes(f.state) ? f : null;
+  };
+  const remoteCompLabel = (c) => {
+    const f = remoteCompState(c);
+    return !remoteCompCompatible(c) ? t("需要 remoteSession hostApi 1 宿主支持，请更新应用") : !f ? t("远程组件状态尚未读取") : ({ active: t("已启用"), disabled: t("已停用"), absent: t("未安装"), incompatible: t("宿主不兼容"), retiring: t("正在停用…"), error: t("远程组件不可用") })[f.state];
+  };
+  function watchRemoteInstall() {
+    if (!compRemoteWatch || compRemoteTimer) return;
+    compRemoteTimer = setTimeout(async () => {
+      compRemoteTimer = 0;
+      await loadComponents();
+      if (compRemoteWatch) watchRemoteInstall();
+    }, 1200);
+  }
   const compRemovalHint = () => '<span class="tiny muted" role="status">' + esc(t("正在卸载，这一步不能取消，请等待完成")) + "</span>";
   // 只有 zh / en 两份：中文界面（简繁都算）用 zh，其它语言一律用 en
   const pickLang = (o) => (o && typeof o === "object" ? (isZh() ? o.zh || o.en : o.en || o.zh) || "" : o || "");
@@ -184,12 +203,28 @@
     const r = await api("/api/components" + (refresh ? "?refresh=" + (refresh === true ? 1 : refresh) : "")).catch((e) => ({ supported: true, items: [], indexError: e.message }));
     // 完成后的刷新比卸载中的轮询新；旧响应不能把已恢复的卡片盖回去。
     if (request !== compLoad) return;
+    compItems = new Map((r.items || []).map((c) => [c.id, c]));
+    const remote = compItems.get("remote-session");
+    if (remote) {
+      const stamp = JSON.stringify([remote.state, remote.installedVersion, remote.hostCompatible, remote.feature]);
+      const mutating = !!remote.progress || compRemoving.has(remote.id) || ["downloading", "verifying", "installing", "removing"].includes(remote.state);
+      if (stamp !== compRemoteStamp) {
+        compRemoteStamp = stamp;
+        if (mutating && (remote.installedVersion || remote.state === "removing")) remoteCompHost()?.retiring();
+        else if (!mutating) remoteCompHost()?.refresh().catch(() => {});
+      }
+      if (compRemoteWatch && !mutating) {
+        compRemoteWatch = false; clearTimeout(compRemoteTimer); compRemoteTimer = 0;
+        remoteCompHost()?.refresh().catch(() => {});
+      }
+    }
     $("comp-field").classList.toggle("hidden", !r.supported);
     if (!r.supported) return loadGhField();
     const box = $("comp-list");
     const btn = (c, id, label) => `<button data-c="${c}" data-id="${esc(id)}">${label}</button>`;
     const html = (r.items || []).map((c) => {
       if (compRemoving.has(c.id)) c = { ...c, state: "removing", progress: null };
+      const isRemote = c.id === "remote-session", hostOK = !isRemote || remoteCompCompatible(c), feature = isRemote ? remoteCompState(c) : null;
       const name = esc(pickLang(c.name) || c.id), pr = c.progress;
       const size = c.available ? t("下载约 {a}，装好后约 {b}", { a: MB(c.bytes), b: MB(c.installed) }) : "";
       const st = {
@@ -225,6 +260,7 @@
           : "<span>" + (gpuOnly === "mali" ? t("Mali 专用") : t("骁龙专用")) + "</span>") : "");
       let desc = '<div class="tiny ext-desc">' + esc(pickLang(c.desc)) + "</div>";
       if (c.error) desc += '<div class="tiny err">' + esc(c.error) + "</div>";
+      if (isRemote) desc += '<div class="tiny' + (hostOK ? '' : ' warn') + '" role="status">' + esc(remoteCompLabel(c)) + '</div>' + (feature?.error ? '<div class="tiny err">' + esc(feature.error) + '</div>' : '');
       if (miss.length && c.state !== "ok") desc += '<div class="tiny warn">' + t("要先装：{names}", { names: listOf(miss) }) + "</div>";
       if (webUrl(c.homepage) && c.state !== "ok") desc += '<div class="tiny"><a class="weblink" href="' + esc(c.homepage) + '">' + esc(c.homepage) + "</a></div>";
       if (c.state === "ok" && c.bin.length) desc += '<div class="tiny">' + t("命令：") + " " + c.bin.map((b) => "<code>" + esc(b) + "</code>").join(" ") + "</div>";
@@ -237,8 +273,8 @@
       if (["update", "outdated", "damaged", "error"].includes(c.state)) tags.push("upd");
       // 设计稿的卡片：分类色图标 + 名称 + 「版本 · 大小」，验证过的带盾牌；底下一条虚线隔开状态和按钮
       const [cc, ci] = CAT_LOOK[cat] || CAT_LOOK.other;
-      const dotSt = { ok: "ok", update: "warn", downloading: "warn", verifying: "warn", installing: "warn", removing: "warn", configuring: "warn", "fetching-models": "warn", outdated: "err", damaged: "err", error: "err" }[c.state] || "";
-      const dotL = c.unsupported && !["removing", "configuring", "fetching-models"].includes(c.state) ? (gpuOnly === "mali" ? t("需要 Mali GPU") : t("需要骁龙")) : { ok: t("已装"), update: t("可更新"), absent: c.available ? t("未装") : t("暂无适配版本") }[c.state] || st;
+      const dotSt = isRemote && ["ok", "update"].includes(c.state) ? !hostOK || feature?.state === "error" || feature?.state === "incompatible" ? "err" : feature?.state === "active" ? "ok" : "warn" : { ok: "ok", update: "warn", downloading: "warn", verifying: "warn", installing: "warn", removing: "warn", configuring: "warn", "fetching-models": "warn", outdated: "err", damaged: "err", error: "err" }[c.state] || "";
+      const dotL = isRemote && ["ok", "update"].includes(c.state) ? remoteCompLabel(c) : c.unsupported && !["removing", "configuring", "fetching-models"].includes(c.state) ? (gpuOnly === "mali" ? t("需要 Mali GPU") : t("需要骁龙")) : { ok: t("已装"), update: t("可更新"), absent: c.available ? t("未装") : t("暂无适配版本") }[c.state] || st;
       let cbtn = "";
       if (c.state === "removing") cbtn = compRemovalHint();
       else if (c.state === "configuring") cbtn = '<span class="tiny muted" role="status">' + esc(t("正在配置…请等待完成")) + "</span>";
@@ -252,6 +288,15 @@
       } else if (["update", "outdated", "damaged", "error"].includes(c.state)) {
         if (c.available) cbtn += btn("install", c.id, ei("download") + (c.state === "update" ? t("更新") : t("重新安装"))).replace("<button ", '<button class="btn sm" ');
         if (c.installedVersion) cbtn += btn("remove", c.id, t("卸载")).replace("<button ", '<button class="btn sm ghost" ');
+      }
+      if (isRemote) {
+        if (!hostOK) cbtn = '<span class="tiny warn" role="status">' + esc(t("需要 remoteSession hostApi 1 宿主支持，请更新应用")) + '</span>';
+        else if (compRemoteBusy.has(c.id) || feature?.state === "retiring") cbtn = '<span class="tiny muted" role="status">' + esc(t("正在切换远程组件状态…")) + '</span>';
+        else if (["ok", "update"].includes(c.state)) {
+          // This is host capability, not a toolpack/GPU version constraint.
+          const controls = btn("configure", c.id, t("配置")).replace("<button ", '<button class="btn sm ghost" ') + (feature && feature.state !== "incompatible" ? btn(feature.enabled ? "disable" : "enable", c.id, feature.enabled ? t("停用") : t("启用")).replace("<button ", '<button class="btn sm ghost" ') : '');
+          cbtn = controls + cbtn;
+        }
       }
       const live = (c.id === "gh" && c.state === "ok") || (c.id === "llama-cpp" && c.state === "ok") ? desc.slice(desc.indexOf(c.id === "gh" ? '<div class="gh-auth"' : '<details class="llm-dl"')) : "";
       const more = (live ? desc.slice(0, desc.length - live.length) : desc) + '<div class="it-meta">' + meta + "</div>";
@@ -277,7 +322,7 @@
       if (llmDl.open) loadLlmDl();
     }
     // 有在跑的就一秒刷一次；抽屉关了 / 换了页签就停
-    if ((compRemoving.size || (r.items || []).some((c) => c.progress || ["removing", "configuring", "fetching-models"].includes(c.state))) && pageOn("ext"))
+    if ((compRemoving.size || (r.items || []).some((c) => c.progress || ["downloading", "verifying", "installing", "removing", "configuring", "fetching-models"].includes(c.state))) && pageOn("ext"))
       compTimer = setTimeout(loadComponents, 1000);
     // 先显示的是上回存下的列表、网关还在后台拉新索引：两秒后再要一次，拉完自然停
     else if (r.refreshing && pageOn("ext"))
@@ -1067,7 +1112,29 @@
     if (cb && !cb.disabled) {
       const c = cb.dataset.c, id = cb.dataset.id;
       if (c === "reindex") { cb.disabled = true; return loadComponents(true); }
-      if (compRemoving.has(id)) return;
+      if (compRemoving.has(id) || compRemoteBusy.has(id)) return;
+      if (id === "remote-session" && ["configure", "enable", "disable", "install", "remove", "cancel"].includes(c)) {
+        const component = compItems.get(id), host = remoteCompHost();
+        if (!remoteCompCompatible(component)) return toast(t("需要 remoteSession hostApi 1 宿主支持，请更新应用"), true);
+        if (["configure", "enable", "disable"].includes(c)) {
+          if (!["ok", "update"].includes(component.state) || remoteCompState(component)?.state === "retiring") return;
+          if (c !== "configure" && (!remoteCompState(component) || remoteCompState(component).state === "incompatible")) return;
+          if (c === "disable" && !confirm(t("停用远程托管组件？这会撤销现有托管并清理本机远程缓存；原会话和任务继续执行，不会停止。"))) return;
+          compRemoteBusy.add(id); cb.disabled = true;
+          try {
+            if (c === "configure") {
+              await host.refresh();
+              if (!host.enabled()) return toast(t("请先启用远程托管组件，再打开配置"), true);
+              openPage("settings", "remote");
+            } else {
+              await (c === "enable" ? host.enable() : host.disable());
+              toast(c === "enable" ? host.enabled() ? t("远程托管组件已启用") : t("组件尚未就绪，请核对状态") : t("远程托管组件已停用"), c === "enable" && !host.enabled());
+            }
+          } catch (err) { toast(t("失败：{msg}", { msg: err.message || "" }), true); }
+          finally { compRemoteBusy.delete(id); cb.disabled = false; await loadComponents(); }
+          return;
+        }
+      }
       if (c === "configure") {
         if (id !== "openai-bridge") return;
         if (typeof window.CCBridgeConfig?.open !== "function") return toast(t("配置界面尚未就绪，请刷新后重试"), true);
@@ -1086,8 +1153,9 @@
       const nm = (cb.closest(".item")?.querySelector(".it-title")?.textContent || id).trim();
       if (c === "install" && cb.dataset.unverified && !confirm(t("{name} 还没人在真机上验证过，可能装不上或用不了。仍然安装？", { name: nm }))) return;
       if (c === "remove" && cb.dataset.usedby) return toast(t("{names} 要用它，先卸载那些组件", { names: cb.dataset.usedby }), true);
-      if (c === "remove" && !confirm(t("卸载组件 {name}？会删掉它装进工具包的文件，你自己的文件不受影响。", { name: nm }))) return;
+      if (c === "remove" && !confirm(id === "remote-session" ? t("卸载远程托管组件？这会撤销现有托管并清理本机远程缓存；原会话和任务继续执行，不会停止。") : t("卸载组件 {name}？会删掉它装进工具包的文件，你自己的文件不受影响。", { name: nm }))) return;
       cb.disabled = true;
+      if (id === "remote-session" && (c === "remove" || c === "install" && compItems.get(id)?.installedVersion)) remoteCompHost()?.retiring();
       if (c === "remove") {
         // 停服务可能要等一会儿；在下一次轮询回来前也不能再装、再卸或取消。
         compRemoving.add(id);
@@ -1098,6 +1166,11 @@
       let r;
       try { r = await post("/api/components/" + c, { id }).catch((err) => ({ ok: false, message: err.message })); }
       finally { if (c === "remove") compRemoving.delete(id); }
+      if (id === "remote-session") {
+        await remoteCompHost()?.refresh();
+        if (r.ok && c === "install") { compRemoteWatch = true; watchRemoteInstall(); }
+        if (c === "cancel" || c === "remove") { compRemoteWatch = false; clearTimeout(compRemoteTimer); compRemoteTimer = 0; }
+      }
       if (!r.ok) toast(t("失败：{msg}", { msg: r.message || "" }), true);
       else if (c === "remove") {
         toast(t("已卸载"));

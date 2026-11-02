@@ -11,10 +11,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { isCoreAppPart } from "../gateway/gw/app-parts.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const DIR = path.join(ROOT, "gateway/web/app");
-const parts = fs.readdirSync(DIR).filter((f) => f.endsWith(".js")).sort();
+const parts = fs.readdirSync(DIR).filter(isCoreAppPart).sort();
 const texts = parts.map((f) => fs.readFileSync(path.join(DIR, f), "utf8"));
 const all = texts.join("");
 const argv = process.argv.slice(2);

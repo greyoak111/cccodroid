@@ -8,6 +8,7 @@
 // 社区组件不走这里，走 greyoak111/cccodroid-components 仓库的 CI（同一把签名钥匙）
 import fs from "node:fs";
 import path from "node:path";
+import { componentHostApiFields } from "./component-host-api.mjs";
 
 const [out, prefix, ...inputs] = process.argv.slice(2);
 if (!out || !prefix || !inputs.length) { console.error("用法: node components-index.mjs <out> <url前缀> <component-x.json>..."); process.exit(1); }
@@ -27,6 +28,7 @@ for (const f of inputs) {
     url: prefix.replace(/\/?$/, "/") + asset, asset, local: path.join(path.dirname(f), c.gz.file),
     sha256: c.gz.sha256, bytes: c.gz.bytes, installed: c.installed,
     bin: c.bin, skill: c.skill, selftest: c.selftest, packages: c.packages.length,
+    ...componentHostApiFields(c),
     // 依赖链里由底座提供的包：模块化工具包（0.3.9 起）据此算出组件要先装哪些模块
     baseDeps: (c.baseDeps || []).map((d) => d.name),
   });

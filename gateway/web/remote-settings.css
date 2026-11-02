@@ -1,0 +1,55 @@
+/* Scoped remote settings / local hosting sheets. Use the application's theme and font. */
+/* The host settings pane owns scrolling; an unbounded nested scroller blocks touch chaining. */
+#remoteSettingsPage.rs-page{min-width:0;min-height:0;max-width:100%;overflow:visible;color:var(--fg);background:var(--bg)}
+.rs-content{width:100%;max-width:760px;margin-inline:auto;padding:20px 20px calc(24px + var(--safe-b,0px));overflow-wrap:anywhere}
+.rs-heading,.rs-device,.rs-actions,.rs-switch-row,.rs-dialog-header,.rs-dialog-footer{display:flex;align-items:center;gap:12px;min-width:0}
+.rs-heading{justify-content:space-between;margin-bottom:12px}
+.rs-heading h2,.rs-dialog h2{font-size:18px;line-height:1.5;margin:0;overflow-wrap:anywhere}
+.rs-section{margin-top:24px;padding-top:20px;border-top:1px solid var(--line);min-width:0}
+.rs-section h3,.rs-dialog h3{font-size:15px;line-height:1.6;margin:0 0 10px;overflow-wrap:anywhere}
+.rs-content p,.rs-dialog p{margin:8px 0}
+.rs-hint{color:var(--fg2);font-size:13px;line-height:1.7;overflow-wrap:anywhere}
+.rs-status{font-size:13px;line-height:1.7;padding:10px 12px;border:1px solid var(--line);background:var(--bg2);border-radius:10px;overflow-wrap:anywhere}
+.rs-ok{color:var(--ok)}.rs-warning{color:var(--warn)}.rs-error,.rs-danger{color:var(--err)}
+.rs-field{display:block;margin:16px 0;min-width:0;font-size:13px}
+.rs-field>span{display:block;margin-bottom:6px;color:var(--fg2)}
+.rs-field input,.rs-field textarea,.rs-field select{display:block;width:100%;max-width:100%;min-width:0;min-height:44px;font:inherit;line-height:1.6;color:var(--fg);background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;box-sizing:border-box}
+.rs-field textarea{resize:vertical;overflow-wrap:anywhere;white-space:pre-wrap}
+.rs-field input[type="url"],.rs-field input[type="password"]{direction:ltr;text-align:start}
+.rs-button{min-height:44px;min-width:44px;max-width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg3);color:var(--fg);font:inherit;font-size:13px;line-height:1.5;cursor:pointer;touch-action:manipulation;overflow-wrap:anywhere;white-space:normal}
+.rs-button.rs-primary{background:var(--accent-btn,var(--accent));border-color:var(--accent-btn,var(--accent));color:var(--on-accent)}
+.rs-button.rs-danger{color:var(--err);background:var(--bg2)}
+.rs-button.rs-close{flex:0 0 auto;background:transparent;color:var(--fg2)}
+.rs-button:disabled,.rs-field :disabled,.rs-switch:disabled{opacity:.5;cursor:not-allowed}
+.rs-button:focus-visible,.rs-field input:focus-visible,.rs-field select:focus-visible,.rs-field textarea:focus-visible,.rs-switch:focus-visible,.rs-confirm input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.rs-actions{flex-wrap:wrap;margin:12px 0}
+.rs-device{padding:14px 0;align-items:flex-start;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.rs-device:last-child{margin-bottom:14px}.rs-device strong{font-size:14px;overflow-wrap:anywhere}
+.rs-grow{flex:1;min-width:100px}
+.rs-fingerprint{display:block;max-width:100%;font:12px/1.7 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;color:var(--fg2);user-select:text;margin:8px 0}
+.rs-switch-row{justify-content:space-between;align-items:flex-start}
+.rs-switch-row p{flex:1;font-size:13px;overflow-wrap:anywhere}
+.rs-switch{position:relative;flex:0 0 52px;min-height:44px;min-width:52px;border:0;background:transparent;cursor:pointer;touch-action:manipulation;padding:0}
+.rs-switch::before{position:absolute;content:"";inset:9px 2px;border-radius:20px;background:var(--fg3)}
+.rs-switch>span{position:absolute;inset-block-start:12px;inset-inline-start:5px;width:20px;height:20px;border-radius:50%;background:var(--bg);box-shadow:0 1px 3px var(--shadow)}
+.rs-switch[aria-checked="true"]::before{background:var(--accent-btn,var(--accent))}
+.rs-switch[aria-checked="true"]>span{inset-inline-start:27px}
+.rs-checks{list-style:none;margin:12px 0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.rs-checks li{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;min-width:0;flex-wrap:wrap;font-size:13px;border-bottom:1px solid var(--line)}
+.rs-checks li:last-child{border:0}.rs-checks li span{overflow-wrap:anywhere}
+/* Keep host selection menus (95) and toast (96) above this modal, like .rv-modal. */
+.rs-overlay{position:fixed;inset:0;z-index:85;display:flex;align-items:center;justify-content:center;padding:calc(12px + var(--safe-t,0px)) 14px calc(12px + var(--safe-b,0px));background:var(--scrim);overflow:hidden;box-sizing:border-box}
+.rs-dialog{display:flex;flex-direction:column;width:min(520px,100%);max-width:100%;max-height:100%;min-width:0;min-height:0;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:var(--radius,14px);box-shadow:0 18px 55px var(--shadow);overflow:hidden}
+.rs-dialog-header{justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);flex-shrink:0;align-items:flex-start}
+.rs-dialog-body{padding:16px;overflow:auto;overscroll-behavior:contain;min-height:0;min-width:0;overflow-wrap:anywhere}
+.rs-dialog-footer{padding:12px 16px;flex-shrink:0;border-top:1px solid var(--line);flex-wrap:wrap;justify-content:flex-end;max-height:45vh;overflow:auto}
+.rs-dialog-footer .rs-button{flex:1 1 140px}
+.rs-session-title{white-space:pre-wrap;word-break:break-word}
+.rs-identity,.rs-warning-box{padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg2);margin:14px 0;min-width:0}
+.rs-identity>strong{overflow-wrap:anywhere}.rs-warning-box{border-color:var(--warn)}
+.rs-pair-code,.rs-verification{display:block;width:100%;max-width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;color:var(--fg);background:var(--code-bg);font:14px/1.8 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-all;user-select:text}
+.rs-verification{font-size:17px;font-weight:600;text-align:center;letter-spacing:.04em}
+.rs-confirm{display:flex;align-items:center;gap:10px;min-height:44px;font-size:13px;cursor:pointer;overflow-wrap:anywhere}
+.rs-confirm input{flex-shrink:0;width:22px;height:22px;margin:11px 0;accent-color:var(--accent)}
+@media(max-width:420px){.rs-content{padding:16px 12px calc(20px + var(--safe-b,0px))}.rs-overlay{align-items:flex-end;padding:calc(8px + var(--safe-t,0px)) 8px calc(8px + var(--safe-b,0px))}.rs-dialog-header{padding:10px 12px}.rs-dialog-body{padding:12px}.rs-dialog-footer{padding:10px 12px;gap:8px}.rs-heading{gap:8px}.rs-device{gap:8px}.rs-actions .rs-button{flex:1 1 130px}}
+@supports(height:100dvh){.rs-overlay{max-height:100dvh}}

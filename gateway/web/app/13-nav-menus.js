@@ -84,6 +84,7 @@
 
   const PAGES = {
     sessions: { name: tk("对话"), icon: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>' },
+    remote: { name: tk("远程会话"), icon: '<rect x="2" y="4" width="14" height="11" rx="2"/><path d="M6 19h6M9 15v4"/><rect x="17" y="10" width="5" height="11" rx="1"/>' },
     settings: { name: tk("设置"), icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>' },
     projects: { name: tk("项目"), icon: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>' },
     lineage: { name: tk("脉络"), icon: '<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M6 3v12.5M18 8.5a9 9 0 0 1-9.5 8"/>' },
@@ -95,7 +96,7 @@
     bookmarks: { name: tk("书签"), icon: '<path d="M7 3.5h10a1 1 0 0 1 1 1V20l-6-4.2L6 20V4.5a1 1 0 0 1 1-1z"/>' },
     changelog: { name: tk("更新日志"), icon: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>' },
   };
-  const NAV_ITEMS = ["sessions", "projects", "lineage", "sched", "bookmarks", "ext", "caps", "usage", "help", "changelog"];          // 侧栏「去哪」里能放的；设置走底部账户行
+  const NAV_ITEMS = ["sessions", "remote", "projects", "lineage", "sched", "bookmarks", "ext", "caps", "usage", "help", "changelog"];          // 侧栏「去哪」里能放的；设置走底部账户行
   var curPage = null;   // var：openSession 在启动早期就会调 closePage，别撞上 let 的暂时性死区
   // 轮询（下载进度、配对状态…）只在那一页开着时继续：整页关了、换页了就停
   function pageOn(name) { return name === "settings" ? setOpen : curPage === name && !$("pages").classList.contains("hidden"); }
@@ -103,22 +104,25 @@
   // 0.4.10 加了「脉络」：已有的固定项里补上它（只补一次，用户之后取消了不再加回来）
   (function () { try { const p = JSON.parse(localStorage.getItem("cc.navPins")); if (Array.isArray(p) && !localStorage.getItem("cc.navPinsV3") && !p.includes("lineage")) localStorage.setItem("cc.navPins", JSON.stringify([...p, "lineage"])); localStorage.setItem("cc.navPinsV3", "1"); } catch {} })();
   // 0.4.20 起存进 ccapp-ui.json（uiGet / uiSet，见 01-core.js）；以前存在本地的 cc.navPins 照读
-  const navPins = () => { const p = uiGet("navPins", "cc.navPins"); if (Array.isArray(p)) return NAV_ITEMS.filter((k) => p.includes(k)); return ["sessions", "projects", "lineage", "sched"]; };
+  const navAvailable = (k) => k !== "remote" || remoteComponent.enabled();
+  // Filter presentation only: disabling the component must not overwrite pins.
+  const savedNavPins = () => { const p = uiGet("navPins", "cc.navPins"); return Array.isArray(p) ? NAV_ITEMS.filter((k) => p.includes(k)) : ["sessions", "remote", "projects", "lineage", "sched"]; };
+  const navPins = () => savedNavPins().filter(navAvailable);
   document.addEventListener("cc:ui", (e) => { if (e.detail.key === "navPins") renderSideNav(); });
-  var navEdit = false;
+  var navEdit = false, remotePendingCount = 0;
   function renderSideNav() {
     const nav = $("side-nav"); if (!nav) return;
     const pins = navPins(), more = localStorage.getItem("cc.navMore") === "1";
     const ico = (k) => `<svg viewBox="0 0 24 24">${PAGES[k].icon}</svg>`;
     const live = srv.runs.filter((x) => !x.idle).length;
-    const badge = (k) => k === "sessions" && live ? `<span class="nav-badge"><i></i>${esc(t("{n} 个在跑", { n: live }))}</span>` : "";
+    const badge = (k) => k === "remote" && remotePendingCount ? `<span class="nav-badge">${remotePendingCount}</span>` : k === "sessions" && live ? `<span class="nav-badge"><i></i>${esc(t("{n} 个在跑", { n: live }))}</span>` : "";
     const item = (k) => `<button class="nav-item${curPage === k || (!curPage && !setOpen && k === "sessions") ? " on" : ""}" data-page="${k}">${ico(k)}<span>${esc(t(PAGES[k].name))}</span>${badge(k)}</button>`;
     let h = pins.map(item).join("");
-    const rest = NAV_ITEMS.filter((k) => !pins.includes(k));
+    const available = NAV_ITEMS.filter(navAvailable), rest = available.filter((k) => !pins.includes(k));
     h += `<button class="nav-item nav-more${more ? " open" : ""}" data-nav="more"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg><span>${esc(t("更多"))}</span><svg viewBox="0 0 24 24" class="caret"><path d="M6 9l6 6 6-6"/></svg></button>`;
     if (more) {
       h += '<div class="nav-sub">';
-      if (navEdit) h += NAV_ITEMS.map((k) => `<label class="nav-item">${ico(k)}<span>${esc(t(PAGES[k].name))}</span><input type="checkbox" data-pin="${k}"${pins.includes(k) ? " checked" : ""}></label>`).join("") + `<button class="nav-edit" data-nav="done">${esc(t("完成"))}</button>`;
+      if (navEdit) h += available.map((k) => `<label class="nav-item">${ico(k)}<span>${esc(t(PAGES[k].name))}</span><input type="checkbox" data-pin="${k}"${pins.includes(k) ? " checked" : ""}></label>`).join("") + `<button class="nav-edit" data-nav="done">${esc(t("完成"))}</button>`;
       else h += rest.map(item).join("") + `<button class="nav-edit" data-nav="edit">${esc(t("自定常驻项…"))}</button>`;
       h += "</div>";
     }
@@ -141,8 +145,8 @@
     if (n) renderSideNav();
   });
   $("side-nav").addEventListener("change", (e) => {
-    const k = e.target.dataset.pin; if (!k) return;
-    const pins = navPins().filter((x) => x !== k);
+    const k = e.target.dataset.pin; if (!k || !NAV_ITEMS.includes(k) || !navAvailable(k)) return;
+    const pins = savedNavPins().filter((x) => x !== k);
     if (e.target.checked) pins.push(k);
     uiSet("navPins", pins);
   });
@@ -264,7 +268,15 @@
       : `<button type="button" data-i="${i}" class="${it.selected ? "on" : ""}"${it.disabled ? " disabled" : ""}>`
         + (it.selected ? `<svg viewBox="0 0 24 24">${CHECK}</svg>` : '<span class="pm-pad"></span>')
         + `<span>${esc(it.textContent)}</span>${it.dataset && it.dataset.img ? MM_IMG() : ""}</button>`).join("");
-    OV.open(m, { anchor: sel });     // 锚点记住是哪个下拉框开的：再点它本身就是收起
+    const remoteKeyboard = sel.dataset.remoteKeyboard === "1";
+    if (remoteKeyboard) {
+      m.setAttribute("role", "listbox");
+      m.setAttribute("aria-label", sel.closest("label")?.querySelector("span")?.textContent || t("发送到已配对设备"));
+      m.querySelectorAll("button[data-i]").forEach((b) => { b.setAttribute("role", "option"); b.setAttribute("aria-selected", String(items[+b.dataset.i].selected)); });
+    }
+    OV.open(m, { anchor: sel, ...(remoteKeyboard ? { onClose: () => {
+      if (sel.isConnected && sel.getClientRects().length && (m.contains(document.activeElement) || document.activeElement === document.body)) sel.focus({ preventScroll: true });
+    } } : {}) });     // 锚点记住是哪个下拉框开的：再点它本身就是收起
     const ar = sel.getBoundingClientRect(), W = innerWidth, H = innerHeight;
     m.style.minWidth = Math.min(ar.width, W - 16) + "px";
     m.style.maxHeight = Math.max(160, Math.min(H * 0.6, Math.max(H - ar.bottom, ar.top) - 14)) + "px";
@@ -275,6 +287,20 @@
     m.style.left = Math.max(8, Math.min(x, W - mw - 8)) + "px"; m.style.top = y + "px";
     moOrigin(m, ar);
     const on = m.querySelector("button.on"); if (on) m.scrollTop = on.offsetTop - (m.clientHeight - on.offsetHeight) / 2;
+    if (remoteKeyboard) {
+      const options = [...m.querySelectorAll("button[data-i]:not(:disabled)")];
+      const focus = (index) => { const b = options[Math.max(0, Math.min(index, options.length - 1))]; b?.focus({ preventScroll: true }); b?.scrollIntoView({ block: "nearest" }); };
+      focus(Math.max(0, options.indexOf(on)));
+      m.addEventListener("keydown", (e) => {
+        const index = options.indexOf(document.activeElement);
+        if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+          e.preventDefault(); e.stopPropagation();
+          focus(e.key === "Home" ? 0 : e.key === "End" ? options.length - 1 : index + (e.key === "ArrowDown" ? 1 : -1));
+        } else if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault(); e.stopPropagation(); if (index >= 0) options[index].click();
+        } else if (e.key === "Tab") { e.preventDefault(); e.stopPropagation(); OV.close(m); }
+      });
+    }
     m.addEventListener("click", (e) => {
       const b = e.target.closest("button[data-i]"); if (!b || b.disabled) return;
       OV.close(m);
@@ -392,6 +418,7 @@
     popMenu(anchor, [
       { label: x.pinned ? t("取消置顶") : t("置顶"), icon: SM.pin, fn: () => post(`/api/session/${encodeURIComponent(id)}/pin`, { pin: !x.pinned }).then(reload, (e) => toast(e.message, true)) },
       { label: t("移到项目…"), icon: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', fn: () => moveToProject(id, anchor) },
+      ...(remoteComponent.enabled() ? [{ label: t("托管到手机 / 管理托管…"), icon: PAGES.remote.icon, fn: () => { remoteHosting.open(id).catch((e) => toast(e.message, true)); } }] : []),
       { label: t("重命名"), icon: SM.edit, fn: () => { const n = prompt(t("新的会话名称"), x.title || ""); if (n) post(`/api/session/${encodeURIComponent(id)}/rename`, { title: n }).then(reload, (e) => toast(e.message, true)); } },
       { label: t("脉络"), icon: SM.lineage, fn: () => lineageMenu(id, anchor) },
       { label: x.misc ? t("移出杂项") : t("归入杂项"), icon: SM.tray, fn: () => post("/api/archive/misc", { session: id, misc: !x.misc }).then(reload, (e) => toast(e.message, true)) },

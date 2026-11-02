@@ -93,7 +93,10 @@ final class Env {
             byte[] nb = new byte[16];
             new java.security.SecureRandom().nextBytes(nb);
             String n = hex(nb);
-            java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL("http://" + HOST + ":" + PORT + pq).openConnection();
+            String resource = pq.split("\\?", 2)[0];
+            boolean componentAsset = "/api/components/remote-session/ui.js".equals(resource) || "/api/components/remote-session/ui.css".equals(resource);
+            java.net.HttpURLConnection c = componentAsset ? gateway(pq) :
+                (java.net.HttpURLConnection) new java.net.URL("http://" + HOST + ":" + PORT + pq).openConnection();
             c.setConnectTimeout(2000); c.setReadTimeout(15000); c.setInstanceFollowRedirects(false); c.setUseCaches(false);
             c.setRequestProperty("X-CC-Nonce", n);
             c.setRequestProperty("Accept-Encoding", "identity");

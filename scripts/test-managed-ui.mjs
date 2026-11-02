@@ -223,7 +223,7 @@ try {
   assert.equal(await cdp.eval("!!document.querySelector('#comp-list button[data-c=remove]')"), false);
   ok("successful removal", "card becomes absent with install action");
 
-  // DESIGN.zh-CN.md: the actual integration target is the three-field bridge configuration, not motion.
+  // Current upstream adds optional context capacity to the original connection fields.
   fixture.resetComponent();
   await openExt();
   await refreshComponents();
@@ -261,12 +261,13 @@ try {
   const existing = await cdp.eval("({ key: document.querySelector('#bc-key').value, type: document.querySelector('#bc-key').type, count: document.querySelectorAll('#bc-form input:not([type=checkbox])').length, active: document.activeElement?.id, hint: document.querySelector('#bc-key-hint').innerText })");
   assert.equal(existing.key, "", "old API key never returns to input");
   assert.equal(existing.type, "password");
-  assert.equal(existing.count, 3, "only endpoint/key/model inputs are shown");
+  assert.equal(existing.count, 4, "endpoint/key/model and upstream optional context capacity inputs are shown");
+  assert.equal(await cdp.eval("document.querySelector('#bc-ctx').value"), "", "unknown capacity stays optional and empty");
   assert.notEqual(existing.active, "bc-key", "opening configuration does not automatically focus key input");
   assert.match(existing.hint, /blank|unchanged|留空|保持/i);
   assert.equal(fixture.state.configResponses.some((s) => s.includes(FAKE_OLD_KEY)), false, "GET response excludes old key");
   assert.equal(await cdp.eval(`document.documentElement.outerHTML.includes(${q(FAKE_OLD_KEY)})`), false, "old key not present in page DOM");
-  ok("bridge config entry and existing key privacy", "original card, Configure left of Uninstall, three fields in Extensions, old key absent/masked");
+  ok("bridge config entry and existing key privacy", "original card, Configure left of Uninstall, connection fields plus optional capacity in Extensions, old key absent/masked");
 
   // Invalid API paths/credentials/model must not reach any POST or remote inference endpoint.
   const initialSaves = fixture.state.configRequests.length;
@@ -358,7 +359,10 @@ try {
   assert.equal(fixture.state.modelsRequests.length, 0, "typing credentials without model-list consent does not connect remotely");
   await click("#bc-model-consent");
   await until(() => fixture.state.modelsRequests.length === 1, "opt-in automatic model discovery");
-  await until(() => cdp.eval("document.querySelectorAll('#bc-model-list option').length === 2"), "model datalist filled");
+  await until(() => cdp.eval("document.querySelector('#bc-model-retry').disabled === false"), "model discovery completes");
+  await fill("#bc-model", "synthetic-listed-a");
+  await until(() => cdp.eval("document.querySelectorAll('#bc-model-list li[role=option]').length === 2"), "current self-drawn model suggestions filled");
+  await fill("#bc-model", "synthetic-new-model");
   assert.equal(fixture.state.modelsRequests[0].consent, true);
   assert.equal(fixture.state.modelsRequests[0].apiKey, FAKE_NEW_KEY);
   assert.equal(await cdp.eval("document.querySelector('#bc-model').value"), "synthetic-new-model", "list never chooses the first model over typed input");
@@ -377,7 +381,9 @@ try {
   fixture.state.modelsMode = "success";
   await click("#bc-model-retry");
   await until(() => fixture.state.modelsRequests.length === 3, "synthetic model recovery");
-  await until(() => cdp.eval("document.querySelectorAll('#bc-model-list option').length === 2 && !document.querySelector('#bc-model-retry').disabled"), "model recovery completes");
+  await until(() => cdp.eval("!document.querySelector('#bc-model-retry').disabled"), "model recovery completes");
+  await fill("#bc-model", "synthetic-listed-a");
+  await until(() => cdp.eval("document.querySelectorAll('#bc-model-list li[role=option]').length === 2"), "recovered self-drawn suggestions filled");
   await fill("#bc-model", "synthetic-new-model");
   await unchanged();
   ok("bridge model list error and manual fallback", "static error, explicit retry only, model editing does not refetch, no inference or provider changes");

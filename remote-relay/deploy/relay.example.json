@@ -1,0 +1,16 @@
+{
+  "host": "127.0.0.1",
+  "port": 8765,
+  "stateFile": "/var/lib/cccodroid-relay/metadata.json",
+  "devices": [
+    {
+      "deviceId": "replace-tablet-device-id",
+      "token": "<GENERATE_LOCALLY_32_RANDOM_BYTES_BASE64URL>"
+    },
+    {
+      "deviceId": "replace-phone-device-id",
+      "token": "<GENERATE_DIFFERENT_32_RANDOM_BYTES_BASE64URL>"
+    }
+  ],
+  "pairs": []
+}

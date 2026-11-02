@@ -3,6 +3,7 @@
   var setCatShown = "-";   // 上次画的是哪一类：null = 窄屏的分类列表，"-" = 刚打开还没画过
   let setFrom = null;
   function openSettings(cat) {
+    if (cat === "remote" && !remoteComponent.enabled()) return openPage("remote");
     setFrom = document.activeElement;
     OV.closeAll();
     setOpen = true;
@@ -20,6 +21,7 @@
   }
   function closeSettings() {
     if (!setOpen) return;
+    if (setCatOpen === "remote") remoteSettings.close().catch(() => {});
     setOpen = false;
     const ov = $("set-ov");
     MO.leave(ov, ov.classList.contains("narrow") ? "mo-out-push" : "mo-out-fade", 170, () => ov.classList.add("hidden"));
@@ -130,6 +132,9 @@
   new MutationObserver(() => { if (!setOpen || setCatRaf) return; setCatRaf = requestAnimationFrame(() => { setCatRaf = 0; paintSetCats(); }); })
     .observe($("tab-settings"), { subtree: true, attributes: true, attributeFilter: ["class"] });
   function paintSetCats() {
+    const remoteOn = remoteComponent.enabled();
+    if (setCatOpen === "remote" && !remoteOn) setCatOpen = pagesNarrow() ? null : "general";
+    if (setCatShown === "remote" && setCatOpen !== "remote") remoteSettings.close().catch(() => {});
     paintSetUsage();
     // 回程：换类之前给旧的那一屏留个替身 —— 窄屏往里进时分类列表往左退暗、返回时内容页往右滑走。
     // 宽屏（左边选、右边换）不放动画，直接换（10-27 用户定：交叉淡变不好看，做减法）
@@ -142,20 +147,21 @@
     }
     const narrow = pagesNarrow(), cats = [...document.querySelectorAll("#set-cats [data-cat]")];
     // 一类里一项都没显示（比如开发端没有通知 / 更新）就连分类一起藏起来
-    const empty = (k) => ![...document.querySelectorAll(`.set-cat[data-cat="${k}"] > :is(.srow, .sblock)`)].some((f) => !f.classList.contains("hidden"));
-    cats.forEach((b) => b.classList.toggle("hidden", empty(b.dataset.cat)));
+    const empty = (k) => k === "remote" ? !remoteOn : ![...document.querySelectorAll(`.set-cat[data-cat="${k}"] > :is(.srow, .sblock)`)].some((f) => !f.hidden && !f.classList.contains("hidden"));
+    cats.forEach((b) => { const hidden = empty(b.dataset.cat); b.classList.toggle("hidden", hidden); if (b.dataset.cat === "remote") b.hidden = hidden; });
     if (!narrow && (!setCatOpen || empty(setCatOpen))) setCatOpen = "general";
     $("tab-settings").classList.toggle("set-list", narrow && !setCatOpen);
     $("tab-settings").classList.toggle("set-one", narrow && !!setCatOpen);
     cats.forEach((b) => b.classList.toggle("on", b.dataset.cat === setCatOpen));
     // 每次进「更新」这一类都重新查一遍（不只读上回的结果）；离开再进来才算一次
     if (setCatOpen === "update" && setCatShown !== "update") updOnOpen();
+    if (remoteOn && setCatOpen === "remote" && setCatShown !== "remote" && !remoteComponent.settingsOpening()) requestAnimationFrame(() => { if (setOpen && setCatOpen === "remote" && remoteComponent.enabled()) remoteSettings.open().catch((e) => toast(e.message, true)); });
     if (setCatShown !== "-" && setCatShown !== setCatOpen) {
       const cur = setCatOpen && document.querySelector(`.set-cat[data-cat="${setCatOpen}"]`);
       if (narrow) { if (cur) MO.play(cur, "mo-in-push", 1400); else if (!setCatOpen) MO.play($("set-cats"), "mo-in-back", 1400); }
     }
     setCatShown = setCatOpen;
-    document.querySelectorAll(".set-cat:not(.mo-ghost)").forEach((c) => c.classList.toggle("hidden", c.dataset.cat !== setCatOpen));
+    document.querySelectorAll(".set-cat:not(.mo-ghost)").forEach((c) => c.classList.toggle("hidden", c.dataset.cat !== setCatOpen || c.dataset.cat === "remote" && !remoteOn));
     const cb = cats.find((b) => b.dataset.cat === setCatOpen);
     $("set-title").textContent = narrow && cb ? cb.textContent.trim() : t("设置");
     $("set-ov").classList.toggle("narrow", narrow);
@@ -163,7 +169,8 @@
     $("set-x").classList.toggle("hidden", narrow);
   }
   $("set-cats").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-cat]"); if (!b) return;
+    const b = e.target.closest("[data-cat]"); if (!b || b.hidden || b.classList.contains("hidden")) return;
+    if (b.dataset.cat === "remote" && !remoteComponent.enabled()) return;
     const was = setCatOpen;
     setCatOpen = b.dataset.cat; paintSetCats();
     // 宽屏换类也回到顶上：各类共用一个滚动区，不归零会接着上一类的位置，顶上几项被跳过（审查 SET-02-02）

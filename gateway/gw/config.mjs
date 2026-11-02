@@ -140,3 +140,12 @@ export function tr(lang, msg) {
 
 /** claude 认的权限模式（2026-10 版二进制）。没有 manual */
 export const PERM_MODES = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
+/** 比「自动接受编辑」宽的模式。前端 03-perm-status.js 的 WIDE_MODES 是同一张表，改一处要同步另一处 */
+export const WIDE_PERM_MODES = ["bypassPermissions", "auto", "dontAsk"];
+/** 回答权限请求时顺带的模式怎么处理："global" 改全局、"run" 只把这一轮切回原模式、"none" 不动。
+ *  只有批准才切；最多到「自动接受编辑」可以改全局（计划卡上的明确选项）；宽模式只能原样保持本轮，放宽得走 /api/perm/mode 那条有确认的路 */
+export function permModeAction(behavior, mode, runPermMode) {
+  if (behavior !== "allow" || !mode || !PERM_MODES.includes(mode)) return "none";
+  if (!WIDE_PERM_MODES.includes(mode)) return "global";
+  return mode === runPermMode ? "run" : "none";
+}

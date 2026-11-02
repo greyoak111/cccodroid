@@ -583,10 +583,17 @@
 
   /** 打开整页：窄屏收起侧栏、盖住对话；宽屏侧栏照旧常驻，高亮当前项 */
   function openPage(name, cat) {
+    if ((name === "remote" || name === "settings" && cat === "remote") && !remoteComponent.enabled()) {
+      remoteComponent.refresh().catch(() => {});
+      toast(t("请在扩展中安装并启用远程托管组件"), true);
+      return openPage("ext");
+    }
     if (!PAGES[name] || name === "settings") return openSettings(cat);
     OV.closeAll();
     const prev = curPage;
+    if (prev === "remote" && name !== "remote") remoteView.close().catch(() => {});
     curPage = name;
+    document.documentElement.classList.toggle("pg-remote", name === "remote");
     document.documentElement.classList.add("pg-on");   // 整页盖着时藏起会话的上下文用量条（#39：小数缩放下整页上沿和顶栏差一丝，条会漏出来）
     document.documentElement.classList.toggle("pg-lineage", name === "lineage");   // 脉络页整页不滚（地图自己接手势）
     if (name !== "lineage") closeTour();   // 离开脉络页：导览一起收掉
@@ -606,6 +613,7 @@
     renderSideNav();
     refreshStatus();
     if (name === "sessions") loadSessions();
+    if (name === "remote") remoteView.open(typeof cat === "string" ? cat : undefined).catch((e) => { if (remoteComponent.enabled()) toast(e.message, true); });
     if (name === "caps") loadCaps();
     if (name === "ext") loadExt();
     if (SUBNAVS[name]) paintSubnav(name);
@@ -619,9 +627,10 @@
   }
   function closePage() {
     if (!curPage) return;
+    if (curPage === "remote") remoteView.close().catch(() => {});
     curPage = null;
     pageTitleOv = "";
-    document.documentElement.classList.remove("pg-lineage", "pg-on");
+    document.documentElement.classList.remove("pg-lineage", "pg-remote", "pg-on");
     closeTour();
     // 回到对话：窄屏整页滑出去、底下的对话从左边一点点回来；宽屏淡掉
     const pg = $("pages");
@@ -633,6 +642,7 @@
   // 顶栏标题：对话里是会话名 + 状态；整页时是页名 + 这一页的一句概况（照设计稿，整页自己不再有标题条）
   var chatStatus = chatStatus || ["", ""], pageSub = pageSub || "";   // setStatus 可能在这行之前就调过
   function paintTitle() {
+    $("btn-session-menu")?.classList.toggle("hidden", !!curPage || !view.sessionId);
     const el = $("app-title");
     if (curPage) { el.textContent = pageTitleOv || t(PAGES[curPage].name); subEl.textContent = pageSub; subEl.className = ""; }
     else { el.textContent = view.title || t("新对话"); subEl.textContent = chatStatus[0] + (chatStatus[1] === "ok" ? archSub() : ""); subEl.className = chatStatus[1]; }

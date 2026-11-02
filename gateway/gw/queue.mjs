@@ -295,7 +295,15 @@ const MSG_MAX = 2000000;                        // 字（UTF-16 码元）：两�
 const SID_OK = /^[A-Za-z0-9_-]{1,80}$/;
 /** 字符串数组：只留字符串，条数、每条长度、总长都有上限（总长见 settings-store 的 capList） */
 export const strList = (a, n, len, total) => capList(a, n, len, total);
-export function enqueue(body) {
+export function enqueueRemoteText({ sessionId, text, commandId, sourceDeviceId }) {
+  if (!SID_OK.test(sessionId || "") || typeof text !== "string" || !text.trim() || Buffer.byteLength(text) > 16384
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(commandId || "")
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(sourceDeviceId || "") || QUEUE.length >= 50) return false;
+  const P = pickProvider({ sessionId }).P;
+  if (!keyOf(P) && !P.login) return false;
+  return enqueue({ sessionId, message: text }, { commandId, sourceDeviceId });
+}
+export function enqueue(body, remote = null) {
   const item = {
     id: newRunId(),
     message: String(body.message || ""),
@@ -315,6 +323,7 @@ export function enqueue(body) {
     ...(body.internal ? { cwd: body.cwd || null, effort: body.effort || null, provider: body.provider || null, sched: body.sched || null, unattended: !!body.unattended,
       allowedTools: body.allowedTools || null, disallowedTools: body.disallowedTools || null, timeoutMs: body.timeoutMs || 0 } : {}),
     ...(body.auto ? { auto: body.auto } : {}),
+    ...(remote ? { literalText: true, remoteCommandId: remote.commandId, sourceDeviceId: remote.sourceDeviceId } : {}),
   };
   // 插话（"inject"，旧前端叫 "interrupt"）：不打断。消息直接写进正在跑的 claude 的 stdin，
   // claude 会在当前这一步（比如一次工具调用）结束后把它并进对话，同一轮里接着干 —— 和终端里边干边打字一样。
@@ -334,7 +343,7 @@ export function enqueue(body) {
 }
 
 function tryInject(run, item) {
-  if (!run.inject || item.message.trim().startsWith("/")) return false;   // 斜杠命令得自己单跑一轮
+  if (!run.inject || (!item.literalText && item.message.trim().startsWith("/"))) return false;   // 斜杠命令得自己单跑一轮
   const same = item.sessionId ? item.sessionId === run.sessionId : (item.follow === run.id || !item.follow);
   if (!same) return false;
   return run.inject(item);
@@ -378,6 +387,12 @@ export async function routeQueue(req, res, u, p) {
       if (Array.isArray(b.ids)) { const ids = new Set(b.ids.map(String)); for (let k = QUEUE.length - 1; k >= 0; k--) if (ids.has(QUEUE[k].id)) QUEUE.splice(k, 1); }
       else QUEUE.length = 0;
     } else if (i < 0) return sendJson(res, 404, { error: "not queued" });
+    // Remote receipts bind immutable text and the original target run. A local
+    // edit/promotion must not reuse that identity for different text or a new
+    // injection target (including uncertain items retained after a run closes).
+    else if ((act === "edit" || act === "promote") && QUEUE[i].remoteCommandId) return sendJson(res, 409, {
+      error: "remote_command_immutable", message: tz("手机发送的排队消息不能在此编辑或插话，请先确认送达状态。"),
+    });
     else if (act === "remove") QUEUE.splice(i, 1);
     else if (act === "promote") {          // ⚡ 插话：塞进正在跑的这一轮（不打断）；塞不进就挪到队首
       const it = QUEUE.splice(i, 1)[0];

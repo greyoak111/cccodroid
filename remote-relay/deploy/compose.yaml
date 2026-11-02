@@ -1,0 +1,29 @@
+# Host-network template for Linux only. The service itself listens on loopback;
+# Caddy on the same host is the only public TLS/WSS entry. Do not publish 8765.
+# This is deliberately not run or deployed by the development tests.
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: remote-relay/deploy/Dockerfile
+      args:
+        NODE_IMAGE: node:24.11.0-alpine
+    network_mode: host
+    user: "1000:1000"
+    read_only: true
+    restart: unless-stopped
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    pids_limit: 32
+    tmpfs:
+      - /tmp:size=8m,noexec,nosuid,nodev
+    volumes:
+      - ./private-config:/run/relay-config:ro
+      - ./private-state:/var/lib/cccodroid-relay:rw
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "3"

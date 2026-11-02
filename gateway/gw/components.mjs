@@ -13,6 +13,19 @@ import { retireManagedBridge } from "./managed-bridge.mjs";
 import { clearBridgeConfigMapping, handleBridgeConfig, handleBridgeModels } from "./bridge-config.mjs";
 import { archiveProblem, parseTarListing } from "./archive-check.mjs";
 import { baseOwnedPaths } from "./orphans.mjs";
+import { REMOTE_COMPONENT_ID, REMOTE_HOST_API, assertRemoteArchiveEntries, readRemotePackage } from "./remote-component-layout.mjs";
+
+// This API is feature-specific: it does not let arbitrary components register
+// gateway routes, execute frontend modules or access the original run map.
+let remoteComponentProvider = null;
+export function registerRemoteComponentProvider(provider) { remoteComponentProvider = provider; }
+const remoteManager = () => remoteComponentProvider?.();
+const hostCompatible = (entry) => {
+  if (!entry || !Object.hasOwn(entry, "hostApi")) return true;
+  const api = entry.hostApi;
+  return !!api && typeof api === "object" && !Array.isArray(api)
+    && Object.keys(api).length === 1 && api.remoteSession === REMOTE_HOST_API;
+};
 
 /** 前端文件（web/ 下全部，含 i18n.js 与各语言词典）的最后修改时间戳。界面拿它来判断「我是不是该刷新了」——
  *  这样以后只改 web/ 也能自动生效，不用重开 App。 */
@@ -37,6 +50,7 @@ const COMP_INDEX_PUBKEY = crypto.createPublicKey(
   "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4u1V3UuRVZgXwqXXQaQIBaefPf2PCGqKqvsna9Pgzzs=\n-----END PUBLIC KEY-----\n");
 export const COMP_DIR = PREFIX ? path.join(path.dirname(PREFIX), "components") : "";
 const COMP_JOBS = new Map();      // id → { phase, done, total, error, child, cancelled }
+export const compBusy = (id) => { const job = COMP_JOBS.get(id); return !!job && !job.finished; };
 export let compIndexCache = { at: 0, data: null, error: "" };
 
 export function devkitIdentity() {
@@ -197,8 +211,13 @@ async function compList(force) {
   try { for (const f of fs.readdirSync(COMP_DIR)) if (f.endsWith(".json")) ids.add(f.slice(0, -5)); } catch {}
   const items = [...ids].map((id) => {
     const e = comps[id] || null, b = e && compBuildFor(e, dk), rec = compRecord(id), job = COMP_JOBS.get(id);
+    // Requirements belong to this artifact, not the latest recipe or an older installation.
+    const host = b || rec;
     return {
       id, name: e ? e.name : { zh: id, en: id }, desc: e ? e.desc : null,
+      hostApi: host?.hostApi ?? null,
+      hostCompatible: hostCompatible(host),
+      ...(id === REMOTE_COMPONENT_ID ? { feature: remoteManager()?.peek() || { ok: true, id, hostApi: REMOTE_HOST_API, installed: !!rec, enabled: false, state: rec ? "disabled" : "absent", version: rec?.version || null, assetVersion: null, activationId: null, error: null } } : {}),
       version: b ? b.version : null, bytes: b ? b.bytes : 0, installed: b ? b.installed : 0,
       available: !!b, installedVersion: rec ? rec.version : null,
       state: compState(id, e, dk),
@@ -412,6 +431,7 @@ async function compInstall(id) {
   if (miss.length) return { ok: false, message: tz("要先装：{names}", { names: miss.map((rid) => compName(rid, ix.data.components).zh || rid).join("、") }) };
   const b0 = compBuildFor(entry, dk), b = b0 && { ...b0, source: entry.source, requires: entry.requires || [] };
   if (!b) return { ok: false, message: tz("这个组件还没有对应当前工具包的版本，先更新工具包或稍后再试") };
+  if (!hostCompatible(b)) return { ok: false, message: tz("此组件需要更新 CC 主程序以提供宿主接口") };
   // 模块化工具包：组件依赖的底座包所在的模块得先装上
   const needMods = modulesMissingFor(b.baseDeps);
   if (needMods.length) return { ok: false, needModules: needMods.map((m) => m.id), message: tz("要先装工具包模块：{names}（扩展页上方「工具包模块」）", { names: needMods.map((m) => m.name.zh || m.id).join("、") }) };
@@ -532,11 +552,15 @@ async function compRunInstall(id, b, job) {
   try {
     const list = await new Promise((ok, no) => execFile(path.join(PREFIX, "bin", "tar"), ["-tzv", "--quoting-style=c", "-f", gz],
       { maxBuffer: 256 << 20 }, (e, out) => e ? no(e) : ok(String(out))));
-    const bad = archiveProblem(parseTarListing(list));
+    const entries = parseTarListing(list), bad = archiveProblem(entries);
     if (bad) throw new Error(tz("这个压缩包里有条目会写到包外面（{p}），为安全起见不解开", { p: String(bad.name).slice(0, 200) }));
+    if (id === REMOTE_COMPONENT_ID) assertRemoteArchiveEntries(entries);
     await compRun(job, path.join(PREFIX, "bin", "tar"), ["-xzf", gz, "-C", tree]);
   }
   catch (e) { if (!job.cancelled) fs.rmSync(gz, { force: true }); throw e; }
+  if (id === REMOTE_COMPONENT_ID) readRemotePackage(path.join(tree, "usr"), {
+    record: { id, state: "ok", version: b.version, base: b.base }, devkit: { sha256: b.base },
+  });
   const lx = `libexec/devkit/components/${id}`;
   const man = fs.readFileSync(path.join(tree, "usr", lx, "MANIFEST"), "utf8").trim().split("\n");
   // 进度按清单里的字节算：索引的 installed 是装好后的总占用（含链接等），按它算永远到不了头，看着像卡住
@@ -553,9 +577,18 @@ async function compRunInstall(id, b, job) {
   // 3) 切换：先写"安装中"的记录（被打断就是 damaged，可以重装或卸载），再逐个搬进 $PREFIX
   job.phase = "installing";
   const old = compRecord(id);
+  // Validate the optional executable tree before retiring the installed one.
+  // Upgrade never carries active session grants over to the new runtime.
+  let reactivateRemote = false;
+  if (id === REMOTE_COMPONENT_ID) {
+    const manager = remoteManager();
+    if (!manager) throw new Error("REMOTE_HOST_UNAVAILABLE");
+    reactivateRemote = old ? manager.peek().enabled : manager.enabledPreference;
+    await manager.disable();
+  }
   if (old) compRemoveFiles(id, old);                // 升级 / 重装：先清掉上一版（别的组件也要用的留下）
   const rec = { id, source: b.source || "", version: b.version, upstream: b.upstream, base: b.base, sha256: b.sha256, bin: b.bin || [],
-    requires: b.requires || [], skill: "", state: "installing", at: Date.now(), files: [], shared: [] };
+    requires: b.requires || [], ...(Object.hasOwn(b, "hostApi") ? { hostApi: b.hostApi } : {}), skill: "", state: "installing", at: Date.now(), files: [], shared: [] };
   // 先按包内文件清单记下"将要放进去的文件"：搬到一半被杀也能按它卸干净
   const list = [];
   (function walk(rel) {
@@ -573,11 +606,15 @@ async function compRunInstall(id, b, job) {
   if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
   // 4) 首次运行配置（各包 postinst），失败不算安装失败
   const fr = path.join(PREFIX, lx, "first-run.sh");
-  if (fs.existsSync(fr)) { try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); } catch (e) { log(`[comp] ${id} first-run：${e.message}`); } }
+  if (id !== REMOTE_COMPONENT_ID && fs.existsSync(fr)) { try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); } catch (e) { log(`[comp] ${id} first-run：${e.message}`); } }
   // 5) 给 Claude 的技能
   if (b.skill) compInstallSkill(id, b.skill, rec);
   rec.state = "ok"; rec.at = Date.now();
   compWriteRecord(id, rec);
+  if (id === REMOTE_COMPONENT_ID) {
+    const manager = remoteManager();
+    if (reactivateRemote) await manager.enable(); else await manager.status();
+  }
   fs.rmSync(tree, { recursive: true, force: true });
   fs.rmSync(gz, { force: true });
 }
@@ -622,6 +659,12 @@ export async function compRemove(id) {
   let stage = "read-record";
   try {
     const { exists, rec } = compRemovalRecord(id);
+    if (id === REMOTE_COMPONENT_ID) {
+      stage = "retire-remote-component";
+      const manager = remoteManager();
+      if (!manager) throw new Error("REMOTE_HOST_UNAVAILABLE");
+      await manager.disable();
+    }
     stage = "retire-managed-bridge";
     const retired = await retireManagedBridge(id);
     stage = "clear-app-mapping";
@@ -635,6 +678,7 @@ export async function compRemove(id) {
     fs.rmSync(compRecFile(id), { force: true });
     stage = "clear-stage";
     compClearStage(id);
+    if (id === REMOTE_COMPONENT_ID) await remoteManager().status();
     log(`[comp] ${id} 已卸载（${rec ? rec.files.length : 0} 个文件）`);
     return { ok: true };
   } catch (e) {

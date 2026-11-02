@@ -270,6 +270,11 @@ public class MainActivity extends Activity {
         @Override public void run() { FrameRate.apply(MainActivity.this); ui.postDelayed(this, 30000); }
     };
 
+    // Remote policy follows actual window visibility; pause can leave CC visible in split-screen.
+    // Keep visible/Battery/Notify/pane resume semantics below unchanged for the existing local features.
+    @Override protected void onStart() { super.onStart(); RemoteHost.get(this).onStarted(this); }
+    @Override protected void onStop() { RemoteHost.get(this).onStopped(this); super.onStop(); }
+
     @Override protected void onResume() { super.onResume(); visible = true; applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
         ui.removeCallbacks(fpsBeat); ui.postDelayed(fpsBeat, 30000);
         if (pane != null) pane.resume();
@@ -450,6 +455,7 @@ public class MainActivity extends Activity {
         else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false));
         else if (ACTION_PRIV_OK.equals(a)) confirmPriv(i.getStringExtra("id"), i.getStringExtra("cmd"), i.getStringExtra("who"), i.getBooleanExtra("trust", false));
         else if (Notify.ACTION_OPEN.equals(a)) openSession(i.getStringExtra("session"));
+        else if (RemoteRoutes.ACTION_OPEN.equals(a)) openRemote(RemoteRoutes.consume(this, i));
     }
 
     // ── 分享进来的东西：文件拷进工作区的 uploads/（和网页上传同一处、同样的命名），文字插进输入框 ──
@@ -649,6 +655,13 @@ public class MainActivity extends Activity {
 
     /** 从「已完成」通知点进来：切到那个会话（界面正显示它就不动）。页面可能还在启动，等 __cc 就绪 */
     private String pendingSid;
+    private org.json.JSONObject pendingRemote;
+    private void openRemote(org.json.JSONObject route) {
+        if (route == null) return;
+        if (web == null || !isOwnGateway(web.getUrl())) { pendingRemote = route; return; }
+        try { web.evaluateJavascript(RemoteRoutes.pageScript(route), null); }
+        catch (RuntimeException ignored) { pendingRemote = null; }
+    }
     private void openSession(String sid) {
         if (web == null || sid == null || !sid.matches("[0-9A-Za-z-]{8,64}")) return;
         // 冷启动时页面还在 about:blank / 等网关：这里塞进去的轮询会被真正的导航冲掉。先记着，网关页面落地再发（审查 #49 待确认-2）
@@ -1439,7 +1452,8 @@ public class MainActivity extends Activity {
                 if (isOwnGateway(u.toString()) && "GET".equalsIgnoreCase(req.getMethod())) {
                     String p = u.getEncodedPath();
                     if (p == null || p.isEmpty()) p = "/";
-                    if (!p.startsWith("/api/")) {
+                    boolean remoteAsset = "/api/components/remote-session/ui.js".equals(p) || "/api/components/remote-session/ui.css".equals(p);
+                    if (!p.startsWith("/api/") || remoteAsset) {
                         android.webkit.WebResourceResponse r = Env.fetchStatic(p + (u.getEncodedQuery() != null ? "?" + u.getEncodedQuery() : ""));
                         return r != null ? r : unavailable();
                     }
@@ -1457,6 +1471,7 @@ public class MainActivity extends Activity {
                 pushInsets();
                 if (handoff != null && isOwnGateway(url)) ui.postDelayed(MainActivity.this::dropHandoff, 180);
                 if (pendingSid != null && isOwnGateway(url)) { String sid = pendingSid; pendingSid = null; openSession(sid); }
+                if (pendingRemote != null && isOwnGateway(url)) { org.json.JSONObject route = pendingRemote; pendingRemote = null; openRemote(route); }
             }
         });
         web.addJavascriptInterface(new Object() {

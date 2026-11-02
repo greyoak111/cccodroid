@@ -1,0 +1,18 @@
+{
+  "name": "cccodroid-remote-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Single-user opaque remote-session relay, independent of the gateway",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "check": "node --check src/tunnel-server.mjs && node --check src/server.mjs && node --check src/store.mjs && node --check src/flow.mjs && node --check src/validation.mjs && node --check src/cli.mjs"
+  },
+  "dependencies": {
+    "ws": "8.22.1"
+  }
+}

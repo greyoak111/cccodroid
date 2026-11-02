@@ -1,0 +1,21 @@
+# Local template only. Set a real, controlled DNS name before deployment.
+# Do not enable request/access logging: it is unnecessary for this single user.
+# Caddy's certificate validation is left enabled; never use tls_insecure_skip_verify.
+{$RELAY_DOMAIN:relay.example.invalid} {
+    encode zstd gzip
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        Cache-Control "no-store"
+        X-Content-Type-Options "nosniff"
+        -Server
+    }
+    @relay path /v1/relay /v1/devices/register /healthz
+    handle @relay {
+        reverse_proxy 127.0.0.1:8765 {
+            stream_timeout 24h
+        }
+    }
+    handle {
+        respond 404
+    }
+}

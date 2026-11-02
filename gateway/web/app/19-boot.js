@@ -25,6 +25,7 @@
     chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: "smooth" });
   });
 
+  $("btn-session-menu").addEventListener("click", () => { if (view.sessionId && !curPage) sessMenu(view.sessionId, $("btn-session-menu")); });
   $("btn-files").addEventListener("click", () => openFiles());
   // 顶栏按钮怎么摆（0.4.20）：五个工具键各自「常驻」（挪进 #tb-pins，不折叠）/「收起」（照旧收在 ⋯ 里）/「隐藏」，外加先后顺序。
   //   存在 ccapp-ui.json 的 topbar：{ order, pin, off }；没设过就是全收起、原来的顺序。⋯ 里一个都不剩时 ⋯ 也藏掉
@@ -479,6 +480,35 @@
   window.__cc = { view, srv, state, send, abort, openSession, newConversation, openPage, bus: onBus,   // bus：测试时往前端灌事件
     openGit, openViewer, openFiles, openDrawer, showWhatsNew, mdEd: () => VW.ed, provCard: (id) => { state.provView = id; renderProvCard(); },
     lin: { prof: linProfOpen, pick: linPickStart, wiz: mergeWizard, get: () => LIN } };   // 脉络：探针直接开剖面 / 多选 / 汇合向导
+
+  document.addEventListener("cc:remote-back", (event) => { if (remoteComponent.enabled() && curPage === "remote" && event.target === $("remotePage")) closePage(); });
+  document.addEventListener("cc:remote-settings-open", () => { if (remoteComponent.enabled()) openPage("settings", "remote"); });
+  let remoteRouteSerial = 0;
+  window.addEventListener("cc:remote-open", async (event) => {
+    const route = event.detail, serial = ++remoteRouteSerial;
+    const routeId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
+    if (!route || !routeId(route.remoteSessionId) || !routeId(route.fromDeviceId) || !routeId(route.hostInstanceId)
+        || !Number.isSafeInteger(route.grantVersion) || route.grantVersion < 1) return;
+    try {
+      // Proxies exist before the optional bundle is ready. Wait for this boot's
+      // decision, without enabling an inactive component or accepting an invite.
+      await remoteComponent.ready;
+      if (serial !== remoteRouteSerial) return;
+      if (!remoteComponent.enabled()) {
+        openPage("ext"); toast(t("请在扩展中安装并启用远程托管组件"), true); return;
+      }
+      const activationId = remoteComponent.status().activationId;
+      const list = await remoteTransport.list();
+      if (serial !== remoteRouteSerial || !remoteComponent.enabled() || remoteComponent.status().activationId !== activationId) return;
+      const session = list.find((x) => x.remoteSessionId === route.remoteSessionId && x.deviceId === route.fromDeviceId && x.grantVersion === route.grantVersion);
+      openPage("remote", session?.state === "active" ? session.remoteSessionId : undefined);
+      if (!session) toast(t("远程授权已变化，请重新核对列表"), true);
+    } catch (e) { if (serial === remoteRouteSerial && remoteComponent.enabled()) toast(t("远程连接尚未恢复，请打开远程列表核对"), true); }
+  });
+  window.__cc.remote = Object.freeze({ view: remoteView, transport: remoteTransport, settings: remoteSettings, hosting: remoteHosting });
+  window.__cc.remoteComponent = remoteComponent;
+  // Unread/event subscriptions belong to the component generation, not boot.
+  remoteComponent.boot().catch(() => {});
 
   // ── 启动 ──────────────────────────────────────────────────────────
   (async function boot() {

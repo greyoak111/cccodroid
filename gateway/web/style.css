@@ -61,6 +61,10 @@ body{
   border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;
 }
 #title-block{flex:1;min-width:0}
+html.pg-remote #tb-pins,html.pg-remote #tb-tools,html.pg-remote #btn-more{display:none!important}
+html.pg-remote #page-body{padding:0;overflow:hidden}
+html.pg-remote #tab-remote,html.pg-remote #remotePage{height:100%;max-width:none;width:100%}
+#btn-session-menu{min-height:44px;min-width:44px}
 #app-title{font-weight:600;font-size:15px;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 手机窄屏：顶栏图标多（7 个），收紧按钮和间距，给标题留出位置 */
 @media (max-width:420px){
@@ -244,6 +248,9 @@ td{color:var(--fg2)}
 .tgroup.single .tg-head{display:none}
 .tgroup:not(.single):not(.open):not(:has(.perm:not(.done),.tool.open,.tool-peek)) .tg-body{display:none}
 .tgroup.open .tg-head .chev,.tgroup:has(.perm:not(.done),.tool.open,.tool-peek) .tg-head .chev{transform:rotate(90deg)}
+/* 用户亲手收起的组：图片预览、展开着的卡都不再撑开它；只有待确认的权限卡还能把它摊开 */
+.tgroup.shut:not(.single):not(:has(.perm:not(.done))) .tg-body{display:none}
+.tgroup.shut:not(:has(.perm:not(.done))) .tg-head .chev{transform:none}
 .tg-body>.think{margin:6px 0}
 .tgroup:not(.single) .tg-body{margin-inline-start:12px;padding-inline-start:8px;border-inline-start:1px solid var(--tool-line)}
 .tool-head{display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:12.5px;cursor:pointer;user-select:none}

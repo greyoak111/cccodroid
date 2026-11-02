@@ -24,8 +24,20 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020   # v4.4.0
         with:
           node-version: "22"
+      - name: 独立中转测试依赖
+        run: npm --prefix remote-relay ci --ignore-scripts --no-audit --no-fund
       - name: 网关测试
         run: node scripts/test.mjs
+      - name: 独立中转回归
+        run: npm --prefix remote-relay test
+      - name: 独立中转语法检查
+        run: npm --prefix remote-relay run check
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3   # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Java 纯逻辑回归
+        run: sh scripts/java-tests.sh
 
   build:
     needs: test
