@@ -147,7 +147,7 @@
       if (op) { GIT.file = s.files[+op.dataset.open].path; GIT.view = { kind: "diff" }; return gitRender(); }
       if (un != null) {
         const f = s.files[+un];
-        const q = f.kind === "new" ? t("{f} 是新文件，撤销就是删掉它。确定？", { f: f.path }) : t("把 {f} 改回上次提交时的样子？这个文件没提交的改动会丢掉。", { f: f.path });
+        const q = (f.kind === "new" || f.kind === "added") ? t("{f} 是新文件，撤销就是删掉它。确定？", { f: f.path }) : t("把 {f} 改回上次提交时的样子？这个文件没提交的改动会丢掉。", { f: f.path });
         if (!confirm(q)) return;
         try { const r = await gpost("discard", { file: f.path }); toast(r.message || t("已撤销")); gitLoad(); } catch (e2) { toast(e2.message, true); }
       }
@@ -204,7 +204,8 @@
   async function gitCommit(again) {
     const msg = ($("git-msg")?.value || "").trim();
     if (!msg) { toast(t("写一句提交说明"), true); $("git-msg")?.focus(); return; }
-    const all = GIT.sel.size === GIT.status.files.length;
+    // 状态列表截断了（超过 1000 项）：全选的只是看得见的这些，照样按清单传，没显示的不能跟着提交（#106 07-002）
+    const all = GIT.sel.size === GIT.status.files.length && !GIT.status.truncated;
     try {
       const r = await gpost("commit", { message: msg, files: all ? null : [...GIT.sel] });
       toast(r.message || t("已提交"));
@@ -273,7 +274,7 @@
       if (a === "hist") { GIT.tab = "history"; GIT.view = null; return gitRender(); }
       if (a === "undo") {
         const f = GIT.status.files.find((x) => x.path === file);
-        if (!confirm(f && f.kind === "new" ? t("{f} 是新文件，撤销就是删掉它。确定？", { f: file }) : t("把 {f} 改回上次提交时的样子？这个文件没提交的改动会丢掉。", { f: file }))) return;
+        if (!confirm(f && (f.kind === "new" || f.kind === "added") ? t("{f} 是新文件，撤销就是删掉它。确定？", { f: file }) : t("把 {f} 改回上次提交时的样子？这个文件没提交的改动会丢掉。", { f: file }))) return;
         try { await gpost("discard", { file }); toast(t("已撤销")); GIT.view = null; GIT.file = ""; gitLoad(); } catch (e2) { toast(e2.message, true); }
       }
     };

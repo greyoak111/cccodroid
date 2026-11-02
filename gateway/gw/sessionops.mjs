@@ -99,10 +99,17 @@ export function forkSession(id, userText, after, { before = false, uuid = "", la
       catch { w.write(line); }
     });
   } finally { w.close(); }
-  sealSession(nid, path.join(dir, nid + ".jsonl"), { flag: dirty || undefined });
   // 同名目录里是子代理记录、超长工具结果：一起抄过去，引用它们的路径照旧有效
+  // 抄不全就不分叉：分出来的会话读不到子代理过程，还报成功（#98 03-003 同类）。原会话没动，删掉抄了一半的
   const side = path.join(dir, id);
-  try { if (fs.statSync(side).isDirectory()) fs.cpSync(side, path.join(dir, nid), { recursive: true }); } catch {}
+  let sideDir = false; try { sideDir = fs.statSync(side).isDirectory(); } catch {}
+  if (sideDir) try { fs.cpSync(side, path.join(dir, nid), { recursive: true }); }
+  catch (e) {
+    fs.rmSync(path.join(dir, nid), { recursive: true, force: true });
+    fs.rmSync(path.join(dir, nid + ".jsonl"), { force: true });
+    return { ok: false, status: 500, message: tz("会话附带的文件没抄过去，没有分叉：{err}", { err: e.code || e.message }) };
+  }
+  sealSession(nid, path.join(dir, nid + ".jsonl"), { flag: dirty || undefined });
   const title = (NAMES[id] || peekSession(found.file).title || "").slice(0, 100);
   NAMES[nid] = title + " · " + tr(LAST_LANG, before ? tz("回退") : tz("分叉")); saveNames();
   recordPrimary(nid, id, at, before ? "rewind" : "fork");
@@ -344,11 +351,21 @@ export function restoreSession(id) {
   const slot = path.join(TRASH_DIR, id);
   let meta;
   try { meta = JSON.parse(fs.readFileSync(path.join(slot, "meta.json"), "utf8")); } catch { return { ok: false, error: "not found" }; }
-  if (findSessionFile(id)) return { ok: false, error: "exists" };
-  const dir = path.join(PATHS.projects, SID_RE.test(meta.project || "") ? meta.project : projectSlug(realWorkspace()));
-  fs.mkdirSync(dir, { recursive: true });
-  fs.renameSync(path.join(slot, id + ".jsonl"), path.join(dir, id + ".jsonl"));
-  if (fs.existsSync(path.join(slot, "dir"))) fs.renameSync(path.join(slot, "dir"), path.join(dir, id));
+  const sideIn = path.join(slot, "dir"), hasSide = fs.existsSync(sideIn);
+  const done = findSessionFile(id);
+  if (done) {
+    // 旧版先放回主记录、附件没放回去就报错的半截：主记录已在、回收站这格只剩附件 —— 把附件补回去收尾（#98 03-014）
+    const tail = !fs.existsSync(path.join(slot, id + ".jsonl")) && hasSide && !fs.existsSync(path.join(path.dirname(done.file), id));
+    if (!tail) return { ok: false, error: "exists" };
+    fs.renameSync(sideIn, path.join(path.dirname(done.file), id));
+  } else {
+    const dir = path.join(PATHS.projects, SID_RE.test(meta.project || "") ? meta.project : projectSlug(realWorkspace()));
+    fs.mkdirSync(dir, { recursive: true });
+    // 先放附件、再放主记录：主记录放不回去就把附件挪回回收站，这一格照旧在列表里，可以再点恢复（#98 03-014）
+    if (hasSide) fs.renameSync(sideIn, path.join(dir, id));
+    try { fs.renameSync(path.join(slot, id + ".jsonl"), path.join(dir, id + ".jsonl")); }
+    catch (e) { if (hasSide) try { fs.renameSync(path.join(dir, id), sideIn); } catch {} throw e; }
+  }
   if (meta.renamed && meta.title) { NAMES[id] = meta.title; saveNames(); }
   if (meta.pinned) { PINS[id] = meta.pinned; savePins(); }
   fs.rmSync(slot, { recursive: true, force: true });
@@ -513,7 +530,8 @@ export async function importSessions(file) {
     if (!l.includes('"cwd"')) return l;
     try { const ev = JSON.parse(l); if (ev.cwd) ev.cwd = ws; return JSON.stringify(ev); } catch { return l; }
   };
-  for (const s of manifest.sessions || []) {
+  // 后面某条坏了会抛错跳出：前面已经放好的几条，标题照样要落盘（#98 03-002），并告诉前端放好了哪些
+  try { for (const s of manifest.sessions || []) {
     const id = String(s.id || "");
     if (!SID_RE.test(id)) continue;
     const main = ents.find((e) => e.name === `sessions/${id}.jsonl`);
@@ -542,7 +560,7 @@ export async function importSessions(file) {
     sealSession(id, dst, { flag: "imported" });   // 包里的历史谁都能写：第一次接着聊时提醒模型（见 integrity.mjs）
     if (s.renamed && s.title) NAMES[id] = String(s.title).slice(0, 120);
     res.imported.push(id);
-  }
-  saveNames();
+  } } catch (e) { e.imported = res.imported; throw e; }
+  finally { saveNames(); }
   return res;
 }

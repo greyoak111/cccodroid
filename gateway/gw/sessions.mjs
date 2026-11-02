@@ -311,7 +311,7 @@ export async function routeSessions(req, res, u, p) {
       const r = await importSessions(tmp);
       log(`导入会话：${r.imported.length} 个，跳过 ${r.skipped.length} 个`);
       return sendJson(res, 200, { ok: true, ...r });
-    } catch (e) { return sendJson(res, 400, { ok: false, message: e.message }); }
+    } catch (e) { if (e.imported?.length) log(`导入会话：放好 ${e.imported.length} 个后出错`); return sendJson(res, 400, { ok: false, message: e.message, imported: e.imported || [] }); }
     finally { importBusy = false; fs.rmSync(tmp, { force: true }); }
   }
   if (p.startsWith("/api/session/")) {

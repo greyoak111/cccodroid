@@ -2612,3 +2612,11 @@
 2612	Percobaan pemulihan otomatis habis
 2613	Verifikasi patch jembatan gagal
 2614	Jembatan lokal dinonaktifkan
+2615	File yang akan di-commit tidak ada di repositori ini
+2616	File lampiran sesi tidak dapat dipindahkan, jadi sesi tetap di tempat semula: {err}
+2617	File lampiran sesi tidak dapat disalin, jadi cabang tidak dibuat: {err}
+2618	Belum ada file yang dipilih untuk di-commit
+2619	Daftar perubahan repositori tidak bisa dibaca; tidak ada yang di-commit
+2620	Daftar perubahan repositori tidak bisa dibaca; tidak ada yang dibatalkan
+2621	Hanya bisa membatalkan satu file sekaligus
+2622	Sudah ada file di {f}; pindahkan dulu sebelum membatalkan

@@ -2612,3 +2612,11 @@
 2612	Tentatives de récupération automatique épuisées
 2613	Échec de la vérification du correctif du pont
 2614	Pont local désactivé
+2615	Les fichiers à valider ne sont pas dans ce dépôt
+2616	Les fichiers joints à la session n'ont pas pu être déplacés ; la session reste à sa place : {err}
+2617	Les fichiers joints à la session n'ont pas pu être copiés ; aucune bifurcation créée : {err}
+2618	Aucun fichier sélectionné pour le commit
+2619	Impossible de lire la liste des modifications du dépôt ; rien n’a été commité
+2620	Impossible de lire la liste des modifications du dépôt ; rien n’a été annulé
+2621	Vous ne pouvez annuler qu’un fichier à la fois
+2622	Un fichier existe déjà à {f} ; déplacez-le avant d’annuler

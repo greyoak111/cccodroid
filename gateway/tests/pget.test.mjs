@@ -110,3 +110,9 @@ test("ghProxy：只改写 github.com 的地址", () => {
   assert.equal(ghProxy("https://dl.cccodroid.net/x"), "");
   assert.equal(ghProxy(""), "");
 });
+
+test("curl 起不来：返回错误，不留未处理的 error 把网关带走（#102 04-006）", async () => {
+  const f = fresh("nocurl.part");
+  const err = await pget({ curl: path.join(DIR, "no-such-curl"), url: URL_, file: f, total: DATA.length });
+  assert.match(err, /ENOENT/);
+});

@@ -41,6 +41,8 @@ cp "$A/assets/bin/"* "$A/assets/app/bin/"
 cp "$ROOT/devkit/pgp.mjs" "$A/assets/app/bin/"     # OpenPGP 验签：pkg.mjs、install-claude.mjs 与 devkit 构建共用这一份
 mkdir -p "$A/assets/app/pre"; cp "$A/assets/pre/"* "$A/assets/app/pre/"     # pkg / apt：PATH 最前，压过工具包里的旧替身
 cp "$A/assets/TOOLS.md" "$A/assets/app/"     # 给 claude 的工具说明（网关读进系统提示）
+# 随包的第三方许可：Shizuku-API 编进了 classes.dex，MIT 要求随包带上版权与许可原文（#110 10-003）；网页里的库各自带着 LICENSE
+mkdir -p "$A/assets/app/licenses"; cp "$ROOT/NOTICE" "$ROOT/LICENSE" "$A/assets/app/licenses/"; cp "$ROOT/third_party/shizuku/LICENSE" "$A/assets/app/licenses/Shizuku-API-LICENSE"
 # 工具包下载地址（Release 目录，按序尝试）。测试时可用 DEVKIT_BASES="http://… https://…" 覆盖
 if [ -n "$DEVKIT_BASES" ]; then echo "$DEVKIT_BASES" | tr " " "\n" > "$A/assets/devkit-sources.txt"
 else cp "$ROOT/devkit-sources.txt" "$A/assets/devkit-sources.txt"; fi

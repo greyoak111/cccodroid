@@ -2615,4 +2615,12 @@ window.I18N_DICT["id"] = {
   "自动恢复次数已耗尽": "Percobaan pemulihan otomatis habis",
   "桥补丁校验失败": "Verifikasi patch jembatan gagal",
   "本地桥已停用": "Jembatan lokal dinonaktifkan",
+  "要提交的文件不在这个仓库里": "File yang akan di-commit tidak ada di repositori ini",
+  "会话附带的文件没搬过去，会话留在原处：{err}": "File lampiran sesi tidak dapat dipindahkan, jadi sesi tetap di tempat semula: {err}",
+  "会话附带的文件没抄过去，没有分叉：{err}": "File lampiran sesi tidak dapat disalin, jadi cabang tidak dibuat: {err}",
+  "没选要提交的文件": "Belum ada file yang dipilih untuk di-commit",
+  "读不出仓库的改动列表，没有提交": "Daftar perubahan repositori tidak bisa dibaca; tidak ada yang di-commit",
+  "读不出仓库的改动列表，没有撤销": "Daftar perubahan repositori tidak bisa dibaca; tidak ada yang dibatalkan",
+  "一次只能撤销一个文件": "Hanya bisa membatalkan satu file sekaligus",
+  "{f} 那里已经有个文件了，先挪开再撤销": "Sudah ada file di {f}; pindahkan dulu sebelum membatalkan",
 };

@@ -2649,5 +2649,13 @@ window.I18N_DICT.en = {
   "本地桥尚未就绪，请先检查本地诊断；当前会话保持不变，保存配置不会重置恢复次数。": "The local bridge isn't ready. Check local diagnostics first. The current session is unchanged, and saving the configuration will not reset the recovery attempt count.",
   "自动恢复次数已耗尽": "Auto-recovery attempts exhausted",
   "桥补丁校验失败": "Bridge patch verification failed",
-  "本地桥已停用": "Local bridge disabled"
+  "本地桥已停用": "Local bridge disabled",
+  "要提交的文件不在这个仓库里": "The files to commit are not in this repository",
+  "会话附带的文件没搬过去，会话留在原处：{err}": "The session's attached files could not be moved, so the session stays where it was: {err}",
+  "会话附带的文件没抄过去，没有分叉：{err}": "The session's attached files could not be copied, so no fork was made: {err}",
+  "没选要提交的文件": "No files selected to commit",
+  "读不出仓库的改动列表，没有提交": "Couldn't read the repository's change list; nothing was committed",
+  "读不出仓库的改动列表，没有撤销": "Couldn't read the repository's change list; nothing was discarded",
+  "一次只能撤销一个文件": "You can only discard one file at a time",
+  "{f} 那里已经有个文件了，先挪开再撤销": "There's already a file at {f}; move it away before discarding",
 };

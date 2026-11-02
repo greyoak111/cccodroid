@@ -40,6 +40,7 @@ export async function pget({ curl, url, file, total, n = 4, curlArgs = [], onPro
     const kids = new Set();
     const tick = setInterval(() => { save(); onProgress(doneBytes()); if (cancelled()) for (const c of kids) c.kill("SIGKILL"); }, 1000);
     const runSeg = async (seg) => {
+      let fatal = false;                                              // curl 根本起不来：重试也没用，直接让下一个来源接手
       for (let attempt = 0; seg[2] < seg[1] - seg[0] + 1; attempt++) {
         if (cancelled()) return "cancelled";
         const err = await new Promise((resolve) => {
@@ -54,6 +55,8 @@ export async function pget({ curl, url, file, total, n = 4, curlArgs = [], onPro
             if (b.length > room) c.kill("SIGKILL");                   // 服务器多给了（不该发生）：够了就停
           });
           c.stderr.on("data", (d) => { e += d; });
+          // curl 起不来（缺失/不可执行）只发 error：不接就是未处理的 error 事件，整个网关跟着退出（#102 04-006）
+          c.on("error", (er) => { kids.delete(c); fatal = true; resolve("curl " + (er.code || er.message)); });
           c.on("close", (code) => {
             kids.delete(c);
             if (seg[2] >= seg[1] - seg[0] + 1) return resolve("");
@@ -61,7 +64,7 @@ export async function pget({ curl, url, file, total, n = 4, curlArgs = [], onPro
           });
         });
         if (!err) return "";
-        if (cancelled() || attempt >= 2) return err;
+        if (cancelled() || fatal || attempt >= 2) return err;
         await new Promise((ok) => setTimeout(ok, 2000 * (attempt + 1)));
       }
       return "";
@@ -93,6 +96,7 @@ function single({ curl, url, file, total, curlArgs, onProgress, cancelled }) {
     let e = ""; c.stderr.on("data", (d) => { e += d; });
     const size = () => { try { return fs.statSync(file).size; } catch { return 0; } };
     const tick = setInterval(() => { onProgress(size()); if (cancelled()) c.kill("SIGKILL"); }, 1000);
+    c.on("error", (er) => { clearInterval(tick); resolve("curl " + (er.code || er.message)); });   // 同上：起不来别带走网关
     c.on("close", (code) => {
       clearInterval(tick); onProgress(size());
       if (code === 0 || (total > 0 && size() === total)) return resolve("");

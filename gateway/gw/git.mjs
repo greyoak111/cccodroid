@@ -104,7 +104,19 @@ function gitRel(root, f) {
   let a = path.isAbsolute(f) ? f : path.join(root, f);
   try { a = path.join(fs.realpathSync(path.dirname(a)), path.basename(a)); } catch {}
   const r = path.relative(root, a);
-  return r.startsWith("..") || path.isAbsolute(r) ? null : r;
+  // 按路径分量判越界：..notes.txt 是仓库里的正常文件名（#106 07-011）
+  return r === ".." || r.startsWith(".." + path.sep) || path.isAbsolute(r) ? null : r;
+}
+/** 暂存的重命名：新路径 → 旧路径。不截断（状态列表最多 1000 项，这里要全量）；读不出来返回 null，别当成「没有重命名」 */
+async function gitRenames(root) {
+  const r = await git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=no"], { max: 64 << 20 });
+  const m = new Map(); if (r.code) return null;
+  const parts = r.out.split("\0");
+  for (let i = 0; i < parts.length; i++) {
+    const s = parts[i]; if (!s) continue;
+    if (s[0] === "R" || s[0] === "C") { const orig = parts[++i]; if (s[0] === "R") m.set(s.slice(3), orig); }
+  }
+  return m;
 }
 
 async function gitStatus(root) {
@@ -302,12 +314,23 @@ async function handleGit(req, res, p, u) {
   if (act === "commit") {
     const msg = String(body.message || "").trim();
     if (!msg) return sendJson(res, 400, { error: tz("写一句提交说明") });
-    const files = Array.isArray(body.files) ? body.files.map((f) => gitRel(root, String(f))).filter((f) => f != null) : null;
+    // 不给 files（null）= 全部提交；给了就只提交这些：有一项不在仓库里、或一项都没有，都直接拒绝，
+    // 不能悄悄退化成全仓提交（#106 07-011）
+    let files = null, olds = [];
+    if (Array.isArray(body.files)) {
+      files = body.files.map((f) => gitRel(root, String(f)));
+      if (!files.length) return sendJson(res, 400, { error: tz("没选要提交的文件") });
+      if (files.some((f) => !f)) return sendJson(res, 400, { error: tz("要提交的文件不在这个仓库里") });
+      // 选了一个暂存的重命名：旧路径的删除要一起提交，不然旧文件留在提交里、删除还挂在暂存区（#106 07-003）
+      const ren = await gitRenames(root);
+      if (!ren) return sendJson(res, 500, { error: tz("读不出仓库的改动列表，没有提交") });
+      olds = files.filter((f) => ren.has(f)).map((f) => ren.get(f)).filter((o) => !files.includes(o));
+    }
     const who = await git(root, ["config", "user.email"]);
     if (!who.out.trim()) return sendJson(res, 409, { error: "no_identity", message: tz("还没设置 git 的名字和邮箱（提交记录里署名用）。") });
-    const add = files && files.length ? await git(root, ["add", "-A", "--", ...files]) : await git(root, ["add", "-A"]);
+    const add = files ? await git(root, ["add", "-A", "--", ...files]) : await git(root, ["add", "-A"]);
     if (add.code) return sendJson(res, 500, { error: add.err });
-    const r = await git(root, ["commit", "-F", "-", ...(files && files.length ? ["--", ...files] : [])], { input: msg + "\n" });
+    const r = await git(root, ["commit", "-F", "-", ...(files ? ["--", ...files, ...olds] : [])], { input: msg + "\n" });
     if (r.code) return sendJson(res, 500, { error: r.err || r.out.trim() });
     const h = await git(root, ["rev-parse", "--short", "HEAD"]);
     log(`[git] 提交 ${h.out.trim()} @ ${root}`);
@@ -331,9 +354,28 @@ async function handleGit(req, res, p, u) {
     if (st.out.startsWith("??")) {
       try { fs.rmSync(path.join(root, file), { force: true }); } catch (e) { return sendJson(res, 500, { error: e.message }); }
     } else {
-      const head = await git(root, ["rev-parse", "--verify", "-q", "HEAD"]);
-      const r = head.code ? await git(root, ["rm", "--cached", "-f", "-q", "--", file]) : await git(root, ["checkout", "HEAD", "--", file]);
-      if (r.code) return sendJson(res, 500, { error: r.err });
+      // 上次提交里没有这个路径（已暂存的新文件、重命名的新名字，或还没有任何提交）：改回去就是没有它 ——
+      // 取消跟踪再删掉，跟没跟踪过的新文件一样；重命名还要把旧文件从上次提交里取回来（#106 07-004）
+      const inHead = !(await git(root, ["cat-file", "-e", "HEAD:" + file])).code;
+      if (inHead) {
+        const r = await git(root, ["checkout", "HEAD", "--", file]);
+        if (r.code) return sendJson(res, 500, { error: r.err });
+      } else {
+        const ren = await gitRenames(root);
+        if (!ren) return sendJson(res, 500, { error: tz("读不出仓库的改动列表，没有撤销") });
+        const orig = ren.get(file);
+        // 先把会半路失败的情形挡在动手之前：拆了一半（新名删了、旧名没回来）比不撤更糟
+        let isDir = false; try { isDir = fs.lstatSync(path.join(root, file)).isDirectory(); } catch {}
+        if (isDir) return sendJson(res, 400, { error: tz("一次只能撤销一个文件") });
+        if (orig && fs.existsSync(path.join(root, orig))) return sendJson(res, 409, { error: tz("{f} 那里已经有个文件了，先挪开再撤销", { f: orig }) });
+        const r = await git(root, ["rm", "--cached", "-f", "-q", "--", file]);
+        if (r.code) return sendJson(res, 500, { error: r.err });
+        try { fs.rmSync(path.join(root, file), { force: true }); } catch (e) { return sendJson(res, 500, { error: e.message }); }
+        if (orig) {
+          const o = await git(root, ["checkout", "HEAD", "--", orig]);
+          if (o.code) return sendJson(res, 500, { error: o.err });
+        }
+      }
     }
     log(`[git] 撤销 ${file} @ ${root}`);
     return sendJson(res, 200, { ok: true, message: tz("已撤销") });

@@ -2615,4 +2615,12 @@ window.I18N_DICT["fr"] = {
   "自动恢复次数已耗尽": "Tentatives de récupération automatique épuisées",
   "桥补丁校验失败": "Échec de la vérification du correctif du pont",
   "本地桥已停用": "Pont local désactivé",
+  "要提交的文件不在这个仓库里": "Les fichiers à valider ne sont pas dans ce dépôt",
+  "会话附带的文件没搬过去，会话留在原处：{err}": "Les fichiers joints à la session n'ont pas pu être déplacés ; la session reste à sa place : {err}",
+  "会话附带的文件没抄过去，没有分叉：{err}": "Les fichiers joints à la session n'ont pas pu être copiés ; aucune bifurcation créée : {err}",
+  "没选要提交的文件": "Aucun fichier sélectionné pour le commit",
+  "读不出仓库的改动列表，没有提交": "Impossible de lire la liste des modifications du dépôt ; rien n’a été commité",
+  "读不出仓库的改动列表，没有撤销": "Impossible de lire la liste des modifications du dépôt ; rien n’a été annulé",
+  "一次只能撤销一个文件": "Vous ne pouvez annuler qu’un fichier à la fois",
+  "{f} 那里已经有个文件了，先挪开再撤销": "Un fichier existe déjà à {f} ; déplacez-le avant d’annuler",
 };

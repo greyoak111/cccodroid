@@ -391,7 +391,9 @@ function compRemoveFiles(id, rec) {
   // 由深到浅删掉变空的目录（工具包自己的目录不空，自然删不掉）
   for (const d of [...dirs].sort((a, b) => b.length - a.length)) { try { fs.rmdirSync(path.join(PREFIX, d)); } catch {} }
   const sk = rec.skill && skillDst(rec.skill);
-  if (sk) fs.rmSync(sk, { recursive: true, force: true });
+  // 标记写着别的组件（那边接管了同名目录）就不删；没有标记的是旧版装的，照旧删
+  let owner = ""; try { owner = sk ? fs.readFileSync(path.join(sk, SKILL_OWNER), "utf8").trim() : ""; } catch {}
+  if (sk && (!owner || owner === id)) fs.rmSync(sk, { recursive: true, force: true });
 }
 
 async function compInstall(id) {
@@ -437,21 +439,29 @@ export const skillDst = (name) => {
   const dst = path.join(SKILLS_DIR, name);
   return path.dirname(dst) === path.resolve(SKILLS_DIR) ? dst : null;
 };
+const SKILL_OWNER = ".cccodroid-component";
 const SKILL_NAME_RE = /^(?!\.+$)[A-Za-z0-9._-]{1,64}$/;
 function compInstallSkill(id, rel, rec) {
   const src = path.join(PREFIX, rel.replace(/^usr\//, ""));
   const name = (skillMeta(src) || {}).name || id;
   const dst = skillDst(name);
   if (!dst) { log(`[comp] ${id} 技能名不合法，没装：${String(name).slice(0, 80)}`); return; }
+  // 同名目录已经在：用户自己的、手动导入的、别的组件的 —— 不是本组件的就不碰（#104 05-010）。
+  // 本组件上一版的技能在升级/重装时已由 compRemoveFiles 按 rec.skill 删掉；空目录（v0.1.9 留下的）照旧删。
+  // 目录里的 .cccodroid-component 记着是哪个组件放的：装到一半被杀、记录还没写上 skill 的，重装时认得出是自己的
+  try { fs.rmdirSync(dst); } catch {}
+  let owner = ""; try { owner = fs.readFileSync(path.join(dst, SKILL_OWNER), "utf8").trim(); } catch {}
+  if (owner === id) fs.rmSync(dst, { recursive: true, force: true });
+  if (fs.existsSync(dst)) { log(`[comp] ${id} 的技能 ${name} 跟已有技能同名，没装（保留原来的）`); return; }
   try {
-    fs.rmSync(dst, { recursive: true, force: true });
     fs.mkdirSync(dst, { recursive: true });
+    fs.writeFileSync(path.join(dst, SKILL_OWNER), id + "\n");
     for (const f of fs.readdirSync(src)) fs.copyFileSync(path.join(src, f), path.join(dst, f));
     rec.skill = name;
   } catch (e) { log(`[comp] ${id} 技能没装上：${e.message}`); }
 }
 // v0.1.9 拼错了 skill 路径（多了一层 usr/），装好的组件没有 skill：发现就补上
-function compHealSkills() {
+export function compHealSkills() {
   let fs_; try { fs_ = fs.readdirSync(COMP_DIR); } catch { return; }
   for (const f of fs_) {
     if (!f.endsWith(".json")) continue;
@@ -460,8 +470,15 @@ function compHealSkills() {
     const rel = `usr/share/cccodroid/components/${id}/skill`;
     if (!fs.existsSync(path.join(PREFIX, rel.slice(4), "SKILL.md"))) continue;
     try { fs.rmdirSync(path.join(SKILLS_DIR, id)); } catch {}     // 当时留下的空目录（只删空的）
-    compInstallSkill(id, rel, rec);
-    if (rec.skill) { compWriteRecord(id, rec); log(`[comp] ${id} 补装技能 ${rec.skill}`); }
+    // 这段跑在启动定时器里（网关没装 uncaughtException 兜底）：哪一步抛了都只跳过这一个组件
+    try {
+      const want = skillDst((skillMeta(path.join(PREFIX, rel.slice(4))) || {}).name || id);
+      if (!want) continue;                                            // 技能名不合法：安装时已记过日志
+      let owner = ""; try { owner = fs.readFileSync(path.join(want, SKILL_OWNER), "utf8").trim(); } catch {}
+      if (fs.existsSync(want) && owner !== id && (!fs.statSync(want).isDirectory() || fs.readdirSync(want).length)) continue;   // 同名已有别人的技能（或同名文件）：不补，也别每次刷列表都记一条日志
+      compInstallSkill(id, rel, rec);
+      if (rec.skill) { compWriteRecord(id, rec); log(`[comp] ${id} 补装技能 ${rec.skill}`); }
+    } catch (e) { log(`[comp] ${id} 补装技能出错：${e.message}`); }
   }
 }
 

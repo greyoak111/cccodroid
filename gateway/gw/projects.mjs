@@ -124,7 +124,10 @@ export function moveSession(sid, projectId) {
   });
   try { fs.utimesSync(dst, st.atime, st.mtime); } catch {}
   const side = path.join(path.dirname(found.file), sid);
-  if (isDir(side)) { try { fs.renameSync(side, path.join(dir, sid)); } catch {} }
+  if (isDir(side)) {
+    try { fs.renameSync(side, path.join(dir, sid)); }
+    catch (e) { fs.rmSync(dst, { force: true }); throw new Error(tz("会话附带的文件没搬过去，会话留在原处：{err}", { err: e.code || e.message })); }
+  }
   fs.rmSync(found.file, { force: true });
   resealAfterEdit(sid, dst, dirty);
   PEEK_CACHE.delete(found.file);

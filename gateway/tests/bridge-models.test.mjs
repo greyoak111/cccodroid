@@ -397,6 +397,7 @@ test("超时终止短命 gui-models；错误静态、配置不变，finished 后
   control({ mode: "hang" });
   failed(await request(), "MODELS_TIMEOUT");
   assert.equal(scheduled.length, 1, "必须确实走生产超时计时器而非 fixture 自行退出");
+  await until(() => fs.existsSync(stoppedFile), "超时必须终止组件，不只是提前返回HTTP");   // 组件收到信号后才写这个文件，和 HTTP 返回有先后
   assert.equal(fs.readFileSync(stoppedFile, "utf8"), "stopped", "超时必须终止组件，不只是提前返回HTTP");
   const pid = calls()[0].pid;
   await until(() => { try { process.kill(pid, 0); return false; } catch (error) { return error.code === "ESRCH"; } }, "超时返回后短命组件仍存活");

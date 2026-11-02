@@ -44,7 +44,14 @@ function loginStart(flag) {
   const onData = (d) => { L.out += String(d); };
   child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
   child.stdout.on("data", onData); child.stderr.on("data", onData);
+  // loader 起不来（缺失/无权限/EAGAIN）只发 error：不接会把整个网关带走（#102 04-005）。runAuth 早就接了，这里补上
+  child.on("error", (e) => {
+    if (L.done) return;
+    L.done = true; L.ok = false; L.out += "\n" + (e.code || e.message);
+    log("登录：没起来（" + (e.code || e.message) + "）");
+  });
   child.on("close", (code) => {
+    if (L.done) return;   // error 之后可能还会补一个 close，已经结过账了
     L.done = true;
     L.ok = code === 0 && /success/i.test(L.out);
     log("登录：" + (L.ok ? "成功" : "结束（退出码 " + code + "）"));

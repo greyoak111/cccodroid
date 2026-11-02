@@ -2612,3 +2612,11 @@
 2612	Intentos de recuperación automática agotados
 2613	Falló la verificación del parche del puente
 2614	Puente local desactivado
+2615	Los archivos a confirmar no están en este repositorio
+2616	No se pudieron mover los archivos adjuntos de la sesión; la sesión se queda donde estaba: {err}
+2617	No se pudieron copiar los archivos adjuntos de la sesión; no se creó la bifurcación: {err}
+2618	No has seleccionado archivos para el commit
+2619	No se pudo leer la lista de cambios del repositorio; no se hizo commit
+2620	No se pudo leer la lista de cambios del repositorio; no se descartó nada
+2621	Solo puedes descartar un archivo a la vez
+2622	Ya hay un archivo en {f}; muévelo antes de descartar

@@ -33,20 +33,23 @@ export async function fileChapter(sid, { title, same, status, chapter, misc, by 
   if (st === undefined) v.errors.push(/^zh/i.test(LAST_LANG) ? "状态只能是：进行中 / 已完成 / 搁置" : "status must be one of: ongoing / done / paused");
   if (v.errors.length) return { ok: false, errors: v.errors };
   const db = archiveDb();
+  // 改的是共享的内存档案：存不上要整条还原，不然列表/脉络显示没存上的题名，没存上的用户锁还会挡住 AI 重建（#98 03-007）
+  const before = db.sessions[sid] ? structuredClone(db.sessions[sid]) : undefined;
+  const undo = () => { if (before === undefined) delete db.sessions[sid]; else db.sessions[sid] = before; };
   const entry = db.sessions[sid] || (db.sessions[sid] = { title: null, chapters: {} });
   const pick = pickChapter(rec, entry, chapter);
-  if (pick.error) return { ok: false, errors: [pick.error] };
+  if (pick.error) { undo(); return { ok: false, errors: [pick.error] }; }
   const n = pick.n, old = entry.chapters[n];
-  if (old?.locked && by === "ai") return { ok: false, errors: [/^zh/i.test(LAST_LANG) ? `第 ${n} 章的题名用户改过并锁定了，不用再建` : `chapter ${n} was titled by the user and is locked; nothing to do`] };
+  if (old?.locked && by === "ai") return undo(), { ok: false, errors: [/^zh/i.test(LAST_LANG) ? `第 ${n} 章的题名用户改过并锁定了，不用再建` : `chapter ${n} was titled by the user and is locked; nothing to do`] };
   // 自动起名（autotitle.mjs）是最弱的来源：已经有题名（AI 建的、用户交的）一律不盖。和下面的写入在同一段同步代码里，不留竞态窗口（v0515 复核低-2）
-  if (by === "auto" && old?.title) return { ok: false, errors: ["chapter already titled"] };
+  if (by === "auto" && old?.title) { undo(); return { ok: false, errors: ["chapter already titled"] }; }
   const hist = old?.hist || [];
   if (old?.title && old.title !== v.title) hist.push({ title: old.title, at: old.at || 0, by: old.by || null });
   entry.chapters[n] = { title: v.title, status: st || old?.status || null, same: !!same && n > 1, by, at: Date.now(), spec: SPEC_VERSION, locked: by === "user" || !!old?.locked, hist: hist.slice(-20) };
   entry.title = chapterView(rec, entry).sessionTitle;
   // AI 判断是测试 / 试模型这类用完即弃的会话：归进杂项。用户定过（归入或移出）的不动
   if (misc && entry.miscBy !== "user") { entry.misc = true; entry.miscBy = by; }
-  if (!saveArchive()) return { ok: false, errors: [/^zh/i.test(LAST_LANG) ? "档案写不进去（存储满了或没权限），这次没存上，稍后再建" : "could not write the archive file (storage full or no permission); nothing was saved, try again later"] };
+  if (!saveArchive()) return undo(), { ok: false, errors: [/^zh/i.test(LAST_LANG) ? "档案写不进去（存储满了或没权限），这次没存上，稍后再建" : "could not write the archive file (storage full or no permission); nothing was saved, try again later"] };
   log(`建档 ${archiveNo(sid, n)}「${v.title}」${same ? "（同上一章）" : ""}${by === "user" ? "（用户）" : ""}`);
   publish({ type: "archive", sessionId: sid, n, title: v.title, sessionTitle: NAMES[sid] || entry.title });
   return { ok: true, n, no: archiveNo(sid, n), title: v.title, sessionTitle: entry.title };
@@ -55,9 +58,10 @@ export async function fileChapter(sid, { title, same, status, chapter, misc, by 
 /** 归入 / 移出杂项（用户在菜单里点的）。会话不用建过档 */
 export function setMisc(sid, on) {
   const db = archiveDb();
+  const before = db.sessions[sid] ? structuredClone(db.sessions[sid]) : undefined;
   const entry = db.sessions[sid] || (db.sessions[sid] = { title: null, chapters: {} });
   entry.misc = !!on; entry.miscBy = "user";
-  if (!saveArchive()) return { ok: false, error: tz("档案写不进去（存储满了或没权限），这次没存上") };
+  if (!saveArchive()) { if (before === undefined) delete db.sessions[sid]; else db.sessions[sid] = before; return { ok: false, error: tz("档案写不进去（存储满了或没权限），这次没存上") }; }
   publish({ type: "archive", sessionId: sid, misc: !!on });
   return { ok: true, misc: !!on };
 }
