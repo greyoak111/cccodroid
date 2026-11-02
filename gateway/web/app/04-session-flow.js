@@ -38,6 +38,36 @@
     return (n / 1e6).toFixed(2) + "M";
   }
   /** 刻度以【自动压缩窗口】为准；没设才退回模型窗口。设得比窗口还大时 claude 按窗口压，刻度也按窗口（#67） */
+  /** 事件流送来的上下文用量（usage / 压缩 / 一轮收尾 / /context）：记下时间，在途的历史请求回来不许盖回旧值（#89）。
+   *  记的是「到达时刻」不是产生时刻：重放的是连上那一刻的快照，可能比随后发出的历史请求读到的旧一点，
+   *  但那之后新来的 usage 会排在 sync 后面补到，最终收敛到最新值，只差一瞬。
+   *  重放期间先攒着，到 sync 只落最后一个，不把旧轮次的数一个个闪一遍（#88） */
+  let replayCtx = null;
+  function liveCtx(used, total) {
+    if (busReplay) { replayCtx = [used, total]; return; }
+    view.ctxAt = Date.now();
+    updateCtx(used, total);
+  }
+  /** 续不上的重连：网关接着整轮重放。重放的是已经说过的过程（旧错误、已处理的确认卡、半截正文）：
+   *  实时区先遮着，到 sync 一次揭开（#88）。sync 迟迟不来：2.5 秒先揭开（重放特别长时边放边看，同以前）；
+   *  15 秒还没来（连接断在重放中途、再没续上）就按到头收尾，别让用量一直攒着不上屏、新回复不吐字 */
+  function beginReplay() {
+    busReplay = true;
+    liveEl.classList.add("replaying");
+    clearTimeout(endReplay.guard); clearTimeout(endReplay.guard2);
+    endReplay.guard = setTimeout(() => liveEl.classList.remove("replaying"), 2500);
+    endReplay.guard2 = setTimeout(() => { if (busReplay) endReplay(); }, 15000);
+  }
+  /** 整轮重放到头（sync）：攒着的正文一次画完、用量落定、遮着的实时区揭开，最后统一定位一次 */
+  function endReplay() {
+    busReplay = false;
+    clearTimeout(endReplay.guard); clearTimeout(endReplay.guard2);
+    for (const f of REPLAY_FLUSH) f();
+    REPLAY_FLUSH.clear();
+    if (replayCtx) { const [u, tot] = replayCtx; replayCtx = null; liveCtx(u, tot); }
+    liveEl.classList.remove("replaying");
+    scrollDown();
+  }
   function updateCtx(used, total) {
     if (used != null) state.ctxUsed = used;
     if (total) state.ctxTotal = total;
@@ -79,18 +109,22 @@
       return Math.round(n);
     };
     let m = t.match(/\*{0,2}Tokens:?\*{0,2}\s*([\d.]+)\s*([km])?\s*\/\s*([\d.]+)\s*([km])?/i);
-    if (m) return updateCtx(num(m[1], m[2]), num(m[3], m[4]));
+    if (m) return liveCtx(num(m[1], m[2]), num(m[3], m[4]));
     m = t.match(/\|\s*(?:Used|已用)\s*\|\s*([\d.]+)\s*([km])?\s*\|/i);
     if (m) {
       const used = num(m[1], m[2]);
       const tot = t.match(/\|\s*(?:Total|总计)\s*\|\s*([\d.]+)\s*([km])?\s*\|/i);
-      return updateCtx(used, tot ? num(tot[1], tot[2]) : state.ctxTotal);
+      return liveCtx(used, tot ? num(tot[1], tot[2]) : state.ctxTotal);
     }
   }
 
   // ── 会话切换 / 历史翻页 ────────────────────────────────────────────
   function resetView(sessionId, keepPendingModel = false) {
+    const prevSid = view.sessionId;
     view.sessionId = sessionId || null;
+    // 换了会话：上一个会话的上下文用量不能挂在这个会话名下，先归零，等历史 / 事件流报这个会话自己的（#89）
+    view.ctxAt = 0;
+    if (view.sessionId !== prevSid) { replayCtx = null; updateCtx(0, state.ctxTotal); }
     // 同一个未发送的新会话重连：hello 不能冲掉刚选的接口；显式打开 / 新建仍清空。
     if (view.sessionId || !keepPendingModel) state.pendingModel = null;
     refreshSessModel();                      // 模型标签换成这个会话自己的（打开、启动、重连都经过这里）
@@ -299,7 +333,8 @@
       histEl.innerHTML = "";
       histEl.appendChild(page);
       syncWindow();
-      if (r.contextTokens != null) updateCtx(r.contextTokens, state.ctxTotal);
+      // 请求在途时事件流已经报过更新的用量（含压缩后变小的）：历史里的是旧快照，不许盖回去（#89）
+      if (r.contextTokens != null && (view.ctxAt || 0) < sent) updateCtx(r.contextTokens, state.ctxTotal);
       paintTitle();
       calmStatus(t("就绪"));
       if (anchor) return landOnChapter(page, gen, aObj);
@@ -580,7 +615,7 @@
       case "state": return applyState(ev);
       case "archive": return loadSessions();   // 建档 / 归入杂项：标题、档号、分组跟着变
       case "sched": case "sched_note": return onSchedEvent(ev);
-      case "sync": busReplay = false; return;
+      case "sync": return endReplay();
       case "run_start": {
         if (!belongs(ev)) return;
         view.runIds.add(ev.runId);
@@ -655,7 +690,7 @@
     if (!rv) return;
     const av = rv.av;
     switch (ev.type) {
-      case "usage":          if (ev.contextTokens) updateCtx(ev.contextTokens, state.ctxTotal); break;
+      case "usage":          if (ev.contextTokens) liveCtx(ev.contextTokens, state.ctxTotal); break;
       case "run_tokens":     rv.out = +ev.out || 0; if (statRun === ev.runId) statPaint(); break;
       case "delta":          av.delta(ev.text); break;
       case "assistant_text": av.text(ev.text); break;
@@ -685,7 +720,7 @@
         av.noteK("cmp" + cmpGen++, ev.pre != null && ev.post != null
           ? t("上下文已压缩：{pre} → {post} tokens", { pre: ev.pre.toLocaleString(), post: ev.post.toLocaleString() })
           : t("上下文已压缩"), true);
-        if (ev.post != null) updateCtx(ev.post, state.ctxTotal);
+        if (ev.post != null) liveCtx(ev.post, state.ctxTotal);
         scrollDown(); break;
       case "error":          av.error(ev.message + (ev.detail ? "\n\n" + ev.detail : "")); break;
     }
@@ -702,7 +737,7 @@
     if (ev.uiTag) uiTag = ev.uiTag;
     applyState(ev);
     if (ev.resume) { calmStatus(t("已连接")); return; }
-    busReplay = true;
+    beginReplay();
 
     // 续不上（首次连接 / 网关重启过 / 断太久）：本视图从头来 —— 历史重新取，
     // 正在跑的那一轮紧接着会被网关整轮重放过来
@@ -759,7 +794,7 @@
     if (statRun === ev.runId) { statStop(); statEl.textContent = statLast[view.sessionId || ev.sessionId] || ""; }
     for (const [id, it] of PERMS) if (it.runId === ev.runId && !it.done) permDone(id, "stopped");
     if (ev.sessionId && !view.sessionId && view.runIds.has(ev.runId)) { view.sessionId = ev.sessionId; adoptPendingModel(); saveUiState(); }
-    if (ev.usage?.context_tokens) updateCtx(ev.usage.context_tokens, ev.usage.context_window || state.ctxTotal);
+    if (ev.usage?.context_tokens) liveCtx(ev.usage.context_tokens, ev.usage.context_window || state.ctxTotal);
 
     if (ev.localCommand && ev.resultText) {
       av.finish();

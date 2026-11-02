@@ -185,7 +185,7 @@ test("bridge session handoff: real onHello preserves a new-session pin before mo
     WROTE: new Map(), TOOL_CARDS: new Map(), PENDING_RESULTS: new Map(), runViews: new Map(),
     histEl: nodes(), liveEl: nodes(), olderEl: nodes(), statEl: nodes(),
     stripHidden: () => ({}), paintTitle() {}, renderRunStrip() {}, agReset() {}, syncWindow() {}, pickViewRun() {}, renderQueue() {}, paintProjChip() {}, syncInterject() {}, saveUiState() {},
-    applyState() {}, renderSessions() {}, loadOlder() {}, showWelcome() {}, renderInterrupted() {}, calmStatus() {},
+    applyState() {}, beginReplay() {}, updateCtx() {}, renderSessions() {}, loadOlder() {}, showWelcome() {}, renderInterrupted() {}, calmStatus() {},
     paintModel() {}, chipName: () => "synthetic-model", loadCtxModel() {}, provChanged() {}, statStop() {}, statLast: {},
     api: async (url) => {
       modelQueries.push(url);

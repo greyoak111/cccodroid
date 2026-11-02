@@ -510,6 +510,8 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
   let stick = true, progTop = -1, touching = false, touchEndAt = 0;
   // 网关整轮重放（切会话 / 重连续不上）期间为真，到 sync 为止：那些是已经说过的话，正文直接整段显示，不再匀速吐一遍（#36）
   let busReplay = false;
+  // 重放期间等着画的正文：到 sync 一次画完再定位，别先按半截布局滚、正文随后再撑高（#88）
+  const REPLAY_FLUSH = new Set();
   // 这次打开应用后进过的会话：再切回来不重播入场动画
   const seenSessions = new Set();
   chatEl.addEventListener("touchstart", () => { touching = true; }, { passive: true });

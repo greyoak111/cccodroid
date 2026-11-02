@@ -5,7 +5,7 @@ import { SID_RE, TRASH_KEEP_DAYS, exportSessions, deleteMessage, forkSession, im
 import { goalStateOf, tasksOf } from "./goal.mjs";
 import { backfillAgents, readAgentIndex, settleAgentRecs } from "./agents.mjs";
 import { bodyToFile, forEachLine } from "./bigfile.mjs";
-import { agentFilesOf, findLineOffset, lineHas, readSessionForward, readSessionPage, transcriptItems } from "./transcript.mjs";
+import { agentFilesOf, findLineOffset, latestContextTokens, lineHas, readSessionForward, readSessionPage, transcriptItems } from "./transcript.mjs";
 import { lineageCached } from "./lineage.mjs";
 import { chapterView } from "./archive-core.mjs";
 import { runOfSession } from "./runs.mjs";
@@ -368,7 +368,8 @@ export async function routeSessions(req, res, u, p) {
         cursor: fwd !== null ? page.from : page.cursor,
         next: fwd !== null ? page.next : undefined,
         size: page.size,
-        contextTokens: page.contextTokens,
+        // 正向读的那一页本身不带用量：首屏（书签 / 上次读到 / 章节）另从尾部取最新的，翻页不取（#89）
+        contextTokens: fwd === null ? page.contextTokens : u.searchParams.has("after") ? undefined : await latestContextTokens(found.file),
         liveRunId: live ? live.id : null,
         goal: u.searchParams.has("before") || u.searchParams.has("after") ? undefined : goalStateOf(found.file),
         tasks: u.searchParams.has("before") || u.searchParams.has("after") ? undefined : tasksOf(id),

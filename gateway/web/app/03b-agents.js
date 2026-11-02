@@ -98,13 +98,13 @@
     if (!tc || !tc.el || !tc.el.isConnected) return null;
     const anchor = tc.el.closest(".tgroup") || tc.el;
     const next = anchor.nextElementSibling;
-    const card = next && next.classList.contains("agc") && next._agc ? next._agc : AgentsCard(anchor);
+    const card = next && next.classList.contains("agc") && next._agc ? next._agc : AgentsCard(anchor, tool);
     card.tools.add(tool);
     AG.cards.set(tool, card);
     return card;
   }
 
-  function AgentsCard(anchor) {
+  function AgentsCard(anchor, tool) {
     const el = document.createElement("div");
     el.className = "agc";
     el.innerHTML = `<button class="agc-head" type="button"><span class="chev">▶</span><span class="agc-t"></span><span class="agc-st"></span></button>` +
@@ -114,8 +114,13 @@
     let allMsgs = false;
     const card = { el, tools: new Set(), paint };
     el._agc = card;
-    el.classList.add("open");
-    head.addEventListener("click", () => { if (el.classList.toggle("open")) MO.play(el.querySelector(".agc-body"), "mo-in-fade", 400); });
+    const key = "a:" + tool;
+    el.classList.toggle("open", foldGet(key) !== false);   // 默认展开；用户收过的切回来还收着（#87）
+    head.addEventListener("click", () => {
+      const open = el.classList.toggle("open");
+      foldSet(key, open);
+      if (open) MO.play(el.querySelector(".agc-body"), "mo-in-fade", 400);
+    });
     // 这张卡管的代理：顶层的按派出顺序，孙代理跟在上级后面
     const members = () => {
       const all = [...AG.agents.values()], out = [];
@@ -184,13 +189,16 @@
     const chain = [];
     for (let a = AG.agents.get(id), n = 0; a && n < 20; a = a.parent ? AG.agents.get(a.parent) : null, n++) chain.unshift(a);
     let card = null;
+    const gen = view.gen;
     for (const a of chain) {
       for (let i = 0; i < 30; i++) {               // 历史里上级的过程是异步取的：等它的卡建出来
         card = TOOL_CARDS.get(a.tool);
         if (card && !card.lazy && card.el?.isConnected) break;
         await new Promise((r) => setTimeout(r, 100));
+        if (gen !== view.gen) return;              // 等的时候切了会话
       }
-      if (!card || card.lazy || !card.el) return toast(t("这个子代理的过程还没加载到"));
+      // 等满了还没连上文档的（旧视图留下的卡）也算没加载到，别往脱离的节点上滚（#90）
+      if (!card || card.lazy || !card.el?.isConnected) return toast(t("这个子代理的过程还没加载到"));
       card.el.closest(".tgroup")?.classList.add("open");
       card.openSub?.();
     }

@@ -128,6 +128,8 @@ html[data-skin="zhuyue"] #ctxbar:not(.warn):not(.danger) #ctxfill{background:lin
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 /* 历史页是重建出来的旧消息，不播入场淡入（#36 复测）；新发的消息在 #live 里照常 */
 #hist>.page .msg{animation:none}
+/* 切会话 / 重连时整轮重放：已经说过的过程先遮着，到 sync 一次揭开，不闪旧错误、旧确认卡（#88）。占位照留，滚动定位照算 */
+#live.replaying{visibility:hidden}
 
 .who{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--fg3);margin-bottom:6px;font-weight:600;letter-spacing:.4px}
 .who .dot{width:6px;height:6px;border-radius:50%;background:var(--fg3)}

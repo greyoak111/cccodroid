@@ -64,6 +64,55 @@ export function transcriptItems(ev) {
   return out;
 }
 
+/** 倒着读时这一行能不能定下「当前上下文用量」：压缩边界（取压缩后的数，没有就是未知，不越过边界拿旧的）
+ *  或带用量的主会话回复。定得下返回 { n }（n 可能是 null），定不下返回 null */
+function contextOf(ev) {
+  if (ev.isSidechain || ev.isMeta) return null;
+  if (ev.type === "system" && ev.subtype === "compact_boundary") {
+    const m = ev.compactMetadata || ev.compact_metadata || {};
+    const post = m.postTokens ?? m.post_tokens;
+    return { n: Number.isFinite(post) && post >= 0 ? post : null };
+  }
+  if (ev.type === "assistant" && !ev.isApiErrorMessage && ev.message?.model !== "<synthetic>") {
+    const n = promptTokens(ev.message?.usage);
+    if (Number.isFinite(n) && n > 0) return { n };
+  }
+  return null;
+}
+
+/** 会话最新的上下文用量：从尾部倒着找第一行定得下的（正向读一页时页里没有，书签 / 上次读到打开要用，#89）。
+ *  最多扫 MAX_SCAN，找不到返回 null */
+export async function latestContextTokens(file) {
+  const CH = 256 * 1024, MAX_SCAN = 12 * 1024 * 1024;
+  const fh = await fs.promises.open(file, "r");
+  try {
+    let pos = (await fh.stat()).size, tail = Buffer.alloc(0), scanned = 0;
+    while (pos > 0 && scanned < MAX_SCAN) {
+      const start = Math.max(0, pos - CH);
+      const chunk = Buffer.alloc(pos - start);
+      await fh.read(chunk, 0, chunk.length, start);
+      const data = tail.length ? Buffer.concat([chunk, tail]) : chunk;
+      pos = start; scanned += chunk.length;
+      let end = data.length;
+      for (;;) {
+        const nl = end - 2 >= 0 ? data.lastIndexOf(10, end - 2) : -1;
+        if (nl < 0 && start > 0) { tail = data.subarray(0, end); break; }
+        const line = data.toString("utf8", nl < 0 ? 0 : nl + 1, end).trim();
+        end = nl < 0 ? 0 : nl + 1;
+        if (line) {
+          let ev = null; try { ev = JSON.parse(line); } catch {}
+          const c = ev && contextOf(ev);
+          if (c) return c.n;
+        }
+        if (nl < 0) break;
+      }
+    }
+    return null;
+  } finally {
+    await fh.close();
+  }
+}
+
 /** 从 transcript **尾部倒着**读一页消息。
  *
  *  老办法是 readFileSync 整个文件再全量解析 —— 十几 MB 的会话会把网关的事件循环
@@ -105,16 +154,9 @@ export async function readSessionPage(file, { before = null, limit = 40, exclude
         if (line) {
           let ev = null; try { ev = JSON.parse(line); } catch {}
           // exclude 只防止正文重复渲染，用量仍要从最新的主会话消息取。
-          if (ev && !contextDone && !ev.isSidechain && !ev.isMeta) {
-            if (ev.type === "system" && ev.subtype === "compact_boundary") {
-              const m = ev.compactMetadata || ev.compact_metadata || {};
-              const post = m.postTokens ?? m.post_tokens;
-              if (Number.isFinite(post) && post >= 0) contextTokens = post;
-              contextDone = true;   // 不越过压缩边界去拿旧上下文
-            } else if (ev.type === "assistant" && !ev.isApiErrorMessage && ev.message?.model !== "<synthetic>") {
-              const n = promptTokens(ev.message?.usage);
-              if (Number.isFinite(n) && n > 0) { contextTokens = n; contextDone = true; }
-            }
+          if (ev && !contextDone) {
+            const c = contextOf(ev);
+            if (c) { contextDone = true; contextTokens = c.n; }
           }
           if (ev && !(excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) {
             const its = pick(ev);

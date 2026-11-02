@@ -32,6 +32,17 @@
     for (const [k, c] of AG.cards) if (c.el && root.contains(c.el)) AG.cards.delete(k);
   }
   const PENDING_RESULTS = new Map();
+  /** 用户亲手收起 / 展开过的步骤组、子代理卡：按会话记在内存里，切走再切回按原样还原（#87）。
+   *  键是组里第一个工具的 id（"g:"）或代理卡第一个工具的 id（"a:"），值 true = 展开、false = 收起。只记这次打开应用期间 */
+  const FOLDS = new Map();
+  function foldGet(key) { const m = view.sessionId && FOLDS.get(view.sessionId); return m ? m.get(key) : undefined; }
+  function foldSet(key, open) {
+    if (!view.sessionId || !key) return;
+    let m = FOLDS.get(view.sessionId);
+    if (!m) { m = new Map(); FOLDS.set(view.sessionId, m); if (FOLDS.size > 40) FOLDS.delete(FOLDS.keys().next().value); }
+    m.delete(key); m.set(key, open);
+    if (m.size > 400) m.delete(m.keys().next().value);
+  }
 
   function mkMsg(role, label, parent) {
     const el = document.createElement("div");
@@ -243,7 +254,8 @@
       paint(false);
       if (shown < text.length || ending) timer = setTimeout(tick, STREAM_TICK);
     }
-    const kick = () => { if (!timer) timer = setTimeout(tick, STREAM_TICK); };
+    const kick = () => { if (busReplay) REPLAY_FLUSH.add(flushNow); if (!timer) timer = setTimeout(tick, STREAM_TICK); };
+    function flushNow() { if (timer && el.isConnected) { shown = text.length; paint(ending); } }
     return {
       kind: "text",
       append(t) { text += t; if (busReplay) shown = text.length; kick(); },
@@ -425,6 +437,7 @@
     });
     const api = {
       kind: "tool",
+      id,
       el: card,
       name, summary: summarizeTool(name, input), state: live ? "run" : "ok",
       onChange: null,
@@ -519,8 +532,11 @@
         const s = subArea();
         s.lazy = async () => {
           s.now.textContent = t("加载中…");
+          const gen = view.gen;
           try {
             const items = await load();
+            // 取的时候切走过、或这张卡已被裁掉 / 重建：回执作废，别把旧树里的卡写回全局索引（#90）
+            if (gen !== view.gen || !card.isConnected || (id && TOOL_CARDS.get(id) !== api)) return;
             // 先按「收着」只记数据，再走 openSub 那套「一次只建最近 SUB_SHOW 步」；以前展开着来就逐项全建（#71）
             const wasOpen = s.box.classList.contains("open");
             s.box.classList.remove("open");
@@ -556,6 +572,7 @@
     el.innerHTML = `<button class="tg-head" type="button"></button><div class="tg-body"></div>`;
     parent.appendChild(el);
     const head = el.firstChild, body = el.lastChild, members = [], inner = [];
+    let key = "";   // 第一个工具定了才有：用来记用户收没收（#87）
     // 收起整组时，组里展开着的步骤、子代理过程、思考也一起收回去 —— 不然下次点开还是一大片摊着（群友 10-27）
     head.addEventListener("click", () => {
       // 失败、待确认时样式（:has）已经把组摊开了，组本身却没有 open：按眼前看到的来，第一下就收（审查 #48 UI07-05）
@@ -563,6 +580,7 @@
       el.classList.toggle("open", !showing);
       // 带图片预览的卡（.tool-peek）会被样式一直撑开，光去掉 open 收不起来：记一个「用户收了」压过它（群友 11-02）
       el.classList.toggle("shut", showing);
+      foldSet(key, !showing);
       if (showing) {
         body.querySelectorAll(".tool.open, .tool-sub.open").forEach((x) => x.classList.remove("open"));
         body.querySelectorAll("details[open]").forEach((d) => { d.open = false; });
@@ -583,7 +601,14 @@
       kind: "tgroup",
       body,
       get lastInner() { return inner[inner.length - 1]; },
-      add(m) { members.push(m); inner.push(m); m.onChange = refresh; refresh(); },
+      add(m) {
+        if (!members.length && m.id) {
+          key = "g:" + m.id;
+          const f = foldGet(key);      // 切回来重建：照用户上次的选择
+          if (f !== undefined) { el.classList.toggle("open", f); el.classList.toggle("shut", !f); }
+        }
+        members.push(m); inner.push(m); m.onChange = refresh; refresh();
+      },
       addThink(b) { inner.push(b); if (b.el.parentNode !== body) body.appendChild(b.el); },
       finish() { for (const b of inner) b.finish && b.finish(); refresh(); },
       stop() { for (const m of members) m.stop(); },
