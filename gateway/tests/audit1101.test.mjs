@@ -68,7 +68,10 @@ test("B20 git 超时：连它拉起的钩子一起结束，不在后台接着写
   const { d, g } = repo("b20");
   g("config", "user.email", "t@t"); g("config", "user.name", "t");
   const mark = path.join(d, "..", "b20-hook-done");
-  fs.writeFileSync(path.join(d, ".git", "hooks", "pre-commit"), `#!/bin/sh\nsleep 3\necho done > "${mark}"\n`, { mode: 0o755 });
+  // 网关的假 PREFIX PATH 不含开发机 /usr/bin；sleep 用本机绝对路径，免得钩子跳过等待却返回 0。
+  const sleep = execFileSync("sh", ["-c", "command -v sleep"], { encoding: "utf8" }).trim();
+  const quote = (s) => "'" + s.replace(/'/g, "'\\''") + "'";
+  fs.writeFileSync(path.join(d, ".git", "hooks", "pre-commit"), `#!/bin/sh\nset -e\n${quote(sleep)} 3\nprintf done > ${quote(mark)}\n`, { mode: 0o755 });
   fs.writeFileSync(path.join(d, "a.txt"), "x"); g("add", "a.txt");
   const t0 = Date.now();
   const r = await _gitForTest(d, ["commit", "-q", "-m", "m"], { timeout: 800 });
