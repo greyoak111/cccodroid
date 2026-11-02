@@ -208,10 +208,15 @@ export async function routeFiles(req, res, u, p) {
     return;
   }
   if (req.method === "GET" && p === "/api/file/stat") {
-    let q = String(u.searchParams.get("path") || "").trim();
+    // 先按原样找：末尾真带空格的文件名先 trim 就打不开，或认成同名不带空格的另一个（#106 07-008）。
+    // 原样找不到再去掉首尾空白（复制来的路径常带换行），同 safeFilePath
+    const raw = String(u.searchParams.get("path") || ""), q = raw.trim();
     if (!path.isAbsolute(q)) return sendJson(res, 400, { error: "absolute path required" });
     let real;
-    try { real = fs.realpathSync(q); } catch { return sendJson(res, 404, { error: "not found", path: q }); }
+    try { real = fs.realpathSync(path.isAbsolute(raw) ? raw : q); }
+    catch { real = null; }
+    if (real == null && raw !== q) { try { real = fs.realpathSync(q); } catch {} }
+    if (real == null) return sendJson(res, 404, { error: "not found", path: q });
     let st; try { st = fs.statSync(real); } catch (e) { return sendJson(res, 404, { error: e.message }); }
     // 目录也过同一道闸：不然私有目录、运行时目录在不在、真实路径是什么都探得出来（11-01 独立审查低-1）
     if (st.isDirectory()) return pathBlocked(real) ? sendJson(res, 403, { error: "forbidden" }) : sendJson(res, 200, { path: real, dir: true });
@@ -346,9 +351,15 @@ export async function routeFiles(req, res, u, p) {
         if (!showHidden && it.name.startsWith(".")) continue;
         if (q && !it.name.toLowerCase().includes(q)) continue;
         if (SECRET_NAMES.has(it.name)) continue;
-        const isDir = it.isDirectory();
-        let size = 0, mtime = 0;
-        try { const st = fs.statSync(path.join(real, it.name)); size = isDir ? 0 : st.size; mtime = st.mtimeMs; } catch {}
+        let isDir = it.isDirectory(), size = 0, mtime = 0;
+        try {
+          const full = path.join(real, it.name), st = fs.statSync(full);
+          // 软链指向被挡的地方（私有目录、令牌文件）：目标的类型、大小、时间都不报（DeepSeek 复核 低-1，旧代码就跟链取了 size/mtime）
+          const hid = it.isSymbolicLink() && (() => { const t = fs.realpathSync(full); return pathBlocked(t) || SECRET_NAMES.has(path.basename(t)); })();
+          // 目录软链：Dirent 不跟链，按目标算，不然面板里点不进去（#106 07-007）；进去时 /api/files 照样过 realpath + pathBlocked
+          if (!isDir && !hid && st.isDirectory()) isDir = true;
+          if (!hid) { size = isDir ? 0 : st.size; mtime = st.mtimeMs; }
+        } catch {}
         out.entries.push({ name: it.name, dir: isDir, size, mtime, kind: fileKind(it.name, isDir) });
         if (out.entries.length >= 1000) break;
       }

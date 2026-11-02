@@ -589,7 +589,7 @@ public class MainActivity extends Activity {
                         check = w + (64L << 20);
                         if (dir.getUsableSpace() < (512L << 20)) throw new java.io.IOException(Tr.t("存储空间不够了"));
                     }
-                    toPage("ccapp-attach", out.getPath());
+                    toPage("ccapp-attach-pick", out.getPath());
                 } catch (Exception e) {
                     out.delete();
                     ui.post(() -> android.widget.Toast.makeText(this, Tr.f("「{0}」附加失败：{1}", displayName(u), e.getMessage()), android.widget.Toast.LENGTH_LONG).show());

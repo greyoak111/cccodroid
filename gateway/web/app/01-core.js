@@ -86,12 +86,12 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     root.dataset.fr = "";   // 容器本身拿焦点不描框（style.css [data-fr]）
     root.focus({ preventScroll: true });
   }
-  /** Tab 不许跑出模态：首尾循环；焦点在外面时拉回第一个 */
+  /** Tab 不许跑出模态：首尾循环；焦点在外面、或在容器本身（手指打开时 focusInto 聚焦的是容器）时，按方向落到首 / 尾（#96 01-008） */
   function trapTab(root, e) {
     const fs = focusables(root);
     if (!fs.length) { e.preventDefault(); return; }
     const a = document.activeElement;
-    if (!root.contains(a)) { e.preventDefault(); fs[e.shiftKey ? fs.length - 1 : 0].focus(); }
+    if (!root.contains(a) || !fs.includes(a)) { e.preventDefault(); fs[e.shiftKey ? fs.length - 1 : 0].focus(); }
     else if (e.shiftKey && a === fs[0]) { e.preventDefault(); fs[fs.length - 1].focus(); }
     else if (!e.shiftKey && a === fs[fs.length - 1]) { e.preventDefault(); fs[0].focus(); }
   }
@@ -144,7 +144,16 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     }, true);
     addEventListener("keydown", (e) => {
       if (e.key === "Escape" && top()) { e.stopPropagation(); back(); }
-      else if (e.key === "Tab") { const s = live(), it = s[s.length - 1]; if (it && it.kind === "modal") trapTab(it.el, e); }
+      else if (e.key === "Tab") {
+        const s = live(), it = s[s.length - 1];
+        if (it && it.kind === "modal") trapTab(it.el, e);
+        else if (it) {
+          // 弹层里又开了轻菜单（自绘下拉框）：焦点在菜单里就在菜单里转，否则锁回下面那层弹层（#96 01-008）。
+          // 下面没有弹层的（设置页、主界面上的菜单）不归这里管
+          const m = s.slice().reverse().find((x) => x.kind === "modal");
+          if (m) trapTab(it.el.contains(document.activeElement) ? it.el : m.el, e);
+        }
+      }
     }, true);
     addEventListener("resize", () => {
       for (const it of live().slice()) {
@@ -155,7 +164,7 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     });
     // 别处直接 remove() 掉的也要跟上（窗格让位状态别卡住）
     new MutationObserver(() => { if (stack.length) sync(); }).observe(document.body, { childList: true });
-    return { open, close, closeAll, at, top, back, isOpen: (el) => !!(el && el.isConnected && find(el)) };
+    return { open, close, closeAll, at, top, back, hasModal: () => live().some((x) => x.kind === "modal"), isOpen: (el) => !!(el && el.isConnected && find(el)) };
   })();
 
   // ── 动效：弹簧曲线 ────────────────────────────────────────────────

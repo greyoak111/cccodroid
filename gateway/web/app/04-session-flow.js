@@ -130,6 +130,8 @@
     refreshSessModel();                      // 模型标签换成这个会话自己的（打开、启动、重连都经过这里）
     view.gen++;
     WROTE.clear();                           // 写过的文件只认本会话的
+    // 已答完的确认卡随旧视图一起放掉：只有还在文档里的卡才拿来挡重放，留着只会越攒越多（#95 01-007）；没答的留着，那一轮可能还在等
+    for (const [id, it] of PERMS) if (it.done) PERMS.delete(id);
     view.cursor = null;
     view.next = null;
     view.loading = false;

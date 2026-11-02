@@ -407,7 +407,8 @@
           if (skipped) skipped.after(box); else s.list.prepend(box);
           const older = q.slice(0, cut);
           (s.older = s.older || []).push(older);              // 还没建的更早步骤：停止时也要收
-          more.addEventListener("click", (e) => { e.stopPropagation(); more.remove(); s.older = s.older.filter((x) => x !== older); for (const c of older) s.kids.push(realize(c, box)); });
+          older.open = () => { more.remove(); s.older = s.older.filter((x) => x !== older); for (const c of older) s.kids.push(realize(c, box)); };
+          more.addEventListener("click", (e) => { e.stopPropagation(); older.open(); });
         }
         // 建出来的卡记进 kids：停止时要连它们一起收成「中断」（审查 #52 UI07-01）
         for (const c of q.slice(cut)) s.kids.push(realize(c, s.list));
@@ -449,7 +450,12 @@
         if (live && !busReplay) { MO.play(st, "mo-tick", 1400); if (ok) MO.play(card, "mo-ok", 1400); }
         // 后台子代理：工具结果只是「已启动」，真正跑完靠 sub_done
         // 状态也记成在跑：不然步骤组的摘要按「完成」算（审查 #48 UI07-03）
-        if (isAgent && ok && /^Async agent launched/.test(result.text) && !(sub && sub.done)) { api.state = "run"; st.className = "tool-state run"; st.textContent = t("后台运行"); }
+        if (isAgent && ok && /^Async agent launched/.test(result.text) && !(sub && sub.done)) {
+          // 联络簿比这张卡先到、已经记着它结束了（翻历史时常见）：直接按终态收，别挂成「后台运行」（#95 01-003）
+          const fin = AG.byTool.get(id)?.status;
+          if (fin && fin !== "running") api.subDone(fin === "done" ? "completed" : fin);
+          else { api.state = "run"; st.className = "tool-state run"; st.textContent = t("后台运行"); }
+        }
         if (built) { built = false; build(); }
         if (!ok && live) { card.classList.add("open"); build(); }
         // 工具产出的图片（渲染结果、截图）直接露出来，不用点开
@@ -503,6 +509,12 @@
         return b;
       },
       openSub,
+      // 联络卡要定位的孙代理在「更早的 n 步」里：把它所在的那一批建出来（#95 01-005）。找到了返回 true
+      realizeFor(tid) {
+        const b = sub?.older?.find((x) => x.some((c) => c.id === tid));
+        if (b) b.open();
+        return !!b;
+      },
       // 新版 claude 跑得久的普通命令（Bash 等）也会发 task_progress / task_notification，
       // id 是那张工具卡自己的：只有子代理卡才有「过程」可放，别的卡只更新状态，不挂空的「子代理过程」
       subText(text) {
@@ -530,7 +542,7 @@
       // mk(工具调用 id) → 取那个代理过程的函数：过程里又派了孙代理的，孙代理的卡也要能点开取它自己的（审查 #48 UI07-02）
       subLazy(load, mk) {
         const s = subArea();
-        s.lazy = async () => {
+        const run = async () => {
           s.now.textContent = t("加载中…");
           const gen = view.gen;
           try {
@@ -552,8 +564,12 @@
             }
             s.now.textContent = items.length ? "" : t("没有记录");
             if (wasOpen) openSub();
-          } catch (e) { s.now.textContent = e.message; s.lazy = null; }
+          } catch (e) {
+            // 取失败（断网、网关重启）：把加载器放回去，收起再点开就重取；以前置空了，同一张卡再也取不到（#95 01-001）
+            s.now.textContent = e.message + " · " + t("收起再点开可重试"); s.lazy = run;
+          }
         };
+        s.lazy = run;
       },
     };
     if (id) {

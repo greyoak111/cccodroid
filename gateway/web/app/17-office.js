@@ -106,17 +106,19 @@
       const X = window.XLSX, ws = wb.Sheets[VW.sheets[VW.sheetI]];
       const addr = td.dataset.a || X.utils.encode_cell({ r: Number(td.parentNode.dataset.r), c: Number(td.dataset.c) });
       const cell = ws[addr];
-      const val = sheetText(cell);
+      const val = sheetText(cell, wb);
       box.querySelector(".vw-cellbar").textContent = `${addr}  ${val}${cell && cell.f ? `   =${cell.f}` : ""}`;
     });
     vwSheetShow(0);
   }
   // Excel 的默认日期格式（编号 14）各地显示不同，SheetJS 一律写成美式 m/d/yy —— 这种按年-月-日显示
-  function sheetText(cell) {
+  // wb：认工作簿的日期系统。1904 系统（Mac 版 Excel 的老文件）同一个数差 1462 天（#106 07-005）；
+  // 注意 parse_date_code 的第三个参数是回历开关，日期系统要放在第二个参数的 date1904 里
+  function sheetText(cell, wb) {
     if (!cell) return "";
     const w = cell.w != null ? cell.w : String(cell.v ?? "");
     if (cell.t === "n" && cell.z && /^\d{1,2}\/\d{1,2}\/\d{2,4}( |$)/.test(w) && window.XLSX.SSF.is_date(cell.z)) {
-      const d = window.XLSX.SSF.parse_date_code(cell.v), p = (n) => String(n).padStart(2, "0");
+      const d = window.XLSX.SSF.parse_date_code(cell.v, wb?.Workbook?.WBProps?.date1904 ? { date1904: true } : undefined), p = (n) => String(n).padStart(2, "0");
       if (!d) return w;
       const time = /[hs]/i.test(cell.z.replace(/"[^"]*"/g, ""));   // 格式里没有时分秒就只显示日期
       return `${d.y}-${p(d.m)}-${p(d.d)}${time ? ` ${p(d.H)}:${p(d.M)}${d.S ? ":" + p(d.S) : ""}` : ""}`;
@@ -179,7 +181,7 @@
         if (covered(r, c) || hid(c)) continue;
         const cell = ws[X.utils.encode_cell(src.get(k) || { r, c })];
         const sp = span.get(k);
-        const txt = sheetText(cell);
+        const txt = sheetText(cell, wb);
         const num = cell && (cell.t === "n" || cell.t === "d");
         h += `<td data-c="${c}"${src.has(k) ? ` data-a="${X.utils.encode_cell(src.get(k))}"` : ""}${sp ? ` rowspan="${sp[0]}" colspan="${sp[1]}"` : ""}${num ? ` class="n"` : cell && cell.t === "e" ? ` class="err"` : ""}>${esc(txt)}</td>`;
       }

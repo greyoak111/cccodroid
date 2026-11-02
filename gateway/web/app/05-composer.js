@@ -478,17 +478,26 @@
   }
 
   // 安卓壳递进来的东西：别的应用「分享到 Claude CLI」，或系统选择器的结果
-  window.addEventListener("ccapp-attach", (e) => {
-    const p = e.detail?.value;
+  function attachPath(p, from) {
     if (!p) return;
     const name = p.split("/").pop();
     // 大小先不知道：按大附件算（不出缩略图、发出去只给路径），问到大小再改
     const a = { path: p, name, size: 0, big: true, kind: /\.(png|jpe?g|gif|webp|bmp|avif|heic)$/i.test(p) ? "image" : "other" };
+    // 选择器里挑的大文件要在后台拷一阵：拷完时已经切到别的会话了，落回打开选择器那个会话的草稿（#105 06-014，同 uploadFiles）
+    if (from && from.ep !== draftEpoch && (view.sessionId || "") !== from.key) {
+      const all = draftsRead(), d = all[from.key] || { text: "", att: [] };
+      d.att = [...(Array.isArray(d.att) ? d.att : []), a]; d.at = Date.now(); all[from.key] = d;
+      try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
+      return toast(t("{n} 个文件已附加到刚才那个会话的草稿", { n: 1 }));
+    }
     state.attachments.push(a);
     renderAttachments();
     api("/api/file/stat?path=" + encodeURIComponent(p)).then((r) => { a.size = r.size || 0; a.big = false; renderAttachments(); }, () => {});
     toast(t("已附加 {name}", { name }));
-  });
+  }
+  let pickFrom = null;      // 最近一次打开选择器时的草稿（会话号 + 换草稿的代次）
+  window.addEventListener("ccapp-attach", (e) => attachPath(e.detail?.value, null));
+  window.addEventListener("ccapp-attach-pick", (e) => attachPath(e.detail?.value, pickFrom));
   window.addEventListener("ccapp-insert", (e) => {
     const v = e.detail?.value;      // 别叫 t：会遮住翻译函数，下面那句提示就抛「t is not a function」
     if (!v) return;
@@ -497,7 +506,7 @@
   });
 
   // 三扇门：点回形针 / 设置里选 / ＋ 面板
-  function pickFiles() { fileInput.click(); }
+  function pickFiles() { pickFrom = { ep: draftEpoch, key: view.sessionId || "" }; fileInput.click(); }
   fileInput.addEventListener("change", async () => {
     await uploadFiles(fileInput.files);
     fileInput.value = "";

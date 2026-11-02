@@ -2623,4 +2623,6 @@
 2623	Tidak bisa memastikan apakah Wi-Fi tersambung
 2624	Pilih setidaknya satu putaran untuk kutipan
 2625	Model di perangkat {model} sedang dipakai di percakapan lain; ganti model setelah selesai menjawab
+2626	Tutup lalu buka lagi untuk mencoba ulang
+2627	{n} dihentikan
 2633	(Ini status dari pengecekan terakhir; kali ini gagal: {msg})

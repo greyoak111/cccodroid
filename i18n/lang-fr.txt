@@ -2623,4 +2623,6 @@
 2623	Impossible de savoir si le Wi-Fi est connecté
 2624	Cochez au moins un tour pour l’extrait
 2625	Le modèle local {model} est utilisé dans une autre conversation ; changez de modèle quand il aura fini
+2626	Repliez puis rouvrez pour réessayer
+2627	{n} arrêté(s)
 2633	(État du dernier contrôle ; celui-ci a échoué : {msg})

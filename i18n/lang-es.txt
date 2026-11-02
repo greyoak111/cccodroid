@@ -2623,4 +2623,6 @@
 2623	No se pudo saber si hay conexión Wi-Fi
 2624	Marca al menos una ronda para el extracto
 2625	El modelo local {model} se está usando en otra conversación; cambia de modelo cuando termine
+2626	Contrae y vuelve a abrir para reintentar
+2627	{n} detenido(s)
 2633	(Es el estado de la última consulta; esta vez falló: {msg})

@@ -61,8 +61,11 @@
       a.lastAt = at; a.status = r.status || "done"; a.endAt = at; a.why = r.why || ""; a.report = r.file || a.report; a.now = "";
       if (r.steps > a.steps) a.steps = r.steps;
       if (a.by === "main" && av) av.mark("← " + a.name + " " + (a.status === "done" ? t("完成") : a.status === "stopped" ? t("已停止") : t("失败")));
-      // 后台子代理的 Agent 卡（结果只是「已启动」）跟着收：翻历史时没有 sub_done 事件，不然一直标「后台运行」
-      if (!a.parent && a.status !== "done") TOOL_CARDS.get(a.tool)?.subDone?.(a.status);
+      // 后台子代理的 Agent 卡（结果只是「已启动」）跟着收：翻历史时没有 sub_done 事件，不然一直标「后台运行」。
+      // 成功结束的也要收：以前把 done 排除了，成功的后台代理翻历史时一直挂着「后台运行」（#95 01-003）；
+      // 前台代理的卡本来就是「完成」，不用碰（碰了会凭空长出一块空的「子代理过程」）
+      const tc = a.parent ? null : TOOL_CARDS.get(a.tool);
+      if (tc?.subDone && (a.status !== "done" || tc.state === "run")) tc.subDone(a.status === "done" ? "completed" : a.status);
       return agTouch(agCardOf(a));
     }
     if (r.k === "resume" && a) {
@@ -132,11 +135,14 @@
       const ms = members();
       if (!ms.length) { el.classList.add("hidden"); return; }
       el.classList.remove("hidden");
-      const run = ms.filter((a) => a.status === "running").length, bad = ms.filter((a) => a.status === "failed").length;
+      // 完成只数 done：已停止的单独算，不能和成功的一起标绿（#95 01-006）
+      const run = ms.filter((a) => a.status === "running").length, ok = ms.filter((a) => a.status === "done").length,
+        stop = ms.filter((a) => a.status === "stopped").length, bad = ms.length - run - ok - stop;
       head.querySelector(".agc-t").textContent = t("子代理") + " · " + ms.length;
       head.querySelector(".agc-st").innerHTML = [
         run ? `<span class="tool-state run">${esc(t("{n} 在跑", { n: run }))}</span>` : "",
-        ms.length - run - bad ? `<span class="tool-state ok">${esc(t("{n} 完成", { n: ms.length - run - bad }))}</span>` : "",
+        ok ? `<span class="tool-state ok">${esc(t("{n} 完成", { n: ok }))}</span>` : "",
+        stop ? `<span class="tool-state err">${esc(t("{n} 已停止", { n: stop }))}</span>` : "",
         bad ? `<span class="tool-state err">${esc(t("{n} 失败", { n: bad }))}</span>` : "",
       ].join("");
       const now = Date.now();
@@ -188,12 +194,13 @@
   async function agReveal(id) {
     const chain = [];
     for (let a = AG.agents.get(id), n = 0; a && n < 20; a = a.parent ? AG.agents.get(a.parent) : null, n++) chain.unshift(a);
-    let card = null;
+    let card = null, up = null;
     const gen = view.gen;
     for (const a of chain) {
       for (let i = 0; i < 30; i++) {               // 历史里上级的过程是异步取的：等它的卡建出来
         card = TOOL_CARDS.get(a.tool);
         if (card && !card.lazy && card.el?.isConnected) break;
+        if (card?.lazy && up?.realizeFor?.(a.tool)) continue;   // 落在上级「更早的 n 步」里：干等不会变，直接把那批建出来（#95 01-005）
         await new Promise((r) => setTimeout(r, 100));
         if (gen !== view.gen) return;              // 等的时候切了会话
       }
@@ -201,6 +208,7 @@
       if (!card || card.lazy || !card.el?.isConnected) return toast(t("这个子代理的过程还没加载到"));
       card.el.closest(".tgroup")?.classList.add("open");
       card.openSub?.();
+      up = card;
     }
     card.el.scrollIntoView({ block: "center", behavior: "smooth" });
     MO.play(card.el, "mo-flash", 1200);
@@ -209,10 +217,10 @@
   /** 翻历史时：这个会话的联络簿取一次（网关有落盘读落盘，没有就从记录现推） */
   async function agLoad(sid) {
     if (!sid || AG.loaded === sid) return;
-    AG.loaded = sid;
+    AG.loaded = sid;                               // 先占上：取的过程中再来的不重复发
     try {
       const r = await api(`/api/session/${encodeURIComponent(sid)}/agents`);
       if (view.sessionId !== sid) return;
       for (const rec of r.records || []) agApply(rec, null);
-    } catch {}
+    } catch { if (AG.loaded === sid) AG.loaded = null; }   // 取失败别当取过：下次翻页再取（#95 01-002）
   }

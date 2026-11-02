@@ -33,7 +33,12 @@
   // Esc 关设置（窄屏先回分类列表）；菜单、弹层开着时 OV 在捕获阶段先接走了（审查 P2-12）
   addEventListener("keydown", (e) => { if (e.key === "Escape" && setOpen && !e.defaultPrevented) { e.preventDefault(); setBack(); } });
   // Tab 别跑出模态：挂在 window 上，焦点还在背景时也接得到（审查 #52 P2-12）；上面另开了 OV 弹层时归 OV 管
-  addEventListener("keydown", (e) => { if (e.key === "Tab" && setOpen && !OV.top()) trapTab($("set-ov"), e); }, true);
+  // 设置里开着轻菜单（自绘下拉框，OV 记成 menu、不锁 Tab）：焦点在菜单里就在菜单里转，不然锁回设置（#96 01-008）
+  addEventListener("keydown", (e) => {
+    if (e.key !== "Tab" || !setOpen || OV.hasModal()) return;
+    const m = OV.top();
+    trapTab(m && m.contains(document.activeElement) ? m : $("set-ov"), e);
+  }, true);
   // 开关、下拉框没有关联标题，读屏只念「复选框」：挂到同一行的粗体标题上（审查 P2-13）
   document.querySelectorAll("#tab-settings .srow").forEach((row, i) => {
     // 子行只有说明没有粗体标题（保活、开机自启、通知）：挂到那段说明上（审查 #52 P2-13）

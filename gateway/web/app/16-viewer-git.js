@@ -522,28 +522,31 @@
   }
   function draftSave() {
     clearTimeout(VW.dt);
+    const key = draftKey();   // 排的时候就定下是哪个文件：800ms 里换了文件，就别把正文存到新文件名下（DeepSeek 复核 低-4）
     VW.dt = setTimeout(() => {
-      if (!VW.dirty) return;
-      const key = draftKey(), d = { at: Date.now(), text: vwText() };
+      if (!VW.dirty || draftKey() !== key) return;
+      const d = { at: Date.now(), text: vwText() };
       draftIdb("readwrite", (os) => os.put(d, key)).catch(() => {
         if (d.text.length <= 1024 * 1024) try { localStorage.setItem(key, JSON.stringify(d)); } catch {}
       });
     }, 800);
   }
-  function draftClear() {
+  // key 由调用方带进来：读草稿是异步的，读完时 VW.path 可能已经换成别的文件，不能再按当前路径算（#106 07-009）
+  function draftClear(key = draftKey()) {
     clearTimeout(VW.dt);
-    const key = draftKey();
     try { localStorage.removeItem(key); } catch {}
     draftIdb("readwrite", (os) => os.delete(key)).catch(() => {});
   }
-  async function draftTake() {
+  async function draftTake(gen) {
+    const key = draftKey();
     let d = null;
-    try { d = await draftIdb("readonly", (os) => os.get(draftKey())); } catch {}
-    if (!d) try { d = JSON.parse(localStorage.getItem(draftKey()) || "null"); } catch {}
+    try { d = await draftIdb("readonly", (os) => os.get(key)); } catch {}
+    if (gen !== VW.gen) return null;                 // 读的时候换了文件：别弹旧文件的提示，更别动草稿
+    if (!d) try { d = JSON.parse(localStorage.getItem(key) || "null"); } catch {}
     if (!d || typeof d.text !== "string") return null;
-    if (d.text === VW.text) { draftClear(); return null; }
+    if (d.text === VW.text) { draftClear(key); return null; }
     if (confirm(t("上次有没保存的修改（{time}），要恢复吗？\n确定：恢复\n取消：丢掉草稿", { time: new Date(d.at).toLocaleString() }))) return d.text;
-    draftClear();
+    draftClear(key);
     return null;
   }
 
@@ -556,20 +559,22 @@
     $("vw-body").innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
     const gen = VW.gen;
     VW.ready = false;
-    let text, mtime;
+    let dec, mtime;
     try {
       const r = await fetch(fileUrl(VW.path));
       if (!r.ok) throw new Error("HTTP " + r.status);
       mtime = Number(r.headers.get("x-mtime")) || 0;
-      ({ text, enc: VW.enc, bom: VW.bom } = vwDecode(new Uint8Array(await r.arrayBuffer())));
+      dec = vwDecode(new Uint8Array(await r.arrayBuffer()));
     } catch (e) {
       if (gen === VW.gen) $("vw-body").innerHTML = `<div class="vw-empty">${t("读取失败")}: ${esc(e.message)}</div>`;
       return;
     }
     if (gen !== VW.gen) return;
-    VW.mtime = mtime; VW.text = text;
+    // 编码、BOM 和正文一起认：以前编码在世代检查之前就写进 VW，迟到的旧文件回执能把当前文件的只读保护摘掉（#106 07-001）
+    VW.enc = dec.enc; VW.bom = dec.bom;
+    VW.mtime = mtime; VW.text = dec.text;
     VW.dirty = false;
-    const draft = await draftTake();
+    const draft = await draftTake(gen);
     if (gen !== VW.gen) return;
     if (draft != null) { VW.text = draft; VW.dirty = true; mode = "edit"; }
     VW.ready = true;
@@ -751,11 +756,14 @@
     VW.mode = "diff";
     vwRenderActs();
     $("vw-body").innerHTML = `<div class="vw-diff">${VW.dirty ? `<div class="tiny">${t("还有没保存的修改；这里对比的是磁盘上的版本和上次提交。")}</div>` : ""}<div class="tiny">${t("读取中…")}</div></div>`;
+    // 只认最后一次点的对比：慢的旧回执（别的文件、或同一文件早先那次）不许盖掉现在的（#106 07-006）
+    const my = VW.diffSeq = (VW.diffSeq || 0) + 1, gen = VW.gen, p = VW.path;
+    const box = () => my === VW.diffSeq && gen === VW.gen && p === VW.path && VW.mode === "diff" ? $("vw-body").querySelector(".vw-diff") : null;
     try {
-      const r = await api("/api/git/diff?" + new URLSearchParams({ dir: VW.path, file: VW.path }));
-      if (VW.mode !== "diff") return;
-      $("vw-body").querySelector(".vw-diff").innerHTML = (VW.dirty ? `<div class="tiny">${t("还有没保存的修改；这里对比的是磁盘上的版本和上次提交。")}</div>` : "") + diffHtml(r.diff);
-    } catch (e) { $("vw-body").querySelector(".vw-diff").innerHTML = `<div class="tiny">${esc(e.message)}</div>`; }
+      const r = await api("/api/git/diff?" + new URLSearchParams({ dir: p, file: p }));
+      const el = box(); if (!el) return;
+      el.innerHTML = (VW.dirty ? `<div class="tiny">${t("还有没保存的修改；这里对比的是磁盘上的版本和上次提交。")}</div>` : "") + diffHtml(r.diff);
+    } catch (e) { const el = box(); if (el) el.innerHTML = `<div class="tiny">${esc(e.message)}</div>`; }
   }
 
   // ── HTML 预览：网关另起的只读小服务里渲染（和界面不同站点，网页脚本碰不到网关），文件一改自动刷新 ──

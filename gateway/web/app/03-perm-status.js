@@ -211,6 +211,7 @@
       tc.el.querySelector(".tool-state")?.before(tag);
       it.el.remove();
       it.el = null;
+      PERMS.delete(id);          // 卡已经并进工具卡的小标签，这条记录没用了（#95 01-007）
     } else if (it.el) {
       it.el.classList.remove("busy");
       it.el.classList.add("done", behavior === "allow" ? "ok" : "no");
@@ -792,7 +793,7 @@
     const page = document.createElement("div");
     page.className = "page";
     let av = null;
-    const avs = [];
+    const avs = [], agTools = [];
     for (const m of items) {
       if (m.role === "user") { renderUser(m.text, page, m.uuid); av = null; continue; }
       if (m.role === "note") { (m.chapter ? chapterSep : addNote)(m.chapter ? m : m.text, page); av = null; continue; }
@@ -802,7 +803,7 @@
       else if (m.role === "thinking") av.thinking(m.text);
       else if (m.role === "tool_use") {
         av.tool(m.id, m.name, m.input);
-        if (AG.byTool.has(m.id)) agTouch(agCardFor(m.id));   // 联络簿先到、卡片所在的这页后到
+        agTools.push(m.id);
         const c = m.sub && view.sessionId && TOOL_CARDS.get(m.id), sid = view.sessionId;
         const mk = (tid) => async () => { const r = await api(`/api/session/${encodeURIComponent(sid)}/agent?tool=${encodeURIComponent(tid)}`), it = r.items || []; it.more = !!r.more; return it; };
         if (c && c.isAgent) c.subLazy(mk(m.id), mk);
@@ -810,6 +811,9 @@
     }
     for (const a of avs) a.finish();
     paintMarks(page);
+    // 联络簿先到、卡片所在的这页后到：子代理卡要挂在已经接进文档的工具卡后面（agCardFor 认 isConnected），
+    // 这时 page 还没接上 —— 调用方拿到 page 都是当场同步接上的，等到微任务再补建（#95 01-004）
+    if (agTools.length) queueMicrotask(() => { for (const id of agTools) if (AG.byTool.has(id)) agTouch(agCardFor(id)); });
     if (view.sessionId && items.some((m) => m.sub)) agLoad(view.sessionId);
     return page;
   }
