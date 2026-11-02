@@ -65,7 +65,7 @@ function ui(initial = fresh()) {
     querySelector(selector) { if (selector === '[data-bc="eye"]') return nodes.get("bc-eye"); return null; }
     querySelectorAll(selector) { return selector === "input, button" ? this.children.filter((el) => ["INPUT", "BUTTON"].includes(el.tagName)) : []; }
     getClientRects() { return this.closest(".hidden") ? [] : [{}]; }
-    closest(selector) { if (selector === "[data-bc]" && this.dataset.bc) return this; if (selector === ".hidden") { for (let el = this; el; el = el.parentElement) if (el.classList.contains("hidden")) return el; } return null; }
+    closest(selector) { if (selector === "[data-bc]" && this.dataset.bc) return this; if (selector === "button" && this.tagName === "BUTTON") return this; if (selector === ".hidden") { for (let el = this; el; el = el.parentElement) if (el.classList.contains("hidden")) return el; } return null; }
     focus() { document.activeElement = this; }
     reset() { for (const el of nodes.values()) if (el.tagName === "INPUT") { el.value = ""; el.checked = false; } }
   }
@@ -148,6 +148,22 @@ function ui(initial = fresh()) {
       for (const fn of get("bridge-config-panel").listeners.click) fn({ target: node });
       await flush();
     },
+    pointerButton(id) {
+      let prevented = false;
+      for (const fn of get("bridge-config-panel").listeners.mousedown || []) fn({ target: get(id), preventDefault() { prevented = true; } });
+      return prevented;
+    },
+    async modelAction(action, id) {
+      const button = get("bc-selected").children.flatMap((row) => row.children).find((el) => el.dataset.bc === action && el.dataset.model === id);
+      assert.ok(button, `missing model action ${action}/${id}`);
+      if (!button.disabled) for (const fn of get("bridge-config-panel").listeners.click) fn({ target: button });
+      await flush();
+    },
+    pickModel(id) {
+      const input = get("bc-model"); input.value = id; document.activeElement = input;
+      for (const fn of input.listeners.focus || []) fn({});
+      for (const key of ["ArrowDown", "Enter"]) for (const fn of input.listeners.keydown || []) fn({ key, isComposing: false, preventDefault() {} });
+    },
     input(name, value) { const el = get("bc-" + name); el.value = value; for (const fn of el.listeners.input || []) fn({ target: el }); },
     change(id, checked) { const el = get(id); assert.ok(el, `missing bridge input: ${id}`); el.checked = checked; for (const fn of el.listeners.change || []) fn({ target: el }); },
     back: () => sandbox.__ccBack(), backCount: () => backCount,
@@ -220,7 +236,8 @@ test("bridge form: card stays inside Extensions, old key is not echoed and save 
   assert.equal(u.get("bc-key").required, false);
   await u.submit();
   assert.deepEqual(u.calls.map((c) => c.method), ["GET", "POST"]);
-  assert.deepEqual(u.calls[1].body, { endpoint: "https://api.example.com/v1", model: "synthetic-model", consent: true });
+  assert.deepEqual(u.calls[1].body, { endpoint: "https://api.example.com/v1", model: "synthetic-model", consent: true,
+    models: [{ id: "synthetic-model", contextWindow: 200000 }] });
   assert.equal(used, 0);
   assert.equal(u.get("bc-local-state").textContent, "本地已准备好");
   assert.equal(u.get("bc-remote-state").textContent, "模型推理尚未验证");
@@ -288,7 +305,7 @@ test("bridge form: local readiness is independent of saved configuration; errors
   const u = ui(); await u.open(); fill(u); u.response(saved({ local: { state: "error" } })); await u.submit();
   assert.equal(u.get("bc-use").disabled, true);
   assert.equal(u.get("bc-local-state").textContent, "配置已保存，但本地桥尚未就绪");
-  assert.match(u.get("bc-notice").textContent, /不会切换接口/);
+  assert.match(u.get("bc-notice").textContent, /诊断.*保存配置不会重置恢复次数/);
   await u.click("edit"); u.input("key", "synthetic-new-key");
   u.post(async () => reply({ field: "apiKey", message: "secret-token-must-not-render", apiKey: "synthetic-new-key" }, 400));
   await u.submit();
@@ -297,6 +314,35 @@ test("bridge form: local readiness is independent of saved configuration; errors
   assert.equal(u.get("bc-key").getAttribute("aria-invalid"), "true");
   assert.ok(!u.get("bc-notice").textContent.includes("secret-token"));
   assert.equal(u.get("bc-form").classList.contains("hidden"), false);
+});
+
+for (const code of ["RECOVERY_EXHAUSTED", "PATCH_VERIFICATION_FAILED", "COMPONENT_DISABLED", "LOCAL_START_FAILED", "COMPONENT_UNAVAILABLE", "UPDATE_REQUIRED"]) test(`bridge local fault ${code}: read and repeated saves show diagnosis, never a ready new-session action`, async () => {
+  const data = saved({ localError: code, local: { state: "ready", code } });
+  const u = ui(data); let used = 0;
+  await u.open({ useNew: async () => { used++; } });
+  assert.equal(u.get("bc-use").disabled, true);
+  const message = u.get("bc-notice").textContent;
+  assert.ok(message); assert.equal(message.includes("可修改配置后重试"), false);
+  if (code === "RECOVERY_EXHAUSTED") {
+    assert.equal(u.get("bc-local-state").textContent, "自动恢复次数已耗尽");
+    assert.match(message, /修改配置不会解除.*诊断.*明确重置恢复次数/);
+  }
+  for (let i = 0; i < 3; i++) {
+    await u.click("edit"); u.response(data); await u.submit();
+    assert.equal(u.get("bc-use").disabled, true);
+    assert.equal(u.get("bc-notice").textContent, message, "save-time notice must not override the fault explanation");
+  }
+  await u.click("use"); assert.equal(used, 0);
+  assert.equal(u.calls.some((c) => /reset|start/.test(c.url)), false);
+});
+
+test("bridge local fault: saved error response uses fixed explanation, not a misleading configuration retry", async () => {
+  const u = ui(); await u.open(); fill(u);
+  u.post(() => reply({ ok: false, saved: true, code: "RECOVERY_EXHAUSTED", message: "untrusted private response" }, 400));
+  await u.submit();
+  assert.match(u.get("bc-notice").textContent, /修改配置不会解除.*诊断.*明确重置恢复次数/);
+  assert.equal(u.get("bc-notice").textContent.includes("untrusted"), false);
+  assert.equal(u.configPosts().length, 1);
 });
 
 test("bridge form: absent or malformed component status never enables configuration or a new session", async () => {
@@ -364,13 +410,44 @@ test("bridge form: config GET 404 or not_installed alone prompts installation; u
 
 test("bridge form: partial save failure reports saved versus readiness without losing replacement input", async () => {
   const u = ui(); await u.open(); fill(u);
-  u.post(async () => reply({ ok: false, saved: true, localReady: false, code: "RUNTIME_CONFLICT", message: "untrusted-secret-synthetic" }, 409));
+  u.post(async () => reply({ ok: false, saved: true, localReady: false, code: "provider_save_failed", message: "untrusted-secret-synthetic" }, 400));
   await u.submit();
-  assert.match(u.get("bc-notice").textContent, /配置已保存，但本地桥尚未就绪/);
+  assert.match(u.get("bc-notice").textContent, /本地桥尚未就绪.*诊断/);
   assert.equal(u.get("bc-form").classList.contains("hidden"), false);
   assert.equal(u.get("bc-key").value, "synthetic-test-key");
   assert.equal(u.get("bc-key").type, "password");
   assert.ok(!u.get("bc-notice").textContent.includes("untrusted-secret"));
+});
+
+for (const [code, expected] of [
+  ["RUNTIME_CONFLICT", "已有桥安装不能自动迁移，请先备份并由你处理原安装；未覆盖或卸载。"],
+  ["BUSY", "本地桥正在使用或卸载中，请稍后重试；当前会话保持不变。"],
+  ["not_installed", "请先安装或更新 OpenAI API 本地协议桥组件。"],
+  ["unknown-private-code", "保存配置未完成；请检查本地状态后重试，当前会话保持不变。"],
+]) test(`bridge form: save 409 ${code} reports its fixed reason rather than treating every conflict as busy`, async () => {
+  const u = ui(); await u.open(); fill(u);
+  u.post(() => reply({ ok: false, saved: false, code, message: "untrusted-private-save-detail" }, 409));
+  await u.submit();
+  assert.equal(u.get("bc-notice").textContent, expected);
+  assert.equal(u.get("bc-form").classList.contains("hidden"), false);
+  assert.equal(u.get("bc-saved").classList.contains("hidden"), true);
+  assert.equal(u.get("bc-key").value, "synthetic-test-key");
+  assert.equal(u.configPosts().length, 1);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("untrusted-private-save-detail"), false);
+  assert.equal(u.get("bc-notice").textContent.includes("unknown-private-code"), false);
+});
+
+test("bridge form: an ownership conflict after partial save keeps the same GET explanation", async () => {
+  const expected = "已有桥安装不能自动迁移，请先备份并由你处理原安装；未覆盖或卸载。";
+  const u = ui(); await u.open(); fill(u);
+  u.post(() => reply({ ok: false, saved: true, localReady: false, code: "RUNTIME_CONFLICT", message: "untrusted-private-save-detail" }, 409));
+  await u.submit();
+  assert.equal(u.get("bc-notice").textContent, expected);
+  assert.equal(u.get("bc-key").value, "synthetic-test-key");
+  u.close();
+  u.read(() => reply({ ok: false, code: "RUNTIME_CONFLICT", message: "untrusted-private-get-detail" }, 409));
+  await u.open();
+  assert.equal(u.get("bc-notice").textContent, expected);
 });
 
 test("bridge form: in-flight save is single-shot; leaving clears key and late success cannot reopen the panel", async () => {
@@ -815,4 +892,160 @@ test("bridge models: suggestion list supports arrow keys, Enter picks and Escape
   assert.equal(key("Escape"), true);
   assert.ok(list.classList.contains("hidden"));
   assert.equal(u.configPosts().length, 0);
+});
+
+test("bridge multiple models: add, default, edit, remove and save windows independently", async () => {
+  const u = ui(); await u.open(); fill(u);
+  u.models(() => reply({ ok: true, models: [{ id: "large-model", context_window: 1048576 }, { id: "small-model", context_window: 128000 }, { id: "unknown-model" }], truncated: false }));
+  u.change(u.checkbox().id, true); await u.advance(650);
+  u.input("model", "large-model"); assert.equal(u.get("bc-ctx").value, "1048576");
+  await u.click("model-add");
+  assert.equal(u.get("bc-model").value, "");
+  u.input("model", "small-model"); assert.equal(u.get("bc-ctx").value, "128000");
+  await u.click("model-add");
+  u.input("model", "unknown-model"); assert.equal(u.get("bc-ctx").value, "200000");
+  await u.click("model-add");
+  assert.equal(u.get("bc-selected").children.length, 3);
+  await u.modelAction("model-default", "small-model");
+  await u.modelAction("model-edit", "large-model"); u.input("ctx", "512k");
+  await u.click("model-add");
+  assert.equal(u.get("bc-selected").children.length, 3, "editing an existing model does not duplicate it");
+  await u.modelAction("model-remove", "unknown-model");
+  assert.equal(u.get("bc-selected").children.length, 2);
+  u.response(saved({ model: "small-model", contextWindow: 128000, models: [{ id: "large-model", contextWindow: 512000 }, { id: "small-model", contextWindow: 128000 }] }));
+  await u.submit();
+  assert.deepEqual(u.configPosts()[0].body.models, [{ id: "large-model", contextWindow: 512000 }, { id: "small-model", contextWindow: 128000 }]);
+  assert.equal(u.configPosts()[0].body.model, "small-model");
+  assert.equal(u.modelCalls().length, 1, "selection and model editing never refetch");
+  assert.equal(u.get("bc-saved-models").children.length, 2);
+  await u.click("edit");
+  assert.equal(u.get("bc-selected").children.length, 2, "all saved models survive reopening editor");
+});
+
+test("bridge multiple models: adding keeps the loaded suggestions available while input stays focused", async () => {
+  const u = ui(); await u.open(); fill(u);
+  u.models(() => reply({ ok: true, models: [{ id: "first-model", context_window: 1048576 }, { id: "second-model", context_window: 128000 }], truncated: false }));
+  u.change(u.checkbox().id, true); await u.advance(650);
+  const input = u.get("bc-model"), list = u.get("bc-model-list");
+  u.document.activeElement = input;
+  const key = (value) => { for (const fn of input.listeners.keydown || []) fn({ key: value, isComposing: false, preventDefault() {} }); };
+  u.input("model", "first-model"); key("ArrowDown"); key("Enter");
+  assert.equal(input.value, "first-model"); assert.equal(u.get("bc-ctx").value, "1048576");
+  await u.click("model-add");
+  assert.equal(input.value, ""); assert.equal(u.document.activeElement, input);
+  // 不用 modelList()：它会人为触发新的 focus，从而掩盖“输入框一直有焦点”的真实操作。
+  assert.equal(input.getAttribute("aria-expanded"), "true");
+  assert.deepEqual(list.children.map((li) => li.dataset.value), ["first-model", "second-model"]);
+  key("ArrowDown"); key("ArrowDown"); key("Enter");
+  assert.equal(input.value, "second-model"); assert.equal(u.get("bc-ctx").value, "128000");
+  await u.click("model-add");
+  assert.equal(u.get("bc-selected").children.length, 2);
+  assert.equal(list.classList.contains("hidden"), false);
+  assert.equal(u.modelCalls().length, 1, "continuing to pick uses the same loaded list");
+});
+
+test("bridge multiple models: clicking a focused input reopens suggestions after a pick or Escape", async () => {
+  const u = ui(); await u.open(); fill(u);
+  u.models(() => reply({ ok: true, models: [{ id: "first-model" }, { id: "second-model" }], truncated: false }));
+  u.change(u.checkbox().id, true); await u.advance(650);
+  const input = u.get("bc-model"), list = u.get("bc-model-list");
+  u.pickModel("first-model");
+  assert.equal(list.classList.contains("hidden"), true); assert.equal(u.document.activeElement, input);
+  for (const fn of input.listeners.click || []) fn({ target: input });
+  assert.equal(list.classList.contains("hidden"), false);
+  for (const fn of input.listeners.keydown || []) fn({ key: "Escape", preventDefault() {} });
+  assert.equal(list.classList.contains("hidden"), true);
+  for (const fn of input.listeners.click || []) fn({ target: input });
+  assert.equal(list.classList.contains("hidden"), false);
+  assert.equal(u.modelCalls().length, 1);
+});
+
+test("bridge multiple models: buttons retain an open list's focus until their click finishes", async () => {
+  const u = ui(); await u.open(); fill(u);
+  u.models(() => reply({ ok: true, models: [{ id: "first-model" }, { id: "second-model" }], truncated: false }));
+  u.change(u.checkbox().id, true); await u.advance(650);
+  const input = u.get("bc-model");
+  u.document.activeElement = input; u.input("model", "");
+  for (const fn of input.listeners.focus || []) fn({});
+  assert.equal(u.pointerButton("bc-action-edit"), true, "closing an open in-flow list must not move the button mid-click");
+  assert.equal(u.pointerButton("bc-save"), true);
+  for (const fn of input.listeners.blur || []) fn({});
+  assert.equal(u.pointerButton("bc-action-edit"), false, "closed lists do not override unrelated button focus");
+  assert.equal(u.pointerButton("bc-model-add"), true, "adding preserves same-input continuation even with suggestions already closed");
+  u.document.activeElement = u.get("bc-ctx");
+  assert.equal(u.pointerButton("bc-save"), false);
+});
+
+test("bridge windows: exact model metadata fills late, no metadata falls back to200000, manual edit wins", async () => {
+  const u = ui(), pending = deferred(); await u.open(); fill(u);
+  u.input("model", "large-model"); assert.equal(u.get("bc-ctx").value, "200000");
+  u.models(() => pending.promise); u.change(u.checkbox().id, true); await u.advance(650);
+  pending.resolve(reply({ ok: true, models: [{ id: "large-model", context_window: 1048576 }, { id: "other" }, { id: "invalid", context_window: "1000000" }], truncated: false }));
+  await u.flush(); assert.equal(u.get("bc-ctx").value, "1048576");
+  u.input("ctx", "256k"); await u.click("models-retry"); await u.advance(0);
+  assert.equal(u.get("bc-ctx").value, "256k", "late/retried metadata must not overwrite user input");
+  u.input("model", "other"); assert.equal(u.get("bc-ctx").value, "200000");
+  u.input("model", "invalid"); assert.equal(u.get("bc-ctx").value, "200000");
+  u.input("model", "manual-unlisted"); assert.equal(u.get("bc-ctx").value, "200000");
+  u.pickModel("large-model"); assert.equal(u.get("bc-ctx").value, "1048576");
+  assert.equal(u.configPosts().length, 0);
+});
+
+for (const [field, value] of [["key", "replacement-synthetic-key"], ["endpoint", "https://api.example.com/private/chat/completions"]]) test(`bridge windows: reopening and changing only ${field} preserves every saved window and default`, async () => {
+  const models = [{ id: "synthetic-model", contextWindow: 512000 }, { id: "second", contextWindow: 128000 }];
+  const u = ui(saved({ models, contextWindow: 512000 })); await u.open();
+  for (let i = 0; i < 2; i++) {
+    await u.click("edit");
+    u.input(field, value);
+    assert.equal(u.get("bc-ctx").value, "512000");
+    u.response(saved({ models, contextWindow: 512000, endpoint: field === "endpoint" ? value : "https://api.example.com/v1" }));
+    await u.submit();
+    assert.deepEqual(u.configPosts()[i].body.models, models);
+    assert.equal(u.configPosts()[i].body.model, "synthetic-model");
+  }
+  assert.equal(u.modelCalls().length, 0, "credential/path edits do not require discovery to preserve saved windows");
+});
+
+test("bridge windows: reopened explicit windows survive delayed discovery while new models still use metadata", async () => {
+  const models = [{ id: "synthetic-model", contextWindow: 512000 }, { id: "second", contextWindow: 128000 }];
+  const u = ui(saved({ models, contextWindow: 512000 })), pending = deferred();
+  await u.open(); await u.click("edit");
+  u.models(() => pending.promise); u.change(u.checkbox().id, true); await u.advance(650);
+  pending.resolve(reply({ ok: true, models: [{ id: "synthetic-model", context_window: 1048576 }, { id: "second" }, { id: "new-model", context_window: 256000 }], truncated: false }));
+  await u.flush();
+  assert.equal(u.get("bc-ctx").value, "512000");
+  u.input("model", "new-model"); assert.equal(u.get("bc-ctx").value, "256000");
+  await u.click("model-add");
+  const expected = [...models, { id: "new-model", contextWindow: 256000 }];
+  u.response(saved({ models: expected, contextWindow: 512000 })); await u.submit();
+  assert.deepEqual(u.configPosts()[0].body.models, expected);
+  assert.equal(u.configPosts()[0].body.model, "synthetic-model");
+});
+
+for (const selection of ["suggestion", "typing"]) test(`bridge windows: ${selection} of an added manual model restores and preserves its own window`, async () => {
+  const u = ui(); await u.open(); fill(u);
+  u.models(() => reply({ ok: true, models: [{ id: "large-model", context_window: 1048576 }, { id: "small-model", context_window: 128000 }], truncated: false }));
+  u.change(u.checkbox().id, true); await u.advance(650);
+  u.input("model", "large-model"); u.input("ctx", "512k"); await u.click("model-add");
+  u.input("model", "small-model"); assert.equal(u.get("bc-ctx").value, "128000");
+  if (selection === "suggestion") u.pickModel("large-model");
+  else u.input("model", "large-model");
+  assert.equal(u.get("bc-model").value, "large-model");
+  assert.equal(u.get("bc-ctx").value, "512000");
+  await u.click("models-retry"); await u.advance(0);
+  assert.equal(u.get("bc-ctx").value, "512000", "selecting an existing model must retain its manual precedence");
+  const models = [{ id: "large-model", contextWindow: 512000 }];
+  u.response(saved({ model: "large-model", models, contextWindow: 512000 })); await u.submit();
+  assert.deepEqual(u.configPosts()[0].body.models, models);
+});
+
+test("bridge multiple models: remove default chooses a remaining model, clear-all requires another model", async () => {
+  const u = ui(saved({ models: [{ id: "synthetic-model", contextWindow: 1048576 }, { id: "second", contextWindow: 200000 }] }));
+  await u.open(); await u.click("edit");
+  await u.modelAction("model-remove", "synthetic-model");
+  assert.match(u.get("bc-selected").textContent, /second.*默认模型/);
+  await u.modelAction("model-remove", "second");
+  await u.submit();
+  assert.equal(u.configPosts().length, 0);
+  assert.equal(u.get("bc-model").getAttribute("aria-invalid"), "true");
 });

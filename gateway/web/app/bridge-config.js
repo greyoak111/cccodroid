@@ -6,14 +6,28 @@
   const t = (s, vars) => window.I18N ? window.I18N.t(s, vars) : s.replace(/\{(\w+)\}/g, (m, k) => vars && k in vars ? String(vars[k]) : m);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const API = "/api/components/openai-bridge/config", MODELS_API = "/api/components/openai-bridge/models";
-  const MODEL_DELAY = 650, MODEL_LIMIT = 500, MODEL_TIMEOUT = 15000, SUGGEST_MAX = 100;
+  const MODEL_DELAY = 650, MODEL_LIMIT = 500, MODEL_TIMEOUT = 15000, SUGGEST_MAX = 100, CONFIG_MODEL_LIMIT = 100, DEFAULT_CTX = 200000;
+  const LOCAL_ERRORS = ["RECOVERY_EXHAUSTED", "PATCH_VERIFICATION_FAILED", "COMPONENT_DISABLED", "LOCAL_START_FAILED", "COMPONENT_UNAVAILABLE", "UPDATE_REQUIRED"];
+  const localCode = (code) => LOCAL_ERRORS.includes(code) ? code : code ? "LOCAL_START_FAILED" : "";
+  function localMessage(code) {
+    if (code === "RECOVERY_EXHAUSTED") return t("自动恢复已停止，修改配置不会解除；请先诊断，再明确重置恢复次数。");
+    if (code === "PATCH_VERIFICATION_FAILED") return t("桥补丁校验失败，自动恢复已停止；请先诊断并修复，保存配置不会解除故障。");
+    if (code === "COMPONENT_DISABLED") return t("本地桥已停用，不能供新会话使用；请先确认组件状态，保存配置不会解除停用。");
+    if (code === "COMPONENT_UNAVAILABLE") return t("本地桥组件暂不可用，可能正在更新或安装不完整；请先检查组件，不会自动重置恢复次数。");
+    if (code === "UPDATE_REQUIRED") return t("桥运行副本需要更新；请先检查组件版本，当前不能供新会话使用。");
+    return t("本地桥尚未就绪，请先检查本地诊断；当前会话保持不变，保存配置不会重置恢复次数。");
+  }
+  const validWindow = (n) => Number.isInteger(n) && n >= 1024 && n <= 16777216;
+  const validModel = (id) => typeof id === "string" && !!id && id === id.trim() && id.length <= 200 && !/[,\u0000-\u001f\u007f-\u009f]/.test(id);
   let panel = null, options = {}, snapshot = null, busy = false, seq = 0, returnTop = 0;
-  // Discovery state contains only IDs/origins and cancellation handles, never a key or key fingerprint.
+  // Discovery state contains only model metadata/origins and cancellation handles, never a key or key fingerprint.
   let modelsTimer = null, modelsDeadline = null, modelsAbort = null, modelsSeq = 0;
   let modelItems = [], modelsConnected = false, currentOrigin = "", consentOrigin = "", suggestAt = -1;
+  let modelWindows = new Map(), selectedModels = [], defaultModel = "", editingModel = "", ctxManual = false;
   const readError = (status, code) => {
     if (code === "BUSY") return t("本地桥正在使用或卸载中，请稍后重试；当前会话保持不变。");
     if (code === "RUNTIME_CONFLICT") return t("已有桥安装不能自动迁移，请先备份并由你处理原安装；未覆盖或卸载。");
+    if (LOCAL_ERRORS.includes(code)) return localMessage(code);
     return status === 404 || code === "not_installed" ? t("请先安装或更新 OpenAI API 本地协议桥组件。") : t("读取桥配置失败，请返回扩展后重试。");
   };
   const visible = () => !!panel && $("tab-ext").classList.contains("bridge-config-open") && !$("tab-ext").classList.contains("hidden") && !$("pages").classList.contains("hidden") && !$("pages")._moLeave;
@@ -42,15 +56,20 @@
     return n >= 1024 && n <= 16777216 ? n : null;
   }
   function safeSnapshot(data) {
-    const local = data.local || {};
+    const local = data.local || {}, code = localCode(data.localError || local.code);
     const endpoint = endpointOf(typeof data.endpoint === "string" ? data.endpoint : "");
     const model = typeof data.model === "string" ? data.model : "";
+    const contextWindow = validWindow(data.contextWindow) ? data.contextWindow : DEFAULT_CTX;
+    const models = Array.isArray(data.models) ? data.models.slice(0, CONFIG_MODEL_LIMIT).filter((m) => m && validModel(m.id))
+      .map((m) => ({ id: m.id, contextWindow: validWindow(m.contextWindow) ? m.contextWindow : DEFAULT_CTX })) : [];
+    if (validModel(model) && !models.some((m) => m.id === model)) models.unshift({ id: model, contextWindow });
     return {
       installed: data.installed === true, configured: data.configured === true && !endpoint.error && !!model && model.length <= 200 && !/[,\u0000-\u001f\u007f]/.test(model), hasKey: data.hasKey === true,
-      endpoint: endpoint.error ? "" : data.endpoint, model,
+      endpoint: endpoint.error ? "" : data.endpoint, model, models,
       providerId: typeof data.providerId === "string" ? data.providerId : "",
-      contextWindow: Number.isInteger(data.contextWindow) && data.contextWindow > 0 ? data.contextWindow : 0,
-      local: { state: ["ready", "error", "stopped", "starting"].includes(local.state) ? local.state : "stopped" },
+      contextWindow: models.find((m) => m.id === model)?.contextWindow || contextWindow,
+      localError: code,
+      local: { state: code ? "error" : ["ready", "error", "stopped", "starting"].includes(local.state) ? local.state : "stopped", code },
     };
   }
   async function request(body) {
@@ -73,7 +92,7 @@
     panel.setAttribute("aria-labelledby", "bridge-config-title");
     panel.innerHTML = `
       <button type="button" class="bc-back" data-bc="back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>${esc(t("返回扩展"))}</button>
-      <header class="bc-heading"><h2 id="bridge-config-title" tabindex="-1">${esc(t("OpenAI API 本地协议桥"))} <span class="badge">${esc(t("预览"))}</span></h2><p>${esc(t("填好地址、密钥和模型就能用；上下文窗口选填。"))}</p></header>
+      <header class="bc-heading"><h2 id="bridge-config-title" tabindex="-1">${esc(t("OpenAI API 本地协议桥"))} <span class="badge">${esc(t("预览"))}</span></h2><p>${esc(t("一个 API 可配置多个模型，上下文窗口自动填写。"))}</p></header>
       <p class="bc-notice hidden" id="bc-notice" role="alert"></p>
       <div id="bc-loading" role="status">${esc(t("读取中…"))}</div>
       <form id="bc-form" class="bc-card hidden" novalidate autocomplete="off">
@@ -81,12 +100,14 @@
         <div class="field"><label for="bc-endpoint">${esc(t("API 地址"))}</label><input id="bc-endpoint" type="url" dir="ltr" inputmode="url" enterkeyhint="next" placeholder="https://api.example.com/v1" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="2048" aria-describedby="bc-endpoint-hint bc-endpoint-error bc-endpoint-preview" required><p class="bc-hint" id="bc-endpoint-hint">${esc(t("填写服务商的 API 地址，不是官网登录页。"))}</p><p class="bc-error hidden" id="bc-endpoint-error"></p><p class="bc-hint mono hidden" id="bc-endpoint-preview" dir="ltr"></p></div>
         <div class="field"><label for="bc-key">${esc(t("API Key"))}</label><div class="bc-key-wrap"><input id="bc-key" type="password" dir="ltr" enterkeyhint="next" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off" maxlength="1024" aria-describedby="bc-key-hint bc-key-error"><button type="button" class="bc-eye" data-bc="eye" aria-label="${esc(t("显示密钥"))}" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div><p class="bc-hint" id="bc-key-hint"></p><p class="bc-error hidden" id="bc-key-error"></p></div>
         <div class="bc-discovery"><label class="bc-model-consent" for="bc-model-consent"><input id="bc-model-consent" type="checkbox" aria-describedby="bc-model-origin bc-model-status"><span>${esc(t("允许自动读取模型清单（会将 API Key 发往所填服务，不发送对话、不调用模型）"))}</span></label><p class="bc-hint mono" id="bc-model-origin" dir="ltr"></p><div class="bc-model-feedback"><p class="bc-hint" id="bc-model-status" role="status" aria-live="polite" aria-atomic="true"></p><button class="btn ghost sm bc-model-retry" type="button" id="bc-model-retry" data-bc="models-retry">${esc(t("重试读取清单"))}</button></div></div>
-        <div class="field"><label for="bc-model">${esc(t("模型名称"))}</label><input id="bc-model" type="text" dir="ltr" enterkeyhint="done" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="200" placeholder="${esc(t("输入搜索或手填模型名称"))}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="bc-model-list" aria-describedby="bc-model-hint bc-model-error bc-model-status" required><ul class="bc-suggest hidden" id="bc-model-list" role="listbox" aria-label="${esc(t("模型清单"))}"></ul><p class="bc-hint" id="bc-model-hint">${esc(t("可输入搜索清单，也可按服务商提供的名称手填。"))}</p><p class="bc-error hidden" id="bc-model-error"></p></div>
-        <div class="field"><label for="bc-ctx">${esc(t("上下文窗口（可选）"))}</label><input id="bc-ctx" type="text" dir="ltr" inputmode="numeric" enterkeyhint="done" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="12" placeholder="1048576 / 256k / 1m" aria-describedby="bc-ctx-hint bc-ctx-error"><p class="bc-hint" id="bc-ctx-hint">${esc(t("模型能读多少 token。不填按 200k 算，自动压缩线也到不了更高。"))}</p><p class="bc-error hidden" id="bc-ctx-error"></p></div>
+        <div class="field"><label for="bc-model">${esc(t("模型名称"))}</label><input id="bc-model" type="text" dir="ltr" enterkeyhint="done" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="200" placeholder="${esc(t("输入搜索或手填模型名称"))}" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="bc-model-list" aria-describedby="bc-model-hint bc-model-error bc-model-status" required><ul class="bc-suggest hidden" id="bc-model-list" role="listbox" aria-label="${esc(t("模型清单"))}"></ul><p class="bc-hint" id="bc-model-hint">${esc(t("搜索或手填后添加模型；已添加的模型可分别设置窗口和默认项。"))}</p><p class="bc-error hidden" id="bc-model-error"></p></div>
+        <div class="field"><label for="bc-ctx">${esc(t("上下文窗口（可选）"))}</label><input id="bc-ctx" type="text" dir="ltr" inputmode="numeric" enterkeyhint="done" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="12" placeholder="1048576 / 256k / 1m" aria-describedby="bc-ctx-hint bc-ctx-error"><p class="bc-hint" id="bc-ctx-hint">${esc(t("优先采用接口返回的窗口，未提供时默认 200,000 token；可手动修改。"))}</p><p class="bc-error hidden" id="bc-ctx-error"></p></div>
+        <div class="bc-actions"><button type="button" class="btn ghost" id="bc-model-add" data-bc="model-add">${esc(t("添加模型"))}</button></div>
+        <div id="bc-selected" class="bc-selected" aria-label="${esc(t("已添加的模型"))}"></div>
         <p class="bc-hint bc-privacy">${esc(t("对话、工具结果和图片将发往你填写的服务。"))}</p>
         <button class="btn" id="bc-save" type="submit">${esc(t("保存配置"))}</button><p class="bc-hint bc-center" id="bc-save-note" role="status">${esc(t("保存不调用远端模型，也不切换当前会话"))}</p>
       </form>
-      <section id="bc-saved" class="bc-card hidden" aria-labelledby="bc-saved-title"><h3 id="bc-saved-title" tabindex="-1">${esc(t("配置已保存"))}</h3><dl class="bc-summary"><div><dt>${esc(t("API 地址"))}</dt><dd class="mono" id="bc-saved-endpoint" dir="ltr"></dd></div><div><dt>${esc(t("API Key"))}</dt><dd>${esc(t("已设置 · 不回显"))}</dd></div><div><dt>${esc(t("模型名称"))}</dt><dd class="mono" id="bc-saved-model" dir="ltr"></dd></div><div><dt>${esc(t("上下文窗口"))}</dt><dd class="mono" id="bc-saved-ctx" dir="ltr"></dd></div></dl><div class="bc-status" role="status"><b id="bc-local-state"></b><span id="bc-remote-state">${esc(t("模型推理尚未验证"))}</span></div><p class="bc-hint">${esc(t("已添加到「接口与型号」。当前会话保持不变。"))}</p><div class="bc-actions"><button class="btn" type="button" id="bc-use" data-bc="use">${esc(t("新建会话使用"))}</button><button class="btn ghost" type="button" data-bc="edit">${esc(t("修改配置"))}</button></div><p class="bc-hint">${esc(t("别的会话也能用：点输入栏下的模型标签，在接口一行选它。"))}</p></section>
+      <section id="bc-saved" class="bc-card hidden" aria-labelledby="bc-saved-title"><h3 id="bc-saved-title" tabindex="-1">${esc(t("配置已保存"))}</h3><dl class="bc-summary"><div><dt>${esc(t("API 地址"))}</dt><dd class="mono" id="bc-saved-endpoint" dir="ltr"></dd></div><div><dt>${esc(t("API Key"))}</dt><dd>${esc(t("已设置 · 不回显"))}</dd></div><div><dt>${esc(t("模型名称"))}</dt><dd class="mono" id="bc-saved-model" dir="ltr"></dd></div><div><dt>${esc(t("上下文窗口"))}</dt><dd class="mono" id="bc-saved-ctx" dir="ltr"></dd></div></dl><div id="bc-saved-models" class="bc-selected"></div><div class="bc-status" role="status"><b id="bc-local-state"></b><span id="bc-remote-state">${esc(t("模型推理尚未验证"))}</span></div><p class="bc-hint">${esc(t("已添加到「接口与型号」。当前会话保持不变。"))}</p><div class="bc-actions"><button class="btn" type="button" id="bc-use" data-bc="use">${esc(t("新建会话使用"))}</button><button class="btn ghost" type="button" data-bc="edit">${esc(t("修改配置"))}</button></div><p class="bc-hint">${esc(t("别的会话也能用：点输入栏下的模型标签，在接口一行选它。"))}</p></section>
       <p class="bc-hint bc-footnote">${esc(t("仅支持 OpenAI Chat Completions API，暂不支持 Responses API。"))}</p>`;
     $("tab-ext").appendChild(panel);
     $("bc-form").addEventListener("submit", save);
@@ -101,11 +122,23 @@
       } else if (action === "edit") showForm();
       else if (action === "use") useNew();
       else if (action === "models-retry") scheduleModels(0);
+      else if (action === "model-add") addModel(true);
+      else if (action === "model-edit") { if (stashEditor()) { const item = selectedModels.find((m) => m.id === b.dataset.model); if (item) editModel(item); } }
+      else if (action === "model-default") { defaultModel = b.dataset.model; renderSelected(); }
+      else if (action === "model-remove") {
+        selectedModels = selectedModels.filter((m) => m.id !== b.dataset.model);
+        if (defaultModel === b.dataset.model) defaultModel = selectedModels[0]?.id || "";
+        if (editingModel === b.dataset.model) { editingModel = ""; $("bc-model").value = ""; ctxManual = false; syncContext(); }
+        renderSelected();
+      }
     });
     for (const name of ["endpoint", "key", "model"]) $("bc-" + name).addEventListener("input", () => {
       $("bc-" + name).removeAttribute("aria-invalid"); $("bc-" + name + "-error").classList.add("hidden");
       // 模型清单在本地过滤；改模型名不看密钥、不重新读取
-      if (name === "model") { suggestAt = -1; renderSuggest(true); return; }
+      if (name === "model") {
+        if (editingModel && $("bc-model").value.trim() !== editingModel) { stashEditor(); editingModel = ""; }
+        syncContext(true); suggestAt = -1; renderSuggest(true); return;
+      }
       cancelModels(true);
       if (name === "endpoint") {
         const endpoint = endpointOf($("bc-endpoint").value);
@@ -119,9 +152,21 @@
       }
       scheduleModels();
     });
+    // 流内列表失焦收起会移动下方按钮，导致这次 click 落空；操作按钮时保持焦点，先完成点击。
+    panel.addEventListener("mousedown", (e) => {
+      const button = e.target.closest("button");
+      if (button && document.activeElement === $("bc-model") &&
+          (button.id === "bc-model-add" || !$("bc-model-list").classList.contains("hidden"))) e.preventDefault();
+    });
+    $("bc-ctx").addEventListener("input", () => {
+      ctxManual = true;
+      $("bc-ctx").removeAttribute("aria-invalid"); $("bc-ctx-error").classList.add("hidden");
+    });
     // 原生 datalist 的弹层在安卓 WebView 上不贴输入框、半透明叠在页面上，改成排在输入框下面的列表
     const model = $("bc-model"), list = $("bc-model-list");
     model.addEventListener("focus", () => { suggestAt = -1; renderSuggest(true); });
+    // 添加按钮保留输入框焦点，列表收起后再点输入框不会重发 focus，也要能展开。
+    model.addEventListener("click", () => { suggestAt = -1; renderSuggest(true); });
     model.addEventListener("blur", () => renderSuggest(false));
     model.addEventListener("keydown", (e) => {
       const n = list.children.length;
@@ -210,9 +255,60 @@
     if (suggestAt >= 0) input.setAttribute("aria-activedescendant", "bc-model-opt-" + suggestAt);
     else input.removeAttribute("aria-activedescendant");
   }
+  function syncContext(selecting = false) {
+    if (ctxManual && !selecting) return;
+    const id = $("bc-model").value.trim(), selected = selectedModels.find((m) => m.id === id);
+    // A new selection must load its own value, even when that model was manually configured.
+    if (selecting) ctxManual = selected?.manual === true;
+    $("bc-ctx").value = String(selected?.contextWindow || modelWindows.get(id) || DEFAULT_CTX);
+  }
+  function stashEditor() {
+    if (!editingModel) return true;
+    const item = selectedModels.find((m) => m.id === editingModel), ctx = ctxOf($("bc-ctx").value);
+    if (ctx === null) { error("ctx", t("填 1024 到 16777216 之间的整数，也可以写 256k、1m；不知道就留空。")).focus(); return false; }
+    if (item) { item.contextWindow = ctx || modelWindows.get(item.id) || DEFAULT_CTX; item.manual = ctxManual; }
+    return true;
+  }
+  function editModel(item) {
+    editingModel = item.id; $("bc-model").value = item.id; ctxManual = item.manual === true;
+    $("bc-ctx").value = String(item.contextWindow); renderSelected(); renderSuggest(false);
+  }
+  function addModel(clear) {
+    const id = $("bc-model").value.trim(), ctx = ctxOf($("bc-ctx").value);
+    if (!validModel(id)) { error("model", t("请输入准确的模型名称，不要包含逗号或换行。")).focus(); return false; }
+    if (ctx === null) { error("ctx", t("填 1024 到 16777216 之间的整数，也可以写 256k、1m；不知道就留空。")).focus(); return false; }
+    let item = selectedModels.find((m) => m.id === id);
+    if (!item && selectedModels.length >= CONFIG_MODEL_LIMIT) { error("model", t("最多可添加 100 个模型。")).focus(); return false; }
+    if (!item) { item = { id }; selectedModels.push(item); }
+    item.contextWindow = ctx || modelWindows.get(id) || DEFAULT_CTX; item.manual = ctxManual;
+    defaultModel ||= id;
+    if (clear) { editingModel = ""; $("bc-model").value = ""; ctxManual = false; syncContext(); }
+    suggestAt = -1;
+    renderSuggest(clear); renderSelected(); return true;
+  }
+  function renderSelected(saved = false) {
+    const list = $(saved ? "bc-saved-models" : "bc-selected"); list.textContent = "";
+    const items = saved ? snapshot.models : selectedModels, def = saved ? snapshot.model : defaultModel;
+    for (const item of items) {
+      const row = document.createElement("div"); row.className = "bc-model-row";
+      const label = document.createElement("span"); label.className = "mono"; label.dir = "ltr";
+      label.textContent = item.id + " · " + item.contextWindow.toLocaleString() + (item.id === def ? " · " + t("默认模型") : "");
+      row.appendChild(label);
+      if (!saved) for (const [action, text] of [["model-edit", t("编辑")], ["model-default", t("设为默认")], ["model-remove", t("移除")]]) {
+        const button = document.createElement("button"); button.type = "button"; button.className = "btn ghost sm";
+        button.dataset.bc = action; button.dataset.model = item.id; button.textContent = text;
+        button.disabled = busy || action === "model-default" && item.id === def;
+        button.setAttribute("aria-label", text + " " + item.id); row.appendChild(button);
+      }
+      list.appendChild(row);
+    }
+  }
   function pickSuggest(id) {
+    if (!stashEditor()) return;
     const input = $("bc-model");
+    editingModel = selectedModels.some((m) => m.id === id) ? id : "";
     input.value = id; input.removeAttribute("aria-invalid"); $("bc-model-error").classList.add("hidden");
+    syncContext(true);
     suggestAt = -1; renderSuggest(false);
   }
   function renderModels() { renderSuggest(); }
@@ -223,7 +319,11 @@
     if (modelsDeadline !== null) clearTimeout(modelsDeadline);
     modelsTimer = modelsDeadline = null;
     if (modelsAbort) { modelsAbort.abort(); modelsAbort = null; }
-    if (clear) { modelItems = []; modelsConnected = false; renderModels(); }
+    if (clear) {
+      modelItems = []; modelWindows = new Map(); modelsConnected = false;
+      for (const item of selectedModels) if (!item.manual) item.contextWindow = DEFAULT_CTX;
+      renderModels(); renderSelected(); syncContext();
+    }
     return pending;
   }
   function modelPrompt(endpoint) {
@@ -285,11 +385,15 @@
       if (!r.ok || !data || data.ok !== true) throw { status: r.status, code: data && data.code };
       if (!Array.isArray(data.models)) throw { code: "models_unsupported" };
       modelsConnected = true;
-      const ids = new Set();
+      const ids = new Set(); modelWindows = new Map();
       for (const item of data.models.slice(0, MODEL_LIMIT)) {
-        if (item && typeof item.id === "string" && item.id.trim() && item.id.length <= 200 && !/[,\u0000-\u001f\u007f]/.test(item.id)) ids.add(item.id);
+        if (item && validModel(item.id)) {
+          ids.add(item.id);
+          if (validWindow(item.context_window)) modelWindows.set(item.id, item.context_window);
+        }
       }
-      modelItems = [...ids]; renderModels();
+      for (const item of selectedModels) if (!item.manual && modelWindows.has(item.id)) item.contextWindow = modelWindows.get(item.id);
+      modelItems = [...ids]; syncContext(); renderSelected(); renderModels();
       $("bc-model-status").textContent = !modelItems.length ? t("模型清单为空，请手填模型名称或重试。") : data.truncated === true || data.models.length > MODEL_LIMIT ? t("已读取 {count} 个模型（最多 500 个），可搜索或手填其他名称。", { count: modelItems.length }) : t("已读取 {count} 个模型，可输入搜索或手填。", { count: modelItems.length });
       updateSaveNote();
     } catch (e) {
@@ -321,8 +425,11 @@
     cancelModels(true); consentOrigin = ""; $("bc-model-consent").checked = false;
     errorsClear(); hideKey(true);
     $("bc-form").classList.remove("hidden"); $("bc-saved").classList.add("hidden"); $("bc-loading").classList.add("hidden");
-    $("bc-endpoint").value = snapshot ? snapshot.endpoint : ""; $("bc-model").value = snapshot ? snapshot.model : "";
-    $("bc-ctx").value = snapshot && snapshot.contextWindow ? String(snapshot.contextWindow) : "";
+    // Persisted windows are explicit configuration, not disposable discovery metadata.
+    selectedModels = snapshot ? snapshot.models.map((m) => ({ ...m, manual: true })) : [];
+    defaultModel = snapshot?.model || ""; editingModel = defaultModel;
+    $("bc-endpoint").value = snapshot ? snapshot.endpoint : ""; $("bc-model").value = defaultModel;
+    syncContext(true); renderSelected();
     $("bc-key").placeholder = snapshot && snapshot.hasKey ? t("已保存，留空保持不变") : t("粘贴服务商提供的密钥");
     currentOrigin = endpointOf($("bc-endpoint").value).origin || "";
     previewEndpoint(); $("bc-model-status").textContent = t("勾选后自动读取清单，也可直接手填模型。");
@@ -333,12 +440,15 @@
     errorsClear(); hideKey(true);
     $("bc-form").classList.add("hidden"); $("bc-loading").classList.add("hidden"); $("bc-saved").classList.remove("hidden");
     $("bc-saved-endpoint").textContent = snapshot.endpoint; $("bc-saved-model").textContent = snapshot.model;
-    $("bc-saved-ctx").textContent = snapshot.contextWindow ? snapshot.contextWindow.toLocaleString() : t("未填（按 200k 算）");
+    $("bc-saved-ctx").textContent = snapshot.contextWindow.toLocaleString(); renderSelected(true);
     $("bc-remote-state").textContent = modelsConnected ? t("读取清单已连接服务，尚未验证模型推理。") : t("模型推理尚未验证");
     const ready = snapshot.local.state === "ready";
-    $("bc-local-state").textContent = ready ? t("本地已准备好") : t("配置已保存，但本地桥尚未就绪");
+    $("bc-local-state").textContent = ready ? t("本地已准备好") : snapshot.localError === "RECOVERY_EXHAUSTED" ? t("自动恢复次数已耗尽")
+      : snapshot.localError === "PATCH_VERIFICATION_FAILED" ? t("桥补丁校验失败")
+      : snapshot.localError === "COMPONENT_DISABLED" ? t("本地桥已停用") : t("配置已保存，但本地桥尚未就绪");
     $("bc-local-state").className = ready ? "bc-ready" : "bc-pending";
     $("bc-use").disabled = !ready || !snapshot.providerId || typeof options.useNew !== "function";
+    if (!ready) notice(localMessage(snapshot.localError));
     updateModelsControls();
   }
   async function open(opts = {}) {
@@ -366,7 +476,8 @@
   function close(force = false) {
     if (!panel || !$("tab-ext").classList.contains("bridge-config-open") || busy && !force) return false;
     ++seq; cancelModels(true); currentOrigin = consentOrigin = ""; $("bc-model-consent").checked = false;
-    busy = false; hideKey(true); snapshot = null;
+    busy = false; hideKey(true); snapshot = null; selectedModels = []; defaultModel = editingModel = ""; ctxManual = false;
+    $("bc-selected").textContent = $("bc-saved-models").textContent = "";
     $("tab-ext").classList.remove("bridge-config-open");
     $("bc-form").reset(); $("bc-saved-endpoint").textContent = $("bc-saved-model").textContent = $("bc-saved-ctx").textContent = "";
     $("page-body").scrollTop = returnTop;
@@ -385,14 +496,16 @@
     const old = endpointOf(snapshot.endpoint), changed = snapshot.hasKey && old.origin !== endpoint.origin;
     if (!$("bc-key").value.trim() && (!snapshot.hasKey || changed)) { const el = error("key", changed ? t("服务地址已改变，请重新填写 API Key，旧密钥不会发往新地址。") : t("请填写服务商提供的 API Key。")); first ||= el; }
     if ($("bc-key").value.trim().length > 1024 || /[\u0000- \u007f]/.test($("bc-key").value.trim())) { const el = error("key", t("API Key 不能包含空格或换行。")); first ||= el; }
-    if (!model || model.length > 200 || /[,\u0000-\u001f\u007f]/.test(model)) { const el = error("model", t("请输入准确的模型名称，不要包含逗号或换行。")); first ||= el; }
+    if ((!model && !selectedModels.length) || (model && !validModel(model))) { const el = error("model", t("请输入准确的模型名称，不要包含逗号或换行。")); first ||= el; }
     const ctx = ctxOf($("bc-ctx").value);
     if (ctx === null) { const el = error("ctx", t("填 1024 到 16777216 之间的整数，也可以写 256k、1m；不知道就留空。")); first ||= el; }
     if (first) { first.focus(); return; }
+    if (model && !addModel(false)) return;
+    if (!defaultModel || !selectedModels.some((item) => item.id === defaultModel)) defaultModel = selectedModels[0].id;
     if (!confirm(t("保存此 API 配置？\n\n后续使用时，对话、工具结果和图片将发往 {origin}。\n{verification}\n保存本身不调用远端模型，也不切换当前会话。", { origin: endpoint.origin, verification: modelsConnected ? t("读取清单已连接服务，尚未验证模型推理。") : t("模型推理尚未验证") }))) return;
     // Keep a replacement secret only in this input and the same-origin POST, never in UI state/storage.
-    const body = { endpoint: $("bc-endpoint").value.trim(), model, consent: true };
-    if (ctx) body.contextWindow = ctx;   // 留空不发：服务端按 0 处理（清掉旧值）
+    const body = { endpoint: $("bc-endpoint").value.trim(), model: defaultModel, consent: true,
+      models: selectedModels.map(({ id, contextWindow }) => ({ id, contextWindow })) };
     if ($("bc-key").value.trim()) body.apiKey = $("bc-key").value.trim();
     const id = ++seq; setBusy(true, true);
     try {
@@ -401,7 +514,7 @@
       if (typeof options.saved === "function") options.saved();   // 窗口 / 模型可能变了：设置页滑块、顶栏刻度跟着重取（#76）
       if (!snapshot.configured || !snapshot.hasKey) { notice(t("配置未完成，请检查字段后重试。")); return; }
       showSaved(); $("bc-saved-title").focus({ preventScroll: true });
-      if (snapshot.local.state !== "ready") notice(t("配置已保存，但本地桥尚未就绪；不会切换接口，可修改配置后重试。"));
+      if (snapshot.local.state !== "ready") notice(localMessage(snapshot.localError));
     } catch (err) {
       if (id !== seq || !visible()) return;
       if (err.field === "endpoint") error("endpoint", t("API 地址未通过检查，请确认服务商提供的地址。"));
@@ -409,8 +522,9 @@
       else if (err.field === "contextWindow") error("ctx", t("填 1024 到 16777216 之间的整数，也可以写 256k、1m；不知道就留空。"));
       else if (err.field === "model") error("model", t("请输入准确的模型名称，不要包含逗号或换行。"));
       if (err.saved && typeof options.saved === "function") options.saved();
-      if (err.saved) notice(t("配置已保存，但本地桥尚未就绪；不会切换接口，可修改配置后重试。"));
-      else notice(err.status === 409 ? t("本地桥正在使用或卸载中，请稍后重试；当前会话保持不变。") : t("保存配置未完成；请检查本地状态后重试，当前会话保持不变。"));
+      if (["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(err.code)) notice(readError(err.status, err.code));
+      else if (err.saved || LOCAL_ERRORS.includes(err.code)) notice(localMessage(localCode(err.code)));
+      else notice(t("保存配置未完成；请检查本地状态后重试，当前会话保持不变。"));
     } finally { body.apiKey = ""; if (id === seq) setBusy(false); }
   }
   async function useNew() {

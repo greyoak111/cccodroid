@@ -130,7 +130,9 @@ export async function startManagedUiServer() {
         const changed = state.config.hasKey && new URL(state.config.endpoint).origin !== new URL(endpoint).origin;
         if (!body.apiKey && (!state.config.hasKey || changed)) return json(res, { ok: false, field: "apiKey", code: "key-required" }, 400);
         if (!body.model || /[,\u0000-\u001f\u007f]/.test(body.model)) return json(res, { ok: false, field: "model", code: "invalid-model" }, 400);
-        Object.assign(state.config, { endpoint, model: body.model, apiKey: body.apiKey || state.config.apiKey, configured: true, hasKey: true, local: { state: state.configMode === "not-ready" ? "error" : "ready" } });
+        const models = body.models || [{ id: body.model, contextWindow: body.contextWindow || 200000 }];
+        Object.assign(state.config, { endpoint, model: body.model, models, contextWindow: models.find((m) => m.id === body.model)?.contextWindow || 200000,
+          apiKey: body.apiKey || state.config.apiKey, configured: true, hasKey: true, local: { state: state.configMode === "not-ready" ? "error" : "ready" } });
         return json(res, configReply());
       }
       if (p === "/api/session-model" && req.method === "POST") {
@@ -184,6 +186,14 @@ export async function startManagedUiServer() {
         "/api/energy": { supported: false, items: [] }, "/api/billing": { supported: false },
         "/api/bookmarks": { items: [] }, "/api/orphans": { items: [] }, "/api/login/status": { loggedIn: false },
       };
+      if (p === "/api/models") {
+        const selected = url.searchParams.get("provider"), browse = url.searchParams.get("browse") || selected;
+        const configured = state.config.models || [{ id: state.config.model, contextWindow: 200000 }];
+        const current = url.searchParams.get("model") || "synthetic-model";
+        Object.assign(routes[p], { provider: selected || "synthetic", listProvider: browse || "synthetic", defaultModel: state.config.model,
+          ...(browse === state.config.providerId ? { models: configured.map((m) => ({ id: m.id, context_window: m.contextWindow, input_modalities: ["text"] })) } : {}),
+          contextWindow: selected === state.config.providerId ? configured.find((m) => m.id === current)?.contextWindow || 200000 : 200000 });
+      }
       if (Object.hasOwn(routes, p)) return json(res, routes[p]);
       if (p.startsWith("/api/")) {
         state.unexpected.push(`GET ${p}`);

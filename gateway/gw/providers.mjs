@@ -353,7 +353,7 @@ function providerView(id, v) {
   };
 }
 
-function upsertProvider(id, b) {
+export function upsertProvider(id, b, prepare) {
   const isNew = !id;
   if (isNew) {
     if (!b.baseUrl) return { error: "need_baseUrl", message: tz("自定义接口至少要填端点地址") };
@@ -391,8 +391,15 @@ function upsertProvider(id, b) {
   const conn = (v) => [v.apiKey, v.baseUrl, v.authStyle, v.endpoint].map((x) => String(x || "")).join("\0");
   if (!isNew && conn(PROVIDERS_RAW.providers[id] || {}) !== conn(cur) && [...RUNS.values()].some((r) => !r.ended && r.provider === id))
     return { error: "busy", status: 409, message: tz("这一家正在用，等这一轮跑完再改地址或密钥。") };
+  // 受管桥先持久化非秘密的旧/新指纹，再同步写接口；回调不接收密钥，HTTP 请求也不能提供它。
+  const rollback = prepare?.(id), previous = PROVIDERS_RAW.providers[id];
   PROVIDERS_RAW.providers[id] = cur;
-  saveProvidersRaw();
+  try { saveProvidersRaw(); }
+  catch (error) {
+    if (previous === undefined) delete PROVIDERS_RAW.providers[id]; else PROVIDERS_RAW.providers[id] = previous;
+    try { rollback?.(); } catch { log("[provider] 受管映射回滚未完成"); }
+    throw error;
+  }
   if (id === PROVIDER.id) applyProvider();
   dropModelCache();   // 会话可能钉在不是全局的这家上：哪家改了都清，免得清单/窗口还是旧的
   log(`[provider] 已保存 ${id}${"apiKey" in b && str(b.apiKey) ? "（含密钥）" : ""}`);

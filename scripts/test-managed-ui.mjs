@@ -261,12 +261,12 @@ try {
   const existing = await cdp.eval("({ key: document.querySelector('#bc-key').value, type: document.querySelector('#bc-key').type, count: document.querySelectorAll('#bc-form input:not([type=checkbox])').length, active: document.activeElement?.id, hint: document.querySelector('#bc-key-hint').innerText })");
   assert.equal(existing.key, "", "old API key never returns to input");
   assert.equal(existing.type, "password");
-  assert.equal(existing.count, 3, "only endpoint/key/model inputs are shown");
+  assert.equal(existing.count, 4, "endpoint/key/model plus per-model context input are shown");
   assert.notEqual(existing.active, "bc-key", "opening configuration does not automatically focus key input");
   assert.match(existing.hint, /blank|unchanged|留空|保持/i);
   assert.equal(fixture.state.configResponses.some((s) => s.includes(FAKE_OLD_KEY)), false, "GET response excludes old key");
   assert.equal(await cdp.eval(`document.documentElement.outerHTML.includes(${q(FAKE_OLD_KEY)})`), false, "old key not present in page DOM");
-  ok("bridge config entry and existing key privacy", "original card, Configure left of Uninstall, three fields in Extensions, old key absent/masked");
+  ok("bridge config entry and existing key privacy", "original card, Configure left of Uninstall, per-model window editor in Extensions, old key absent/masked");
 
   // Invalid API paths/credentials/model must not reach any POST or remote inference endpoint.
   const initialSaves = fixture.state.configRequests.length;
@@ -322,6 +322,24 @@ try {
   await unchanged();
   ok("bridge saved versus local readiness", "not-ready is explicit and new-session action disabled; remote remains untested");
 
+  fixture.state.configMode = "success";
+  fixture.state.config.localError = "RECOVERY_EXHAUSTED";
+  fixture.state.config.local = { state: "ready" }; // 故意让残存服务健康，锁仍必须优先阻断。
+  await configClose(); await configOpen(true);
+  const recoveryNotice = await cdp.eval("document.querySelector('#bc-notice').innerText");
+  assert.match(recoveryNotice, /恢复|recovery/i);
+  assert.match(recoveryNotice, /修改配置不会解除|configuration.*(?:not|won't|won’t).*clear/i);
+  assert.equal(await cdp.eval("document.querySelector('#bc-use').disabled"), true);
+  for (let i = 0; i < 3; i++) {
+    await click('#bridge-config-panel [data-bc="edit"]'); await click("#bc-save");
+    await until(() => cdp.eval(visible("#bc-saved")), "recovery-locked save stays configured");
+    assert.equal(await cdp.eval("document.querySelector('#bc-notice').innerText"), recoveryNotice);
+    assert.equal(await cdp.eval("document.querySelector('#bc-use').disabled"), true);
+    await unchanged();
+  }
+  delete fixture.state.config.localError;
+  ok("bridge recovery fault read and repeated saves", "residual health never overrides fault; three saves keep diagnosis and disable use; no reset operation");
+
   await click('#bridge-config-panel [data-bc="edit"]');
   await fill("#bc-model", "synthetic-retry-model");
   for (const mode of ["http-error", "busy", "field-error"]) {
@@ -347,7 +365,7 @@ try {
 
   // First-time setup: only an explicit user click may prepare a new session, never remote inference.
   fixture.state.configMode = "success";
-  Object.assign(fixture.state.config, { configured: false, hasKey: false, endpoint: "", model: "", apiKey: "", local: { state: "stopped" } });
+  Object.assign(fixture.state.config, { configured: false, hasKey: false, endpoint: "", model: "", models: [], apiKey: "", local: { state: "stopped" } });
   await configOpen();
   await click("#bc-save");
   for (const field of ["endpoint", "key", "model"]) assert.equal(await cdp.eval(`document.querySelector('#bc-${field}').getAttribute('aria-invalid')`), "true", `first setup requires ${field}`);
@@ -358,7 +376,7 @@ try {
   assert.equal(fixture.state.modelsRequests.length, 0, "typing credentials without model-list consent does not connect remotely");
   await click("#bc-model-consent");
   await until(() => fixture.state.modelsRequests.length === 1, "opt-in automatic model discovery");
-  await until(() => cdp.eval("document.querySelectorAll('#bc-model-list option').length === 2"), "model datalist filled");
+  await until(() => cdp.eval("document.querySelector('#bc-model-status').textContent.includes('2')"), "model suggestions loaded");
   assert.equal(fixture.state.modelsRequests[0].consent, true);
   assert.equal(fixture.state.modelsRequests[0].apiKey, FAKE_NEW_KEY);
   assert.equal(await cdp.eval("document.querySelector('#bc-model').value"), "synthetic-new-model", "list never chooses the first model over typed input");
@@ -377,7 +395,7 @@ try {
   fixture.state.modelsMode = "success";
   await click("#bc-model-retry");
   await until(() => fixture.state.modelsRequests.length === 3, "synthetic model recovery");
-  await until(() => cdp.eval("document.querySelectorAll('#bc-model-list option').length === 2 && !document.querySelector('#bc-model-retry').disabled"), "model recovery completes");
+  await until(() => cdp.eval("document.querySelector('#bc-model-status').textContent.includes('2') && !document.querySelector('#bc-model-retry').disabled"), "model recovery completes");
   await fill("#bc-model", "synthetic-new-model");
   await unchanged();
   ok("bridge model list error and manual fallback", "static error, explicit retry only, model editing does not refetch, no inference or provider changes");
@@ -390,6 +408,49 @@ try {
   assert.equal(await cdp.eval(`document.documentElement.outerHTML.includes(${q(FAKE_NEW_KEY)})`), false, "success does not echo replacement key");
   await unchanged();
   ok("bridge first setup", "required fields and root normalization, new key only same-origin POST, no storage/DOM secret after success");
+
+  await click('#bridge-config-panel [data-bc="edit"]');
+  fixture.state.models = [{ id: "large-synthetic", context_window: 1048576 }, { id: "small-synthetic", context_window: 128000 }, { id: "unknown-synthetic" }];
+  const discoveriesBeforeMulti = fixture.state.modelsRequests.length;
+  await click("#bc-model-consent");
+  await until(() => fixture.state.modelsRequests.length === discoveriesBeforeMulti + 1 && cdp.eval("!document.querySelector('#bc-model-retry').disabled"), "multi-model metadata loaded");
+  for (const [model, window] of [["large-synthetic", "1048576"], ["small-synthetic", "128000"], ["unknown-synthetic", "200000"]]) {
+    await fill("#bc-model", model);
+    assert.equal(await cdp.eval("document.querySelector('#bc-ctx').value"), window);
+    await click("#bc-model-add");
+  }
+  await click('#bc-selected [data-bc="model-default"][data-model="small-synthetic"]');
+  await click('#bc-selected [data-bc="model-edit"][data-model="large-synthetic"]');
+  await fill("#bc-ctx", "512k"); await click("#bc-model-add");
+  await click('#bc-selected [data-bc="model-remove"][data-model="synthetic-new-model"]');
+  await click("#bc-save");
+  await until(() => cdp.eval(visible("#bc-saved")), "multi-model configuration saved");
+  assert.deepEqual(fixture.state.configRequests.at(-1).models, [{ id: "large-synthetic", contextWindow: 512000 }, { id: "small-synthetic", contextWindow: 128000 }, { id: "unknown-synthetic", contextWindow: 200000 }]);
+  assert.equal(fixture.state.configRequests.at(-1).model, "small-synthetic");
+  await unchanged();
+  ok("bridge multiple models and windows", "add/edit/remove/default, exact API windows, 200000 fallback and manual override; no inference");
+
+  const persistedModels = structuredClone(fixture.state.configRequests.at(-1).models);
+  await configClose(); await configOpen(true);
+  await click('#bridge-config-panel [data-bc="edit"]');
+  await fill("#bc-key", FAKE_NEW_KEY);
+  await click("#bc-save");
+  await until(() => cdp.eval(visible("#bc-saved")), "key replacement preserves saved model windows");
+  assert.deepEqual(fixture.state.configRequests.at(-1).models, persistedModels);
+  await click('#bridge-config-panel [data-bc="edit"]');
+  const discoveriesBeforeReselect = fixture.state.modelsRequests.length;
+  await click("#bc-model-consent");
+  await until(async () => fixture.state.modelsRequests.length === discoveriesBeforeReselect + 1 && await cdp.eval("!document.querySelector('#bc-model-retry').disabled"), "reopened discovery metadata loaded");
+  await fill("#bc-model", "small-synthetic");
+  assert.equal(await cdp.eval("document.querySelector('#bc-ctx').value"), "128000");
+  await fill("#bc-model", "");
+  await click('#bc-model-list [data-value="large-synthetic"]');
+  assert.equal(await cdp.eval("document.querySelector('#bc-ctx').value"), "512000", "suggestion selection restores this model's manual window, not the previous model's");
+  await click("#bc-save");
+  await until(() => cdp.eval(visible("#bc-saved")), "reselected configured model saves without changing windows");
+  assert.deepEqual(fixture.state.configRequests.at(-1).models, persistedModels);
+  await unchanged();
+  ok("bridge persisted window and suggestion regression", "reopen, replace key, rediscover and reselect an existing manual model preserve all model windows");
 
   await until(() => cdp.eval("document.querySelector('#bc-use').disabled === false"), "new-session action enabled by integrated entry callback");
   const connectionsBeforeUse = fixture.state.sseConnections;
@@ -405,6 +466,15 @@ try {
   assert.equal(await cdp.eval("__cc.state.sessions.length"), beforeConfig.count, "no persisted chat until user actually sends");
   assert.equal(fixture.state.requests.filter((r) => r.path === "/api/chat").length, 0);
   ok("bridge explicit new session", "only user action leaves current session and stages new provider/model; no chat or global switch");
+  for (const [model, window] of [["large-synthetic", 512000], ["unknown-synthetic", 200000], ["small-synthetic", 128000]]) {
+    await click("#model-chip .chip");
+    await until(() => cdp.eval(`!!document.querySelector('#model-pick .mp-item[data-id="${model}"]')`), "all configured models available in conversation picker");
+    await click(`#model-pick .mp-item[data-id="${model}"]`);
+    await until(() => cdp.eval(`__cc.state.pendingModel?.model === ${q(model)} && __cc.state.ctxTotal === ${window}`), "model switch updates its context window");
+  }
+  assert.equal(fixture.state.providerActive, "synthetic");
+  assert.equal(fixture.state.requests.filter((r) => r.path === "/api/chat").length, 0);
+  ok("bridge conversation model switching", "three models selected back and forth with separate context windows; no chat sent");
 
   // One browser, two viewport sizes; exercise interrupted transitions rather than claiming device FPS.
   await cdp.eval("__cc.openPage('sessions')");
