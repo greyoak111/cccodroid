@@ -2623,5 +2623,6 @@ window.I18N_DICT["id"] = {
   "读不出仓库的改动列表，没有撤销": "Daftar perubahan repositori tidak bisa dibaca; tidak ada yang dibatalkan",
   "一次只能撤销一个文件": "Hanya bisa membatalkan satu file sekaligus",
   "{f} 那里已经有个文件了，先挪开再撤销": "Sudah ada file di {f}; pindahkan dulu sebelum membatalkan",
+  "判断不了是不是连着 Wi-Fi": "Tidak bisa memastikan apakah Wi-Fi tersambung",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(Ini status dari pengecekan terakhir; kali ini gagal: {msg})",
 };

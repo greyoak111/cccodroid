@@ -429,6 +429,17 @@ final class Priv {
                     break;
                 }
                 case "dev_status": resp = DeviceTools.status(ctx); break;
+                // 定时任务的条件（充电 / 电量 / 仅 Wi-Fi）：平铺的几项，不受「设备工具」开关管（那是给 Claude 用的）。
+                // 以前网关问的这个操作根本不存在，Wi-Fi 一直是「不知道」，仅 Wi-Fi 的任务照跑（#108 09-001）
+                case "device_status": {
+                    try {
+                        JSONObject d = DeviceTools.deviceStatus(ctx), b = d.optJSONObject("battery"), n = d.optJSONObject("network");
+                        resp = new JSONObject().put("ok", true);
+                        if (b != null) resp.put("charging", b.optBoolean("charging")).put("battery", b.optInt("percent"));
+                        if (n != null) resp.put("network", n.optString("type")).put("wifi", "wifi".equals(n.optString("type")) || (n.optBoolean("vpn") && vpnOverWifi(ctx)));
+                    } catch (Exception e) { resp = new JSONObject().put("ok", false).put("message", String.valueOf(e.getMessage())); }
+                    break;
+                }
                 case "dev_set": resp = DeviceTools.set(ctx, req); break;
                 case "a11y_settings":
                     ctx.startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -448,6 +459,17 @@ final class Priv {
         } catch (Throwable t) {
             Log.e(TAG, "处理请求出错", t);
         }
+    }
+
+    /** 开着 VPN 时活动网络是 VPN 本身：看底下有没有一条连上了的 Wi-Fi（定时任务「仅 Wi-Fi」用） */
+    private static boolean vpnOverWifi(Context c) {
+        android.net.ConnectivityManager cm = c.getSystemService(android.net.ConnectivityManager.class);
+        for (android.net.Network n : cm.getAllNetworks()) {
+            android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(n);
+            if (nc != null && nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) && !nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)
+                && nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) return true;
+        }
+        return false;
     }
 
     // ── 高风险命令要用户点头（审查 v0513b 中-3）──

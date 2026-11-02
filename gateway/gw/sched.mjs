@@ -23,8 +23,20 @@ import { privCall } from "./usage.mjs";
 import { usdCny } from "./providers.mjs";
 
 // node 在安卓上可能没拿到时区（TZ 没设就是 UTC）：「每天 09:00」必须按本地时间算
+// 按系统设置取的就要跟着系统变：出差、手动改时区后，每天 09:00 要按新时区的 09:00（#107 06-012）。tick 里隔几分钟再问一次
+const sysTz = () => { try { return execFileSync("getprop", ["persist.sys.timezone"], { encoding: "utf8", timeout: 2000 }).trim(); } catch { return ""; } };
+let TZ_FROM_PROP = false, TZ_CHECKED = 0;
 if (!process.env.TZ && Intl.DateTimeFormat().resolvedOptions().timeZone === "UTC") {
-  try { const z = execFileSync("getprop", ["persist.sys.timezone"], { encoding: "utf8", timeout: 2000 }).trim(); if (z) process.env.TZ = z; } catch {}
+  const z = sysTz(); if (z) { process.env.TZ = z; TZ_FROM_PROP = true; }
+}
+function followSysTz(now) {
+  if (!TZ_FROM_PROP || now - TZ_CHECKED < 5 * 60000) return;
+  TZ_CHECKED = now;
+  const z = sysTz();
+  if (!z || z === process.env.TZ) return;
+  log(`⏰ 系统时区 ${process.env.TZ} → ${z}，重排定时任务`);
+  process.env.TZ = z;                    // node 见到 TZ 被改会重读时区
+  for (const t of DB.tasks) if (t.on && t.nextAt != null && t.nextAt > now) refreshNext(t, now);   // 已到点的照常跑，跑完自然按新时区排
 }
 
 const FILE = path.join(CFG.home, "ccapp-sched.json");
@@ -199,7 +211,8 @@ async function fireNow(t, { reason, attempt, trial }) {
     const c = t.cond || {};
     if (c.wifi || c.charging || c.battery) {
       const st = await deviceState();
-      if (c.wifi && st.wifi === false) return skip(tz("没连 Wi-Fi"));
+      // 判断不了（老版本 App、Priv 不通）也不跑：仅 Wi-Fi 是为了不走流量，宁可错过一次（#108 09-001）
+      if (c.wifi && st.wifi !== true) return skip(st.wifi === false ? tz("没连 Wi-Fi") : tz("判断不了是不是连着 Wi-Fi"));
       if (c.charging && st.charging === false) return skip(tz("没在充电"));
       if (c.battery && st.battery != null && st.battery < c.battery) return skip(tz("电量 {b}%，低于 {m}%", { b: st.battery, m: c.battery }));
     }
@@ -297,6 +310,7 @@ END_HOOKS.push((run, f) => {
 // ── 计时 ──
 function tick() {
   const now = Date.now();
+  followSysTz(now);
   const gap = DB.lastTick ? now - DB.lastTick : 0;
   const live = new Set(runningNow().map((x) => x.taskId));
   for (const t of DB.tasks) {

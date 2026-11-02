@@ -3,7 +3,9 @@ import path from "node:path";
 import { CFG, LIVE, LAST_LANG, log, tr, tz } from "./config.mjs";
 import { SETTINGS, saveSettings, capList } from "./settings-store.mjs";
 import { PERM_MODES, PROVIDER, keyOf, providerById } from "./providers.mjs";
-import { sessProvider } from "./sessmodel.mjs";
+import { effectiveModel } from "./sessmodel.mjs";
+// 这个会话真跑时用哪家：钉的 → 项目默认 → 全局（和 run.mjs 的 pickProvider 一致；只看钉的会漏掉项目，#102 04-004）
+const runProvider = (sid) => providerById(effectiveModel(sid).provider) || PROVIDER;
 import { isLoginMode } from "./models.mjs";
 import { findSessionFile } from "./sessions.mjs";
 import { killTree } from "./claude.mjs";
@@ -245,7 +247,7 @@ function autoCompactOff() {
 export function idleArm(sid, flags) {
   idleDisarm(sid);
   const ctx = flags.mainCtx || 0;
-  const P = sessProvider(sid);           // 按这个会话用的那家（缓存计时只对原生家有意义）
+  const P = runProvider(sid);            // 按这个会话用的那家（缓存计时只对原生家有意义）
   if (SETTINGS.idleCompaction === false || !P.nativeModels || P.local) return;
   if (!flags.cache1h || flags.cache5m || ctx < IDLE_MIN_TOKENS || autoCompactOff()) return;
   let size = -1; try { size = fs.statSync(findSessionFile(sid).file).size; } catch { return; }
@@ -257,7 +259,7 @@ export function idleArm(sid, flags) {
 function idleFire(sid) {
   const x = IDLE.get(sid);
   IDLE.delete(sid);
-  const P = sessProvider(sid);
+  const P = runProvider(sid);
   if (!x || SETTINGS.idleCompaction === false || !P.nativeModels) return;
   const why = (() => {
     if (laneRun("s:" + sid)) return "正在跑";

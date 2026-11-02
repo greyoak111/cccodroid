@@ -291,7 +291,8 @@
         : (dfltOpt ? "" : '<option value="">' + t("（该厂商不提供模型清单）") + '</option>')));
       // 没单独指定（current=null）的非原生厂商：实际跑的是它的默认型号，没有默认就是清单第一个（和网关同一套），
       // 下拉框和下面的说明都按它画，别停在随便哪一项上（审查 #52 D-03）
-      const curId = r.current || (!r.nativeModels && (MODELS.some((m) => m.id === r.defaultModel) ? r.defaultModel : MODELS[0]?.id)) || null;
+      // 默认型号不在清单里也照它画（网关照样用它跑），不能退到第一项、拿别的型号的窗口冒充（#102 04-003）
+      const curId = r.current || (!r.nativeModels && (r.defaultModel || MODELS[0]?.id)) || null;
       if (r.current) {
         sel.value = r.current;
         // 当前模型不在厂商 /models 的清单里（比如 DeepSeek 的 deepseek-flash 是兼容端点认的别名）：
@@ -301,7 +302,13 @@
           sel.value = r.current;
         }
       } else if (r.nativeModels) sel.value = "";
-      else if (curId) sel.value = curId;
+      else if (curId) {
+        sel.value = curId;
+        if (sel.value !== curId) {
+          sel.insertAdjacentHTML("afterbegin", `<option value="${esc(curId)}">${esc(curId)} · ${t("（当前，不在厂商清单里）")}</option>`);
+          sel.value = curId;
+        }
+      }
       $("model-count").textContent = t("{n} 个", { n: MODELS.length });
       // 自动起名的型号：跟对话 / 关 / 全局这家清单里的某个（存的不在清单里也补一项，别显示成空白）
       const tsel = $("set-titlemodel"), tv = state.settings.titleModel || "";

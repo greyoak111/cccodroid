@@ -2623,5 +2623,6 @@ window.I18N_DICT["fr"] = {
   "读不出仓库的改动列表，没有撤销": "Impossible de lire la liste des modifications du dépôt ; rien n’a été annulé",
   "一次只能撤销一个文件": "Vous ne pouvez annuler qu’un fichier à la fois",
   "{f} 那里已经有个文件了，先挪开再撤销": "Un fichier existe déjà à {f} ; déplacez-le avant d’annuler",
+  "判断不了是不是连着 Wi-Fi": "Impossible de savoir si le Wi-Fi est connecté",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(État du dernier contrôle ; celui-ci a échoué : {msg})",
 };

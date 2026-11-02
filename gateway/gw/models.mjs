@@ -227,27 +227,37 @@ export function withConfigured(list, p) {
   return cw ? list.map((m) => (ids.includes(m.id) && !m.context_window ? { ...m, context_window: cw, configured: true } : m)) : list;
 }
 
+// 先 withConfigured 再 withCatalog：用户在接口设置里明说的窗口优先于公共目录按名字猜的（#102 04-001）。
+// withConfigured 补出来的型号（configured）目录不碰：声明了就用声明的，没声明就是不知道（#67）
 function withCatalog(list, p) {
-  if (!list.some((m) => !m.context_window)) return list;
+  if (!list.some((m) => !m.context_window && !m.configured)) return list;
   if (!CAT || Date.now() - CAT_AT >= CATALOG_TTL) loadCatalog().then((c) => { if (c) expireModelCache(); });
-  return CAT ? applyCatalog(list, CAT, catalogKeys(p)) : list;
+  if (!CAT) return list;
+  const done = applyCatalog(list.map((m) => m.configured ? { ...m, context_window: m.context_window || -1 } : m), CAT, catalogKeys(p));
+  return done.map((m) => m.context_window === -1 ? { ...m, context_window: 0 } : m);
 }
 
 // 清空 / 让它过期：别的模块改不了这几个变量（ES 模块的导入是只读的），走这两个函数
 // 代次：接口配置一改就加一。改之前发出去、改之后才回来的清单请求只交给当时的调用方，不再写回缓存（#77）
-let CACHE_GEN = 0;
+let CACHE_GEN = 0, REQ_SEQ = 0;
 export function dropModelCache() { CACHE_GEN++; MODELS = null; MODELS_AT = 0; MODELS_FOR = null; CACHE.clear(); }
 export function expireModelCache() { CACHE_GEN++; MODELS_AT = 0; for (const c of CACHE.values()) c.at = 0; }   // 在途的旧结果别把过期的又续上（复核 L1）
 
 /** p：哪家（缺省 = 全局生效的）。按家各缓存 10 分钟；全局那家的结果同时放进 MODELS */
 export async function fetchModels(force, p = PROVIDER) {
   const gen = CACHE_GEN, list = await fetchModelsOf(p, force);
-  if (gen === CACHE_GEN && p.id === PROVIDER.id) { MODELS = list; MODELS_AT = Date.now(); MODELS_FOR = sigOf(p); }
+  // 全局那份跟着按家缓存走：并发刷新时缓存里留的是后发起的那次（见 keep），这里不按完成顺序另写一份
+  if (gen === CACHE_GEN && p.id === PROVIDER.id) { const c = CACHE.get(p.id); MODELS = c && c.sig === sigOf(p) ? c.list : list; MODELS_AT = Date.now(); MODELS_FOR = sigOf(p); }
   return list;
 }
 async function fetchModelsOf(p, force) {
-  const sig = sigOf(p), c0 = CACHE.get(p.id), c = c0 && c0.sig === sig ? c0 : null, gen = CACHE_GEN;
-  const keep = (list, ttl = true) => { if (gen === CACHE_GEN) CACHE.set(p.id, { list, at: ttl ? Date.now() : 0, sig }); return list; };
+  const sig = sigOf(p), c0 = CACHE.get(p.id), c = c0 && c0.sig === sig ? c0 : null, gen = CACHE_GEN, seq = ++REQ_SEQ;
+  // 同一配置两次刷新重叠、先发的后回来：不许盖掉后发的结果（#102 04-002）
+  const keep = (list, ttl = true) => {
+    const cur = CACHE.get(p.id);
+    if (gen === CACHE_GEN && !(cur && cur.sig === sig && cur.seq > seq)) CACHE.set(p.id, { list, at: ttl ? Date.now() : 0, sig, seq });
+    return list;
+  };
   if (!force && c && c.at && Date.now() - c.at < 600000) return c.list;
 
   if (p.local) return keep(localModels(), false);   // 端侧：模型目录里有什么就是什么（每次现扫，刚放进去的文件马上能选）
@@ -256,7 +266,7 @@ async function fetchModelsOf(p, force) {
   // 写在配置里的内嵌清单（data:application/json,…）：本地解析，不发请求、不带密钥，网络那边的同主机限制不用放宽（#57）
   const inline = inlineModels(p.modelsUrl);
   if (inline) {
-    const list = withConfigured(withCatalog(mergeKnown(inline, p.fallbackModels, true), p), p);
+    const list = withCatalog(withConfigured(mergeKnown(inline, p.fallbackModels, true), p), p);
     if (list.length) return keep(list);
   }
 
@@ -275,7 +285,7 @@ async function fetchModelsOf(p, force) {
       }
       const r = await fetchKeyed(p.modelsUrl, { headers, signal: AbortSignal.timeout(15000) });
       if (r.ok) {
-        const list = withConfigured(withCatalog(mergeKnown(normalizeModels(await fetchJsonCapped(r)), p.fallbackModels), p), p);
+        const list = withCatalog(withConfigured(mergeKnown(normalizeModels(await fetchJsonCapped(r)), p.fallbackModels), p), p);
         if (list.length) {
           log(`[${p.id}] 模型清单：${list.map((m) => m.id).join(", ")}`);
           return keep(list);

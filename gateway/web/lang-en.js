@@ -2658,5 +2658,6 @@ window.I18N_DICT.en = {
   "读不出仓库的改动列表，没有撤销": "Couldn't read the repository's change list; nothing was discarded",
   "一次只能撤销一个文件": "You can only discard one file at a time",
   "{f} 那里已经有个文件了，先挪开再撤销": "There's already a file at {f}; move it away before discarding",
+  "判断不了是不是连着 Wi-Fi": "Couldn't tell whether Wi-Fi is connected",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(This is the status from the last check; this check failed: {msg})"
 };

@@ -2620,4 +2620,5 @@
 2620	Daftar perubahan repositori tidak bisa dibaca; tidak ada yang dibatalkan
 2621	Hanya bisa membatalkan satu file sekaligus
 2622	Sudah ada file di {f}; pindahkan dulu sebelum membatalkan
+2623	Tidak bisa memastikan apakah Wi-Fi tersambung
 2633	(Ini status dari pengecekan terakhir; kali ini gagal: {msg})
