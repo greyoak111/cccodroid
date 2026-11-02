@@ -60,7 +60,7 @@ See **[Design philosophy](docs/design-philosophy.md)**.
   - A **↓ button** appears when you scroll up through a long chat; tap it to jump to the latest message. A dot on it means new output arrived meanwhile.
   - **Paths in replies are links**: tap an absolute path such as `/storage/emulated/0/…/report.pdf` (or `file.js:12`) and it opens in the viewer; a folder opens in the file browser. Claude is told to write full paths so this always works. Tool cards that read or write a file get a ↗ button too.
   - **In-app browser** (globe in the top bar): web links in replies open inside the app — handy for checking a dev server at `http://127.0.0.1:<port>/`. On wide screens it opens in the workspace on the right, next to the chat. It uses the system WebView, so it adds no download. Sign-in pages still go to your normal browser.
-  - UI in 9 languages: 简体中文, 繁體中文, English, Français, Español, Русский, العربية (RTL), 日本語, 한국어.
+  - UI in 10 languages: 简体中文, 繁體中文, English, Français, Español, Русский, العربية (RTL), 日本語, 한국어, Bahasa Indonesia (machine-translated draft; corrections welcome).
 - **Projects and scheduled tasks** (from 0.3.13):
   - A project is a working directory plus its CLAUDE.md and default provider, model, effort and permissions; sessions are grouped under projects by directory.
   - Scheduled tasks have Claude do something on a schedule — daily, weekly, monthly, every few hours, once, or a cron expression — woken on time by a system alarm. You can limit a task to read-only, to this project, or to chosen tools, and cap the cost and duration of a run and the total per day. Nobody is watching while it runs, so anything that needs your approval is refused.

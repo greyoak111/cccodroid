@@ -21,7 +21,7 @@ import org.json.JSONObject;
 final class Tr {
     static final String[][] LANGS = {           // code, 系统语言前缀（越具体越前）
         {"zh-Hant", "zh-tw", "zh-hk", "zh-mo", "zh-hant"},
-        {"zh", "zh"}, {"en", "en"}, {"fr", "fr"}, {"es", "es"}, {"ru", "ru"}, {"ar", "ar"}, {"ja", "ja"}, {"ko", "ko"},
+        {"zh", "zh"}, {"en", "en"}, {"fr", "fr"}, {"es", "es"}, {"ru", "ru"}, {"ar", "ar"}, {"ja", "ja"}, {"ko", "ko"}, {"id", "id", "in"},
     };
     private static Context ctx;
     private static String lang;

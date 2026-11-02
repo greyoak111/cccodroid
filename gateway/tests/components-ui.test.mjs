@@ -280,7 +280,7 @@ test("bridge form literal and conditional labels are translated in every shipped
   const backend = fs.readFileSync(new URL("../gw/bridge-config.mjs", import.meta.url), "utf8");
   for (const literal of backend.matchAll(/\btz\(\s*("(?:[^"\\]|\\.)*")/g)) keys.add(JSON.parse(literal[1]));
   const vars = (s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
-  for (const code of ["en", "ar", "es", "fr", "ja", "ko", "ru", "zh-Hant"]) {
+  for (const code of ["en", "ar", "es", "fr", "ja", "ko", "ru", "zh-Hant", "id"]) {
     const box = { window: {} };
     vm.runInNewContext(fs.readFileSync(new URL(`lang-${code}.js`, WEB), "utf8"), box);
     for (const key of keys) {
@@ -294,7 +294,7 @@ test("bridge form literal and conditional labels are translated in every shipped
 });
 
 test("component lifecycle strings have real translations in every shipped dictionary", () => {
-  for (const code of ["en", "ar", "es", "fr", "ja", "ko", "ru", "zh-Hant"]) {
+  for (const code of ["en", "ar", "es", "fr", "ja", "ko", "ru", "zh-Hant", "id"]) {
     const box = { window: {} };
     vm.runInNewContext(fs.readFileSync(new URL(`lang-${code}.js`, WEB), "utf8"), box);
     for (const key of ["配置界面尚未就绪，请刷新后重试", "正在配置…请等待完成", "正在读取模型清单…", "正在卸载…", removingHint, retainedError]) {
