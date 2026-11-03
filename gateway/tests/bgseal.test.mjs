@@ -19,8 +19,11 @@ fs.writeFileSync(providerFile, JSON.stringify({ active: PID, providers: {
 } }));
 const cli = path.join(root, "fake-cli.sh");
 const sh = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
+// 假 CLI 跑在 claude 那套 PATH 里（假 PREFIX/bin、/system/bin），Linux 上找不到 sleep 会悄悄跳过等待：用绝对路径，找不到就直接失败（#113）
+const SLEEP = ["/system/bin/sleep", "/bin/sleep", "/usr/bin/sleep"].find((p) => fs.existsSync(p));
+if (!SLEEP) throw new Error("找不到 sleep，假 CLI 的等待会失效");
 function script(steps, code = 0) {
-  const body = steps.map((s) => s.sleep ? `sleep ${s.sleep}` : `printf '%s\\n' ${JSON.stringify(JSON.stringify(s)).replace(/\$/g, "\\$")}`).join("\n");
+  const body = steps.map((s) => s.sleep ? `${SLEEP} ${s.sleep}` : `printf '%s\\n' ${JSON.stringify(JSON.stringify(s)).replace(/\$/g, "\\$")}`).join("\n");
   fs.writeFileSync(cli, `#!${sh}\n${body}\nexit ${code}\n`, { mode: 0o700 });
 }
 const previousPaths = { claude: PATHS.claude, loader: PATHS.loader };
