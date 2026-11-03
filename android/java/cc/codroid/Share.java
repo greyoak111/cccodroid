@@ -92,14 +92,22 @@ public final class Share extends ContentProvider {
     }
 
     /** 能不能交出本应用（分享、「保存到」）：凭据按真实路径拦（软链指过去的也算）；
-     *  私有目录里只交工作区和导出目录的，别的（配置、登录态、日志、会话记录）和网关 /api/file 一样不往外给（审查 v0513b 低-19） */
+     *  私有目录里只交工作区和导出目录的，别的（配置、登录态、日志、会话记录）和网关 /api/file 一样不往外给（审查 v0513b 低-19）。
+     *  「私有目录」是整个应用数据目录（shared_prefs、databases、files 下 home 以外的都算），不只 home（审查 v0.5.20 09-015）；
+     *  诊断包和拍照那两个分享根照常能交 */
     static void guard(Context c, File f) throws IOException {
         File cf = f.getCanonicalFile();
         if (secret(cf)) throw new IOException(Tr.t("这是凭据或私钥文件，不分享"));
-        File home = new Env(c).home.getCanonicalFile();
-        if (cf.getPath().startsWith(home.getPath() + "/")) {
-            String rel = cf.getPath().substring(home.getPath().length() + 1);
-            if (!rel.startsWith("workspace/") && !rel.startsWith("exports/")) throw new IOException(Tr.t("应用私有目录里的这个文件不分享"));
+        String p = cf.getPath();
+        boolean priv = false;
+        for (File d : new File[]{c.getDataDir(), c.createDeviceProtectedStorageContext().getDataDir()})
+            if (d != null && p.startsWith(d.getCanonicalPath() + "/")) priv = true;
+        if (priv) {
+            Env env = new Env(c);
+            boolean ok = false;
+            for (File d : new File[]{new File(env.home, "workspace"), new File(env.home, "exports"), root(c, "logs"), Camera.dir(c)})
+                if (p.startsWith(d.getCanonicalPath() + "/")) ok = true;
+            if (!ok) throw new IOException(Tr.t("应用私有目录里的这个文件不分享"));
             // 硬链接不改真实路径：工作区里一个硬链接就能指到凭据文件上（10-31 复核）。私有目录里正常的文件只有一个名字
             try { if (android.system.Os.stat(cf.getPath()).st_nlink > 1) throw new IOException(Tr.t("这个文件有多个硬链接，不分享")); }
             catch (android.system.ErrnoException ignored) {}
@@ -117,9 +125,17 @@ public final class Share extends ContentProvider {
         // 拷出来的副本放一天就清：以前分享过什么就永远留一份
         File[] old = dir.listFiles();
         long cut = System.currentTimeMillis() - 24L * 3600 * 1000;
-        if (old != null) for (File o : old) if (o.isFile() && o.lastModified() < cut) o.delete();
-        File dst = new File(dir, f.getName());
-        java.nio.file.Files.copy(f.toPath(), dst.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        if (old != null) for (File o : old) if (o.lastModified() < cut) {
+            File[] in = o.isDirectory() ? o.listFiles() : null;
+            if (in != null) for (File x : in) x.delete();
+            o.delete();
+        }
+        // 每次分享一个新的子目录：同名的两次分享以前共用一个副本，后一次会把前一次接收方还没读的内容换掉（审查 v0.5.20 09-004）
+        File sub;
+        do { sub = new File(dir, Long.toString(System.currentTimeMillis(), 36) + "-" + Integer.toHexString(new java.security.SecureRandom().nextInt())); } while (sub.exists());
+        if (!sub.mkdirs()) throw new IOException(Tr.t("建不了分享目录"));
+        File dst = new File(sub, f.getName());
+        java.nio.file.Files.copy(f.toPath(), dst.toPath());
         return dst;
     }
 
@@ -155,6 +171,9 @@ public final class Share extends ContentProvider {
     // 网关日志里记着每条提问 / 插话的开头几十个字：那是用户的对话内容，诊断用不着，抹掉
     private static final Pattern ASK = Pattern.compile("(▶ (?:提问|命令) ).*?(  \\((?:续 [0-9a-f]{8}|新会话)\\))", Pattern.DOTALL);
     private static final Pattern INJ = Pattern.compile("(↪ 插话 ).*");
+    // 本地命令的参数、工具确认带的命令 / 路径 / 网址：新版网关不再记，旧日志里还有（审查 v0.5.20 08-001）
+    private static final Pattern LOCAL_CMD = Pattern.compile("(⌘ 本地命令 /[A-Za-z]+)[^\\n]*");
+    private static final Pattern TOOL_ARG = Pattern.compile("((?:✗ 无人值守，自动拒绝|✓ 全部放行，自动允许|⏸ 等确认|✓ 敏感操作本轮已允许过，放行) [^\\s（]+(?:（子代理）)?)[^\\n]*");
     // 私钥块、.env 式的「名字里带 KEY/TOKEN/SECRET/PASSWORD 的变量=值」（审查 10-30 第九份 安卓低11）
     private static final Pattern PEM = Pattern.compile("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(-----END [A-Z0-9 ]*PRIVATE KEY-----|\\z)", Pattern.DOTALL);
     private static final Pattern ENVKV = Pattern.compile("(?m)\\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIALS?)[A-Z0-9_]*\\s*[=:]\\s*)[\"']?[^\\s\"']{4,}[\"']?");
@@ -162,6 +181,7 @@ public final class Share extends ContentProvider {
         s = PEM.matcher(s).replaceAll("«私钥已抹去»");
         s = ENVKV.matcher(s).replaceAll("$1«已抹去»");
         s = INJ.matcher(ASK.matcher(s).replaceAll("$1«内容已抹去»$2")).replaceAll("$1«内容已抹去»");
+        s = TOOL_ARG.matcher(LOCAL_CMD.matcher(s).replaceAll("$1")).replaceAll("$1");
         s = QSECRET.matcher(s).replaceAll("$1«已抹去»");
         s = USERINFO.matcher(s).replaceAll("$1«已抹去»@");
         return EMAIL.matcher(SECRET.matcher(s).replaceAll("«已抹去»")).replaceAll("«邮箱»");

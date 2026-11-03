@@ -11,6 +11,7 @@ import { log } from "./config.mjs";
 
 const MAX_IMAGES = 5;
 const MAX_RAW = 3.75 * 1024 * 1024;        // base64 后 5 MB 是官方单图上限，第三方只会更紧
+const MAX_SHRINK = 64 * 1024 * 1024;       // 再大的原图不交给 magick 缩（缩在别的进程里，但也要读、要时间），只走 Read
 const REF = /@(\/[^\s"'<>`]+?\.(?:png|jpe?g|gif|webp))(?=[\s"'<>`),.;，。；]|$)/gi;
 
 /** 按文件头认格式：扩展名和内容对不上时，按扩展名报 media_type 会被拒 */
@@ -39,6 +40,13 @@ export function imageRefs(msg) {
   return out;
 }
 
+// 先看大小、只读文件头认格式，合适了才整读：以前先把整张图读进网关内存再判断太大（审查 v0.5.20 07-012）
+const sizeOf = (f) => { try { return fs.statSync(f).size; } catch { return -1; } };
+function head(f) {
+  const fd = fs.openSync(f, "r");
+  try { const b = Buffer.alloc(12); return b.subarray(0, fs.readSync(fd, b, 0, 12, 0)); } finally { fs.closeSync(fd); }
+}
+
 function block(buf) {
   const mt = sniff(buf);
   return mt && buf.length <= MAX_RAW ? { type: "image", source: { type: "base64", media_type: mt, data: buf.toString("base64") } } : null;
@@ -62,10 +70,13 @@ export async function inlineImages(msg, P, { tmpDir, env } = {}) {
   if (!wantsInline(P)) return [];
   const blocks = [];
   for (const f of imageRefs(msg)) {
-    let buf;
-    try { buf = fs.readFileSync(f); } catch { continue; }
-    let b = block(buf);
-    if (!b && sniff(buf) && tmpDir) { const s = await shrink(f, { tmpDir, env }); if (s) b = block(s); }
+    const size = sizeOf(f);
+    if (size < 0) continue;
+    let b = null;
+    try {
+      if (size <= MAX_RAW) b = block(fs.readFileSync(f));
+      else if (size <= MAX_SHRINK && tmpDir && sniff(head(f))) { const s = await shrink(f, { tmpDir, env }); if (s) b = block(s); }
+    } catch { continue; }
     if (b) blocks.push(b); else log(`[图片随消息] ${path.basename(f)} 没带上（格式不认或太大且缩不了），只走 Read`);
   }
   return blocks;
@@ -77,7 +88,8 @@ export function inlineImagesSync(msg, P) {
   const blocks = [];
   for (const f of imageRefs(msg)) {
     let b = null;
-    try { b = block(fs.readFileSync(f)); } catch {}
+    const size = sizeOf(f);
+    try { if (size >= 0 && size <= MAX_RAW) b = block(fs.readFileSync(f)); } catch {}
     if (b) blocks.push(b); else log(`[图片随消息] ${path.basename(f)} 没带上（插话里不缩图），只走 Read`);
   }
   return blocks;

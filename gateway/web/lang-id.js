@@ -2634,4 +2634,9 @@ window.I18N_DICT["id"] = {
   "这一轮已经收不进指令，只能把 {n} 个后台任务一起停掉。继续？": "Giliran ini tidak bisa lagi menerima perintah, jadi {n} tugas latar belakang harus dihentikan bersama. Lanjutkan?",
   "{n} 个没停下：{list}": "{n} tidak berhenti: {list}",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(Ini status dari pengecekan terakhir; kali ini gagal: {msg})",
+  "请在弹出的说明里确认…": "Silakan konfirmasi di dialog yang muncul…",
+  "正在关闭…": "Mematikan…",
+  "已打开：特权命令不再逐条确认": "Aktif: perintah istimewa tidak lagi dikonfirmasi satu per satu",
+  "✓ 已关闭，恢复逐条确认": "✓ Nonaktif, kembali mengonfirmasi tiap perintah",
+  "特权命令不再逐条确认（风险自负）：打开后特权命令直接执行，在后台也不会卡在等确认；涉及 cccodroid 自身和 Shizuku / Sui 的会尽量拦下来再问，但拦不住所有写法。只想放行一个会话，在确认框里勾「这个会话后面的都允许」即可": "Tidak lagi mengonfirmasi tiap perintah istimewa (risiko ditanggung sendiri): setelah aktif, perintah istimewa langsung dijalankan dan tugas di latar belakang tidak lagi tertahan menunggu konfirmasi; perintah yang menyentuh cccodroid atau Shizuku / Sui sebisa mungkin dicegat dan ditanyakan, tetapi tidak semua bentuk penulisan bisa terdeteksi. Untuk mengizinkan satu sesi saja, centang \"Izinkan semua perintah istimewa berikutnya di sesi ini\" di dialog konfirmasi",
 };

@@ -18,6 +18,24 @@ import java.util.regex.Pattern;
 final class PrivRules {
     private PrivRules() {}
 
+    /** 动到本应用（pkg）、Shizuku / Sui 自己的命令：开了免确认也照样问（别让一条命令把保护本身拆掉）。
+     *  只是尽力而为：写法看不清的（变量、命令替换、通配、转义、编码解码、把输出再当命令跑的 xargs / sh）一律当成可能动到，回到确认框；
+     *  引号去掉前后都看（cc.codro"i"d、ba''se64 这种拆词，审查 0601 中-3、0601b）。脚本文件里写的看不见，拦不住 */
+    static boolean touchesSelf(String text, String pkg) {
+        String x = text.toLowerCase(Locale.ROOT).replace("\"", "").replace("'", "");
+        if (OPAQUE.matcher(text).find() || OPAQUE.matcher(x).find()) return true;
+        return x.contains(pkg) || x.contains("shizuku") || x.contains("rikka") || x.contains("/data/adb");
+    }
+    /** 免问的命令（am force-stop 这类）点了本应用或 Shizuku 的名：也要问 —— 一条 am force-stop cc.codroid 就把网关和在跑的任务全停了（审查 0601c）。
+     *  只看字面，不套 OPAQUE：查看类命令里的通配、正则很常见，套上就全变成要问了 */
+    static boolean namesSelf(String text, String pkg) {
+        String x = text.toLowerCase(Locale.ROOT).replace("\"", "").replace("'", "");
+        return x.contains(pkg) || x.contains("shizuku") || x.contains("rikka");
+    }
+    static final Pattern OPAQUE = Pattern.compile("[$`\\\\*?\\[]|\\b(eval|source|base64|base32|xxd|printf|rev|tr|od|sed|awk|xargs|sh|mksh|bash|ash|dash|zsh|openssl|gzip|gunzip|zcat|perl|python3?)\\b"
+        // 从管道读命令跑的来源（/dev/stdin、/dev/fd、/proc/self/fd…），和命令位置上的 . （source，前面可能是 ; & | ( { } 或 then / do / else）（审查 0601c、0601d）
+        + "|/dev/(stdin|fd)|/proc/[^/\\s]+/fd|(^|[;&|(){}\n])\\s*\\.\\s|\\b(then|do|else)\\s+\\.\\s");
+
     /** 不能免问就返回 true。env：请求自带了环境变量；cwd：请求的工作目录 */
     static boolean risky(String[] argv) { return risky(argv, false, null); }
 

@@ -15,10 +15,9 @@ import { RUNS } from "./runs.mjs";
 import { publish } from "./bus.mjs";
 import { NAMES, saveNames } from "./sessions.mjs";
 import { trashSession } from "./sessionops.mjs";
-import { projectById, projectDefaults } from "./projects.mjs";
+import { projectById } from "./projects.mjs";
 import { isLoginMode } from "./models.mjs";
-import { providerById } from "./providers.mjs";
-import { sessProvider } from "./sessmodel.mjs";
+import { pickProvider } from "./run.mjs";
 import { privCall } from "./usage.mjs";
 import { usdCny } from "./providers.mjs";
 
@@ -170,13 +169,10 @@ export function schedSessions() {
 function addRun(rec) { RUNLOG.push(rec); saveRuns(); publish({ type: "sched", op: "run", taskId: rec.taskId }); return rec; }
 function note(t, title, text, sessionId, ok) { publish({ type: "sched_note", taskId: t.id, title, text: String(text || "").slice(0, 200), sessionId: sessionId || null, ok: !!ok }); }
 
-// 这个任务跑起来会用哪家：和 run.mjs 挑接口的顺序一致（任务指定 → 接着的会话钉的 → 项目默认 → 全局）
-function taskProvider(t) {
-  const sid = t.session === "same" && t.lastSid ? t.lastSid : null;
-  const pd = projectDefaults(t.projectId ? projectById(t.projectId) : null);
-  return (t.provider && providerById(t.provider)) || (pd.provider && providerById(pd.provider)) || sessProvider(sid);
-}
-const usesLogin = (t) => { try { return isLoginMode(taskProvider(t)); } catch { return false; } };
+// 这个任务跑起来会用哪家：直接用 run.mjs 的 pickProvider，入参和下面 enqueue 的一致——
+// 以前这里抄了一份优先级，少了「会话钉的」那层：项目默认 API、接着的会话钉了官方账户时，门禁放行了、实际用订阅跑（审查 v0.5.20 03-013）
+const taskItem = (t) => ({ projectId: t.projectId && projectById(t.projectId) ? t.projectId : null, sessionId: t.session === "same" && t.lastSid ? t.lastSid : null, provider: t.provider || null });
+const usesLogin = (t) => { try { return isLoginMode(pickProvider(taskItem(t)).P); } catch { return false; } };
 
 // ── 跑一次 ──
 const NULL_AT = new Map();  // 排不出下次时间的任务上次重算的时刻
@@ -259,6 +255,15 @@ START_GUARDS.push((q) => {
   const ctx = q.sched && RUNNING.get(q.sched.key);
   if (!ctx || ctx.trial) return true;
   const t = byId(ctx.taskId);
+  // 排队期间会话可能被改钉到官方账户：真开跑前按这一条实际会用的那家再核一次订阅许可
+  if (t && !DB.allowLogin && (() => { try { return isLoginMode(pickProvider(q).P); } catch { return false; } })()) {
+    RUNNING.delete(q.sched.key);
+    const msg = tz("用订阅账户跑定时任务默认关闭");
+    log(`⏭ 定时任务「${t.name}」跳过：${msg}`);
+    addRun({ taskId: t.id, at: Date.now(), st: "skip", msg });
+    note(t, tz("定时任务已跳过"), tz("「{n}」要用订阅账户跑：到定时任务页底部「订阅账户」里打开（无人值守使用以 Anthropic 条款为准），或给任务换一个用 API Key 的接口", { n: t.name }), null, false);
+    return false;
+  }
   if (t && (ctx.reason !== "due" || t.on)) return true;
   RUNNING.delete(q.sched.key);
   const msg = tz("排队时任务被关掉或删了");

@@ -126,7 +126,7 @@ function termNew({ cols, rows, login, cwd: want } = {}) {
     if (!s) return;
     t.buf += s;
     if (t.buf.length > TERM_RING) t.buf = t.buf.slice(t.buf.length - TERM_RING);
-    for (const r of t.subs) sseSend(r, "o", s);
+    for (const r of t.subs) sseSend(r, "o", s, t);
   };
   child.stdout.on("data", (d) => out(t.dec.write(d)));
   child.stderr.on("data", (d) => out(d.toString()));     // 只有 ptyhost 自己的报错走这里
@@ -150,8 +150,14 @@ function termNew({ cols, rows, login, cwd: want } = {}) {
   return { ok: true, term: termInfo(t) };
 }
 
-function sseSend(res, ev, data) {
-  try { res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); } catch {}
+// 订阅者读得太慢（WebView 在后台被冻住）而终端一直在出字：待发的超过 8MB 就断掉它，前端重连时拿回放环续上，
+// 别让一个冻住的连接把网关内存撑爆（审查 v0.5.20 02-004；事件总线同一规则见 bus.mjs）
+const SSE_MAX = 8 * 1024 * 1024;
+function sseSend(res, ev, data, t) {
+  try {
+    if (res.writableLength > SSE_MAX) { if (t) t.subs.delete(res); res.destroy(); return; }
+    res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`);
+  } catch {}
 }
 
 function termKill(t) {
@@ -219,3 +225,4 @@ export async function routeTerminal(req, res, u, p) {
   if (p.startsWith("/api/term/")) return handleTerm(req, res, p);
   return NEXT;
 }
+export const _termForTest = { sseSend };   // 只给测试用

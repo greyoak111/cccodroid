@@ -687,6 +687,11 @@
               <div class="sc"><input type="checkbox" class="sw" id="priv-ka"></div>
             </div>
             <div class="prov-state" id="priv-ka-result"></div>
+            <div class="srow sub" id="priv-na-row">
+              <div class="sl"><p data-i18n>特权命令不再逐条确认（风险自负）：打开后特权命令直接执行，在后台也不会卡在等确认；涉及 cccodroid 自身和 Shizuku / Sui 的会尽量拦下来再问，但拦不住所有写法。只想放行一个会话，在确认框里勾「这个会话后面的都允许」即可</p></div>
+              <div class="sc"><input type="checkbox" class="sw" id="priv-na"></div>
+            </div>
+            <div class="prov-state" id="priv-na-result"></div>
           </div>
           <!-- 通知：应用在后台时，跑完 / 等确认提醒一下。只有 cccodroid 带（GatewayService 发），开发端整块隐藏 -->
           <div class="sblock hidden" id="ntf-field">

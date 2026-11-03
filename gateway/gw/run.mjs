@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { CFG, LAST_LANG, PATHS, log, tr, tz, permModeAction } from "./config.mjs";
 import { SETTINGS, capList } from "./settings-store.mjs";
@@ -45,6 +46,21 @@ function cwdOf(item, sessionId) {
 // 和 HTTP 请求完全脱钩：前端断了也接着跑，结果照样落进 transcript、照样广播。
 // 这一轮用哪家：定时任务指定的 → 新会话首条带来的选择（pin）→ 这个会话钉的 → 项目默认 → 全局生效的。
 // 整轮都按它（地址、密钥、模型名规则）。/api/chat 入口查 Key 也用它，两边才不会各认一家（审查 #49 P2-4）
+// 特权命令「这个会话都允许」：每个会话一个随机口令，经环境变量 CCAPP_PRIV_SESS 跟着这个会话的每一轮 claude 走，
+// 应用在确认框里勾了「本会话都允许」就记下它（只在内存里，应用或网关重启即失效）。无人值守（定时任务）的轮次不带，
+// 用户点头时没看着的任务不该沾光
+const PRIV_TOK = new Map();
+function privToken(run) {
+  if (run.unattended) return "";
+  const tok = (run.sessionId && PRIV_TOK.get(run.sessionId)) || crypto.randomBytes(16).toString("hex");
+  if (run.sessionId) PRIV_TOK.set(run.sessionId, tok);
+  if (PRIV_TOK.size > 500) PRIV_TOK.delete(PRIV_TOK.keys().next().value);
+  return tok;
+}
+
+// 工具确认进日志只记参数多长，不记原文：命令、路径、网址可能带着用户的业务内容，诊断包里不该有（审查 v0.5.20 08-001）
+const argLen = (inp) => { const v = String(inp?.command || inp?.file_path || inp?.url || ""); return v ? `(${v.length} 字)` : ""; };
+
 export function pickProvider(item) {
   const sid0 = item.sessionId || (item.follow && RUN_SESSIONS.get(item.follow)) || null;
   const pdef0 = projectDefaults(item.projectId ? projectById(item.projectId) : projectOfDir(cwdOf(item, sid0)));
@@ -74,6 +90,9 @@ export async function startRun(item) {
     sched: item.sched || null,         // 定时任务跑的：{ taskId, runKey }（结束时 sched.mjs 记运行记录）
     unattended: !!item.unattended,     // 没人看着：要确认的一律拒绝
   };
+  // 进程起来之前（拉模型、问设备工具、读建档提示都要等）用户改权限模式：先记下来，起进程时按最新的那个启动；
+  // 起来后由下面真的 setMode 接手（审查 v0.5.20 02-001：以前这段时间收紧会被开头读的旧模式盖掉，新进程照样全部放行）
+  run.setMode = (mode) => { run.permMode = mode; return true; };
   run.lane = laneOfItem(item);
   RUNS.set(run.id, run);                 // 同步占槽，中间不许有 await
   RUN_LANE.set(run.id, run.lane);
@@ -89,7 +108,7 @@ export async function startRun(item) {
   const message = run.text;
   const local = message.trim().match(/^\/(model|models|effort|autocompact)(?:\s+([\s\S]*))?$/);
   if (local) {
-    log(`⌘ 本地命令 /${local[1]}${local[2] ? " " + local[2].trim() : ""}`);
+    log(`⌘ 本地命令 /${local[1]}`);   // 参数不记：诊断包说了不含消息内容（审查 v0.5.20 08-001）
     return handleLocalCommand(local[1], (local[2] || "").trim(),
       (text, cmd) => endRun(run, { localCommand: cmd || local[1], resultText: text, durationMs: 0, costUsd: 0 }), run.sessionId);
   }
@@ -152,8 +171,9 @@ export async function startRun(item) {
     const mi = currentModelInfo(model, P);
     if (!effortLevelsOf(mi, P).includes(effort)) effort = normEffort(mi, effort, P) || "";
   }
-  let permMode = String(item.permissionMode || SETTINGS.permissionMode || "default").trim();
+  let permMode = String(run.permMode || item.permissionMode || SETTINGS.permissionMode || "default").trim();
   if (!PERM_MODES.includes(permMode)) permMode = "default";
+  run.permMode = permMode;
 
   // 端侧小模型：先确保 llama-server 跑着、载的是这个模型（第一次要加载十几秒）
   if (P.local) {
@@ -242,11 +262,16 @@ export async function startRun(item) {
   const refN = isCmd || P.local ? "" : await refNote(message, run.sessionId).catch((e) => { log("档号引用失败: " + e.message); return ""; });
   // 上面拉模型清单、问设备工具、读建档提示都要等：这期间点了停止（还没有进程可杀）就别再起了（安全通告 GHSA-g35m）
   if (run.aborted) { log("⏹ 起进程前已停止"); return endRun(run, { durationMs: 0 }); }
+  const pmAt = argv.indexOf("--permission-mode");
+  if (run.permMode !== permMode && PERM_MODES.includes(run.permMode) && pmAt >= 0) {
+    log(`权限模式在起进程前改了：${permMode} → ${run.permMode}`);
+    argv[pmAt + 1] = permMode = run.permMode;
+  }
   const [cmd0, args0] = claudeCmd(argv);
   const child = spawn(cmd0, args0, {
     cwd,
     // CCAPP_RUN_ID / CCAPP_GW_PORT：建档命令 cc-archive 靠它们告诉网关「这是哪一轮」
-    env: { ...claudeEnv({ model, provider: P }), CCAPP_RUN_ID: String(run.id), CCAPP_GW_PORT: String(CFG.port) },
+    env: { ...claudeEnv({ model, provider: P }), CCAPP_RUN_ID: String(run.id), CCAPP_GW_PORT: String(CFG.port), ...((run.privTok = privToken(run)) ? { CCAPP_PRIV_SESS: run.privTok } : {}) },
     stdio: ["pipe", "pipe", "pipe"],
     detached: true,            // 当进程组长，中断时好整组带走（见 killTree）
   });
@@ -311,7 +336,6 @@ export async function startRun(item) {
   run.perms = new Map();
   const writeCtl = (o) => { try { child.stdin.write(JSON.stringify(o) + "\n"); return true; } catch { return false; } };
   let ctlN = 0;
-  run.permMode = permMode;
   run.setMode = (mode) => { run.permMode = mode; return run.inputOpen && writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "set_permission_mode", mode } }); };
   // 停掉一个后台任务（stop_task 控制请求；claude 停完会再报一次 background_tasks_changed）
   run.stopTask = (taskId) => run.inputOpen && run.bgList.some((t) => t.id === taskId) &&
@@ -362,7 +386,7 @@ export async function startRun(item) {
       const gm = r.decision_reason_type === "hook" && /^cccodroid-guard\|([^|]+)\|(.*)$/s.exec(String(r.decision_reason || ""));
       if (gm) { p.guard = { cat: gm[1].slice(0, 80), what: gm[2].slice(0, 200) }; p.reason = null; }
       if (run.unattended) {
-        log(`✗ 无人值守，自动拒绝 ${p.tool} ${String(p.input.command || p.input.file_path || p.input.url || "").slice(0, 60)}`);
+        log(`✗ 无人值守，自动拒绝 ${p.tool} ${argLen(p.input)}`);
         (run.denied = run.denied || []).push(p.tool);
         writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: { behavior: "deny",
           message: "This is an unattended scheduled run: nobody can approve this action, so it is denied. Do not retry it; finish with what you can do and say what was blocked." } } });
@@ -370,19 +394,19 @@ export async function startRun(item) {
       }
       // 同一轮里这一类敏感操作已经点过允许（比如一连串读屏点按）：别每步都问
       if (p.guard && run.guardOk?.has(p.guard.cat)) {
-        log(`✓ 敏感操作本轮已允许过，放行 ${p.tool} ${p.guard.what.slice(0, 60)}`);
+        log(`✓ 敏感操作本轮已允许过，放行 ${p.tool} ${p.guard.cat || ""}`);
         writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: { behavior: "allow", updatedInput: p.input } } });
         return;
       }
       // 全部放行时 claude 不该再来问；来了（子代理没继承到模式之类）就直接放行，必须由人回答的（AskUserQuestion 等）照问。
       // 敏感操作再确认的卡片例外：那是专门为全部放行加的一道兜底
       if (run.permMode === "bypassPermissions" && !p.interactive && !HUMAN_TOOLS.has(p.tool) && !p.guard) {
-        log(`✓ 全部放行，自动允许 ${p.tool}${p.agentId ? "（子代理）" : ""} ${String(p.input.command || p.input.file_path || p.input.url || "").slice(0, 60)}`);
+        log(`✓ 全部放行，自动允许 ${p.tool}${p.agentId ? "（子代理）" : ""} ${argLen(p.input)}`);
         writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: { behavior: "allow", updatedInput: p.input } } });
         return;
       }
       run.perms.set(id, p);
-      log(`⏸ 等确认 ${p.tool} ${String(p.input.command || p.input.file_path || p.input.url || "").slice(0, 60)}`);
+      log(`⏸ 等确认 ${p.tool} ${argLen(p.input)}`);
       emit({ type: "perm_request", ...p });
       publishState();
       return;
@@ -409,6 +433,7 @@ export async function startRun(item) {
     // 新会话的 run_start 发出时还没有会话号：回填进日志，别的视图切过来、整轮重放时才认得出这是它的
     for (const e of run.log || []) if (e.type === "run_start" && !e.sessionId) e.sessionId = run.sessionId;
     RUN_SESSIONS.set(run.id, run.sessionId);
+    if (run.privTok && !PRIV_TOK.has(run.sessionId)) PRIV_TOK.set(run.sessionId, run.privTok);   // 新会话：有了会话号才挂上
     if (RUN_SESSIONS.size > 500) RUN_SESSIONS.delete(RUN_SESSIONS.keys().next().value);
     rememberSession(run.sessionId);
     if (item.pin) setSessModel(run.sessionId, item.pin, item.projectId);   // 新会话首条带来的选择：有了会话号就记上

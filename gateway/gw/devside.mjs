@@ -249,6 +249,10 @@ export async function routeDevside(req, res, u, p) {
     }
     return sendJson(res, 200, { ok: true, supported: !!PREFIX, items });
   }
+  if (req.method === "POST" && p === "/api/priv/noask") {
+    let b; try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
+    return sendJson(res, 200, await privCall({ op: "noask", enable: b.enable === true }, 90000));
+  }
   if (req.method === "POST" && p === "/api/priv/keepalive") {
     const b = JSON.parse((await readBody(req)) || "{}");
     return sendJson(res, 200, await privCall({ op: "keepalive", enable: b.enable !== false }, 60000));

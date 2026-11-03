@@ -43,7 +43,7 @@
     const el = $("priv-state");
     if (st.state === "ok") {
       el.className = "prov-state ok";
-      el.textContent = t("✓ 已就绪 · 以 {who} 身份执行", { who: st.uid === 0 ? "root" : st.uid === 2000 ? "shell" : "uid " + st.uid }) + (st.version ? " · Shizuku v" + st.version : "");
+      el.textContent = t("✓ 已就绪 · 以 {who} 身份执行", { who: st.uid === 0 ? "root" : st.uid === 2000 ? "shell" : "uid " + st.uid }) + (st.sui ? " · Sui" : st.version ? " · Shizuku v" + st.version : "");
     } else {
       const [cls, txt] = PRIV_TEXT[st.state] || ["err", st.message || t("状态未知")];
       el.className = "prov-state " + cls;
@@ -101,6 +101,10 @@
     $("priv-ka-row").style.opacity = st.state === "ok" ? "1" : ".45";
     $("priv-ka").disabled = st.state !== "ok";
     $("priv-ka").checked = !!st.keepalive;
+    $("priv-na-row").classList.toggle("hidden", !!st.dev);
+    $("priv-na-row").style.opacity = st.state === "ok" ? "1" : ".45";
+    $("priv-na").disabled = st.state !== "ok";
+    $("priv-na").checked = !!st.noask;
     // 安装、配对、启动都在进行时自己刷新（设置页开着才刷）
     clearTimeout(privPoll);
     if (busy && pageOn("settings")) privPoll = setTimeout(loadPriv, 1500);
@@ -448,6 +452,16 @@
     out.textContent = r.ok
             ? (on ? t("✓ 已应用") + (r.phantom ? t("（幽灵进程上限 {n}）", { n: r.phantom }) : "") : t("✓ 已恢复"))
       : "✗ " + (r.message || t("失败"));
+    loadPriv();
+  });
+
+  // 特权命令免确认：打开时由应用弹原生的免责说明（这里不另问一遍），点了「打开」才生效
+  $("priv-na").addEventListener("change", async (e) => {
+    const on = e.target.checked, out = $("priv-na-result");
+    out.className = "prov-state"; out.textContent = on ? t("请在弹出的说明里确认…") : t("正在关闭…");
+    const r = await post("/api/priv/noask", { enable: on }).catch((e2) => ({ ok: false, message: e2.message }));
+    out.className = "prov-state " + (r.ok ? (on ? "warn" : "ok") : "err");
+    out.textContent = r.ok ? (on ? t("已打开：特权命令不再逐条确认") : t("✓ 已关闭，恢复逐条确认")) : "✗ " + (r.message || t("失败"));
     loadPriv();
   });
 

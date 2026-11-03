@@ -2634,4 +2634,9 @@ window.I18N_DICT["es"] = {
   "这一轮已经收不进指令，只能把 {n} 个后台任务一起停掉。继续？": "Este turno ya no acepta órdenes, así que hay que detener juntas las {n} tareas en segundo plano. ¿Continuar?",
   "{n} 个没停下：{list}": "{n} no se detuvieron: {list}",
   "（这是上次查询的状态，这次没问出来：{msg}）": "(Es el estado de la última consulta; esta vez falló: {msg})",
+  "请在弹出的说明里确认…": "Confirma en el diálogo que aparece…",
+  "正在关闭…": "Desactivando…",
+  "已打开：特权命令不再逐条确认": "Activado: los comandos privilegiados ya no se confirman uno a uno",
+  "✓ 已关闭，恢复逐条确认": "✓ Desactivado; se vuelve a confirmar cada comando",
+  "特权命令不再逐条确认（风险自负）：打开后特权命令直接执行，在后台也不会卡在等确认；涉及 cccodroid 自身和 Shizuku / Sui 的会尽量拦下来再问，但拦不住所有写法。只想放行一个会话，在确认框里勾「这个会话后面的都允许」即可": "Dejar de confirmar cada comando privilegiado (bajo tu responsabilidad): al activarlo, los comandos privilegiados se ejecutan directamente y las tareas ya no se quedan esperando confirmación en segundo plano; los que afectan a cccodroid o a Shizuku / Sui se intentan detener para preguntar, aunque no se pueden detectar todas las formas de escribirlos. Para permitir solo una sesión, marca «Permitir todos los comandos privilegiados siguientes de esta sesión» en el diálogo de confirmación",
 };

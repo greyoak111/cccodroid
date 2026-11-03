@@ -2668,5 +2668,10 @@ window.I18N_DICT.en = {
   "立即发送要先停掉还在跑的 {n} 个后台任务。继续？": "Sending now will first stop {n} background task(s) that are still running. Continue?",
   "这一轮已经收不进指令，只能把 {n} 个后台任务一起停掉。继续？": "This turn can no longer take commands, so all {n} background tasks have to be stopped together. Continue?",
   "{n} 个没停下：{list}": "{n} didn't stop: {list}",
-  "（这是上次查询的状态，这次没问出来：{msg}）": "(This is the status from the last check; this check failed: {msg})"
+  "（这是上次查询的状态，这次没问出来：{msg}）": "(This is the status from the last check; this check failed: {msg})",
+  "请在弹出的说明里确认…": "Please confirm in the dialog that pops up…",
+  "正在关闭…": "Turning off…",
+  "已打开：特权命令不再逐条确认": "On: privileged commands are no longer confirmed one by one",
+  "✓ 已关闭，恢复逐条确认": "✓ Off; confirming each command again",
+  "特权命令不再逐条确认（风险自负）：打开后特权命令直接执行，在后台也不会卡在等确认；涉及 cccodroid 自身和 Shizuku / Sui 的会尽量拦下来再问，但拦不住所有写法。只想放行一个会话，在确认框里勾「这个会话后面的都允许」即可": "Stop confirming privileged commands one by one (at your own risk): once on, privileged commands run directly and tasks no longer stall waiting for confirmation in the background; commands touching cccodroid itself or Shizuku / Sui are caught and asked about where possible, but not every form can be caught. To allow just one session, tick \"Allow all later privileged commands in this session\" in the prompt instead"
 };

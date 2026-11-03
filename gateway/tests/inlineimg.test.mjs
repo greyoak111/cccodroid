@@ -41,6 +41,20 @@ test("太大的图：插话里不缩、直接不带（留给 Read）；最多 5 
   assert.equal(inlineImagesSync(many.map((p) => "@" + p).join(" "), ON).length, 5);
 });
 
+test("太大的图不先整读进网关内存（审查 v0.5.20 07-012）：插话直接跳过，起轮前只读文件头再交给缩图", async () => {
+  const { inlineImagesSync, inlineImages } = await import("../gw/inlineimg.mjs");
+  const big = put("big8.png", Buffer.concat([PNG, Buffer.alloc(8 * 1024 * 1024)]));
+  const huge = put("huge.png", PNG); fs.truncateSync(huge, 80 * 1024 * 1024);   // 稀疏文件：不真占 80MB
+  const orig = fs.readFileSync, seen = [];
+  fs.readFileSync = function (p, ...rest) { const r = orig.call(this, p, ...rest); if (p === big || p === huge) seen.push(r.length); return r; };
+  try {
+    assert.deepEqual(inlineImagesSync(`@${big}`, ON), []);
+    await inlineImages(`@${big} @${huge}`, ON, { tmpDir: dir });
+    await inlineImages(`@${big}`, ON);
+  } finally { fs.readFileSync = orig; }
+  assert.deepEqual(seen, [], "超过单图上限的原图一次都不该整读");
+});
+
 test("历史：原话里已有 @图片路径就不再补一行 [图片]；没有路径的照旧补", async () => {
   const { transcriptItems } = await import("../gw/transcript.mjs");
   const img = { type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } };

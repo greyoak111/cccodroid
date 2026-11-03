@@ -388,7 +388,7 @@ final class ShizukuSetup {
      */
     void reactivateAsync(boolean boot) {
         if (!prefs().getBoolean("autostart", false) || !prefs().getBoolean("paired", false) || !hasWss()) return;
-        if (Build.VERSION.SDK_INT < 30 || !Priv.installed()) return;
+        if (Build.VERSION.SDK_INT < 30 || !Priv.installed() || Priv.sui()) return;   // Sui 随系统起，不用无线调试拉
         new Thread(() -> {
             try {
                 if (boot) Thread.sleep(10_000);

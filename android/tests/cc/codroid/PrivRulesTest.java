@@ -9,7 +9,48 @@ public final class PrivRulesTest {
     }
     static void sh(boolean expect, String cmd) { want(expect, "/system/bin/sh", "-c", cmd); }
 
+    static void self(boolean expect, String cmd) {
+        if (PrivRules.touchesSelf(cmd, "cc.codroid") != expect) { fail++; System.out.println("FAIL " + (expect ? "应当算动到自己" : "不该算动到自己") + "：" + cmd); }
+    }
+
+    static void names(boolean expect, String cmd) {
+        if (PrivRules.namesSelf(cmd, "cc.codroid") != expect) { fail++; System.out.println("FAIL namesSelf " + expect + "：" + cmd); }
+    }
+
     public static void main(String[] a) {
+        // 0601c：免问命令点了本应用 / Shizuku 的名也要问
+        names(true, "am force-stop cc.codroid");
+        names(true, "am stop-app 'cc.codro''id'");
+        names(true, "am force-stop moe.shizuku.privileged.api");
+        names(false, "am force-stop com.foo");
+        names(false, "dumpsys meminfo | grep -E '^ +[0-9]'");
+        // 免确认下也要问的：动到本应用、Shizuku / Sui，或写法看不清（审查 0601 中-3、0601b 引号拆词）
+        self(true, "pm uninstall cc.codroid");
+        self(true, "pm uninstall cc.codro\"i\"d");
+        self(true, "am force-stop moe.shizuku.privileged.api");
+        self(true, "rm -rf /data/adb/modules");
+        self(true, "echo Y2MuY29kcm9pZA== | base64 -d | xargs pm uninstall");
+        self(true, "echo Y2MuY29kcm9pZA== | ba''se64 -d | xargs pm uninstall");
+        self(true, "echo Y2MuY29kcm9pZA== | ba\"\"se64 -d | x''args pm uninstall");
+        self(true, "echo pm uninstall cc.xodroid | sed s/x/c/ | sh");
+        self(true, "pm uninstall $P");
+        self(true, "pm uninstall cc.codr*");
+        self(true, "ev''al pm uninstall");
+        // 0601c：sed 转写 / awk 拼接 / . 从管道读
+        self(true, "echo abcdefghij | sed 'y/abcdefghij/pm unistl/' | . /dev/stdin");
+        self(true, "awk 'BEGIN { cmd = \"pm uninstall cc\" \".codroid\"; cmd | getline }'");
+        self(true, "echo x; . /sdcard/x");
+        self(true, "cat /dev/fd/0");
+        self(true, "echo x | { . /proc/self/fd/0; }");
+        self(true, "if :; then . /sdcard/x; fi");
+        self(true, "{ :; }. /sdcard/x");
+        self(true, "echo x | mksh");
+        self(false, "ls . | wc -l");
+        self(false, "pm uninstall com.example.app");
+        self(false, "settings put global window_animation_scale 0.5");
+        self(false, "dumpsys shortcut | grep -c ShortcutInfo");
+        self(false, "am force-stop com.foo; ssh-keygen -h");
+
         // 查看类：直接跑（含 cc-mem、网关自己用的）
         sh(false, "pm list packages");
         sh(false, "pm list packages --uid 10123; pm list packages --uid 10124");

@@ -425,18 +425,44 @@ public class MainActivity extends Activity {
 
     /** 白名单以外的特权命令执行前问一句（见 Priv.ask / PrivRules）：关掉、按返回都算拒绝。
      *  按钮一秒后才能点，盖在上面的窗口挡着时不收触摸 —— 防止脚本抢在用户前面把「允许」点掉 */
-    private void confirmPriv(String id, String cmd, String who, boolean trustable) {
+    private void confirmPriv(String id, String cmd, String who, boolean trustable, boolean sess, boolean noAskBox) {
         if (id == null) return;
         boolean clip = Tr.t("设备工具：读取剪贴板").equals(cmd);
         // 发起方是按对方进程的环境变量认的，对方能伪造：只作参考
-        String by = "claude".equals(who) ? "Claude" : "terminal".equals(who) ? Tr.t("终端") : "cc-mem".equals(who) ? "cc-mem" : Tr.t("不明程序");
+        String by = "claude".equals(who) ? "Claude" : "terminal".equals(who) ? Tr.t("终端") : "cc-mem".equals(who) ? "cc-mem" : "gateway".equals(who) ? Tr.t("cccodroid 网关接口（Claude 也能调用）") : Tr.t("不明程序");
+        // 设置页打开「特权命令免确认」：整段是免责说明，标题和按钮换成对应的说法。按 Priv 给的来路认，不看正文（审查 0601 高-2）；
+        // 也写上是谁要打开的 —— 设置页之外的程序也能发这个请求，用户没在设置里点就该拒（低-8）
+        String noAskHead = Tr.t("特权命令不再逐条确认（风险自负）");
+        if (noAskBox && cmd != null && cmd.startsWith(noAskHead + "\n\n")) {
+            final boolean[] said0 = { false };
+            android.app.AlertDialog d0 = new android.app.AlertDialog.Builder(this)
+                .setTitle(noAskHead)
+                .setMessage(Tr.t("发起方（自报，仅供参考）：") + by + "\n\n" + cmd.substring(noAskHead.length() + 2))
+                .setPositiveButton(Tr.t("我了解风险，打开"), (x, w) -> { said0[0] = true; Priv.answer(id, 1); })
+                .setNegativeButton(Tr.t("不打开"), (x, w) -> { said0[0] = true; Priv.answer(id, 0); })
+                .create();
+            d0.setOnDismissListener((x) -> { PRIV_DLG.remove(id); if (!said0[0]) Priv.answer(id, 0); });
+            PRIV_DLG.put(id, d0);
+            if (!guard(d0, android.content.DialogInterface.BUTTON_POSITIVE)) { PRIV_DLG.remove(id); Priv.answer(id, 0); }
+            return;
+        }
         final boolean[] said = { false };
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this)
             .setTitle(clip ? Tr.t("允许读取剪贴板？") : Tr.t("允许执行这条特权命令？"))
             .setMessage(Tr.t("发起方（自报，仅供参考）：") + by + "\n\n" + (clip ? Tr.t("剪贴板里可能有你从别的应用复制的密码、验证码。不是你让 Claude 读的就拒绝。")
                 : cmd + "\n\n" + Tr.t("它会以 Shizuku（shell）身份运行，能装卸应用、改权限或系统设置。不认识这条命令就拒绝。")))
-            .setPositiveButton(Tr.t("允许"), (x, w) -> { said[0] = true; Priv.answer(id, 1); })
             .setNegativeButton(Tr.t("拒绝"), (x, w) -> { said[0] = true; Priv.answer(id, 0); });
+        // 这个会话后面的都允许（Claude 发来的才有）：勾上再点「允许」。只在内存里，应用重启就失效
+        final android.widget.CheckBox all = sess && !clip ? new android.widget.CheckBox(this) : null;
+        if (all != null) {
+            all.setText(Tr.t("这个会话后面的特权命令都允许，不再逐条问（应用重启后失效）"));
+            int pad = (int) (20 * getResources().getDisplayMetrics().density);
+            android.widget.FrameLayout box = new android.widget.FrameLayout(this);
+            box.setPadding(pad, pad / 2, pad, 0);
+            box.addView(all);
+            b.setView(box);
+        }
+        b.setPositiveButton(Tr.t("允许"), (x, w) -> { said[0] = true; Priv.answer(id, all != null && all.isChecked() ? 3 : 1); });
         // 命令里引用了文件的，不给「不再问」：信任的是文字，文件内容随时能换（见 Priv.trustable）
         if (trustable) b.setNeutralButton(Tr.t("允许，这条命令 10 分钟内不再问"), (x, w) -> { said[0] = true; Priv.answer(id, 2); });
         android.app.AlertDialog d = b.create();
@@ -460,7 +486,7 @@ public class MainActivity extends Activity {
         else if (ACTION_UPDATE.equals(a)) Updater.get(this).apply(i.getStringExtra("item"), true);
         else if (ACTION_SHIZUKU.equals(a)) ShizukuSetup.get(this).activate();
         else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false));
-        else if (ACTION_PRIV_OK.equals(a)) confirmPriv(i.getStringExtra("id"), i.getStringExtra("cmd"), i.getStringExtra("who"), i.getBooleanExtra("trust", false));
+        else if (ACTION_PRIV_OK.equals(a)) confirmPriv(i.getStringExtra("id"), i.getStringExtra("cmd"), i.getStringExtra("who"), i.getBooleanExtra("trust", false), i.getBooleanExtra("sess", false), "noask".equals(i.getStringExtra("kind")));
         else if (Notify.ACTION_OPEN.equals(a)) openSession(i.getStringExtra("session"));
     }
 
@@ -527,14 +553,7 @@ public class MainActivity extends Activity {
                     continue;
                 }
                 try (InputStream in = in0; OutputStream o = new FileOutputStream(out)) {
-                    byte[] buf = new byte[1 << 16];
-                    long w = 0, check = 0;
-                    for (int r; (r = in.read(buf)) > 0; ) {
-                        o.write(buf, 0, r);
-                        if ((w += r) < check) continue;
-                        check = w + (64L << 20);       // 每写 64 MB 看一眼剩余空间
-                        if (dir.getUsableSpace() < (512L << 20)) throw new java.io.IOException(Tr.t("存储空间不够了"));
-                    }
+                    copyIn(in, o, dir);
                     n++;
                     toPage("ccapp-attach", out.getPath());
                 } catch (Exception e) {
@@ -545,6 +564,38 @@ public class MainActivity extends Activity {
             // 分享文件时 EXTRA_TEXT 常是标题之类的附带说明，只有单纯分享文字时才插进去
             if (n == 0 && uris.isEmpty() && text != null) toPage("ccapp-insert", text);
         }, "share-in").start();
+    }
+    /** 收别的应用递来的流：单个最多 4 GB；60 秒没来新数据就关掉输入流（阻塞的 read 随之返回）、算失败；
+     *  每写 64 MB 看一眼剩余空间，低于 512 MB 就停（审查 低12）。以前只有空间检查，一个不结束、或极慢的流能一直占着线程和存储（审查 v0.5.20 08-003） */
+    static final long SHARE_MAX = 4L << 30;
+    static void copyIn(InputStream in, OutputStream o, java.io.File dir) throws java.io.IOException {
+        final java.util.concurrent.atomic.AtomicLong last = new java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis());
+        final java.util.concurrent.atomic.AtomicBoolean stalled = new java.util.concurrent.atomic.AtomicBoolean(), done = new java.util.concurrent.atomic.AtomicBoolean();
+        Thread dog = new Thread(() -> {
+            while (!done.get()) {
+                try { Thread.sleep(2000); } catch (InterruptedException e) { return; }
+                if (!done.get() && System.currentTimeMillis() - last.get() > 60_000) { stalled.set(true); try { in.close(); } catch (Exception ignored) {} return; }
+            }
+        }, "share-in-dog");
+        dog.setDaemon(true);
+        dog.start();
+        try {
+            byte[] buf = new byte[1 << 16];
+            long w = 0, check = 0;
+            for (int r; (r = in.read(buf)) >= 0; ) {
+                if (r == 0) continue;
+                last.set(System.currentTimeMillis());
+                o.write(buf, 0, r);
+                if ((w += r) > SHARE_MAX) throw new java.io.IOException(Tr.t("文件超过 4 GB，没收"));
+                if (w < check) continue;
+                check = w + (64L << 20);
+                if (dir.getUsableSpace() < (512L << 20)) throw new java.io.IOException(Tr.t("存储空间不够了"));
+            }
+            if (stalled.get()) throw new java.io.IOException(Tr.t("对方 60 秒没有传数据，停止接收"));
+        } catch (java.io.IOException e) {
+            if (stalled.get()) throw new java.io.IOException(Tr.t("对方 60 秒没有传数据，停止接收"));
+            throw e;
+        } finally { done.set(true); dog.interrupt(); }
     }
     /** 附件大小门限（与界面 05-composer.js 的 BIG_ATT 同值）：超过的不经网页上传 */
     static final long BIG_ATTACH = 20L << 20;
@@ -606,14 +657,7 @@ public class MainActivity extends Activity {
                     continue;
                 }
                 try (InputStream in = openShared(u); OutputStream o = new FileOutputStream(out)) {
-                    byte[] buf = new byte[1 << 16];
-                    long w = 0, check = 0;
-                    for (int r; (r = in.read(buf)) > 0; ) {
-                        o.write(buf, 0, r);
-                        if ((w += r) < check) continue;
-                        check = w + (64L << 20);
-                        if (dir.getUsableSpace() < (512L << 20)) throw new java.io.IOException(Tr.t("存储空间不够了"));
-                    }
+                    copyIn(in, o, dir);
                     toPage("ccapp-attach-pick", out.getPath());
                 } catch (Exception e) {
                     out.delete();

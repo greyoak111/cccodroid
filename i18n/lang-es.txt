@@ -2631,3 +2631,8 @@
 2631	Este turno ya no acepta órdenes, así que hay que detener juntas las {n} tareas en segundo plano. ¿Continuar?
 2632	{n} no se detuvieron: {list}
 2633	(Es el estado de la última consulta; esta vez falló: {msg})
+2634	Confirma en el diálogo que aparece…
+2635	Desactivando…
+2636	Activado: los comandos privilegiados ya no se confirman uno a uno
+2637	✓ Desactivado; se vuelve a confirmar cada comando
+2638	Dejar de confirmar cada comando privilegiado (bajo tu responsabilidad): al activarlo, los comandos privilegiados se ejecutan directamente y las tareas ya no se quedan esperando confirmación en segundo plano; los que afectan a cccodroid o a Shizuku / Sui se intentan detener para preguntar, aunque no se pueden detectar todas las formas de escribirlos. Para permitir solo una sesión, marca «Permitir todos los comandos privilegiados siguientes de esta sesión» en el diálogo de confirmación

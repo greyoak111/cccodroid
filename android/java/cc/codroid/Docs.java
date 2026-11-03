@@ -82,17 +82,17 @@ public final class Docs extends DocumentsProvider {
         catch (Exception e) { return false; }
     }
 
+    /** ID 用名字本身的路径（不解开软链接），越界检查照旧按真实路径（checked）。
+     *  以前 ID 用真实路径：工作区里 alias.txt → target.txt，列出来名字是 alias.txt、ID 却是 target.txt，
+     *  在文件管理器里删「别名」实际删掉了原文件（审查 v0.5.20 06-002） */
     private String idOf(File f) throws FileNotFoundException {
-        try {
-            String base = home.getCanonicalPath();
-            String path = f.getCanonicalPath();
-            if (path.equals(base)) return ROOT_ID;
-            // 指到作用域外的软链接：不给 ID（列目录时跳过这一条）。以前直接截前缀，路径比根短就抛越界，整个目录列不出来
-            if (!path.startsWith(base + File.separator)) throw new FileNotFoundException("越界：" + f.getName());
-            return ROOT_ID + "/" + path.substring(base.length() + 1);
-        } catch (java.io.IOException e) {
-            throw new FileNotFoundException(f.getName());
-        }
+        // 指到作用域外的软链接：不给 ID（列目录时跳过这一条）
+        checked(f);
+        String base = home.getAbsoluteFile().toPath().normalize().toString();
+        String path = f.getAbsoluteFile().toPath().normalize().toString();
+        if (path.equals(base)) return ROOT_ID;
+        if (!path.startsWith(base + File.separator)) throw new FileNotFoundException("越界：" + f.getName());
+        return ROOT_ID + "/" + path.substring(base.length() + 1);
     }
 
     private static String mimeOf(File f) {
@@ -302,7 +302,13 @@ public final class Docs extends DocumentsProvider {
     public String renameDocument(String docId, String displayName) throws FileNotFoundException {
         File f = fileOf(docId);
         File to = checked(new File(f.getParentFile(), safeName(displayName)));
-        if (f.equals(home) || !f.renameTo(to)) throw new FileNotFoundException("改名失败");
+        if (f.equals(home)) throw new FileNotFoundException("改名失败");
+        if (to.equals(f)) return idOf(f);
+        // 不覆盖同名：以前直接 renameTo，改成已有文件的名字就把那个文件顶掉了（审查 v0.5.20 06-001）。
+        // Files.move 不带 REPLACE_EXISTING：目标在就报错；链接按链接本身挪
+        if (exists(to)) throw new FileNotFoundException("已经有叫这个名字的文件了");
+        try { java.nio.file.Files.move(f.toPath(), to.toPath()); }
+        catch (Exception e) { throw new FileNotFoundException("改名失败"); }
         changed(to.getParentFile());
         return idOf(to);
     }

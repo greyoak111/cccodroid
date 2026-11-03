@@ -59,6 +59,9 @@ final class Priv {
         if (started) return;
         started = true;
         ctx = c.getApplicationContext();
+        // Sui（Magisk / KernelSU 模块，提供和 Shizuku 一样的接口，但没有 Shizuku 管理器应用）：先认它，binder 由 Sui 直接递过来（#112）
+        try { sui = rikka.sui.Sui.init(ctx.getPackageName()); } catch (Throwable t) { sui = false; }
+        if (sui) Log.i(TAG, "检测到 Sui");
         Shizuku.addBinderReceivedListenerSticky(() -> {
             Log.i(TAG, "Shizuku binder 到手 uid=" + safeUid());
             if (prefs().getBoolean("keepalive", false) && granted()) {
@@ -96,7 +99,10 @@ final class Priv {
     private static SharedPreferences prefs() { return ctx.getSharedPreferences("priv", Context.MODE_PRIVATE); }
 
     // ── 状态 ───────────────────────────────────────────────────────────
+    private static volatile boolean sui;
+    static boolean sui() { return sui; }
     static boolean installed() {
+        if (sui) return true;
         try { ctx.getPackageManager().getPackageInfo(MANAGER, 0); return true; }
         catch (Exception e) { return false; }
     }
@@ -134,6 +140,8 @@ final class Priv {
         boolean ins = installed(), run = ins && running(), ok = run && verified();
         o.put("state", !ins ? "not_installed" : !run ? "not_running" : !ok ? "no_permission" : "ok");
         o.put("installed", ins);
+        o.put("sui", sui);
+        o.put("noask", noAsk());
         o.put("running", run);
         o.put("granted", ok);
         if (run) {
@@ -339,6 +347,22 @@ final class Priv {
                     resp = keepAlive(on);
                     break;
                 }
+                case "noask": {
+                    // 特权命令免确认（总开关）：打开要过原生对话框里的免责说明，脚本发请求没用；关掉随时可以
+                    boolean on = req.optBoolean("enable", false);
+                    int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
+                    if (on && !noAsk() && !confirm(Tr.t("特权命令不再逐条确认（风险自负）") + "\n\n"
+                            + Tr.t("打开后，Claude、终端和本机其他程序发来的特权命令都不再弹框问你，直接以 Shizuku（shell）身份执行，cccodroid 在后台时也一样。这类命令能装卸应用、改权限和系统设置。") + "\n\n"
+                            + Tr.t("命令写错、模型判断失误、或者混进来的脚本，都可能造成数据丢失、应用异常甚至需要恢复出厂设置。打开即表示你了解并自行承担这些风险，cccodroid 及其作者不对由此造成的损失负责。") + "\n\n"
+                            + Tr.t("涉及 cccodroid 自身、Shizuku / Sui 的命令会尽量拦下来再问你，但拦不住所有写法（比如藏在脚本文件里的）。随时可以在设置里关掉。"), caller(pid), "noask")) {
+                        resp = new JSONObject().put("ok", false).put("message", Tr.t("没有确认，仍然逐条询问"));
+                        break;
+                    }
+                    prefs().edit().putBoolean("noask", on).apply();
+                    Log.w(TAG, "特权命令免确认 " + (on ? "打开" : "关闭"));
+                    resp = new JSONObject().put("ok", true).put("noask", on);
+                    break;
+                }
                 case "to_front": resp = new JSONObject().put("ok", true).put("via", toFront(ctx, req.optString("text"))); break;
                 case "freeze_ack": ctx.getSharedPreferences("bg", Context.MODE_PRIVATE).edit().clear().apply(); resp = status(); break;
                 case "open_app_settings": {      // 自启动、悬浮窗之类的开关都在应用详情页里
@@ -448,7 +472,7 @@ final class Priv {
                 default: resp = new JSONObject().put("ok", false).put("message", Tr.t("未知操作 ") + op);
             }
             // 改状态的应用内操作也留痕（10-31 四轮复核：以前只有 exec 进特权命令记录）
-            if (op.startsWith("upd_") && !op.equals("upd_status") || op.startsWith("shz_") || op.equals("keepalive") || op.equals("dev_set")) {
+            if (op.startsWith("upd_") && !op.equals("upd_status") || op.startsWith("shz_") || op.equals("keepalive") || op.equals("dev_set") || op.equals("noask")) {
                 int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                 JSONObject r0 = new JSONObject(req.toString());
                 r0.remove("code");    // 配对码不进记录
@@ -507,6 +531,50 @@ final class Priv {
 
     static boolean asking() { return !ASKS.isEmpty(); }
 
+    // ── 免确认 ──
+    // 总开关（设置页，打开时原生对话框给免责说明、用户点头才生效）与「本会话都允许」的会话口令（只在内存里）
+    private static final java.util.Set<String> SESS_OK = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    static boolean noAsk() { return prefs().getBoolean("noask", false); }
+    /** 动到本应用、Shizuku / Sui 自己的命令：开了免确认也照样问。规则见 PrivRules.touchesSelf */
+    static boolean touchesSelf(String text) { return PrivRules.touchesSelf(text, ctx.getPackageName()); }
+
+    /** 会话口令（32 位十六进制）。不认发起方自己的环境变量：同 uid 的进程都能读到别的会话的口令，再塞进自己的环境冒用（审查 0601 高-1）。
+     *  沿父进程往上找到网关（本应用直接拉起、跑 server.mjs 的那个），只认网关的直接子进程身上的 —— 那是这一轮的 claude，
+     *  环境是网关给的，会话里跑的命令改不了。终端、别的会话、setsid 脱离出去的进程、不是本应用拉起的网关，都找不到这条链，照常问。
+     *  靠两条不变量成立，改动时别破坏（审查 0601b）：① 本应用的直接子进程只有网关（GatewayService.spawnGateway）；
+     *  ② CCAPP_PRIV_SESS 只放进 run.mjs 给 claude 的环境，网关的其他直接子进程（终端的 ptyhost、cc-mem…）一律不带。
+     *  比如把终端改成 shell 直接挂在网关下面，shell 就能 exec env CCAPP_PRIV_SESS=偷来的口令 重新执行自己，冒充已允许的会话 */
+    static String sessToken(int pid) { return chainToken(pid, android.os.Process.myPid()); }
+    /** me：本应用的进程号（拆出来是为了能在宿主上测） */
+    static String chainToken(int pid, int me) {
+        int below = 0, cur = pid;
+        for (int i = 0; i < 64 && cur > 1; i++) {
+            int pp = ppid(cur);
+            if (pp <= 0) return null;
+            if (pp == me) return below > 0 && proc(cur, "cmdline").contains("server.mjs") ? envToken(below) : null;
+            below = cur; cur = pp;
+        }
+        return null;
+    }
+    /** /proc/<pid>/stat 的父进程号；进程名里可能有空格和括号，从最后一个 ')' 后面数 */
+    static int ppid(int pid) {
+        String s = proc(pid, "stat");
+        int r = s.lastIndexOf(')');
+        if (r < 0) return -1;
+        try { return Integer.parseInt(s.substring(r + 2).split(" ")[1]); } catch (Exception e) { return -1; }
+    }
+    private static String envToken(int pid) {
+        for (String kv : proc(pid, "environ").split("\0")) if (kv.startsWith("CCAPP_PRIV_SESS=")) {
+            String v = kv.substring(16);
+            return v.matches("[0-9a-f]{32}") ? v : null;
+        }
+        return null;
+    }
+    private static String proc(int pid, String f) {
+        try { return new String(java.nio.file.Files.readAllBytes(new java.io.File("/proc/" + pid + "/" + f).toPath()), StandardCharsets.UTF_8); }
+        catch (Exception e) { return ""; }
+    }
+
     private static boolean trustable(String[] argv, String cwd, JSONObject env) {
         if (env != null || !"/".equals(cwd)) return false;
         // 直接起某个程序（不是 sh -c）：程序本身就是文件，内容随时能换
@@ -529,7 +597,9 @@ final class Priv {
 
     /** trustable = false：只给「允许这一次」。命令里引用了文件（或工作目录不是根）时，信任的是文本不是文件内容，
      *  别人把文件换掉再原样发一遍就搭上车了（10-31 三轮复核） */
-    private static boolean ask(String cmd, String who, String key, boolean trustable) {
+    private static boolean ask(String cmd, String who, String key, boolean trustable) { return ask(cmd, who, key, trustable, null); }
+    /** sess：发起方带着的会话口令（见 run.mjs privToken）。给了就在确认框里多一个「本会话都允许」 */
+    private static boolean ask(String cmd, String who, String key, boolean trustable, String sess) {
         Long t = trustable ? TRUST.get(key) : null;
         if (t != null && System.currentTimeMillis() < t) return true;
         // 命令整条摆出来（对话框正文能滚动）：截头截尾的话，危险的那段正好藏在省略的中间。太长的不问，直接拒
@@ -537,14 +607,16 @@ final class Priv {
         String show = cmd;
         String id = Long.toHexString(System.nanoTime()) + Integer.toHexString((int) (Math.random() * 0x7fffffff));
         java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
-        Object[] slot = { done, Boolean.FALSE, Boolean.FALSE };
+        Object[] slot = { done, Boolean.FALSE, Boolean.FALSE, Boolean.FALSE };
         synchronized (ASKS) {     // 「同一时间只问一条」：查和登记要一起做，不然同时来的两条都会弹
             if (!ASKS.isEmpty() || !foreground()) return false;
             ASKS.put(id, slot);
         }
         try {
             ctx.startActivity(MainActivity.internal(ctx, MainActivity.ACTION_PRIV_OK).putExtra("id", id)
-                .putExtra("cmd", show).putExtra("who", who).putExtra("trust", trustable)
+                .putExtra("cmd", show).putExtra("who", who).putExtra("trust", trustable).putExtra("sess", sess != null)
+                // 设置页的免责框：按来路认（exec 的 key 是 JSON 数组开头，撞不上），不看正文 —— 正文是命令原文，能伪造成免责说明的样子（审查 0601 高-2）
+                .putExtra("kind", !trustable && "noask".equals(key) ? "noask" : "")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             done.await(60, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception e) { Log.w(TAG, "问不了用户", e); }
@@ -553,14 +625,20 @@ final class Priv {
             if (TRUST.size() > 64) TRUST.clear();
             TRUST.put(key, System.currentTimeMillis() + 10 * 60_000L);
         }
+        if (sess != null && Boolean.TRUE.equals(slot[1]) && Boolean.TRUE.equals(slot[3])) {
+            if (SESS_OK.size() > 64) SESS_OK.clear();
+            SESS_OK.add(sess);
+            Log.i(TAG, "这个会话后面的特权命令不再逐条问（" + who + "）");
+        }
         return Boolean.TRUE.equals(slot[1]);
     }
 
-    /** 对话框的回答：how 0=拒绝 1=允许这一次 2=允许，这条命令 10 分钟内不再问 */
+    /** 对话框的回答：how 0=拒绝 1=允许这一次 2=允许，这条命令 10 分钟内不再问 3=允许，这个会话后面的都不再问 */
     static void answer(String id, int how) {
         Object[] slot = id == null ? null : ASKS.get(id);
         if (slot == null) return;
         slot[2] = how == 2;
+        slot[3] = how == 3;
         slot[1] = how > 0;
         ((java.util.concurrent.CountDownLatch) slot[0]).countDown();
     }
@@ -587,11 +665,17 @@ final class Priv {
             java.util.Iterator<String> it = e.keys();
             for (int i = 0; it.hasNext(); i++) { String k = it.next(); envp[i] = k + "=" + e.getString(k); }
         }
-        if (PrivRules.risky(argv, envp != null, req.optString("cwd", "/")) && !(envp == null && shotArmed(argv, req.optString("shot", null)))
-            && !ask((argv.length >= 3 && "-c".equals(argv[1]) ? argv[2] : String.join(" ", argv)) + (e != null ? "\n\n[env] " + e : ""), who,
-                a + "\0" + req.optString("cwd", "/") + "\0" + e, trustable(argv, req.optString("cwd", "/"), e))) {
+        String text = (argv.length >= 3 && "-c".equals(argv[1]) ? argv[2] : String.join(" ", argv)) + (e != null ? "\n\n[env] " + e : "");
+        boolean risky = PrivRules.risky(argv, envp != null, req.optString("cwd", "/")) && !(envp == null && shotArmed(argv, req.optString("shot", null)))
+            || PrivRules.namesSelf(text, ctx.getPackageName());   // 免问的 am force-stop 等点了本应用 / Shizuku 的名：也要问（审查 0601c）
+        // 免确认：设置里打开了总开关，或这个会话已经点过「本会话都允许」。动到本应用自己、Shizuku / Sui 的命令照样问
+        String sess = risky && "claude".equals(who) ? sessToken(peerPid) : null;
+        boolean self = risky && touchesSelf(text);
+        String pass = !risky || self ? null : noAsk() ? "免确认" : sess != null && SESS_OK.contains(sess) ? "本会话已允许" : null;
+        if (pass != null) who = who + "·" + pass;
+        else if (risky && !ask(text, who, a + "\0" + req.optString("cwd", "/") + "\0" + e, trustable(argv, req.optString("cwd", "/"), e), self ? null : sess)) {
             audit(t0, who, req, 126, 0);
-            frame(out, 4, Tr.t("这条特权命令要你在 cccodroid 里点「允许」才会执行（只有带服务名的 dumpsys、pm list、settings get 这类查看命令不用问）。这次没有允许，没有执行。cccodroid 不在前台、或者已经有一条在等确认时，会直接拒绝。").getBytes(StandardCharsets.UTF_8));
+            frame(out, 4, Tr.t("这条特权命令要你在 cccodroid 里点「允许」才会执行（只有带服务名的 dumpsys、pm list、settings get 这类查看命令不用问）。这次没有允许，没有执行。cccodroid 不在前台、或者已经有一条在等确认时，会直接拒绝。想让任务在后台也能跑：下次确认时勾上「这个会话后面的特权命令都允许」，或者在设置 → 设备与权限里打开「特权命令不再逐条确认」。").getBytes(StandardCharsets.UTF_8));
             frameExit(out, 126);
             return null;
         }
@@ -600,25 +684,30 @@ final class Priv {
         try { p = newProcess(argv, envp, dir); }
         catch (Throwable t) { audit(t0, who, req, 127, 0); frame(out, 4, (Tr.t("起进程失败：") + t).getBytes(StandardCharsets.UTF_8)); frameExit(out, 127); return null; }
 
-        Thread o1 = pump(p.getInputStream(), out, 1);
-        Thread o2 = pump(p.getErrorStream(), out, 2);
-        // 客户端 → 进程 stdin
+        Thread o1 = pump(p.getInputStream(), out, 1, p);
+        Thread o2 = pump(p.getErrorStream(), out, 2, p);
+        // 客户端 → 进程 stdin。零长帧是客户端的 stdin 到头了：只关进程的 stdin，命令照常跑完（sleep、安装这类不读 stdin 的不受影响）；
+        // 套接字断了（客户端被杀、会话停了）才算取消：命令还在跑就停掉它。以前断开也只关 stdin，特权命令在后台接着跑（审查 v0.5.20 09-010）
         Thread inT = new Thread(() -> {
             DataInputStream din = new DataInputStream(in);
             OutputStream pin = p.getOutputStream();
+            boolean open = true;
             try {
                 while (true) {
                     int type = din.read();
                     if (type < 0) break;
                     int len = din.readInt();
-                    if (len <= 0 || len > (1 << 24)) break;     // 负数或离谱的长度别去 new（审查 10-30 第九份 安卓低13）
+                    if (len == 0) { if (open) { open = false; try { pin.close(); } catch (IOException ignored) {} } continue; }
+                    if (len < 0 || len > (1 << 24)) break;     // 负数或离谱的长度别去 new（审查 10-30 第九份 安卓低13）
                     byte[] b = new byte[len];
                     din.readFully(b);
-                    if (type == 0) { pin.write(b); pin.flush(); }
+                    // 进程自己先关了 stdin：写不进去不等于客户端走了，后面的帧照读、丢掉
+                    if (type == 0 && open) try { pin.write(b); pin.flush(); } catch (IOException we) { open = false; }
                 }
             } catch (IOException ignored) {
             } finally {
-                try { pin.close(); } catch (IOException ignored) {}
+                if (open) try { pin.close(); } catch (IOException ignored) {}
+                stopIfAlive(p, "客户端断开");
             }
         }, "priv-stdin");
         inT.setDaemon(true);
@@ -687,15 +776,23 @@ final class Priv {
         } catch (IOException ignored) {}
     }
 
-    private static Thread pump(InputStream src, DataOutputStream out, int type) {
+    private static Thread pump(InputStream src, DataOutputStream out, int type, java.lang.Process p) {
         Thread t = new Thread(() -> {
             byte[] buf = new byte[16384];
-            try {
-                for (int n; (n = src.read(buf)) > 0; ) synchronized (out) { out.writeByte(type); out.writeInt(n); out.write(buf, 0, n); out.flush(); }
-            } catch (IOException ignored) {}
+            int n;
+            while (true) {
+                try { if ((n = src.read(buf)) <= 0) return; } catch (IOException e) { return; }
+                // 输出送不回去 = 客户端已经走了：同上，停掉还在跑的命令
+                try { synchronized (out) { out.writeByte(type); out.writeInt(n); out.write(buf, 0, n); out.flush(); } }
+                catch (IOException e) { stopIfAlive(p, "输出送不回客户端"); return; }
+            }
         }, "priv-out" + type);
         t.start();
         return t;
+    }
+
+    private static void stopIfAlive(java.lang.Process p, String why) {
+        try { if (p.isAlive()) { Log.w(TAG, "特权命令还在跑，" + why + "，停掉"); p.destroy(); } } catch (Throwable ignored) {}
     }
 
     private static void frame(DataOutputStream out, int type, byte[] b) throws IOException {
