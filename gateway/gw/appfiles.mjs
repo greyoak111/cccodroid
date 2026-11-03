@@ -2,7 +2,7 @@
 // 但网关一跑就是几天，这期间被改的东西不用等重启就生效：界面脚本每次请求现读（改了能替用户点「允许」）、
 // TOOLS.md 每轮拼进系统提示、建档规范模型会自己去读、bin/claude 终端里直接跑、pre/ 在 PATH 最前。
 // 刚起来时 files/app 是核过的，这时把清单（FILES）和几个小目录的内容读进内存：
-//   · 小目录（TOOLS.md、archive、guard、bin、pre、scripts）：每轮起 claude 前、平时每分钟看一眼，被改就用内存里的原样写回，多出来的删掉
+//   · 小目录（TOOLS.md、archive、guard、bin、pre、scripts、gw）：每轮起 claude 前、平时每分钟看一眼，被改就用内存里的原样写回，多出来的删掉
 //   · 界面文件：下发前按清单核哈希，不对就不发（503），等没有在跑的回话和终端时退出，让应用按安装包还原后重起
 // 只在部署出来的那份上生效（目录里有 FILES）；开发时直接跑仓库里的网关没有 FILES，改文件热更新照旧。
 import fs from "node:fs";
@@ -10,8 +10,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { HERE, log } from "./config.mjs";
 
-// lib/ 里是起 claude 时 --preload 的库和网关自己 --require 的 execpath.cjs，和 bin/claude 一样在执行链上（DeepSeek 复核 11-03 第三轮）
-const SNAP_DIRS = ["archive/", "guard/", "bin/", "pre/", "scripts/", "lib/"];
+// lib/ 里是起 claude 时 --preload 的库和网关自己 --require 的 execpath.cjs，和 bin/claude 一样在执行链上（DeepSeek 复核 11-03 第三轮）。
+// gw/ 是网关自己的源码：已经加载的模块不会热换，但被改过的文件要在下一次起进程（包括不是 Java 托管的那种）之前写回核过的那份。
+const SNAP_DIRS = ["archive/", "guard/", "bin/", "pre/", "scripts/", "lib/", "gw/"];
 const SNAP_FILES = ["TOOLS.md"];
 const sha = (b) => crypto.createHash("sha256").update(b).digest("hex");
 

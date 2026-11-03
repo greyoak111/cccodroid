@@ -56,6 +56,13 @@ test("小目录被改：check 写回原样，多出来的删掉，可执行位�
   assert.equal(fs.statSync(f).mtimeMs, old.mtimeMs);
   assert.deepEqual(g.check(), ["pre/pkg"]);
   assert.deepEqual(why, [], "小目录写回了，不用重启");
+  // 网关源码也纳入快照：运行中被改的 gw/ 写回，多出来的删掉
+  fs.writeFileSync(path.join(root, "gw/x.mjs"), "export const patched = 1;\n");
+  assert.deepEqual(g.check(), ["gw/x.mjs"]);
+  assert.equal(fs.readFileSync(path.join(root, "gw/x.mjs"), "utf8"), "export {};\n");
+  fs.writeFileSync(path.join(root, "gw/evil.mjs"), "x");
+  assert.deepEqual(g.check(), ["gw/evil.mjs（多出来的）"]);
+  assert.deepEqual(why, [], "网关源码写回了，不用重启");
 });
 
 test("界面文件：对得上才发，对不上要求重启", () => {

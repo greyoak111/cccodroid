@@ -10,10 +10,11 @@ import { fixedBaseUrl } from "./streamfix.mjs";
 import { archiveHooks } from "./archive-core.mjs";
 import { fileURLToPath } from "node:url";
 
-// 敏感操作再确认：PreToolUse 钩子（guard/cc-guard.mjs），碰密钥 / 读屏点按 / 往外分享时让 claude 停下来问，全部放行也一样
+// 敏感操作再确认：PreToolUse 钩子（guard/cc-guard.mjs），碰密钥 / 读屏点按 / 往外分享时让 claude 停下来问，全部放行也一样。
+// 不设全局关闭开关：整层关掉就等于没有；旧设置里存过 guard:false 也不再认。要放行就在确认卡片上逐次「允许」。
 const GUARD_CLI = fileURLToPath(new URL("../guard/cc-guard.mjs", import.meta.url));
 export function guardHooks() {
-  if (SETTINGS.guard === false || !fs.existsSync(GUARD_CLI)) return null;
+  if (!fs.existsSync(GUARD_CLI)) return null;
   const q = (x) => "'" + String(x).replace(/'/g, "'\\''") + "'";
   return [{ matcher: "Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob|mcp__device__.*",
     hooks: [{ type: "command", command: q(process.execPath) + " " + q(GUARD_CLI), timeout: 10 }] }];

@@ -102,7 +102,7 @@ export async function routeSettings(req, res, u, p) {
       }
 
       if ("staticCompat" in b) { SETTINGS.staticCompat = !!b.staticCompat; try { customRefresh(); } catch {} }   // 下一轮生效；自定义组件的入口立刻跟着改
-      if ("guard" in b) SETTINGS.guard = !!b.guard;
+      // 敏感操作再确认没有关闭口子：设置接口不提供全局关掉这一层的能力，要放行走确认卡片逐次允许
       if ("idleCompaction" in b) { SETTINGS.idleCompaction = !!b.idleCompaction; if (!SETTINGS.idleCompaction) idleDisarmAll(); }
       if ("workIsland" in b) SETTINGS.workIsland = !!b.workIsland;
 
