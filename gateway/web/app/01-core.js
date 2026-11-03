@@ -661,6 +661,13 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
   // 取出来就是转义过的：两个调用处都直接拼进 data-path 属性
   const wroteOf = (s) => { const w = WROTE.size && !mdImg && WROTE.get(String(s).replace(/^\.\//, "")); return w ? esc(w) : null; };
   const WROTE_RE = /(^|[\s(（:：,，、;*“])((?:\.\/)?[\w.\-\u4e00-\u9fff]+(?:\/[\w.\-\u4e00-\u9fff]+)*\.[A-Za-z0-9]{1,8})(?=$|[\s)）:：,，、;*”。！？!?&]|\.(?:\s|$))/g;
+  // file:// 网址 → 本机路径：模型常把路径包成 [路径](file:///…)，原样显示点不开。传进来的是转义过的文本；
+  // %xx 先解码，解出引号、尖括号、控制字符的不认（要进 data-path 属性），返回转义好的路径或 null
+  const fileUrlPath = (u) => {
+    let p = u.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+    try { p = decodeURIComponent(p); } catch { return null; }
+    return /^\/[^/]/.test(p) && !/["'<>&`\u0000-\u001f]/.test(p) ? esc(p.replace(/:\d+(?::\d+)?$/, "")) : null;
+  };
   const pathLink = (p, line, label) =>
     `<a class="fpath" data-path="${p}" href="#" title="${t("在查看器中打开")}">${label || p + (line || "")}</a>`;
   // 行内公式：$…$、\(…\)、行内的 $$…$$。先于转义从原文里抠出来（换成 \u0001N\u0001），代码片段里的不认。
@@ -708,6 +715,7 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
         return hold(m ? `<code>${pathLink(m[1], m[2], c)}</code>` : w ? `<code>${pathLink(w, "", c)}</code>` : `<code>${c}</code>`);
       })
       .replace(/\[([^\]]+)\]\((\/[^)\s]+)\)/g, (_, l, p) => hold(pathLink(p.replace(/:\d+(?::\d+)?$/, ""), "", l)))
+      .replace(/\[([^\]]+)\]\(file:\/\/(\/[^)\s]+)\)/g, (all, l, u) => { const p = fileUrlPath(u); return p ? hold(pathLink(p, "", l)) : all; })
       .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, (_, l, u) => hold(`<a class="weblink" href="${u}" target="_blank" rel="noopener">${l}</a>`))
       // 裸网址也能点（本机开发服务 http://127.0.0.1:端口 最常见）；句末标点不算
       .replace(/https?:\/\/[^\s<>"'`）)】」，。；、\u0000]+/g, (u) => {
@@ -715,6 +723,12 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
         const tail = (u.match(/[.,;:!?*]+$/) || [""])[0];
         const h = u.slice(0, u.length - tail.length);
         return hold(`<a class="weblink" href="${h}" target="_blank" rel="noopener">${h}</a>`) + tail;
+      })
+      // 裸 file:///… 也认；句末标点、加粗的 * 不算（! ? 留着，文件名里可能有）；:行号 照 PATH_RE 显示在链接里
+      .replace(/(^|[\s(（:：,，、;'"`“*])file:\/\/(\/[^\s<>"'`）)】」，。；、\u0000]+)/g, (all, pre, u) => {
+        const tail = (u.match(/[.,;:*]+$/) || [""])[0], body = u.slice(0, u.length - tail.length);
+        const p = fileUrlPath(body);
+        return p ? pre + hold(pathLink(p, (body.match(/:\d+(?::\d+)?$/) || [""])[0])) + tail : all;
       })
       .replace(PATH_RE, (_, pre, p, line) => {
         const tail = line ? "" : (p.match(/[.]+$/) || [""])[0];     // 句末的点不算路径
