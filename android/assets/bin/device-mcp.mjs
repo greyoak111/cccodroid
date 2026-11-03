@@ -79,7 +79,7 @@ const TOOLS = {
     annotations: { readOnlyHint: true },
   },
   screen_read: {
-    description: "Read the UI of the app currently on screen through the accessibility service: one line per element with [number], type, text, (description), #view-id, @centerX,centerY and flags (click, edit, scroll, checked…). Use the numbers with screen_tap / screen_type / screen_swipe. Numbers change after every screen_read. Prefer this over screenshot; take a screenshot when the layout or images matter.",
+    description: "Read the UI of the app currently on screen through the accessibility service: one line per element with [number], type, text, (description), #view-id, @centerX,centerY and flags (click, edit, password, scroll, checked…). Password fields are listed but never show their content or description. Use the numbers with screen_tap / screen_type / screen_swipe. Numbers change after every screen_read. Prefer this over screenshot; take a screenshot when the layout or images matter.",
     inputSchema: { type: "object", properties: { all: { type: "boolean", description: "Include layout-only elements too (default false)" } } },
     annotations: { readOnlyHint: true },
   },
@@ -92,7 +92,7 @@ const TOOLS = {
     inputSchema: { type: "object", properties: { node, direction: { type: "string", enum: ["forward", "backward"] }, x1: { type: "integer" }, y1: { type: "integer" }, x2: { type: "integer" }, y2: { type: "integer" }, duration_ms: { type: "integer" } } },
   },
   screen_type: {
-    description: "Set the text of an input field (node with the edit flag, or the focused field). append=true keeps existing text; submit=true presses enter afterwards.",
+    description: "Set the text of an input field (node with the edit flag, or the focused field). append=true keeps existing text (not allowed on password fields); submit=true presses enter afterwards.",
     inputSchema: { type: "object", properties: { node, text: { type: "string" }, append: { type: "boolean" }, submit: { type: "boolean" } }, required: ["text"] },
   },
   screen_key: {

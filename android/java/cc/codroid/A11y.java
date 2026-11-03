@@ -157,8 +157,12 @@ public class A11y extends AccessibilityService {
         if (n == null || nodes.size() >= 800) return;
         if (!n.isVisibleToUser()) return;
         CharSequence text = n.getText(), desc = n.getContentDescription();
+        // 密码框的内容不交给模型：有的应用 getText 给的是明文，不是圆点，也有把明文放进描述的，两样都不读
+        // （框本身照样列出，标 password，还能填）
+        boolean pw = n.isPassword();
+        if (pw) { text = null; desc = null; }
         boolean click = n.isClickable() || n.isLongClickable(), edit = n.isEditable(), scroll = n.isScrollable();
-        boolean useful = all || click || edit || scroll || n.isCheckable()
+        boolean useful = all || pw || click || edit || scroll || n.isCheckable()
             || (text != null && text.length() > 0) || (desc != null && desc.length() > 0);
         int nextDepth = depth;
         if (useful) {
@@ -176,6 +180,7 @@ public class A11y extends AccessibilityService {
             out.append(" @").append(b.centerX()).append(',').append(b.centerY());
             if (click) out.append(" click");
             if (edit) out.append(" edit");
+            if (pw) out.append(" password");
             if (scroll) out.append(" scroll");
             if (n.isCheckable()) out.append(n.isChecked() ? " checked" : " unchecked");
             if (n.isFocused()) out.append(" focused");
@@ -244,6 +249,7 @@ public class A11y extends AccessibilityService {
         }
         if (n == null || !n.isEditable()) return fail(Tr.t("没找到输入框：给 node（screen_read 里带 edit 的编号），或先点一下输入框"));
         String text = a.optString("text", "");
+        if (a.optBoolean("append", false) && n.isPassword()) return fail(Tr.t("密码框不读原有内容，不能追加：请给出完整内容，不带 append"));
         if (a.optBoolean("append", false) && n.getText() != null) text = n.getText() + text;
         Bundle b = new Bundle();
         b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
