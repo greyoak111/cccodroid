@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import crypto from "node:crypto";
-import { CFG, GLIBC_PRELOAD, PATHS, PREFIX, glibcEnv, log, tz } from "./config.mjs";
+import { CFG, GLIBC_PRELOAD, PATHS, PREFIX, glibcEnv, loadPgp, log, tz } from "./config.mjs";
 import { verifiedInfo } from "./ccverified.mjs";
 import { ledger } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
@@ -68,7 +68,14 @@ async function devUpdInstall() {
   c.state = "installing"; c.message = ""; c.done = 0; c.total = 0;
   const part = PATHS.claude + ".part", tag = PATHS.claude + ".part.sha256";
   try {
-    const man = await (await fetch(`${CC_BASE}/${c.latest}/manifest.json`, { signal: AbortSignal.timeout(20000) })).json();
+    // 清单要过 Anthropic 的 PGP 签名（同 install-claude.mjs）：只靠 TLS 的话，装了别的根证书的代理能连清单带程序一起换掉（11-03 审查 L-11）
+    const get = async (u) => { const r = await fetch(u, { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error("HTTP " + r.status + " " + u); return Buffer.from(await r.arrayBuffer()); };
+    const manBuf = await get(`${CC_BASE}/${c.latest}/manifest.json`);
+    const { ANTHROPIC_KEYS, verifyDetached } = await loadPgp();
+    try { verifyDetached(manBuf, (await get(`${CC_BASE}/${c.latest}/manifest.json.sig`)).toString("utf8"), ANTHROPIC_KEYS); }
+    catch (e) { throw new Error(tz("官方清单的签名验不过：{msg}", { msg: e.message })); }
+    const man = JSON.parse(manBuf.toString("utf8"));
+    if (man.version && man.version !== c.latest) throw new Error(tz("清单内容不对"));
     const plat = man.platforms && man.platforms["linux-arm64"];
     if (!plat || !/^[a-f0-9]{64}$/.test(plat.checksum)) throw new Error(tz("清单里没有 linux-arm64"));
     c.total = plat.size;

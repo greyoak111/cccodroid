@@ -2697,3 +2697,29 @@
 2697	Enregistrements de l'application synchronisés. L'état local a été relu et la session actuelle n'a pas été changée.
 2698	Impossible de confirmer si cette réparation a été enregistrée. Vérifiez à nouveau l'état local. Aucune nouvelle tentative automatique ne sera faite ; n'écrasez pas la configuration à répétition.
 2699	Le fournisseur de l'application a été enregistré, mais la finalisation de l'association n'a pas abouti. Une nouvelle vérification en lecture seule a été tentée ; consultez l'état actuel. Ne répétez pas la réparation. La session actuelle n'a pas été changée.
+2700	Une commande système ou de cccodroid porte déjà ce nom. Choisissez-en un autre
+2701	Ces commandes viennent des fichiers de configuration du dépôt. S'il a été téléchargé ou fourni par quelqu'un d'autre, inspectez-le d'abord dans le terminal. Continuer ?
+2702	Autoriser cette page à accéder à Internet ?\n\nUne fois en ligne, les scripts de la page peuvent envoyer ailleurs les fichiers de son dossier et de jusqu'à trois dossiers parents. N'autorisez que les pages de confiance. Chaque page doit être autorisée séparément.
+2703	Le répertoire du zip est trop volumineux
+2704	{f} du dépôt glibc ne correspond pas au Release signé
+2705	Impossible de copier dans la zone temporaire : {msg}
+2706	L'entrée d'index de {pkg} est invalide
+2707	{pkg} contient des entrées qui écriraient hors du paquet ; extraction annulée
+2708	La commande {c} est intégrée au système ou à cccodroid. Choisissez un autre nom
+2709	Une compétence nommée custom-{id} existe déjà. Choisissez un autre nom
+2710	La signature du manifeste officiel n'est pas valide : {msg}
+2711	Le contenu du manifeste est incorrect
+2712	L'adresse doit commencer par http:// ou https://
+2713	La configuration propre à ce dépôt exécutera des commandes à cette étape. Ne continuez que si vous lui faites confiance.
+2714	Ce dossier se trouve dans le stockage privé de l'app et ne peut pas être un projet
+2715	Trop de tâches planifiées (limite 500). Supprimez-en d'abord
+2716	Le dossier d'export est un lien symbolique ; écriture refusée
+2717	Le paquet contient trop de sessions. Importez-les en plusieurs fois
+2718	Ce projet contient des réglages qui s'exécutent automatiquement à l'ouverture (hooks, serveurs MCP, etc.)
+2719	Ces réglages lancent des programmes directement avec les droits de cette app. Si vous ne les avez pas écrits ou ne savez pas d'où vient le projet, choisissez « Ne pas charger » : ce tour se poursuit normalement, simplement sans eux. Si vous autorisez, c'est mémorisé jusqu'à ce que les réglages changent.
+2720	Autoriser et mémoriser
+2721	Ne pas charger ▾
+2722	Teinte du papier
+2723	Fond du thème Construct clair : à gauche plus blanc, à droite plus jaune
+2724	Blanc
+2725	Jaune

@@ -65,6 +65,8 @@ nginx 配置：`/etc/nginx/sites-available/cccodroid.conf` 和 `cccodroid-dl.con
 - 首次安装时，安装页让用户选来源：GitHub、cccodroid.net 镜像，或本地文件。GitHub 和镜像互为备用，最后再试 gh-proxy；按顺序依次换、不回头，用同一个 `.part` 文件接着续传。
 - 校验值以 APK 里的 `assets/devkit-pin.json` 为准。这个文件由 `scripts/pin-devkit.mjs` 生成，`build.sh` 会核对它和 `devkit-sources.txt` 是不是同一版。
 - **改工具包版本时**：先发布 devkit Release，再更新 `devkit-sources.txt`，然后跑 `pin-devkit.mjs`，最后打 APK。服务器会自动把新绑定的那一版同步过去。
+- `pin-devkit.mjs` 要求锁文件带签名（`devkit.lock.json.sig`）并验过。只有 10-29 之前那几版本来就没签，这种情况确认无误后加 `PIN_ALLOW_UNSIGNED=1` 重跑，生成的 pin 里会记 `lockSigned:false`。新版本不要用这个开关。
+- 预置组件索引（`components` Release 上的 `components.json` 和 `.sig`）：`publish-devkit.mjs` 合并前先用发布钥匙验线上那份，验不过就停。`components-index.mjs` 在有私钥时也只合并验得过的旧索引。全新的仓库（Release 上还没有索引）第一次要手工播种：对一个不存在的输出路径跑 `INDEX_SIGNING_KEY_FILE=<钥匙> node devkit/components-index.mjs <新路径>/components.json <URL 前缀> <component-x.json>`，把生成的 `components.json` 和 `components.json.sig` 传到 `components` Release，之后就交给 `publish-devkit.mjs`。
 
 ### 2. APK 更新
 

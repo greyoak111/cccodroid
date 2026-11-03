@@ -13,17 +13,17 @@
 // ─────────────────────────────────────────────────────────────────────
 
 // ── 原生桥口令（cccodroid 0.4.6 起）：壳的 CCApp 里有副作用的方法第一个参数要带口令，
-//    口令只经首页地址 ?k= 交给主框架（存 sessionStorage，刷新还在）。HTML 预览的 iframe 同样被注入了 CCApp，
+//    口令只经首页地址的 #k= 交给主框架（不进请求行，11-03 审查 M-3）（存 sessionStorage，刷新还在）。HTML 预览的 iframe 同样被注入了 CCApp，
 //    但和界面不同源，拿不到口令，调了也没用。这里把 CCApp 换成自动带口令的一层，其余代码照旧写 CCApp.xxx(…)。
 //    放在 theme.js 开头，因为它是第一个碰 CCApp 的脚本。开发端 / 测试壳没有 keyed()，原样不动
 (function () {
   const raw = window.CCApp;
   if (!raw || typeof raw.keyed !== "function") return;
-  let k = (/[?&]k=([0-9a-f]{32})/.exec(location.search) || [])[1] || "";
+  let k = (/[#&]k=([0-9a-f]{32})/.exec(location.hash) || [])[1] || "";
   try { if (k) sessionStorage.setItem("cc.bk", k); else k = sessionStorage.getItem("cc.bk") || ""; } catch {}
   const PLAIN = ["hasPane", "paneCanBack", "whatsNew", "nightMode", "keyed", "wallColor"];
   const KEYED = ["privShot", "openUrl", "paneOpen", "paneBounds", "paneGoBack", "paneClose", "openBrowser", "shareText", "copyText",
-    "pickDevkit", "uninstall", "unfreeze", "whatsNewSeen", "setBars", "skinPref", "accentPref", "langPref", "themePref", "saveAs", "previewNet", "skinPal"];
+    "pickDevkit", "uninstall", "unfreeze", "whatsNewSeen", "setBars", "skinPref", "accentPref", "langPref", "themePref", "saveAs", "previewNet", "skinPal", "gcPal"];
   const w = {};
   for (const m of PLAIN) if (typeof raw[m] === "function") w[m] = (...a) => raw[m](...a);
   for (const m of KEYED) if (typeof raw[m] === "function") w[m] = (...a) => raw[m](k, ...a);
@@ -62,6 +62,7 @@
     if (root.dataset.theme !== name) root.dataset.theme = name;
     if (root.dataset.skin !== skin) root.dataset.skin = skin;
     shisePaint(skin);
+    gcPaint(skin);
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = BAR[skin][name];
     applyAccent(skin, name);
@@ -209,6 +210,44 @@
     try { w = localStorage.getItem(WALL) || ""; } catch {}
     return /^#[0-9a-f]{6}$/.test(w) ? w : "";
   }
+  // ── 构成浅色的纸色（群友反馈「看着偏黄，能不能调」）：ccapp-ui.json 的 gcPaper，0 偏白 … 50 现在的样子 … 100 原版牛皮纸 ──
+  //   每个底色 / 线色 / 浅字色两头各有一个端点：白端 = 同亮度的中性灰（越亮的往白提得越多），黄端 = 现在的颜色离白端再走同样一段；
+  //   中间按 RGB 线性插。只动浅色，深色不变；状态栏和外壳的颜色经 CCApp.gcPal 跟着换
+  const GC_BASE = { "--bg": "#f3eee3", "--bg2": "#faf7ef", "--bg3": "#e9e2d2", "--bg4": "#ddd4c0", "--line": "#cdc2aa", "--fg2": "#4f483d", "--fg3": "#6b6255",
+    "--code-bg": "#e9e2d2", "--think-bg": "#eee8db", "--more-bg": "#e9e2d2", "--more-line": "#cdc2aa", "--user-bg": "#faf7ef", "--tool-bg": "#faf7ef",
+    "--tool-sep": "#e9e2d2", "--cmd-bg": "#eeeadf", "--panel": "#faf7ef", "--input-bg": "#faf7ef", "--on-accent": "#faf7ef" };
+  let gcPrev = null;   // 设置里拖滑块时的临时值（松手才存）
+  function gcPaperPref() {
+    if (gcPrev != null) return gcPrev;
+    try { const v = (JSON.parse(localStorage.getItem("cc.ui")) || {}).gcPaper; return Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : 50; } catch { return 50; }
+  }
+  function gcTone(hex, v) {
+    const c = hex2rgb(hex), y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    const w = c.map(() => y + (1 - y) * 0.6 * Math.max(0, Math.min(1, (y - 0.6) / 0.3)));   // 越亮往白提得越多，深色字不提
+    const k = c.map((x, i) => Math.max(0, Math.min(1, 2 * x - w[i])));
+    const t = v / 50, out = c.map((x, i) => (t <= 1 ? w[i] + (x - w[i]) * t : x + (k[i] - x) * (t - 1)));
+    return "#" + out.map((x) => Math.round(x * 255).toString(16).padStart(2, "0")).join("");
+  }
+  function gcPaint(skin) {
+    let el = document.getElementById("gc-paper");
+    const v = skin === "goucheng" ? gcPaperPref() : 50;
+    const col = (h) => (v === 50 ? h : gcTone(h, v));
+    BAR.goucheng.light = col(GC_BASE["--bg"]);
+    let css = "";
+    if (v !== 50) {
+      const bg = hex2rgb(BAR.goucheng.light).map((x) => Math.round(x * 255)).join(",");
+      css = `html[data-skin="goucheng"][data-theme="light"]{${Object.entries(GC_BASE).map(([k, h]) => `${k}:${col(h)}`).join(";")};--bar-bg:${BAR.goucheng.light};--bar-bg2:${BAR.goucheng.light};--veil:rgba(${bg},.9)}`;
+    }
+    const a = app();
+    // 外壳的 8 键：bg card field line fg dim hint accent（见 BrowserPane.pal）；空串 = 用原色
+    if (skin === "goucheng" && a && typeof a.gcPal === "function") {
+      try { a.gcPal(v === 50 ? "" : [col("#f3eee3"), col("#faf7ef"), col("#e9e2d2"), col("#cdc2aa"), "#1a1a1a", col("#4f483d"), col("#6b6255"), "#c8211b"].join(",")); } catch {}
+    }
+    if (!el) { if (!css) return; el = document.createElement("style"); el.id = "gc-paper"; document.head.appendChild(el); }
+    if (el.textContent !== css) el.textContent = css;
+  }
+  /** 设置里拖动时预览（null = 回到存着的值） */
+  function gcPreview(v) { gcPrev = v == null ? null : Math.max(0, Math.min(100, Math.round(v))); apply(); }
   const SS = { seed: "", light: null, dark: null };
   /** 拾色：按种子色写变量表、改状态栏底色、把 8 种颜色交给外壳；别的外观清掉那段 style */
   function shisePaint(skin) {
@@ -326,7 +365,7 @@
   document.addEventListener("DOMContentLoaded", applyType);
   applyType();
 
-  window.Theme = { pref, set, system, wall, wallSeed, apply, accentFor, get skin() { return skinOf(pref); }, setType, type: typePref, setFonts, fontOf, fam, get fonts() { return ufonts.slice(); }, get current() { return document.documentElement.dataset.theme; } };
+  window.Theme = { pref, set, system, wall, wallSeed, apply, accentFor, gcPreview, gcPaperPref, get skin() { return skinOf(pref); }, setType, type: typePref, setFonts, fontOf, fam, get fonts() { return ufonts.slice(); }, get current() { return document.documentElement.dataset.theme; } };
   apply();
 })();
 

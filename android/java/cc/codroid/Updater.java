@@ -107,6 +107,7 @@ final class Updater {
                     if (ids != null) for (int i = 0; i < ids.length(); i++) devkit.moduleIds.add(ids.getString(i));
                 }
                 devkit.set("ready", "");
+                stagedFromPrefs = true;
                 dropStagedIfInstalled();
             }
         } catch (Exception ignored) {}
@@ -956,6 +957,37 @@ final class Updater {
         ctx.startActivity(MainActivity.internal(ctx, MainActivity.ACTION_APPLY_DEVKIT).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
     }
 
+    private static final class Unverified extends IOException {
+        Unverified() { super(Tr.t("已下载的工具包核实不了来源，已删除；重新检查更新会再下一次")); }
+    }
+    /** 待装记录是从 prefs 里读回来的（进程重启过）：那是本应用 uid 的普通文件，同 uid 的脚本写得进去，装之前要重新核来源 */
+    private boolean stagedFromPrefs;
+    /** 从 prefs 接上的待装工具包：按下载时同样的规矩再核一遍来源（11-03 审查 L-15）。
+     *  按块装：modules.json 要验得过签名、属于这个 tag（或就是 APK 钉的那份）；整包：sha256 是 APK 钉的，或者有验得过签名的同 tag 清单写着它 */
+    private void verifyStaged() throws Exception {
+        String base = devkit.base, tag = tagOf(base);
+        JSONObject pin = devkitPin(ctx);
+        if (devkit.modules != null) {
+            JSONObject pm = pin == null ? null : pin.optJSONObject("modules");
+            boolean ok = pm != null && devkit.modSha.equals(pm.optString("sha256"));
+            if (!ok) {
+                byte[][] got = new byte[1][];
+                fetchDevkitFile(base, "modules.json.sig", got);
+                JSONObject mj = new JSONObject(new String(devkit.modules, StandardCharsets.UTF_8));
+                ok = Ed25519.verifyIndex(devkit.modules, new String(got[0], StandardCharsets.UTF_8)) && tag.equals(mj.optString("release"));
+            }
+            if (!ok) throw new Unverified();
+            return;
+        }
+        JSONObject pgz = pin == null ? null : pin.optJSONObject("gz");
+        if (pgz != null && devkit.sha != null && devkit.sha.equals(pgz.optString("sha256"))) return;
+        byte[][] got = new byte[1][];
+        fetchDevkitFile(base, "devkit.lock.json", got);
+        JSONObject lock = new JSONObject(new String(got[0], StandardCharsets.UTF_8)), lgz = lock.optJSONObject("gz");
+        if (!lockSigned(base, got[0]) || lgz == null || devkit.sha == null || !devkit.sha.equals(lgz.optString("sha256")))
+            throw new Unverified();
+    }
+
     /** 在 MainActivity 的线程里调。ins 的进度打到安装界面 */
     void applyDevkit(Installer ins) throws Exception {
         devkit.set("installing", "");
@@ -966,6 +998,15 @@ final class Updater {
                 devkit.file.delete();
                 prefs().edit().remove("devkitStaged").apply();
                 throw new IOException(Tr.t("已下载的工具包校验不通过，已删除；重新检查更新会再下一次"));
+            }
+            if (stagedFromPrefs) {
+                try { verifyStaged(); }
+                catch (Exception e) {
+                    // 连不上网核不了：留着下次再核；核出来不对：删掉
+                    if (e instanceof Unverified) { devkit.file.delete(); prefs().edit().remove("devkitStaged").apply(); }
+                    throw e;
+                }
+                stagedFromPrefs = false;
             }
         } catch (Exception e) { devkit.set("error", e.getMessage()); releaseApp(); throw e; }
         GatewayService.pause(true);

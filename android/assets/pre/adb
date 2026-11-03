@@ -1,0 +1,21 @@
+#!/system/bin/sh
+# adb 的服务开在私有目录里的文件套接字上，不开默认的 127.0.0.1:5037：
+# 5037 同机任何应用都连得上，能借这里配对 / 授权过的钥匙拿到对面设备（或本机无线调试）的 shell。
+# 自己指定了 -L / -H / -P 或 ADB_SERVER_SOCKET 的，原样交给真 adb。
+REAL="$PREFIX/bin/adb"
+[ -x "$REAL" ] || { echo "adb: 没装（工具包里的 adb 不在 $REAL）" >&2; exit 127; }
+[ -n "$ADB_SERVER_SOCKET" ] && exec "$REAL" "$@"
+# 只看子命令前面的全局选项：adb shell ls -L 里的 -L 是给 ls 的
+skip=0
+for a in "$@"; do
+  if [ $skip = 1 ]; then skip=0; continue; fi
+  case "$a" in
+    -L|-L*|-H|-H*|-P|-P*) exec "$REAL" "$@" ;;
+    -s|-t) skip=1 ;;
+    -*) ;;
+    *) break ;;
+  esac
+done
+D="$HOME/.adb"
+mkdir -p "$D" && chmod 700 "$D"
+exec "$REAL" -L "localfilesystem:$D/adb.sock" "$@"

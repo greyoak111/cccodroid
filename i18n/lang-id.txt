@@ -2697,3 +2697,29 @@
 2697	Catatan aplikasi telah disinkronkan. Status lokal telah dibaca ulang dan sesi saat ini tidak dialihkan.
 2698	Belum dapat dipastikan apakah perbaikan ini sudah tersimpan. Periksa lagi status lokal. Tidak akan ada percobaan ulang otomatis; jangan berulang kali menimpa konfigurasi.
 2699	Penyedia aplikasi telah disimpan, tetapi penyelesaian pemetaan belum tuntas. Pemeriksaan ulang hanya-baca telah dicoba; tinjau status saat ini. Jangan berulang kali menjalankan perbaikan. Sesi saat ini tidak dialihkan.
+2700	Sistem atau cccodroid sudah punya perintah dengan nama ini. Pilih nama lain
+2701	Perintah ini berasal dari file konfigurasi repositori itu sendiri. Kalau repo diunduh dari internet atau diberi orang lain, periksa dulu di terminal. Lanjutkan?
+2702	Izinkan halaman ini terhubung ke internet?\n\nSetelah terhubung, skrip di halaman bisa mengirim file dari foldernya, juga dari hingga tiga folder di atasnya, ke tempat lain. Hanya izinkan halaman yang kamu percaya. Tiap halaman perlu izin sendiri.
+2703	Direktori zip terlalu besar
+2704	{f} dari repositori glibc tidak cocok dengan Release yang ditandatangani
+2705	Gagal menyalin ke area sementara: {msg}
+2706	Entri indeks untuk {pkg} tidak valid
+2707	{pkg} berisi entri yang akan menulis ke luar paket; tidak diekstrak
+2708	Perintah {c} bawaan sistem atau cccodroid. Pilih nama lain
+2709	Skill bernama custom-{id} sudah ada. Pilih nama lain
+2710	Tanda tangan manifes resmi tidak valid: {msg}
+2711	Isi manifes tidak benar
+2712	Alamat harus diawali http:// atau https://
+2713	Konfigurasi repositori ini sendiri akan menjalankan perintah pada langkah ini. Lanjutkan hanya kalau kamu memercayai repositori ini.
+2714	Folder ini ada di penyimpanan privat aplikasi dan tidak bisa dijadikan proyek
+2715	Terlalu banyak tugas terjadwal (maks. 500). Hapus beberapa dulu
+2716	Folder ekspor berupa symlink; tidak ditulisi
+2717	Paket berisi terlalu banyak sesi. Impor dalam beberapa kali
+2718	Proyek ini membawa pengaturan yang berjalan otomatis saat dibuka (hook, server MCP, dll.)
+2719	Pengaturan ini menjalankan program langsung dengan izin aplikasi ini. Jika bukan kamu yang menulisnya atau asal proyeknya tidak jelas, pilih "Jangan muat": giliran ini tetap berjalan, hanya tanpa pengaturan itu. Jika diizinkan, pilihan diingat sampai pengaturannya berubah.
+2720	Izinkan dan ingat
+2721	Jangan muat ▾
+2722	Warna kertas
+2723	Latar tema Construct terang: ke kiri lebih putih, ke kanan lebih kuning
+2724	Putih
+2725	Kuning

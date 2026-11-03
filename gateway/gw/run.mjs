@@ -27,6 +27,8 @@ import { SPOOF_NOTE, checkSession, integrityHint, integrityNote, neutralizeMarke
 import { recordExtra } from "./lineage-store.mjs";
 import { refNote, refNoteSync } from "./merge.mjs";
 import { ensureManagedBridge } from "./managed-bridge.mjs";
+import { projectRisks, projectTrusted, trustProject } from "./projtrust.mjs";
+import { checkAppFiles } from "./appfiles.mjs";
 
 // 必须由人回答的工具：全部放行也照问（问题、计划审批）
 const HUMAN_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
@@ -70,6 +72,37 @@ export function pickProvider(item) {
     || (rec0 && rec0.model != null ? sessProvider(sid0) : null)
     || (pdef0.provider && providerById(pdef0.provider))
     || sessProvider(sid0) };
+}
+
+/** 起进程前的那张「项目配置」卡片：借用敏感操作卡（guard），答复走同一个 /api/perm/answer。
+ *  允许 → true；拒绝 → false；「拒绝并停止」或这期间点了停止 → 停掉这一轮 */
+function askProjectTrust(run, cwd, proj, emit) {
+  return new Promise((resolve) => {
+    const id = "ccapp-proj-" + run.id;
+    const p = { id, tool: "ProjectConfig", input: { dir: cwd, risks: proj.risks }, suggestions: [], at: Date.now(),
+      runId: run.id, sessionId: run.sessionId || null, guard: { cat: "project", what: cwd } };
+    const done = (v) => {
+      if (!run.perms?.delete(id)) return;
+      run.readyAbort = null; run.answerPerm = null;
+      publishState();
+      resolve(v);
+    };
+    run.perms = new Map([[id, p]]);
+    run.readyAbort = new AbortController();
+    run.readyAbort.signal.addEventListener("abort", () => { emit({ type: "perm_resolved", id, behavior: "cancel" }); done(false); });
+    run.answerPerm = (pid, a) => {
+      if (pid !== id || !run.perms?.has(id)) return false;
+      const allow = a.behavior === "allow";
+      log(`${allow ? "✓ 允许" : "✗ 不加载"} 项目配置${a.interrupt ? "（并停止）" : ""}`);
+      emit({ type: "perm_resolved", id, behavior: allow ? "allow" : "deny", interrupt: !!a.interrupt });
+      if (a.interrupt) { holdLane(run); run.aborted = true; }
+      done(allow);
+      return true;
+    };
+    log(`⏸ 等确认 项目配置 ${proj.risks.length} 项`);
+    emit({ type: "perm_request", ...p });
+    publishState();
+  });
 }
 
 export async function startRun(item) {
@@ -262,6 +295,15 @@ export async function startRun(item) {
   const refN = isCmd || P.local ? "" : await refNote(message, run.sessionId).catch((e) => { log("档号引用失败: " + e.message); return ""; });
   // 上面拉模型清单、问设备工具、读建档提示都要等：这期间点了停止（还没有进程可杀）就别再起了（安全通告 GHSA-g35m）
   if (run.aborted) { log("⏹ 起进程前已停止"); return endRun(run, { durationMs: 0 }); }
+  // 项目自带会自动运行的配置（钩子、.mcp.json…，见 projtrust.mjs）、又没被认过：先问；不同意就不加载项目级配置，这一轮照常
+  checkAppFiles();     // 建档规范、bin/claude、guard 这些小文件被改了先写回（见 appfiles.mjs）
+  const proj = projectRisks(cwd);
+  if (proj && !projectTrusted(cwd, proj.fp)) {
+    const ok = run.unattended || run.auto ? false : await askProjectTrust(run, cwd, proj, emit);
+    if (run.aborted) { log("⏹ 等项目配置确认时停止"); return endRun(run, { durationMs: 0 }); }
+    if (ok) trustProject(cwd, proj.fp);
+    else { argv.push("--setting-sources", "user"); log(`项目级配置不加载（${run.unattended || run.auto ? "无人值守" : "用户没同意"}）：${proj.risks.length} 项`); }
+  }
   const pmAt = argv.indexOf("--permission-mode");
   if (run.permMode !== permMode && PERM_MODES.includes(run.permMode) && pmAt >= 0) {
     log(`权限模式在起进程前改了：${permMode} → ${run.permMode}`);

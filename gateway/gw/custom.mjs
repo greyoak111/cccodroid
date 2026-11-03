@@ -3,7 +3,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { execFile } from "node:child_process";
 import crypto from "node:crypto";
-import { CFG, GLIBC_PRELOAD, PATHS, PREFIX, glibcEnv, log, tz } from "./config.mjs";
+import { CFG, GLIBC_PRELOAD, PATHS, PREFIX, glibcEnv, loadPgp, log, tz } from "./config.mjs";
 import { SETTINGS } from "./settings-store.mjs";
 import { enosysRun } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
@@ -100,22 +100,43 @@ const CMD_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
 /** 命令名能不能用：工具包里已有（PATH 里排在前面，会被盖住）、或别的自定义组件占了，都不行 */
 function customCmdClash(cmd, selfId) {
   if (fs.existsSync(path.join(PREFIX, "bin", cmd))) return "toolkit";
+  // PATH 里排在自定义组件后面的：cccodroid 自带的（priv…）和安卓系统的（am、settings…）。同名会把它们盖住，
+  // 应用自己按名字调的 priv 也会被劫持（11-03 审查 L-9）
+  const bin = process.env.CCAPP_BIN;
+  for (const d of [bin && path.join(bin, "..", "pre"), bin, "/system/bin", "/system/xbin"]) if (d && fs.existsSync(path.join(d, cmd))) return "system";
   const w = path.join(CUSTOM_BIN, cmd);
   if (fs.existsSync(w)) { const m = /cccodroid-custom-id: ([a-z0-9-]+)/.exec(fs.readFileSync(w, "utf8").slice(0, 400)); if (!m || m[1] !== selfId) return "custom"; }
   return "";
 }
 
-// Termux glibc 仓库的 Contents（文件 → 包）与 Packages（包 → 下载地址、sha256），缓存一天
-async function glibcRepoIndex() {
+const GZ_MAX = 256 << 20, DEB_MAX = 512 << 20;
+// Termux glibc 仓库的 Contents（文件 → 包）与 Packages（包 → 下载地址、sha256），缓存一天。
+// 先用 Termux 自动构建钥验 Release 的签名，再按 Release 里的 SHA256 核 Contents 和 Packages：
+// 以前只信 TLS，镜像或中间人给一份自洽的 Packages 就能塞进任意 .so（11-03 审查 M-5，同 devkit.mjs 的 loadRepo）
+async function glibcRepoIndex(fresh = false) {
   const cache = path.join(CUSTOM_DIR, ".cache"); fs.mkdirSync(cache, { recursive: true });
   const get = async (name, url) => {
     const f = path.join(cache, name), part = f + "." + crypto.randomBytes(3).toString("hex") + ".part";
-    try { if (Date.now() - fs.statSync(f).mtimeMs < 86400000) return fs.readFileSync(f); } catch {}
+    try { if (!fresh && Date.now() - fs.statSync(f).mtimeMs < 86400000) return fs.readFileSync(f); } catch {}
     const r = await runP(path.join(PREFIX, "bin", "curl"), ["-fsSL", "--max-time", "120", "--retry", "2", "-o", part, url]);
     if (r.code) { fs.rmSync(part, { force: true }); if (fs.existsSync(f)) return fs.readFileSync(f); throw new Error(tz("取不到 glibc 仓库索引：{msg}", { msg: r.err.trim().split("\n").pop() })); }
     fs.renameSync(part, f); return fs.readFileSync(f);
   };
-  const contents = zlib.gunzipSync(await get("Contents-glibc.gz", GLIBC_REPO + "dists/glibc/Contents-aarch64.gz")).toString();
+  const { TERMUX_KEYS, verifyDetached } = await loadPgp();
+  const rel = await get("Release-glibc", GLIBC_REPO + "dists/glibc/Release");
+  verifyDetached(rel, (await get("Release-glibc.gpg", GLIBC_REPO + "dists/glibc/Release.gpg")).toString(), TERMUX_KEYS);
+  const sums = new Map();
+  for (const l of (rel.toString().split("SHA256:")[1] || "").split("\n")) { const m = /^ ([0-9a-f]{64})\s+\d+\s+(\S+)$/.exec(l); if (m) sums.set(m[2], m[1]); else if (l && !l.startsWith(" ")) break; }
+  const checked = async (name, rp) => {
+    const b = await get(name, GLIBC_REPO + "dists/glibc/" + rp);
+    if (sums.get(rp) === crypto.createHash("sha256").update(b).digest("hex")) return b;
+    if (!fresh) throw Object.assign(new Error("stale"), { stale: true });   // 缓存和新的 Release 对不上：整套重取一次
+    throw new Error(tz("glibc 仓库的 {f} 和签过名的 Release 对不上", { f: rp }));
+  };
+  let contentsGz, pkgsBuf;
+  try { contentsGz = await checked("Contents-glibc.gz", "Contents-aarch64.gz"); pkgsBuf = await checked("Packages-glibc", "stable/binary-aarch64/Packages"); }
+  catch (e) { if (e.stale) return glibcRepoIndex(true); throw e; }
+  const contents = zlib.gunzipSync(contentsGz, { maxOutputLength: GZ_MAX }).toString();
   const lib = new Map();
   for (const l of contents.split("\n")) {
     if (!l.startsWith(GLIBC_REPO_LIB)) continue;
@@ -123,7 +144,7 @@ async function glibcRepoIndex() {
     if (!p.includes("/")) lib.set(p, l.slice(sp + 1).split(",")[0].replace(/^.*\//, ""));
   }
   const pk = new Map();
-  for (const blk of (await get("Packages-glibc", GLIBC_REPO + "dists/glibc/stable/binary-aarch64/Packages")).toString().split("\n\n")) {
+  for (const blk of pkgsBuf.toString().split("\n\n")) {
     const f = Object.fromEntries(blk.split("\n").map((x) => [x.slice(0, x.indexOf(":")), x.slice(x.indexOf(":") + 1).trim()]));
     if (f.Package) pk.set(f.Package, { version: f.Version, file: f.Filename, sha256: f.SHA256, size: +f.Size || 0 });
   }
@@ -164,6 +185,10 @@ async function customAnalyze(src) {
   const fail = (m) => { fs.rmSync(dir, { recursive: true, force: true }); return { ok: false, message: m }; };
   const isTar = /\.(tar\.(gz|xz|bz2|zst)|tgz|txz|tbz2?|tar)$/i.test(base), isZip = /\.zip$/i.test(base);
   if (isTar || isZip) {
+    // 先拷进私有暂存区再查、再解：查和解是两次打开，源文件在共享存储上，中间能被换成另一个包（11-03 审查 L-5）
+    const own = path.join(dir, "src-" + base);
+    try { fs.copyFileSync(sp, own); } catch (e) { return fail(tz("拷不进暂存区：{msg}", { msg: e.code || e.message })); }
+    sp = own;
     const n = await unpackedSize(sp, isZip);
     if (n == null) return fail(tz("读不出压缩包的目录，可能已损坏"));
     if (n > UNPACK_MAX) return fail(tz("解开后有 {n} MB，超过 {max} MB 的上限", { n: Math.round(n / 1048576), max: UNPACK_MAX >> 20 }));
@@ -291,6 +316,7 @@ async function customFetchLibs(want, deps, have, log2) {
     want = new Set();
     for (const [pkg, names] of byPkg) {
       const m = ix.pk.get(pkg), deb = path.join(cache, path.basename(m.file));
+      if (!(m.size > 0 && m.size <= DEB_MAX) || !/^[0-9a-f]{64}$/.test(m.sha256 || "")) throw new Error(tz("{pkg} 的索引条目不对", { pkg }));
       let ok = false; try { ok = (await sha256File(deb)) === m.sha256; } catch {}
       if (!ok) {
         const part = deb + "." + crypto.randomBytes(3).toString("hex") + ".part";
@@ -310,6 +336,11 @@ async function customFetchLibs(want, deps, have, log2) {
       if (!member) throw new Error(tz("{pkg} 的包结构不对", { pkg }));
       const tmp = path.join(cache, "x-" + pkg + "-" + crypto.randomBytes(3).toString("hex")); fs.rmSync(tmp, { recursive: true, force: true }); fs.mkdirSync(tmp, { recursive: true });
       const tf = path.join(tmp, member.nm); fs.writeFileSync(tf, member.data);
+      // 解之前看目录：条目跳出包外、或经过包里的软链的，整包不解（同导入程序时的检查）
+      const ls = await runP(path.join(PREFIX, "bin", "tar"), ["-tv", "--quoting-style=c", "-f", tf], { maxBuffer: 64 << 20 });
+      let bad = ls.code ? { name: "?" } : null;
+      try { if (!bad) bad = archiveProblem(parseTarListing(ls.out)); } catch { bad = { name: "?" }; }
+      if (bad) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(tz("{pkg} 里有条目会写到包外面，不解开", { pkg })); }
       const r = await runP(path.join(PREFIX, "bin", "tar"), ["-xf", tf, "-C", tmp, "--no-same-owner", "./" + GLIBC_REPO_LIB]);
       if (r.code) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(tz("解开 {pkg} 失败：{msg}", { pkg, msg: r.err.trim().split("\n").pop() })); }
       const libd = path.join(tmp, GLIBC_REPO_LIB);
@@ -404,11 +435,14 @@ async function customInstall(b) {
     if (!CMD_RE.test(cmd)) return { ok: false, message: tz("命令名不合法：{c}", { c: cmd }) };
     if (seen.has(cmd)) return { ok: false, message: tz("命令名重复：{c}", { c: cmd }) };
     const clash = customCmdClash(cmd, id);
-    if (clash) return { ok: false, message: clash === "toolkit" ? tz("命令 {c} 工具包里已经有了，换个名字", { c: cmd }) : tz("命令 {c} 被别的自定义组件占了", { c: cmd }) };
+    if (clash) return { ok: false, message: clash === "toolkit" ? tz("命令 {c} 工具包里已经有了，换个名字", { c: cmd }) : clash === "system" ? tz("命令 {c} 是系统或 cccodroid 自带的，换个名字", { c: cmd }) : tz("命令 {c} 被别的自定义组件占了", { c: cmd }) };
     seen.add(cmd);
     entries.push({ rel: p.rel, cmd, kind: p.kind, gpu: !!e.gpu && p.kind === "glibc" && s.report.gpu, patchelf: !!e.patchelf && p.kind === "glibc" && !e.gpu });
   }
   if (!entries.length) return { ok: false, message: tz("至少选一个要用的命令") };
+  // 同名技能是用户自己的（不是我们生成的）、或者是个软链：不覆盖（11-03 审查 L-10）
+  const sk0 = path.join(SKILLS_DIR, "custom-" + id);
+  if (fs.existsSync(sk0) && !customSkillOurs(sk0, id)) return { ok: false, message: tz("已经有一个叫 custom-{id} 的技能了，换个名字", { id }) };
   const msgs = [], log2 = (m) => { msgs.push(m); log(`[custom] ${id}：${m}`); };
   fs.mkdirSync(dir, { recursive: true });
   const appDir = path.join(dir, "app"), deps = path.join(dir, "deps");
@@ -483,13 +517,24 @@ function customList() {
     deps: (r.deps || []).length, entries: r.entries.map((e) => ({ cmd: e.cmd, kind: e.kind, gpu: e.gpu, patchelf: e.patchelf, ok: fs.existsSync(path.join(CUSTOM_BIN, e.cmd)) })),
   })) };
 }
+/** 这个技能目录是不是我们给自定义组件生成的：真目录（不是软链），SKILL.md 是普通文件、开头是我们的模板 */
+function customSkillOurs(sk, id) {
+  try {
+    if (!fs.lstatSync(sk).isDirectory()) return false;
+    const f = path.join(sk, "SKILL.md"), st = fs.lstatSync(f);
+    if (!st.isFile() || st.size > (1 << 20)) return false;
+    const t = fs.readFileSync(f, "utf8");
+    return t.startsWith(`---\nname: custom-${id}\n`) && t.includes("（cccodroid 自定义组件）");
+  } catch { return false; }
+}
 function customRemove(id, quiet) {
   if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) return { ok: false, message: "bad id" };
   const dir = path.join(CUSTOM_DIR, id);
   if (!fs.existsSync(dir)) return { ok: false, message: "not installed" };
   try { for (const f of fs.readdirSync(CUSTOM_BIN)) { const w = path.join(CUSTOM_BIN, f); if (fs.readFileSync(w, "utf8").slice(0, 400).includes("cccodroid-custom-id: " + id + "\n")) fs.rmSync(w, { force: true }); } } catch {}
   fs.rmSync(dir, { recursive: true, force: true });
-  fs.rmSync(path.join(SKILLS_DIR, "custom-" + id), { recursive: true, force: true });
+  const sk = path.join(SKILLS_DIR, "custom-" + id);
+  if (customSkillOurs(sk, id)) fs.rmSync(sk, { recursive: true, force: true });
   if (!quiet) log(`[custom] ${id} 已卸载`);
   return { ok: true };
 }

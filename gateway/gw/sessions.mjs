@@ -322,7 +322,8 @@ export async function routeSessions(req, res, u, p) {
     importBusy = true;
     const tmp = path.join(CFG.home, `.import-${Date.now()}.zip`);
     try {
-      await bodyToFile(req, tmp, 0xffffffff);
+      // 没写 Content-Length（分块上传）的上面查不了：按剩余空间给个顶，别把存储写满（11-03 审查 I-8）
+      await bodyToFile(req, tmp, Math.min(0xffffffff, Number.isFinite(free) ? Math.max(0, Math.floor((free - (512 << 20)) / 2)) : 0xffffffff));
       const r = await importSessions(tmp);
       log(`导入会话：${r.imported.length} 个，跳过 ${r.skipped.length} 个`);
       return sendJson(res, 200, { ok: true, ...r });

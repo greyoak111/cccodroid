@@ -464,6 +464,11 @@
               </select>
             </div>
           </div>
+          <!-- 构成浅色的纸色（0.6.2）：只在构成 · 浅色时显示，算色在 theme.js gcPaint -->
+          <div class="srow gp-row" id="gp-row">
+            <div class="sl"><b data-i18n>纸色</b><p data-i18n>构成浅色的底色：往左偏白，往右偏黄</p></div>
+            <div class="sc gp-sc"><span class="tiny" data-i18n>白</span><div class="ac-track"><input type="range" id="gp-range" min="0" max="100" step="1"></div><span class="tiny" data-i18n>黄</span><button type="button" class="btn sm ghost" id="gp-reset" data-i18n>还原</button></div>
+          </div>
           <!-- 强调色（0.4.20）：色块由 app/09-settings.js 画，算色在 theme.js（按底色自动调深浅） -->
           <div class="srow ac-row">
             <div class="sl"><b data-i18n>强调色</b><p data-i18n>按钮、链接、选中项的颜色。会按当前外观的底色自动调深浅，保证看得清</p></div>

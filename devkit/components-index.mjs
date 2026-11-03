@@ -13,7 +13,18 @@ const [out, prefix, ...inputs] = process.argv.slice(2);
 if (!out || !prefix || !inputs.length) { console.error("用法: node components-index.mjs <out> <url前缀> <component-x.json>..."); process.exit(1); }
 const MAN = JSON.parse(fs.readFileSync(new URL("./devkit.json", import.meta.url), "utf8"));
 let idx = { schema: 1, components: {} };
-try { idx = JSON.parse(fs.readFileSync(out, "utf8")); } catch {}
+const pem = process.env.INDEX_SIGNING_KEY || (process.env.INDEX_SIGNING_KEY_FILE && fs.readFileSync(process.env.INDEX_SIGNING_KEY_FILE, "utf8"));
+const crypto = await import("node:crypto");
+if (fs.existsSync(out)) {
+  const old = fs.readFileSync(out);
+  // 要重签的话，旧索引必须是这把钥匙签过的：别把来路不明的条目一起签成官方的（11-03 审查 M-4）
+  if (pem) {
+    let ok = false;
+    try { ok = crypto.verify(null, old, crypto.createPublicKey(crypto.createPrivateKey(pem)), Buffer.from(fs.readFileSync(out + ".sig", "utf8").trim(), "base64")); } catch {}
+    if (!ok) { console.error(`✗ ${out} 没有 .sig 或验签不过，不合并（要从头生成就先删掉它）`); process.exit(1); }
+  }
+  idx = JSON.parse(old.toString("utf8"));
+}
 for (const f of inputs) {
   const c = JSON.parse(fs.readFileSync(f, "utf8"));
   const def = MAN.components[c.id] || {};
@@ -40,9 +51,7 @@ fs.writeFileSync(out, JSON.stringify(pub, null, 1) + "\n");
 if (process.env.KEEP_LOCAL) fs.writeFileSync(out + ".local.json", JSON.stringify(idx, null, 1));
 // 签名（v0.2.0 起 App 只认签过名的索引）：发布前带上私钥，和 components.json 一起传 components.json.sig
 //   INDEX_SIGNING_KEY_FILE=<bldtools 里的 index-signing-ed25519.pem> node components-index.mjs …
-const pem = process.env.INDEX_SIGNING_KEY || (process.env.INDEX_SIGNING_KEY_FILE && fs.readFileSync(process.env.INDEX_SIGNING_KEY_FILE, "utf8"));
 if (pem) {
-  const crypto = await import("node:crypto");
   fs.writeFileSync(out + ".sig", crypto.sign(null, fs.readFileSync(out), crypto.createPrivateKey(pem)).toString("base64") + "\n");
   console.log("✓ 已签名 → " + out + ".sig");
 } else console.log("⚠ 没给签名私钥：这份索引 v0.2.0 起的 App 不认（设 INDEX_SIGNING_KEY_FILE）");

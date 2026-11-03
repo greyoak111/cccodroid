@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CFG, log } from "./config.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
+import { pathBlocked } from "./files.mjs";
 
 export const CMD_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 const MAX_BODY = 64 * 1024;
@@ -16,8 +17,10 @@ function cmdDir(scope, dir) {
   if (scope === "user") return path.join(process.env.HOME || CFG.home, ".claude", "commands");
   if (scope !== "project") throw new Error("bad scope");
   const d = path.resolve(String(dir || CFG.workspace));
-  let ok = false; try { ok = fs.statSync(d).isDirectory(); } catch {}
+  let ok = false, real = d; try { real = fs.realpathSync(d); ok = fs.statSync(real).isDirectory(); } catch {}
   if (!ok) throw new Error("project dir not found: " + d);
+  // 项目范围不许落在应用私有目录里（home、运行时；工作区除外）：往 home 里塞一条斜杠命令，等于给用户下套（11-03 审查 L-18，同文件面板的政策）
+  if (pathBlocked(real)) throw new Error("project dir is private: " + d);
   return path.join(d, ".claude", "commands");
 }
 

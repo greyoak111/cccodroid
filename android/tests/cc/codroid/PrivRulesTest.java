@@ -252,6 +252,18 @@ public final class PrivRulesTest {
         want(true, "toybox", "sh", "-c", "pm install x");
         want(true, "env", "X=1", "pm", "install", "x");
         want(true, "python3", "-c", "import os");
+        // 11-03 L-17：sort 起外部程序 / 改临时目录
+        sh(true, "sort --compress-program=toybox x");
+        sh(true, "sort --comp=toybox x");
+        sh(true, "sort -T /data/local/tmp /x");
+        sh(true, "sort --temporary-directory=/x /y");
+        sh(false, "pm list packages | sort -r");
+        // 11-03 H-2：同意的签名只认本机生成、每次验证的钥匙（KeyProperties.ORIGIN_GENERATED=1，IMPORTED=2）
+        if (!PrivRules.consentKeyOk(1, true, 0)) { fail++; System.out.println("FAIL consentKeyOk 每次验证 0"); }
+        if (!PrivRules.consentKeyOk(1, true, -1)) { fail++; System.out.println("FAIL consentKeyOk 每次验证 -1"); }
+        if (PrivRules.consentKeyOk(2, true, 0)) { fail++; System.out.println("FAIL consentKeyOk 导入的钥匙"); }
+        if (PrivRules.consentKeyOk(1, false, 0)) { fail++; System.out.println("FAIL consentKeyOk 不要求验证"); }
+        if (PrivRules.consentKeyOk(1, true, 30)) { fail++; System.out.println("FAIL consentKeyOk 解锁后 30 秒内可用"); }
         if (fail > 0) { System.out.println(fail + " 条不对"); System.exit(1); }
         System.out.println("PrivRules 全过");
     }

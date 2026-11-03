@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { PATHS, log, reqLang, tr } from "./config.mjs";
 import { localAddr, staticMac } from "./access.mjs";
+import { APP } from "./appfiles.mjs";
 
 // ── HTTP ──────────────────────────────────────────────────────────────
 export const MIME = {
@@ -107,7 +108,12 @@ export function appJs() {
   if (!parts.length) return null;
   const st = parts.map((f) => fs.statSync(path.join(dir, f)));
   const key = parts.map((f, i) => `${f}:${st[i].mtimeMs}:${st[i].size}`).join("|");
-  if (appCache.key !== key) appCache = { key, data: Buffer.concat(parts.map((f) => fs.readFileSync(path.join(dir, f)))) };
+  if (appCache.key !== key) {
+    const bufs = parts.map((f) => fs.readFileSync(path.join(dir, f)));
+    // 部署出来的那份：每段都得和安装包对得上（见 appfiles.mjs），有一段不对整个不发
+    if (APP && !parts.every((f, i) => APP.served(path.relative(path.dirname(PATHS.web), path.join(dir, f)), bufs[i], st[i]))) return null;
+    appCache = { key, data: Buffer.concat(bufs) };
+  }
   return appCache.data;
 }
 
@@ -142,6 +148,7 @@ export function serveStatic(req, res, urlPath) {
   if (rel.includes("..")) return sendJson(res, 403, { error: "forbidden" });
   if (rel === "app.js") {
     const data = appJs();
+    if (!data && APP?.restartWanted) return sendJson(res, 503, { error: "app files modified" });
     if (data) {
       res.writeHead(200, { "content-type": MIME[".js"], "content-length": data.length, "cache-control": "no-store", ...STATIC_SAFE, ...macHdr(req, data) });
       return res.end(data);
@@ -156,6 +163,7 @@ export function serveStatic(req, res, urlPath) {
     return sendJson(res, 404, { error: "not found", path: rel });
   }
   const data = fs.readFileSync(full);
+  if (APP && !APP.served(path.relative(path.dirname(PATHS.web), full), data, fs.statSync(full))) return sendJson(res, 503, { error: "app files modified" });
   res.writeHead(200, {
     "content-type": MIME[path.extname(full).toLowerCase()] || "application/octet-stream",
     "content-length": data.length,

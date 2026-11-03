@@ -6,6 +6,10 @@ import crypto from "node:crypto";
 // Termux 自动构建钥（main / root / x11 仓库的 Release 都由它签）
 export const TERMUX_KEYS = {"CC72CF8BA7DBFA0182877D045A897D96E57CF20C":{"kty":"RSA","n":"yBh7FtnoP4xlWnvU-AUwXXYxgv7waUkxQ-4iE-pv_Ro0Lw7siRcYrJbt-VFVEC8se51FV2HsqgAVCfq3JUtiV82QBJa_h7ffLL5EDdRGlgBG16EtjXQ6nMG1l960a8fQYrP762_EFBO-HjQOknYiGzu7dGW8-nxYiNfRAX-fO8yGljur_JWJq-Ud6y6j2anoHlJ-vGuaKBdCoILPldL_nE3-mkyUzgvVZe3QPHvDEwbMDgCINxJd4U6weRn-IGXSfp4bWk4sOjTbPWFRpqzBpfVpS7ABsOdhWgfryfUC3w-fLZw9H_10QJ8ytnWr7i5cCg8jRd97kTmj7uX0I0ATF_ALjqdQ1ZVb5qjShYP67ZP86sAN9N92WLN7CgrIGfABDXKzHzS8U-RztzfiwXbx0jWHwliUyFZDrH2KZVx6PDYb3TICQGMHdF7MG31fGfKx4z_Anl5oqe1S4QB9IwaRlHQwBRGT1uh2g6YQ0S_BSlA0yd1rw-bpD1OB5AmjB8m3m4YrOCXcNWkxVmTibUup7UdYch-ekS3AkQSFGg4lPM4ZQgAKtt7LMSmlKqG2y8YLliQzR-jL_D8V6dA_OQqSAPtfIFHj5vG_-1G_0pB54WRlR5TckdTvXv241XyliDaRnOozf9NpOfji8e0wlqvmNxO69JTYoFPpgP0u7EMK4Jc","e":"AQAB"}};
 
+// Anthropic 的发布签名钥（https://downloads.claude.ai/keys/claude-code.asc，与 keys.openpgp.org 上同指纹的一致）
+// （安装脚本 install-claude.mjs 与开发布局的更新 gw/devside.mjs 共用）
+export const ANTHROPIC_KEYS = {"31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE":{"kty":"RSA","n":"p28rSV5I8HmK8CK9GixBUZR_gtJxeOCsRXO4EJiej40jzBmQA3cWXGosVO82ZfFsRKVTtMC5iB_HH9sxjncrmYNWGroJNbx29m_FgYQBgkCXT4AfFl6rnnXqRGLZOerj_4AqE4yQ1GZbhBgR55Z7ro0ieKK8RHYUspBKAFHyWRhCCz6THW6YRbf0p_hG_08TOY6Sj3cJ7_AEoTRf9ZmVNX1k0KvbUSiVGpGY9OIHWgxRJUF2pArU4o_hk-sqGAgEUh8Bjvjwvz6-quLXPg-y0Y8Ugb1Fg6BUppam_zydYY_Q_-yNjnuF154gD1jEeeir8R5czs6zUHSbo2yXUpAsIdWYo5End8vGsluVmFExnUWm_fTVMGoM5Wm3v1VRepMydEnJ-atz4oQdmPQcKNAip5GJO2uyk--xFr9CpKvlR5jral92toYV_m-mur3va8ydamWBo_qG7_wt0sdS81IwH6lcu0SQ39rgKD-bdoPLv05EqVMYTFRI2QZEsWGYTMs0DOrfCIJFH50qyD0x4sWw1gEWeG3jDgY8cj2StZz-zjqzUd05CibcCzEAGm1EQg5y9D40tIsAU1OI7bpgQ9V0lC8lrqE7zJY66UK9Z1daA8jrdDi6migNjHFrXfT3V4QvMthCIO05q05SS3x2G3ZpIgmI-CePUPB1pDf-lhPkU1M","e":"AQAB"}};
+
 function dearmor(t) {
   const body = String(t).replace(/\r/g, "").split("\n\n").slice(1).join("\n\n").split("\n=")[0];
   return Buffer.from(body.replace(/\s/g, ""), "base64");

@@ -354,7 +354,9 @@ async function energyReport(view) {
 function energySystem() {
   return new Promise((resolve) => {
     // 两路输出并成一路：开发端的 priv（rish）在没有终端时会把一部分 stdout 吐到 stderr，分开收就是两半残缺的行
-    execFile("sh", ["-c", "priv \"dumpsys batterystats --checkin\" 2>&1 </dev/null"], { env: { ...process.env, PATH: claudeEnv().PATH }, timeout: 60000, maxBuffer: 32 << 20 }, (err, out, errOut) => {
+    // priv 用随包那份的绝对路径：PATH 里排在前面的目录（~/bin 之类）可能被放了同名程序（复核 11-03，L-9 余项）
+    const priv = [path.join(HERE, "bin", "priv")].find((f) => fs.existsSync(f)) || "priv";
+    execFile("sh", ["-c", (priv.startsWith("/") ? "sh " : "") + "\"$0\" \"dumpsys batterystats --checkin\" 2>&1 </dev/null", priv], { env: { ...process.env, PATH: claudeEnv().PATH }, timeout: 60000, maxBuffer: 32 << 20 }, (err, out, errOut) => {
       if (!out || !out.includes(",l,pwi,")) return resolve({ ok: false, message: (errOut || (err && err.message) || tz("没拿到数据")).trim().slice(0, 300) });
       const apps = {}, names = {};
       let cap = 0, used = 0, since = 0, me = null;
@@ -448,27 +450,28 @@ export async function routeUsage(req, res, u, p) {
       usageSave(true);
       return sendJson(res, 200, { ok: true });
     }
+    // 导出目录被换成软链、或里面放了同名软链：不跟着写到别处（11-03 审查 L-1，同 profile.saveExport）
+    const writeExport = (name, data) => {
+      const base = process.env.CCAPP_SHARED && fs.existsSync(process.env.CCAPP_SHARED) ? process.env.CCAPP_SHARED : CFG.home;
+      const dir = path.join(base, "exports");
+      fs.mkdirSync(dir, { recursive: true });
+      if (fs.lstatSync(dir).isSymbolicLink()) return sendJson(res, 400, { error: "bad dir" });
+      const file = path.join(dir, name), C = fs.constants;
+      try { fs.writeFileSync(file, data, { flag: C.O_WRONLY | C.O_CREAT | C.O_TRUNC | (C.O_NOFOLLOW || 0) }); }
+      catch (e) { return sendJson(res, e.code === "ELOOP" ? 400 : 500, { error: e.code === "ELOOP" ? "bad target" : "write failed" }); }
+      return sendJson(res, 200, { ok: true, file });
+    };
     // 月报图片：前端画好的 PNG 落到导出目录，再交给「保存到」/ 分享
     if (op === "card") {
       const name = String(b.name || ""), data = Buffer.from(String(b.data || ""), "base64");
       if (!/^[\w.-]+\.png$/.test(name) || data.length < 100 || data.readUInt32BE(0) !== 0x89504e47) return sendJson(res, 400, { error: "bad image" });
-      const base = process.env.CCAPP_SHARED && fs.existsSync(process.env.CCAPP_SHARED) ? process.env.CCAPP_SHARED : CFG.home;
-      const dir = path.join(base, "exports");
-      fs.mkdirSync(dir, { recursive: true });
-      const file = path.join(dir, name);
-      fs.writeFileSync(file, data);
-      return sendJson(res, 200, { ok: true, file });
+      return writeExport(name, data);
     }
     // 导出 CSV：前端按本地时区汇总好的逐日表，落到同一个导出目录
     if (op === "csv") {
       const name = String(b.name || ""), text = String(b.text || "");
       if (!/^[\w.-]+\.csv$/.test(name) || !text || text.length > 4e6) return sendJson(res, 400, { error: "bad csv" });
-      const base = process.env.CCAPP_SHARED && fs.existsSync(process.env.CCAPP_SHARED) ? process.env.CCAPP_SHARED : CFG.home;
-      const dir = path.join(base, "exports");
-      fs.mkdirSync(dir, { recursive: true });
-      const file = path.join(dir, name);
-      fs.writeFileSync(file, "\ufeff" + text);   // 带 BOM，表格软件才认得出中文
-      return sendJson(res, 200, { ok: true, file });
+      return writeExport(name, "\ufeff" + text);   // 带 BOM，表格软件才认得出中文
     }
     return sendJson(res, 404, { error: "unknown op" });
   }

@@ -2697,3 +2697,29 @@
 2697	Registros de la app sincronizados. Se ha vuelto a leer el estado local y no se ha cambiado la sesión actual.
 2698	No se puede confirmar si esta reparación se ha guardado. Vuelve a comprobar el estado local. No se reintentará automáticamente; no sobrescribas la configuración repetidamente.
 2699	El proveedor de la app se ha guardado, pero no se ha completado la asignación. Se ha intentado una nueva comprobación de solo lectura; revisa el estado actual. No repitas la reparación. No se ha cambiado la sesión actual.
+2700	Ya existe un comando del sistema o de cccodroid con ese nombre. Elige otro
+2701	Estos comandos vienen de los archivos de configuración del repositorio. Si lo descargaste o te lo dio otra persona, revísalo primero en la terminal. ¿Continuar?
+2702	¿Permitir que esta página acceda a internet?\n\nCon conexión, los scripts de la página pueden enviar a otro sitio archivos de su carpeta y de hasta tres carpetas superiores. Permítelo solo en páginas de confianza. Cada página necesita su propio permiso.
+2703	El directorio del zip es demasiado grande
+2704	{f} del repositorio glibc no coincide con el Release firmado
+2705	No se pudo copiar al área temporal: {msg}
+2706	La entrada del índice de {pkg} no es válida
+2707	{pkg} tiene entradas que escribirían fuera del paquete; no se extrae
+2708	El comando {c} viene con el sistema o con cccodroid. Elige otro nombre
+2709	Ya existe una habilidad llamada custom-{id}. Elige otro nombre
+2710	La firma del manifiesto oficial no es válida: {msg}
+2711	El contenido del manifiesto no es correcto
+2712	La dirección debe empezar por http:// o https://
+2713	La configuración propia de este repositorio ejecutará comandos en este paso. Continúa solo si confías en él.
+2714	Esta carpeta está en el almacenamiento privado de la app y no puede ser un proyecto
+2715	Demasiadas tareas programadas (máximo 500). Borra algunas primero
+2716	La carpeta de exportación es un enlace simbólico; no se escribe en ella
+2717	El paquete tiene demasiadas sesiones. Impórtalas en varias tandas
+2718	Este proyecto trae ajustes que se ejecutan solos al abrirlo (hooks, servidores MCP, etc.)
+2719	Estos ajustes ejecutan programas directamente con los permisos de esta app. Si no los escribiste tú o no sabes de dónde viene el proyecto, elige «No cargar»: este turno sigue igual, solo que sin ellos. Si lo permites, se recuerda hasta que cambien los ajustes.
+2720	Permitir y recordar
+2721	No cargar ▾
+2722	Tono del papel
+2723	Fondo del tema Construct claro: a la izquierda más blanco, a la derecha más amarillo
+2724	Blanco
+2725	Amarillo

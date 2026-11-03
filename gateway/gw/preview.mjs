@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { MIME, NEXT, readBody, sendJson } from "./http.mjs";
 import { fileRoots, safeFilePath } from "./files.mjs";
 import { PATHS } from "./config.mjs";
+import { APP } from "./appfiles.mjs";
 
 // ── HTML 预览 ─────────────────────────────────────────────────────────
 // 查看器里渲染 HTML：另起一个只读的小服务（随机端口，地址用 localhost），和界面（127.0.0.1:端口）不同站点——
@@ -74,7 +75,8 @@ async function previewGrant(p, net) {
   let cap = [...PREVIEW.caps].find(([, v]) => v.key === key)?.[0];   // 同一目录复用，刷新不换网址
   if (!cap) { cap = crypto.randomBytes(12).toString("hex"); if (PREVIEW.caps.size >= 200) PREVIEW.caps.delete(PREVIEW.caps.keys().next().value); }
   const old = PREVIEW.caps.get(cap);
-  const g = { root, bases, only, key, exp: now + CAP_IDLE, net: typeof net === "boolean" ? net : !!(old && old.net), blocked: (old && old.blocked) || new Set(), dt: old && old.dt };
+  // 联网是用户对「这个网页」点的头：同目录换一个页面（凭证按目录复用）不继承，要重新允许（11-03 审查 M-2）
+  const g = { root, bases, only, key, exp: now + CAP_IDLE, page: r.file, net: typeof net === "boolean" ? net : !!(old && old.net && old.page === r.file), blocked: (old && old.blocked) || new Set(), dt: old && old.dt };
   if (net === true) g.blocked.clear();
   PREVIEW.caps.set(cap, g);
   return { url: `http://localhost:${port}/${cap}/${path.basename(r.file).split("/").map(encodeURIComponent).join("/")}`, mtime: r.mtime, net: g.net };
@@ -109,7 +111,9 @@ function previewServe(req, res) {
   // 开发者工具（Eruda，MIT，随包内置）：本体从包里吐，不走网络；凭证随机，不会和 __cc 撞
   const CC_FILES = { "/__cc/eruda.js": ["eruda", "eruda.js"], "/__cc/pick.js": ["cc-pick.js"] };
   if (CC_FILES[pathname]) {
-    let buf; try { buf = fs.readFileSync(path.join(PATHS.web, "vendor", ...CC_FILES[pathname])); } catch { return fail(404, "no devtools"); }
+    const full = path.join(PATHS.web, "vendor", ...CC_FILES[pathname]);
+    let buf; try { buf = fs.readFileSync(full); } catch { return fail(404, "no devtools"); }
+    if (APP && !APP.served(path.relative(path.dirname(PATHS.web), full), buf, fs.statSync(full))) return fail(503, "app files modified");
     res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "max-age=86400", "content-length": buf.length });
     return res.end(req.method === "HEAD" ? undefined : buf);
   }
@@ -149,6 +153,8 @@ function previewServe(req, res) {
   // 开关记在这张凭证上：之后在预览里点链接跳到的网页（地址里没有我们的参数）照样带上；
   // 关掉开关时界面会带 _r 重新载入且不带 cc_devtools，那一次清掉。只给「整页导航」插（脚本、样式、图片请求不碰）
   const isHtml = /\.html?$/i.test(r.file), nav = !req.headers["sec-fetch-mode"] || req.headers["sec-fetch-mode"] === "navigate";
+  // 联网只给用户点头的那一页：在里面点链接跳到同目录别的网页，那一页照离线处理（DeepSeek 复核 11-03，M-2 余项）
+  if (g.net && isHtml && nav && r.file !== g.page) res.setHeader("content-security-policy", PV_CSP(cap));
   if (isHtml && nav) {
     if (query.get("cc_devtools") === "1") g.dt = { dark: query.get("cc_dark") === "1" };
     else if (query.has("_r")) g.dt = null;

@@ -75,6 +75,45 @@ final class ShizukuSetup {
         ch.setDescription(Tr.t("无线调试配对码输入框、激活结果"));
         c.getSystemService(NotificationManager.class).createNotificationChannel(ch);
         flushStaleNote(c);
+        new Thread(this::sweepLegacyAdb, "shz-sweep").start();
+    }
+
+    /**
+     * 老版本（0.6.1 及以前）激活时 adb 服务开在 127.0.0.1:5037、用完也不停：同机任何应用连上去，就能借我们配对过的
+     * 钥匙拿到 shell。新版只开私有 socket（见 adb()），这里把老版本留下的那个收掉，整个过程只做一次。
+     * 能看到的进程只有自己 uid 的，所以杀不到别人的 adb。终端里自己起的 adb 服务也会被停一次（升级后仅此一次）。
+     * Shizuku 已经起来、配对是我们做的：顺手把老版本打开的无线调试关掉（Shizuku 起来后不需要它，下次要用我们自己会开）
+     */
+    private void sweepLegacyAdb() {
+        if (prefs().getInt("adbSwept", 0) >= 1) return;
+        int n = 0;
+        File[] ps = new File("/proc").listFiles();
+        for (File p : ps == null ? new File[0] : ps) {
+            if (!p.getName().matches("\\d+")) continue;
+            try {
+                byte[] b = java.nio.file.Files.readAllBytes(new File(p, "cmdline").toPath());
+                String c = new String(b, StandardCharsets.UTF_8).replace('\0', ' ');
+                if (!c.contains("fork-server") || c.contains("localfilesystem:")) continue;
+                // 经加载器执行时（targetSdk 36 版）argv0 是 /system/bin/linker64，adb 在第二个
+                String[] av = c.split(" ", 3);
+                boolean isAdb = false;
+                for (int i = 0; i < Math.min(2, av.length); i++) if (av[i].equals("adb") || av[i].endsWith("/adb")) isAdb = true;
+                if (!isAdb) continue;
+                android.os.Process.killProcess(Integer.parseInt(p.getName()));
+                n++;
+            } catch (Exception ignored) {}
+        }
+        boolean wifiOff = false;
+        // 应用刚起来时 Shizuku 的 binder 可能还没到：等一会儿（最多 30 秒）再判断
+        for (int i = 0; i < 30 && !Priv.running(); i++) { try { Thread.sleep(1000); } catch (InterruptedException e) { break; } }
+        try {
+            if (Build.VERSION.SDK_INT >= 30 && prefs().getBoolean("paired", false) && hasWss() && Priv.running() && !Priv.sui() && wirelessOn() != 0) {
+                Settings.Global.putInt(ctx.getContentResolver(), "adb_wifi_enabled", 0);
+                wifiOff = true;
+            }
+        } catch (Exception e) { log("关无线调试失败：" + e.getMessage()); }
+        log("清理老版本留下的 adb 服务 " + n + " 个" + (wifiOff ? "，已关掉无线调试" : ""));
+        prefs().edit().putInt("adbSwept", 1).apply();
     }
 
     /**
@@ -194,6 +233,7 @@ final class ShizukuSetup {
             if (busy) { activateQueued = true; log("上一步还在进行，激活排队中"); return; }
             busy = true;
         }
+        wifiOrig = wirelessOn();
         new Thread(() -> {
             try { doActivate(); }
             catch (Exception e) { set("error", e.getMessage()); }
@@ -202,6 +242,7 @@ final class ShizukuSetup {
     }
 
     private void idle() {
+        adbQuit();
         boolean again;
         synchronized (this) { busy = false; again = activateQueued && !Priv.granted(); activateQueued = false; }
         if (again) activate();
@@ -229,6 +270,7 @@ final class ShizukuSetup {
     /** 已配对过的情况：开无线调试（有 WRITE_SECURE_SETTINGS 时自己开）→ 连 → 起服务。成功返回 true */
     private boolean connectAndStart() throws Exception {
         if (wirelessOn() == 0 && hasWss()) {
+            if (wifiOrig < 0) wifiOrig = 0;
             set("connecting", Tr.t("打开无线调试…"));
             Settings.Global.putInt(ctx.getContentResolver(), "adb_wifi_enabled", 1);
             for (int i = 0; i < 20 && wirelessOn() == 0; i++) Thread.sleep(250);
@@ -360,6 +402,7 @@ final class ShizukuSetup {
         adb(10, "disconnect", serial);
         for (int i = 0; i < 60 && !Priv.running(); i++) Thread.sleep(250);
         if (!Priv.running()) throw new Exception(Tr.t("Shizuku 没起来：") + tail(out));
+        restoreWifi();
         cancelNote();
         requestPermission();
     }
@@ -395,6 +438,7 @@ final class ShizukuSetup {
                 for (int i = 0; i < 18 && !onWifi(); i++) Thread.sleep(10_000);
                 if (Priv.running() || busy) return;
                 busy = true;
+                wifiOrig = wirelessOn();
                 try {
                     if (!onWifi()) { failNote(Tr.t("没连 Wi‑Fi，Shizuku 没能自动激活。连上 Wi‑Fi 后点此重试")); return; }
                     if (!connectAndStart()) failNote(Tr.t("Shizuku 自动激活没成功，点此重试"));
@@ -438,6 +482,7 @@ final class ShizukuSetup {
 
     /** 用户点"重新配对"：Shizuku 在跑也照样走配对 */
     void repair() {
+        wifiOrig = wirelessOn();
         synchronized (this) { if (busy) { activateQueued = false; return; } busy = true; }
         new Thread(() -> {
             try {
@@ -463,12 +508,39 @@ final class ShizukuSetup {
         return false;
     }
 
+    /**
+     * 激活前无线调试原本是什么状态：0 关、1 开、-1 不知道。Shizuku 起来后不再需要无线调试（实测关掉不影响
+     * shizuku_server），原本是关的就关回去。配对流程里是用户自己去打开的，那时记下的仍是开始激活前的 0
+     */
+    private volatile int wifiOrig = -1;
+    private void restoreWifi() {
+        if (wifiOrig != 0 || !hasWss()) return;
+        try { Settings.Global.putInt(ctx.getContentResolver(), "adb_wifi_enabled", 0); log("无线调试已关回去"); }
+        catch (Exception e) { log("关无线调试失败：" + e.getMessage()); }
+        wifiOrig = -1;
+    }
+
+    /**
+     * adb 服务只开在应用私有目录里的 Unix socket 上（目录 0700，别的应用连不进来），用完就停。
+     * 不能用默认的 127.0.0.1:5037：adb 服务不校验来访者，同机任何应用都能借我们配对过的钥匙拿到 shell。
+     * 注意 ADB_SERVER_SOCKET 环境变量不认 localfilesystem:（实测会退回 5037），只能用 -L
+     */
+    private String adbSock() { return "localfilesystem:" + new File(env.files, ".adb-shz.sock").getPath(); }
+
+    private void adbQuit() {
+        File s = new File(env.files, ".adb-shz.sock");
+        if (!s.exists()) return;
+        try { adb(5, "kill-server"); } catch (Exception ignored) {}
+        s.delete();
+    }
+
     private int wirelessOn() { return Settings.Global.getInt(ctx.getContentResolver(), "adb_wifi_enabled", 0); }
 
     /** 跑工具包里的 adb，返回合并后的输出；超时就杀掉 */
     private String adb(int timeoutSec, String... args) throws Exception {
         List<String> cmd = new ArrayList<>();
         cmd.add(env.bin("adb").getPath());
+        cmd.add("-L"); cmd.add(adbSock());
         Collections.addAll(cmd, args);
         ProcessBuilder pb = new ProcessBuilder(env.cmd(cmd.toArray(new String[0])));
         env.apply(pb.environment());

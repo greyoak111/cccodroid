@@ -89,6 +89,7 @@ final class Env {
     static android.webkit.WebResourceResponse fetchStatic(String pq) {
         String t = token();
         if (t.isEmpty()) return null;
+        pq = pq.replaceAll("([?&])k=[0-9a-f]{32}&?", "$1").replaceAll("[?&]$", "");   // 桥口令一律不往外发（审查 M-3）
         try {
             byte[] nb = new byte[16];
             new java.security.SecureRandom().nextBytes(nb);
@@ -162,9 +163,10 @@ final class Env {
         return k != null && java.security.MessageDigest.isEqual(k.getBytes(), BRIDGE_KEY.getBytes());
     }
 
-    /** WebView 首次加载的地址：带 k= 把原生桥口令交给界面。Cookie 由 MainActivity 在核过身份后直接种（onBoot），地址里不再带令牌 */
+    /** WebView 首次加载的地址：#k= 把原生桥口令交给界面。放在 # 后面：只留在 WebView 里，不进请求行，
+     *  端口被别人抢占时发过去的请求里也没有它（11-03 审查 M-3）。Cookie 由 MainActivity 在核过身份后直接种（onBoot），地址里不再带令牌 */
     static String uiUrl() {
-        return "http://" + HOST + ":" + PORT + "/?k=" + BRIDGE_KEY;
+        return "http://" + HOST + ":" + PORT + "/#k=" + BRIDGE_KEY;
     }
 
     final File files, usr, home, app, log;
@@ -269,7 +271,7 @@ final class Env {
         e.put("PREFIX", usr.getPath());
         e.put("HOME", home.getPath());
         e.put("TMPDIR", new File(usr, "tmp").getPath());
-        // app/pre 在最前：只放 pkg / apt（压过工具包里同名的旧说明替身）
+        // app/pre 在最前：pkg / apt（压过工具包里同名的旧说明替身）和 adb（服务改开私有套接字，见 pre/adb）
         e.put("PATH", new File(app, "pre").getPath() + ":" + usr.getPath() + "/bin:" + new File(app, "bin").getPath() + ":/system/bin:/system/xbin");
         e.put("LANG", "en_US.UTF-8");
         e.put("TERM", "xterm-256color");

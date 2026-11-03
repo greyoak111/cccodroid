@@ -362,7 +362,12 @@ public final class Share extends ContentProvider {
     @Override public boolean onCreate() { return true; }
 
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
-        if ("r".equals(mode)) return ParcelFileDescriptor.open(fileFor(uri), ParcelFileDescriptor.MODE_READ_ONLY);
+        if ("r".equals(mode)) {
+            // 交出去之前照「分享」的规矩再查一遍（凭据、私有目录、硬链接），不只看在不在分享根下面（11-03 审查 L-12）
+            File f = fileFor(uri);
+            try { guard(getContext(), f); } catch (IOException e) { throw new FileNotFoundException(e.getMessage()); }
+            return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY);
+        }
         // 只有拍照目录可写：相机按 EXTRA_OUTPUT 写进我们事先建好的空文件
         if (uri.getPathSegments().size() == 2 && "camera".equals(uri.getPathSegments().get(0)))
             return ParcelFileDescriptor.open(fileFor(uri), ParcelFileDescriptor.parseMode(mode));

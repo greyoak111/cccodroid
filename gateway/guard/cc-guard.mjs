@@ -10,7 +10,7 @@ import fs from "node:fs";
 
 // 密钥与凭据：按路径特征认，不依赖具体 home 在哪
 const SECRETS = [
-  [/\.gateway-token\b/, "gateway token"],
+  [/\.gateway-token\b|\bCCAPP_TOKEN_FILE\b/, "gateway token"],
   [/ccapp-(?:providers|config|seed)[\w.-]*\.json/, "provider API keys"],
   [/\.cache\/(?:ccapp-key|llama-api-key)/, "API key file"],
   [/(?:^|[\/\s"'=~@<>:])\.ssh(?:\/|\b)/, "SSH keys"],
@@ -36,6 +36,16 @@ const PROMPT = [
   [/ccapp-session-seals\.json\b/, "conversation integrity seals"],
   [/ccapp-settings\.json\b/, "app settings"],
   [/cc-guard\.mjs\b/, "this safety check"],
+  // 打开项目就会自动跑的东西（见 gw/projtrust.mjs）和应用自己的代码：改了等于在下一轮塞进一个程序
+  [/(?:^|[\/\s"'=~@<>:])\.mcp\.json\b/, "project MCP servers"],
+  [/(?:^|[\/\s"'=~@<>:])\.claude\.json\b/, "Claude Code MCP config"],
+  [/\.claude\/(?:hooks|agents)\//, "hooks and agents"],
+  [/ccapp-project-trust\.json\b/, "trusted project list"],
+  // 整个 files/app 都是：界面脚本、TOOLS.md（拼进系统提示）、建档规范（模型自己会去读）也在里面（群友破甲清单 V-12/V-13）
+  [/(?:\/files|(?:~|\$\{?HOME\}?)\/\.\.)\/app(?=$|[\/\s"';|&)])/, "cccodroid gateway code"],
+  [/\.cccodroid-env\.json\b/, "device facts in the system prompt"],
+  // 不提文件名、经 claude 自己的命令改用户级配置：加 MCP 服务器、改设置（钩子 / disableAllHooks）、装插件（DeepSeek 复核 11-03 C-1）
+  [/\bclaude\s+(?:mcp\s+(?:add|add-json|add-from-claude-desktop)|config\s+(?:set|add)|plugins?\s+(?:install|add|enable|marketplace))\b/, "Claude Code config via CLI"],
 ];
 const WRITERS = new Set(["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
 

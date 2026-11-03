@@ -227,7 +227,8 @@ public class BrowserPane extends LinearLayout {
         String skin = ui.getString("skin", "native");
         boolean qs = "qiusuo".equals(skin);
         String[] keys = { "bg", "card", "field", "line", "fg", "dim", "hint", "accent" };
-        String own = "shise".equals(skin) ? ui.getString(night ? "pal_dark" : "pal_light", "") : "";
+        String own = "shise".equals(skin) ? ui.getString(night ? "pal_dark" : "pal_light", "")
+            : "goucheng".equals(skin) && !night ? ui.getString("gc_pal_light", "") : "";   // 构成浅色调过纸色（MainActivity.gcPal）
         String[] v = own.matches("#[0-9a-f]{6}(,#[0-9a-f]{6}){7}") ? own.split(",")
             : "shise".equals(skin)     // 还没算过（刚切过来、界面没起来）：M3 的默认紫
             ? (night ? new String[] { "#141218", "#1d1b20", "#2b2930", "#49454f", "#e6e0e9", "#cac4d0", "#938f99", "#d0bcff" }

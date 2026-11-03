@@ -55,32 +55,37 @@ final class DeviceTools {
     static final String[] SCREEN = {"screen_read", "screen_tap", "screen_swipe", "screen_type", "screen_key", "screenshot"};
     private static int noteId = 600;
 
-    /** 用户在原生对话框里确认过开读屏（MainActivity.confirmA11y） */
+    /** 用户在原生对话框里确认过开读屏（MainActivity.confirmA11y）。总开关和读屏模式存在 Consent 里（锁屏签名），
+     *  不再是同 uid 脚本改一下 prefs 就能伪造的明文（11-03 审查 H-2） */
     static void a11yConfirmed(Context c, String mode, boolean on) {
-        SharedPreferences.Editor e = sp(c).edit();
-        if (on) e.putBoolean("on", true);
-        if (mode.equals("auto") || mode.equals("on")) { procOk = true; e.putBoolean("a11yOk", true).putString("a11y", mode); }
-        e.commit();
+        if (on) Consent.grant(c, Consent.DEV_ON, "1");
+        if (mode.equals("auto") || mode.equals("on")) Consent.grant(c, Consent.DEV_A11Y, mode);
         if (mode.equals("on")) new Thread(() -> A11y.enable(c, 4000)).start();
     }
-    /** 「用时自动开」模式下，这次应用进程里用户点过头没有（审查 v0513b 低-20）：以前确认一次就永久有效，
-     *  之后任何会话（包括被网页、文件内容带偏的）都能随时读别的应用的屏幕、替你点按。现在应用每次重新启动后，第一次读屏再问一句；
-     *  「常开」是用户明确选的，不再问 */
-    private static volatile boolean procOk;
-    private static SharedPreferences sp(Context c) { return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
-    private static boolean isScreen(String t) { for (String s : SCREEN) if (s.equals(t)) return true; return false; }
+    static boolean on(Context c) { return Consent.on(c, Consent.DEV_ON); }
+    /** 读屏模式：off / auto（用时自动开）/ on（常开） */
+    static String a11yMode(Context c) {
+        String m = Consent.get(c, Consent.DEV_A11Y);
+        return "auto".equals(m) || "on".equals(m) ? m : "off";
+    }
+    /** 屏幕类工具现在能不能用（总开关、读屏模式、单个工具都开着）。Priv 据此决定要不要先问这个会话（11-03 审查 M-6） */
+    static boolean screenReady(Context c, String tool) {
+        return isScreen(tool) && on(c) && !"off".equals(a11yMode(c)) && !sp(c).getStringSet("off", new HashSet<>()).contains(tool);
+    }
+    static SharedPreferences sp(Context c) { return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
+    static boolean isScreen(String t) { for (String s : SCREEN) if (s.equals(t)) return true; return false; }
     private static boolean known(String t) { for (String s : BASIC) if (s.equals(t)) return true; return isScreen(t); }
 
     // ── 设置 ─────────────────────────────────────────────────────────────
     static JSONObject status(Context c) throws Exception {
         SharedPreferences p = sp(c);
         Set<String> off = p.getStringSet("off", new HashSet<>());
-        String mode = p.getString("a11y", "off");
+        String mode = a11yMode(c);
         JSONArray tools = new JSONArray();
         for (String s : BASIC) tools.put(new JSONObject().put("name", s).put("enabled", !off.contains(s)));
         for (String s : SCREEN) tools.put(new JSONObject().put("name", s).put("enabled", !off.contains(s)).put("screen", true));
         return new JSONObject().put("ok", true)
-            .put("on", p.getBoolean("on", false))
+            .put("on", on(c))
             .put("tools", tools)
             .put("a11y", new JSONObject()
                 .put("mode", mode)
@@ -93,8 +98,8 @@ final class DeviceTools {
     static JSONObject set(Context c, JSONObject r) throws Exception {
         SharedPreferences.Editor e = sp(c).edit();
         // 打开总开关同样要用户在原生对话框里点头（这条设置经网关谁都能发，被带偏的模型、混进来的脚本都行）
-        boolean askOn = r.has("on") && r.getBoolean("on") && !sp(c).getBoolean("on", false);
-        if (r.has("on") && !askOn) e.putBoolean("on", r.getBoolean("on"));
+        boolean askOn = r.has("on") && r.getBoolean("on") && !on(c);
+        if (r.has("on") && !r.getBoolean("on")) Consent.revoke(c, Consent.DEV_ON);
         if (r.has("tool") && known(r.getString("tool"))) {
             Set<String> off = new HashSet<>(sp(c).getStringSet("off", new HashSet<>()));
             if (r.optBoolean("enabled", true)) off.remove(r.getString("tool")); else off.add(r.getString("tool"));
@@ -104,12 +109,12 @@ final class DeviceTools {
         String mode = r.optString("a11y", "");
         // 读屏切到「用时自动开」或「常开」：每次都要用户在原生对话框里点头（审查 v0.5.9 B4；10-31 复核：以前点过一次就永久免问，
         // 之后谁发一条 dev_set 都能静默切到常开）。这条设置能经网关改，被带偏的模型也改得了；对话框只能在 App 前台弹，后台发起的直接没下文
-        boolean ask = (mode.equals("auto") || mode.equals("on")) && !mode.equals(sp(c).getString("a11y", "off"));
+        boolean ask = (mode.equals("auto") || mode.equals("on")) && !mode.equals(a11yMode(c));
         if (ask || askOn) {
             try { c.startActivity(MainActivity.internal(c, MainActivity.ACTION_A11Y_OK).putExtra("mode", ask ? mode : "").putExtra("on", askOn)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
         }
-        if (!ask && (mode.equals("off") || mode.equals("auto") || mode.equals("on"))) e.putString("a11y", mode);
+        if (mode.equals("off")) Consent.revoke(c, Consent.DEV_A11Y);
         e.commit();
         JSONObject res = status(c);
         if (ask || askOn) { res.put("message", Tr.t("请在弹出的对话框里确认")); return res; }
@@ -126,18 +131,15 @@ final class DeviceTools {
         if (a == null) a = new JSONObject();
         try {
             SharedPreferences p = sp(c);
-            if (!p.getBoolean("on", false)) return fail(Tr.t("用户在设置里关掉了设备工具"));
+            if (!on(c)) return fail(Tr.t("用户在设置里关掉了设备工具"));
             if (!known(tool)) return fail(Tr.t("没有这个设备工具：") + tool);
             if (p.getStringSet("off", new HashSet<>()).contains(tool)) return fail(Tr.t("用户在设置里关掉了这个工具：") + tool);
             if (isScreen(tool)) {
                 // 正在问用户要不要放行一条特权命令：这会儿不许动屏幕，免得替用户点了「允许」
                 if (Priv.asking() || MainActivity.guarding()) return fail(Tr.t("cccodroid 正在等用户确认一条特权命令，这会儿不能操作屏幕，稍后再试"));
-                if ("off".equals(p.getString("a11y", "off")))
+                if ("off".equals(a11yMode(c)))
                     return fail(Tr.t("读屏 / 点按没开：用户要在 设置 → 设备工具 里把「无障碍」改成「用时自动开」或「常开」"));
-                if ("auto".equals(p.getString("a11y", "off")) && !procOk) {
-                    try { c.startActivity(MainActivity.internal(c, MainActivity.ACTION_A11Y_OK).putExtra("mode", "auto").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
-                    return fail(Tr.t("要先在 cccodroid 里确认允许读屏 / 点按（应用重新启动后第一次用要确认一次）。用户点了「允许」之后再试"));
-                }
+                // 每个会话第一次用屏幕类工具要用户点头：在 Priv 的 dev 分支里问（11-03 审查 M-6），这里只会是问过之后进来的
                 String why = A11y.enable(c, 4000);
                 if (why != null) return fail(why);
             }
@@ -194,7 +196,7 @@ final class DeviceTools {
         }
         r.put("storage", st);
         r.put("device", Build.MANUFACTURER + " " + Build.MODEL).put("android", Build.VERSION.RELEASE).put("sdk", Build.VERSION.SDK_INT);
-        r.put("accessibility", A11y.self != null ? "connected" : sp(c).getString("a11y", "off"));
+        r.put("accessibility", A11y.self != null ? "connected" : a11yMode(c));
         return r;
     }
 

@@ -1,0 +1,95 @@
+package cc.codroid;
+
+import android.content.Context;
+import android.system.Os;
+import android.system.OsConstants;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * files/app（网关、界面、guard、PATH 最前的 pre/ 与 bin/）的部署与核对。
+ * 以前只比 TAG（它自己也在 files/app 里），里面的 js 被改了照样跑 —— 项目钩子、MCP 服务器、被网页带偏的 Claude
+ * 都以本应用身份运行，改一次网关源码就能把安全检查、系统提示里的提醒整个拿掉，而且一直留着。
+ * 安装包里的 assets/app/FILES 记着每个文件的 sha256（build.sh 生成，APK 里的改不了）：每次起网关前核对一遍，
+ * 内容不对、少了、多出来的（pre/ 在 PATH 最前，多一个同名程序就能顶替系统命令）都算，有一处就整个按安装包还原。
+ * 24 MB 左右，骁龙 8+ 上不到半秒；只在起网关时做。
+ */
+final class AppFiles {
+    private AppFiles() {}
+
+    /** 整个按安装包重新铺一遍 */
+    static synchronized void deploy(Context c, File app) throws Exception {
+        Installer.deleteTree(app);
+        copyAssetDir(c, "app", app);
+        // lib/ 里除了 .so 还有可执行的 seccomp-enosys-run、ptyhost
+        for (String d : new String[]{"scripts", "bin", "pre", "lib"}) {
+            File[] fs = new File(app, d).listFiles();
+            if (fs != null) for (File f : fs) f.setExecutable(true, true);
+        }
+    }
+
+    /** 和安装包对不上的文件（最多列 20 个）；空 = 一致。旧包没有 FILES 就不核 */
+    static synchronized List<String> tampered(Context c, File app) {
+        List<String> bad = new ArrayList<>();
+        Map<String, String> want = new HashMap<>();
+        try (InputStream in = c.getAssets().open("app/FILES");
+             BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+            for (String l; (l = r.readLine()) != null; ) if (l.length() > 65) want.put(l.substring(65), l.substring(0, 64));
+        } catch (Exception e) { return bad; }
+        walk(app, "", want, bad);
+        for (String k : want.keySet()) { if (bad.size() >= 20) break; if (!k.isEmpty()) bad.add(k + " (missing)"); }
+        return bad;
+    }
+
+    private static void walk(File dir, String rel, Map<String, String> want, List<String> bad) {
+        String[] kids = dir.list();
+        if (kids == null) return;
+        for (String k : kids) {
+            if (bad.size() >= 20) return;
+            String r = rel.isEmpty() ? k : rel + "/" + k;
+            File f = new File(dir, k);
+            int mode;
+            try { mode = Os.lstat(f.getPath()).st_mode; } catch (Exception e) { bad.add(r); continue; }
+            if (OsConstants.S_ISDIR(mode)) { walk(f, r, want, bad); continue; }
+            if (r.equals("FILES")) continue;
+            String h = want.remove(r);
+            if (h == null || !OsConstants.S_ISREG(mode) || !h.equals(sha256(f))) bad.add(r);
+        }
+    }
+
+    private static String sha256(File f) {
+        try (InputStream in = new FileInputStream(f)) {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[1 << 16];
+            for (int n; (n = in.read(buf)) > 0; ) md.update(buf, 0, n);
+            StringBuilder sb = new StringBuilder();
+            for (byte b : md.digest()) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) { return ""; }
+    }
+
+    private static void copyAssetDir(Context c, String path, File dst) throws Exception {
+        String[] kids = c.getAssets().list(path);
+        if (kids == null || kids.length == 0) {
+            dst.getParentFile().mkdirs();
+            try (InputStream in = c.getAssets().open(path); OutputStream o = new FileOutputStream(dst)) {
+                byte[] buf = new byte[1 << 16];
+                for (int n; (n = in.read(buf)) > 0; ) o.write(buf, 0, n);
+            }
+            return;
+        }
+        dst.mkdirs();
+        for (String k : kids) copyAssetDir(c, path + "/" + k, new File(dst, k));
+    }
+}

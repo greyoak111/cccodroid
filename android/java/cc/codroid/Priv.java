@@ -64,7 +64,7 @@ final class Priv {
         if (sui) Log.i(TAG, "检测到 Sui");
         Shizuku.addBinderReceivedListenerSticky(() -> {
             Log.i(TAG, "Shizuku binder 到手 uid=" + safeUid());
-            if (prefs().getBoolean("keepalive", false) && granted()) {
+            if (Consent.on(ctx, Consent.KEEPALIVE) && granted()) {
                 new Thread(() -> keepAlive(true), "keepalive").start();
             }
         });
@@ -72,10 +72,11 @@ final class Priv {
         Shizuku.addRequestPermissionResultListener((code, result) -> {
             lastPermission = result == PackageManager.PERMISSION_GRANTED ? "granted" : "denied";
             ShizukuSetup.get(ctx).onPermission(result == PackageManager.PERMISSION_GRANTED);
-            if (result == PackageManager.PERMISSION_GRANTED && prefs().getBoolean("keepalive", false)) {
+            if (result == PackageManager.PERMISSION_GRANTED && Consent.on(ctx, Consent.KEEPALIVE)) {
                 new Thread(() -> keepAlive(true), "keepalive").start();
             }
         });
+        Consent.dropLegacy(ctx);
         new Thread(Priv::serveFile, "priv-server-fs").start();
     }
 
@@ -148,7 +149,7 @@ final class Priv {
             try { o.put("version", Shizuku.getVersion()); } catch (Throwable ignored) {}
             o.put("uid", safeUid());     // 2000 = adb 方式启动，0 = root 方式
         }
-        o.put("keepalive", prefs().getBoolean("keepalive", false));
+        o.put("keepalive", Consent.on(ctx, Consent.KEEPALIVE));
         o.put("lastPermission", lastPermission);
         ShizukuSetup.get(ctx).put(o);
         SharedPreferences bg = ctx.getSharedPreferences("bg", Context.MODE_PRIVATE);
@@ -264,7 +265,7 @@ final class Priv {
     }
     static JSONObject keepAlive(boolean on) {
         JSONObject r = new JSONObject();
-        prefs().edit().putBoolean("keepalive", on).apply();
+        if (!on) Consent.revoke(ctx, Consent.KEEPALIVE);
         if (!granted()) { try { r.put("ok", false).put("message", Tr.t("Shizuku 未就绪或未授权")); } catch (Exception ignored) {} return r; }
         String[] K = keepAliveOn();
         String[][] steps = on ? new String[][]{
@@ -340,10 +341,11 @@ final class Priv {
                     // 打开要用户点头：会改全局的幽灵进程上限、把本应用加进电池白名单（10-31 复核：以前谁发一条都直接改）
                     boolean on = req.optBoolean("enable", true);
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
-                    if (on && !prefs().getBoolean("keepalive", false) && !ask(Tr.t("打开后台保活增强：") + "\n" + String.join("\n", keepAliveOn()), caller(pid), "keepalive")) {
+                    if (on && !Consent.on(ctx, Consent.KEEPALIVE) && !ask(Tr.t("打开后台保活增强：") + "\n" + String.join("\n", keepAliveOn()), caller(pid), "keepalive")) {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("没有允许，保活增强没有打开"));
                         break;
                     }
+                    if (on && !Consent.on(ctx, Consent.KEEPALIVE)) Consent.grant(ctx, Consent.KEEPALIVE, "1");
                     resp = keepAlive(on);
                     break;
                 }
@@ -358,7 +360,7 @@ final class Priv {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("没有确认，仍然逐条询问"));
                         break;
                     }
-                    prefs().edit().putBoolean("noask", on).apply();
+                    if (on) { if (!noAsk()) Consent.grant(ctx, Consent.NOASK, "1"); } else Consent.revoke(ctx, Consent.NOASK);
                     Log.w(TAG, "特权命令免确认 " + (on ? "打开" : "关闭"));
                     resp = new JSONObject().put("ok", true).put("noask", on);
                     break;
@@ -448,6 +450,10 @@ final class Priv {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("用户没有允许写剪贴板（cccodroid 不在前台时也会直接拒绝）"));
                     } else if ("open".equals(tool) && !ask(Tr.t("设备工具：打开") + "\n\n" + clip(da == null ? "{}" : da.toString(2)), who, "dev:open", false)) {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("用户没有允许打开（cccodroid 不在前台时也会直接拒绝）"));
+                    // 读屏 / 点按 / 输入 / 截图：每个会话第一次问一次，点了允许，这个会话后面的屏幕操作不再问；
+                    // 认不出会话的（终端、脚本直连套接字）每次都问（11-03 审查 M-6）
+                    } else if (DeviceTools.screenReady(ctx, tool) && !devSessOk(sessToken(pid), who, tool)) {
+                        resp = new JSONObject().put("ok", false).put("message", Tr.t("用户没有允许读屏和点按（cccodroid 不在前台时也会直接拒绝）"));
                     } else resp = DeviceTools.call(ctx, req);
                     audit(t0, who, new JSONObject().put("argv", new JSONArray().put("[" + Tr.t("设备工具") + "] " + tool)), resp.optBoolean("ok", true) ? 0 : 1, System.currentTimeMillis() - t0);
                     break;
@@ -534,7 +540,18 @@ final class Priv {
     // ── 免确认 ──
     // 总开关（设置页，打开时原生对话框给免责说明、用户点头才生效）与「本会话都允许」的会话口令（只在内存里）
     private static final java.util.Set<String> SESS_OK = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
-    static boolean noAsk() { return prefs().getBoolean("noask", false); }
+    /** 允许过屏幕类设备工具的会话口令（只在内存里） */
+    private static final java.util.Set<String> DEV_SESS = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    private static boolean devSessOk(String sess, String who, String tool) {
+        if (sess != null && DEV_SESS.contains(sess)) return true;
+        if (!ask(Tr.t("设备工具：读屏和点按") + " (" + tool + ")\n\n"
+                + (sess != null ? Tr.t("允许后，这个会话后面的读屏、点按、输入、截图不再问。") : Tr.t("认不出是哪个会话发起的，这次允许只管这一次。")),
+                who, "dev:screen", false)) return false;
+        if (sess != null) { if (DEV_SESS.size() > 64) DEV_SESS.clear(); DEV_SESS.add(sess); }
+        return true;
+    }
+    /** 存在 Consent 里（锁屏签名），不再是谁都能改的 prefs（11-03 审查 H-2） */
+    static boolean noAsk() { return Consent.on(ctx, Consent.NOASK); }
     /** 动到本应用、Shizuku / Sui 自己的命令：开了免确认也照样问。规则见 PrivRules.touchesSelf */
     static boolean touchesSelf(String text) { return PrivRules.touchesSelf(text, ctx.getPackageName()); }
 

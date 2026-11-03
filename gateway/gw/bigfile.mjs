@@ -81,8 +81,9 @@ const ZIP32 = 0xffffffff;
 const dosTime = (d) => ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xffff;
 const dosDate = (d) => (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xffff;
 
-export async function zipToFile(file, entries) {
-  const fd = fs.openSync(file, "w");
+/** fd0：调用方已经用 O_EXCL | O_NOFOLLOW 占好的文件，直接往里写，不关掉重开（11-03 审查 L-1） */
+export async function zipToFile(file, entries, fd0) {
+  const fd = fd0 ?? fs.openSync(file, "w");
   let off = 0;
   const put = (b) => { fs.writeSync(fd, b); off += b.length; };
   const now = new Date(), central = [];
@@ -134,6 +135,7 @@ export function zipEntries(file) {
     if (e < 0) throw new Error(tz("不是 zip 文件"));
     const n = tail.readUInt16LE(e + 10), cdLen = tail.readUInt32LE(e + 12), cdAt = tail.readUInt32LE(e + 16);
     if (cdAt + cdLen > size) throw new Error(tz("zip 目录损坏"));
+    if (cdLen > (256 << 20)) throw new Error(tz("zip 目录太大了"));   // 一次读进内存：别让一个包撑爆网关（11-03 审查 L-3）
     const cd = Buffer.alloc(cdLen);
     fs.readSync(fd, cd, 0, cdLen, cdAt);
     const out = [], lh = Buffer.alloc(30);

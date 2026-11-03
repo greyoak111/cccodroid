@@ -7,7 +7,17 @@
   const gitEl = $("git");
   const GIT = { dir: "", root: "", tab: "changes", status: null, sel: new Set(), file: "", view: null, wrap: true };
   const gapi = (act, params) => api(`/api/git/${act}?` + new URLSearchParams({ dir: GIT.dir, ...(params || {}) }));
-  const gpost = (act, body) => api(`/api/git/${act}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dir: GIT.dir, ...body }) });
+  const gpost0 = (act, body) => api(`/api/git/${act}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dir: GIT.dir, ...body }) });
+  // 仓库自己的配置会在这一步执行命令（过滤器、钩子等）：网关回 untrusted，列出来让用户确认一次，确认后网关按仓库记住
+  const gpost = async (act, body) => {
+    try { return await gpost0(act, body); }
+    catch (e) {
+      const b = e.body;
+      if (!(e.status === 409 && b && b.error === "untrusted")) throw e;
+      if (!confirm(b.message + "\n\n" + b.risks.slice(0, 12).join("\n") + (b.risks.length > 12 ? "\n…" : "") + "\n\n" + t("这些命令来自仓库里的配置文件。从网上下载、别人给的仓库，先在终端里看清楚再继续。继续？"))) throw new Error(t("已取消"));
+      return gpost0(act, { ...body, trust: b.fp });
+    }
+  };
   const GS = { modified: "M", added: "A", new: "U", deleted: "D", renamed: "R", conflict: "!" };
   const gsTitle = (k) => ({ modified: t("已修改"), added: t("已添加"), new: t("新文件"), deleted: t("已删除"), renamed: t("已改名"), conflict: t("有冲突") })[k] || k;
   const gnum = (f) => (f.add == null && f.del == null) ? (f.binary ? `<span class="gn">${t("二进制")}</span>` : "")
@@ -864,7 +874,7 @@
   async function pvSetNet(on) {
     const pv = VW.pv, p = VW.path;
     if (!pv) return;
-    if (on && !confirm(t("允许这个网页连外网？\n\n联网后，网页里的脚本能把它所在文件夹里的文件发到别处。只对你信得过的网页打开。"))) return;
+    if (on && !confirm(t("允许这个网页连外网？\n\n联网后，网页里的脚本能把它所在文件夹、以及往上最多三层文件夹里的文件发到别处。只对你信得过的网页打开。换一个网页要重新允许。"))) return;
     let r; try { r = await post("/api/preview", { path: p, net: !!on }); } catch (e) { return toast(e.message); }
     if (VW.pv !== pv) return;
     pv.net = !!r.net; pv.blocked = 0;

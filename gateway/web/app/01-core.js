@@ -11,8 +11,8 @@
 //    拿出去  /api/file       ← 消息里的本地图片自动内联、点开大图
 //    看得见  openFiles()     ← 全屏文件浏览器，能预览能引用
 // ─────────────────────────────────────────────────────────────────────
-// 宿主 WebView 用 ?t=令牌&k=桥口令 首次加载（网关据 t 种 Cookie，k 见 theme.js）；两个都别留在地址里
-if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.pathname + location.hash);
+// 宿主 WebView 用 #k=桥口令 首次加载（k 见 theme.js；老版本还有 ?t=令牌）；都别留在地址里
+if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.replaceState(null, "", location.pathname + (/[?&](t|k)=/.test(location.search) ? "" : location.search));
 
 (() => {
   "use strict";
@@ -627,7 +627,8 @@ if (/[?&](t|k)=/.test(location.search)) history.replaceState(null, "", location.
     b.replaceWith(i);
   }, true);
   async function uiSync() {
-    const d = await api("/api/ui").catch(() => null); if (!d) return;
+    const d = await api("/api/ui").catch(() => null); if (!d || typeof d !== "object") return;
+    for (const k of ["__proto__", "constructor", "prototype"]) if (Object.prototype.hasOwnProperty.call(d, k)) delete d[k];   // Object.assign 遇到它会改原型（11-03 审查 I-5）
     // 网关还没有、本地有（升级上来的第一次）：把本地的推上去，别被空的盖掉
     const up = {}; for (const k of Object.keys(UIS.d)) if (d[k] === undefined) up[k] = UIS.d[k];
     if (Object.keys(up).length) api("/api/ui", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(up) }).catch(() => {});

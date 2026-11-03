@@ -205,6 +205,13 @@ public class GatewayService extends Service {
     private void spawnGateway() throws Exception {
         env = new Env(this);                 // 每次重读：执行方式（files/.exec-mode）改了，重启网关就生效
         Log.i(TAG, "执行方式 pref=" + Env.execPref(this) + " targetSdk=" + env.targetSdk + " loader=" + env.loader + " ldso=" + env.ldsoMatches());
+        // 起之前核一遍 files/app（见 AppFiles）：两次起网关之间被改过的，按安装包还原了再起
+        java.util.List<String> bad = AppFiles.tampered(this, env.app);
+        if (!bad.isEmpty()) {
+            Log.w(TAG, "files/app 被改过，起网关前还原：" + bad);
+            AppFiles.deploy(this, env.app);
+            Ledger.add(env, "repair", true, Tr.t("界面与网关的文件被改动过，已按安装包还原：") + android.text.TextUtils.join(", ", bad), null);
+        }
         File server = new File(env.app, "server.mjs");
         ProcessBuilder pb = new ProcessBuilder(env.cmd(env.bin("node").getPath(), server.getPath(), String.valueOf(Env.PORT)));
         env.apply(pb.environment());

@@ -19,7 +19,8 @@ import { archiveDb, archiveImport, saveArchive } from "./archive-store.mjs";
 const TRASH_DIR = path.join(CFG.home, ".ccapp-trash");
 export const TRASH_KEEP_DAYS = 30;
 // 只当单个目录名用：不许全是点（「.」「..」拼进路径就跳出了所在目录，回收站清理曾因此删掉整个 home）
-export const SID_RE = /^(?!\.+$)[A-Za-z0-9._-]{1,200}$/;
+//  也不许是 __proto__ 这类：会话 id 要当对象的键用（封签表、标题表），会改到原型上（11-03 审查 L-2）
+export const SID_RE = /^(?!\.+$)(?!(__proto__|constructor|prototype)$)[A-Za-z0-9._-]{1,200}$/;
 
 // ── 分叉：从某一轮之后另起一个会话 ──
 // 把 transcript 从头抄到「这一轮的最后一行」（下一条用户消息之前），换个会话号写成新文件。
@@ -261,7 +262,8 @@ function realOf(p) {
 const inside = (p, root) => p === root || p.startsWith(root + path.sep);
 export function rewindTargetOk(want) {
   if (typeof want !== "string" || !path.isAbsolute(want)) return false;
-  const r = realOf(want), priv = realOf(path.dirname(CFG.home)), ws = realOf(CFG.workspace);
+  // 私有目录按整个 App 数据目录算（files 之外还有 shared_prefs、databases、app_webview…，11-03 审查 M-7）
+  const r = realOf(want), priv = realOf(path.dirname(path.dirname(CFG.home))), ws = realOf(CFG.workspace);
   return !inside(r, priv) || (inside(r, ws) && r !== ws);
 }
 export function rewindFixup(sessionFile, sid, uuid, files) {
@@ -304,7 +306,10 @@ export function rewindFixup(sessionFile, sid, uuid, files) {
       let curr = null; try { curr = fs.readFileSync(want); } catch {}
       if (curr && curr.equals(data)) continue;
       fs.mkdirSync(path.dirname(want), { recursive: true });
-      fs.writeFileSync(want, data);
+      // 建完上级再按真实路径判一次（中途换成软链的），最后一段不跟软链
+      if (!rewindTargetOk(want)) { failed++; continue; }
+      const fd = fs.openSync(want, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o644);
+      try { fs.writeSync(fd, data); } finally { fs.closeSync(fd); }
       fixed++;
     } catch (e) { failed++; log(`回退补救失败 ${want}: ${e.message}`); }
   }
@@ -496,16 +501,19 @@ export async function exportSessions(ids) {
   const base = process.env.CCAPP_SHARED && fs.existsSync(process.env.CCAPP_SHARED) ? process.env.CCAPP_SHARED : CFG.home;
   const dir = path.join(base, "exports");
   fs.mkdirSync(dir, { recursive: true });
+  if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(tz("导出目录是个软链接，不往里写"));
   if (freeBytes(dir) < (256 << 20)) throw new Error(tz("存储空间不够了"));
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
   // 同一秒导出两次别互相覆盖（审查 v0513b 低-11）：用 wx 先把名字占住，并发的两次也各拿各的
-  let file = null;
+  // 占名用的 fd 直接拿去写，不跟软链（11-03 审查 L-1：以前占完名关掉再按名字重开，中间能被换成软链）
+  let file = null, fd;
+  const C = fs.constants;
   for (let k = 1; !file && k < 100; k++) {
     const f = path.join(dir, k === 1 ? `sessions-${stamp}.zip` : `sessions-${stamp}-${k}.zip`);
-    try { fs.closeSync(fs.openSync(f, "wx")); file = f; } catch (e) { if (e.code !== "EEXIST") throw e; }
+    try { fd = fs.openSync(f, C.O_WRONLY | C.O_CREAT | C.O_EXCL | (C.O_NOFOLLOW || 0), 0o644); file = f; } catch (e) { if (e.code !== "EEXIST") throw e; }
   }
   if (!file) throw new Error(tz("导出目录里同名文件太多了"));
-  const bytes = await zipToFile(file, entries);
+  const bytes = await zipToFile(file, entries, fd);
   return { file, count: list.length, bytes };
 }
 
@@ -523,6 +531,14 @@ export async function importSessions(file) {
     try { manifest = JSON.parse(fs.readFileSync(tmp, "utf8")); } finally { fs.rmSync(tmp, { force: true }); }
   } catch { throw new Error(tz("缺少 manifest.json，不是会话包")); }
   if (manifest.format !== "cccodroid-sessions") throw new Error(tz("不是 cccodroid 会话包"));
+  if (!Array.isArray(manifest.sessions) || manifest.sessions.length > 5000) throw new Error(tz("会话包里的会话太多了，分几次导入"));
+  // 条目按名字、按会话目录先分好：以前每个会话都把全部条目扫一遍，会话多、条目多时卡住网关（11-03 审查 L-3）
+  const byName = new Map(), bySide = new Map();
+  for (const e of ents) {
+    byName.set(e.name, e);
+    const m = /^sessions\/([^/]+)\//.exec(e.name);
+    if (m) (bySide.get(m[1]) || bySide.set(m[1], []).get(m[1])).push(e);
+  }
   const ws = realWorkspace();
   const dir = path.join(PATHS.projects, projectSlug(ws));
   fs.mkdirSync(dir, { recursive: true });
@@ -538,7 +554,7 @@ export async function importSessions(file) {
   try { for (const s of manifest.sessions || []) {
     const id = String(s.id || "");
     if (!SID_RE.test(id)) continue;
-    const main = ents.find((e) => e.name === `sessions/${id}.jsonl`);
+    const main = byName.get(`sessions/${id}.jsonl`);
     if (!main) continue;
     if (findSessionFile(id) || fs.existsSync(path.join(TRASH_DIR, id))) { res.skipped.push(id); continue; }
     const dst = path.join(dir, id + ".jsonl"), side = path.join(dir, id), hadSide = fs.existsSync(side);
@@ -546,7 +562,7 @@ export async function importSessions(file) {
       // 先解到临时名，整条会话（含子代理记录）都解完再改名：中途失败不留半截会话
       await zipExtract(file, main, dst + ".part", budget, fixCwd);
       const pre = `sessions/${id}/`;
-      for (const e of ents) {
+      for (const e of bySide.get(id) || []) {
         if (!e.name.startsWith(pre)) continue;
         const rel = e.name.slice(pre.length);
         if (rel.split("/").some((x) => !x || x === "." || x === "..")) continue;   // 防目录穿越

@@ -6,6 +6,7 @@ import { isLoginMode, learnWindow } from "./models.mjs";
 import { currentModelInfo } from "./claude.mjs";
 import { AUTH_CACHE, authStatus } from "./login.mjs";
 import { envFacts } from "./envfacts.mjs";
+import { APP } from "./appfiles.mjs";
 import { publish } from "./bus.mjs";
 
 // ── 系统提示补充、claude 流事件翻译、订阅额度 ─────────────────────────
@@ -26,7 +27,8 @@ export function toolsHint() {
   if (PREFIX) {
     // 随包的 TOOLS.md 是逐项实测过的工具清单与用法（cccodroid-selftest 验证），优先用它；后面接本机实况
     try {
-      const t = fs.readFileSync(path.join(HERE, "TOOLS.md"), "utf8")
+      // 部署出来的那份用网关启动时读进内存的（见 appfiles.mjs）：跑着的时候文件被改了也不进系统提示
+      const t = (APP?.text("TOOLS.md") ?? fs.readFileSync(path.join(HERE, "TOOLS.md"), "utf8"))
         .replaceAll("{{WORKSPACE}}", CFG.workspace).replaceAll("{{SHARED}}", process.env.CCAPP_SHARED || "（无存储权限，不可用）");
       if (t.trim()) return [t.trim(), envFacts()].filter(Boolean).join("\n\n");
     } catch {}

@@ -33,7 +33,7 @@ function inWorkspace(real) {
 }
 
 /** 读文件和列目录共用的路径政策：home / 运行时 / 种子文件（工作区除外）和凭据目录一律不碰（真实路径） */
-function pathBlocked(real) {
+export function pathBlocked(real) {
   for (const root of inWorkspace(real) ? [SEED_FILE] : [CFG.home, CFG.runtime, SEED_FILE]) {
     if (!root) continue;
     let rr; try { rr = fs.realpathSync(root); } catch { rr = root; }

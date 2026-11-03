@@ -877,6 +877,19 @@
   // 换外观 / 深浅时色块跟着重算（theme.js 只改 html 属性，不发事件）
   new MutationObserver(() => renderAccent()).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-skin"] });
 
+  // ── 构成浅色的纸色（0.6.2）：拖动只预览，松手存进 ccapp-ui.json 的 gcPaper（50 = 默认，存成 null） ──
+  function renderPaper() {
+    const rg = $("gp-range"); if (!rg || !window.Theme || !Theme.gcPaperPref) return;
+    const v = Theme.gcPaperPref();
+    if (document.activeElement !== rg) rg.value = v;
+    rg.style.setProperty("--p", rg.value + "%");
+  }
+  $("gp-range")?.addEventListener("input", (e) => { Theme.gcPreview(+e.target.value); e.target.style.setProperty("--p", e.target.value + "%"); });
+  $("gp-range")?.addEventListener("change", (e) => { const v = +e.target.value; Theme.gcPreview(null); uiSet("gcPaper", v === 50 ? null : v); renderPaper(); });
+  $("gp-reset")?.addEventListener("click", () => { Theme.gcPreview(null); uiSet("gcPaper", null); renderPaper(); });
+  document.addEventListener("cc:ui", (e) => { if (e.detail.key === "gcPaper") renderPaper(); });
+  renderPaper();
+
   // ── 消息下面的按钮（0.4.20）：每个按钮点一下切显示 / 隐藏，藏法见 02-chat-view.js 的 paintActHide ──
   const ACT_NAME = { copy: tk("复制"), resend: tk("重发"), rewind: tk("回退到这里"), mark: tk("书签"), del: tk("删除"), share: tk("转发"), fork: tk("从这里分叉") };
   function renderMsgActs() {

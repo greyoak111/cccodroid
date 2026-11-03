@@ -493,6 +493,10 @@ html.dock-l .side-recent{margin:0 -12px;padding:0 12px 8px}
 .ac-head b{font-weight:600}
 .ac-head #ac-val{flex:1;color:var(--fg2);font-variant-numeric:tabular-nums}
 .ac-track{position:relative;height:28px;margin:6px 0 0}
+/* 纸色：只在构成 · 浅色时出现（设置 → 通用 → 外观下面） */
+html:not([data-skin="goucheng"][data-theme="light"]) #gp-row{display:none}
+.gp-sc{display:flex;align-items:center;gap:8px;min-width:min(320px,60vw)}
+.gp-sc .ac-track{flex:1;margin:0}
 .ac-track input{-webkit-appearance:none;appearance:none;width:100%;height:28px;margin:0;background:none;position:relative;z-index:1;--p:50%}
 .ac-track input::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(to right,var(--accent) var(--p),var(--bg4) var(--p))}
 .ac-track input::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:50%;background:var(--bg);border:2px solid var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.25);transition:transform .12s}
@@ -2843,6 +2847,8 @@ html[data-skin="shise"] .sheet-panel{background:var(--bg2);border-top-left-radiu
 html[data-skin="shise"] #pages .panel:not(.flat){border-color:transparent}
 /* 侧栏：navigation drawer —— container-low 底，当前项是次要色容器的药丸；「新对话」是主色容器的大按钮（M3 的 extended FAB） */
 html[data-skin="shise"] .drawer-panel{border-inline-end:0;border-start-end-radius:16px;border-end-end-radius:16px}
+/* 侧栏面板自己带 16px 圆角、交界没有描边：通用的内凹角片（13px、带一道 --line 细弧）不画，免得上下两端各剩一小段孤立的弧（#115） */
+html[data-skin="shise"].dock-l #drawer::before,html[data-skin="shise"].dock-l #drawer::after{content:none}
 html[data-skin="shise"] .side-nav{border-bottom-color:var(--ss-ov)}
 html[data-skin="shise"] .side-new{background:var(--ss-pc);color:var(--ss-on-pc);border:0;border-radius:16px;padding:13px 16px;box-shadow:0 1px 3px rgba(0,0,0,.15)}
 html[data-skin="shise"] .side-new svg{color:var(--ss-on-pc)}

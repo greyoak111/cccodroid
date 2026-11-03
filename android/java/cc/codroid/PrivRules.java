@@ -37,6 +37,12 @@ final class PrivRules {
         + "|/dev/(stdin|fd)|/proc/[^/\\s]+/fd|(^|[;&|(){}\n])\\s*\\.\\s|\\b(then|do|else)\\s+\\.\\s");
 
     /** 不能免问就返回 true。env：请求自带了环境变量；cwd：请求的工作目录 */
+    /** Consent 验签时认不认这把钥匙：只认本机生成（KeyProperties.ORIGIN_GENERATED = 1）、要求每次使用都验证锁屏的
+     *  （有效期 0；有的系统版本报 -1）。导入的钥匙、「解锁后若干秒内可用」的钥匙都不认（11-03 审查 H-2） */
+    static boolean consentKeyOk(int origin, boolean authRequired, int validitySec) {
+        return origin == 1 && authRequired && validitySec <= 0;
+    }
+
     static boolean risky(String[] argv) { return risky(argv, false, null); }
 
     static boolean risky(String[] argv, boolean env, String cwd) {
@@ -214,7 +220,9 @@ final class PrivRules {
                 for (String x : a) if (x.matches("-[A-Za-z]*R.*|--recursive")) return false;
                 return true;
             case "sort":
-                for (String x : a) if (x.matches("-[A-Za-z]*o.*|--output.*")) return false;
+                // -o 写文件；--compress-program 会起外部程序，-T 指临时目录（GNU sort，PATH 指到工具包时用的是它，11-03 审查 L-17）。
+                // 长选项能缩写（--comp、--te），按前缀拦
+                for (String x : a) if (x.matches("-[A-Za-z]*[oT].*|--(o|co|t).*")) return false;
                 return true;
             case "uniq": {   // uniq 输入 输出：第二个文件名是写
                 int files = 0;

@@ -5,6 +5,8 @@
   if (window.__ccPick) return;
   window.__ccPick = 1;
   var on = false, box = null, cur = null;
+  // 只和嵌着自己的那一层（cccodroid 界面）说话（11-03 审查 I-1）；拿不到父页来源（老 WebView）才退回 *
+  var PO = (location.ancestorOrigins && location.ancestorOrigins.length && location.ancestorOrigins[0] !== "null") ? location.ancestorOrigins[0] : "*";
   function cssEsc(s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/[^\w-]/g, "\\$&"); }
   function selector(el) {
     var parts = [];
@@ -55,15 +57,15 @@
     stop();
     var out = { cc: "picked", sel: selector(t), tag: t.tagName.toLowerCase(), html: html, text: text, page: location.pathname, url: location.href };
     window.__ccPicked = out;   // 浏览器窗格（原生 WebView）没有父页面，原生侧轮询来取
-    if (parent !== window) parent.postMessage(out, "*");
+    if (parent !== window) parent.postMessage(out, PO);
   }
   document.addEventListener("mousemove", hover, true);
   document.addEventListener("touchstart", hover, { capture: true, passive: true });
   document.addEventListener("touchmove", hover, { capture: true, passive: true });
   document.addEventListener("click", pick, true);
-  document.addEventListener("keydown", function (e) { if (on && e.key === "Escape") { stop(); parent.postMessage({ cc: "pickoff" }, "*"); } }, true);
+  document.addEventListener("keydown", function (e) { if (on && e.key === "Escape") { stop(); parent.postMessage({ cc: "pickoff" }, PO); } }, true);
   window.addEventListener("message", function (e) {
-    if (e.source !== parent || !e.data) return;
+    if (e.source !== parent || !e.data || (PO !== "*" && e.origin !== PO)) return;
     if (e.data.cc === "pick") { on = true; document.documentElement.style.cursor = "crosshair"; }
     else if (e.data.cc === "pickoff") stop();
   });

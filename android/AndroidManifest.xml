@@ -79,10 +79,13 @@
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|navigation" />
+        <!-- 任务亲和性置空：别的应用声明同名 taskAffinity 也挤不进我们的任务栈冒充界面（StrandHogg 类，11-03 审查 L-21） -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:allowTaskReparenting="false"
             android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Launch"

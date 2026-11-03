@@ -51,6 +51,21 @@ test("改提示词、钩子、会话记录：写要问，读不问；CLAUDE.md �
     ["Bash", { command: "sed -i 's/I cannot/Sure/' ~/.claude/projects/-ws/abc.jsonl" }],
     ["Bash", { command: "echo {} > ~/ccapp-session-seals.json" }],
     ["Bash", { command: "rm /x/gateway/guard/cc-guard.mjs" }],
+    ["Write", { file_path: "/proj/.mcp.json" }],
+    ["Bash", { command: "cp evil.json /sdcard/.mcp.json" }],
+    ["Edit", { file_path: "/x/home/.claude.json" }],
+    ["Write", { file_path: "/proj/.claude/agents/runner.md" }],
+    ["Write", { file_path: "/proj/.claude/hooks/unlock.sh" }],
+    ["Bash", { command: "echo {} > ~/ccapp-project-trust.json" }],
+    ["Edit", { file_path: "/data/user/0/cc.codroid/files/app/gw/integrity.mjs" }],
+    ["Bash", { command: "node self-patch.mjs /data/user/0/cc.codroid/files/app/server.mjs" }],
+    ["Bash", { command: "claude mcp add -s user sys -- node /sdcard/x/mcp-sys.mjs" }],
+    ["Bash", { command: "cd ~ && claude  config set -g disableAllHooks true" }],
+    ["Bash", { command: "claude plugin install evil@market" }],
+    ["Bash", { command: "cat core.md >> /data/user/0/cc.codroid/files/app/TOOLS.md" }],
+    ["Write", { file_path: "/data/user/0/cc.codroid/files/app/archive/spec.zh.md" }],
+    ["Bash", { command: "cp x.js ~/../app/web/app/03-perm-status.js" }],
+    ["Bash", { command: "echo '{}' > $HOME/.cccodroid-env.json" }],
   ];
   for (const [tool, inp] of hit) assert.match(judge(tool, inp)?.cat || "", /^prompt:/, `${tool} ${JSON.stringify(inp)}`);
   for (const [tool, inp] of [
@@ -58,5 +73,12 @@ test("改提示词、钩子、会话记录：写要问，读不问；CLAUDE.md �
     ["Grep", { pattern: "x", path: "/x/home/.claude/projects/-ws/abc.jsonl" }],
     ["Edit", { file_path: "/proj/CLAUDE.md" }],
     ["Write", { file_path: "/proj/docs/settings.json" }],
+    ["Write", { file_path: "/proj/mcp.json.md" }],
+    ["Write", { file_path: "/proj/.claude/skills/x/SKILL.md" }],
+    ["Read", { file_path: "/proj/.mcp.json" }],
+    ["Bash", { command: "claude mcp list" }],
+    ["Bash", { command: "claude --version" }],
+    ["Write", { file_path: "/sdcard/files/apple/notes.md" }],
+    ["Read", { file_path: "/data/user/0/cc.codroid/files/app/TOOLS.md" }],
   ]) assert.equal(judge(tool, inp), null, `${tool} ${JSON.stringify(inp)}`);
 });

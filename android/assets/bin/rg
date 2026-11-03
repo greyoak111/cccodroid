@@ -1,0 +1,9 @@
+#!/system/bin/sh
+# ripgrep 兜底：工具包「命令行增强」模块没装时，用 Claude Code 自带的那份（官方二进制里内置了 ripgrep，按 argv0=rg 进入）。
+# 为什么要它：claude 经 glibc 加载器运行，它找自带 ripgrep 用的是 /proc/self/exe —— 那是加载器本身，调起来什么也搜不到，
+# Grep / Glob 不报错、一律返回「没找到」（2.1.311 实测）。所以起 claude 时设了 USE_BUILTIN_RIPGREP=0 让它按 PATH 找 rg：
+# 装了模块用工具包的 rg（PATH 里排在前面），没装就落到这里。启动方式和 bin/claude 一样。
+unset LD_PRELOAD
+PRE=${CCAPP_GLIBC_PRELOAD:-${CCAPP_CLAUDE_PRELOAD:-${CCAPP_BIN%/bin}/lib/seccomp-enosys.so}}
+exec "${CCAPP_LD:-$PREFIX/glibc/lib/ld-linux-aarch64.so.1}" --library-path "$PREFIX/glibc/lib" ${PRE:+--preload "$PRE"} \
+  --argv0 rg "$HOME/.local/share/cccodroid/claude/current/claude" "$@"

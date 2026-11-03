@@ -109,7 +109,13 @@ test("命令行 cc-archive：带本轮编号交档，网关认出会话；不合
   const { RUNS } = await import("../gw/runs.mjs");
   const sid = session(4, 1);
   RUNS.set("run-arch-1", { id: "run-arch-1", sessionId: sid });
-  const srv = http.createServer((req, res) => { const u = new URL(req.url, "http://127.0.0.1"); routeArchive(req, res, u, u.pathname); });
+  const { proof, localAddr } = await import("../gw/access.mjs");
+  // 和 server.mjs 一样答 /__proof：cc-archive 先确认对面是真网关才交令牌（11-03 审查 L-6）
+  const srv = http.createServer((req, res) => {
+    const u = new URL(req.url, "http://127.0.0.1");
+    if (u.pathname === "/__proof") { res.writeHead(200); return res.end(proof(u.searchParams.get("n"), localAddr(req))); }
+    routeArchive(req, res, u, u.pathname);
+  });
   await new Promise((r) => srv.listen(0, "127.0.0.1", r));
   const port = srv.address().port;
   const cli = path.join(HERE, "..", "archive", "cc-archive.mjs");
@@ -124,6 +130,25 @@ test("命令行 cc-archive：带本轮编号交档，网关认出会话；不合
   assert.match(r2.o, /filed .*·1: 审 GPU 驱动组件/);
   srv.close();
   RUNS.delete("run-arch-1");
+  // 冒牌的（端口上是别的监听者）：答不出 /__proof，令牌一个字节都不给它
+  let leaked = false;
+  const fake = http.createServer((req, res) => { if (req.headers["x-cc-token"]) leaked = true; res.writeHead(200); res.end("x y"); });
+  await new Promise((r) => fake.listen(0, "127.0.0.1", r));
+  const r3 = await new Promise((r) => { const c = spawn(process.execPath, [cli, "--title", "审 GPU 驱动组件"], { env: { ...env, CCAPP_GW_PORT: String(fake.address().port) } }); let o = ""; c.stderr.on("data", (d) => (o += d)); c.on("close", (code) => r({ code, o })); });
+  fake.close();
+  assert.equal(r3.code, 2, r3.o);
+  assert.equal(leaked, false, "令牌发给了冒牌网关");
+  // 冒牌的不回话 / 回一大串不收尾：命令要判失败退出，不能一直挂着（DeepSeek 复核 11-03）
+  for (const mode of ["silent", "flood"]) {
+    const bad = http.createServer((req, res) => { if (req.headers["x-cc-token"]) leaked = true; if (mode === "flood") { res.writeHead(200); res.write("x".repeat(8192)); } });
+    await new Promise((r) => bad.listen(0, "127.0.0.1", r));
+    const t0 = Date.now();
+    const r4 = await new Promise((r) => { const c = spawn(process.execPath, [cli, "--title", "审 GPU 驱动组件"], { env: { ...env, CCAPP_GW_PORT: String(bad.address().port) } }); let o = ""; c.stderr.on("data", (d) => (o += d)); c.on("close", (code) => r({ code, o })); });
+    bad.closeAllConnections(); bad.close();
+    assert.equal(r4.code, 2, mode + " " + r4.o);
+    assert.ok(Date.now() - t0 < 20000, mode + " 等太久");
+    assert.equal(leaked, false, mode + " 令牌发给了冒牌网关");
+  }
 });
 
 test("杂项：AI 交档带 misc 归进去；用户移出后 AI 再带也不动；会话列表带档号和杂项标记", async () => {

@@ -8,7 +8,7 @@ import { CFG, log } from "./config.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-ui.json");
-export const UI_KEYS = ["topbar", "navPins", "accent", "msgActs", "extImg"];
+export const UI_KEYS = ["topbar", "navPins", "accent", "msgActs", "extImg", "gcPaper"];
 const MAX = 16 * 1024;
 
 export function readUi() {

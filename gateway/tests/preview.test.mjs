@@ -61,3 +61,25 @@ test("默认断网：带 CSP 和回报地址，拦下的外站记下来；点「
   await api({ path: path.join(site, "index.html"), net: false });
   assert.match((await fetch(r.url)).headers.get("content-security-policy") || "", /connect-src 'self'/);
 });
+
+test("联网只给点头的那个网页：同目录换一页不继承（11-03 审查 M-2）", async () => {
+  const api = (b) => fetch(`http://127.0.0.1:${gw.address().port}/api/preview`, { method: "POST", body: JSON.stringify(b) }).then((r) => r.json());
+  fs.writeFileSync(path.join(site, "other.html"), "<p>b</p>");
+  assert.equal((await api({ path: path.join(site, "index.html"), net: true })).net, true);
+  assert.equal((await api({ path: path.join(site, "other.html") })).net, false, "换了网页要重新允许");
+  assert.equal((await api({ path: path.join(site, "index.html") })).net, false, "回到原来那页也不复活（凭证已被换页改成断网）");
+  await api({ path: path.join(site, "index.html"), net: false });
+});
+
+test("联网的网页里点链接跳到同目录别的网页：那一页照离线处理（复核 11-03 M-2 余项）", async () => {
+  const api = (b) => fetch(`http://127.0.0.1:${gw.address().port}/api/preview`, { method: "POST", body: JSON.stringify(b) }).then((r) => r.json());
+  fs.writeFileSync(path.join(site, "other.html"), "<p>b</p>");
+  const r = await api({ path: path.join(site, "index.html"), net: true });
+  // fetch 会自己把 sec-fetch-mode 设成 cors，模拟整页导航得用 http.get
+  const base = r.url.replace(/index\.html$/, "");
+  const csp = (rel, mode) => new Promise((ok, no) => http.get(base + rel, { headers: { "sec-fetch-mode": mode } }, (res) => { res.resume(); ok(res.headers["content-security-policy"] || null); }).on("error", no));
+  assert.equal(await csp("index.html", "navigate"), null, "点了头的那页联网");
+  assert.ok(await csp("other.html", "navigate"), "跳过去的那页要带离线 CSP");
+  assert.equal(await csp("assets/app.js", "no-cors"), null, "那页自己的资源照常");
+  await api({ path: path.join(site, "index.html"), net: false });
+});

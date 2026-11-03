@@ -57,6 +57,7 @@
         h = `<div class="perm-path">${esc(i.notebook_path || "")}</div><pre class="perm-cmd">${esc(String(i.new_source || "").slice(0, 3000))}</pre>`;
         break;
       case "WebFetch": h = `<pre class="perm-cmd">${esc(i.url || "")}</pre>` + (i.prompt ? `<div class="perm-sub">${esc(i.prompt)}</div>` : ""); break;
+      case "ProjectConfig": h = `<div class="perm-path">${esc(i.dir || "")}</div><pre class="perm-cmd">${esc((i.risks || []).join("\n"))}</pre>`; break;
       case "WebSearch": h = `<pre class="perm-cmd">${esc(i.query || "")}</pre>`; break;
       case "ExitPlanMode": h = `<div class="perm-plan">${renderMd(String(i.plan || ""))}</div>`; break;
       case "AskUserQuestion":
@@ -76,7 +77,9 @@
     if (p.blockedPath && !["Edit", "Write", "MultiEdit"].includes(p.tool) && !String(i.command || "").includes(p.blockedPath)) h += `<div class="perm-sub">${t("涉及路径：{p}", { p: esc(p.blockedPath) })}</div>`;
     if (p.reason && typeof p.reason === "string") h += `<div class="perm-sub">${t("原因：{r}", { r: esc(p.reason) })}</div>`;
     // 敏感操作再确认（网关的 guard 钩子）：说清楚碰到了什么、为什么要多问一句
-    if (p.guard) h = `<div class="perm-guard"><b>${esc(permGuardWhat(p.guard))}</b><p>${t("如果不是你让它这么做的，多半是它读到的网页或文件里藏了指令，建议拒绝。允许后，这一轮里同一类操作不再问。")}</p></div>` + h;
+    if (p.guard) h = `<div class="perm-guard"><b>${esc(permGuardWhat(p.guard))}</b><p>${p.guard.cat === "project"
+      ? t("这些配置会以本应用的身份直接运行程序。不是你自己写的、或者来路不明的项目，选「不加载」：这一轮照常进行，只是不用它们。允许后记住，配置变了会再问。")
+      : t("如果不是你让它这么做的，多半是它读到的网页或文件里藏了指令，建议拒绝。允许后，这一轮里同一类操作不再问。")}</p></div>` + h;
     return h;
   }
 
@@ -85,6 +88,7 @@
     if (c === "device:screen") return t("要读屏幕或替你操作别的应用（{w}）", { w: g.what });
     if (c === "device:clipboard") return t("要读剪贴板");
     if (c === "device:share") return t("要把文件分享到别的应用");
+    if (c === "project") return t("这个项目带了打开就会自动运行的配置（钩子、MCP 服务器等）");
     // what 是「英文类别: 命中的那段路径」，界面只显示路径那段
     const w = String(g.what || ""), k = w.indexOf(": ");
     if (c.startsWith("prompt:")) return t("要改管着提示词或安全检查的文件：{w}", { w: k > 0 ? w.slice(k + 2) : w });
@@ -97,8 +101,8 @@
   const WIDE_MODES = ["bypassPermissions", "auto", "dontAsk"];
   function permActions(p, runId) {
     if (p.guard) return `
-      <button class="pa-allow">${t("允许")}</button>
-      <button class="pa-more primary">${t("拒绝 ▾")}</button>`;
+      <button class="pa-allow">${p.guard.cat === "project" ? t("允许并记住") : t("允许")}</button>
+      <button class="pa-more primary">${p.guard.cat === "project" ? t("不加载 ▾") : t("拒绝 ▾")}</button>`;
     if (p.tool === "ExitPlanMode") {
       // 用户本来就放得比「自动接受编辑」宽（全部放行等）时，批准计划不该顺手把全局模式降下来（群友反馈）
       const cur = runMode(runId), keep = WIDE_MODES.includes(cur);

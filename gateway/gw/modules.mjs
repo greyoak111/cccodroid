@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
 import { LAST_LANG, PREFIX, log, tr, tz } from "./config.mjs";
 import { killTree } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { compBaseDeps, compNeeds, compRecords, compRun, devkitIdentity, sha256File, breathe } from "./components.mjs";
+import { archiveProblem, parseTarListing } from "./archive-check.mjs";
 
 // ── 模块化工具包（0.3.9 起）──────────────────────────────────────────
 // 工具包按 devkit.json 的 modules 拆成基础块 + 若干模块（+ 自动算出的共享层），同一份 Termux 快照一起发布。
@@ -182,7 +184,14 @@ async function modRunInstall(mj, m, base, job) {
   job.phase = "verifying"; job.done = 0; job.total = m.installed || 0;
   fs.rmSync(tree, { recursive: true, force: true });
   fs.mkdirSync(tree, { recursive: true });
-  try { await compRun(job, path.join(PREFIX, "bin", "tar"), ["-xzf", gz, "-C", tree]); }
+  // 解之前按目录查（同组件包）：MANIFEST 解完才核，经包内软链或 .. 写到暂存区外面的条目那时已经落地了（11-03 审查 L-8）
+  try {
+    const list = await new Promise((ok, no) => execFile(path.join(PREFIX, "bin", "tar"), ["-tzv", "--quoting-style=c", "-f", gz],
+      { maxBuffer: 256 << 20 }, (e, out) => e ? no(e) : ok(String(out))));
+    const bad = archiveProblem(parseTarListing(list));
+    if (bad) throw new Error(tz("这个压缩包里有条目会写到包外面（{p}），为安全起见不解开", { p: String(bad.name).slice(0, 200) }));
+    await compRun(job, path.join(PREFIX, "bin", "tar"), ["-xzf", gz, "-C", tree]);
+  }
   catch (e) { if (!job.cancelled) fs.rmSync(gz, { force: true }); throw e; }
   const man = readLines(path.join(tree, "usr", m.dir, "MANIFEST"));
   job.total = man.reduce((a, l) => a + (Number(l.split(" ")[1]) || 0), 0);   // 按清单字节算，installed 含链接等到不了头

@@ -72,7 +72,7 @@ public class A11y extends AccessibilityService {
             @Override public void run() {
                 if (self != A11y.this) return;
                 SharedPreferences sp = getSharedPreferences(DeviceTools.PREFS, Context.MODE_PRIVATE);
-                String mode = sp.getString("a11y", "off");
+                String mode = DeviceTools.a11yMode(A11y.this);
                 int idle = sp.getInt("a11yIdle", 10);
                 if (!"on".equals(mode) && System.currentTimeMillis() - lastUse > idle * 60_000L) {
                     Log.i(TAG, "无障碍空闲 " + idle + " 分钟，自动关闭");

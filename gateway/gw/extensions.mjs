@@ -7,6 +7,7 @@ import { SID_RE, zipRead } from "./sessionops.mjs";
 import { NEXT, readBody, readBodyBuf, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
 import { COMP_DIR, compIndex, compIndexCache, compRecord } from "./components.mjs";
+import { retrustProject } from "./projtrust.mjs";
 
 // ── 扩展：插件 / 技能 / MCP ───────────────────────────────────────────
 // 全部转给 claude 自己的命令行（claude plugin … / claude mcp …），网关不自己改它的配置文件 ——
@@ -126,10 +127,13 @@ async function listMcp() {
 
 async function addMcp(b) {
   const name = String(b.name || "").trim();
-  if (!/^[A-Za-z0-9._-]{1,64}$/.test(name)) return { ok: false, message: tz("名字只能用字母、数字、点、下划线、横线") };
+  // 横线开头的名字会被当成 claude 的选项（11-03 审查 L-19，同 badArg）
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(name) || badArg(name)) return { ok: false, message: tz("名字只能用字母、数字、点、下划线、横线") };
   const transport = ["stdio", "http", "sse"].includes(b.transport) ? b.transport : "stdio";
   const target = String(b.target || "").trim();
   if (!target) return { ok: false, message: tz("缺少命令或地址") };
+  // http / sse 的地址是位置参数：只收 http(s) 网址，别的（横线开头、控制字符）不进命令行
+  if (transport !== "stdio" && (badArg(target) || !/^https?:\/\/[^\s]+$/i.test(target))) return { ok: false, message: tz("地址要以 http:// 或 https:// 开头") };
   // -e / --header 是可变参数，会把后面的名字吞掉：名字放前面，选项跟在后面、用 -- 收尾
   const args = ["mcp", "add", "-s", "user", "--transport", transport, name];
   if (transport !== "stdio") args.push(target);
@@ -232,6 +236,7 @@ function saveHooks({ scope, dir, hooks, disableAll }) {
     fs.writeFileSync(tmp, JSON.stringify(j, null, 2) + "\n");
     fs.renameSync(tmp, file);
     log(`hooks 已保存：${file}`);
+    if (scope !== "user") retrustProject(path.dirname(path.dirname(file)));   // 用户在这里亲手改的：之前认过这个目录就跟着认新的（见 projtrust.mjs）
     return { ok: true, file };
   });
   EXT_LOCK = job.catch(() => {});
@@ -458,6 +463,7 @@ function importSkill(buf) {
       let rel = f.name.slice(root.length);
       if (f === md) rel = "SKILL.md";       // 统一成 Claude 认的大写文件名
       if (!rel || rel.split("/").some((x) => !x || x === "." || x === "..")) continue;
+      if (rel === ".cc-source.json") continue;   // 来源记录只由官方目录安装时写：导入的包自带一份就能冒充「官方」（11-03 审查 I-13）
       const out = path.join(dst, rel);
       fs.mkdirSync(path.dirname(out), { recursive: true });
       fs.writeFileSync(out, f.data);

@@ -10,6 +10,11 @@ if ((process.env.NODE_TEST_CONTEXT || /\.test\.mjs$/.test(process.argv[1] || "")
 
 // 网关目录（gw/ 的上一级）：web/、bin/、TAG 等都相对它找
 export const HERE = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+/** OpenPGP 验签模块：打包时拷进 app/bin；仓库里（开发布局、测试）在 devkit/。找不到就抛错，调用方不许放行 */
+export async function loadPgp() {
+  for (const f of [path.join(HERE, "bin", "pgp.mjs"), path.join(HERE, "..", "devkit", "pgp.mjs")]) if (fs.existsSync(f)) return import(f);
+  throw new Error("pgp.mjs not found");
+}
 // ── 路径与配置 ────────────────────────────────────────────────────────
 export const CFG = {
   runtime: process.env.CCAPP_RUNTIME || path.join(HERE, "..", "runtime"),

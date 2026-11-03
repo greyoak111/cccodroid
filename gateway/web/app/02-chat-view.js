@@ -94,7 +94,7 @@
     el.textContent = sel.length ? sel.join(",") + "{display:none !important}" : "";
   }
   paintActHide();
-  document.addEventListener("cc:ui", (e) => { if (e.detail.key === "msgActs") paintActHide(); if (e.detail.key === "accent" && window.Theme) Theme.apply(); });
+  document.addEventListener("cc:ui", (e) => { if (e.detail.key === "msgActs") paintActHide(); if ((e.detail.key === "accent" || e.detail.key === "gcPaper") && window.Theme) Theme.apply(); });
 
   const UI_I = {
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',

@@ -16,6 +16,7 @@ import { runOfSession } from "./runs.mjs";
 import { checkSession, resealAfterEdit } from "./integrity.mjs";
 import { rewriteLines } from "./bigfile.mjs";
 import { lineageForget } from "./lineage.mjs";
+import { pathBlocked } from "./files.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-projects.json");
 // 项目颜色：和界面强调色同一套饱和度，按顺序分配（用户可改）
@@ -81,7 +82,10 @@ function memoryFiles(p) {
 }
 /** 项目自带的 MCP 服务器（.mcp.json） */
 function projectMcp(p) {
-  try { return Object.keys(JSON.parse(fs.readFileSync(path.join(p.path, ".mcp.json"), "utf8")).mcpServers || {}); } catch { return []; }
+  // 只读普通文件、不跟软链：指向 /dev/zero 的软链会把网关同步读卡死（11-03 审查 L-4）
+  const f = path.join(p.path, ".mcp.json");
+  try { const st = fs.lstatSync(f); if (!st.isFile() || st.size > (1 << 20)) return []; } catch { return []; }
+  try { return Object.keys(JSON.parse(fs.readFileSync(f, "utf8")).mcpServers || {}); } catch { return []; }
 }
 /** 顶层文件（目录在前），给项目页「文件」一栏 */
 function topFiles(p, max = 40) {
@@ -186,6 +190,8 @@ export async function routeProjects(req, res, u, p) {
     if (b.mode === "dir") {
       dir = real(String(b.path || ""));
       if (!isDir(dir)) return sendJson(res, 400, { error: tz("目录不存在：{d}", { d: dir }) });
+      // 应用私有目录（home、运行时；工作区除外）不能登记成项目：项目页会读写里面的 CLAUDE.md，会话也会在里面跑（11-03 审查 L-4，同文件面板的政策）
+      if (pathBlocked(dir)) return sendJson(res, 403, { error: tz("这个目录在应用私有目录里，不能当项目") });
     } else {
       dir = freeDir(name);
       if (b.mode === "git") {

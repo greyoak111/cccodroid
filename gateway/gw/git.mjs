@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { CFG, log, tz } from "./config.mjs";
@@ -13,22 +14,99 @@ const GIT_MAX = 768 * 1024;
 // 文件面板一进目录就自动跑 status/diff：仓库自带的配置不能借机执行命令（safe.directory=* 让本地配置一律被信任）。
 // fsmonitor 全关；只读命令再把属性来源换成空树（仓库 .gitattributes 挂的 clean 过滤器 / diff 驱动不生效），diff 类关外部比较与 textconv。
 // add/commit 是用户点的，不换属性来源——否则 LFS 之类的过滤器在提交时被跳过
+// 光换属性来源不够：.git/info/attributes 与 core.attributesFile 不受 --attr-source 影响，照样能给文件挂上仓库配置里的
+// clean 过滤器。所以只读命令还要把配置里出现的每个过滤器都覆盖成空（实测空值即不执行），子模块不递归（它的配置另算），
+// 签名校验关掉（log.showSignature + gpg.program 能执行命令）
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const GIT_RO = new Set(["status", "diff", "show", "log", "for-each-ref", "rev-parse", "remote", "branch"]);
+const GIT_PRE = ["-c", "core.quotePath=false", "-c", "color.ui=false", "-c", "core.fsmonitor=false", "-c", "protocol.ext.allow=never"];
 function gitArgs(args) {
-  const pre = ["-c", "core.quotePath=false", "-c", "color.ui=false", "-c", "core.fsmonitor=false"];
-  if (!GIT_RO.has(args[0])) return [...pre, ...args];
+  if (!GIT_RO.has(args[0])) return [...GIT_PRE, ...args];
   const extra = args[0] === "diff" || args[0] === "show" || args[0] === "log" ? ["--no-ext-diff", "--no-textconv"] : [];
-  return [...pre, `--attr-source=${EMPTY_TREE}`, args[0], ...extra, ...args.slice(1)];
+  if ((args[0] === "status" || args[0] === "diff") && !args.includes("--no-index")) extra.push("--ignore-submodules=all");
+  return [...GIT_PRE, "-c", "log.showSignature=false", `--attr-source=${EMPTY_TREE}`, args[0], ...extra, ...args.slice(1)];
+}
+/** 仓库能读到的全部配置（含 include 进来的）：{ ok, list: [{ scope, raw, key, value }], odd }。读配置本身不执行任何东西。
+ *  raw 是原样的键：过滤器名（中间那段）区分大小写，[filter "Evil"] 只能用 filter.Evil.* 盖住；key 是小写的，只拿来认。
+ *  --null 下键和值用第一个换行分开，名字里带换行（[filter "a\nb"]）就切错了 —— 值里有换行、键里有引号反斜杠控制字符的
+ *  一律记 odd，调用方按「看不懂」处理（DeepSeek 复核 11-03）。读失败 ok=false，同样不能当成「没有配置」 */
+function gitConfigList(cwd) {
+  return new Promise((resolve) => {
+    execFile("git", ["config", "--list", "--null", "--show-scope"], { cwd, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", LC_ALL: "C.UTF-8" }, timeout: 10000, maxBuffer: 4 << 20, encoding: "utf8" },
+      (err, out) => {
+        const a = String(out || "").split("\0"), list = [];
+        let odd = 0;
+        for (let i = 0; i + 1 < a.length; i += 2) {
+          const kv = a[i + 1], nl = kv.indexOf("\n");
+          const raw = nl < 0 ? kv : kv.slice(0, nl), value = nl < 0 ? "" : kv.slice(nl + 1);
+          if (/[\x00-\x1f\x7f"\\]/.test(raw) || value.includes("\n")) odd++;
+          list.push({ scope: a[i], raw, key: raw.toLowerCase(), value });
+        }
+        // 没有任何配置时 git config --list 退出码是 1、输出为空：那是正常的「没有」
+        const ok = !err || (err.code === 1 && !String(out || "").length);
+        resolve({ ok, list, odd });
+      });
+  });
+}
+/** 只读命令用：把每个过滤器的命令覆盖成空。走 GIT_CONFIG_COUNT（过滤器名可以带 = 和空格，-c 拆不开） */
+async function gitNeutral(cwd) {
+  const names = new Set(), c = await gitConfigList(cwd);
+  if (!c.ok || c.odd) return null;   // 看不懂的配置：盖不准，宁可不跑
+  for (const e of c.list) { const m = e.raw.match(/^filter\.(.+)\.(clean|smudge|process|required)$/i); if (m) names.add(m[1]); }
+  const env = {}; let n = 0;
+  for (const nm of names) for (const [k, v] of [["clean", ""], ["smudge", ""], ["process", ""], ["required", "false"]]) {
+    env["GIT_CONFIG_KEY_" + n] = `filter.${nm}.${k}`; env["GIT_CONFIG_VALUE_" + n] = v; n++;
+  }
+  if (n) env.GIT_CONFIG_COUNT = String(n);
+  return env;
+}
+// 仓库自己的配置（local / worktree，含它 include 进来的）里这些项会让提交、撤销、切分支、拉取推送执行命令。
+// git-lfs 装在仓库里时写的是固定的几行，放行
+const RISKY_KEY = /^(filter\..+\.(clean|smudge|process)|core\.(sshcommand|gitproxy|askpass|hookspath|alternaterefscommand)|credential\.(.+\.)?helper|gpg\.(.+\.)?program|remote\..+\.(uploadpack|receivepack)|protocol\.(.+\.)?allow|include\.path|includeif\..+\.path)$/;
+const LFS_OK = new Set(["git-lfs clean -- %f", "git-lfs smudge -- %f", "git-lfs filter-process"]);
+async function gitRisks(root) {
+  const risks = [], c = await gitConfigList(root);
+  if (!c.ok) risks.push("git config: ?");
+  if (c.odd) risks.push(`git config: ${c.odd} odd entries`);
+  for (const e of c.list) {
+    if (e.scope !== "local" && e.scope !== "worktree") continue;
+    if (!RISKY_KEY.test(e.key) || LFS_OK.has(e.value.trim())) continue;
+    if (/^protocol\./.test(e.key) && /^(never|user)$/i.test(e.value.trim())) continue;
+    risks.push(`${JSON.stringify(e.raw).slice(1, -1)} = ${JSON.stringify(e.value.slice(0, 200)).slice(1, -1)}`);
+  }
+  // 钩子：core.hooksPath 已算进上面；默认目录里非 .sample 的文件
+  const hp = await git(root, ["rev-parse", "--git-path", "hooks"]);
+  if (!hp.code) {
+    const dir = path.resolve(root, hp.out.trim());
+    let names = [];
+    try { names = fs.readdirSync(dir).filter((n) => !n.endsWith(".sample") && (() => { try { return fs.statSync(path.join(dir, n)).isFile(); } catch { return false; } })()); } catch {}
+    for (const n of names.slice(0, 20)) risks.push(`hook: ${n}`);
+  }
+  return risks;
+}
+/** 用户确认过的仓库：根目录 → 当时那份风险清单的指纹。清单一变（配置被改）就重新问 */
+const GIT_TRUST = new Map();
+async function gitGate(root, body) {
+  const risks = await gitRisks(root);
+  if (!risks.length) return null;
+  const fp = crypto.createHash("sha256").update(root + "\0" + risks.join("\n")).digest("hex").slice(0, 24);
+  if (GIT_TRUST.get(root) === fp) return null;
+  if (body && body.trust === fp) { GIT_TRUST.set(root, fp); log(`[git] 用户确认信任仓库配置 @ ${root}`); return null; }
+  return { error: "untrusted", fp, risks, message: tz("这个仓库自己的配置会在这一步执行命令。只有信得过这个仓库时才继续。") };
 }
 // GIT_LITERAL_PATHSPECS：前端给的都是确切文件名，report[1].txt 不能当通配把 report1.txt 一起撤销 / 提交（审查 B03）
 // 超时整组杀：提交时的钩子是 git 的子孙，只杀 git 本身它们还会接着写文件、和用户重试撞在一起（审查 B20）。
 // 新开进程组（spawn 的 detached；execFile 不认这个选项），到点 kill(-pid)；等 close（stdio 全关）才返回，等于等整组收尾
-function git(cwd, args, { input, timeout = 30000, max = GIT_MAX } = {}) {
+async function git(cwd, args, opts = {}) {
+  const env = GIT_RO.has(args[0]) ? await gitNeutral(cwd) : {};
+  if (!env) return { code: 1, out: "", err: tz("这个仓库的配置读不懂（名字里有换行、引号之类），为安全起见没有执行。") };
+  return gitRun(cwd, args, opts, env);
+}
+function gitRun(cwd, args, { input, timeout = 30000, max = GIT_MAX } = {}, extraEnv = {}) {
   return new Promise((resolve) => {
     let timedOut = false, spawnErr = null, over = false;
     const out = [], errs = []; let outLen = 0, errLen = 0;
-    const c = spawn("git", gitArgs(args), { cwd, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_LITERAL_PATHSPECS: "1", LC_ALL: "C.UTF-8" }, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    const c = spawn("git", gitArgs(args), { cwd, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_LITERAL_PATHSPECS: "1", LC_ALL: "C.UTF-8", ...extraEnv }, detached: true, stdio: ["pipe", "pipe", "pipe"] });
     const killGroup = () => { try { process.kill(-c.pid, "SIGKILL"); } catch { try { c.kill("SIGKILL"); } catch {} } };
     const timer = setTimeout(() => { timedOut = true; killGroup(); }, timeout);
     c.stdout.on("data", (d) => { outLen += d.length; if (outLen > max * 2) { over = true; killGroup(); } else out.push(d); });
@@ -53,7 +131,7 @@ async function gitNet(root, args) {
   const sc = await git(root, ["config", "core.sshCommand"]);
   const env = sc.out.trim() ? {} : { GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20" };
   return new Promise((resolve) => {
-    execFile("git", ["-c", "core.quotePath=false", "-c", "color.ui=false", "-c", "core.fsmonitor=false", ...args],
+    execFile("git", [...GIT_PRE, ...args],
       { cwd: root, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", LC_ALL: "C.UTF-8", ...env }, timeout: 180000, maxBuffer: 4 << 20, encoding: "utf8" },
       (err, out, errOut) => resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, out: out || "", err: (errOut || (err && err.killed ? "timeout" : err?.message) || "").trim() }));
   });
@@ -153,7 +231,8 @@ async function gitStatus(root) {
     for (const f of out.files) { const n = map.get(f.path); if (n) { f.add = n[0] === "-" ? null : +n[0]; f.del = n[1] === "-" ? null : +n[1]; } }
   }
   for (const f of out.files) if (f.kind === "new" && f.add == null) {
-    try { const st = fs.statSync(path.join(root, f.path)); if (st.size < 2 << 20) { const t = fs.readFileSync(path.join(root, f.path)); f.add = t.includes(0) ? null : (t.length ? t.toString("utf8").split("\n").length - (t[t.length - 1] === 10 ? 1 : 0) : 0); f.del = 0; f.binary = t.includes(0); } } catch {}
+    // 只数普通文件、不跟软链：未跟踪的软链指向 /dev/zero 时 stat 报 0 字节，一读就读不完（11-03 审查 L-7）
+    try { const st = fs.lstatSync(path.join(root, f.path)); if (st.isFile() && st.size < 2 << 20) { const t = fs.readFileSync(path.join(root, f.path)); f.add = t.includes(0) ? null : (t.length ? t.toString("utf8").split("\n").length - (t[t.length - 1] === 10 ? 1 : 0) : 0); f.del = 0; f.binary = t.includes(0); } } catch {}
   }
   return out;
 }
@@ -250,6 +329,12 @@ async function handleGit(req, res, p, u) {
   }
 
   if (req.method !== "POST") return sendJson(res, 404, { error: "unknown" });
+
+  // 下面都会照仓库配置执行命令（过滤器、钩子、sshCommand…）：仓库自己配了这类东西，先让用户确认
+  if (["fetch", "pull", "push", "switch", "commit", "discard"].includes(act)) {
+    const g = await gitGate(root, body);
+    if (g) return sendJson(res, 409, g);
+  }
 
   if (act === "fetch" || act === "pull" || act === "push") {
     const st = await gitStatus(root);
@@ -390,3 +475,4 @@ export async function routeGit(req, res, u, p) {
   return NEXT;
 }
 export const _gitForTest = git;   // 只给测试用
+export const _gitRisksForTest = gitRisks;

@@ -670,6 +670,14 @@ export async function compRemove(id) {
 // 卸载后报出大小、问用户要不要一起删。目录名不一定等于 id（gpu-driver-glibc 用 gpu-driver 的目录），
 // 所以只认和 id 同名的目录，还装着 <id>-xxx 组件时当作共用、不提议删
 function compDataDir(id) { return path.join(CFG.home, ".cccodroid", id); }
+// ~/.cccodroid 下别的子系统的目录：不是组件的运行数据，永远不许按「组件」删（11-03 审查 M-8）
+const COMP_DATA_RESERVED = new Set(["custom", "bin", "services", "agents", "local-mode", "cache", "tmp", "logs"]);
+/** 只有组件索引里有的 id 才算组件：清理接口只按 id 删目录，别让它删到不相干的东西 */
+function compDataKnown(id) {
+  if (COMP_DATA_RESERVED.has(id)) return false;
+  compLoadDiskCache();
+  return !!(compIndexCache.data && compIndexCache.data.components && Object.prototype.hasOwnProperty.call(compIndexCache.data.components, id));
+}
 function compDataShared(id) {
   try { return fs.readdirSync(COMP_DIR).some((f) => f.endsWith(".json") && f.startsWith(id + "-")); } catch { return false; }
 }
@@ -689,12 +697,13 @@ async function compDuBytes(dir) {
 async function compDataInfo(id) {
   const dir = compDataDir(id);
   try { if (!fs.lstatSync(dir).isDirectory()) return null; } catch { return null; }
-  if (compRecord(id) || compDataShared(id)) return null;
+  if (compRecord(id) || compDataShared(id) || !compDataKnown(id)) return null;
   return { path: "~/.cccodroid/" + id, bytes: await compDuBytes(dir) };
 }
 async function compPurgeData(id) {
   if (compRecord(id)) return { ok: false, message: "still installed" };
   if (compDataShared(id)) return { ok: false, message: "shared" };
+  if (!compDataKnown(id)) return { ok: false, message: "not a component" };
   const dir = compDataDir(id);
   try { if (!fs.lstatSync(dir).isDirectory()) return { ok: true }; } catch { return { ok: true }; }
   const rm = () => fs.promises.rm(dir, { recursive: true, force: true });

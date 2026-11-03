@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { rsaKeys, verifyDetached } from "../bin/pgp.mjs";     // 正本在 devkit/pgp.mjs，打包时拷进 app/bin
+import { ANTHROPIC_KEYS, rsaKeys, verifyDetached } from "../bin/pgp.mjs";     // 正本在 devkit/pgp.mjs，打包时拷进 app/bin
 
 const OFFICIAL = process.env.CCODROID_CLAUDE_OFFICIAL || "https://downloads.claude.ai/claude-code-releases";   // 两个变量只给测试换地址用
 // 清单镜像两条线：cccodroid.net 走 Cloudflare，dl.cccodroid.net 直连服务器（国内有的网络只通其中一条）
@@ -30,8 +30,6 @@ const REGISTRIES = [
   ["tencent", "https://mirrors.cloud.tencent.com/npm"],
   ["npmjs", "https://registry.npmjs.org"],
 ];
-// Anthropic 的发布签名钥（https://downloads.claude.ai/keys/claude-code.asc，与 keys.openpgp.org 上同指纹的一致）
-const ANTHROPIC_KEYS = {"31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE":{"kty":"RSA","n":"p28rSV5I8HmK8CK9GixBUZR_gtJxeOCsRXO4EJiej40jzBmQA3cWXGosVO82ZfFsRKVTtMC5iB_HH9sxjncrmYNWGroJNbx29m_FgYQBgkCXT4AfFl6rnnXqRGLZOerj_4AqE4yQ1GZbhBgR55Z7ro0ieKK8RHYUspBKAFHyWRhCCz6THW6YRbf0p_hG_08TOY6Sj3cJ7_AEoTRf9ZmVNX1k0KvbUSiVGpGY9OIHWgxRJUF2pArU4o_hk-sqGAgEUh8Bjvjwvz6-quLXPg-y0Y8Ugb1Fg6BUppam_zydYY_Q_-yNjnuF154gD1jEeeir8R5czs6zUHSbo2yXUpAsIdWYo5End8vGsluVmFExnUWm_fTVMGoM5Wm3v1VRepMydEnJ-atz4oQdmPQcKNAip5GJO2uyk--xFr9CpKvlR5jral92toYV_m-mur3va8ydamWBo_qG7_wt0sdS81IwH6lcu0SQ39rgKD-bdoPLv05EqVMYTFRI2QZEsWGYTMs0DOrfCIJFH50qyD0x4sWw1gEWeG3jDgY8cj2StZz-zjqzUd05CibcCzEAGm1EQg5y9D40tIsAU1OI7bpgQ9V0lC8lrqE7zJY66UK9Z1daA8jrdDi6migNjHFrXfT3V4QvMthCIO05q05SS3x2G3ZpIgmI-CePUPB1pDf-lhPkU1M","e":"AQAB"}};
 // npm registry 的签名公钥（https://registry.npmjs.org/-/npm/v1/keys，只留没过期的）
 const NPM_KEYS = {"SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U":"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEY6Ya7W++7aUPzvMTrezH6Ycx3c+HOKYCcNGybJZSCJq/fd7Qa8uuAKtdIkUQtQiEKERhAmE5lMMJhP8OkDOa2g=="};
 

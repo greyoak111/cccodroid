@@ -407,6 +407,8 @@ export async function routeSched(req, res, u, p) {
   }
   if (p === "/api/sched" && req.method === "POST") {
     const b = await body();
+    // 每 30 秒整份写盘：任务数设个顶（11-03 审查 I-7）
+    if (DB.tasks.length >= 500) return sendJson(res, 400, { error: tz("定时任务太多了（上限 500 个），先删掉一些") });
     let t;
     try { t = clean(b, { ...DEFAULTS, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), created: Date.now(), runsDone: 0 }); }
     catch (e) { return sendJson(res, 400, { error: e.message }); }

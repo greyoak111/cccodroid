@@ -251,7 +251,9 @@ step.chromium = async () => {
   run("node", [path.join(ROOT, "devkit/devkit.mjs"), "component", "chromium", "--target", "cc.codroid", "--base", path.join(REL, "devkit.lock.json"), "--out", D, "--cache", CHROM_CACHE], { cwd: path.join(ROOT, "devkit") });
   const meta = json(path.join(D, "component-chromium.json"));
   if (meta.base.gz !== state.done.fetch.gz) fail(`浏览器组件打在了 ${meta.base.gz.slice(0, 12)} 上`);
-  gh("release", "download", "components", "-R", REPO, "-p", "components.json", "-D", D, "--clobber");
+  // 线上那份索引会被合并后重签：先验它的签名，不然有仓库写权限的人改一下 Release 附件，就能借发布机的钥匙签出「官方」组件（11-03 审查 M-4）
+  gh("release", "download", "components", "-R", REPO, "-p", "components.json", "-p", "components.json.sig", "-D", D, "--clobber");
+  if (!verifySig(fs.readFileSync(path.join(D, "components.json")), fs.readFileSync(path.join(D, "components.json.sig"), "utf8"))) fail("线上的预置组件索引验签失败，不合并");
   run("node", [path.join(ROOT, "devkit/components-index.mjs"), path.join(D, "components.json"), `https://github.com/${REPO}/releases/download/components/`, path.join(D, "component-chromium.json")], { env: { ...process.env, INDEX_SIGNING_KEY_FILE: KEYFILE } });
   const body = fs.readFileSync(path.join(D, "components.json"));
   if (!verifySig(body, fs.readFileSync(path.join(D, "components.json.sig"), "utf8"))) fail("新签的预置组件索引验不过");

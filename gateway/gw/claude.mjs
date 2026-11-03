@@ -197,7 +197,7 @@ export function claudeEnv(o = {}) {
     // 终端能力；我们 prefix 里那份是齐的（221K），指过去就活了。
     TERMINFO_DIRS: PREFIX ? path.join(PREFIX, "share", "terminfo") : path.join(PATHS.toolchain, "dshtc", "prefix", "share", "terminfo"),
     // 工具链在前：这样 claude 调 git/gcc/rg/magick… 命中的是我们搬过来的包装脚本。
-    // 最前面的 app/pre 只放 pkg / apt：工具包里有同名的旧说明替身，改它会被完整性校验判成"改动"，只能靠 PATH 顺序压过去
+    // 最前面的 app/pre 放 pkg / apt 和 adb（服务改开私有套接字）：工具包里有同名的旧说明替身，改它会被完整性校验判成"改动"，只能靠 PATH 顺序压过去
     PATH: PREFIX ? [process.env.CCAPP_BIN && path.join(process.env.CCAPP_BIN, "..", "pre"), path.join(PREFIX, "bin"), path.join(CFG.home, ".cccodroid", "bin"), process.env.CCAPP_BIN, "/system/bin", "/system/xbin"].filter(Boolean).join(":") : [
       path.join(PATHS.toolchain, "payload", "bin"),
       // 开发端自己加的工具（python3/pip、java/javac/d8/apksigner、strace、adb…）：放在 tc.tar 之外，启动重新部署时不会被冲掉
@@ -214,6 +214,9 @@ export function claudeEnv(o = {}) {
     // 别家（会话钉的不是全局那家）也直连：桥只有一个上游，跟着全局走；claude（Bun）自己解析 DNS，用不着桥
     ANTHROPIC_BASE_URL: NO_BRIDGE || other ? (p.baseUrl || "") : `http://127.0.0.1:${CFG.bridgePort}`,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    // 自带的 ripgrep 按 /proc/self/exe 找，经加载器起的 claude 那是加载器本身：Grep / Glob 不报错、一律「没找到」（2.1.311 实测）。
+    // 改用 PATH 里的 rg：工具包装了「命令行增强」用它的，没装落到 app/bin/rg（经加载器以 argv0=rg 调 claude 自带的那份）
+    USE_BUILTIN_RIPGREP: "0",
     CLAUDE_CODE_SHELL: ensureShell(),
     SHELL: ensureShell(),
     CI: "1",
@@ -222,6 +225,8 @@ export function claudeEnv(o = {}) {
   };
 
   for (const k of ["LD_LIBRARY_PATH", "ANTHROPIC_BASE_URL"]) if (!env[k]) delete env[k];
+  // 网关令牌文件的位置不交给 claude：Bash 里 cat "$CCAPP_TOKEN_FILE" 不带 .gateway-token 字样，再确认钩子认不出（11-03 审查 L-6）
+  delete env.CCAPP_TOKEN_FILE;
   // 自定义接口（第三方调用）垫一层流式补尾：回答说完了上游却没收尾，claude 会整段撤回重答（见 streamfix.mjs）
   // 用户给 claude 配了代理就不垫：本地转发是 node 发的请求，不走那个代理
   const viaProxy = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"].some((k) => env[k]);

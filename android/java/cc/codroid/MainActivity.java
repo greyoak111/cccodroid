@@ -69,6 +69,7 @@ public class MainActivity extends Activity {
     static final String ACTION_SHIZUKU = "cc.codroid.SHIZUKU";
     static final String ACTION_A11Y_OK = "cc.codroid.A11Y_OK";
     static final String ACTION_PRIV_OK = "cc.codroid.PRIV_OK";
+    static final String ACTION_CONSENT = "cc.codroid.CONSENT";
     /** 配对通知的 fullScreenIntent：只为让通知常驻顶部，真被拉起（锁屏时）也什么都不做 */
     static final String ACTION_SHIZUKU_NOOP = "cc.codroid.SHIZUKU_NOOP";
     /** 界面在前台吗：自动静默更新只在用户没盯着界面时做 */
@@ -283,6 +284,7 @@ public class MainActivity extends Activity {
     @Override protected void onResume() { super.onResume(); visible = true; applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
         // 在后台从常驻通知点了「停止」、界面还活着：回来时把网关服务拉起来（审查 #105 06-007）。以前只有 boot 起服务，回来只能对着连不上的页面
         if (booted && !GatewayService.serviceUp()) GatewayService.start(this);
+        Consent.runNext(this);   // 上次排着的锁屏签名（界面当时正在关、没问成）
         ui.removeCallbacks(fpsBeat); ui.postDelayed(fpsBeat, 30000);
         if (pane != null) pane.resume();
         pushWall();
@@ -365,6 +367,17 @@ public class MainActivity extends Activity {
         applyLandBars();
         pushWall();
         if (web != null) web.evaluateJavascript(guarded("Theme.system", "window.Theme&&Theme.system(" + systemNight() + ")"), null);
+    }
+
+    private void confirmWebDebug() {
+        if (isDestroyed()) return;
+        android.app.AlertDialog d = new android.app.AlertDialog.Builder(this)
+            .setTitle(Tr.t("打开网页调试？"))
+            .setMessage(Tr.t("发现 ~/.webdebug：有人要打开 cccodroid 界面的网页调试。打开后，连上这台设备的调试工具能看到界面里的一切，包括网关令牌。\n\n不是你自己建的这个文件，就点「取消」，并删掉它。"))
+            .setPositiveButton(Tr.t("允许"), (x, w) -> { Consent.grant(this, Consent.WEBDEBUG, "1"); WebView.setWebContentsDebuggingEnabled(true); })
+            .setNegativeButton(Tr.t("取消"), null)
+            .create();
+        guard(d, android.content.DialogInterface.BUTTON_POSITIVE);
     }
 
     /** 第一次开读屏 / 点按前问一句（审查 v0.5.9 B4）：系统那套「此应用将能读取屏幕」的提示被我们写系统设置绕过了，这里补上 */
@@ -486,6 +499,7 @@ public class MainActivity extends Activity {
         else if (ACTION_UPDATE.equals(a)) Updater.get(this).apply(i.getStringExtra("item"), true);
         else if (ACTION_SHIZUKU.equals(a)) ShizukuSetup.get(this).activate();
         else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false));
+        else if (ACTION_CONSENT.equals(a)) Consent.runNext(this);
         else if (ACTION_PRIV_OK.equals(a)) confirmPriv(i.getStringExtra("id"), i.getStringExtra("cmd"), i.getStringExtra("who"), i.getBooleanExtra("trust", false), i.getBooleanExtra("sess", false), "noask".equals(i.getStringExtra("kind")));
         else if (Notify.ACTION_OPEN.equals(a)) openSession(i.getStringExtra("session"));
     }
@@ -616,7 +630,8 @@ public class MainActivity extends Activity {
                         p = ("primary".equalsIgnoreCase(vol) ? android.os.Environment.getExternalStorageDirectory().getPath() : "/storage/" + vol) + "/" + rel;
                     } else if ("com.android.providers.downloads.documents".equals(au) && id.startsWith("raw:")) p = id.substring(4);
                 }
-                if (p == null) {
+                // _data 只信系统的媒体库 / 下载：别的应用自己的 provider 想填什么路径都行（11-03 审查 L-13）
+                if (p == null && (au.equals("media") || au.equals("downloads") || au.equals("com.android.providers.media.documents") || au.equals("com.android.providers.downloads.documents"))) {
                     try (android.database.Cursor c = getContentResolver().query(u, new String[]{"_data"}, null, null, null)) {
                         if (c != null && c.moveToFirst() && !c.isNull(0)) p = c.getString(0);
                     } catch (Exception ignored) {}
@@ -626,7 +641,8 @@ public class MainActivity extends Activity {
             File f = new File(p).getCanonicalFile();
             String c = f.getPath();
             if (!c.startsWith("/storage/") && !c.startsWith("/sdcard/")) return null;
-            if (c.contains("/Android/data/" + getPackageName()) || c.contains("/Android/obb/" + getPackageName())) return null;
+            // 各应用在共享存储上的私有目录（含本应用）：不按路径直接给，照常拷一份
+            if (c.contains("/Android/data/") || c.contains("/Android/obb/")) return null;
             return f.isFile() && f.canRead() ? c : null;
         } catch (Exception e) { return null; }
     }
@@ -1111,44 +1127,29 @@ public class MainActivity extends Activity {
         ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; } });
     }
 
-    /** assets/app → files/app。内容哈希写在 .tag 里，没变就不动 */
+    /** assets/app → files/app。内容哈希写在 TAG 里，没变、且逐个文件核对和安装包一致（见 AppFiles）就不动 */
     private void deployAssets() throws Exception {
         String want = readAsset("app/TAG")  /* aapt2 打包时会丢掉点开头的文件 */;
         File tag = new File(env.app, "TAG");
         String have = tag.isFile() ? new String(java.nio.file.Files.readAllBytes(tag.toPath())) : "";
-        if (want.equals(have)) return;
-        say(Tr.t("部署界面与网关 ") + want.trim());
+        java.util.List<String> bad = want.equals(have) ? AppFiles.tampered(this, env.app) : null;
+        if (bad != null && bad.isEmpty()) return;
+        if (bad != null) {
+            android.util.Log.w("cccodroid", "files/app 被改过：" + bad);
+            Ledger.add(env, "repair", true, Tr.t("界面与网关的文件被改动过，已按安装包还原：") + android.text.TextUtils.join(", ", bad), null);
+            say(Tr.t("界面与网关的文件被改动过，已按安装包还原"));
+        } else say(Tr.t("部署界面与网关 ") + want.trim());
         // boot() 一开头就起了网关服务，守护线程可能已经拿旧的 server.mjs 把 node 拉起来了 ——
         // 不停一下，升级后界面是新的、网关还是旧的（新接口全 404），直到下次重启。
-        // 只在内容哈希变了（= 刚升级，进程本来就被安装杀过）时走到这里，不会打断任务
+        // 只在内容哈希变了（= 刚升级，进程本来就被安装杀过）或文件被改过时走到这里
         GatewayService.pause(true);
         try {
-            Installer.deleteTree(env.app);
-            copyAssetDir("app", env.app);
-            // lib/ 里除了 .so 还有可执行的 seccomp-enosys-run、ptyhost
-            for (String d : new String[]{"scripts", "bin", "pre", "lib"}) {
-                File[] fs = new File(env.app, d).listFiles();
-                if (fs != null) for (File f : fs) f.setExecutable(true, true);
-            }
+            AppFiles.deploy(this, env.app);
         } finally {
             // 守护线程若恰好在 pause 前一刻已经在拉 node，这里再杀一次，保证起来的一定是新文件
             GatewayService.pause(true);
             GatewayService.pause(false);
         }
-    }
-
-    private void copyAssetDir(String path, File dst) throws Exception {
-        String[] kids = getAssets().list(path);
-        if (kids == null || kids.length == 0) {
-            dst.getParentFile().mkdirs();
-            try (InputStream in = getAssets().open(path); OutputStream o = new FileOutputStream(dst)) {
-                byte[] buf = new byte[1 << 16];
-                for (int n; (n = in.read(buf)) > 0; ) o.write(buf, 0, n);
-            }
-            return;
-        }
-        dst.mkdirs();
-        for (String k : kids) copyAssetDir(path + "/" + k, new File(dst, k));
     }
 
     private String readAsset(String p) throws Exception {
@@ -1469,8 +1470,12 @@ public class MainActivity extends Activity {
         if (pane != null) closePane(true);
         askPerms();
         // 网页调试默认关：开着时任何连上 adb 的电脑都能读页面（含网关令牌）。
-        // 要调试就在终端里 touch ~/.webdebug，重开应用生效；只有本机终端写得进私有目录
-        WebView.setWebContentsDebuggingEnabled(new File(env.home, ".webdebug").exists());
+        // 要调试就在终端里 touch ~/.webdebug，重开应用。这个文件同 uid 的脚本也建得出来，所以光有它不算数：
+        // 第一次要在原生对话框里点头（再用锁屏验证存下来，见 Consent）；删掉文件就连同意一起撤掉（11-03 审查 L-16）
+        boolean wantDbg = new File(env.home, ".webdebug").exists();
+        if (!wantDbg) Consent.revoke(this, Consent.WEBDEBUG);
+        WebView.setWebContentsDebuggingEnabled(wantDbg && Consent.on(this, Consent.WEBDEBUG));
+        if (wantDbg && !Consent.on(this, Consent.WEBDEBUG)) ui.post(this::confirmWebDebug);
         guardServiceWorkers();
         web = new WebView(this) {
             @Override public boolean dispatchTouchEvent(android.view.MotionEvent e) {
@@ -1491,6 +1496,8 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setAllowFileAccessFromFileURLs(false);
         s.setAllowUniversalAccessFromFileURLs(false);
+        // content:// 也用不着（选文件走 onShowFileChooser，不经页面加载）；预览页别能导航到 content://cc.codroid.share/…（11-03 审查 L-12）
+        s.setAllowContentAccess(false);
         web.setBackgroundColor(BrowserPane.pal(this, uiDark(), "bg"));
         // 本机网关之外的地址一律交给系统浏览器：登录授权页、"去官网创建 Key" 之类。
         // 在 WebView 里打开登录页会被 Google 等拒绝，而且 OAuth 回调要回到浏览器才能跳 localhost。
@@ -1620,6 +1627,11 @@ public class MainActivity extends Activity {
                 String re = "#[0-9a-f]{6}(,#[0-9a-f]{6}){7}";
                 if (light == null || dark == null || !light.matches(re) || !dark.matches(re)) return;
                 getSharedPreferences("ui", MODE_PRIVATE).edit().putString("pal_light", light).putString("pal_dark", dark).apply();
+            }
+            /** 构成浅色调过纸色（theme.js gcPaint）：8 种颜色同 skinPal 的顺序；空串 = 回到原色 */
+            @android.webkit.JavascriptInterface public void gcPal(String k, String light) { if (!Env.bridgeOk(k)) return;
+                if (light == null || !(light.isEmpty() || light.matches("#[0-9a-f]{6}(,#[0-9a-f]{6}){7}"))) return;
+                getSharedPreferences("ui", MODE_PRIVATE).edit().putString("gc_pal_light", light).apply();
             }
             @android.webkit.JavascriptInterface public void setBars(String k, boolean dark) { if (!Env.bridgeOk(k)) return; ui.post(() -> applyBars(dark)); }
             /** 界面里的风格（native / qiusuo / zhuyue / goucheng / shise）：状态栏、安装页、对话框、内置浏览器的颜色按它取。theme.js 在 setBars 之前调 */

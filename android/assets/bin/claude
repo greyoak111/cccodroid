@@ -3,6 +3,8 @@
 # 先清掉 LD_PRELOAD：shell 里的 termux-exec 是 bionic 库，glibc 进程继承到它会直接起不来。
 # --preload 的小库把"被安卓 seccomp 拦下的调用"改成返回 ENOSYS（Android 14 拦 epoll_pwait2，不挂它 claude 一跑就 SIGSYS）。
 unset LD_PRELOAD
+# 自带的 ripgrep 经加载器调不起来（Grep / Glob 一律「没找到」），改用 PATH 里的 rg，见 bin/rg
+export USE_BUILTIN_RIPGREP=0
 # 经加载器时（targetSdk 36）：ld.so 用 APK 里那份（CCAPP_LD），预加载列表多一个 exec-shim.so（CCAPP_GLIBC_PRELOAD）
 PRE=${CCAPP_GLIBC_PRELOAD:-${CCAPP_CLAUDE_PRELOAD:-${CCAPP_BIN%/bin}/lib/seccomp-enosys.so}}
 # 应用内终端：网关把这家的密钥放在 0600 私有文件里、只给路径（不进环境变量），照网关起 claude 的办法交给 apiKeyHelper。

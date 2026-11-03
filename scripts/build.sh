@@ -74,6 +74,9 @@ cp "$A/native/execpath.cjs" "$A/assets/app/lib/"
 TAG=$(cat "$A/assets/app/server.mjs" "$A/assets/app/gw/"* "$A/assets/app/archive/"* "$A/assets/app/guard/"* "$A/assets/app/TOOLS.md" $(find "$A/assets/app/web" -type f | sort) "$A/assets/app/scripts/"* "$A/assets/app/bin/"* "$A/assets/app/pre/"* "$A/assets/app/lib/"* | md5sum | cut -c1-12)
 echo "$TAG" > "$A/assets/app/TAG"
 echo "  tag $TAG"
+# 逐文件清单（sha256 + 相对路径）：启动时应用按它核对 files/app，被改过、多出来的就从安装包还原（防项目钩子 / MCP 之类偷偷改网关）
+node -e 'const fs=require("fs"),p=require("path"),c=require("crypto"),R=process.argv[1],o=[];const w=(d)=>{for(const e of fs.readdirSync(p.join(R,d),{withFileTypes:true})){const r=d?d+"/"+e.name:e.name;if(e.name.startsWith("."))continue;if(e.isDirectory())w(r);else if(r!=="FILES")o.push(c.createHash("sha256").update(fs.readFileSync(p.join(R,r))).digest("hex")+" "+r)}};w("");o.sort((a,b)=>a.slice(65)<b.slice(65)?-1:1);fs.writeFileSync(p.join(R,"FILES"),o.join("\n")+"\n")' "$A/assets/app" || exit 1
+echo "  清单 $(wc -l < "$A/assets/app/FILES") 个文件"
 
 # 第三方库：Shizuku-API 13.1.5（MIT，Maven Central 原样，sha1 已核）
 LIBS=$(ls "$ROOT"/third_party/shizuku/*.jar | tr '\n' ':')
@@ -114,6 +117,11 @@ if [ -n "$TARGET_SDK" ]; then
 fi
 $AAPT2 link -o "$A/build/unsigned.apk" -I "$AJAR" \
   --manifest "$MANIFEST" -A "$A/assets" "$A/build/res.zip"
+# FILES 里的每个文件都得真进了包（aapt2 会丢点开头的、_ 开头目录这类）：少一个，装好后 AppFiles 每次启动都判「被改过」、整个重铺
+node -e 'const fs=require("fs"),b=fs.readFileSync(process.argv[1]);let e=b.length-22;while(e>=0&&b.readUInt32LE(e)!==0x06054b50)e--;
+  const n=b.readUInt16LE(e+10),names=new Set();for(let i=0,p=b.readUInt32LE(e+16);i<n;i++){const l=b.readUInt16LE(p+28);names.add(b.toString("utf8",p+46,p+46+l));p+=46+l+b.readUInt16LE(p+30)+b.readUInt16LE(p+32)}
+  const miss=fs.readFileSync(process.argv[2],"utf8").split("\n").filter(Boolean).map((l)=>"assets/app/"+l.slice(65)).filter((x)=>!names.has(x));
+  if(miss.length){console.error("✗ FILES 里有 "+miss.length+" 个文件没进 APK：",miss.slice(0,5).join(" "));process.exit(1)}' "$A/build/unsigned.apk" "$A/assets/app/FILES" || exit 1
 if [ "$SIGN" = apksigner ]; then
   # SDK 的 apksigner：先把 classes.dex 塞进包、对齐，再签（最低 API 26，它自己决定出 v2 / v3）
   ( cd "$A/build" && zip -q unsigned.apk classes.dex && zip -q -0 unsigned.apk lib/arm64-v8a/libldlinux.so )

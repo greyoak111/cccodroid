@@ -42,6 +42,8 @@ test("回退补救：应用私有目录里只许写工作区，别处（/sdcard 
   assert.equal(rewindTargetOk(CFG.workspace), false, "工作区本身不是文件");
   assert.equal(rewindTargetOk("/sdcard/Documents/proj/a.js"), true);
   assert.equal(rewindTargetOk("relative/a.js"), false);
+  // 11-03 审查 M-7：files 之外的私有数据（shared_prefs、databases…）也不许
+  assert.equal(rewindTargetOk(path.join(path.dirname(path.dirname(CFG.home)), "shared_prefs", "consent.xml")), false);
   // 工作区里一个软链指回 home：按真实路径判，拦下
   const link = path.join(CFG.workspace, "sneaky");
   try { fs.symlinkSync(CFG.home, link); } catch {}

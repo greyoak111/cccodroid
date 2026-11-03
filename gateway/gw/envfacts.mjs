@@ -96,7 +96,12 @@ export function envFacts() {
     if (lost.length) out.push(`- 工具包更新后这些 pkg 包已不在：${lost.join("、")}（要用就先 \`pkg restore\`）`);
   } catch {}
   out.push(...reconcileFacts());
+  // 这份 JSON 在 home 下、拼进系统提示（群友破甲清单 V-14）：只认自检写的几个字段，逐条压成单行、限长，别让它带进成段的文字
   let r = null; try { r = JSON.parse(fs.readFileSync(ENV_FACTS, "utf8")); } catch {}
+  const line = (x) => String(x).replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").slice(0, 260);
+  if (r && typeof r === "object") r = { key: String(r.key || ""), pass: Number(r.pass) | 0,
+    fail: (Array.isArray(r.fail) ? r.fail : []).slice(0, 12).map(line), info: (Array.isArray(r.info) ? r.info : []).slice(0, 8).map(line) };
+  else r = null;
   if (r) {
     const stale = r.key !== envFactsKey() ? "（工具包或应用更新前测的）" : "";
     out.push(`- 本机自检${stale}：通过 ${r.pass} 项${r.fail.length ? `，**失败 ${r.fail.length} 项 —— 下列功能在这台设备上不能用，别依赖，需要时如实告诉用户**：` : "，全部通过"}`);
