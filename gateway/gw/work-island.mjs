@@ -18,27 +18,32 @@ import { createWorkIsland } from "./work-island-core.mjs";
 const PKG = process.env.WORK_ISLAND_PKG || "com.dafeiyu.workisland";
 const SVC = PKG + "/.IslandService";
 
-function amArgs(action, title, text, since, state) {
+function amArgs(action, title, text, since, state, extra) {
   const a = ["start-foreground-service", "--user", "0", "-n", SVC, "-a", PKG + "." + action];
   if (title) a.push("--es", "title", title);
   if (text) a.push("--es", "text", text);
   if (state) a.push("--es", "state", state);
   if (since) a.push("--el", "since", String(since));
+  // 可选的清单进度：工作岛 1.5+ 用它画分段进度条；不传时应用按无清单处理。
+  if (extra && Number.isInteger(extra.todoTotal) && extra.todoTotal > 0) {
+    a.push("--ei", "todoDone", String(extra.todoDone || 0));
+    a.push("--ei", "todoTotal", String(extra.todoTotal));
+  }
   return a;
 }
 
 let warned = false;
-function amSend(action, title, text, since, state) {
+function amSend(action, title, text, since, state, extra) {
   // 用绝对路径：PATH 里的包装脚本在部分环境会返回非零，实际却已经送达。
-  execFile("/system/bin/am", amArgs(action, title, text, since, state), { timeout: 8000 }, (e, out, err) => {
+  execFile("/system/bin/am", amArgs(action, title, text, since, state, extra), { timeout: 8000 }, (e, out, err) => {
     if (!e || warned) return;
     warned = true;
     log(`[work-island] am 失败（应用没装或服务未就绪？后面不再重复）：${e.message} ${String(err || "").slice(0, 120)}`);
   });
 }
-function amSendSync(action, title, text, since, state) {
+function amSendSync(action, title, text, since, state, extra) {
   try {
-    execFileSync("/system/bin/am", amArgs(action, title, text, since, state), { timeout: 3000, stdio: "ignore" });
+    execFileSync("/system/bin/am", amArgs(action, title, text, since, state, extra), { timeout: 3000, stdio: "ignore" });
   } catch {}
 }
 

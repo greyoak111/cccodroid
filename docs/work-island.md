@@ -75,6 +75,10 @@ The gateway side uses Node built-ins only — no npm dependency, no build step.
    from `RUNS`, so `runList()` is authoritative — no HTTP re-check, no polling.
 6. **Text follows the UI language.**
    `LAST_LANG` starting with `zh` uses Chinese; otherwise English. More languages later.
+7. **List progress.**
+   `TodoWrite` / `tasks` done/total counts are passed as the optional `todoDone` /
+   `todoTotal` `--ei` extras. Work Island 1.5+ uses them for the segmented progress bar;
+   when absent the app treats the run as having no list.
 
 ---
 
@@ -85,14 +89,16 @@ node scripts/test.mjs work-island
 ```
 
 Covers state mapping, done + idle, turn boundaries, grace cancellation, abort, approval,
-error redaction, English, 1.5 s throttling, and IDLE on disable.
+error redaction, English, 1.5 s throttling, IDLE on disable, and the list-progress extras.
 
 ## Known limits
 
 - Force-stopping cccodroid skips the final IDLE; reopen cccodroid to recover.
 - Other ColorOS versions and OEM dynamic-island implementations are untested.
 - The app's notification service is exported; another app can spoof the displayed state.
-- The capsule is drawn by the system; no OPPO UPK custom card.
+- The system-island capsule is drawn by the OS; no OPPO UPK custom card. Work Island 1.5+
+  also has an app-drawn fallback capsule for devices without an island (semi-transparent,
+  touch-through, adjustable size/position with an in-app preview).
 - The APK in the Work Island repo is test-signed.
 
 ---

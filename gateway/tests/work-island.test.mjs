@@ -10,7 +10,7 @@ function make(opts = {}) {
   const sent = [];
   let runs = [];
   const core = createWorkIsland({
-    send: (action, title, text, since, state) => sent.push({ action, title, text, since, state }),
+    send: (action, title, text, since, state, extra) => sent.push({ action, title, text, since, state, extra }),
     runs: () => runs,
     lang: () => "zh",
     graceMs: 20,
@@ -52,6 +52,7 @@ test("清单：TodoWrite 显示已完成/总数", () => {
   assert.equal(sent.at(-1).title, "整理清单");
   assert.equal(sent.at(-1).text, "清单 2/5");
   assert.equal(sent.at(-1).state, "planning");
+  assert.deepEqual(sent.at(-1).extra, { todoDone: 2, todoTotal: 5 });
 });
 
 test("完成：任务完成 + 用时，8 秒后收起", async () => {
@@ -130,7 +131,15 @@ test("清单：tasks 事件只数已完成/总数，不带 subject 原文", () =
   assert.equal(sent.at(-1).title, "整理清单");
   assert.equal(sent.at(-1).text, "清单 2/3");
   assert.equal(sent.at(-1).state, "planning");
+  assert.deepEqual(sent.at(-1).extra, { todoDone: 2, todoTotal: 3 });
   assert.ok(!JSON.stringify(sent.at(-1)).includes("SECRET"));
+});
+
+test("普通工具更新不带清单 extras", () => {
+  const { core, sent } = make();
+  core.handleEvent({ type: "run_start", startedAt: Date.now() });
+  core.handleEvent({ type: "tool_use", name: "Read" });
+  assert.equal(sent.at(-1).extra, undefined);
 });
 
 test("清单清空：tasks 为 null 时不报错也不改岛", () => {

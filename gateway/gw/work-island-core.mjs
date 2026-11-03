@@ -114,7 +114,8 @@ function todoProgress(ev, l) {
   if (!todos) return null;
   const total = todos.length;
   const done = todos.filter((t) => t && t.status === "completed").length;
-  return { title: l.todoTitle, text: l.todo(done, total), state: "planning" };
+  return { title: l.todoTitle, text: l.todo(done, total), state: "planning",
+    extra: { todoDone: done, todoTotal: total } };
 }
 
 const TOOL_STATE = {
@@ -129,7 +130,7 @@ const toolState = (name) => TOOL_STATE[name] || "working";
 
 /**
  * @param {object} opts
- * @param {(action:string,title:string,text:string,since:number)=>void} opts.send  发通知
+ * @param {(action:string,title:string,text:string,since:number,state:string,extra?:object)=>void} opts.send  发通知
  * @param {()=>Array} [opts.runs]     读活跃轮次（默认空）
  * @param {()=>string} [opts.lang]    最近界面语言
  * @param {()=>number} [opts.clock]   当前时间（测试可替换）
@@ -158,11 +159,11 @@ export function createWorkIsland(opts = {}) {
   let pending = null;       // 节流时保留的最后一条
   let pendingTimer = null;
 
-  const emit = (action, title, text, since, state) => {
-    try { send(action, title, text, since, state); } catch {}
+  const emit = (action, title, text, since, state, extra) => {
+    try { send(action, title, text, since, state, extra); } catch {}
   };
-  const emitSync = (action, title, text, since, state) => {
-    try { sendSync(action, title, text, since, state); } catch {}
+  const emitSync = (action, title, text, since, state, extra) => {
+    try { sendSync(action, title, text, since, state, extra); } catch {}
   };
 
   function clearPending() {
@@ -170,15 +171,15 @@ export function createWorkIsland(opts = {}) {
     pending = null;
   }
 
-  function sendUpdate(title, text, since, state) {
+  function sendUpdate(title, text, since, state, extra) {
     const t = clock();
     if (t - lastSent >= throttleMs) {
       lastSent = t;
       shown = true;
-      emit("UPDATE", title, text, since, state);
+      emit("UPDATE", title, text, since, state, extra);
       return;
     }
-    pending = { title, text, since, state };
+    pending = { title, text, since, state, extra };
     if (pendingTimer) return;
     pendingTimer = setTimeout(() => {
       pendingTimer = null;
@@ -187,19 +188,20 @@ export function createWorkIsland(opts = {}) {
       pending = null;
       lastSent = clock();
       shown = true;
-      emit("UPDATE", p.title, p.text, p.since, p.state);
+      emit("UPDATE", p.title, p.text, p.since, p.state, p.extra);
     }, Math.max(0, throttleMs - (t - lastSent)));
   }
 
-  function update(text, title, state) {
+  function update(text, title, state, extra) {
     if (!active) return;
     const t = title || L().working;
     const x = text || "";
     const st = state || "working";
-    const key = t + "|" + x + "|" + st;
+    const progress = extra && extra.todoTotal ? `|${extra.todoDone}/${extra.todoTotal}` : "";
+    const key = t + "|" + x + "|" + st + progress;
     if (key === active.last) return;
     active.last = key;
-    sendUpdate(t, x, active.startedAt, st);
+    sendUpdate(t, x, active.startedAt, st, extra);
   }
 
   function start(run, text) {
@@ -267,7 +269,7 @@ export function createWorkIsland(opts = {}) {
         break;
       case "tool_use": {
         const todo = todoProgress(ev, L());
-        if (todo) update(todo.text, todo.title, todo.state);
+        if (todo) update(todo.text, todo.title, todo.state, todo.extra);
         else update(L().tool(L().toolName(ev.name)), L().toolTitle(ev.name), toolState(ev.name));
         break;
       }
@@ -278,7 +280,8 @@ export function createWorkIsland(opts = {}) {
         if (!list || !list.length) break;
         const total = list.length;
         const done = list.filter((t) => t && t.status === "completed").length;
-        update(L().todo(done, total), L().todoTitle, "planning");
+        update(L().todo(done, total), L().todoTitle, "planning",
+          { todoDone: done, todoTotal: total });
         break;
       }
       case "perm_request":
