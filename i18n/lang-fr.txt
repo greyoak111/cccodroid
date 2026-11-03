@@ -2723,3 +2723,4 @@
 2723	Fond du thème Construct clair : à gauche plus blanc, à droite plus jaune
 2724	Blanc
 2725	Jaune
+2726	Les statistiques d'utilisation ont été effacées pendant le recalcul ; ses résultats ont été ignorés.

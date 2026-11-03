@@ -73,7 +73,7 @@ test("试跑用新会话，不续正式 lastSid；结束钩子也不写回（#11
     assert.ok(it && QUEUE.includes(it));
     assert.equal(it.sessionId, null, "试跑不该 --resume 正式会话");
     const run = { sched: it.sched, sessionId: crypto.randomUUID(), overBudget: false, timedOut: false, aborted: false, denied: [] };
-    for (const h of END_HOOKS) { try { h(run, { costRaw: 0.01, finalText: "试跑结果" }); } catch {} }
+    for (const h of END_HOOKS) h(run, { costRaw: 0.01, finalText: "试跑结果" });   // 不吞异常：钩子半路抛了，下面的断言会假通过
     assert.equal(t.lastSid, sid, "试跑结束不能写回 lastSid");
     drop(t, it);
     // 正式执行仍接着原会话

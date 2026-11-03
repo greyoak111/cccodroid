@@ -113,6 +113,9 @@ function customCmdClash(cmd, selfId) {
   return "";
 }
 
+/** 测试用：直接看命令名预留和冲突判断（#122-4） */
+export const _customForTest = { CMD_RESERVED, customCmdClash };
+
 const GZ_MAX = 256 << 20, DEB_MAX = 512 << 20;
 // Termux glibc 仓库的 Contents（文件 → 包）与 Packages（包 → 下载地址、sha256），缓存一天。
 // 先用 Termux 自动构建钥验 Release 的签名，再按 Release 里的 SHA256 核 Contents 和 Packages：

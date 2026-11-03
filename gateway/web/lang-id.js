@@ -2726,4 +2726,5 @@ window.I18N_DICT["id"] = {
   "构成浅色的底色：往左偏白，往右偏黄": "Latar tema Construct terang: ke kiri lebih putih, ke kanan lebih kuning",
   "白": "Putih",
   "黄": "Kuning",
+  "补算期间使用统计被清空了，这次补算的结果已丢弃。": "Statistik penggunaan dihapus saat penghitungan ulang, jadi hasilnya dibuang.",
 };
