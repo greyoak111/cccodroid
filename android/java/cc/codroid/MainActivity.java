@@ -1143,6 +1143,7 @@ public class MainActivity extends Activity {
         if (bad != null) {
             android.util.Log.w("cccodroid", "files/app 被改过：" + bad);
             Ledger.add(env, "repair", true, Tr.t("界面与网关的文件被改动过，已按安装包还原：") + android.text.TextUtils.join(", ", bad), null);
+            AppFiles.noteRestored(bad);
             say(Tr.t("界面与网关的文件被改动过，已按安装包还原"));
         } else say(Tr.t("部署界面与网关 ") + want.trim());
         // boot() 一开头就起了网关服务，守护线程可能已经拿旧的 server.mjs 把 node 拉起来了 ——

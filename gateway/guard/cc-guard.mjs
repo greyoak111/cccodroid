@@ -32,6 +32,8 @@ const SECRETS = [
 const PROMPT = [
   [/\.claude\/settings(?:\.local)?\.json\b/, "Claude Code settings and hooks"],
   [/\.claude\/output-styles\//, "output style"],
+  // 用户级 CLAUDE.md 每个会话都加载，等于常驻系统提示（第三份破甲审计的常驻层之一）；项目里的 CLAUDE.md 照旧不问
+  [/(?:(?:^|[\s"'=:])(?:~|\$\{?HOME\}?)|\/files\/home)\/\.claude\/(?:CLAUDE\.md|rules\/)/, "user-level CLAUDE.md (loaded into every session)"],
   [/\.claude\/projects\/[^\s"']*\.jsonl\b/, "conversation history"],
   [/ccapp-session-seals\.json\b/, "conversation integrity seals"],
   [/ccapp-settings\.json\b/, "app settings"],
@@ -46,6 +48,13 @@ const PROMPT = [
   [/\.cccodroid-env\.json\b/, "device facts in the system prompt"],
   // 不提文件名、经 claude 自己的命令改用户级配置：加 MCP 服务器、改设置（钩子 / disableAllHooks）、装插件（DeepSeek 复核 11-03 C-1）
   [/\bclaude\s+(?:mcp\s+(?:add|add-json|add-from-claude-desktop)|config\s+(?:set|add)|plugins?\s+(?:install|add|enable|marketplace))\b/, "Claude Code config via CLI"],
+  // 能把这一层整个关掉的：安全模式（--safe-mode 连 --settings 挂的钩子一起不跑）的开关文件和接口，
+  // 以及再起一个不带这一层的 claude —— 多个 --settings 后一个整个顶掉前一个，--bare / --safe-mode 不跑任何钩子（2.1.311 实测）
+  [/\.ccapp-safe-mode\b|\/api\/safe-mode\b/, "safe mode (turns this check off)"],
+  // 旗标前允许引号（claude "--bare"），--allowedTools 能不问就放行工具（DeepSeek 复核必修 4）
+  [/\bclaude\b[^\n;&|]*?[\s"'](?:--settings|--setting-sources|--safe-mode|--bare|--dangerously-skip-permissions|--allow-dangerously-skip-permissions|--allowed-?[Tt]ools|--permission-mode["']?[\s=]+["']?(?:bypassPermissions|auto|dontAsk|acceptEdits))(?=$|[\s=;|&)'"])/, "Claude Code started without this check"],
+  // Claude Code 程序、它的签名清单、current 软链：删了清单再换程序，起 claude 前的核验就无从比对（见 gw/claudeseal.mjs）
+  [/\.local\/share\/cccodroid\/claude(?=$|[\/\s"';|&)])/, "the Claude Code program and its signed manifest"],
 ];
 const WRITERS = new Set(["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
@@ -82,8 +91,8 @@ export function judge(tool, inp) {
   return null;
 }
 
-// 当钩子跑：stdin 是 claude 给的 JSON
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+// 当钩子跑：stdin 是 claude 给的 JSON。网关挂钩子时不读盘上这个文件，把启动时核过的源码整段经 node -e 跑，末尾补一句 runHook()（见 gw/claude.mjs）
+export function runHook() {
   let raw = "";
   try { raw = fs.readFileSync(0, "utf8"); } catch {}
   try {
@@ -96,3 +105,4 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()
   } catch {}
   process.exit(0);
 }
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) runHook();

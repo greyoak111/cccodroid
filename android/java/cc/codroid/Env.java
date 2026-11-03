@@ -14,6 +14,18 @@ final class Env {
     /** 网关访问令牌（server.mjs 首次启动时生成，0600，存在应用私有目录）。见 server.mjs「访问控制」 */
     private static volatile File tokenFile = new File("/data/data/cc.codroid/files/home/.gateway-token");
 
+    /** 这次拉起网关时现造的随机数（GatewayService.spawnGateway 经 stdin 交给网关，不落盘）。
+     *  证明身份、静态资源签名、Cookie 用「令牌 + 它」派生的钥匙：令牌同 uid 读得到，另起的冒牌网关有令牌也算不出这个（反破甲 11-03，
+     *  见 gateway/gw/access.mjs 的 SPAWN） */
+    static volatile String spawnKey = "";
+    static String key() {
+        String t = token(), k = spawnKey;
+        // 手里没有随机数（应用进程重来过）就谁也不认：退回令牌的话，能对上的只可能是拿到令牌的冒牌货（DeepSeek 复核必修 1）。
+        // 真网关这时证明不了自己，GatewayService 的 squatted() 把它杀掉、带新随机数重起
+        if (t.isEmpty() || k.isEmpty()) return "";
+        try { return hmac(t, "spawn:" + k); } catch (Exception e) { return ""; }
+    }
+
     static String token() {
         try { return new String(java.nio.file.Files.readAllBytes(tokenFile.toPath()), "UTF-8").trim(); }
         catch (Exception e) { return ""; }
@@ -53,7 +65,7 @@ final class Env {
 
     static boolean proveGateway() {
         if (System.currentTimeMillis() - provedAt < 3000) return true;    // 刚核过：别每个请求都多跑一趟
-        String t = token();
+        String t = key();
         if (t.isEmpty()) return false;
         try {
             byte[] nb = new byte[16];
@@ -87,7 +99,7 @@ final class Env {
      *  它给的页面和脚本跟界面同源，能读到桥口令、能调 /api。所以这里带随机数去取，网关用令牌对「随机数 + 请求行 + 内容哈希」
      *  回一个 HMAC（gateway/gw/access.mjs 的 staticMac），对不上就整个不交给 WebView。pq 是路径加查询串，原样发出去 */
     static android.webkit.WebResourceResponse fetchStatic(String pq) {
-        String t = token();
+        String t = key();
         if (t.isEmpty()) return null;
         pq = pq.replaceAll("([?&])k=[0-9a-f]{32}&?", "$1").replaceAll("[?&]$", "");   // 桥口令一律不往外发（审查 M-3）
         try {

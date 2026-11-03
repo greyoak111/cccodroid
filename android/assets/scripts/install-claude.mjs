@@ -67,17 +67,25 @@ const isVer = (v) => /^\d{1,6}\.\d{1,6}\.\d{1,6}(-[0-9A-Za-z.]{1,40})?$/.test(v 
 const sha = (f, alg = "sha256", enc = "hex") => { const h = crypto.createHash(alg), fd = fs.openSync(f, "r"), b = Buffer.alloc(1 << 20); let n; while ((n = fs.readSync(fd, b, 0, b.length)) > 0) h.update(b.subarray(0, n)); fs.closeSync(fd); return h.digest(enc); };
 const size = (f) => { try { return fs.statSync(f).size; } catch { return 0; } };
 
+// 签过名的官方清单存进版本目录：网关每轮起 claude 前拿它验签、比 sha256（gw/claudeseal.mjs），被改过的程序不起
+function keepManifest(dir, raw) {
+  if (!raw) return;
+  try { fs.writeFileSync(path.join(dir, "manifest.json"), raw.m); fs.writeFileSync(path.join(dir, "manifest.json.sig"), raw.sig); }
+  catch (e) { say("  签名清单没存上：" + e.message); }
+}
 // ── 补核：npm 签名装上的（.npm-only），连得上官方清单时核 sha256。网关定时调；退出码 3 = 对不上 ──
 if (CHANNEL === "--recheck") {
   let bad = 0;
   for (const d of (() => { try { return fs.readdirSync(DEST); } catch { return []; } })()) {
     const dir = path.join(DEST, d), mark = path.join(dir, ".npm-only");
-    if (!isVer(d) || !fs.existsSync(mark)) continue;
+    if (!isVer(d) || !fs.existsSync(path.join(dir, "claude"))) continue;
+    if (!fs.existsSync(mark) && fs.existsSync(path.join(dir, "manifest.json.sig"))) continue;
     const m = officialManifest(d, true);
     if (!m) { say(`${d}：官方清单还拿不到，下次再核`); continue; }
     const got = sha(path.join(dir, "claude"));
-    if (got === m.sum) { fs.rmSync(mark, { force: true }); say(`✓ ${d}：与官方清单一致（${m.anchor}）`); }
-    else { bad++; fs.writeFileSync(path.join(dir, ".mismatch"), got + "\n"); say(`✗ ${d}：与官方清单不符（期望 ${m.sum.slice(0, 12)}…，实得 ${got.slice(0, 12)}…）`); }
+    if (got === m.sum) { fs.rmSync(mark, { force: true }); keepManifest(dir, m.raw); say(`✓ ${d}：与官方清单一致（${m.anchor}）`); }
+    // 对不上也把官方清单存下：网关起 claude 前按它验，这一版就不再启动（DeepSeek 复核必修 3）
+    else { bad++; fs.writeFileSync(path.join(dir, ".mismatch"), got + "\n"); keepManifest(dir, m.raw); say(`✗ ${d}：与官方清单不符（期望 ${m.sum.slice(0, 12)}…，实得 ${got.slice(0, 12)}…）`); }
   }
   process.exit(bad ? 3 : 0);
 }
@@ -124,12 +132,12 @@ function officialManifest(ver, quiet) {
     if (mustSign && !signed) { quiet || say(`  ${name}的签名文件取不到，不用`); continue; }
     const j = jsonOf(m), p = j && j.platforms && j.platforms[PLATFORM];
     if (!j || j.version !== ver || !p || !/^[a-f0-9]{64}$/.test(p.checksum)) { say(`  ${name}清单内容不对，不用`); continue; }
-    return { sum: p.checksum, size: p.size, anchor: signed ? `${name}清单（Anthropic 签名已验）` : `${name}清单（HTTPS）` };
+    return { sum: p.checksum, size: p.size, anchor: signed ? `${name}清单（Anthropic 签名已验）` : `${name}清单（HTTPS）`, raw: signed ? { m, sig } : null };
   }
   return null;
 }
-let SUM = "", SIZE = 0, anchor = "";
-{ const m = officialManifest(VER); if (m) { ({ sum: SUM, size: SIZE, anchor } = m); say(`✓ ${anchor}`); } }
+let SUM = "", SIZE = 0, anchor = "", SIGNED = null;
+{ const m = officialManifest(VER); if (m) { ({ sum: SUM, size: SIZE, anchor, raw: SIGNED } = m); say(`✓ ${anchor}`); } }
 
 // ── 3. npm 包信息（信任锚 ②，也是镜像下载地址）───────────────
 let NPM = null;
@@ -217,7 +225,7 @@ else {
     }
     for (const f of [raw, tgz]) { fs.rmSync(f, { force: true }); fs.rmSync(f + ".for", { force: true }); fs.rmSync(f + ".seg", { force: true }); }
     fs.rmSync(path.join(OUT, ".mismatch"), { force: true });      // 补核没过、重下成功的，标记一起去掉
-    if (SUM) { fs.rmSync(path.join(OUT, ".npm-only"), { force: true }); say("✓ sha256 与官方清单一致"); }
+    if (SUM) { fs.rmSync(path.join(OUT, ".npm-only"), { force: true }); say("✓ sha256 与官方清单一致"); keepManifest(OUT, SIGNED); }
     else { fs.writeFileSync(path.join(OUT, ".npm-only"), VER + "\n"); say("✓ npm 签名与 sha512 一致（官方清单以后连得上时会自动补核）"); }
     try { fs.writeFileSync(lastFile, s.id); } catch {}
     done = true; break;

@@ -9,14 +9,24 @@ import { cachedModels } from "./models.mjs";
 import { fixedBaseUrl } from "./streamfix.mjs";
 import { archiveHooks } from "./archive-core.mjs";
 import { fileURLToPath } from "node:url";
+import { APP } from "./appfiles.mjs";
 
-// 敏感操作再确认：PreToolUse 钩子（guard/cc-guard.mjs），碰密钥 / 读屏点按 / 往外分享时让 claude 停下来问，全部放行也一样
+// 敏感操作再确认：PreToolUse 钩子（guard/cc-guard.mjs），碰密钥 / 读屏点按 / 往外分享时让 claude 停下来问，全部放行也一样。
+// 不设全局关闭开关：整层关掉就等于没有；旧设置里存过 guard:false 也不再认。要放行就在确认卡片上逐次「允许」。
+// 钩子不读盘上的文件：部署出来的网关用启动时核过、存在内存里的那份源码（appfiles.mjs），整段经 node -e 跑，
+// 跑着的时候盘上那份被改了也换不掉正在挂的这一层。开发时（没有 FILES）照旧现读仓库里的。
 const GUARD_CLI = fileURLToPath(new URL("../guard/cc-guard.mjs", import.meta.url));
+export function guardSource() {
+  let src = APP ? APP.text("guard/cc-guard.mjs") : null;
+  if (src == null) try { src = fs.readFileSync(GUARD_CLI, "utf8"); } catch { return null; }
+  return src.replace(/^#!.*\n/, "") + "\nrunHook();\n";
+}
 export function guardHooks() {
-  if (SETTINGS.guard === false || !fs.existsSync(GUARD_CLI)) return null;
+  const src = guardSource();
+  if (!src) return null;
   const q = (x) => "'" + String(x).replace(/'/g, "'\\''") + "'";
   return [{ matcher: "Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob|mcp__device__.*",
-    hooks: [{ type: "command", command: q(process.execPath) + " " + q(GUARD_CLI), timeout: 10 }] }];
+    hooks: [{ type: "command", command: q(process.execPath) + " --input-type=module -e " + q(src), timeout: 10 }] }];
 }
 import { NEXT, readBody, sendJson } from "./http.mjs";
 
@@ -426,6 +436,8 @@ const KEY_FILE = path.join(CFG.home, ".cache", "ccapp-key");
  *  开关是一个标记文件 —— 界面打不开时，安卓壳的启动页也能直接写它。 */
 const SAFE_FILE = path.join(CFG.home, ".ccapp-safe-mode");
 export const safeMode = () => fs.existsSync(SAFE_FILE);
+/** --safe-mode 下所有钩子都不跑，敏感操作再确认也跟着没了：这时不让用不问人的权限模式，退回「每次都问」 */
+export const safeModePerm = (mode) => safeMode() && ["bypassPermissions", "auto", "acceptEdits"].includes(mode) ? "default" : mode;
 function setSafeMode(on) {
   if (on) fs.writeFileSync(SAFE_FILE, String(Date.now()));
   else try { fs.unlinkSync(SAFE_FILE); } catch {}
@@ -456,7 +468,10 @@ export function settingsArgs(p = PROVIDER) {
   if (SETTINGS.outputStyle && !safe) st.outputStyle = SETTINGS.outputStyle;
   if (!p.local) {
     st.hooks = archiveHooks();   // 压缩后提醒建档（只陈述事实，规则在系统提示里，见 archive.mjs）
-    const g = guardHooks(); if (g) st.hooks.PreToolUse = g;
+    const g = guardHooks();
+    // 用户级、项目级设置里的 disableAllHooks:true 会连这里挂的钩子一起关掉；这里显式写 false 压过它们（2.1.311 实测）。
+    // 代价是用户在设置里关掉的钩子也会跑 —— 扩展页的「关闭全部钩子」因此改成把钩子挪进暂存键（见 extensions.mjs）
+    if (g) { st.hooks.PreToolUse = g; st.disableAllHooks = false; }
   }
   const key = keyOf(p);
   const file = p.id === PROVIDER.id ? KEY_FILE : KEY_FILE + "-" + String(p.id).replace(/[^\w.-]/g, "_");

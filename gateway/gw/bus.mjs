@@ -2,6 +2,7 @@ import { LIVE } from "./config.mjs";
 import { RUNS, runList } from "./runs.mjs";
 import { NEXT, sendJson, uiTag } from "./http.mjs";
 import { flushPend, snapshot } from "./queue.mjs";
+import { onTamper, tamperAck, tamperPending } from "./tamper.mjs";
 
 // ── 事件总线 ──────────────────────────────────────────────────────────
 // Claude Desktop 的做法：一次生成（run）属于网关，不属于哪个 HTTP 请求。
@@ -52,6 +53,8 @@ function busWrite(res, line) {
   } catch { BUS.clients.delete(res); }
 }
 if (LIVE) setInterval(() => { for (const c of BUS.clients) busWrite(c, ": hb\n\n"); }, 15000).unref();
+// 篡改留痕（tamper.mjs）：有新的就推给界面，界面提示一次，点「知道了」回 /api/tamper/ack
+onTamper((list) => publish({ type: "tamper", tamper: list }));
 
 // ── 路由：/api/events /api/state ──
 export async function routeBus(req, res, u, p) {
@@ -98,5 +101,9 @@ export async function routeBus(req, res, u, p) {
     return;
   }
   if (req.method === "GET" && p === "/api/state") return sendJson(res, 200, snapshot());
+  if (req.method === "POST" && p === "/api/tamper/ack") {
+    tamperAck(u.searchParams.get("id"));
+    return sendJson(res, 200, { ok: true, tamper: tamperPending() });
+  }
   return NEXT;
 }

@@ -8,13 +8,14 @@ import { effectiveModel } from "./sessmodel.mjs";
 const runProvider = (sid) => providerById(effectiveModel(sid).provider) || PROVIDER;
 import { isLoginMode } from "./models.mjs";
 import { findSessionFile } from "./sessions.mjs";
-import { killTree } from "./claude.mjs";
+import { killTree, safeModePerm } from "./claude.mjs";
 import { goalCheck, tasksCheck } from "./goal.mjs";
 import { LAST_SESSION, RUNS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { BOOT, publish } from "./bus.mjs";
 import { execIntent, pickProvider, startRun } from "./run.mjs";
 import { cleanMergeFrom } from "./merge.mjs";
+import { tamperPending } from "./tamper.mjs";
 import { RATE_LIMITS } from "./stream.mjs";
 
 // ── 生成与排队 ────────────────────────────────────────────────────────
@@ -60,12 +61,13 @@ export function setPermMode(mode) {
   if (SETTINGS.permissionMode !== mode) log(`权限模式 ${SETTINGS.permissionMode} → ${mode}`);   // 排障时看得出是谁、何时切的
   SETTINGS.permissionMode = mode;
   saveSettings();
+  const eff = safeModePerm(mode);   // 安全模式下不问人的几档退回 default（见 claude.mjs），界面显示实际生效的
   for (const r of RUNS.values()) if (r.setMode) {
-    r.setMode(mode);
+    r.setMode(eff);
     // 重放（切回会话、断线重连）时 init 里还是起跑时的模式，会把界面改回去，用户想收紧也发不出去（安全通告 GHSA-2w6p）
-    for (const e of r.log || []) if (e.type === "init") e.permissionMode = mode;
+    for (const e of r.log || []) if (e.type === "init") e.permissionMode = eff;
   }
-  publish({ type: "perm_mode", mode });
+  publish({ type: "perm_mode", mode: eff });
   return true;
 }
 export function snapshot() {
@@ -73,6 +75,7 @@ export function snapshot() {
     run: runInfo(latestRun()),           // 旧字段：最近开始的那一轮
     runs: runList().map(runInfo),
     maxParallel: maxParallel(),
+    tamper: tamperPending(),           // 应用文件被改过、已还原：界面提示一次（见 tamper.mjs）
     queue: QUEUE.map((q) => ({ id: q.id, cid: q.cid, text: q.message.slice(0, 500), sessionId: q.sessionId, follow: q.follow, at: q.at, held: !!q.held, intr: !!q.intr })),
     provider: PROVIDER.id,
     model: SETTINGS.model || PROVIDER.defaultModel || null,

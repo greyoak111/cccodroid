@@ -84,6 +84,8 @@ function loadSettings() {
   // 以前有个界面上没有入口、只能经接口写的 appendSystemPrompt，每轮接在系统提示后面：
   // 应用自己不留「改系统提示词」的口子（要给项目定规矩用 CLAUDE.md，那是 Claude Code 自己的机制），旧值清掉
   if ("appendSystemPrompt" in SETTINGS) { delete SETTINGS.appendSystemPrompt; setImmediate(saveSettings); }
+  // 敏感操作再确认没有关闭口子：旧设置里存过 false 的改回 true，别让一次误写跨重启生效
+  if (SETTINGS.guard !== true) { SETTINGS.guard = true; setImmediate(saveSettings); }
 }
 
 /** 写盘成功返回 true；失败记日志并返回 false（调用方要如实告诉用户，别报「已保存」——#122-3） */

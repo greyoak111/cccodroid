@@ -7,12 +7,19 @@ unset LD_PRELOAD
 export USE_BUILTIN_RIPGREP=0
 # 经加载器时（targetSdk 36）：ld.so 用 APK 里那份（CCAPP_LD），预加载列表多一个 exec-shim.so（CCAPP_GLIBC_PRELOAD）
 PRE=${CCAPP_GLIBC_PRELOAD:-${CCAPP_CLAUDE_PRELOAD:-${CCAPP_BIN%/bin}/lib/seccomp-enosys.so}}
+# 和网关起的一样挂上敏感操作再确认（../guard/cc-guard.mjs），并显式 disableAllHooks:false 压过设置里的关闭（见 gw/claude.mjs）；
 # 应用内终端：网关把这家的密钥放在 0600 私有文件里、只给路径（不进环境变量），照网关起 claude 的办法交给 apiKeyHelper。
-# 放在最前面：用户自己再带 --settings 时，以用户的为准
+# 放在最前面：用户自己再带 --settings 时，以用户的为准（claude 只认最后一个 --settings）；在会话里让 Claude 这样起，guard 会先问
 # 路径要拼进 JSON 和 shell 命令：只收普通字符（网关给的路径都是这样），带引号之类的不用（审查 v0.5.9 D7）
+S=
+G=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/guard/cc-guard.mjs
+case "$G" in
+  /*/guard/cc-guard.mjs) case "$G" in *[!A-Za-z0-9._/-]*) ;; *) [ -r "$G" ] && S="\"disableAllHooks\":false,\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob|mcp__device__.*\",\"hooks\":[{\"type\":\"command\",\"command\":\"node '$G'\",\"timeout\":10}]}]}" ;; esac ;;
+esac
 case "$CCAPP_KEY_FILE" in
   ""|*[!A-Za-z0-9._/-]*) ;;
-  *) [ -r "$CCAPP_KEY_FILE" ] && set -- --settings "{\"apiKeyHelper\":\"cat '$CCAPP_KEY_FILE'\"}" "$@" ;;
+  *) [ -r "$CCAPP_KEY_FILE" ] && S="${S:+$S,}\"apiKeyHelper\":\"cat '$CCAPP_KEY_FILE'\"" ;;
 esac
+[ -n "$S" ] && set -- --settings "{$S}" "$@"
 exec "${CCAPP_LD:-$PREFIX/glibc/lib/ld-linux-aarch64.so.1}" --library-path "$PREFIX/glibc/lib" ${PRE:+--preload "$PRE"} \
   "$HOME/.local/share/cccodroid/claude/current/claude" "$@"

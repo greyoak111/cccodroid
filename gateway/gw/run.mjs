@@ -5,7 +5,7 @@ import { CFG, LAST_LANG, PATHS, log, tr, tz, permModeAction } from "./config.mjs
 import { SETTINGS, capList } from "./settings-store.mjs";
 import { PERM_MODES, PROVIDER, billAfterRun, keyOf, noteTokens, providerById } from "./providers.mjs";
 import { ALIAS_SEEN, effortLevelsOf, fetchModels, isLoginMode, modelsCached, normEffort } from "./models.mjs";
-import { claudeCmd, claudeEnv, currentModelInfo, ensureBridge, settingsArgs } from "./claude.mjs";
+import { claudeCmd, claudeEnv, currentModelInfo, ensureBridge, safeModePerm, settingsArgs } from "./claude.mjs";
 import { tasksCheck } from "./goal.mjs";
 import { setLastInit } from "./caps.mjs";
 import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
@@ -23,6 +23,8 @@ import { projectById, projectDefaults, projectOfDir } from "./projects.mjs";
 import { sessModel, sessProvider, setSessModel } from "./sessmodel.mjs";
 import { inlineImages, inlineImagesSync, wantsInline } from "./inlineimg.mjs";
 import { pathWatch, previewHint, settlePathNote, takePathNote } from "./pathnote.mjs";
+import { claudeSeal, sealStillValid } from "./claudeseal.mjs";
+import { tamperNote, tamperRecord } from "./tamper.mjs";
 import { SPOOF_NOTE, checkSession, integrityHint, integrityNote, neutralizeMarkers, sealSession } from "./integrity.mjs";
 import { recordExtra } from "./lineage-store.mjs";
 import { refNote, refNoteSync } from "./merge.mjs";
@@ -155,7 +157,7 @@ export async function startRun(item) {
   };
   // 进程起来之前（拉模型、问设备工具、读建档提示都要等）用户改权限模式：先记下来，起进程时按最新的那个启动；
   // 起来后由下面真的 setMode 接手（审查 v0.5.20 02-001：以前这段时间收紧会被开头读的旧模式盖掉，新进程照样全部放行）
-  run.setMode = (mode) => { run.permMode = mode; return true; };
+  run.setMode = (mode) => { mode = safeModePerm(mode); run.permMode = mode; return true; };
   run.lane = laneOfItem(item);
   RUNS.set(run.id, run);                 // 同步占槽，中间不许有 await
   RUN_LANE.set(run.id, run.lane);
@@ -223,6 +225,8 @@ export async function startRun(item) {
   run.exec = { provider: P.id, model: model || "", effort: effort || "" };
   let permMode = String(run.permMode || item.permissionMode || SETTINGS.permissionMode || "default").trim();
   if (!PERM_MODES.includes(permMode)) permMode = "default";
+  // 安全模式下钩子全不跑（敏感操作再确认也没了），不问人的几档退回 default
+  if (safeModePerm(permMode) !== permMode) { log(`安全模式：权限模式 ${permMode} → default`); permMode = safeModePerm(permMode); }
   run.permMode = permMode;
 
   // 端侧小模型：先确保 llama-server 跑着、载的是这个模型（第一次要加载十几秒）
@@ -322,11 +326,21 @@ export async function startRun(item) {
   }
   const pmAt = argv.indexOf("--permission-mode");
   if (run.permMode !== permMode && PERM_MODES.includes(run.permMode) && pmAt >= 0) {
+    run.permMode = safeModePerm(run.permMode);
     log(`权限模式在起进程前改了：${permMode} → ${run.permMode}`);
     argv[pmAt + 1] = permMode = run.permMode;
   }
   // 建档规范、bin/claude、guard、预加载的库这些被改了先写回（见 appfiles.mjs）。放在起进程紧前：上面等项目配置确认可能等很久
   checkAppFiles();
+  // claude 程序本身：和版本目录里存的 Anthropic 签名清单对不上就不起（被改过字符串的二进制，见 claudeseal.mjs）
+  if (!P.local) {
+    const seal = await claudeSeal();
+    if (seal.ok === false) {
+      emit({ type: "error", message: tr(LAST_LANG, "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。") });
+      return endRun(run, { failed: true });
+    }
+    if (run.aborted) { log("⏹ 核验 Claude Code 时停止"); return endRun(run, { durationMs: 0 }); }
+  }
   const [cmd0, args0] = claudeCmd(argv);
   const child = spawn(cmd0, args0, {
     cwd,
@@ -336,6 +350,13 @@ export async function startRun(item) {
     detached: true,            // 当进程组长，中断时好整组带走（见 killTree）
   });
   run.child = child;
+  // 核过之后、真正执行之前程序被换掉了（来回替换卡时间窗）：这一轮停掉（DeepSeek 复核建议 2）
+  if (!P.local && !sealStillValid()) {
+    log("⚠️ [Claude Code 核验] 核过之后程序文件又变了，停掉这一轮");
+    tamperRecord("claude", ["claude: changed right after it was verified"]);
+    emit({ type: "error", message: tr(LAST_LANG, "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。") });
+    abortRun(run);
+  }
   if (item.timeoutMs > 0) run.limitTimer = setTimeout(() => { run.timedOut = true; log(`⏱ 超过时长上限 ${Math.round(item.timeoutMs / 60000)} 分钟，停止`); abortRun(run); }, item.timeoutMs);
   child.stdin.on("error", () => {});
   const writeUser = (content) => child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n");
@@ -351,7 +372,9 @@ export async function startRun(item) {
   };
   // 上一轮只写了文件名没写全路径：这一轮的消息带上提醒（见 pathnote.mjs）。命令那轮不带（带了也包不进去，提醒会白白丢掉）
   const pathNote = isCmd || P.local ? "" : takePathNote(run.sessionId);
-  writeUser(withNotes(message, [integNote, arch?.note, pathNote, refN].filter(Boolean).join("\n\n"), imgs0));
+  // 应用文件被改过、已还原（tamper.mjs）：告诉模型一次，别再去改回来
+  const tamperN = isCmd || P.local ? "" : tamperNote();
+  writeUser(withNotes(message, [tamperN, integNote, arch?.note, pathNote, refN].filter(Boolean).join("\n\n"), imgs0));
   run.inputOpen = true;
   run.pendingInject = [];      // 已写进 stdin、还没被 claude 吃进去的插话
   run.bgTasks = 0;             // claude 报的后台任务数（见 feed）

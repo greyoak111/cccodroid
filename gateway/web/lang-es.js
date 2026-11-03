@@ -2727,4 +2727,7 @@ window.I18N_DICT["es"] = {
   "白": "Blanco",
   "黄": "Amarillo",
   "补算期间使用统计被清空了，这次补算的结果已丢弃。": "Las estadísticas de uso se borraron durante el recálculo, así que se descartaron sus resultados.",
+  "Claude Code 程序被改过，已拒绝启动；": "El programa de Claude Code fue modificado y no se inició; ",
+  "应用文件被改过，已按安装包还原：": "Se modificaron archivos de la app y se restauraron desde el paquete de la app: ",
+  "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。": "El programa de Claude Code no coincide con el manifiesto oficial firmado y puede haber sido modificado, así que este turno no se inició. Reinstálalo en Ajustes → Actualizaciones y vuelve a intentarlo.",
 };

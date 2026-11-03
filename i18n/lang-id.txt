@@ -2724,3 +2724,6 @@
 2724	Putih
 2725	Kuning
 2726	Statistik penggunaan dihapus saat penghitungan ulang, jadi hasilnya dibuang.
+2727	Program Claude Code telah diubah dan tidak dijalankan; 
+2728	File aplikasi telah diubah dan sudah dipulihkan dari paket aplikasi: 
+2729	Program Claude Code tidak cocok dengan manifes resmi yang ditandatangani dan mungkin telah diubah, jadi giliran ini tidak dijalankan. Instal ulang di Pengaturan → Pembaruan lalu coba lagi.

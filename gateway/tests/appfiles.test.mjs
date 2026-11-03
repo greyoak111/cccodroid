@@ -56,6 +56,13 @@ test("小目录被改：check 写回原样，多出来的删掉，可执行位�
   assert.equal(fs.statSync(f).mtimeMs, old.mtimeMs);
   assert.deepEqual(g.check(), ["pre/pkg"]);
   assert.deepEqual(why, [], "小目录写回了，不用重启");
+  // 网关源码也纳入快照：运行中被改的 gw/ 写回，多出来的删掉
+  fs.writeFileSync(path.join(root, "gw/x.mjs"), "export const patched = 1;\n");
+  assert.deepEqual(g.check(), ["gw/x.mjs"]);
+  assert.equal(fs.readFileSync(path.join(root, "gw/x.mjs"), "utf8"), "export {};\n");
+  fs.writeFileSync(path.join(root, "gw/evil.mjs"), "x");
+  assert.deepEqual(g.check(), ["gw/evil.mjs（多出来的）"]);
+  assert.deepEqual(why, [], "网关源码写回了，不用重启");
 });
 
 test("界面文件：对得上才发，对不上要求重启", () => {
@@ -81,4 +88,16 @@ test("复核补：lib 也写回；清单里的子目录不当多余删；分段�
   assert.deepEqual(g.check(), [], "不来回折腾");
   assert.deepEqual(g.list("web/app/"), ["01-a.js", "02-b.js"]);
   assert.ok(g.has("web/index.html") && !g.has("web/x.html"));
+});
+
+test("加载钩子用的 code()：快照里的给内存那份，清单里的现读现核，对不上、清单外的给 null", () => {
+  const root = mkRoot("apf-code", FILES);
+  const g = appGuard(root);
+  fs.writeFileSync(path.join(root, "gw/x.mjs"), "export const evil = 1;\n");
+  assert.equal(g.code("gw/x.mjs").toString(), "export {};\n", "gw/ 在快照里：盘上被改也给核过的那份");
+  assert.equal(g.code("web/index.html").toString(), "<html></html>\n");
+  fs.writeFileSync(path.join(root, "web/index.html"), "<script>evil()</script>");
+  assert.equal(g.code("web/index.html"), null);
+  fs.writeFileSync(path.join(root, "gw/new.mjs"), "x");
+  assert.equal(g.code("gw/new.mjs"), null, "安装包里没有的");
 });

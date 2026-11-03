@@ -156,7 +156,9 @@ async function removeMcp(name) {
 
 // 技能：~/.claude/skills/<名字>/SKILL.md（开头 YAML 里有 name / description）
 // ── Hooks：到某个时刻自动跑的命令（claude 的 settings.json 里 "hooks" 一个键） ──
-// claude 没有管 hooks 的命令行，只能直接改 settings.json：只动 hooks / disableAllHooks 两个键，其余原样保留；
+// claude 没有管 hooks 的命令行，只能直接改 settings.json：只动 hooks 一个键，其余原样保留；
+// 「暂停全部」不写 disableAllHooks —— 它会连网关挂的敏感操作再确认一起关掉，网关因此每轮显式压成 false（见 claude.mjs settingsArgs），
+// 改成把规则挪到旁边的 <settings>.ccapp-paused 里，恢复时挪回去；以前存的 disableAllHooks:true 头一次读写时照这个办法转过来。
 // 写前留一份 .bak，和插件安装共用 EXT_LOCK，免得两边同时写。三处配置：用户级（所有项目）、项目级、项目本机级。
 const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "UserPromptSubmit", "Stop",
   "SubagentStart", "SubagentStop", "SessionStart", "SessionEnd", "Notification", "PreCompact", "PostCompact",
@@ -185,18 +187,23 @@ function readSettingsFile(file) {
     return { j, exists: true };
   } catch (e) { return { error: e.message, badJson: true, exists: true }; }
 }
-function listHooks(dir) {
+const pausedFile = (file) => file + ".ccapp-paused";
+function readPaused(file) {
+  try { const h = JSON.parse(fs.readFileSync(pausedFile(file), "utf8")); return h && typeof h === "object" && !Array.isArray(h) ? h : null; } catch { return null; }
+}
+export function listHooks(dir) {
   const scopes = [];
   for (const scope of ["user", "project", "local"]) {
     let file;
     try { file = hookSettingsFile(scope, dir); } catch (e) { scopes.push({ scope, error: e.message }); continue; }
     const r = readSettingsFile(file);
-    const h = r.j && r.j.hooks;
+    const paused = readPaused(file);
+    const h = paused || (r.j && r.j.hooks);
     // 事件名只放字母的（和保存时 cleanHooks 一个规矩）；配置文件可能来自克隆的仓库，怪名字不往界面送
     const hooks = {};
     if (h && typeof h === "object" && !Array.isArray(h)) for (const [ev, v] of Object.entries(h)) if (/^[A-Za-z]{1,40}$/.test(ev)) hooks[ev] = v;
     scopes.push({ scope, file, exists: r.exists, error: r.error, badJson: !!r.badJson,
-      hooks, disableAll: !!(r.j && r.j.disableAllHooks) });
+      hooks, disableAll: !!paused || !!(r.j && r.j.disableAllHooks) });
   }
   return { scopes, events: HOOK_EVENTS, workspace: CFG.workspace, dir: path.resolve(String(dir || CFG.workspace)), scriptsDir: HOOK_SCRIPTS_DIR };
 }
@@ -220,7 +227,7 @@ function cleanHooks(h) {
   }
   return out;
 }
-function saveHooks({ scope, dir, hooks, disableAll }) {
+export function saveHooks({ scope, dir, hooks, disableAll }) {
   if (!["user", "project", "local"].includes(scope)) throw new Error("bad scope");
   const file = hookSettingsFile(scope, dir);
   const clean = hooks === undefined ? undefined : cleanHooks(hooks);
@@ -228,19 +235,35 @@ function saveHooks({ scope, dir, hooks, disableAll }) {
     const r = readSettingsFile(file);
     if (r.error) { const e = new Error(r.error); e.code = r.badJson ? "badjson" : "read"; throw e; }
     const j = r.j;
-    if (clean !== undefined) { if (Object.keys(clean).length) j.hooks = clean; else delete j.hooks; }
-    if (disableAll !== undefined) { if (disableAll) j.disableAllHooks = true; else delete j.disableAllHooks; }
+    let paused = readPaused(file);
+    if (j.disableAllHooks === true) { paused = { ...(j.hooks || {}), ...(paused || {}) }; delete j.hooks; }   // 旧的暂停办法：转过来
+    delete j.disableAllHooks;
+    const pause = disableAll !== undefined ? !!disableAll : !!paused;
+    const want = clean !== undefined ? clean : (paused || j.hooks || {});
     fs.mkdirSync(path.dirname(file), { recursive: true });
     if (r.exists) { try { fs.copyFileSync(file, file + ".bak"); } catch {} }
-    const tmp = file + ".tmp-" + process.pid;
-    fs.writeFileSync(tmp, JSON.stringify(j, null, 2) + "\n");
-    fs.renameSync(tmp, file);
+    const put = (dst, obj) => { const tmp = dst + ".tmp-" + process.pid; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n"); fs.renameSync(tmp, dst); };
+    if (pause) { put(pausedFile(file), want); delete j.hooks; }      // 先把规则存好，再从生效的配置里拿掉
+    else if (Object.keys(want).length) j.hooks = want; else delete j.hooks;
+    put(file, j);
+    if (!pause) try { fs.unlinkSync(pausedFile(file)); } catch {}
     log(`hooks 已保存：${file}`);
     if (scope !== "user") retrustProject(path.dirname(path.dirname(file)));   // 用户在这里亲手改的：之前认过这个目录就跟着认新的（见 projtrust.mjs）
     return { ok: true, file };
   });
   EXT_LOCK = job.catch(() => {});
   return job;
+}
+/** 网关启动时：以前用 disableAllHooks:true 暂停的，转成挪开的办法（不然网关压成 false 后它们会重新跑起来）。
+ *  用户级 + 工作区的项目级、本机级（界面管的就这三份，DeepSeek 复核建议 8）；别的项目里的照旧按项目配置确认（projtrust.mjs）处理 */
+export async function migrateHookPause() {
+  for (const scope of ["user", "project", "local"]) {
+    let file; try { file = hookSettingsFile(scope); } catch { continue; }
+    const r = readSettingsFile(file);
+    if (!(r.j && r.j.disableAllHooks === true)) continue;
+    try { await saveHooks({ scope }); log(`hooks 的「暂停全部」已改成挪开保存：${file}`); }
+    catch (e) { log(`转换 hooks 暂停失败（${file}）：${e.message}`); }
+  }
 }
 function installHookScripts() {
   fs.mkdirSync(HOOK_SCRIPTS_DIR, { recursive: true });

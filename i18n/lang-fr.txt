@@ -2724,3 +2724,6 @@
 2724	Blanc
 2725	Jaune
 2726	Les statistiques d'utilisation ont été effacées pendant le recalcul ; ses résultats ont été ignorés.
+2727	Le programme Claude Code a été modifié et n'a pas été lancé ; 
+2728	Des fichiers de l'app avaient été modifiés ; ils ont été restaurés depuis le paquet de l'app : 
+2729	Le programme Claude Code ne correspond pas au manifeste officiel signé et a peut-être été modifié ; ce tour n'a donc pas été lancé. Réinstallez-le dans Réglages → Mises à jour puis réessayez.

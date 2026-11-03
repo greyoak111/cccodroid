@@ -2727,4 +2727,7 @@ window.I18N_DICT["id"] = {
   "白": "Putih",
   "黄": "Kuning",
   "补算期间使用统计被清空了，这次补算的结果已丢弃。": "Statistik penggunaan dihapus saat penghitungan ulang, jadi hasilnya dibuang.",
+  "Claude Code 程序被改过，已拒绝启动；": "Program Claude Code telah diubah dan tidak dijalankan; ",
+  "应用文件被改过，已按安装包还原：": "File aplikasi telah diubah dan sudah dipulihkan dari paket aplikasi: ",
+  "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。": "Program Claude Code tidak cocok dengan manifes resmi yang ditandatangani dan mungkin telah diubah, jadi giliran ini tidak dijalankan. Instal ulang di Pengaturan → Pembaruan lalu coba lagi.",
 };

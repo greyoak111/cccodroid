@@ -615,6 +615,7 @@
         if (view.sessionId && ev.sessionId === view.sessionId) { view.goal = ev.goal || null; view.liveAt = Date.now(); renderRunStrip(); }
         return;
       case "state": return applyState(ev);
+      case "tamper": return showTamper(ev.tamper);
       case "archive": return loadSessions();   // 建档 / 归入杂项：标题、档号、分组跟着变
       case "sched": case "sched_note": return onSchedEvent(ev);
       case "sync": return endReplay();
@@ -832,7 +833,23 @@
   }
 
   // ── 忙闲与排队（都以网关为准）──────────────────────────────────────
+  // 篡改留痕（网关 gw/tamper.mjs）：应用文件被改过、已还原，提示一次；点「知道了」告诉网关，换个界面也不再提
+  // 有新的才弹；弹的时候把还没点过的全列上（替换式的提示条，只列新的会把上一批顶掉，DeepSeek 复核建议 7）
+  const tamperShown = new Set();
+  function showTamper(list) {
+    list = list || [];
+    const key = (e) => e.id + ":" + (e.files || []).length;
+    if (!list.some((e) => !tamperShown.has(key(e)))) return;
+    for (const e of list) tamperShown.add(key(e));
+    const claude = list.some((e) => e.src === "claude");
+    const files = [...new Set(list.flatMap((e) => e.files || []))];
+    console.warn("[tamper]", list);
+    const ids = list.map((e) => e.id);
+    toastAct((claude ? t("Claude Code 程序被改过，已拒绝启动；") : "") + t("应用文件被改过，已按安装包还原：") + files.slice(0, 3).join(", ") + (files.length > 3 ? " …" : ""),
+      t("知道了"), () => { for (const id of ids) api("/api/tamper/ack?id=" + id, { method: "POST" }).catch(() => {}); });
+  }
   function applyState(s) {
+    showTamper(s.tamper);
     srv.runs = s.runs || (s.run ? [s.run] : []);
     srv.intr = intrList(s.interrupted);
     srv.queueAll = s.queue || [];

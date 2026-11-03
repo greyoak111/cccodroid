@@ -211,18 +211,34 @@ public class GatewayService extends Service {
             Log.w(TAG, "files/app 被改过，起网关前还原：" + bad);
             AppFiles.deploy(this, env.app);
             Ledger.add(env, "repair", true, Tr.t("界面与网关的文件被改动过，已按安装包还原：") + android.text.TextUtils.join(", ", bad), null);
+            AppFiles.noteRestored(bad);
         }
         File server = new File(env.app, "server.mjs");
         ProcessBuilder pb = new ProcessBuilder(env.cmd(env.bin("node").getPath(), server.getPath(), String.valueOf(Env.PORT)));
         env.apply(pb.environment());
         if (env.loader) pb.environment().put("TERMUX_EXEC__PROC_SELF_EXE", env.bin("node").getPath());   // 给 execpath.cjs
+        // 篡改留痕：这次（或界面那边部署时）还原过的文件交给网关，它记日志、界面提示一次、下一轮告诉模型（gateway/gw/tamper.mjs）
+        String restored = AppFiles.takeRestored();
+        if (restored != null) pb.environment().put("CCAPP_TAMPERED", restored);
+        // 防冒名：现造一个随机数，起来后经 stdin 交过去（见 Env.spawnKey、gateway/gw/access.mjs）
+        byte[] kb = new byte[32];
+        new java.security.SecureRandom().nextBytes(kb);
+        StringBuilder ks = new StringBuilder();
+        for (byte x : kb) ks.append(String.format("%02x", x));
+        pb.environment().put("CCAPP_SPAWN_KEY", "stdin");
+        pb.redirectInput(ProcessBuilder.Redirect.PIPE);
         pb.directory(env.app);
         pb.redirectErrorStream(true);
         File gout = new File(env.home, "gateway.out");
         // 一直追加会无限长：起网关前超过 8 MB 就挪成 .1（只留一份旧的 —— 审查 低16）
         if (gout.length() > (8L << 20)) { File old = new File(env.home, "gateway.out.1"); old.delete(); gout.renameTo(old); }
         pb.redirectOutput(ProcessBuilder.Redirect.appendTo(gout));
+        // 先换上新的再起：网关读到 stdin 之前答不了话，核身份不会拿旧的去比
+        Env.spawnKey = ks.toString();
+        Env.resetBoot();
         proc = pb.start();
+        try (java.io.OutputStream o = proc.getOutputStream()) { o.write((ks + "\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII)); }
+        catch (java.io.IOException e) { Log.w(TAG, "启动随机数没交过去：" + e.getMessage()); }
     }
 
     private void killGateway() {
@@ -259,6 +275,23 @@ public class GatewayService extends Service {
             } catch (Exception ignored) {}
         }
         if (killed > 0) { sleep(1000); return false; }
+        // 再看一遍：网关拉起的进程（claude、钩子、终端里跑的东西）环境里都带着 CCAPP_TOKEN_FILE。网关已经不在了，
+        // 它们占着端口、又证明不了自己，多半是会话里起的冒牌网关（反破甲 11-03，DeepSeek 复核必修 2）：杀掉再起。
+        // 把这个变量摘掉再起的认不出来；那种情况强行停止应用（整个 uid 的进程一起结束）就能恢复
+        int mine = android.os.Process.myPid();
+        for (File d : ps == null ? new File[0] : ps) {
+            String name = d.getName();
+            if (!name.matches("\\d+") || Integer.parseInt(name) == mine) continue;
+            try {
+                if (android.system.Os.stat(d.getPath()).st_uid != me) continue;
+                String envs = new String(java.nio.file.Files.readAllBytes(new File(d, "environ").toPath()), java.nio.charset.StandardCharsets.UTF_8);
+                if (!("\0" + envs).contains("\0CCAPP_TOKEN_FILE=")) continue;
+                Log.w(TAG, "端口被占、网关不在：结束网关留下的进程 pid=" + name);
+                android.os.Process.sendSignal(Integer.parseInt(name), 9);
+                killed++;
+            } catch (Exception ignored) {}
+        }
+        if (killed > 0) { sleep(1000); if (!Env.portBusy()) return false; }
         Log.e(TAG, "端口 " + Env.PORT + " 被别的应用占着（证明不了自己是网关）");
         return true;
     }

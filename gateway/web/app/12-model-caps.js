@@ -424,7 +424,6 @@
       if (pe && document.activeElement !== pe) { pe.max = state.settings.maxParallelCap || 16; pe.value = state.settings.maxParallel || 3; }
       $("set-static").checked = state.settings.staticCompat !== false;
       $("set-idlecompact").checked = state.settings.idleCompaction !== false;
-      $("set-guard").checked = state.settings.guard !== false;
       $("set-workisland").checked = state.settings.workIsland === true;
       loadExecMode();
     } catch {}
@@ -467,7 +466,7 @@
     const S = state.settings || {};
     const v = { model: ["set-model", S.model || ""], titleModel: ["set-titlemodel", S.titleModel || ""], effort: ["set-effort", S.effort || ""], outputStyle: ["set-style", S.outputStyle || ""],
       maxParallel: ["set-parallel", S.maxParallel || 3] };
-    const c = { staticCompat: ["set-static", S.staticCompat !== false], idleCompaction: ["set-idlecompact", S.idleCompaction !== false], guard: ["set-guard", S.guard !== false],
+    const c = { staticCompat: ["set-static", S.staticCompat !== false], idleCompaction: ["set-idlecompact", S.idleCompaction !== false],
       workIsland: ["set-workisland", S.workIsland === true] };
     for (const k of Object.keys(patch || {})) {
       if (v[k] && $(v[k][0])) $(v[k][0]).value = v[k][1];
@@ -522,7 +521,7 @@
     loadExecMode();
   });
   $("set-idlecompact").addEventListener("change", (e) => saveSettings({ idleCompaction: e.target.checked }));
-  $("set-guard").addEventListener("change", (e) => saveSettings({ guard: e.target.checked }));
+  // 敏感操作再确认没有开关：一直开着，只在设置里说明它管什么（反破甲 11-03）
   const extSync = () => { $("set-extimg").checked = uiGet("extImg") !== "auto"; };
   extSync(); document.addEventListener("cc:ui", (e) => { if (e.detail.key === "extImg" || e.detail.key == null) extSync(); });
   $("set-extimg").addEventListener("change", (e) => uiSet("extImg", e.target.checked ? null : "auto"));

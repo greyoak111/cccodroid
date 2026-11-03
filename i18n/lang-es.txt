@@ -2724,3 +2724,6 @@
 2724	Blanco
 2725	Amarillo
 2726	Las estadísticas de uso se borraron durante el recálculo, así que se descartaron sus resultados.
+2727	El programa de Claude Code fue modificado y no se inició; 
+2728	Se modificaron archivos de la app y se restauraron desde el paquete de la app: 
+2729	El programa de Claude Code no coincide con el manifiesto oficial firmado y puede haber sido modificado, así que este turno no se inició. Reinstálalo en Ajustes → Actualizaciones y vuelve a intentarlo.

@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { CFG, GLIBC_PRELOAD, PATHS, PREFIX, glibcEnv, loadPgp, log, tz } from "./config.mjs";
 import { verifiedInfo } from "./ccverified.mjs";
 import { ledger } from "./claude.mjs";
+import { onSealUnknown } from "./claudeseal.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
 import { ccMem, privCall } from "./usage.mjs";
@@ -132,14 +133,15 @@ if (!PREFIX) {
   setInterval(tick, 30 * 60_000);
 }
 
-// cccodroid：Claude Code 若是官方清单拿不到时靠 npm 签名装上的（版本目录里有 .npm-only），
-// 连得上官方清单时补核一次 sha256（install-claude.mjs --recheck）。启动 2 分钟后、之后每 6 小时看一眼
+// cccodroid：Claude Code 若是官方清单拿不到时靠 npm 签名装上的（版本目录里有 .npm-only），或者版本目录里还没存签过名的清单
+// （0.6.3 以前装的；网关每轮起 claude 前靠它核程序，见 claudeseal.mjs），连得上官方清单时补核一次 sha256、存下清单
+// （install-claude.mjs --recheck）。启动 2 分钟后、之后每 6 小时看一眼
 if (PREFIX && process.env.CCAPP_BIN) {
   const dest = path.join(CFG.home, ".local", "share", "cccodroid", "claude");
   const script = path.join(process.env.CCAPP_BIN, "..", "scripts", "install-claude.mjs");
   const recheck = () => {
     let pending = false;
-    try { pending = fs.readdirSync(dest).some((d) => fs.existsSync(path.join(dest, d, ".npm-only"))); } catch {}
+    try { pending = fs.readdirSync(dest).some((d) => /^\d/.test(d) && fs.existsSync(path.join(dest, d, "claude")) && (fs.existsSync(path.join(dest, d, ".npm-only")) || !fs.existsSync(path.join(dest, d, "manifest.json.sig")))); } catch {}
     if (!pending || !fs.existsSync(script)) return;
     execFile(path.join(PREFIX, "bin", "node"), [script, "--recheck"], { env: termEnv(), timeout: 600000 }, (e, out) => {
       const msg = String(out || "").trim();
@@ -150,6 +152,9 @@ if (PREFIX && process.env.CCAPP_BIN) {
   };
   setTimeout(recheck, 120_000);
   setInterval(recheck, 6 * 3600_000);
+  // 起 claude 前发现版本目录里没有签名清单（claudeseal.mjs）：别等 6 小时，10 分钟内最多补核一次
+  let lastAsk = 0;
+  onSealUnknown(() => { if (Date.now() - lastAsk < 600_000) return; lastAsk = Date.now(); setTimeout(recheck, 1000); });
 }
 
 /** 开发端的 priv 状态：真跑一次 priv 'id -u'（rish → Shizuku），拿到 2000/0 才算就绪 */

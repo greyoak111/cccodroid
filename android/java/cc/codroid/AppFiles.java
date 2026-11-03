@@ -28,6 +28,20 @@ import java.util.Map;
 final class AppFiles {
     private AppFiles() {}
 
+    // 篡改留痕：还原过的文件名攒在内存里，下一次拉起网关时经环境变量交过去（GatewayService.spawnGateway），不落盘
+    private static java.util.List<String> restored = null;
+    static synchronized void noteRestored(List<String> bad) {
+        if (restored == null) restored = new ArrayList<>();
+        for (String b : bad) if (restored.size() < 20 && !restored.contains(b)) restored.add(b);
+    }
+    /** 拿走攒下的（JSON 数组），没有给 null */
+    static synchronized String takeRestored() {
+        if (restored == null || restored.isEmpty()) return null;
+        String j = new org.json.JSONArray(restored).toString();
+        restored = null;
+        return j;
+    }
+
     /** 整个按安装包重新铺一遍 */
     static synchronized void deploy(Context c, File app) throws Exception {
         Installer.deleteTree(app);

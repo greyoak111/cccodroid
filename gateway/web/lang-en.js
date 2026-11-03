@@ -2761,5 +2761,8 @@ window.I18N_DICT.en = {
   "构成浅色的底色：往左偏白，往右偏黄": "Background of Construct (light): left is whiter, right is yellower",
   "白": "White",
   "黄": "Yellow",
-  "补算期间使用统计被清空了，这次补算的结果已丢弃。": "Usage stats were cleared while backfilling, so this backfill's results were discarded."
+  "补算期间使用统计被清空了，这次补算的结果已丢弃。": "Usage stats were cleared while backfilling, so this backfill's results were discarded.",
+  "Claude Code 程序被改过，已拒绝启动；": "The Claude Code program was modified and was not started; ",
+  "应用文件被改过，已按安装包还原：": "App files were modified and have been restored from the app package: ",
+  "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。": "The Claude Code program doesn't match the official signed manifest and may have been modified, so this turn was not started. Reinstall it under Settings → Updates and try again."
 };

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { CFG, PREFIX } from "./config.mjs";
+import { CFG, PREFIX, log } from "./config.mjs";
 
 // ── 访问控制 ──────────────────────────────────────────────────────────
 // 只监听 127.0.0.1 在安卓上不是安全边界：同机任何有联网权限的应用都能连 127.0.0.1，
@@ -78,7 +78,27 @@ export function sigOk(v, pathAndQuery, { method = "GET", local = UI_HOST, body =
 // 真网关用令牌算 HMAC 回过来（令牌只在双方私有目录里，冒牌的算不出），过了才交凭据。
 // BOOT 是这次启动的编号，一并算进去，App 据此知道网关换过了没有。
 export const BOOT = crypto.randomBytes(16).toString("hex");
-const mac = (s) => crypto.createHmac("sha256", TOKEN).update(s).digest("hex");
+// 防冒名（反破甲 11-03）：令牌在 home 里，同 uid 的程序读得到，自己另起一个网关也能算对上面这些 HMAC。
+// 所以应用（GatewayService）每次拉起网关都现造一个随机数，经 stdin 管道交过来（不落盘、不进环境变量），
+// 证明身份、静态资源签名、Cookie 都改用「令牌 + 这个随机数」派生的钥匙：不是应用亲手拉起的网关算不出来，界面一律不认。
+// 开发端、测试没有这一步（CCAPP_SPAWN_KEY 不是 stdin），照旧用令牌
+const SPAWN = (() => {
+  if (process.env.CCAPP_SPAWN_KEY !== "stdin") return "";
+  delete process.env.CCAPP_SPAWN_KEY;
+  const buf = Buffer.alloc(128), sab = new Int32Array(new SharedArrayBuffer(4)), t0 = Date.now();
+  let got = "";
+  while (!got.includes("\n") && got.length < 100 && Date.now() - t0 < 5000) {
+    let n = 0;
+    try { n = fs.readSync(0, buf, 0, buf.length, null); } catch (e) { if (e.code !== "EAGAIN") break; Atomics.wait(sab, 0, 0, 20); continue; }
+    if (!n) break;
+    got += buf.subarray(0, n).toString("latin1");
+  }
+  const k = got.split("\n")[0].trim();
+  if (!/^[0-9a-f]{64}$/.test(k)) { log("⚠️ 没收到应用给的启动随机数，界面会认不出这个网关"); return "x"; }
+  return k;
+})();
+const KEY = SPAWN ? crypto.createHmac("sha256", TOKEN).update("spawn:" + SPAWN).digest("hex") : TOKEN;
+const mac = (s) => crypto.createHmac("sha256", KEY).update(s).digest("hex");
 // local 是连接实际进的监听地址：冒牌的占住 127.0.0.2、把 /__proof 转发给 127.0.0.1 上的真网关，算出来的是 127.0.0.1 的，App 不认
 export function proof(n, local = UI_HOST) {
   return /^[0-9a-f]{32,128}$/.test(String(n || "")) ? `${BOOT} ${mac(`proof:${n}:${BOOT}:${local}`)}` : null;
