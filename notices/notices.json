@@ -1,7 +1,22 @@
 {
  "v": 1,
- "updated": "2026-10-25T02:14:07.308Z",
+ "updated": "2026-11-03T11:33:56.165Z",
  "notices": [
+  {
+   "id": "20261104-priv",
+   "level": "info",
+   "from": "2026-11-03",
+   "title": {
+    "zh": "特权命令可以少问了",
+    "en": "Fewer privileged-command prompts"
+   },
+   "body": {
+    "zh": "只想放行一个会话：确认框里勾「这个会话后面的特权命令都允许」。全都不想逐条确认：设置 → 设备与权限 →「特权命令不再逐条确认（风险自负）」。",
+    "en": "To allow just one session, tick \"Allow all later privileged commands in this session\" in the prompt. To stop confirming them altogether: Settings → Device & permissions → \"Stop confirming privileged commands one by one (at your own risk)\"."
+   },
+   "until": "2026-11-18",
+   "minVer": "0.6.1"
+  },
   {
    "id": "20261025-stance",
    "level": "info",
