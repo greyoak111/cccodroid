@@ -24,7 +24,7 @@ The right end of the top bar normally shows just ⋯. Tap it and the shortcuts y
 
 The menu button at the top left opens the sidebar: places to go at the top (Chats, Projects, Scheduled tasks, with Extensions, Capabilities, Usage and Help under More), recent chats in the middle, and the account row at the bottom, which opens Settings.
 
-The thin line under the top bar shows **context usage**; the further right, the fuller. Its second half shows what is left on the current provider: the share of the 5-hour and weekly limits used when you sign in with a Claude account, or the balance for DeepSeek, Kimi and similar. Tap the line for details; every provider’s quota and spending, plus low-quota reminders, are under **Quota and spending** at the top of the Usage page. In the input area, ＋ attaches files and opens common actions. The row below shows the model, thinking effort and permission mode; tap any of them to change it. The model picker only lists providers you can use: a Claude account that isn’t signed in, or an on-device model with nothing downloaded, is left out. To hide a provider you’ve set up, pick it under **Provider & model** in Settings and turn off **Show in the model picker** (its settings are kept, and the one in use is always listed).
+The thin line under the top bar shows **context usage**; the further right, the fuller. Its second half shows what is left on the current provider: the share of the 5-hour and weekly limits used when you sign in with a Claude account, or the balance for DeepSeek, Kimi and similar. If a provider doesn't report its context window, fill in **Context window** for that custom provider under **Provider & model** in Settings, and the compaction line and scale follow it; without one the bar shows "capacity unknown". Tap the line for details; every provider’s quota and spending, plus low-quota reminders, are under **Quota and spending** at the top of the Usage page. In the input area, ＋ attaches files and opens common actions. The row below shows the model, thinking effort and permission mode; tap any of them to change it. The model picker only lists providers you can use: a Claude account that isn’t signed in, or an on-device model with nothing downloaded, is left out. To hide a provider you’ve set up, pick it under **Provider & model** in Settings and turn off **Show in the model picker** (its settings are kept, and the one in use is always listed).
 
 ## Make it yours
 
@@ -49,6 +49,8 @@ These choices are stored in the app's own data, so clearing the WebView cache wo
 - Every message has four buttons. Yours: copy, resend, rewind to here, delete. Claude's: copy, share, fork from here, delete.
 - **Rewind to here** first lists the files changed since, then lets you undo just the code, or the code and the conversation. Files changed by shell commands are not restored.
 - `/goal <condition>` keeps Claude working turn after turn until the condition is met. Background tasks and the task list appear above the input box, and each can be stopped; several background tasks fold into one line, tap it to expand.
+- Conversations that were running when the gateway restarted or the system killed the app are marked "Interrupted" in the list; open one and tap "Continue" to pick it up. Each has its own.
+- **Misc**: throwaway sessions such as trying a model or saying hi are filed under "Misc" by Claude when it catalogs them. They stay out of the sidebar and appear as the last group on the Chats page; pinned ones and ones that are running or waiting for your confirmation still show in the sidebar. If a session Claude put in Misc gets compacted once or grows past 512 KB, it goes back to its normal group automatically. Sessions you moved there yourself with "Move to Misc" stay put; "Remove from Misc" brings any session back.
 - The Chats page searches message content, filters, and exports or imports zips. Deleted chats stay in the trash for 30 days.
 
 ## Permissions and safety
@@ -68,8 +70,10 @@ These choices are stored in the app's own data, so clearing the WebView cache wo
 - Leave it off when Claude is reading unfamiliar web pages, repositories or files of unknown origin.
 - "Confirm sensitive actions" (Settings → Claude behaviour, on by default) is a safety net: when Claude is about to read keys or sign-in credentials (.env, SSH keys, API keys, the gateway token and so on), read the screen or tap in other apps, read the clipboard, or share a file out, a red-bordered card asks you even under "Allow everything". If you see one and did not ask Claude to do that, deny it. It only recognises the obvious forms and can be sidestepped on purpose, so do not treat it as insurance for "Allow everything".
 
-- Approval cards appear under the tool that needs them, and a bar above the input box keeps them in view. Allow, always allow, or deny with an optional reason.
+- Approval cards appear under the tool that needs them, and a bar above the input box keeps them in view. Allow, always allow, or deny with an optional reason. Approving a request never loosens the mode; change that in Settings.
+- If Claude enters plan mode by itself while "Allow everything" is on, tap "Approve, keep current mode" on the plan card: that turn goes back to your previous mode and the global setting stays as it was.
 - In the background you are notified when a turn ends or needs you. Notifications can only deny; to allow, come back and read the full command.
+- Swiping cccodroid away in Recents closes it: if nothing is running, the gateway stops, the ongoing notification goes away and it won't restart itself; a running turn keeps going and the gateway stops after it finishes. Scheduled tasks are still woken by a system alarm when they're due.
 - Keys stay in the app's private directory. Account sign-in is handled by Claude Code itself; the app never touches your credentials.
 
 ## Projects and scheduled tasks
@@ -103,7 +107,7 @@ The Lineage page in the sidebar draws all your sessions as a subway map: time ru
 
 ## Files, terminal, browser
 
-- **Files and viewer**: edit and save code in place; if the file changed on disk, you are asked before saving. Markdown, images, PDF and HTML preview directly, and HTML reloads when it changes. Word and Excel open as is; PPT and old .doc need LibreOffice, installed on first use.
+- **Files and viewer**: edit and save code in place; if the file changed on disk, you are asked before saving. Markdown, images, PDF and HTML preview directly, and HTML reloads when it changes. UTF-16 and GBK files open read-only so they don't get corrupted on save. Word and Excel open as is; PPT and old .doc need LibreOffice, installed on first use.
 - **Terminal**: multiple tabs, plus a row of Esc, Tab, Ctrl and arrow keys. It keeps running when the panel is closed.
 - **Browser**: type `127.0.0.1:port` to open a local server. ↗ hands the page to the system browser; sign-in pages always open there.
 
@@ -125,8 +129,13 @@ Layout follows the window width, not orientation:
 
 ## Shizuku and system permissions
 
-- Settings → Device & permissions → Install and activate. It activates over wireless debugging with no computer, and reactivates itself after a reboot.
+- Settings → Device & permissions → Install and activate. It activates over wireless debugging with no computer, and reactivates itself after a reboot. If you already have **Sui** (a Magisk / KernelSU module), grant cccodroid in Sui and you're done; no Shizuku app needed.
 - Once active, the terminal and Claude can run `priv '<command>'` as the shell user; every call is kept in the Privileged command log.
+- **Privileged commands need your OK.** Only read-only commands such as `dumpsys <service>`, `pm list` and `settings get` run straight away. Anything else shows a dialog in cccodroid with the exact command, and runs only if you allow it. If cccodroid isn't in the foreground, or another command is already waiting, it is refused, so a task left running in the background stops at its first privileged command. Ways to loosen this, from narrowest to widest:
+  - "Allow, and don't ask again for this command for 10 minutes": only for that exact command.
+  - Tick "Allow all later privileged commands in this session" before allowing: that session won't be asked again and can keep going in the background. It resets when the app restarts and never applies to scheduled tasks.
+  - Settings → Device & permissions → "Stop confirming privileged commands one by one (at your own risk)": every privileged command runs directly. Turning it on shows a disclaimer: damage caused by a wrong command, a model's mistake or an injected script is your own responsibility.
+  - Whichever you choose, commands that touch cccodroid itself or Shizuku / Sui are caught and confirmed where possible, but not every form can be caught (for example, one hidden in a script file).
 - **Device tools** (off by default): let Claude post notifications, use the clipboard and share files. Reading and tapping the screen needs accessibility, which can switch on only while in use.
 - **Memory manager** (off by default): stops background apps outside your allow list before heavy jobs. In the terminal, use `cc-mem run -- <command>`.
 
@@ -147,6 +156,7 @@ Layout follows the window width, not orientation:
 - Workaround · ZUI · **"Split screen not supported"**: the system's split-screen blocklist is stale. Reinstall over the top or reboot.
 - Investigating · All · **Top bar shows "UI script error: Script error."**: when code the Android shell runs in the page fails, WebView only gives this line, so you can't tell where it came from. From 0.3.13 it reads "<entry point>: <reason>", so a screenshot is enough to track it down. The app usually keeps working.
 - Investigating · Samsung · **Stuck on "Waiting for gateway…" after launch**: reported once; the gateway was actually running and the app opened after two to three minutes. The cause is still being looked into. Wait a little longer instead of swiping the app away and reopening it; once it opens, send a diagnostics bundle from Settings → Troubleshooting.
+- Investigating · Red Magic · **New conversations fail with "Failed to fetch" after reopening the app**: the gateway connection is lost and comes back after rebooting the phone. Still being investigated; if it happens, send a diagnostics bundle from Settings → Troubleshooting.
 - Investigating · Non-Snapdragon · **GPU components unavailable**: most need Snapdragon. Mali GPUs such as MediaTek can use gpu-driver-mali; Exynos and Kirin are not supported yet.
 
 ## Troubleshooting
