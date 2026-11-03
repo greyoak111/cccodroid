@@ -10,7 +10,7 @@ import { NEXT } from "../gw/http.mjs";
 import { PATHS } from "../gw/config.mjs";
 import { routeProviders, providerById } from "../gw/providers.mjs";
 import { routeProjects } from "../gw/projects.mjs";
-import { effectiveModel, sessModel } from "../gw/sessmodel.mjs";
+import { effectiveModel, sessModel, setSessModel } from "../gw/sessmodel.mjs";
 import { handleLocalCommand } from "../gw/modelcmd.mjs";
 
 async function serve(...routes) {
@@ -93,4 +93,29 @@ test("/model 等清单时项目接口换了：不把旧接口的型号写进新�
   await p;
   assert.match(out, /没改成/);
   assert.equal(sessModel(sid), null, "不能把 A 的型号写进回落后生效的那家");
+});
+
+test("/model 等清单时同一家里型号被会话面板改了：旧命令不盖掉后来的选择（#122-2 复核）", async () => {
+  let release, hit;
+  const gotHit = new Promise((yes) => { hit = yes; });
+  const models = http.createServer((req, res) => {
+    release = () => res.end(JSON.stringify({ data: [{ id: "b2", context_window: 131072 }, { id: "b3", context_window: 131072 }] }));
+    hit();
+  });
+  await new Promise((ok) => models.listen(0, "127.0.0.1", ok));
+  after(() => models.close());
+  const base = `http://127.0.0.1:${models.address().port}`;
+  const b = await newProvider("b122m", { baseUrl: base, modelsUrl: base + "/v1/models", defaultModel: "b1" });
+  assert.ok(b.id, JSON.stringify(b));
+  const sid = crypto.randomUUID();
+  setSessModel(sid, { provider: b.id, model: "b1", effort: "" });
+  let out = "";
+  const p = handleLocalCommand("model", "b2", (t) => { out = t; }, sid);
+  await gotHit;
+  setSessModel(sid, { provider: b.id, model: "b3", effort: "" });   // 用户在会话面板选了 b3
+  release();
+  await p;
+  assert.match(out, /没改成/);
+  assert.equal(sessModel(sid).model, "b3", "后来在面板选的型号要留着");
+  await post("/api/providers/delete", { id: b.id });
 });

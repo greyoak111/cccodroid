@@ -2760,5 +2760,6 @@ window.I18N_DICT.en = {
   "纸色": "Paper tone",
   "构成浅色的底色：往左偏白，往右偏黄": "Background of Construct (light): left is whiter, right is yellower",
   "白": "White",
-  "黄": "Yellow"
+  "黄": "Yellow",
+  "补算期间使用统计被清空了，这次补算的结果已丢弃。": "Usage stats were cleared while backfilling, so this backfill's results were discarded."
 };

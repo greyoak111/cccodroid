@@ -2726,4 +2726,5 @@ window.I18N_DICT["fr"] = {
   "构成浅色的底色：往左偏白，往右偏黄": "Fond du thème Construct clair : à gauche plus blanc, à droite plus jaune",
   "白": "Blanc",
   "黄": "Jaune",
+  "补算期间使用统计被清空了，这次补算的结果已丢弃。": "Les statistiques d'utilisation ont été effacées pendant le recalcul ; ses résultats ont été ignorés.",
 };

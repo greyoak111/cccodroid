@@ -338,7 +338,8 @@
     $("us-result").textContent = t("正在从历史会话补算…");
     try {
       const r = await post("/api/usage/import", {});
-      $("us-result").textContent = t("补算完成：{f} 个会话记录、{n} 条消息。", { f: r.files, n: usNum(r.prompts) });
+      $("us-result").textContent = r.aborted ? t("补算期间使用统计被清空了，这次补算的结果已丢弃。")
+        : t("补算完成：{f} 个会话记录、{n} 条消息。", { f: r.files, n: usNum(r.prompts) });
       us.busy = false;
       if (!auto || r.prompts) loadUsage();
     } catch (e) { us.busy = false; $("us-result").textContent = "✗ " + e.message; }

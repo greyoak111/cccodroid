@@ -20,16 +20,17 @@ export async function handleLocalCommand(name, arg, reply, sid) {
   const cur = want ? models.find((m) => m.id === want) : models[0];
   const commit = (patch) => {
     // 等清单期间这个会话真跑的那家可能被改了（比如项目默认接口 A→B，审查 #122-2）：这里选中的型号是按旧那家的
-    // 清单校验的，不能再写到新那家名下。作废这次命令，让用户按新接口重来。
-    const nowP = sid ? providerById(effectiveModel(sid).provider) || PROVIDER : PROVIDER;
-    if (nowP.id !== P.id) return false;
+    // 清单校验的，不能再写到新那家名下。同一家里型号、思考强度被别处（会话面板、设置页）改了也一样：
+    // 那是更晚的选择，旧命令不能盖掉它。三样有一样变了就作废这次命令，让用户按现在的设置重来。
+    const n = effectiveModel(sid), nowP = providerById(n.provider) || PROVIDER;
+    if (nowP.id !== P.id || n.model !== now.model || n.effort !== now.effort) return false;
     if (sid) { setSessModel(sid, patch); return true; }
     if (patch.model !== undefined) SETTINGS.model = patch.model || null;
     if (patch.effort !== undefined) SETTINGS.effort = patch.effort || null;
     saveSettings();
     return true;
   };
-  const staleReply = (tag) => reply("没改成：等型号清单的时候这个会话的接口换了。请按现在的接口重新执行一遍。", tag);
+  const staleReply = (tag) => reply("没改成：等型号清单的时候，这个会话的接口、型号或思考强度在别处被改过了。请按现在的设置重新执行一遍。", tag);
   const scope = sid ? "（只改这个会话）" : "（改的是全局默认）";
 
   // ── /autocompact ──

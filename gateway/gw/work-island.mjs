@@ -77,15 +77,19 @@ function detectApp(cb) {
   });
 }
 
+// 测试替身：检测和「是不是安卓」可以换掉，好在 CI（不是安卓）里按自己定的先后回调，复现开关交错（#124-1）
+const seam = { detect: (cb) => detectApp(cb), android: () => isAndroid() };
+export const _islandForTest = { seam, state: () => ({ started, detecting, core, unsub }) };
+
 export function startWorkIsland() {
   if (started || detecting) return;
   if (!SETTINGS.workIsland) return;              // 默认关，用户开了才动
   if (process.env.CCAPP_WORK_ISLAND === "0") return;
-  if (!isAndroid()) return;
+  if (!seam.android()) return;
   started = true;
   detecting = true;
   const my = ++gen;                              // 这一次检测的世代：回来时不是它了就不作数
-  detectApp((ok) => {
+  seam.detect((ok) => {
     if (my !== gen) return;                      // 检测期间关过 / 又开过：旧回调直接丢掉
     detecting = false;
     if (!started) return;                        // 检测期间被关掉了
