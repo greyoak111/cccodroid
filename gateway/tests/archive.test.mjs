@@ -206,3 +206,16 @@ test("脉络弹层：分叉出来的会话带来源（标题、方式、分叉�
   assert.ok(v.parent.ts > 0);
   assert.equal((await archiveView(sid)).parent, null);
 });
+
+test("补档不能盖掉等待期间先提交的题名（#124-2）", async () => {
+  const { fileChapter, archiveView } = await import("../gw/archive.mjs");
+  const sid = session(4, 1);
+  // 用户先起名并锁定（补档在 await 前看到的是空题名，回来时这行已经落盘）
+  assert.equal((await fileChapter(sid, { title: "用户起的名字", chapter: 1, by: "user" })).ok, true);
+  const b = await fileChapter(sid, { title: "补档起的名字", chapter: 1, by: "backfill" });
+  assert.equal(b.ok, false, "补档是最弱来源，已有题名就不盖");
+  const ch = (await archiveView(sid)).chapters.find((c) => c.n === 1);
+  assert.equal(ch.title, "用户起的名字");
+  assert.equal(ch.by, "user");
+  assert.equal(ch.locked, true);
+});

@@ -133,12 +133,14 @@ const usageText = (content) => typeof content === "string" ? content
 
 /** 从 ~/.claude/projects 下的会话记录补算 since 之前的部分。分叉出来的会话会重复带上原会话的消息，按 uuid / message.id 去重 */
 let usageImporting = null;
+let usageGen = 0;   // 清空统计时 +1：还在跑的补算按旧世代号丢弃结果，别把清掉的数据写回来（#119-5）
 function usageImport(extraOnly) {
   return usageImporting || (usageImporting = (async () => {
+    const gen = usageGen, since0 = USAGE.since;
     // extraOnly：老数据（v1）补上 c / mt / st 三项，别的照旧（实时记下的、后来删掉的会话也还在）
-    const until = Math.floor((extraOnly ? Date.now() : USAGE.since) / 3600e3);
+    const until = Math.floor((extraOnly ? Date.now() : since0) / 3600e3);
     // 实时统计从 since 那一刻起记：since 所在的那个小时，since 之前的部分也要补（以前按整点切，整小时丢了，#102 04-011）
-    const before = extraOnly ? (ts) => Math.floor(ts / 3600e3) < until : (ts) => ts < USAGE.since;
+    const before = extraOnly ? (ts) => Math.floor(ts / 3600e3) < until : (ts) => ts < since0;
     const hours = {}, seenU = new Set(), seenTool = new Set(), msgs = new Map();
     let files = 0, prompts = 0;
     let dirs = [];
@@ -197,6 +199,10 @@ function usageImport(extraOnly) {
       if (model) b.mt[model] = (b.mt[model] || 0) + i + o;
       if (sid) b.st[sid] = (b.st[sid] || 0) + i + o;
     }
+    if (gen !== usageGen) {
+      log("使用统计：补算期间统计被清空，丢弃这次结果");
+      return { files, prompts: 0, aborted: true };
+    }
     if (extraOnly) {
       for (const [k, b] of Object.entries(hours)) { const o = USAGE.hours[k]; if (o) { o.c = b.c; o.mt = b.mt; o.st = b.st; } }
       USAGE.v = 2;
@@ -247,13 +253,17 @@ function energyProcs() {
 }
 
 const energyDayKey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
-const energyHourStart = (ts) => { const d = new Date(ts); d.setMinutes(0, 0, 0); return d.getTime(); };
+// 用本地分/秒/毫秒反推这一小时的真实起点：回拨的重复小时里，setMinutes(0) 会选到第一次的那一小时，
+// 第二次 02:30 算出 00:00Z 而不是 01:00Z，h+1h 落在 t 之前，energySpread 的游标会倒退甚至卡死（#119-1）
+export const energyHourStart = (ts) => { const d = new Date(ts); return ts - (d.getMinutes() * 60 + d.getSeconds()) * 1000 - d.getMilliseconds(); };
 
 /** 把一段时间 [a, b) 里的量按时长摊进各小时桶和天桶 */
 function energySpread(a, b, add) {
   if (!(b > a)) return;
   for (let t = a; t < b;) {
-    const h = energyHourStart(t), end = Math.min(b, h + ENERGY_HOUR), frac = (end - t) / (b - a);
+    const h = energyHourStart(t), end = Math.min(b, h + ENERGY_HOUR);
+    if (!(end > t)) break;   // 时区规则异常也不让游标倒退（#119-1）
+    const frac = (end - t) / (b - a);
     for (const box of [energy.hours[h] ||= {}, energy.days[energyDayKey(t)] ||= {}]) {
       for (const [k, v] of Object.entries(add)) if (v) box[k] = Math.round(((box[k] || 0) + v * frac) * 1000) / 1000;
     }
@@ -441,6 +451,7 @@ export async function routeUsage(req, res, u, p) {
     if (op === "import") return sendJson(res, 200, { ok: true, ...(await usageImport()) });
     if (op === "set") { USAGE.off = !!b.off; usageSave(true); return sendJson(res, 200, { ok: true, off: USAGE.off }); }
     if (op === "clear") {
+      usageGen++;                  // 旧补算的结果作废（#119-5）
       if (b.all) { USAGE.hours = {}; USAGE.since = Date.now(); USAGE.imported = Date.now(); }
       else {
         const from = Number(b.from), to = Number(b.to);

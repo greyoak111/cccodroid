@@ -371,8 +371,17 @@ export function upsertProvider(id, b, prepare) {
   const isNew = !id;
   if (isNew) {
     if (!b.baseUrl) return { error: "need_baseUrl", message: tz("自定义接口至少要填端点地址") };
-    let n = 1; while (PROVIDERS_RAW.providers["custom-" + n] || PRESETS["custom-" + n]) n++;
+    // 接口号只增不减（#122-1）：删掉的 custom-N 不再发给新接口，旧会话 / 项目 / 定时任务里记着的 id
+    // 才不会在另一个端点上「复活」。老配置没有 nextCustom 时，从现有最大号接着往后数。
+    let n = Number(PROVIDERS_RAW.nextCustom) || 0;
+    for (const k of [...Object.keys(PRESETS), ...Object.keys(PROVIDERS_RAW.providers)]) {
+      const m = /^custom-(\d+)$/.exec(k);
+      if (m) n = Math.max(n, Number(m[1]));
+    }
+    n += 1;
+    while (PROVIDERS_RAW.providers["custom-" + n] || PRESETS["custom-" + n]) n++;
     id = "custom-" + n;
+    PROVIDERS_RAW.nextCustom = n;
   }
   if (!PRESETS[id] && !PROVIDERS_RAW.providers[id] && !isNew) return { error: "unknown provider" };
   const cur = { ...(PROVIDERS_RAW.providers[id] || {}) };
@@ -798,14 +807,23 @@ export async function routeProviders(req, res, u, p) {
     const b = JSON.parse((await readBody(req)) || "{}");
     const id = String(b.id || "");
     if ([...RUNS.values()].some((r) => !r.ended && r.provider === id)) return sendJson(res, 409, { error: "busy", message: tz("这一家正在用，等这一轮跑完再删。") });
-    if (PRESETS[id]) {
-      // 预置厂商删不掉，只清空用户字段（密钥等）
-      delete PROVIDERS_RAW.providers[id];
-    } else if (PROVIDERS_RAW.providers[id]) {
-      delete PROVIDERS_RAW.providers[id];
-      if (SETTINGS.provider === id) { SETTINGS.provider = null; SETTINGS.model = null; saveSettings(); }
-    } else return sendJson(res, 404, { error: "unknown provider" });
-    saveProvidersRaw();
+    const previous = PROVIDERS_RAW.providers[id];
+    if (!PRESETS[id] && !previous) return sendJson(res, 404, { error: "unknown provider" });
+    // 预置厂商删不掉，只清空用户字段（密钥等）；自定义的整条删掉
+    delete PROVIDERS_RAW.providers[id];
+    const resetSettings = !PRESETS[id] && SETTINGS.provider === id;
+    const settingsOld = resetSettings ? { provider: SETTINGS.provider, model: SETTINGS.model } : null;
+    if (resetSettings) { SETTINGS.provider = null; SETTINGS.model = null; }
+    try {
+      saveProvidersRaw();
+    } catch (e) {
+      // 写盘失败：把它放回内存里的原始表，和磁盘（没变）保持一致；这样再删一次还是这家，不会 404，
+      // 也不会被之后保存别的接口时顺手写死（#122-5）
+      if (previous === undefined) delete PROVIDERS_RAW.providers[id]; else PROVIDERS_RAW.providers[id] = previous;
+      if (settingsOld) { SETTINGS.provider = settingsOld.provider; SETTINGS.model = settingsOld.model; }
+      throw e;
+    }
+    if (resetSettings) saveSettings();   // 接口已经删掉了；设置即使没写进去，加载时也会按「那家不在了」回落
     applyProvider();
     dropModelCache();
     return sendJson(res, 200, { ok: true });

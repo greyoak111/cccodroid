@@ -51,6 +51,8 @@ let started = false;
 let detecting = false;
 let unsub = null;
 let core = null;
+// 每次开 / 关 +1：检测是异步的，关掉又开之后旧那次的回调必须作废，不能把第二份 core / 订阅装进来（#124-1）
+let gen = 0;
 
 function isAndroid() {
   return fs.existsSync("/system/bin/am");
@@ -82,7 +84,9 @@ export function startWorkIsland() {
   if (!isAndroid()) return;
   started = true;
   detecting = true;
+  const my = ++gen;                              // 这一次检测的世代：回来时不是它了就不作数
   detectApp((ok) => {
+    if (my !== gen) return;                      // 检测期间关过 / 又开过：旧回调直接丢掉
     detecting = false;
     if (!started) return;                        // 检测期间被关掉了
     if (!ok) {
@@ -108,6 +112,7 @@ export function startWorkIsland() {
 export function stopWorkIsland(sync = false) {
   started = false;
   detecting = false;
+  gen++;                                         // 在途检测的结果作废（#124-1）
   if (unsub) { try { unsub(); } catch {} unsub = null; }
   if (core) {
     try { core.stop(sync); } catch {}

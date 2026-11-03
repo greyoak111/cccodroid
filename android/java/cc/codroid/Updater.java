@@ -10,6 +10,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
+import android.os.Build;
 import android.os.StatFs;
 import android.system.Os;
 import android.util.Log;
@@ -111,6 +112,24 @@ final class Updater {
                 dropStagedIfInstalled();
             }
         } catch (Exception ignored) {}
+        // 上次下好、还没装的 APK：通知能活过进程，用户点通知冷启动时不能因为内存状态没了就拒绝安装（#123-2）
+        try {
+            JSONObject st = new JSONObject(prefs().getString("appStaged", "{}"));
+            File f = new File(st.optString("file", "/nonexistent"));
+            String latest = st.optString("latest", ""), url = st.optString("url", "");
+            long size = st.optLong("size");
+            int c = latest.isEmpty() || app.current.isEmpty() ? -1 : cmpVer(latest, app.current);
+            boolean swap = c == 0 && !st.optString("flavor", "").equals(flavor());
+            if (f.isFile() && f.length() == size && !url.isEmpty() && st.optString("flavor", "").equals(wantFlavor()) && (c > 0 || swap)) {
+                app.file = f; app.size = size; app.url = url; app.sha = st.optString("sha256", "");
+                app.latest = latest;
+                app.set("ready", "");
+            } else {
+                // 文件没了 / 已经装上 / 方案或版本对不上了：这份待装记录留着也没用
+                f.delete();
+                prefs().edit().remove("appStaged").apply();
+            }
+        } catch (Exception ignored) {}
     }
 
     /** 已下载待装的那份其实已经装上了（上次被打断、recover() 接着装完的）：删掉，别再装一遍 */
@@ -167,6 +186,7 @@ final class Updater {
     private void markOnly36(String why) {
         Log.i(TAG, "系统拒装 targetSdk 28 → 以后只用 36：" + why);
         prefs().edit().putString("only36", why.length() > 200 ? why.substring(0, 200) : why).apply();
+        prefs().edit().remove("appStaged").apply();
         if (app.file != null) app.file.delete();
         app.url = null;
         app.set("unknown", "");
@@ -830,7 +850,13 @@ final class Updater {
             }
             if (it == devkit && it.modules != null) downloadModules(it);
             else { Installer ins = installer(it); ins.download(it.url, new String[]{ it.alt, it.alt2 }, it.file, it.size, it.sha); via = ins.lastHost; }
-            if (it == app) checkApkSigner(it.file);
+            if (it == app) {
+                checkApkSigner(it.file);
+                // 待装记录：进程被杀 / 冷启动后，点之前那条「已下载」通知还能接着装（#123-2）
+                prefs().edit().putString("appStaged", new JSONObject().put("file", it.file.getPath())
+                    .put("size", it.file.length()).put("sha256", it.sha == null ? "" : it.sha).put("url", it.url)
+                    .put("latest", it.latest).put("flavor", wantFlavor()).toString()).apply();
+            }
             if (it == devkit) {
                 JSONObject st = new JSONObject().put("file", it.file.getPath())
                     .put("base", it.base).put("sha256", it.sha).put("size", it.file.length()).put("tarSha256", it.tarSha == null ? "" : it.tarSha);
@@ -842,7 +868,10 @@ final class Updater {
             else if (user) startDevkitApply();
             else { notifyReady(it); releaseApp(); }
         } catch (Exception e) {
-            if (it == app && it.file != null) it.file.delete();
+            if (it == app) {
+                if (it.file != null) it.file.delete();
+                prefs().edit().remove("appStaged").apply();
+            }
             it.set("error", e.getMessage());
             if (it == devkit) releaseApp();
         }
@@ -877,8 +906,13 @@ final class Updater {
         // 比真实版本号，别只信更新源声称的 tag（审查 10-29 第六份 低1）：同版本只在换 28/36 时才装，不然中间人能让它反复重装
         PackageInfo me = pm.getPackageInfo(ctx.getPackageName(), 0);
         String mine = ctx.getApplicationInfo().targetSdkVersion >= 29 ? "36" : "28";
-        long va = a.getLongVersionCode(), vm = me.getLongVersionCode();
+        long va = versionCode(a), vm = versionCode(me);
         if (va < vm || (va == vm && got.equals(mine))) throw new IOException(Tr.f("下载的安装包版本（{0}）不比已装的新，不装", a.versionName));
+    }
+
+    /** 版本号：PackageInfo.getLongVersionCode 是 API 28 才有的，Android 8.0/8.1（minSdk 26）上直接调会 NoSuchMethodError（#123-1） */
+    private static long versionCode(PackageInfo pi) {
+        return Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : pi.versionCode;
     }
 
     /** 工具包正在下载 / 替换：这时装 APK 会把它拦腰截断 */
@@ -904,6 +938,14 @@ final class Updater {
     void installApp() {
         if (app.file == null || !app.file.isFile()) { app.set("error", Tr.t("安装包不见了，重新检查更新")); return; }
         if (deferApp(true)) return;
+        // 冷启动从磁盘恢复的待装包可能已被换掉 / 已经装上了：安装前按包名、签名、targetSdk 方案和版本重核一遍（#123-2）
+        try { checkApkSigner(app.file); }
+        catch (Exception e) {
+            app.file.delete();
+            prefs().edit().remove("appStaged").apply();
+            app.set("error", e.getMessage());
+            return;
+        }
         app.set("installing", "");
         // 有 Shizuku 就静默装（进程会被系统替换掉，服务由 MY_PACKAGE_REPLACED 拉起）；否则走系统安装确认
         if (Priv.granted() && !gatewayBusy()) {
@@ -930,6 +972,7 @@ final class Updater {
         Item it = "app".equals(what) ? app : null;
         if (it == null) return;
         if (!ok && sdkTooOld(msg) && "28".equals(wantFlavor())) { markOnly36(msg); return; }
+        if (ok) prefs().edit().remove("appStaged").apply();
         it.set(ok ? "uptodate" : "ready", ok ? "" : msg);
     }
 

@@ -40,9 +40,10 @@ function followSysTz(now) {
 
 const FILE = path.join(CFG.home, "ccapp-sched.json");
 const RUNS_FILE = path.join(CFG.home, "ccapp-sched-runs.json");
-const DB = { tasks: [], dailyBudget: 0, missed: [], sids: [], lastTick: 0, allowLogin: false };   // dailyBudget：美元，0 = 不限
+const DB = { tasks: [], dailyBudget: 0, missed: [], sids: [], lastTick: 0, allowLogin: false, spent: {} };   // dailyBudget：美元，0 = 不限
 // allowLogin：用订阅账户（官方登录态）跑定时任务。默认关——无人值守使用以 Anthropic 条款为准，要用户自己确认后打开
 try { Object.assign(DB, JSON.parse(fs.readFileSync(FILE, "utf8"))); } catch {}
+if (!DB.spent || typeof DB.spent !== "object" || Array.isArray(DB.spent)) DB.spent = {};
 let RUNLOG = [];
 try { RUNLOG = JSON.parse(fs.readFileSync(RUNS_FILE, "utf8")); if (!Array.isArray(RUNLOG)) RUNLOG = []; } catch {}
 const save = () => { try { fs.writeFileSync(FILE + ".tmp", JSON.stringify(DB, null, 1)); fs.renameSync(FILE + ".tmp", FILE); } catch (e) { log("定时任务保存失败: " + e.message); } pushNext(); };
@@ -151,8 +152,24 @@ async function deviceState() {
 }
 
 // ── 记账 ──
-const dayKey = (ms) => { const d = new Date(ms); return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); };
-const costToday = () => RUNLOG.filter((r) => dayKey(r.at) === dayKey(Date.now())).reduce((s, r) => s + (r.cost || 0), 0);
+const dayKey = (ms) => { const d = new Date(ms); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+// 每日预算用独立的日桶记，不依赖 RUNLOG：它只留最近 500 条（skip 也占名额），连续跳过后会把当天的
+// 费用挤掉、预算重新放行（#119-3）。升级时用 RUNLOG 里今天的费用补个种，之后只由结束钩子累加。
+{
+  const k = dayKey(Date.now());
+  if (DB.spent[k] == null) {
+    const c = RUNLOG.filter((r) => dayKey(r.at) === k).reduce((s, r) => s + (r.cost || 0), 0);
+    if (c > 0) DB.spent[k] = c;
+  }
+}
+const spend = (ms, cost) => {
+  if (!(cost > 0)) return;
+  const k = dayKey(ms);
+  DB.spent[k] = Math.round(((DB.spent[k] || 0) + cost) * 1e6) / 1e6;
+  const cut = dayKey(Date.now() - 60 * 86400e3);
+  for (const d of Object.keys(DB.spent)) if (d < cut) delete DB.spent[d];
+};
+const costToday = () => DB.spent[dayKey(Date.now())] || 0;
 /** 脉络用：会话 → 所属定时任务 { id, name }。运行记录（留最近 500 条）+「同一个会话」任务的 lastSid，
  *  再往前的旧会话按名字「任务名 · 时间」认领；任务已删的只留名字（id 为 null） */
 export function schedSessions() {
@@ -241,7 +258,7 @@ async function fireNow(t, { reason, attempt, trial }) {
   RUNNING.set(key, { taskId: t.id, startedAt: Date.now(), attempt, trial, reason });
   const item = enqueue({
     internal: true, message, projectId: p ? p.id : null,
-    sessionId: t.session === "same" && t.lastSid ? t.lastSid : null,
+    sessionId: !trial && t.session === "same" && t.lastSid ? t.lastSid : null,
     model: t.model || null, effort: t.effort || null, provider: t.provider || null, ...perm,
     unattended: true, timeoutMs: Math.max(1, +t.limitMin || 15) * 60000, limitCost: +t.limitCost || 0, sched: { taskId: t.id, key },
   });
@@ -262,6 +279,15 @@ START_GUARDS.push((q) => {
     log(`⏭ 定时任务「${t.name}」跳过：${msg}`);
     addRun({ taskId: t.id, at: Date.now(), st: "skip", msg });
     note(t, tz("定时任务已跳过"), tz("「{n}」要用订阅账户跑：到定时任务页底部「订阅账户」里打开（无人值守使用以 Anthropic 条款为准），或给任务换一个用 API Key 的接口", { n: t.name }), null, false);
+    return false;
+  }
+  // 排队期间别的任务可能把当天预算花完了：真开跑前再核一次（#119-2）
+  if (t && DB.dailyBudget > 0 && costToday() >= DB.dailyBudget) {
+    RUNNING.delete(q.sched.key);
+    const msg = tz("今天的花费已到上限");
+    log(`⏭ 定时任务「${t.name}」跳过：${msg}`);
+    addRun({ taskId: t.id, at: Date.now(), st: "skip", msg });
+    note(t, tz("定时任务已跳过"), tz("「{n}」：今天的花费已到上限", { n: t.name }), null, false);
     return false;
   }
   if (t && (ctx.reason !== "due" || t.on)) return true;
@@ -290,11 +316,13 @@ END_HOOKS.push((run, f) => {
   const sid = run.sessionId || null;
   if (sid) {
     const d = new Date(ctx.startedAt), stamp = `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    NAMES[sid] = t.session === "same" ? t.name : `${t.name} · ${stamp}`; saveNames();
+    // 试跑是新对话：用带时间的名字，也不写回任务的 lastSid（#119-4）
+    NAMES[sid] = t.session === "same" && !ctx.trial ? t.name : `${t.name} · ${stamp}`; saveNames();
     if (!DB.sids.includes(sid)) DB.sids.push(sid);
-    if (t.session === "same") t.lastSid = sid;
+    if (t.session === "same" && !ctx.trial) t.lastSid = sid;
   }
   if (ctx.trial) { note(t, tz("试跑完成"), msg, sid, st === "ok"); return; }
+  spend(ctx.startedAt, cost);   // 每日预算的独立日桶（#119-3）
   addRun({ taskId: t.id, at: ctx.startedAt, st, msg: msg.slice(0, 300), full: text.slice(0, 2000), cost, dur, sid, attempt: ctx.attempt });
   t.runsDone = (t.runsDone || 0) + 1;
   if (t.until?.kind === "count" && t.runsDone >= (+t.until.count || 1)) t.on = false;
@@ -486,4 +514,4 @@ export async function routeSched(req, res, u, p) {
   }
   return NEXT;
 }
-export const _schedForTest = { fire, tick, DB, runlog: () => RUNLOG, running: () => runningNow() };   // 只给测试用
+export const _schedForTest = { fire, tick, DB, runlog: () => RUNLOG, running: () => runningNow(), costToday };   // 只给测试用

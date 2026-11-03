@@ -97,13 +97,17 @@ function walkFiles(root, rel = "", out = [], cap = 50000) {
 const customSlug = (s) => String(s || "").toLowerCase().replace(/\.(tar\.(gz|xz|bz2|zst)|tgz|txz|tbz2?|tar|zip)$/i, "")
   .replace(/[-_.]?(v?\d+(\.\d+)+.*|linux.*|aarch64.*|arm64.*)$/i, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "program";
 const CMD_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
-/** 命令名能不能用：工具包里已有（PATH 里排在前面，会被盖住）、或别的自定义组件占了，都不行 */
+// 正在安装中的命令名 → 组件 id：补库、patchelf 这些 await 期间先占住名字，别让另一个组件装同一个命令（#122-4）
+const CMD_RESERVED = new Map();
+/** 命令名能不能用：工具包里已有（PATH 里排在前面，会被盖住）、别的自定义组件正占着 / 已经占了，都不行 */
 function customCmdClash(cmd, selfId) {
   if (fs.existsSync(path.join(PREFIX, "bin", cmd))) return "toolkit";
   // PATH 里排在自定义组件后面的：cccodroid 自带的（priv…）和安卓系统的（am、settings…）。同名会把它们盖住，
   // 应用自己按名字调的 priv 也会被劫持（11-03 审查 L-9）
   const bin = process.env.CCAPP_BIN;
   for (const d of [bin && path.join(bin, "..", "pre"), bin, "/system/bin", "/system/xbin"]) if (d && fs.existsSync(path.join(d, cmd))) return "system";
+  const rsv = CMD_RESERVED.get(cmd);
+  if (rsv && rsv !== selfId) return "busy";
   const w = path.join(CUSTOM_BIN, cmd);
   if (fs.existsSync(w)) { const m = /cccodroid-custom-id: ([a-z0-9-]+)/.exec(fs.readFileSync(w, "utf8").slice(0, 400)); if (!m || m[1] !== selfId) return "custom"; }
   return "";
@@ -435,7 +439,7 @@ async function customInstall(b) {
     if (!CMD_RE.test(cmd)) return { ok: false, message: tz("命令名不合法：{c}", { c: cmd }) };
     if (seen.has(cmd)) return { ok: false, message: tz("命令名重复：{c}", { c: cmd }) };
     const clash = customCmdClash(cmd, id);
-    if (clash) return { ok: false, message: clash === "toolkit" ? tz("命令 {c} 工具包里已经有了，换个名字", { c: cmd }) : clash === "system" ? tz("命令 {c} 是系统或 cccodroid 自带的，换个名字", { c: cmd }) : tz("命令 {c} 被别的自定义组件占了", { c: cmd }) };
+    if (clash) return { ok: false, message: clash === "toolkit" ? tz("命令 {c} 工具包里已经有了，换个名字", { c: cmd }) : clash === "system" ? tz("命令 {c} 是系统或 cccodroid 自带的，换个名字", { c: cmd }) : clash === "busy" ? tz("命令 {c} 正在被另一个组件安装，稍后再试或换个名字", { c: cmd }) : tz("命令 {c} 被别的自定义组件占了", { c: cmd }) };
     seen.add(cmd);
     entries.push({ rel: p.rel, cmd, kind: p.kind, gpu: !!e.gpu && p.kind === "glibc" && s.report.gpu, patchelf: !!e.patchelf && p.kind === "glibc" && !e.gpu });
   }
@@ -443,10 +447,12 @@ async function customInstall(b) {
   // 同名技能是用户自己的（不是我们生成的）、或者是个软链：不覆盖（11-03 审查 L-10）
   const sk0 = path.join(SKILLS_DIR, "custom-" + id);
   if (fs.existsSync(sk0) && !customSkillOurs(sk0, id)) return { ok: false, message: tz("已经有一个叫 custom-{id} 的技能了，换个名字", { id }) };
+  // 先占住命令名：下面补库、patchelf 都要等，另一个组件的安装会在这期间看到这个名字已被占用（#122-4）
+  for (const e of entries) CMD_RESERVED.set(e.cmd, id);
   const msgs = [], log2 = (m) => { msgs.push(m); log(`[custom] ${id}：${m}`); };
-  fs.mkdirSync(dir, { recursive: true });
   const appDir = path.join(dir, "app"), deps = path.join(dir, "deps");
   try {
+    fs.mkdirSync(dir, { recursive: true });
     fs.renameSync(s.root, appDir);
     fs.rmSync(s.dir, { recursive: true, force: true });
     CUSTOM_STAGES.delete(b.stage);
@@ -464,6 +470,10 @@ async function customInstall(b) {
       const f = path.join(appDir, e.rel);
       const r = await runP(path.join(PREFIX, "bin", "patchelf"), ["--set-interpreter", STABLE_LD(), "--set-rpath", libs.join(":"), f]);
       if (r.code) throw new Error(tz("patchelf 改 {p} 失败：{msg}", { p: e.rel, msg: r.err.trim().split("\n").pop() }));
+    }
+    // 等完补库 / patchelf 再核一次：名字要是被别处抢了（极端情况下预留之外还有手写入口），宁可回滚也不覆盖
+    for (const e of entries) {
+      if (customCmdClash(e.cmd, id)) throw new Error(tz("命令 {c} 在安装期间被占了，已取消这次安装", { c: e.cmd }));
     }
     fs.mkdirSync(CUSTOM_BIN, { recursive: true });
     for (const e of entries) {
@@ -484,6 +494,9 @@ async function customInstall(b) {
   } catch (e) {
     customRemove(id, true);
     return { ok: false, message: e.message, log: msgs };
+  } finally {
+    // 成功时入口文件已经写好（customCmdClash 认文件），失败时 customRemove 也清干净了：预留都可以放掉
+    for (const e of entries) if (CMD_RESERVED.get(e.cmd) === id) CMD_RESERVED.delete(e.cmd);
   }
 }
 

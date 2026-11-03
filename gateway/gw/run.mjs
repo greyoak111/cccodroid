@@ -10,7 +10,7 @@ import { tasksCheck } from "./goal.mjs";
 import { setLastInit } from "./caps.mjs";
 import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setPermMode } from "./queue.mjs";
+import { QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setPermMode, sidForItem } from "./queue.mjs";
 import { handleLocalCommand } from "./modelcmd.mjs";
 import { LL, ensureLlama, localCustomActive } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "./usage.mjs";
@@ -64,7 +64,8 @@ function privToken(run) {
 const argLen = (inp) => { const v = String(inp?.command || inp?.file_path || inp?.url || ""); return v ? `(${v.length} 字)` : ""; };
 
 export function pickProvider(item) {
-  const sid0 = item.sessionId || (item.follow && RUN_SESSIONS.get(item.follow)) || null;
+  // 跟的那条被撤销了也照样接上车道上首条跑出来的会话（#120-1），不然会另起一个会话
+  const sid0 = sidForItem(item);
   const pdef0 = projectDefaults(item.projectId ? projectById(item.projectId) : projectOfDir(cwdOf(item, sid0)));
   const rec0 = sessModel(sid0);
   return { sid0, pdef0, P: (item.provider && providerById(item.provider))
@@ -72,6 +73,34 @@ export function pickProvider(item) {
     || (rec0 && rec0.model != null ? sessProvider(sid0) : null)
     || (pdef0.provider && providerById(pdef0.provider))
     || sessProvider(sid0) };
+}
+
+/** 这条消息按现在的设置新起一轮会用哪家、哪个模型、哪个思考强度（startRun 里取值那段的同步副本）。
+ *  空闲的后台进程要被自动复用时，队列拿它和那一轮起跑时的取值比对（#120-2）：用户刚在面板里换了接口/模型，
+ *  下一条普通消息就不能再悄悄交给旧进程。清单还没拉过时档位可能算得比真跑时保守，不一致只会让它照常排队，不会错塞。 */
+export function execIntent(item, ctx) {
+  const { sid0, pdef0, P } = ctx || pickProvider(item);
+  // 模型 / 思考强度的取值顺序：本次请求指定（定时任务）→ 新会话首条带来的选择（pin）→ 这个会话单独选过的
+  // → 项目默认 → 全局默认（设置页）→ 该厂商自己的默认。选过的 "" 表示「接口默认」，也算选过
+  // ⚠️ 不能回落到 CFG.model：那是全局兜底（deepseek-flash），只有内置厂商能碰。
+  // 首条带来的接口和会话现在的不是同一家时，会话记下的模型名不作数
+  const own0 = sessModel(sid0), pin = item.pin || {};
+  const own = own0 && (own0.model == null || own0.provider === P.id) ? own0 : null;
+  const ownM = pin.model != null ? pin.model : own && own.model != null ? own.model : null;
+  const ownE = pin.effort != null ? pin.effort : own && own.effort != null ? own.effort : null;
+  let effort = item.effort || (ownE != null ? ownE : pdef0.effort || SETTINGS.effort) || "";
+  // 项目默认的模型名是给项目那家的（没指定家就是全局那家），全局默认的是给全局那家的；对不上的不作数，走这家自己的默认
+  const fallM = (P.id === (pdef0.provider || PROVIDER.id) ? pdef0.model : "") || (P.id === PROVIDER.id ? SETTINGS.model : "");
+  let model = (item.model || (ownM != null ? ownM : fallM) || P.defaultModel || (P.explicit ? "" : CFG.model) || "").trim();
+  // 原生厂商只认 claude 自家的模型名；别家的名字（切厂商前留下的）宁可不传，交给 claude 自己选
+  if (P.nativeModels && model && !/^(claude-|opus|sonnet|haiku|fable|default|best)/i.test(model)) model = "";
+  model = model.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 200);
+  if (!["low", "medium", "high", "xhigh", "max"].includes(effort)) effort = "";
+  if (effort && !P.local) {
+    const mi = currentModelInfo(model, P);
+    if (!effortLevelsOf(mi, P).includes(effort)) effort = normEffort(mi, effort, P) || "";
+  }
+  return { sid0, pdef0, P, model, effort };
 }
 
 /** 起进程前的那张「项目配置」卡片：借用敏感操作卡（guard），答复走同一个 /api/perm/answer。
@@ -111,8 +140,9 @@ export async function startRun(item) {
   const run = {
     id: item.id,
     text: item.message,
-    // 跟在一个还没拿到会话号的新会话后面排队的：等前一条 init 了再接上它的会话
-    sessionId: item.sessionId || (item.follow && RUN_SESSIONS.get(item.follow)) || null,
+    // 跟在一个还没拿到会话号的新会话后面排队的：等前一条 init 了再接上它的会话；
+    // 跟的那条中途被撤销、从没启动时，按车道找回首条已经跑出来的会话（#120-1）
+    sessionId: sidForItem(item),
     follow: item.follow,
     cid: item.cid,
     auto: item.auto || null,           // "idle" = 网关自己发起的空闲压缩（界面画成系统提示，不发通知）
@@ -174,20 +204,8 @@ export async function startRun(item) {
   run.cwd = cwd;
   const pdef = projectDefaults(item.projectId ? projectById(item.projectId) : projectOfDir(cwd));
   if (!item.permissionMode && pdef.perm) item.permissionMode = pdef.perm;
-  // 模型 / 思考强度的取值顺序：本次请求指定（定时任务）→ 新会话首条带来的选择（pin）→ 这个会话单独选过的
-  // → 项目默认 → 全局默认（设置页）→ 该厂商自己的默认。选过的 "" 表示「接口默认」，也算选过
-  // ⚠️ 不能回落到 CFG.model：那是全局兜底（deepseek-flash），只有内置厂商能碰。
-  // 首条带来的接口和会话现在的不是同一家时，会话记下的模型名不作数
-  const own0 = sessModel(run.sessionId), pin = item.pin || {};
-  const own = own0 && (own0.model == null || own0.provider === P.id) ? own0 : null;
-  const ownM = pin.model != null ? pin.model : own && own.model != null ? own.model : null;
-  const ownE = pin.effort != null ? pin.effort : own && own.effort != null ? own.effort : null;
-  let effort = item.effort || (ownE != null ? ownE : pdef.effort || SETTINGS.effort) || "";
-  // 项目默认的模型名是给项目那家的（没指定家就是全局那家），全局默认的是给全局那家的；对不上的不作数，走这家自己的默认
-  const fallM = (P.id === (pdef.provider || PROVIDER.id) ? pdef.model : "") || (P.id === PROVIDER.id ? SETTINGS.model : "");
-  let model = (item.model || (ownM != null ? ownM : fallM) || P.defaultModel || (P.explicit ? "" : CFG.model) || "").trim();
-  // 原生厂商只认 claude 自家的模型名；别家的名字（切厂商前留下的）宁可不传，交给 claude 自己选
-  if (P.nativeModels && model && !/^(claude-|opus|sonnet|haiku|fable|default|best)/i.test(model)) model = "";
+  // 模型 / 思考强度的取值顺序见 execIntent（这里的取值和队列判断能否复用空闲进程时用的是同一份）
+  let { model, effort } = execIntent(item, { sid0, pdef0: pdef, P });
   // 别家的清单拉一次（10 分钟缓存）：窗口、档位映射要用。思考强度是跟着全局 / 项目来的、这家模型不支持时，换成它支持的
   // 全局那家也一样：没打开过设置 / 型号清单时冷缓存里没有窗口，claude 只能按 200k 跑（#57）。拉过的就后台刷新，不让这一轮干等
   if (!P.local) {
@@ -195,15 +213,14 @@ export async function startRun(item) {
     const known = modelsCached(P) || Number(currentModelInfo(model, P).context_window) > 0;
     if (P.id !== PROVIDER.id || !known) await fetchModels(false, P).catch(() => {});
     else fetchModels(false, P).catch(() => {});
+    // 清单可能刚拉到 / 刚刷新：档位按最新的表再校准一次（和以前一样，以取完清单为准）
+    if (effort) {
+      const mi = currentModelInfo(model, P);
+      if (!effortLevelsOf(mi, P).includes(effort)) effort = normEffort(mi, effort, P) || "";
+    }
   }
-  // 出口处统一收口：型号名来自设置、会话、厂商默认、导入的配置和清单，哪条都可能超长或夹控制字符，
-  // 进命令行前截住，免得每轮 E2BIG / spawn 抛错（v0514 复核）。档位只认 claude 的五档
-  model = model.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 200);
-  if (!["low", "medium", "high", "xhigh", "max"].includes(effort)) effort = "";
-  if (effort && !P.local) {
-    const mi = currentModelInfo(model, P);
-    if (!effortLevelsOf(mi, P).includes(effort)) effort = normEffort(mi, effort, P) || "";
-  }
+  // 这一轮起跑时的执行配置：后台轮次还留着进程时，队列据此判断下一条消息能不能自动塞进来（#120-2）
+  run.exec = { provider: P.id, model: model || "", effort: effort || "" };
   let permMode = String(run.permMode || item.permissionMode || SETTINGS.permissionMode || "default").trim();
   if (!PERM_MODES.includes(permMode)) permMode = "default";
   run.permMode = permMode;

@@ -31,7 +31,25 @@
     for (const [k, c] of TOOL_CARDS) { const el = c.el || c.host; if (el && root.contains(el)) TOOL_CARDS.delete(k); }
     for (const [k, c] of AG.cards) if (c.el && root.contains(c.el)) AG.cards.delete(k);
   }
-  const PENDING_RESULTS = new Map();
+  // 工具结果按 tool_use id 单独留一份，不跟着卡片走（#120-4）：结果可能比卡片先到（在同一页里结果排在调用后面、
+  // 但跨页时可能先渲染），也可能卡片所在页已经被 MAX_PAGES 窗口裁掉、等往上翻回来时才重建；
+  // 只贴着卡片存的话，裁掉再补回来结果正文和失败状态就没了。条数和总字数都有上限，长会话也不会一直涨。
+  const TOOL_RESULTS = new Map();     // tool_use id → { ok, text }
+  const RESULT_MAX = 2000, RESULT_CHARS = 8000000;
+  let resultChars = 0;
+  function rememberResult(id, ok, text) {
+    const old = TOOL_RESULTS.get(id);
+    if (old) { resultChars -= old.text.length; TOOL_RESULTS.delete(id); }
+    const v = { ok: !!ok, text: String(text || "") };
+    TOOL_RESULTS.set(id, v); resultChars += v.text.length;
+    while (TOOL_RESULTS.size > RESULT_MAX || (resultChars > RESULT_CHARS && TOOL_RESULTS.size > 1)) {
+      const k = TOOL_RESULTS.keys().next().value;      // 先丢最早的；刚存进来的最后才轮到（只剩它就不再丢）
+      resultChars -= TOOL_RESULTS.get(k).text.length;
+      TOOL_RESULTS.delete(k);
+    }
+  }
+  /** 换会话 / 重连时连同结果表一起清：历史重新加载时会再送一遍，跨会话的旧结果没必要留着 */
+  function clearToolResults() { TOOL_RESULTS.clear(); resultChars = 0; }
   /** 用户亲手收起 / 展开过的步骤组、子代理卡：按会话记在内存里，切走再切回按原样还原（#87）。
    *  键是组里第一个工具的 id（"g:"）或代理卡第一个工具的 id（"a:"），值 true = 展开、false = 收起。只记这次打开应用期间 */
   const FOLDS = new Map();
@@ -574,8 +592,9 @@
     };
     if (id) {
       TOOL_CARDS.set(id, api);
-      const pend = PENDING_RESULTS.get(id);
-      if (pend) { PENDING_RESULTS.delete(id); api.result(pend.ok, pend.text); }
+      // 结果已经先到过（结果排在调用前面、或者这页刚被裁掉又补回来）：当场贴上，别留一个默认成功的空卡（#120-4）
+      const res = TOOL_RESULTS.get(id);
+      if (res) api.result(res.ok, res.text);
     }
     return api;
   }
@@ -631,8 +650,8 @@
     };
   }
   function toolResult(id, ok, text) {
+    if (id) rememberResult(id, ok, text);   // 卡片现在没有、或以后被裁掉重建，结果都还在（#120-4）
     const c = TOOL_CARDS.get(id);
     if (c) c.result(ok, text);
-    else if (id) PENDING_RESULTS.set(id, { ok, text });   // 卡片在更早的一页里，翻到了再贴上
   }
 

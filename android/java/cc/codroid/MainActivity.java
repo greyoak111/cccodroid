@@ -496,7 +496,13 @@ public class MainActivity extends Activity {
         if (Intent.ACTION_SEND.equals(a) || Intent.ACTION_SEND_MULTIPLE.equals(a)) { receiveShare(i); return; }
         if (a.startsWith("cc.codroid.") && !fromUs(i)) { android.util.Log.w("cccodroid", "忽略外来的内部动作 " + a); return; }
         if (ACTION_APPLY_DEVKIT.equals(a) || ACTION_UPDATE.equals(a) && "devkit".equals(i.getStringExtra("item"))) applyDevkitUi();
-        else if (ACTION_UPDATE.equals(a)) Updater.get(this).apply(i.getStringExtra("item"), true);
+        else if (ACTION_UPDATE.equals(a)) {
+            // 通知点进来的安装请求没接住（文件没了、状态对不上）：至少给一句提示，不再静默返回（#123-2）
+            org.json.JSONObject r = Updater.get(this).apply(i.getStringExtra("item"), true);
+            String msg = r == null ? "" : r.optString("message", "");
+            if (r != null && !r.optBoolean("ok", true) && !msg.isEmpty())
+                android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show();
+        }
         else if (ACTION_SHIZUKU.equals(a)) ShizukuSetup.get(this).activate();
         else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false));
         else if (ACTION_CONSENT.equals(a)) Consent.runNext(this);
