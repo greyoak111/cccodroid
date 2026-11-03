@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import { performance } from "node:perf_hooks";
+import crypto from "node:crypto";
+import { registryFlockFixture, guardRegistryFlock } from "./fixtures/registry-flock.mjs";
 import { routeComponents } from "../gw/components.mjs";
 import { normalizeBridgeEndpoint } from "../gw/bridge-config.mjs";
 import { PROVIDER, PROVIDERS_CFG, upsertProvider } from "../gw/providers.mjs";
@@ -30,16 +33,18 @@ let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{
  const command=process.argv[2],mode=fs.readFileSync(modeFile,'utf8');
  fs.appendFileSync(marker,JSON.stringify({args:process.argv.slice(2),hasUpstreamEnv:!!process.env.ANTHROPIC_API_KEY||!!process.env.OPENAI_API_KEY,hasAppEnv:!!process.env.CCAPP_RUN,fields:input?Object.keys(JSON.parse(input)):[]})+'\\n');
  const write=(p,v)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(v),{mode:0o600});};
- if(mode==='conflict'){console.error(JSON.stringify({schema:1,id:'openai-bridge',error:{code:'RUNTIME_CONFLICT',message:'must not forward '+${JSON.stringify(upstreamSecret)}}}));process.exitCode=1;return;}
+ if(mode==='conflict'){console.error(JSON.stringify({schema:1,id:'openai-bridge',error:{code:'RUNTIME_CONFLICT',check:'APP_PROVIDER',detail:${JSON.stringify(upstreamSecret)},message:'must not forward '+${JSON.stringify(upstreamSecret)}}}));process.exitCode=1;return;}
  let state=fs.existsSync(stateFile)?JSON.parse(fs.readFileSync(stateFile,'utf8')):null;
  const view=()=>({schema:1,id:'openai-bridge',configured:!!state,endpoint:state?.endpoint||'',model:state?.model||'',...(state?.models?{models:state.models}:{}),hasKey:!!state,localReady:!!state&&mode!=='not-ready',...(mode.startsWith('local:')?{localError:mode.slice(6)}:{}),apiKey:${JSON.stringify(upstreamSecret)},keyTail:'LEAK',connectionPath:'/untrusted/path'});
- if(command==='gui-status'){console.log(JSON.stringify(view()));return;}
+ if(command==='gui-status'){const output=()=>console.log(JSON.stringify(view()));if(mode==='delay')setTimeout(output,200);else output();return;}
  if(command==='uninstall'){fs.rmSync(reg,{force:true});return;}
  if(command!=='gui-configure'){process.exitCode=2;return;}
  const body=JSON.parse(input);
  if(body.apiKey)state={...body};else state={...body,apiKey:state.apiKey};
- write(stateFile,state);write(path.join(target,'.ccr-bridge-kit.json'),{id:'ccr-bridge-kit',target,guiManaged:true});write(path.join(target,'connection.json'),{baseUrl:'http://127.0.0.1:34597',apiKey:mode==='fresh'?${JSON.stringify(freshLocalSecret)}:${JSON.stringify(localSecret)},model:state.model});
+ write(stateFile,state);write(path.join(target,'.ccr-bridge-kit.json'),{id:'ccr-bridge-kit',target,guiManaged:true,service:{schema:1,home:process.env.HOME,instanceId:'b'.repeat(32)},settings:path.join(process.env.HOME,'.claude/settings.json'),componentEntry:process.argv[1]});write(path.join(target,'connection.json'),{baseUrl:'http://127.0.0.1:34597',apiKey:mode==='fresh'?${JSON.stringify(freshLocalSecret)}:${JSON.stringify(localSecret)},model:state.model});
  write(reg,{schema:1,id:'openai-bridge',endpoint:'http://127.0.0.1:34597',runtimeDir:target,instanceId:'b'.repeat(32)});
+ fs.mkdirSync(path.join(target,'runtime-home/.claude-code-router'),{recursive:true,mode:0o700});
+ write(path.join(target,'runtime-home/.claude-code-router/config.json'),{fixture:true,model:state.model,models:state.models||[state.model]});
  const output=()=>console.log(JSON.stringify(view()));
  if(mode==='delay')setTimeout(output,200);else output();
 });`;
@@ -62,6 +67,12 @@ async function request(body, endpoint = "/api/components/openai-bridge/config") 
   return { status: response.status, body: JSON.parse(text) };
 }
 const input = (more = {}) => ({ endpoint: "https://api.example.invalid/v1", apiKey: upstreamSecret, model: "fixture-model", consent: true, ...more });
+const providerTempWrite = (name) => {
+  try {
+    const file = typeof name === "number" ? fs.readlinkSync(`/proc/self/fd/${name}`) : String(name);
+    return file.startsWith(path.join(home, "ccapp-providers.json") + ".") && file.endsWith(".tmp");
+  } catch { return false; }
+};
 beforeEach(() => {
   for (const file of [marker, stateFile, registration, record, component, path.join(path.dirname(registration), "openai-bridge-app.json")]) fs.rmSync(file, { force: true });
   fs.rmSync(target, { recursive: true, force: true });
@@ -271,11 +282,264 @@ test("已有同版手工实例没有GUI标记时不接管或调用configure", as
   assert.deepEqual(JSON.parse(fs.readFileSync(manifest, "utf8")), { id: "ccr-bridge-kit", target });
 });
 
-test("手工/旧runtime冲突明确报告迁移，不自动uninstall或泄露stderr", async () => {
+test("组件统一冲突只报告检查环节，不猜测旧安装或透传私密诊断", async () => {
   fs.writeFileSync(modeFile, "conflict");
   const result = await request(input());
   assert.equal(result.status, 409); assert.equal(result.body.code, "RUNTIME_CONFLICT"); assert.equal(result.body.saved, false);
-  assert.match(result.body.message, /迁移|原安装/); assert.deepEqual(calls().map((call) => call.args), [["gui-status"]]);
+  assert.equal(result.body.check, "COMPONENT");
+  assert.match(result.body.message, /一致性检查未通过/); assert.equal(result.body.message.includes("请先备份"), false);
+  assert.deepEqual(calls().map((call) => call.args), [["gui-status"]]);
+});
+
+test("只读检查用固定白名单区分App接口、清单、映射和连接错误，绝不自动修复", async () => {
+  const first = await request(input()), provider = PROVIDERS_CFG.providers[first.body.providerId];
+  const mappingFile = path.join(path.dirname(registration), "openai-bridge-app.json"), mapping = fs.readFileSync(mappingFile);
+  const connectionFile = path.join(target, "connection.json"), connection = fs.readFileSync(connectionFile);
+  const baseline = structuredClone(provider);
+  const expectCheck = async (check) => {
+    const before = calls().length, result = await request();
+    assert.equal(result.status, 409); assert.equal(result.body.code, "RUNTIME_CONFLICT"); assert.equal(result.body.check, check);
+    assert.equal(calls().length, before + 1); assert.equal(calls().at(-1).args[0], "gui-status");
+    assert.equal(result.body.message.includes("请先备份"), false);
+    return result;
+  };
+  for (const change of [p => { p.apiKey = "e".repeat(48); }, p => { p.authStyle = "x-api-key"; }]) {
+    change(provider); await expectCheck("APP_PROVIDER"); Object.assign(provider, structuredClone(baseline));
+  }
+  provider.modelsUrl = "https://untrusted.example.invalid/private-models";
+  await expectCheck("MODEL_LIST"); Object.assign(provider, structuredClone(baseline));
+  put(mappingFile, { schema: 999 }); await expectCheck("APP_MAPPING"); assert.deepEqual(JSON.parse(fs.readFileSync(mappingFile)), { schema: 999 });
+  fs.writeFileSync(mappingFile, mapping);
+  const wrong = JSON.parse(connection); wrong.model = "different-fixture-model"; put(connectionFile, wrong);
+  await expectCheck("CONNECTION"); assert.equal(JSON.parse(fs.readFileSync(connectionFile)).model, wrong.model);
+  fs.writeFileSync(connectionFile, connection);
+  const manifestFile = path.join(target, ".ccr-bridge-kit.json"), manifest = fs.readFileSync(manifestFile);
+  put(manifestFile, { id: "ccr-bridge-kit", target }); await expectCheck("OWNERSHIP"); fs.writeFileSync(manifestFile, manifest);
+  assert.deepEqual(provider, baseline); assert.deepEqual(fs.readFileSync(mappingFile), mapping); assert.deepEqual(fs.readFileSync(connectionFile), connection);
+});
+
+const repairRequest = body => request(body, "/api/components/openai-bridge/repair");
+const inspectRepair = () => repairRequest({ action: "inspect", consent: true });
+const applyRepair = ticket => repairRequest({ action: "apply", consent: true, ticket });
+
+test("修复方案只读，确认后只同步同实例App模型清单并保留逐模型窗口", async () => {
+  const models = [{ id: "fixture-model", contextWindow: 1048576 }, { id: "second", contextWindow: 128000 }];
+  const first = await request(input({ models })), id = first.body.providerId, provider = PROVIDERS_CFG.providers[id];
+  const originalUrl = provider.modelsUrl, active = PROVIDER.id, setting = SETTINGS.provider;
+  const data = JSON.parse(Buffer.from(originalUrl.split(",")[1], "base64").toString()); data.data.pop();
+  upsertProvider(id, { modelsUrl: "data:application/json;base64," + Buffer.from(JSON.stringify(data)).toString("base64") });
+  const mapping = path.join(path.dirname(registration), "openai-bridge-app.json"), beforeMapping = fs.readFileSync(mapping);
+  const beforeProvider = fs.readFileSync(path.join(home, "ccapp-providers.json")), beforeConnection = fs.readFileSync(path.join(target, "connection.json"));
+  const plan = await inspectRepair();
+  assert.equal(plan.status, 200, JSON.stringify(plan.body)); assert.equal(plan.body.repair.available, true);
+  assert.deepEqual(plan.body.repair.changes, ["MODELS"]); assert.match(plan.body.repair.ticket, /^[0-9a-f]{48}$/);
+  assert.deepEqual(plan.body.repair.models, [{ id: "fixture-model", contextWindow: 1048576 }, { id: "second", contextWindow: 200000 }]);
+  assert.deepEqual(fs.readFileSync(mapping), beforeMapping); assert.deepEqual(fs.readFileSync(path.join(home, "ccapp-providers.json")), beforeProvider);
+  assert.equal(JSON.stringify(plan.body).includes(home), false); assert.equal(JSON.stringify(plan.body).includes("fingerprint"), false);
+  const result = await applyRepair(plan.body.repair.ticket); assert.equal(result.status, 200, JSON.stringify(result.body)); assert.equal(result.body.repaired, true);
+  assert.equal(result.body.scope, "APP_METADATA"); assert.equal(result.body.providerId, id);
+  assert.equal((await request()).body.providerId, id); assert.deepEqual((await request()).body.models, plan.body.repair.models);
+  assert.deepEqual(fs.readFileSync(path.join(target, "connection.json")), beforeConnection); assert.equal(PROVIDER.id, active); assert.equal(SETTINGS.provider, setting);
+  assert.equal(calls().filter(c => c.args[0] !== "gui-status" && c.args[0] !== "gui-configure").length, 0);
+  assert.equal(calls().filter(c => c.args[0] === "gui-configure").length, 1, "repair never calls configure/start/ensure");
+  assert.equal((await applyRepair(plan.body.repair.ticket)).body.code, "REPAIR_STALE");
+});
+
+test("认证样式修复必须连接地址密钥和归属仍一致，确认后恢复bearer不改本地Key", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" });
+  const plan = await inspectRepair(); assert.equal(plan.status, 200, JSON.stringify(plan.body)); assert.deepEqual(plan.body.repair.changes, ["AUTH_STYLE"]);
+  const result = await applyRepair(plan.body.repair.ticket); assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(PROVIDERS_CFG.providers[id].authStyle, "bearer"); assert.equal(PROVIDERS_CFG.providers[id].apiKey, localSecret);
+});
+
+test("修复拒绝无许可、任意字段、坏ticket、无需修复及真实连接改动", async () => {
+  for (const body of [{ action: "inspect" }, { action: "inspect", consent: false }, { action: "apply", consent: true }, { action: "inspect", consent: true, providerId: "custom-1" }, { action: "inspect", consent: true, ticket: "a".repeat(48) }])
+    assert.equal((await repairRequest(body)).body.code, "invalid_input");
+  const first = await request(input()), id = first.body.providerId;
+  assert.equal((await inspectRepair()).body.code, "REPAIR_NOT_NEEDED");
+  upsertProvider(id, { baseUrl: "https://other.example.invalid" });
+  const changed = await inspectRepair(); assert.equal(changed.body.code, "REPAIR_UNAVAILABLE");
+});
+
+test("计划后接口或注册实例改变不能执行，ticket单次消费且不覆盖新状态", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" });
+  const plan = await inspectRepair(); assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  upsertProvider(id, { label: "changed after inspection" });
+  assert.equal((await applyRepair(plan.body.repair.ticket)).body.code, "REPAIR_STALE");
+  assert.equal(PROVIDERS_CFG.providers[id].authStyle, "x-api-key"); assert.equal(PROVIDERS_CFG.providers[id].label, "changed after inspection");
+  const second = await inspectRepair(); assert.equal(second.status, 200, JSON.stringify(second.body));
+  const reg = JSON.parse(fs.readFileSync(registration)); put(registration, { ...reg, instanceId: "c".repeat(32) });
+  const result = await applyRepair(second.body.repair.ticket); assert.equal(result.body.code, "REPAIR_UNAVAILABLE");
+  assert.equal(PROVIDERS_CFG.providers[id].authStyle, "x-api-key");
+});
+
+test("恢复锁、停用、组件冲突和活动会话不提供自动修复，不清任何标记", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" });
+  for (const mode of ["local:RECOVERY_EXHAUSTED", "local:PATCH_VERIFICATION_FAILED", "local:COMPONENT_DISABLED", "conflict", "not-ready"]) {
+    fs.writeFileSync(modeFile, mode); assert.equal((await inspectRepair()).body.code, "REPAIR_UNAVAILABLE");
+  }
+  fs.writeFileSync(modeFile, "ok");
+  const disabled = path.join(target, "disabled"); fs.writeFileSync(disabled, "configuring\n", { mode: 0o600 });
+  assert.equal((await inspectRepair()).body.code, "REPAIR_UNAVAILABLE"); assert.equal(fs.readFileSync(disabled, "utf8"), "configuring\n"); fs.unlinkSync(disabled);
+  RUNS.set("repair-busy-fixture", { provider: id, ended: false });
+  try { assert.equal((await inspectRepair()).body.code, "BUSY"); } finally { RUNS.delete("repair-busy-fixture"); }
+  assert.equal(PROVIDERS_CFG.providers[id].authStyle, "x-api-key");
+});
+
+test("修复计划60秒过期和随机伪造ticket均拒绝，不写任何记录", async (t) => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" });
+  const plan = await inspectRepair(); assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  const originalNow = performance.now.bind(performance), hook = t.mock.method(performance, "now", () => originalNow() + 61000);
+  try { assert.equal((await applyRepair(plan.body.repair.ticket)).body.code, "REPAIR_STALE"); }
+  finally { hook.mock.restore(); }
+  assert.equal((await applyRepair("e".repeat(48))).body.code, "REPAIR_STALE"); assert.equal(PROVIDERS_CFG.providers[id].authStyle, "x-api-key");
+});
+
+test("修复持锁忙碌不动配置，原ticket已消费且不能重放", async (t) => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" }); const plan = await inspectRepair(); assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  const flock = registryFlockFixture(), guard = guardRegistryFlock(t, flock); flock.reset("busy");
+  try { assert.equal((await applyRepair(plan.body.repair.ticket)).body.code, "REPAIR_UNAVAILABLE"); }
+  finally { guard.restore(); flock.reset(); }
+  assert.equal(PROVIDERS_CFG.providers[id].authStyle, "x-api-key"); assert.equal((await applyRepair(plan.body.repair.ticket)).body.code, "REPAIR_STALE");
+});
+
+test("修复拒绝磁盘接口与内存不一致，不能覆盖设备上新写的接口", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" });
+  const file = path.join(home, "ccapp-providers.json"), disk = JSON.parse(fs.readFileSync(file));
+  disk.providers[id].label = "external edit must survive"; put(file, disk);
+  assert.equal((await inspectRepair()).body.code, "REPAIR_UNAVAILABLE"); assert.equal(JSON.parse(fs.readFileSync(file)).providers[id].label, "external edit must survive");
+});
+
+test("修复拒绝检查前发生的字段删除和无关接口变更，不以旧整表覆盖磁盘", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  const other = upsertProvider(null, { label: "unrelated fixture", baseUrl: "https://old.example.invalid", apiKey: "fixture-other-old" }).id;
+  upsertProvider(id, { authStyle: "x-api-key" });
+  const file = path.join(home, "ccapp-providers.json"), before = fs.readFileSync(file);
+  for (const mutation of [disk => { delete disk.providers[id].apiKey; }, disk => { disk.providers[other].baseUrl = "https://new.example.invalid"; disk.providers[other].apiKey = "fixture-other-new"; }, disk => { disk.active = other; }]) {
+    const disk = JSON.parse(before); mutation(disk); put(file, disk); const changed = fs.readFileSync(file);
+    try { assert.equal((await inspectRepair()).body.code, "REPAIR_UNAVAILABLE"); assert.deepEqual(fs.readFileSync(file), changed); }
+    finally { fs.writeFileSync(file, before); }
+  }
+});
+
+test("修复写入不跟随旧固定tmp软链，不覆写其他文件或把接口文件变成链接", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" });
+  const file = path.join(home, "ccapp-providers.json"), temp = file + ".tmp", sentinel = path.join(root, "provider-write-sentinel");
+  fs.writeFileSync(sentinel, "sentinel must stay byte identical", { mode: 0o600 }); fs.symlinkSync(sentinel, temp);
+  try {
+    const plan = await inspectRepair(); assert.equal(plan.status, 200, JSON.stringify(plan.body));
+    const result = await applyRepair(plan.body.repair.ticket); assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.equal(fs.readFileSync(sentinel, "utf8"), "sentinel must stay byte identical");
+    assert.equal(fs.lstatSync(file).isSymbolicLink(), false); assert.equal(fs.statSync(file).mode & 0o077, 0);
+  } finally {
+    if (fs.lstatSync(file).isSymbolicLink()) { fs.unlinkSync(file); put(file, JSON.parse(fs.readFileSync(sentinel))); }
+    fs.rmSync(temp, { force: true }); fs.rmSync(sentinel, { force: true });
+  }
+});
+
+test("接口随机临时文件碰撞不覆盖链接目标，也不删除已有链接", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  const file = path.join(home, "ccapp-providers.json"), bytes = fs.readFileSync(file), fixed = "ef".repeat(12), temp = file + "." + fixed + ".tmp";
+  const sentinel = path.join(root, "provider-collision-sentinel"), original = crypto.randomBytes;
+  fs.writeFileSync(sentinel, "collision sentinel", { mode: 0o600 }); fs.symlinkSync(sentinel, temp);
+  crypto.randomBytes = size => size === 12 ? Buffer.from(fixed, "hex") : original(size);
+  try {
+    assert.throws(() => upsertProvider(id, { label: "must not commit" }), { code: "EEXIST" });
+    assert.equal(fs.lstatSync(temp).isSymbolicLink(), true); assert.equal(fs.readFileSync(sentinel, "utf8"), "collision sentinel");
+    assert.deepEqual(fs.readFileSync(file), bytes);
+  } finally { crypto.randomBytes = original; fs.rmSync(temp, { force: true }); fs.rmSync(sentinel, { force: true }); }
+});
+
+test("接口保存失败时修复回滚映射并保留旧接口，用户可重新检查后重试", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" }); const plan = await inspectRepair(); assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  const file = path.join(home, "ccapp-providers.json"), mapping = path.join(path.dirname(registration), "openai-bridge-app.json"), before = fs.readFileSync(file), beforeMapping = fs.readFileSync(mapping);
+  const original = fs.writeFileSync; let injected = false;
+  fs.writeFileSync = function(name, ...args) {
+    if (providerTempWrite(name)) { injected = true; throw Object.assign(new Error("fixture disk full"), { code: "ENOSPC" }); }
+    return original.call(this, name, ...args);
+  };
+  try { assert.equal((await applyRepair(plan.body.repair.ticket)).body.code, "REPAIR_UNAVAILABLE"); }
+  finally { fs.writeFileSync = original; }
+  assert.equal(injected, true); assert.deepEqual(fs.readFileSync(file), before); assert.deepEqual(fs.readFileSync(mapping), beforeMapping);
+  assert.equal(PROVIDERS_CFG.providers[id].authStyle, "x-api-key");
+  const retry = await inspectRepair(); assert.equal(retry.status, 200, JSON.stringify(retry.body)); assert.equal((await applyRepair(retry.body.repair.ticket)).status, 200);
+});
+
+test("修复最终映射失败报告已提交，保留精确pending且冷读不丢已同步接口", async () => {
+  const models = [{ id: "fixture-model", contextWindow: 1048576 }, { id: "second", contextWindow: 128000 }];
+  const first = await request(input({ models })), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key", modelsUrl: "data:application/json;base64," + Buffer.from(JSON.stringify({ data: [{ id: models[0].id, context_window: models[0].contextWindow }] })).toString("base64") });
+  const plan = await inspectRepair(); assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  const mapping = path.join(path.dirname(registration), "openai-bridge-app.json"), connection = fs.readFileSync(path.join(target, "connection.json"));
+  const original = fs.writeFileSync; let injected = false;
+  fs.writeFileSync = function(file, ...args) {
+    if (!injected && String(file).startsWith(mapping + ".") && String(file).endsWith(".tmp") && PROVIDERS_CFG.providers[id].authStyle === "bearer") {
+      injected = true; throw Object.assign(new Error("fixture finalize disk full"), { code: "ENOSPC" });
+    }
+    return original.call(this, file, ...args);
+  };
+  try {
+    const partial = await applyRepair(plan.body.repair.ticket);
+    assert.equal(injected, true); assert.equal(partial.status, 409); assert.equal(partial.body.code, "REPAIR_PARTIAL");
+    assert.equal(partial.body.committed, true); assert.equal(partial.body.scope, "APP_METADATA");
+  } finally { fs.writeFileSync = original; }
+  assert.equal(PROVIDERS_CFG.providers[id].authStyle, "bearer"); assert.ok(JSON.parse(fs.readFileSync(mapping)).pending);
+  assert.deepEqual(fs.readFileSync(path.join(target, "connection.json")), connection);
+  const checked = await request(); assert.equal(checked.body.providerId, id); assert.deepEqual(checked.body.models, plan.body.repair.models);
+  const { spawnSync } = await import("node:child_process");
+  const cold = spawnSync(process.execPath, ["--input-type=module", "-e", `const {bridgeConfigStatus}=await import(${JSON.stringify(new URL("../gw/bridge-config.mjs", import.meta.url).href)});console.log(JSON.stringify(await bridgeConfigStatus()));`], { env: process.env, encoding: "utf8", timeout: 10000 });
+  assert.equal(cold.status, 0); assert.equal(JSON.parse(cold.stdout).providerId, id); assert.deepEqual(JSON.parse(cold.stdout).models, plan.body.repair.models);
+  assert.equal((await inspectRepair()).body.code, "REPAIR_NOT_NEEDED");
+});
+
+test("修复拒绝计划后新增恢复锁及嵌套链接，不能绕过故障或写到外部", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" }); const plan = await inspectRepair(); assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  const state = path.join(target, "runtime-home/.claude-code-router"), fault = path.join(state, "recovery.failed");
+  fs.writeFileSync(fault, "fixture authoritative fault\n", { mode: 0o600 });
+  assert.equal((await applyRepair(plan.body.repair.ticket)).body.code, "REPAIR_UNAVAILABLE"); assert.equal(fs.readFileSync(fault, "utf8"), "fixture authoritative fault\n");
+  fs.unlinkSync(fault);
+  const moved = path.join(root, "held-runtime-home"); fs.renameSync(path.join(target, "runtime-home"), moved); fs.symlinkSync(moved, path.join(target, "runtime-home"));
+  try { assert.equal((await inspectRepair()).body.code, "REPAIR_UNAVAILABLE"); }
+  finally { fs.unlinkSync(path.join(target, "runtime-home")); fs.renameSync(moved, path.join(target, "runtime-home")); }
+  assert.equal(PROVIDERS_CFG.providers[id].authStyle, "x-api-key");
+});
+
+test("修复确认占组件槽，重复确认仅执行一次", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" });
+  fs.writeFileSync(modeFile, "ok");
+  const plan = await inspectRepair(); assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  const one = applyRepair(plan.body.repair.ticket), two = applyRepair(plan.body.repair.ticket);
+  const both = await Promise.all([one, two]);
+  assert.equal(both.filter(r => r.status === 200).length, 1);
+  assert.ok(both.some(r => ["BUSY", "REPAIR_STALE"].includes(r.body.code)));
+  assert.equal(PROVIDERS_CFG.providers[id].authStyle, "bearer");
+});
+
+test("修复执行期间配置、卸载和取消都被组件槽拒绝", async () => {
+  const first = await request(input()), id = first.body.providerId;
+  upsertProvider(id, { authStyle: "x-api-key" });
+  const plan = await inspectRepair(); assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  fs.writeFileSync(modeFile, "delay"); const count = calls().length, pending = applyRepair(plan.body.repair.ticket), started = Date.now();
+  while (calls().length === count) {
+    assert.ok(Date.now() - started < 3000); await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(calls().at(-1).args[0], "gui-status");
+  assert.equal((await request(input())).body.code, "BUSY");
+  assert.equal((await request({ id: "openai-bridge" }, "/api/components/remove")).body.message, "busy");
+  assert.equal((await request({ id: "openai-bridge" }, "/api/components/cancel")).body.message, "busy");
+  assert.equal((await pending).status, 200);
+  assert.equal(PROVIDERS_CFG.providers[id].authStyle, "bearer");
+  assert.equal(calls().slice(count).filter(c => c.args[0] !== "gui-status").length, 0);
 });
 
 test("不健康record或软链入口不执行固定组件", async () => {
@@ -358,6 +622,29 @@ test("仅允许归属匹配的规范内嵌清单，远端/被改过的清单仍�
   assert.equal((await request()).status, 200);
 });
 
+test("只改规范模型清单或窗口只诊断MODEL_LIST，仍拒绝旧新事务之外的清单且不写配置", async () => {
+  const models = [{ id: "fixture-model", contextWindow: 1048576 }, { id: "second", contextWindow: 128000 }];
+  const first = await request(input({ models })), provider = PROVIDERS_CFG.providers[first.body.providerId];
+  const original = provider.modelsUrl, baseUrl = provider.baseUrl, apiKey = provider.apiKey, authStyle = provider.authStyle;
+  const mappingFile = path.join(path.dirname(registration), "openai-bridge-app.json"), mapping = fs.readFileSync(mappingFile);
+  const connectionFile = path.join(target, "connection.json"), connection = fs.readFileSync(connectionFile);
+  const inline = data => "data:application/json;base64," + Buffer.from(JSON.stringify({ data })).toString("base64");
+  for (const value of [undefined,
+    inline([{ id: "fixture-model", context_window: 1048576 }, { id: "third", context_window: 64000 }]),
+    inline([{ id: "fixture-model", context_window: 512000 }, { id: "second", context_window: 128000 }])]) {
+    if (value === undefined) delete provider.modelsUrl; else provider.modelsUrl = value;
+    const before = calls().filter(c => c.args[0] === "gui-configure").length;
+    for (const body of [undefined, input({ models })]) {
+      const result = await request(body);
+      assert.equal(result.status, 409); assert.equal(result.body.code, "RUNTIME_CONFLICT"); assert.equal(result.body.check, "MODEL_LIST");
+    }
+    assert.equal(calls().filter(c => c.args[0] === "gui-configure").length, before);
+    assert.equal(provider.modelsUrl, value); assert.equal(provider.baseUrl, baseUrl); assert.equal(provider.apiKey, apiKey); assert.equal(provider.authStyle, authStyle);
+    assert.deepEqual(fs.readFileSync(mappingFile), mapping); assert.deepEqual(fs.readFileSync(connectionFile), connection);
+  }
+  provider.modelsUrl = original; assert.equal((await request()).status, 200);
+});
+
 test("清单映射最终写入失败仍可读和重试，只认写前记录的精确旧新指纹", async () => {
   const models = [{ id: "fixture-model", contextWindow: 1048576 }, { id: "second", contextWindow: 128000 }];
   const first = await request(input({ models })), id = first.body.providerId;
@@ -417,7 +704,7 @@ test("接口文件写入失败保留旧内存和磁盘，写前事务允许原�
   const originalUrl = PROVIDERS_CFG.providers[id].modelsUrl, file = path.join(home, "ccapp-providers.json"), disk = fs.readFileSync(file);
   const writeFileSync = fs.writeFileSync; let failed = false;
   fs.writeFileSync = function(name, ...args) {
-    if (!failed && String(name) === file + ".tmp") {
+    if (!failed && providerTempWrite(name)) {
       failed = true; const error = new Error("fixture write failure"); error.code = "ENOSPC"; throw error;
     }
     return writeFileSync.call(this, name, ...args);
@@ -436,7 +723,7 @@ test("首次provider写入失败撤销预备映射，普通接口复用ID后不�
   const file = path.join(home, "ccapp-providers.json"), mapping = path.join(path.dirname(registration), "openai-bridge-app.json");
   const writeFileSync = fs.writeFileSync; let failed = false;
   fs.writeFileSync = function(name, ...args) {
-    if (!failed && String(name) === file + ".tmp") {
+    if (!failed && providerTempWrite(name)) {
       failed = true; const error = new Error("fixture write failure"); error.code = "ENOSPC"; throw error;
     }
     return writeFileSync.call(this, name, ...args);
@@ -458,7 +745,7 @@ test("provider落盘失败且组件已换默认模型：不借旧默认窗口，
   const updated = [...models, { id: "new-default", contextWindow: 64000 }], file = path.join(home, "ccapp-providers.json"), writeFileSync = fs.writeFileSync;
   let failed = false;
   fs.writeFileSync = function(name, ...args) {
-    if (!failed && String(name) === file + ".tmp") {
+    if (!failed && providerTempWrite(name)) {
       failed = true; const error = new Error("fixture write failure"); error.code = "ENOSPC"; throw error;
     }
     return writeFileSync.call(this, name, ...args);
@@ -469,6 +756,7 @@ test("provider落盘失败且组件已换默认模型：不借旧默认窗口，
   const pending = await request();
   assert.equal(pending.status, 200, JSON.stringify(pending.body)); assert.equal(pending.body.providerId, "");
   assert.equal(pending.body.localReady, false); assert.equal(pending.body.localError, "LOCAL_START_FAILED");
+  assert.equal(pending.body.check, "MODEL_LIST");
   assert.deepEqual(pending.body.models, [...models, { id: "new-default", contextWindow: 200000 }]);
   const saved = await request(input({ model: "new-default", models: updated }));
   assert.equal(saved.status, 200, JSON.stringify(saved.body)); assert.equal(saved.body.providerId, first.body.providerId);

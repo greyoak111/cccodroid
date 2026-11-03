@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { CFG, PATHS, PREFIX, log, tz } from "./config.mjs";
 import { SETTINGS, saveSettings } from "./settings-store.mjs";
 import { dropModelCache, normalizeModels } from "./models.mjs";
@@ -331,12 +332,24 @@ function loadProviders() {
   return { active, providers };
 }
 function saveProvidersRaw() {
-  // 先写临时文件再换名（同 settings）：密钥都在这里，写一半被杀就全丢了
-  fs.writeFileSync(PROVIDERS_FILE + ".tmp", JSON.stringify(PROVIDERS_RAW, null, 2), { mode: 0o600 });
-  fs.renameSync(PROVIDERS_FILE + ".tmp", PROVIDERS_FILE);
+  // 随机、独占且不跟随链接的临时文件；旧固定 .tmp 或碰撞文件都不能接收凭据。
+  const temp = PROVIDERS_FILE + "." + crypto.randomBytes(12).toString("hex") + ".tmp";
+  let fd, created = false;
+  try {
+    fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    created = true;
+    fs.writeFileSync(fd, JSON.stringify(PROVIDERS_RAW, null, 2));
+    fs.closeSync(fd); fd = undefined;
+    fs.renameSync(temp, PROVIDERS_FILE);
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+    if (created) { try { fs.unlinkSync(temp); } catch {} }
+  }
   PROVIDERS_CFG = loadProviders();
 }
 export let PROVIDERS_CFG = loadProviders();
+// 受控修复会重写整表，必须核对整份原始配置，包括删除的字段、无关接口和 active。
+export const providersDiskMatches = (disk) => isDeepStrictEqual(disk, { ...PROVIDERS_RAW, providers: { ...PROVIDERS_RAW.providers } });
 
 /** 给界面看的一家：密钥只露末四位 */
 function providerView(id, v) {

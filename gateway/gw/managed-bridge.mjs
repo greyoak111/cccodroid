@@ -132,7 +132,10 @@ async function withRegistryLock(fn) {
         // 唯一能用的 /system/bin/flock 一次没起来就直接报卸载失败
         const result = await tryRegistryLock(tools[i], fd, deadline - performance.now());
         if (!sameLock()) throw fail("retire-lock");
-        if (result === "locked") { acquired = true; return await fn(file); }
+        if (result === "locked") {
+          acquired = true;
+          return await fn(file, () => { if (!sameLock()) throw fail("retire-lock"); });
+        }
         // -n 返回竞争失败说明工具可用；锁定此候选重试，不能借另一程序绕开同一把锁。
         if (result === "busy") { tools.splice(0, tools.length, tools[i]); break; }
         if (result === "timeout") break;     // 预算已耗尽，统一交给下面报 retire-lock
@@ -151,6 +154,9 @@ async function withRegistryLock(fn) {
     if (dir !== undefined) fs.closeSync(dir);
   }
 }
+
+// App 层修复只复用固定注册锁，不执行组件启动/停止，也不接受请求指定锁路径。
+export const withManagedBridgeRegistryLock = (fn) => withRegistryLock((file, recheck) => fn(recheck));
 
 function clearRegistration(file, expected, sameInstance) {
   try {

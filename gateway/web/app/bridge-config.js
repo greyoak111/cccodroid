@@ -5,10 +5,12 @@
   const $ = (id) => document.getElementById(id);
   const t = (s, vars) => window.I18N ? window.I18N.t(s, vars) : s.replace(/\{(\w+)\}/g, (m, k) => vars && k in vars ? String(vars[k]) : m);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const API = "/api/components/openai-bridge/config", MODELS_API = "/api/components/openai-bridge/models";
+  const API = "/api/components/openai-bridge/config", MODELS_API = "/api/components/openai-bridge/models", REPAIR_API = "/api/components/openai-bridge/repair";
   const MODEL_DELAY = 650, MODEL_LIMIT = 500, MODEL_TIMEOUT = 15000, SUGGEST_MAX = 100, CONFIG_MODEL_LIMIT = 100, DEFAULT_CTX = 200000;
   const LOCAL_ERRORS = ["RECOVERY_EXHAUSTED", "PATCH_VERIFICATION_FAILED", "COMPONENT_DISABLED", "LOCAL_START_FAILED", "COMPONENT_UNAVAILABLE", "UPDATE_REQUIRED"];
   const localCode = (code) => LOCAL_ERRORS.includes(code) ? code : code ? "LOCAL_START_FAILED" : "";
+  const CONFIG_CHECKS = ["COMPONENT", "OWNERSHIP", "CONNECTION", "APP_MAPPING", "APP_PROVIDER", "MODEL_LIST"];
+  const checkCode = (code) => CONFIG_CHECKS.includes(code) ? code : "UNKNOWN";
   function localMessage(code) {
     if (code === "RECOVERY_EXHAUSTED") return t("自动恢复已停止，修改配置不会解除；请先诊断，再明确重置恢复次数。");
     if (code === "PATCH_VERIFICATION_FAILED") return t("桥补丁校验失败，自动恢复已停止；请先诊断并修复，保存配置不会解除故障。");
@@ -20,13 +22,14 @@
   const validWindow = (n) => Number.isInteger(n) && n >= 1024 && n <= 16777216;
   const validModel = (id) => typeof id === "string" && !!id && id === id.trim() && id.length <= 200 && !/[,\u0000-\u001f\u007f-\u009f]/.test(id);
   let panel = null, options = {}, snapshot = null, busy = false, seq = 0, returnTop = 0;
+  let repairPlan = null, repairUntil = 0, repairTimer = null;
   // Discovery state contains only model metadata/origins and cancellation handles, never a key or key fingerprint.
   let modelsTimer = null, modelsDeadline = null, modelsAbort = null, modelsSeq = 0;
   let modelItems = [], modelsConnected = false, currentOrigin = "", consentOrigin = "", suggestAt = -1;
   let modelWindows = new Map(), selectedModels = [], defaultModel = "", editingModel = "", ctxManual = false;
   const readError = (status, code) => {
     if (code === "BUSY") return t("本地桥正在使用或卸载中，请稍后重试；当前会话保持不变。");
-    if (code === "RUNTIME_CONFLICT") return t("已有桥安装不能自动迁移，请先备份并由你处理原安装；未覆盖或卸载。");
+    if (code === "RUNTIME_CONFLICT") return t("桥配置一致性检查未通过，暂不能安全读取或保存；请查看检查说明，不要先删目录或卸载。");
     if (LOCAL_ERRORS.includes(code)) return localMessage(code);
     return status === 404 || code === "not_installed" ? t("请先安装或更新 OpenAI API 本地协议桥组件。") : t("读取桥配置失败，请返回扩展后重试。");
   };
@@ -68,21 +71,21 @@
       endpoint: endpoint.error ? "" : data.endpoint, model, models,
       providerId: typeof data.providerId === "string" ? data.providerId : "",
       contextWindow: models.find((m) => m.id === model)?.contextWindow || contextWindow,
-      localError: code,
+      localError: code, check: checkCode(data.check),
       local: { state: code ? "error" : ["ready", "error", "stopped", "starting"].includes(local.state) ? local.state : "stopped", code },
     };
   }
-  async function request(body) {
+  async function request(body, endpoint = API) {
     const init = {
       method: body ? "POST" : "GET", cache: "no-store", credentials: "same-origin",
       headers: { "X-CC-Lang": window.I18N ? window.I18N.lang : "zh", ...(body ? { "Content-Type": "application/json" } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     };
     try {
-      const r = await fetch(API, init);
+      const r = await fetch(endpoint, init);
       let data;
       try { data = await r.json(); } catch { throw { status: r.status }; }
-      if (!r.ok || data.ok === false) throw { status: r.status, field: data.field, code: data.code, saved: data.saved === true };
+      if (!r.ok || data.ok === false) throw { status: r.status, field: data.field, code: data.code, check: checkCode(data.check), saved: data.saved === true };
       return data;
     } finally { if (body) init.body = ""; }
   }
@@ -93,7 +96,9 @@
     panel.innerHTML = `
       <button type="button" class="bc-back" data-bc="back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>${esc(t("返回扩展"))}</button>
       <header class="bc-heading"><h2 id="bridge-config-title" tabindex="-1">${esc(t("OpenAI API 本地协议桥"))} <span class="badge">${esc(t("预览"))}</span></h2><p>${esc(t("一个 API 可配置多个模型，上下文窗口自动填写。"))}</p></header>
+      <section id="bc-overview" class="bc-overview" aria-label="${esc(t("桥状态"))}" aria-live="polite"><div><span>${esc(t("组件入口"))}</span><b id="bc-package-state"></b></div><div><span>${esc(t("配置检查"))}</span><b id="bc-config-state"></b></div><div><span>${esc(t("本地服务"))}</span><b id="bc-service-state"></b></div></section>
       <p class="bc-notice hidden" id="bc-notice" role="alert"></p>
+      <section id="bc-issue" class="bc-card bc-issue hidden" aria-labelledby="bc-issue-title"><span class="bc-issue-label">${esc(t("需要检查"))}</span><h3 id="bc-issue-title" tabindex="-1"></h3><p id="bc-issue-detail"></p><p class="bc-hint" id="bc-issue-hint"></p><p class="bc-hint mono" id="bc-issue-code" dir="ltr"></p><div class="bc-actions"><button class="btn ghost" id="bc-check-again" type="button" data-bc="check-again">${esc(t("重新检查"))}</button></div><p class="bc-hint">${esc(t("只读取本地状态，不保存、不启动、不重置，也不连接上游。"))}</p><details id="bc-backup-help"><summary>${esc(t("什么时候需要备份？"))}</summary><p class="bc-hint">${esc(t("只有后续明确处理旧安装或迁移时才需要备份桥配置：API 地址、密钥、模型和 App 接口记录；不是聊天记录或整个手机。"))}</p><p class="bc-hint">${esc(t("本页不会创建或上传备份；含密钥的配置文件不要直接发群或公开。"))}</p></details></section>
       <div id="bc-loading" role="status">${esc(t("读取中…"))}</div>
       <form id="bc-form" class="bc-card hidden" novalidate autocomplete="off">
         <h3>${esc(t("连接你的 API"))}</h3>
@@ -108,6 +113,7 @@
         <button class="btn" id="bc-save" type="submit">${esc(t("保存配置"))}</button><p class="bc-hint bc-center" id="bc-save-note" role="status">${esc(t("保存不调用远端模型，也不切换当前会话"))}</p>
       </form>
       <section id="bc-saved" class="bc-card hidden" aria-labelledby="bc-saved-title"><h3 id="bc-saved-title" tabindex="-1">${esc(t("配置已保存"))}</h3><dl class="bc-summary"><div><dt>${esc(t("API 地址"))}</dt><dd class="mono" id="bc-saved-endpoint" dir="ltr"></dd></div><div><dt>${esc(t("API Key"))}</dt><dd>${esc(t("已设置 · 不回显"))}</dd></div><div><dt>${esc(t("模型名称"))}</dt><dd class="mono" id="bc-saved-model" dir="ltr"></dd></div><div><dt>${esc(t("上下文窗口"))}</dt><dd class="mono" id="bc-saved-ctx" dir="ltr"></dd></div></dl><div id="bc-saved-models" class="bc-selected"></div><div class="bc-status" role="status"><b id="bc-local-state"></b><span id="bc-remote-state">${esc(t("模型推理尚未验证"))}</span></div><p class="bc-hint">${esc(t("已添加到「接口与型号」。当前会话保持不变。"))}</p><div class="bc-actions"><button class="btn" type="button" id="bc-use" data-bc="use">${esc(t("新建会话使用"))}</button><button class="btn ghost" type="button" data-bc="edit">${esc(t("修改配置"))}</button></div><p class="bc-hint">${esc(t("别的会话也能用：点输入栏下的模型标签，在接口一行选它。"))}</p></section>
+      <section id="bc-repair" class="bc-card bc-repair hidden" aria-labelledby="bc-repair-title"><h3 id="bc-repair-title">${esc(t("诊断与修复"))}</h3><p class="bc-hint" id="bc-repair-intro">${esc(t("先核对本机状态，再提供可确认的方案；检查本身不改配置、不启动或重置桥。"))}</p><div class="bc-actions"><button class="btn ghost" id="bc-repair-inspect" type="button" data-bc="repair-inspect">${esc(t("检查修复方案"))}</button></div><p class="bc-hint" id="bc-repair-status" role="status" aria-live="polite"></p><div id="bc-repair-plan" class="hidden"><p class="bc-hint" id="bc-repair-changes"></p><p class="bc-hint">${esc(t("仅同步已核对桥接口的模型清单、默认模型和认证样式；保留可验证窗口，缺失项使用 200,000。地址与密钥不变。"))}</p><p class="bc-hint">${esc(t("不停止或启动服务，不改上游 Key、运行文件、恢复锁或当前会话。方案仅在本页短期有效，状态改变须重新检查。"))}</p><div class="bc-actions"><button class="btn" id="bc-repair-apply" type="button" data-bc="repair-apply">${esc(t("确认同步 App 记录"))}</button><button class="btn ghost" id="bc-repair-cancel" type="button" data-bc="repair-cancel">${esc(t("取消修复方案"))}</button></div></div><details id="bc-repair-steps"><summary>${esc(t("不能自动修复时怎么做？"))}</summary><ol class="bc-hint"><li>${esc(t("先核对 App 和组件均为配套正式版本；有会话在运行时，等待结束后再检查。"))}</li><li>${esc(t("地址、密钥、归属或运行文件检查不明确时，请让设备上的 AI 按固定诊断编号做本地只读核对，不要盲删或覆盖。"))}</li><li>${esc(t("恢复预算耗尽或补丁校验失败属于另一类故障；先查诊断，不用同步 App 记录解除恢复锁。"))}</li><li>${esc(t("反馈时提供版本、诊断编号和是否更新或重装；不要上传密钥、完整配置或对话。"))}</li></ol></details></section>
       <p class="bc-hint bc-footnote">${esc(t("仅支持 OpenAI Chat Completions API，暂不支持 Responses API。"))}</p>`;
     $("tab-ext").appendChild(panel);
     $("bc-form").addEventListener("submit", save);
@@ -121,6 +127,13 @@
         b.setAttribute("aria-label", show ? t("隐藏密钥") : t("显示密钥")); b.setAttribute("aria-pressed", String(show));
       } else if (action === "edit") showForm();
       else if (action === "use") useNew();
+      else if (action === "check-again") {
+        if (!$("bc-form").classList.contains("hidden") && !confirm(t("重新检查将清除本页尚未保存的输入，但不会修改已保存的配置。继续？"))) return;
+        checkStatus();
+      }
+      else if (action === "repair-inspect") inspectRepair();
+      else if (action === "repair-apply") applyRepair();
+      else if (action === "repair-cancel") clearRepair();
       else if (action === "models-retry") scheduleModels(0);
       else if (action === "model-add") addModel(true);
       else if (action === "model-edit") { if (stashEditor()) { const item = selectedModels.find((m) => m.id === b.dataset.model); if (item) editModel(item); } }
@@ -199,8 +212,127 @@
     eye.setAttribute("aria-label", t("显示密钥")); eye.setAttribute("aria-pressed", "false");
   }
   function notice(text) { $("bc-notice").textContent = text; $("bc-notice").classList.toggle("hidden", !text); }
+  function clearRepair() {
+    repairPlan = null; repairUntil = 0;
+    if (repairTimer !== null) clearTimeout(repairTimer);
+    repairTimer = null;
+    if (!panel) return;
+    $("bc-repair-plan").classList.add("hidden"); $("bc-repair-changes").textContent = "";
+    $("bc-repair-status").textContent = "";
+  }
+  function repairMessage(code) {
+    if (code === "BUSY") return t("本地桥正在使用或组件操作中，未执行修复；请等待结束后重新检查。");
+    if (code === "REPAIR_STALE") return t("修复方案已失效或相关状态已改变，未执行本次修复；请重新检查方案。");
+    if (code === "REPAIR_NOT_NEEDED") return t("未发现可同步的 App 记录差异；若仍不可用，请按检查说明处理。");
+    return t("当前状态不适合自动同步，未执行修复。请展开下方步骤；不要通过删除或重置绕过检查。");
+  }
+  async function inspectRepair() {
+    if (busy) return;
+    clearRepair(); cancelModels(); hideKey();
+    const id = ++seq; setBusy(true);
+    $("bc-repair-status").textContent = t("正在核对修复范围，不修改配置…");
+    try {
+      const data = await request({ action: "inspect", consent: true }, REPAIR_API);
+      if (id !== seq || !visible()) return;
+      const plan = data.repair;
+      if (!plan || plan.available !== true || plan.action !== "SYNC_APP_METADATA" || typeof plan.ticket !== "string" ||
+          !/^[0-9a-f]{48}$/.test(plan.ticket) || !Array.isArray(plan.changes) || !plan.changes.length ||
+          plan.changes.some(c => !["MODELS", "AUTH_STYLE"].includes(c)) || !Array.isArray(plan.models) || !plan.models.length ||
+          plan.models.length > CONFIG_MODEL_LIMIT || plan.models.some(m => !m || !validModel(m.id) || !validWindow(m.contextWindow))) throw { code: "REPAIR_UNAVAILABLE" };
+      repairPlan = { ticket: plan.ticket, changes: [...plan.changes], count: plan.models.length };
+      repairUntil = Date.now() + 60000;
+      repairTimer = setTimeout(() => { clearRepair(); if (visible()) $("bc-repair-status").textContent = repairMessage("REPAIR_STALE"); }, 60000);
+      $("bc-repair-plan").classList.remove("hidden");
+      $("bc-repair-changes").textContent = t("可同步 {n} 个模型；认证样式与模型记录将按桥的当前配置核对。", { n: repairPlan.count });
+      $("bc-repair-status").textContent = t("方案已就绪，尚未修改任何配置。请阅读范围后再确认。");
+    } catch (error) {
+      if (id !== seq || !visible()) return;
+      clearRepair(); $("bc-repair-status").textContent = repairMessage(error.code);
+      $("bc-repair-steps").open = true;
+    } finally { if (id === seq) setBusy(false); }
+  }
+  async function applyRepair() {
+    if (busy || !repairPlan) return;
+    if (Date.now() >= repairUntil) { clearRepair(); $("bc-repair-status").textContent = repairMessage("REPAIR_STALE"); return; }
+    if (!confirm(t("确认同步已核对桥接口的 App 记录？\n\n仅修复模型清单、默认模型和认证样式；本地地址与密钥不变。不启动、不停止服务，不清恢复锁，也不切换当前会话。"))) return;
+    const body = { action: "apply", consent: true, ticket: repairPlan.ticket };
+    clearRepair(); invalidateReadiness();
+    const id = ++seq; setBusy(true);
+    $("bc-repair-status").textContent = t("正在同步 App 记录…");
+    let refresh = false, partial = false;
+    try {
+      const data = await request(body, REPAIR_API);
+      if (id !== seq || !visible()) return;
+      if (data.repaired !== true || data.scope !== "APP_METADATA") throw { code: "REPAIR_UNAVAILABLE" };
+      refresh = true;
+    } catch (error) {
+      if (id !== seq || !visible()) return;
+      partial = error.code === "REPAIR_PARTIAL"; refresh = partial;
+      $("bc-repair-status").textContent = ["BUSY", "REPAIR_STALE", "REPAIR_NOT_NEEDED", "invalid_input"].includes(error.code) ? repairMessage(error.code)
+        : t("无法确认本次修复是否已写入，请重新检查本地状态；不会自动重试，请勿反复覆盖。");
+      $("bc-repair-steps").open = true;
+    } finally { body.ticket = ""; if (id === seq) setBusy(false); }
+    if (refresh && id === seq && visible()) {
+      if (typeof options.saved === "function") options.saved();
+      const page = seq + 1;
+      await checkStatus();
+      if (!visible() || seq !== page) return;
+      if (partial) {
+        $("bc-repair").classList.remove("hidden"); $("bc-repair-steps").open = true;
+        $("bc-repair-status").textContent = t("App 接口已写入，但映射收尾未完成；已尝试只读重查，请核对当前状态。不要反复执行修复，当前会话未切换。");
+      } else if (snapshot?.installed && snapshot.configured) {
+        const message = t("App 记录已同步；已重新读取本地状态，当前会话未切换。");
+        if (snapshot.local.state === "ready") notice(message);
+        else $("bc-repair-status").textContent = message;
+      }
+    }
+  }
+  function overview(pack, config, service, ready = false) {
+    $("bc-package-state").textContent = pack; $("bc-config-state").textContent = config; $("bc-service-state").textContent = service;
+    $("bc-service-state").className = ready ? "bc-ready" : "";
+  }
+  function overviewSnapshot() {
+    const ready = snapshot.local.state === "ready";
+    overview(t("可用"), snapshot.check !== "UNKNOWN" ? t("未通过") : snapshot.configured ? snapshot.providerId ? t("已核对") : t("待同步接口") : t("尚未配置"),
+      ready ? t("已就绪") : snapshot.configured ? t("不可用于新会话") : t("尚未检查"), ready);
+  }
+  function invalidateReadiness(code = "") {
+    const fault = LOCAL_ERRORS.includes(code) ? code : snapshot?.localError || "";
+    if (snapshot) snapshot = { ...snapshot, localError: fault, local: { state: "error", code: fault } };
+    overview(snapshot?.installed ? t("可用") : t("未确认"), t("未确认"), fault ? t("不可用于新会话") : t("未确认"));
+    $("bc-use").disabled = true;
+  }
+  function issueDetail(check) {
+    if (check === "APP_PROVIDER") return t("App 接口的地址、认证设置或本地连接记录与桥的映射不一致；尚不能确定是哪一项被更改。");
+    if (check === "MODEL_LIST") return t("App 保存的模型清单未通过格式或一致性检查；这不表示存在另一套桥。");
+    if (check === "APP_MAPPING") return t("App 的桥接口映射记录未通过格式或读取检查；这不表示运行目录需要删除。");
+    if (check === "CONNECTION") return t("服务注册与本地连接记录未通过一致性检查；当前不能确认可用接口。");
+    if (check === "OWNERSHIP") return t("未能确认默认运行目录属于图形界面管理的桥；可能是旧记录、目录或归属标记需要核对。");
+    if (check === "COMPONENT") return t("组件拒绝了运行副本的安全检查，但未返回具体失败项；不能据此认定有第二套桥。");
+    return t("当前版本只返回统一冲突码，无法确定失败项；可能涉及运行文件、安装归属或 App 接口记录。");
+  }
+  function showIssue(error, fromSave = false) {
+    const conflict = error.code === "RUNTIME_CONFLICT", check = conflict ? checkCode(error.check) : "UNKNOWN";
+    const absent = !conflict && (error.status === 404 || error.code === "not_installed");
+    const title = conflict ? t("配置检查未通过") : absent ? t("组件入口暂不可用") : error.code === "BUSY" ? t("本地桥正在忙碌") : t("暂时无法读取桥状态");
+    const detail = conflict ? issueDetail(check) : readError(error.status, error.code);
+    $("bc-issue").classList.remove("hidden"); $("bc-backup-help").classList.toggle("hidden", !conflict);
+    clearRepair(); $("bc-repair").classList.remove("hidden");
+    $("bc-backup-help").open = false;
+    $("bc-issue-title").textContent = title; $("bc-issue-detail").textContent = detail;
+    $("bc-issue-hint").textContent = fromSave ? error.saved
+      ? t("桥配置已写入，但后续步骤未完成；当前会话保持不变，请先核对，不要反复覆盖。")
+      : t("本次保存未报告成功；当前会话保持不变，请先核对检查说明。")
+      : t("本次只读检查未修改配置；先核对 App 和组件版本，不要盲删、卸载或重置恢复次数。");
+    // 诊断只接受本页白名单；不渲染服务端 message、私有路径、指纹或未知错误文本。
+    $("bc-issue-code").textContent = conflict ? "RUNTIME_CONFLICT · " + check : "";
+    const installed = !absent && (fromSave && snapshot?.installed || check !== "UNKNOWN");
+    overview(installed ? t("可用") : absent ? t("暂不可用") : t("未确认"), conflict ? t("未通过") : t("尚未检查"), t("未确认"));
+    notice(""); $("bc-issue-title").focus({ preventScroll: true });
+  }
   function errorsClear() {
-    notice("");
+    notice(""); $("bc-issue").classList.add("hidden");
+    clearRepair(); $("bc-repair").classList.add("hidden");
     for (const name of ["endpoint", "key", "model", "ctx"]) { $("bc-" + name).removeAttribute("aria-invalid"); $("bc-" + name + "-error").classList.add("hidden"); }
   }
   function error(name, text) {
@@ -419,11 +551,11 @@
     panel.querySelectorAll("input, button").forEach((el) => { el.disabled = value; });
     $("bc-save").textContent = value && saving ? t("正在准备本地桥…") : t("保存配置");
     updateSaveNote(value && saving); updateModelsControls();
-    if (!value && !$("bc-saved").classList.contains("hidden")) $("bc-use").disabled = !snapshot || snapshot.local.state !== "ready" || !snapshot.providerId || typeof options.useNew !== "function";
+    if (!value) $("bc-use").disabled = $("bc-saved").classList.contains("hidden") || !snapshot || snapshot.local.state !== "ready" || !snapshot.providerId || typeof options.useNew !== "function";
   }
   function showForm() {
     cancelModels(true); consentOrigin = ""; $("bc-model-consent").checked = false;
-    errorsClear(); hideKey(true);
+    errorsClear(); hideKey(true); overviewSnapshot();
     $("bc-form").classList.remove("hidden"); $("bc-saved").classList.add("hidden"); $("bc-loading").classList.add("hidden");
     // Persisted windows are explicit configuration, not disposable discovery metadata.
     selectedModels = snapshot ? snapshot.models.map((m) => ({ ...m, manual: true })) : [];
@@ -437,7 +569,7 @@
   }
   function showSaved() {
     cancelModels(); modelItems = []; renderModels(); consentOrigin = ""; $("bc-model-consent").checked = false;
-    errorsClear(); hideKey(true);
+    errorsClear(); hideKey(true); overviewSnapshot();
     $("bc-form").classList.add("hidden"); $("bc-loading").classList.add("hidden"); $("bc-saved").classList.remove("hidden");
     $("bc-saved-endpoint").textContent = snapshot.endpoint; $("bc-saved-model").textContent = snapshot.model;
     $("bc-saved-ctx").textContent = snapshot.contextWindow.toLocaleString(); renderSelected(true);
@@ -448,34 +580,46 @@
       : snapshot.localError === "COMPONENT_DISABLED" ? t("本地桥已停用") : t("配置已保存，但本地桥尚未就绪");
     $("bc-local-state").className = ready ? "bc-ready" : "bc-pending";
     $("bc-use").disabled = !ready || !snapshot.providerId || typeof options.useNew !== "function";
-    if (!ready) notice(localMessage(snapshot.localError));
+    if (!ready) {
+      notice(snapshot.check !== "UNKNOWN" && ["", "LOCAL_START_FAILED"].includes(snapshot.localError)
+        ? issueDetail(snapshot.check) : localMessage(snapshot.localError));
+      $("bc-repair").classList.remove("hidden");
+    }
     updateModelsControls();
   }
-  async function open(opts = {}) {
+  async function checkStatus() {
     if (busy) return;
-    if (!panel) createPanel();
     cancelModels(true); currentOrigin = consentOrigin = ""; $("bc-model-consent").checked = false;
-    options = opts; snapshot = null; errorsClear(); hideKey(true);
-    const body = $("page-body"); returnTop = body.scrollTop;
-    $("tab-ext").classList.add("bridge-config-open"); body.scrollTop = 0;
+    snapshot = null; selectedModels = []; defaultModel = editingModel = ""; ctxManual = false;
+    errorsClear(); hideKey(true); $("bc-form").reset();
+    $("bc-saved-endpoint").textContent = $("bc-saved-model").textContent = $("bc-saved-ctx").textContent = "";
+    $("bc-selected").textContent = $("bc-saved-models").textContent = "";
     $("bc-form").classList.add("hidden"); $("bc-saved").classList.add("hidden"); $("bc-loading").classList.remove("hidden");
-    $("bridge-config-title").focus({ preventScroll: true });
+    overview(t("检查中…"), t("检查中…"), t("尚未检查"));
     setBusy(true); const id = ++seq;
     try {
       const data = await request(); if (id !== seq || !visible()) return;
       snapshot = safeSnapshot(data);
-      if (!snapshot.installed) { $("bc-loading").classList.add("hidden"); notice(t("请先安装或更新 OpenAI API 本地协议桥组件。")); }
+      if (!snapshot.installed) { $("bc-loading").classList.add("hidden"); showIssue({ code: "not_installed" }); }
       else if (snapshot.configured && snapshot.hasKey) showSaved();
       else showForm();
     } catch (e) {
       if (id !== seq || !visible()) return;
-      $("bc-loading").classList.add("hidden");
-      notice(readError(e.status, e.code));
+      $("bc-loading").classList.add("hidden"); showIssue(e);
     } finally { if (id === seq) setBusy(false); }
+  }
+  async function open(opts = {}) {
+    if (busy) return;
+    if (!panel) createPanel();
+    options = opts;
+    const body = $("page-body"); returnTop = body.scrollTop;
+    $("tab-ext").classList.add("bridge-config-open"); body.scrollTop = 0;
+    $("bridge-config-title").focus({ preventScroll: true });
+    await checkStatus();
   }
   function close(force = false) {
     if (!panel || !$("tab-ext").classList.contains("bridge-config-open") || busy && !force) return false;
-    ++seq; cancelModels(true); currentOrigin = consentOrigin = ""; $("bc-model-consent").checked = false;
+    ++seq; clearRepair(); cancelModels(true); currentOrigin = consentOrigin = ""; $("bc-model-consent").checked = false;
     busy = false; hideKey(true); snapshot = null; selectedModels = []; defaultModel = editingModel = ""; ctxManual = false;
     $("bc-selected").textContent = $("bc-saved-models").textContent = "";
     $("tab-ext").classList.remove("bridge-config-open");
@@ -507,23 +651,24 @@
     const body = { endpoint: $("bc-endpoint").value.trim(), model: defaultModel, consent: true,
       models: selectedModels.map(({ id, contextWindow }) => ({ id, contextWindow })) };
     if ($("bc-key").value.trim()) body.apiKey = $("bc-key").value.trim();
-    const id = ++seq; setBusy(true, true);
+    const id = ++seq; invalidateReadiness(); setBusy(true, true);
     try {
       const data = await request(body); if (id !== seq || !visible()) return;
       snapshot = safeSnapshot(data);
       if (typeof options.saved === "function") options.saved();   // 窗口 / 模型可能变了：设置页滑块、顶栏刻度跟着重取（#76）
-      if (!snapshot.configured || !snapshot.hasKey) { notice(t("配置未完成，请检查字段后重试。")); return; }
+      if (!snapshot.configured || !snapshot.hasKey) { invalidateReadiness(); notice(t("配置未完成，请检查字段后重试。")); return; }
       showSaved(); $("bc-saved-title").focus({ preventScroll: true });
       if (snapshot.local.state !== "ready") notice(localMessage(snapshot.localError));
     } catch (err) {
       if (id !== seq || !visible()) return;
+      invalidateReadiness(err.code);
       if (err.field === "endpoint") error("endpoint", t("API 地址未通过检查，请确认服务商提供的地址。"));
       else if (err.field === "apiKey") error("key", t("请重新填写 API Key；更换服务地址时不能沿用旧密钥。"));
       else if (err.field === "contextWindow") error("ctx", t("填 1024 到 16777216 之间的整数，也可以写 256k、1m；不知道就留空。"));
       else if (err.field === "model") error("model", t("请输入准确的模型名称，不要包含逗号或换行。"));
       if (err.saved && typeof options.saved === "function") options.saved();
-      if (["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(err.code)) notice(readError(err.status, err.code));
-      else if (err.saved || LOCAL_ERRORS.includes(err.code)) notice(localMessage(localCode(err.code)));
+      if (["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(err.code)) showIssue(err, true);
+      else if (err.saved || LOCAL_ERRORS.includes(err.code)) { notice(localMessage(localCode(err.code))); $("bc-repair").classList.remove("hidden"); }
       else notice(t("保存配置未完成；请检查本地状态后重试，当前会话保持不变。"));
     } finally { body.apiKey = ""; if (id === seq) setBusy(false); }
   }

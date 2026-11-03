@@ -76,7 +76,7 @@ function ui(initial = fresh()) {
     createElement: (tag) => { createdTags.push(String(tag).toUpperCase()); return new Node("", tag); }, querySelectorAll: () => [],
     addEventListener(type, fn) { (listeners.get("doc:" + type) || listeners.set("doc:" + type, []).get("doc:" + type)).push(fn); },
   };
-  let response = initial, nextGet = null, nextPost = null, nextModels = null, backCount = 0, acceptConsent = true;
+  let response = initial, nextGet = null, nextPost = null, nextModels = null, nextRepair = null, backCount = 0, acceptConsent = true;
   const sandbox = {
     URL, AbortController, document, MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} },
     setTimeout(fn, delay = 0) { const id = ++nextTimer; timers.set(id, { fn, at: now + Number(delay) }); return id; },
@@ -91,7 +91,7 @@ function ui(initial = fresh()) {
       const call = { url, method: opts.method, body, signal: opts.signal };
       calls.push(call);
       guard(() => {
-        assert.ok(["/api/components/openai-bridge/config", "/api/components/openai-bridge/models"].includes(url), "only the real same-origin bridge configuration/models routes are allowed; no provider, inference or session APIs");
+        assert.ok(["/api/components/openai-bridge/config", "/api/components/openai-bridge/models", "/api/components/openai-bridge/repair"].includes(url), "only fixed same-origin bridge routes are allowed; no provider, inference or session APIs");
         assert.equal(opts.cache, "no-store"); assert.equal(opts.credentials, "same-origin");
         if (url.endsWith("/models")) {
           assert.equal(opts.method, "POST"); assert.equal(body.consent, true, "a models request requires explicit current consent");
@@ -100,6 +100,10 @@ function ui(initial = fresh()) {
           assert.equal(opts.headers["Content-Type"], "application/json");
         }
       });
+      if (url.endsWith("/repair")) {
+        guard(() => { assert.equal(opts.method, "POST"); assert.equal(body.consent, true); assert.deepEqual(Object.keys(body).sort(), body.action === "inspect" ? ["action", "consent"] : ["action", "consent", "ticket"]); });
+        return nextRepair ? nextRepair(call) : reply({ ok: false, code: "REPAIR_UNAVAILABLE" }, 409);
+      }
       if (url.endsWith("/models")) return nextModels ? nextModels(call) : reply({ ok: true, models: [{ id: "synthetic-model" }], truncated: false });
       if (opts.method === "GET" && nextGet) return nextGet();
       if (opts.method === "POST" && nextPost) return nextPost();
@@ -113,7 +117,8 @@ function ui(initial = fresh()) {
     consent(value) { acceptConsent = value; },
     async open(opts = {}) { await sandbox.CCBridgeConfig.open({ anchor: get("anchor"), ...opts }); verify(); },
     close() { const closed = sandbox.CCBridgeConfig.close(); verify(); return closed; },
-    response(value) { response = value; }, read(fn) { nextGet = fn; }, post(fn) { nextPost = fn; }, models(fn) { nextModels = fn; },
+    response(value) { response = value; }, read(fn) { nextGet = fn; }, post(fn) { nextPost = fn; }, models(fn) { nextModels = fn; }, repair(fn) { nextRepair = fn; },
+    repairCalls: () => calls.filter(call => call.url.endsWith("/repair")),
     modelCalls: () => calls.filter((call) => call.url.endsWith("/models")),
     configPosts: () => calls.filter((call) => call.url.endsWith("/config") && call.method === "POST"),
     checkbox: () => [...nodes.values()].find((el) => el.tagName === "INPUT" && el.type === "checkbox"),
@@ -336,6 +341,25 @@ for (const code of ["RECOVERY_EXHAUSTED", "PATCH_VERIFICATION_FAILED", "COMPONEN
   assert.equal(u.calls.some((c) => /reset|start/.test(c.url)), false);
 });
 
+for (const code of ["RECOVERY_EXHAUSTED", "PATCH_VERIFICATION_FAILED", "COMPONENT_DISABLED", "COMPONENT_UNAVAILABLE", "UPDATE_REQUIRED", "LOCAL_START_FAILED", "provider_save_failed", "unknown-private-code"]) test(`bridge failed save ${code}: a healthy GET never leaves stale ready status after POST failure`, async () => {
+  const u = ui(saved()); let used = 0;
+  await u.open({ useNew: async () => { used++; } });
+  assert.equal(u.get("bc-service-state").textContent, "已就绪");
+  await u.click("edit"); u.input("key", "synthetic-replacement-key");
+  u.post(() => reply({ ok: false, saved: code === "provider_save_failed", localReady: false, code, message: "untrusted-private-save-detail" }, 400));
+  await u.submit();
+  assert.equal(u.get("bc-config-state").textContent, "未确认", "a failed save cannot keep the old successful check");
+  assert.equal(u.get("bc-service-state").textContent, ["provider_save_failed", "unknown-private-code"].includes(code) ? "未确认" : "不可用于新会话");
+  assert.equal(u.get("bc-service-state").classList.contains("bc-ready"), false);
+  assert.equal(u.get("bc-use").disabled, true);
+  assert.equal(u.get("bc-key").value, "synthetic-replacement-key");
+  assert.equal(u.get("bc-form").classList.contains("hidden"), false);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("untrusted-private"), false);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("unknown-private-code"), false);
+  await u.click("use"); assert.equal(used, 0);
+  assert.equal(u.calls.some((c) => /reset|start/.test(c.url)), false);
+});
+
 test("bridge local fault: saved error response uses fixed explanation, not a misleading configuration retry", async () => {
   const u = ui(); await u.open(); fill(u);
   u.post(() => reply({ ok: false, saved: true, code: "RECOVERY_EXHAUSTED", message: "untrusted private response" }, 400));
@@ -350,7 +374,9 @@ test("bridge form: absent or malformed component status never enables configurat
     const u = ui(data); await u.open();
     if (!data.installed) {
       assert.equal(u.get("bc-form").classList.contains("hidden"), true);
-      assert.match(u.get("bc-notice").textContent, /先安装或更新/);
+      assert.match(u.get("bc-issue-detail").textContent, /先安装或更新/);
+      assert.equal(u.get("bc-issue").classList.contains("hidden"), false);
+      assert.equal(u.get("bc-package-state").textContent, "暂不可用");
     }
     assert.equal(u.calls.length, 1);
   }
@@ -362,8 +388,10 @@ test("bridge form: config GET 409 BUSY reports retry instead of installation", a
   const u = ui();
   u.read(() => reply({ ok: false, code: "BUSY", message: "synthetic-private-server-detail" }, 409));
   await u.open(); await u.advance(1000);
-  assert.equal(u.get("bc-notice").textContent, "本地桥正在使用或卸载中，请稍后重试；当前会话保持不变。");
-  assert.equal(u.get("bc-notice").classList.contains("hidden"), false);
+  assert.equal(u.get("bc-issue-detail").textContent, "本地桥正在使用或卸载中，请稍后重试；当前会话保持不变。");
+  assert.equal(u.get("bc-issue-title").textContent, "本地桥正在忙碌");
+  assert.equal(u.get("bc-issue").classList.contains("hidden"), false);
+  assert.equal(u.get("bc-notice").classList.contains("hidden"), true);
   assert.equal(u.get("bc-loading").classList.contains("hidden"), true);
   assert.equal(u.get("bc-form").classList.contains("hidden"), true);
   assert.equal(u.get("bc-saved").classList.contains("hidden"), true);
@@ -373,12 +401,19 @@ test("bridge form: config GET 409 BUSY reports retry instead of installation", a
   assert.equal(u.close(), true, "a failed read releases busy state so the user can leave");
 });
 
-test("bridge form: config GET 409 RUNTIME_CONFLICT preserves the existing-install warning instead of installation", async () => {
+test("bridge form: legacy conflict shows an honest unknown check card, not a backup or duplicate-install diagnosis", async () => {
   const u = ui();
   u.read(() => reply({ ok: false, code: "RUNTIME_CONFLICT", message: "synthetic-private-server-detail" }, 409));
   await u.open(); await u.advance(1000);
-  assert.equal(u.get("bc-notice").textContent, "已有桥安装不能自动迁移，请先备份并由你处理原安装；未覆盖或卸载。");
-  assert.equal(u.get("bc-notice").classList.contains("hidden"), false);
+  assert.equal(u.get("bc-issue-title").textContent, "配置检查未通过");
+  assert.match(u.get("bc-issue-detail").textContent, /只返回统一冲突码.*无法确定失败项/);
+  assert.equal(u.get("bc-issue-code").textContent, "RUNTIME_CONFLICT · UNKNOWN");
+  assert.equal(u.get("bc-package-state").textContent, "未确认", "old errors cannot prove a usable component entry");
+  assert.equal(u.get("bc-config-state").textContent, "未通过");
+  assert.equal(u.get("bc-service-state").textContent, "未确认", "a conflict is not proof the service has stopped");
+  assert.equal(u.get("bc-backup-help").open, false);
+  assert.equal(u.get("bc-notice").classList.contains("hidden"), true);
+  assert.equal(u.get("bc-issue").classList.contains("hidden"), false);
   assert.equal(u.get("bc-loading").classList.contains("hidden"), true);
   assert.equal(u.get("bc-form").classList.contains("hidden"), true);
   assert.equal(u.get("bc-saved").classList.contains("hidden"), true);
@@ -396,7 +431,8 @@ test("bridge form: config GET 404 or not_installed alone prompts installation; u
   ]) {
     const u = ui(); u.read(() => reply({ ok: false, ...(code ? { code } : {}), message: "synthetic-private-server-detail" }, status));
     await u.open(); await u.advance(1000);
-    assert.equal(u.get("bc-notice").textContent, expected, `${status}/${code || "no-code"}`);
+    assert.equal(u.get("bc-issue-detail").textContent, expected, `${status}/${code || "no-code"}`);
+    assert.equal(u.get("bc-issue").classList.contains("hidden"), false);
     assert.equal(u.get("bc-form").classList.contains("hidden"), true);
     assert.equal(u.get("bc-saved").classList.contains("hidden"), true);
     assert.equal(u.get("bc-loading").classList.contains("hidden"), true);
@@ -420,7 +456,7 @@ test("bridge form: partial save failure reports saved versus readiness without l
 });
 
 for (const [code, expected] of [
-  ["RUNTIME_CONFLICT", "已有桥安装不能自动迁移，请先备份并由你处理原安装；未覆盖或卸载。"],
+  ["RUNTIME_CONFLICT", "当前版本只返回统一冲突码，无法确定失败项；可能涉及运行文件、安装归属或 App 接口记录。"],
   ["BUSY", "本地桥正在使用或卸载中，请稍后重试；当前会话保持不变。"],
   ["not_installed", "请先安装或更新 OpenAI API 本地协议桥组件。"],
   ["unknown-private-code", "保存配置未完成；请检查本地状态后重试，当前会话保持不变。"],
@@ -428,7 +464,8 @@ for (const [code, expected] of [
   const u = ui(); await u.open(); fill(u);
   u.post(() => reply({ ok: false, saved: false, code, message: "untrusted-private-save-detail" }, 409));
   await u.submit();
-  assert.equal(u.get("bc-notice").textContent, expected);
+  assert.equal(u.get(code === "unknown-private-code" ? "bc-notice" : "bc-issue-detail").textContent, expected);
+  if (code !== "unknown-private-code") assert.equal(u.get("bc-issue").classList.contains("hidden"), false);
   assert.equal(u.get("bc-form").classList.contains("hidden"), false);
   assert.equal(u.get("bc-saved").classList.contains("hidden"), true);
   assert.equal(u.get("bc-key").value, "synthetic-test-key");
@@ -438,16 +475,205 @@ for (const [code, expected] of [
 });
 
 test("bridge form: an ownership conflict after partial save keeps the same GET explanation", async () => {
-  const expected = "已有桥安装不能自动迁移，请先备份并由你处理原安装；未覆盖或卸载。";
+  const expected = "当前版本只返回统一冲突码，无法确定失败项；可能涉及运行文件、安装归属或 App 接口记录。";
   const u = ui(); await u.open(); fill(u);
   u.post(() => reply({ ok: false, saved: true, localReady: false, code: "RUNTIME_CONFLICT", message: "untrusted-private-save-detail" }, 409));
   await u.submit();
-  assert.equal(u.get("bc-notice").textContent, expected);
+  assert.equal(u.get("bc-issue-detail").textContent, expected);
+  assert.match(u.get("bc-issue-hint").textContent, /已写入.*后续步骤未完成/);
   assert.equal(u.get("bc-key").value, "synthetic-test-key");
   u.close();
   u.read(() => reply({ ok: false, code: "RUNTIME_CONFLICT", message: "untrusted-private-get-detail" }, 409));
   await u.open();
-  assert.equal(u.get("bc-notice").textContent, expected);
+  assert.equal(u.get("bc-issue-detail").textContent, expected);
+  assert.match(u.get("bc-issue-hint").textContent, /只读检查未修改/);
+});
+
+for (const [check, detail] of [
+  ["APP_PROVIDER", /App 接口的地址、认证设置或本地连接记录/],
+  ["APP_MAPPING", /接口映射记录未通过/],
+  ["MODEL_LIST", /模型清单未通过/],
+  ["OWNERSHIP", /未能确认默认运行目录/],
+  ["CONNECTION", /服务注册与本地连接记录/],
+  ["COMPONENT", /未返回具体失败项/],
+]) test(`bridge checks ${check}: static stage explains the failure without secrets or a guessed cause`, async () => {
+  const u = ui();
+  u.read(() => reply({ ok: false, code: "RUNTIME_CONFLICT", check, message: "untrusted-private-path-or-key", detail: "do-not-render" }, 409));
+  await u.open();
+  assert.match(u.get("bc-issue-detail").textContent, detail);
+  assert.equal(u.get("bc-issue-code").textContent, "RUNTIME_CONFLICT · " + check);
+  assert.equal(u.get("bc-package-state").textContent, "可用");
+  assert.equal(u.get("bc-service-state").textContent, "未确认");
+  assert.equal(u.get("bc-issue").classList.contains("hidden"), false);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("untrusted-private"), false);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("do-not-render"), false);
+  assert.equal(u.configPosts().length, 0); assert.equal(u.modelCalls().length, 0);
+});
+
+test("bridge checks: unknown diagnostic text cannot become a check name or a fake installed state", async () => {
+  const u = ui(); u.read(() => reply({ ok: false, code: "RUNTIME_CONFLICT", check: "private-credential-or-path", message: "private-server-text" }, 409));
+  await u.open();
+  assert.equal(u.get("bc-issue-code").textContent, "RUNTIME_CONFLICT · UNKNOWN");
+  assert.equal(u.get("bc-package-state").textContent, "未确认");
+  assert.equal(u.get("bridge-config-panel").textContent.includes("private-"), false);
+});
+
+test("bridge checks: a readable saved model mismatch still marks the configuration check as failed", async () => {
+  const u = ui(saved({ providerId: "", check: "MODEL_LIST", localError: "LOCAL_START_FAILED", local: { state: "ready" } }));
+  await u.open();
+  assert.equal(u.get("bc-config-state").textContent, "未通过");
+  assert.match(u.get("bc-notice").textContent, /App 保存的模型清单未通过/);
+  assert.equal(u.get("bc-use").disabled, true);
+});
+
+test("bridge checks: App metadata details never mask an authoritative recovery fault", async () => {
+  const u = ui(saved({ localError: "RECOVERY_EXHAUSTED", check: "MODEL_LIST", local: { state: "ready" } }));
+  await u.open();
+  assert.match(u.get("bc-notice").textContent, /自动恢复已停止.*修改配置不会解除/);
+  assert.equal(u.get("bc-service-state").textContent, "不可用于新会话");
+  assert.equal(u.get("bc-use").disabled, true);
+});
+
+test("bridge checks: explicit recheck is one read-only GET, then clears the issue without saves or model calls", async () => {
+  const u = ui(), pending = deferred();
+  u.read(() => reply({ ok: false, code: "RUNTIME_CONFLICT", check: "APP_PROVIDER" }, 409));
+  await u.open();
+  u.read(() => pending.promise);
+  await u.click("check-again");
+  assert.equal(u.get("bc-check-again").disabled, true);
+  await u.click("check-again");
+  assert.equal(u.calls.length, 2);
+  pending.resolve(reply(saved())); await u.flush();
+  assert.equal(u.get("bc-issue").classList.contains("hidden"), true);
+  assert.equal(u.get("bc-saved").classList.contains("hidden"), false);
+  assert.equal(u.get("bc-package-state").textContent, "可用");
+  assert.equal(u.get("bc-config-state").textContent, "已核对");
+  assert.equal(u.get("bc-service-state").textContent, "已就绪");
+  assert.equal(u.configPosts().length, 0); assert.equal(u.modelCalls().length, 0);
+  assert.equal(u.confirms.length, 0);
+});
+
+test("bridge checks: a declined recheck after a save error preserves draft input and sends no request", async () => {
+  const u = ui(); await u.open(); fill(u);
+  u.post(() => reply({ ok: false, code: "RUNTIME_CONFLICT", check: "APP_PROVIDER" }, 409));
+  await u.submit();
+  assert.equal(u.get("bc-key").value, "synthetic-test-key");
+  const before = u.calls.length; u.consent(false); await u.click("check-again");
+  assert.equal(u.calls.length, before); assert.equal(u.get("bc-key").value, "synthetic-test-key");
+  u.consent(true); u.read(() => reply(saved())); await u.click("check-again"); await u.flush();
+  assert.equal(u.calls.length, before + 1); assert.equal(u.calls.at(-1).method, "GET");
+  assert.equal(u.get("bc-key").value, ""); assert.equal(u.get("bc-issue").classList.contains("hidden"), true);
+});
+
+test("bridge checks: leaving during recheck ignores late responses and never reopens the panel", async () => {
+  const u = ui(), pending = deferred();
+  u.read(() => reply({ ok: false, code: "RUNTIME_CONFLICT" }, 409)); await u.open();
+  u.read(() => pending.promise); await u.click("check-again");
+  u.leavePage(); pending.resolve(reply(saved())); await u.flush();
+  assert.equal(u.get("tab-ext").classList.contains("bridge-config-open"), false);
+  assert.equal(u.get("bc-saved").classList.contains("hidden"), true);
+  assert.equal(u.get("bc-key").value, "");
+});
+
+const syntheticRepairPlan = () => ({ ok: true, repair: { available: true, action: "SYNC_APP_METADATA", ticket: "f".repeat(48), expiresIn: 60, changes: ["MODELS"], models: [{ id: "synthetic-model", contextWindow: 1048576 }] } });
+async function conflictUi() {
+  const u = ui(); u.read(() => reply({ ok: false, code: "RUNTIME_CONFLICT", check: "MODEL_LIST" }, 409)); await u.open(); return u;
+}
+test("bridge repair: opening and rechecking never inspects or applies automatically; explicit inspect only offers a plan", async () => {
+  const u = await conflictUi(); assert.equal(u.repairCalls().length, 0);
+  assert.equal(u.get("bc-repair").classList.contains("hidden"), false);
+  u.repair(() => reply(syntheticRepairPlan())); await u.click("repair-inspect");
+  assert.equal(u.repairCalls().length, 1); assert.equal(u.repairCalls()[0].body.action, "inspect");
+  assert.equal(u.get("bc-repair-plan").classList.contains("hidden"), false);
+  assert.match(u.get("bc-repair-status").textContent, /尚未修改任何配置/);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("f".repeat(48)), false, "ticket is never rendered");
+  assert.equal(u.configPosts().length, 0); assert.equal(u.modelCalls().length, 0); assert.equal(u.confirms.length, 0);
+});
+test("bridge repair: cancel or decline does not apply, and fresh confirmation consumes only the planned ticket then reads status", async () => {
+  const u = await conflictUi();
+  u.repair(call => reply(call.body.action === "inspect" ? syntheticRepairPlan() : { ok: true, repaired: true, scope: "APP_METADATA" }));
+  await u.click("repair-inspect"); u.consent(false); await u.click("repair-apply");
+  assert.equal(u.repairCalls().length, 1); assert.equal(u.get("bc-repair-plan").classList.contains("hidden"), false);
+  await u.click("repair-cancel"); assert.equal(u.get("bc-repair-plan").classList.contains("hidden"), true);
+  await u.click("repair-apply"); assert.equal(u.repairCalls().length, 1);
+  await u.click("repair-inspect"); u.consent(true); u.read(() => reply(saved()));
+  await u.click("repair-apply"); await u.flush();
+  assert.equal(u.repairCalls().length, 3); assert.deepEqual(u.repairCalls().at(-1).body, { action: "apply", consent: true, ticket: "f".repeat(48) });
+  assert.equal(u.get("bc-saved").classList.contains("hidden"), false);
+  assert.equal(u.get("bc-notice").classList.contains("hidden"), false);
+  assert.match(u.get("bc-notice").textContent, /已同步/);
+  assert.equal(u.configPosts().length, 0); assert.equal(u.modelCalls().length, 0);
+});
+test("bridge repair: successful apply followed by a failed status read keeps the diagnosis visible without claiming readiness", async () => {
+  const u = await conflictUi();
+  u.repair(call => reply(call.body.action === "inspect" ? syntheticRepairPlan() : { ok: true, repaired: true, scope: "APP_METADATA" }));
+  await u.click("repair-inspect");
+  u.read(() => reply({ ok: false, code: "RUNTIME_CONFLICT", check: "APP_PROVIDER" }, 409));
+  await u.click("repair-apply"); await u.flush();
+  assert.equal(u.get("bc-issue").classList.contains("hidden"), false);
+  assert.equal(u.get("bc-use").disabled, true);
+  assert.equal(u.get("bc-service-state").textContent, "未确认");
+  assert.equal(u.get("bc-repair-status").textContent.includes("已重新读取本地状态"), false);
+});
+
+test("bridge repair: expired plan, private diagnostic and malformed plan never expose an apply action", async () => {
+  const u = await conflictUi(); u.repair(() => reply(syntheticRepairPlan())); await u.click("repair-inspect");
+  await u.advance(60001); await u.click("repair-apply"); assert.equal(u.repairCalls().length, 1);
+  assert.match(u.get("bc-repair-status").textContent, /方案已失效/);
+  u.repair(() => reply({ ok: true, repair: { ...syntheticRepairPlan().repair, changes: ["untrusted-private-operation"] } }));
+  await u.click("repair-inspect"); assert.equal(u.get("bc-repair-plan").classList.contains("hidden"), true);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("untrusted-private"), false);
+  assert.equal(u.get("bc-repair-steps").open, true);
+});
+test("bridge repair: delayed inspect is single-shot and leaving drops the late plan", async () => {
+  const u = await conflictUi(), pending = deferred(); u.repair(() => pending.promise);
+  await u.click("repair-inspect"); await u.click("repair-inspect"); assert.equal(u.repairCalls().length, 1);
+  u.leavePage(); pending.resolve(reply(syntheticRepairPlan())); await u.flush();
+  assert.equal(u.get("tab-ext").classList.contains("bridge-config-open"), false); assert.equal(u.get("bc-repair-plan").classList.contains("hidden"), true);
+});
+test("bridge repair: partial commit rechecks once and never claims no configuration was changed", async () => {
+  const u = await conflictUi();
+  u.repair(call => reply(call.body.action === "inspect" ? syntheticRepairPlan() : { ok: false, code: "REPAIR_PARTIAL", committed: true, scope: "APP_METADATA", message: "private-partial-state" }, call.body.action === "inspect" ? 200 : 409));
+  await u.click("repair-inspect"); u.read(() => reply(saved()));
+  const reads = u.calls.filter(call => call.method === "GET").length;
+  await u.click("repair-apply"); await u.flush();
+  assert.equal(u.calls.filter(call => call.method === "GET").length, reads + 1);
+  assert.equal(u.get("bc-repair").classList.contains("hidden"), false); assert.equal(u.get("bc-repair-steps").open, true);
+  assert.match(u.get("bc-repair-status").textContent, /已写入.*收尾未完成/);
+  assert.equal(u.get("bc-repair-status").textContent.includes("未执行"), false);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("private-partial-state"), false);
+  assert.equal(u.repairCalls().length, 2); assert.equal(u.configPosts().length, 0);
+});
+test("bridge repair: partial commit and a failed recheck preserve both partial-write warning and current diagnosis", async () => {
+  const u = await conflictUi();
+  u.repair(call => reply(call.body.action === "inspect" ? syntheticRepairPlan() : { ok: false, code: "REPAIR_PARTIAL" }, call.body.action === "inspect" ? 200 : 409));
+  await u.click("repair-inspect");
+  u.read(() => reply({ ok: false, code: "RUNTIME_CONFLICT", check: "APP_PROVIDER", message: "private-after-partial" }, 409));
+  const reads = u.calls.filter(call => call.method === "GET").length;
+  await u.click("repair-apply"); await u.flush();
+  assert.equal(u.calls.filter(call => call.method === "GET").length, reads + 1);
+  assert.equal(u.get("bc-issue").classList.contains("hidden"), false); assert.equal(u.get("bc-use").disabled, true);
+  assert.equal(u.get("bc-service-state").textContent, "未确认"); assert.match(u.get("bc-repair-status").textContent, /已写入.*收尾未完成/);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("private-after-partial"), false);
+  assert.equal(u.repairCalls().length, 2);
+});
+
+test("bridge repair: lost apply response reports uncertainty without automatic retry or asserting no changes", async () => {
+  const u = await conflictUi();
+  u.repair(call => call.body.action === "inspect" ? reply(syntheticRepairPlan()) : Promise.reject(new Error("private transport error")));
+  await u.click("repair-inspect"); await u.click("repair-apply");
+  assert.match(u.get("bc-repair-status").textContent, /无法确认.*重新检查/);
+  assert.equal(u.get("bc-repair-status").textContent.includes("未执行"), false);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("private transport error"), false);
+  assert.equal(u.get("bc-use").disabled, true); assert.equal(u.repairCalls().length, 2);
+});
+
+test("bridge repair: stale apply stays blocked and renders fixed steps without retrying or echoing server text", async () => {
+  const u = await conflictUi(); u.repair(call => reply(call.body.action === "inspect" ? syntheticRepairPlan() : { ok: false, code: "REPAIR_STALE", message: "untrusted-private-state" }, call.body.action === "inspect" ? 200 : 409));
+  await u.click("repair-inspect"); await u.click("repair-apply");
+  assert.equal(u.repairCalls().length, 2); assert.equal(u.get("bc-repair-plan").classList.contains("hidden"), true);
+  assert.equal(u.get("bc-service-state").textContent, "未确认"); assert.equal(u.get("bc-use").disabled, true);
+  assert.match(u.get("bc-repair-status").textContent, /未执行本次修复/); assert.equal(u.get("bridge-config-panel").textContent.includes("untrusted-private-state"), false);
 });
 
 test("bridge form: in-flight save is single-shot; leaving clears key and late success cannot reopen the panel", async () => {

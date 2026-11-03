@@ -2637,3 +2637,63 @@
 2637	✓ Nonaktif, kembali mengonfirmasi tiap perintah
 2638	Tidak lagi mengonfirmasi tiap perintah istimewa (risiko ditanggung sendiri): setelah aktif, perintah istimewa langsung dijalankan dan tugas di latar belakang tidak lagi tertahan menunggu konfirmasi; perintah yang menyentuh cccodroid atau Shizuku / Sui sebisa mungkin dicegat dan ditanyakan, tetapi tidak semua bentuk penulisan bisa terdeteksi. Untuk mengizinkan satu sesi saja, centang "Izinkan semua perintah istimewa berikutnya di sesi ini" di dialog konfirmasi
 2639	Ini file biner; membukanya sebagai teks akan membuat aplikasi macet.
+2640	Konfigurasi jembatan tidak lolos pemeriksaan konsistensi, sehingga belum dapat dibaca atau disimpan dengan aman. Tinjau penjelasan pemeriksaan; jangan langsung menghapus direktori atau mencopot instalasi.
+2641	Status jembatan
+2642	Titik masuk komponen
+2643	Pemeriksaan konfigurasi
+2644	Layanan lokal
+2645	Perlu diperiksa
+2646	Periksa lagi
+2647	Hanya membaca status lokal. Tidak menyimpan, memulai, atau mengatur ulang apa pun, dan tidak terhubung ke layanan upstream.
+2648	Kapan perlu mencadangkan?
+2649	Anda hanya perlu mencadangkan konfigurasi jembatan saat secara tegas memutuskan untuk menangani atau memigrasikan instalasi lama nanti: URL API, kunci, model, dan catatan penyedia dalam aplikasi, bukan riwayat percakapan atau seluruh ponsel.
+2650	Halaman ini tidak membuat atau mengunggah cadangan. Jangan membagikan file konfigurasi yang berisi kunci ke grup percakapan atau memublikasikannya.
+2651	Memeriksa lagi akan menghapus input yang belum disimpan di halaman ini, tetapi tidak mengubah konfigurasi yang tersimpan. Lanjutkan?
+2652	Tersedia
+2653	Terverifikasi
+2654	Sinkronisasi penyedia tertunda
+2655	Belum dikonfigurasi
+2656	Siap
+2657	Tidak tersedia untuk sesi baru
+2658	Belum diperiksa
+2659	URL penyedia dalam aplikasi, pengaturan autentikasi, atau catatan koneksi lokal tidak sesuai dengan pemetaan jembatan. Belum dapat dipastikan bagian mana yang diubah.
+2660	Daftar model yang disimpan aplikasi tidak lolos pemeriksaan format atau konsistensi. Ini tidak berarti ada instalasi jembatan lain.
+2661	Catatan pemetaan penyedia jembatan dalam aplikasi tidak dapat dibaca atau tidak lolos validasi format. Ini tidak berarti direktori runtime perlu dihapus.
+2662	Registrasi layanan dan catatan koneksi lokal tidak lolos pemeriksaan konsistensi. Saat ini belum dapat dipastikan penyedia mana yang bisa digunakan.
+2663	Direktori runtime bawaan belum dapat dipastikan milik jembatan yang dikelola antarmuka grafis. Catatan lama, direktori, atau penanda kepemilikannya mungkin perlu diperiksa.
+2664	Komponen menolak salinan runtime saat pemeriksaan keamanan, tetapi tidak menjelaskan pemeriksaan mana yang gagal. Ini tidak membuktikan adanya instalasi jembatan kedua.
+2665	Versi ini hanya mengembalikan kode konflik umum, sehingga pemeriksaan yang gagal tidak dapat ditentukan. Masalahnya mungkin terkait file runtime, kepemilikan instalasi, atau catatan penyedia dalam aplikasi.
+2666	Pemeriksaan konfigurasi gagal
+2667	Titik masuk komponen sementara tidak tersedia
+2668	Jembatan lokal sedang sibuk
+2669	Status jembatan sementara tidak dapat dibaca
+2670	Konfigurasi jembatan telah ditulis, tetapi langkah berikutnya belum selesai. Sesi saat ini tidak berubah. Periksa statusnya terlebih dahulu, jangan terus menimpa konfigurasi.
+2671	Upaya penyimpanan ini tidak melaporkan keberhasilan. Sesi saat ini tidak berubah. Tinjau penjelasan pemeriksaan terlebih dahulu.
+2672	Pemeriksaan hanya-baca ini tidak mengubah konfigurasi. Periksa versi aplikasi dan komponen terlebih dahulu; jangan sembarangan menghapus file, mencopot instalasi, atau mengatur ulang jumlah upaya pemulihan.
+2673	Sementara tidak tersedia
+2674	Belum dikonfirmasi
+2675	Tidak lolos
+2676	Diagnostik dan perbaikan
+2677	Memeriksa status lokal terlebih dahulu, lalu menawarkan rencana untuk Anda konfirmasi. Pemeriksaan itu sendiri tidak mengubah konfigurasi, memulai, atau mengatur ulang jembatan.
+2678	Periksa opsi perbaikan
+2679	Hanya menyinkronkan daftar model, model bawaan, dan gaya autentikasi penyedia jembatan yang telah diverifikasi. Jendela konteks yang dapat diverifikasi dipertahankan; jika tidak ada, digunakan 200.000 token. URL dan kunci tidak berubah.
+2680	Tidak menghentikan atau memulai layanan, maupun mengubah kunci upstream, file runtime, penguncian pemulihan, atau sesi saat ini. Rencana hanya berlaku sebentar di halaman ini; periksa lagi jika status berubah.
+2681	Konfirmasi sinkronisasi catatan aplikasi
+2682	Batalkan rencana perbaikan
+2683	Bagaimana jika perbaikan otomatis tidak tersedia?
+2684	Pastikan aplikasi dan komponen menggunakan rilis resmi yang saling sesuai. Jika ada sesi yang sedang berjalan, tunggu hingga selesai sebelum memeriksa lagi.
+2685	Jika pemeriksaan URL, kunci, kepemilikan, atau file runtime belum memberikan kepastian, minta AI pada perangkat melakukan pemeriksaan lokal hanya-baca menggunakan kode diagnostik tetap. Jangan sembarangan menghapus atau menimpa file.
+2686	Habisnya jatah upaya pemulihan atau kegagalan verifikasi patch adalah jenis gangguan lain. Periksa diagnostik terlebih dahulu; sinkronisasi catatan aplikasi bukan cara untuk membuka penguncian pemulihan.
+2687	Saat melaporkan masalah, sertakan versi, kode diagnostik, dan apakah Anda melakukan pembaruan atau instalasi ulang. Jangan mengunggah kunci, konfigurasi lengkap, atau percakapan.
+2688	Jembatan lokal sedang digunakan atau ada operasi komponen yang berlangsung. Tidak ada perbaikan yang dilakukan. Tunggu hingga selesai lalu periksa lagi.
+2689	Rencana perbaikan sudah kedaluwarsa atau status terkait telah berubah. Tidak ada perbaikan yang dilakukan. Periksa kembali rencananya.
+2690	Tidak ditemukan perbedaan catatan aplikasi yang perlu disinkronkan. Jika masih tidak tersedia, ikuti petunjuk pemeriksaan.
+2691	Status saat ini tidak mendukung sinkronisasi otomatis, sehingga tidak ada perbaikan yang dilakukan. Buka langkah-langkah di bawah; jangan melewati pemeriksaan dengan menghapus atau mengatur ulang apa pun.
+2692	Memeriksa cakupan perbaikan tanpa mengubah konfigurasi…
+2693	{n} model dapat disinkronkan. Gaya autentikasi dan catatan model akan diperiksa berdasarkan konfigurasi jembatan saat ini.
+2694	Rencana sudah siap. Belum ada konfigurasi yang diubah. Baca cakupannya sebelum mengonfirmasi.
+2695	Sinkronkan catatan aplikasi untuk penyedia jembatan yang telah diverifikasi?\n\nHanya daftar model, model bawaan, dan gaya autentikasi yang diperbaiki. URL lokal dan kunci tidak berubah. Layanan tidak akan dimulai atau dihentikan, kunci pemulihan tidak akan dibuka, dan sesi saat ini tidak akan dialihkan.
+2696	Menyinkronkan catatan aplikasi…
+2697	Catatan aplikasi telah disinkronkan. Status lokal telah dibaca ulang dan sesi saat ini tidak dialihkan.
+2698	Belum dapat dipastikan apakah perbaikan ini sudah tersimpan. Periksa lagi status lokal. Tidak akan ada percobaan ulang otomatis; jangan berulang kali menimpa konfigurasi.
+2699	Penyedia aplikasi telah disimpan, tetapi penyelesaian pemetaan belum tuntas. Pemeriksaan ulang hanya-baca telah dicoba; tinjau status saat ini. Jangan berulang kali menjalankan perbaikan. Sesi saat ini tidak dialihkan.

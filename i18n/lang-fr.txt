@@ -2637,3 +2637,63 @@
 2637	✓ Désactivé ; chaque commande est de nouveau confirmée
 2638	Ne plus confirmer chaque commande privilégiée (à vos risques) : une fois activé, les commandes privilégiées s'exécutent directement et les tâches ne restent plus bloquées en arrière-plan ; celles qui touchent cccodroid ou Shizuku / Sui sont interceptées et soumises à confirmation autant que possible, sans garantie pour toutes les formes d'écriture. Pour n'autoriser qu'une session, cochez plutôt « Autoriser toutes les commandes privilégiées suivantes de cette session » dans la fenêtre de confirmation
 2639	C'est un fichier binaire ; l'ouvrir comme texte bloquerait l'application.
+2640	La configuration du pont n'a pas passé le contrôle de cohérence et ne peut pas encore être lue ou enregistrée en toute sécurité. Consultez les détails du contrôle ; ne commencez pas par supprimer des dossiers ou désinstaller.
+2641	État du pont
+2642	Point d'entrée du composant
+2643	Contrôle de configuration
+2644	Service local
+2645	À vérifier
+2646	Vérifier à nouveau
+2647	Lit uniquement l'état local. N'enregistre, ne démarre et ne réinitialise rien, et ne se connecte pas au service distant.
+2648	Quand faut-il une sauvegarde ?
+2649	Vous n'avez besoin de sauvegarder la configuration du pont que si vous décidez explicitement de traiter une ancienne installation ou de la migrer par la suite : URL de l'API, clé, modèles et enregistrements des fournisseurs dans l'application, pas l'historique des conversations ni tout le téléphone.
+2650	Cette page ne crée ni ne téléverse de sauvegardes. Ne partagez pas de fichiers de configuration contenant des clés dans des groupes de discussion ou publiquement.
+2651	Une nouvelle vérification effacera les saisies non enregistrées de cette page, sans modifier la configuration enregistrée. Continuer ?
+2652	Disponible
+2653	Vérifié
+2654	Synchronisation du fournisseur en attente
+2655	Non configuré
+2656	Prêt
+2657	Indisponible pour de nouvelles sessions
+2658	Non vérifié
+2659	L'URL du fournisseur dans l'application, ses paramètres d'authentification ou l'enregistrement de connexion locale ne correspondent pas à l'association du pont. On ne sait pas encore quel élément a été modifié.
+2660	La liste des modèles enregistrée par l'application n'a pas passé un contrôle de format ou de cohérence. Cela ne signifie pas qu'une autre installation du pont existe.
+2661	L'enregistrement d'association du fournisseur du pont dans l'application n'a pas pu être lu ou n'a pas passé la validation du format. Cela ne signifie pas qu'il faut supprimer le dossier d'exécution.
+2662	L'enregistrement du service et celui de la connexion locale n'ont pas passé le contrôle de cohérence. Aucun fournisseur utilisable ne peut être confirmé pour le moment.
+2663	Impossible de confirmer que le dossier d'exécution par défaut appartient au pont géré par l'interface graphique. D'anciens enregistrements, le dossier ou son marqueur d'appartenance peuvent nécessiter une vérification.
+2664	Le composant a rejeté la copie d'exécution lors du contrôle de sécurité, sans préciser quel contrôle a échoué. Cela ne permet pas de conclure qu'une seconde installation du pont existe.
+2665	Cette version ne renvoie qu'un code de conflit générique ; le contrôle en échec ne peut donc pas être identifié. Les fichiers d'exécution, l'appartenance de l'installation ou les enregistrements des fournisseurs dans l'application peuvent être concernés.
+2666	Échec du contrôle de configuration
+2667	Point d'entrée du composant temporairement indisponible
+2668	Pont local occupé
+2669	État du pont temporairement inaccessible
+2670	La configuration du pont a été écrite, mais les étapes suivantes n'ont pas abouti. La session actuelle reste inchangée. Vérifiez d'abord l'état plutôt que d'écraser la configuration à répétition.
+2671	Cette tentative d'enregistrement n'a pas signalé de réussite. La session actuelle reste inchangée. Consultez d'abord les détails du contrôle.
+2672	Ce contrôle en lecture seule n'a pas modifié la configuration. Vérifiez d'abord les versions de l'application et du composant ; ne supprimez pas de fichiers, ne désinstallez pas et ne réinitialisez pas le compteur de récupération à l'aveugle.
+2673	Temporairement indisponible
+2674	Non confirmé
+2675	Échec
+2676	Diagnostic et réparation
+2677	Vérifie d'abord l'état local, puis propose un plan à confirmer. Le contrôle lui-même ne modifie pas la configuration, ne démarre pas le pont et ne le réinitialise pas.
+2678	Vérifier les options de réparation
+2679	Synchronise uniquement la liste des modèles, le modèle par défaut et le mode d'authentification du fournisseur du pont vérifié. Conserve les fenêtres de contexte vérifiables et utilise 200 000 tokens si elles manquent. L'URL et la clé restent inchangées.
+2680	N'arrête ni ne démarre les services et ne modifie pas la clé du service distant, les fichiers d'exécution, le verrou de récupération ou la session actuelle. Le plan n'est valable que brièvement sur cette page ; vérifiez à nouveau si l'état change.
+2681	Confirmer la synchronisation des enregistrements
+2682	Annuler le plan de réparation
+2683	Que faire si la réparation automatique est impossible ?
+2684	Vérifiez d'abord que l'application et le composant sont des versions officielles compatibles entre elles. Si une session est en cours, attendez qu'elle se termine avant de vérifier à nouveau.
+2685	Si les contrôles de l'URL, de la clé, de l'appartenance ou des fichiers d'exécution ne sont pas concluants, demandez à l'IA de l'appareil d'effectuer des contrôles locaux en lecture seule à l'aide du code de diagnostic fixe. Ne supprimez ni n'écrasez de fichiers à l'aveugle.
+2686	L'épuisement des tentatives de récupération ou l'échec de la vérification du correctif sont d'autres types de panne. Consultez d'abord le diagnostic ; synchroniser les enregistrements de l'application ne sert pas à lever le verrou de récupération.
+2687	Pour signaler un problème, indiquez les versions, le code de diagnostic et si vous avez effectué une mise à jour ou une réinstallation. Ne téléversez pas de clés, de configuration complète ni de conversations.
+2688	Le pont local est utilisé ou une opération sur le composant est en cours. Aucune réparation n'a été effectuée. Attendez la fin, puis vérifiez à nouveau.
+2689	Le plan de réparation a expiré ou l'état concerné a changé. Aucune réparation n'a été effectuée. Vérifiez à nouveau le plan.
+2690	Aucune différence dans les enregistrements de l'application ne nécessite de synchronisation. Si le pont reste indisponible, suivez les instructions du contrôle.
+2691	L'état actuel ne permet pas de synchronisation automatique ; aucune réparation n'a été effectuée. Dépliez les étapes ci-dessous ; ne contournez pas les contrôles par une suppression ou une réinitialisation.
+2692	Vérification du périmètre de réparation sans modifier la configuration…
+2693	{n} modèles peuvent être synchronisés. Le mode d'authentification et les enregistrements des modèles seront vérifiés par rapport à la configuration actuelle du pont.
+2694	Le plan est prêt. Aucune configuration n'a encore été modifiée. Lisez le périmètre avant de confirmer.
+2695	Synchroniser les enregistrements de l'application pour le fournisseur du pont vérifié ?\n\nSeuls la liste des modèles, le modèle par défaut et le mode d'authentification seront réparés. L'URL locale et la clé restent inchangées. Aucun service ne sera démarré ou arrêté, le verrou de récupération ne sera pas levé et la session actuelle ne sera pas changée.
+2696	Synchronisation des enregistrements de l'application…
+2697	Enregistrements de l'application synchronisés. L'état local a été relu et la session actuelle n'a pas été changée.
+2698	Impossible de confirmer si cette réparation a été enregistrée. Vérifiez à nouveau l'état local. Aucune nouvelle tentative automatique ne sera faite ; n'écrasez pas la configuration à répétition.
+2699	Le fournisseur de l'application a été enregistré, mais la finalisation de l'association n'a pas abouti. Une nouvelle vérification en lecture seule a été tentée ; consultez l'état actuel. Ne répétez pas la réparation. La session actuelle n'a pas été changée.

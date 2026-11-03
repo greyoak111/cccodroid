@@ -2637,3 +2637,63 @@
 2637	✓ Desactivado; se vuelve a confirmar cada comando
 2638	Dejar de confirmar cada comando privilegiado (bajo tu responsabilidad): al activarlo, los comandos privilegiados se ejecutan directamente y las tareas ya no se quedan esperando confirmación en segundo plano; los que afectan a cccodroid o a Shizuku / Sui se intentan detener para preguntar, aunque no se pueden detectar todas las formas de escribirlos. Para permitir solo una sesión, marca «Permitir todos los comandos privilegiados siguientes de esta sesión» en el diálogo de confirmación
 2639	Es un archivo binario; abrirlo como texto bloquearía la aplicación.
+2640	La configuración del puente no superó la comprobación de coherencia y aún no se puede leer ni guardar de forma segura. Revisa los detalles; no empieces por borrar directorios o desinstalar.
+2641	Estado del puente
+2642	Punto de entrada del componente
+2643	Comprobación de configuración
+2644	Servicio local
+2645	Requiere comprobación
+2646	Volver a comprobar
+2647	Solo lee el estado local. No guarda, inicia ni restablece nada, ni se conecta al servicio remoto.
+2648	¿Cuándo hace falta una copia de seguridad?
+2649	Solo necesitas respaldar la configuración del puente cuando decidas expresamente gestionar una instalación anterior o migrarla más adelante: la URL de la API, la clave, los modelos y los registros de proveedores de la app, no el historial de chat ni todo el teléfono.
+2650	Esta página no crea ni sube copias de seguridad. No compartas archivos de configuración que contengan claves en chats de grupo ni los publiques.
+2651	Volver a comprobar borrará lo que hayas introducido sin guardar en esta página, pero no modificará la configuración guardada. ¿Continuar?
+2652	Disponible
+2653	Verificado
+2654	Sincronización del proveedor pendiente
+2655	Sin configurar
+2656	Listo
+2657	No disponible para sesiones nuevas
+2658	Sin comprobar
+2659	Hay una discrepancia entre la asignación del puente y la URL del proveedor en la app, los ajustes de autenticación o el registro de conexión local. Aún no se sabe qué elemento cambió.
+2660	La lista de modelos guardada por la app no superó una comprobación de formato o coherencia. Esto no significa que exista otra instalación del puente.
+2661	No se pudo leer el registro de asignación del proveedor del puente en la app o no superó la validación de formato. Esto no significa que haya que borrar el directorio de ejecución.
+2662	El registro del servicio y el de conexión local no superaron la comprobación de coherencia. Por ahora no se puede confirmar ningún proveedor utilizable.
+2663	No se pudo confirmar que el directorio de ejecución predeterminado pertenezca al puente gestionado desde la interfaz gráfica. Puede ser necesario revisar registros antiguos, el directorio o su marcador de pertenencia.
+2664	El componente rechazó la copia de ejecución durante su comprobación de seguridad, pero no indicó qué comprobación falló. Esto no demuestra que exista una segunda instalación del puente.
+2665	Esta versión solo devuelve un código de conflicto genérico, así que no se puede identificar la comprobación que falló. Puede afectar a los archivos de ejecución, la pertenencia de la instalación o los registros de proveedores de la app.
+2666	La configuración no superó la comprobación
+2667	Punto de entrada del componente no disponible temporalmente
+2668	Puente local ocupado
+2669	No se puede leer el estado del puente por ahora
+2670	La configuración del puente se escribió, pero los pasos posteriores no terminaron. La sesión actual no cambia. Comprueba el estado antes de sobrescribir la configuración repetidamente.
+2671	Este intento de guardado no indicó que hubiera terminado con éxito. La sesión actual no cambia. Revisa primero los detalles de la comprobación.
+2672	Esta comprobación de solo lectura no modificó la configuración. Revisa primero las versiones de la app y del componente; no borres archivos, desinstales ni restablezcas el contador de recuperación a ciegas.
+2673	No disponible temporalmente
+2674	Sin confirmar
+2675	No superada
+2676	Diagnóstico y reparación
+2677	Primero comprueba el estado local y después ofrece un plan para que lo confirmes. La comprobación no modifica la configuración ni inicia o restablece el puente.
+2678	Comprobar opciones de reparación
+2679	Solo sincroniza la lista de modelos, el modelo predeterminado y el tipo de autenticación del proveedor del puente verificado. Conserva las ventanas de contexto verificables y usa 200 000 tokens cuando faltan. La URL y la clave no cambian.
+2680	No detiene ni inicia servicios, ni modifica la clave del servicio remoto, los archivos de ejecución, el bloqueo de recuperación o la sesión actual. El plan solo es válido brevemente en esta página; si cambia el estado, vuelve a comprobarlo.
+2681	Confirmar sincronización de registros de la app
+2682	Cancelar plan de reparación
+2683	¿Qué hacer si no hay reparación automática?
+2684	Comprueba primero que la app y el componente sean versiones oficiales compatibles entre sí. Si hay una sesión en marcha, espera a que termine antes de comprobar de nuevo.
+2685	Si las comprobaciones de la URL, la clave, la pertenencia o los archivos de ejecución no son concluyentes, pide a la IA del dispositivo que haga comprobaciones locales de solo lectura usando el código de diagnóstico fijo. No borres ni sobrescribas archivos a ciegas.
+2686	Agotar los intentos de recuperación o fallar la verificación del parche son otro tipo de fallo. Revisa primero el diagnóstico; sincronizar los registros de la app no sirve para quitar el bloqueo de recuperación.
+2687	Al informar de un problema, indica las versiones, el código de diagnóstico y si actualizaste o reinstalaste. No subas claves, la configuración completa ni conversaciones.
+2688	El puente local está en uso o hay una operación del componente en curso. No se realizó ninguna reparación. Espera a que termine y vuelve a comprobar.
+2689	El plan de reparación ha caducado o ha cambiado el estado relacionado. No se realizó ninguna reparación. Vuelve a comprobar el plan.
+2690	No se encontraron diferencias en los registros de la app que deban sincronizarse. Si sigue sin estar disponible, sigue las instrucciones de la comprobación.
+2691	El estado actual no permite la sincronización automática, así que no se realizó ninguna reparación. Despliega los pasos de abajo; no eludas las comprobaciones borrando o restableciendo datos.
+2692	Comprobando el alcance de la reparación sin modificar la configuración…
+2693	Se pueden sincronizar {n} modelos. El tipo de autenticación y los registros de modelos se comprobarán con la configuración actual del puente.
+2694	El plan está listo. Aún no se ha modificado ninguna configuración. Revisa el alcance antes de confirmar.
+2695	¿Sincronizar los registros de la app del proveedor del puente verificado?\n\nSolo se repararán la lista de modelos, el modelo predeterminado y el tipo de autenticación. La URL local y la clave no cambian. No se iniciarán ni detendrán servicios, no se quitará el bloqueo de recuperación ni se cambiará la sesión actual.
+2696	Sincronizando registros de la app…
+2697	Registros de la app sincronizados. Se ha vuelto a leer el estado local y no se ha cambiado la sesión actual.
+2698	No se puede confirmar si esta reparación se ha guardado. Vuelve a comprobar el estado local. No se reintentará automáticamente; no sobrescribas la configuración repetidamente.
+2699	El proveedor de la app se ha guardado, pero no se ha completado la asignación. Se ha intentado una nueva comprobación de solo lectura; revisa el estado actual. No repitas la reparación. No se ha cambiado la sesión actual.

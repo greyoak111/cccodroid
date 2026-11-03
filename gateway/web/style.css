@@ -3439,6 +3439,20 @@ html[data-motion="on"] .lin-prof .mo-ghost .mo-st,html[data-motion="on"] .lin-pr
 #bridge-config-panel .bc-heading{margin:10px 0 22px}
 #bridge-config-panel h2{font-size:21px;line-height:1.45;font-weight:600;margin:0}
 #bridge-config-panel .bc-heading p{font-size:13px;color:var(--fg2);margin:7px 0 0}
+#bridge-config-panel .bc-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px;padding:16px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
+#bridge-config-panel .bc-overview > div{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:12px;line-height:1.6}
+#bridge-config-panel .bc-overview span{color:var(--fg2)}
+#bridge-config-panel .bc-overview b{font-size:13px;font-weight:500}
+#bridge-config-panel .bc-issue{margin-bottom:16px;border-inline-start:3px solid var(--accent)}
+#bridge-config-panel .bc-issue-label{color:var(--fg2);font-size:12px;letter-spacing:.04em}
+#bridge-config-panel .bc-issue h3{margin:8px 0 12px;font-size:18px}
+#bridge-config-panel .bc-issue > p{font-size:13px;line-height:1.8;margin:8px 0}
+#bridge-config-panel .bc-issue .bc-hint{font-size:12px;color:var(--fg2)}
+#bridge-config-panel .bc-repair{margin:16px 0}
+#bridge-config-panel .bc-repair h3{margin-bottom:12px}
+#bridge-config-panel .bc-repair ol{padding-inline-start:20px}
+#bridge-config-panel #bc-backup-help,#bridge-config-panel #bc-repair-steps{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}
+#bridge-config-panel #bc-backup-help summary,#bridge-config-panel #bc-repair-steps summary{cursor:pointer;font-size:13px;line-height:1.7;min-height:44px;display:list-item;align-content:center}
 #bridge-config-panel .bc-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
 #bridge-config-panel .bc-actions .btn{flex:1 1 140px;margin:0}
 #bridge-config-panel .bc-card{padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}

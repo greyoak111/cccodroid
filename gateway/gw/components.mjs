@@ -10,7 +10,7 @@ import { SKILLS_DIR, skillMeta } from "./extensions.mjs";
 import { modulesMissingFor } from "./modules.mjs";
 import { ghProxy, pget } from "./pget.mjs";
 import { retireManagedBridge } from "./managed-bridge.mjs";
-import { clearBridgeConfigMapping, handleBridgeConfig, handleBridgeModels } from "./bridge-config.mjs";
+import { clearBridgeConfigMapping, handleBridgeConfig, handleBridgeModels, handleBridgeRepair } from "./bridge-config.mjs";
 import { archiveProblem, parseTarListing } from "./archive-check.mjs";
 import { baseOwnedPaths } from "./orphans.mjs";
 
@@ -817,8 +817,9 @@ async function handleComponents(req, res, p, u) {
 
 // ── 路由：/api/components /api/gh/ ──
 export async function routeComponents(req, res, u, p) {
-  if (p === "/api/components/openai-bridge/config" || p === "/api/components/openai-bridge/models") {
-    const models = p === "/api/components/openai-bridge/models", handler = models ? handleBridgeModels : handleBridgeConfig;
+  if (p === "/api/components/openai-bridge/config" || p === "/api/components/openai-bridge/models" || p === "/api/components/openai-bridge/repair") {
+    const models = p === "/api/components/openai-bridge/models", repair = p === "/api/components/openai-bridge/repair";
+    const handler = models ? handleBridgeModels : repair ? handleBridgeRepair : handleBridgeConfig;
     let current = COMP_JOBS.get("openai-bridge");
     // 保存优先于只读取清单：即使客户端 close 尚未到达，也先终止短命任务再接手，绝不等待活网络。
     if (!models && req.method === "POST" && current?.phase === "fetching-models" && !current.finished) {

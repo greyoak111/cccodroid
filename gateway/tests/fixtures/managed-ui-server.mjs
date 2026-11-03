@@ -24,6 +24,7 @@ export async function startManagedUiServer() {
     removalMode: "success", historyDelay: {}, ui: {},
     configRequests: [], configResponses: [], configMode: "success", configDelay: 0,
     modelsRequests: [], modelsResponses: [], modelsMode: "success", modelsDelay: 0,
+    repairRequests: [], repairMode: "success", repairDelay: 0,
     models: [{ id: "synthetic-listed-a" }, { id: "synthetic-listed-b" }],
     config: { installed: true, configured: true, hasKey: true, apiKey: FAKE_OLD_KEY, endpoint: "https://old.synthetic.invalid/v1", model: "synthetic-old-model", providerId: "synthetic-bridge", local: { state: "ready" } },
     providerActive: "synthetic", sessionModelWrites: [],
@@ -114,9 +115,28 @@ export async function startManagedUiServer() {
         state.modelsResponses.push(JSON.stringify(reply));
         return json(res, reply);
       }
+      if (p === "/api/components/openai-bridge/repair") {
+        if (req.method !== "POST") return json(res, { ok: false }, 405);
+        const body = await bodyOf(req); state.repairRequests.push(body);
+        if (state.repairDelay) await new Promise(r => setTimeout(r, state.repairDelay));
+        if (body.consent !== true) return json(res, { ok: false, code: "invalid_input" }, 400);
+        if (state.repairMode === "REPAIR_PARTIAL" && body.action === "apply") {
+          state.configMode = "success";
+          return json(res, { ok: false, code: "REPAIR_PARTIAL", committed: true, scope: "APP_METADATA", message: CONFIG_ERROR }, 409);
+        }
+        if (!["success", "REPAIR_PARTIAL"].includes(state.repairMode)) return json(res, { ok: false, code: state.repairMode, message: CONFIG_ERROR }, 409);
+        if (body.action === "inspect") return json(res, { ok: true, repair: { available: true, action: "SYNC_APP_METADATA", ticket: "e".repeat(48), expiresIn: 60, changes: ["MODELS"], models: [{ id: "synthetic-old-model", contextWindow: 200000 }] } });
+        if (body.action === "apply" && body.ticket === "e".repeat(48)) {
+          state.configMode = "success";
+          return json(res, { ok: true, repaired: true, scope: "APP_METADATA" });
+        }
+        return json(res, { ok: false, code: "REPAIR_STALE" }, 409);
+      }
       if (p === "/api/components/openai-bridge/config") {
         if (req.method === "GET") {
           if (state.configMode === "get-error") return json(res, { ok: false, code: "fixture-read-error", message: CONFIG_ERROR }, 503);
+          if (["get-conflict", "get-provider-conflict", "get-model-conflict", "get-private-check"].includes(state.configMode))
+            return json(res, { ok: false, code: "RUNTIME_CONFLICT", ...(state.configMode === "get-conflict" ? {} : { check: state.configMode === "get-private-check" ? CONFIG_ERROR : state.configMode === "get-model-conflict" ? "MODEL_LIST" : "APP_PROVIDER" }), message: CONFIG_ERROR }, 409);
           return json(res, configReply());
         }
         if (req.method !== "POST") return json(res, { ok: false }, 405);
@@ -125,6 +145,8 @@ export async function startManagedUiServer() {
         if (state.configDelay) await new Promise((r) => setTimeout(r, state.configDelay));
         if (state.configMode === "http-error" || state.configMode === "busy") return json(res, { ok: false, code: "fixture-local-error", message: CONFIG_ERROR }, state.configMode === "busy" ? 409 : 503);
         if (state.configMode === "field-error") return json(res, { ok: false, field: "model", code: "invalid-model", message: "Synthetic model validation rejected" }, 400);
+        if (state.configMode.startsWith("save-fault:")) return json(res, { ok: false, saved: false, localReady: false, code: state.configMode.slice(11), message: CONFIG_ERROR }, 400);
+        if (state.configMode === "provider-save-error") return json(res, { ok: false, saved: true, localReady: false, code: "provider_save_failed", message: CONFIG_ERROR }, 400);
         let endpoint;
         try { endpoint = normalizedEndpoint(body.endpoint); } catch { return json(res, { ok: false, field: "endpoint", code: "invalid-endpoint" }, 400); }
         const changed = state.config.hasKey && new URL(state.config.endpoint).origin !== new URL(endpoint).origin;

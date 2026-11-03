@@ -13,12 +13,14 @@ import { startManagedUiServer, REMOVAL_ERROR, CONFIG_ERROR, FAKE_OLD_KEY, FAKE_N
 // Fixed contract, independently checked against the real dispatcher and frontend source (never import gateway).
 const CONFIG_ROUTE = "/api/components/openai-bridge/config";
 const MODELS_ROUTE = "/api/components/openai-bridge/models";
+const REPAIR_ROUTE = "/api/components/openai-bridge/repair";
 const routeSource = await fs.readFile(new URL("../gateway/gw/components.mjs", import.meta.url), "utf8");
 const configSource = await fs.readFile(new URL("../gateway/web/app/bridge-config.js", import.meta.url), "utf8");
 assert.ok(routeSource.includes('p === "' + CONFIG_ROUTE + '"'), "real gateway dispatcher exposes the fixed configuration route");
 assert.match(configSource, /const\s+API\s*=\s*"\/api\/components\/openai-bridge\/config"\s*[,;]/, "frontend must target the real gateway route, not a self-consistent mock alias");
 assert.ok(routeSource.includes('p === "' + MODELS_ROUTE + '"'), "real gateway exposes the fixed model-list route");
 assert.ok(configSource.includes('"' + MODELS_ROUTE + '"'), "model list must use the actual gateway route");
+assert.ok(routeSource.includes('p === "' + REPAIR_ROUTE + '"') && configSource.includes('"' + REPAIR_ROUTE + '"'), "repair UI must use the fixed authenticated component route");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, label, timeout = 8000) {
@@ -340,6 +342,24 @@ try {
   delete fixture.state.config.localError;
   ok("bridge recovery fault read and repeated saves", "residual health never overrides fault; three saves keep diagnosis and disable use; no reset operation");
 
+  for (const code of ["RECOVERY_EXHAUSTED", "PATCH_VERIFICATION_FAILED", "COMPONENT_DISABLED", "COMPONENT_UNAVAILABLE", "UPDATE_REQUIRED", "LOCAL_START_FAILED", "provider_save_failed"]) {
+    await configClose(); fixture.state.configMode = "success"; await configOpen(true);
+    assert.equal(await cdp.eval("document.querySelector('#bc-service-state').innerText"), await cdp.eval("I18N.t('已就绪')"));
+    await click('#bridge-config-panel [data-bc="edit"]');
+    fixture.state.configMode = code === "provider_save_failed" ? "provider-save-error" : "save-fault:" + code;
+    const n = fixture.state.configRequests.length;
+    await click("#bc-save"); await until(() => fixture.state.configRequests.length === n + 1, "failed save POST");
+    await until(() => cdp.eval("document.querySelector('#bc-save').disabled === false"), "failed save unlocks");
+    assert.equal(await cdp.eval("document.querySelector('#bc-service-state').innerText"), await cdp.eval("I18N.t(" + q(code === "provider_save_failed" ? "未确认" : "不可用于新会话") + ")"));
+    assert.equal(await cdp.eval("document.querySelector('#bc-config-state').innerText"), await cdp.eval("I18N.t('未确认')"));
+    assert.equal(await cdp.eval("document.querySelector('#bc-use').disabled"), true);
+    assert.equal(await cdp.eval(visible("#bc-form")), true);
+    assert.equal(await cdp.eval(`document.querySelector('#bridge-config-panel').innerText.includes(${q(CONFIG_ERROR)})`), false);
+    await unchanged();
+  }
+  fixture.state.configMode = "success"; await configClose(); await configOpen(true);
+  ok("bridge failed save invalidates old readiness", "healthy GET then six local faults/partial provider-save failure never retains ready; draft remains, no reset or new-session action");
+
   await click('#bridge-config-panel [data-bc="edit"]');
   await fill("#bc-model", "synthetic-retry-model");
   for (const mode of ["http-error", "busy", "field-error"]) {
@@ -358,10 +378,72 @@ try {
   await configClose();
   fixture.state.configMode = "get-error";
   await click(configure);
-  await until(() => cdp.eval("document.querySelector('#bc-notice').innerText.length > 0 && document.querySelector('#bridge-config-panel').getAttribute('aria-busy') === 'false'"), "configuration read failure notice");
+  await until(() => cdp.eval(visible("#bc-issue")), "configuration read failure card");
   assert.equal(await cdp.eval(visible("#bc-form")), false);
+  assert.equal(await cdp.eval("document.querySelector('#bc-service-state').innerText"), await cdp.eval("I18N.t('未确认')"));
   await configClose();
-  ok("bridge configuration error states", "HTTP 503/409/field rejection retain form; read failure clear; no secret/server diagnostic echo");
+  ok("bridge configuration error states", "HTTP 503/409/field rejection retain form; read failure has explicit read-only retry; no secret/server diagnostic echo");
+
+  for (const mode of ["get-conflict", "get-provider-conflict", "get-model-conflict", "get-private-check"]) {
+    fixture.state.configMode = mode;
+    const posts = fixture.state.configRequests.length, modelCalls = fixture.state.modelsRequests.length;
+    await click(configure); await until(() => cdp.eval(visible("#bc-issue")), "specific consistency issue card");
+    assert.equal(await cdp.eval(visible("#bc-form")), false);
+    assert.equal(await cdp.eval(visible("#bc-notice")), false, "do not duplicate the warning in a red wall of text");
+    assert.equal(await cdp.eval("document.querySelector('#bc-config-state').innerText"), await cdp.eval("I18N.t('未通过')"));
+    assert.equal(await cdp.eval("document.querySelector('#bc-service-state').innerText"), await cdp.eval("I18N.t('未确认')"), "a read conflict cannot prove the service stopped");
+    const code = await cdp.eval("document.querySelector('#bc-issue-code').innerText");
+    assert.equal(code, "RUNTIME_CONFLICT · " + (mode === "get-provider-conflict" ? "APP_PROVIDER" : mode === "get-model-conflict" ? "MODEL_LIST" : "UNKNOWN"));
+    if (mode === "get-model-conflict") assert.equal(await cdp.eval("document.querySelector('#bc-issue-detail').innerText"), await cdp.eval("I18N.t('App 保存的模型清单未通过格式或一致性检查；这不表示存在另一套桥。')"));
+    assert.equal(await cdp.eval("document.querySelector('#bc-backup-help').open"), false);
+    assert.equal(await cdp.eval(`document.querySelector('#bridge-config-panel').innerText.includes(${q(CONFIG_ERROR)})`), false);
+    assert.equal(await cdp.eval("document.querySelector('#bc-key').value"), "");
+    await click("#bc-backup-help summary");
+    assert.equal(await cdp.eval("document.querySelector('#bc-backup-help').open"), true);
+    const body = await cdp.eval("document.querySelector('#bc-backup-help').innerText");
+    assert.match(body, /chat history|conversations|聊天记录/i);
+    fixture.state.configMode = "success";
+    const reads = fixture.state.requests.filter(r => r.path === CONFIG_ROUTE && r.method === "GET").length;
+    await click("#bc-check-again"); await until(() => cdp.eval(visible("#bc-saved")), "read-only recheck recovers saved view");
+    assert.equal(fixture.state.requests.filter(r => r.path === CONFIG_ROUTE && r.method === "GET").length, reads + 1);
+    assert.equal(fixture.state.configRequests.length, posts); assert.equal(fixture.state.modelsRequests.length, modelCalls);
+    assert.equal(await cdp.eval(visible("#bc-issue")), false); await unchanged(); await configClose();
+  }
+  ok("bridge configuration checks and read-only retry", "legacy unknown/specific App mapping/private diagnostic; states are separate, backup scoped and collapsed, one GET recheck, no writes or upstream calls");
+
+  fixture.state.configMode = "get-model-conflict"; const repairsBefore = fixture.state.repairRequests.length;
+  await click(configure); await until(() => cdp.eval(visible("#bc-repair")), "repair guidance available");
+  assert.equal(fixture.state.repairRequests.length, repairsBefore, "opening never automatically checks or repairs");
+  const configPostsBeforeRepair = fixture.state.configRequests.length, modelCallsBeforeRepair = fixture.state.modelsRequests.length;
+  await click("#bc-repair-inspect"); await until(() => cdp.eval(visible("#bc-repair-plan")), "explicit repair inspection offers plan");
+  assert.equal(fixture.state.repairRequests.length, repairsBefore + 1); assert.equal(fixture.state.repairRequests.at(-1).action, "inspect");
+  assert.equal(await cdp.eval("document.querySelector('#bridge-config-panel').innerText.includes('" + "e".repeat(48) + "')"), false, "repair ticket is not rendered");
+  await click("#bc-repair-cancel"); assert.equal(await cdp.eval(visible("#bc-repair-plan")), false);
+  assert.equal(fixture.state.repairRequests.length, repairsBefore + 1, "cancel makes no apply request");
+  await click("#bc-repair-inspect"); await until(() => cdp.eval(visible("#bc-repair-plan")), "fresh plan before apply");
+  await click("#bc-repair-apply"); await until(() => cdp.eval(visible("#bc-saved")), "confirmed metadata sync rechecks status");
+  assert.ok(await cdp.eval(visible("#bc-notice")), "confirmed repair success receipt stays visible after status refresh");
+  assert.deepEqual(fixture.state.repairRequests.slice(repairsBefore).map(r => r.action), ["inspect", "inspect", "apply"]);
+  assert.equal(fixture.state.configRequests.length, configPostsBeforeRepair); assert.equal(fixture.state.modelsRequests.length, modelCallsBeforeRepair);
+  await unchanged(); await configClose();
+  fixture.state.configMode = "get-model-conflict"; fixture.state.repairMode = "REPAIR_UNAVAILABLE";
+  await click(configure); await until(() => cdp.eval(visible("#bc-repair")), "non-repairable guidance");
+  await click("#bc-repair-inspect"); await until(() => cdp.eval("document.querySelector('#bc-repair-status').textContent.length > 0 && document.querySelector('#bc-repair-steps').open"), "manual steps instead of unsafe repair");
+  assert.equal(await cdp.eval(visible("#bc-repair-plan")), false);
+  assert.equal(await cdp.eval(`document.querySelector('#bridge-config-panel').innerText.includes(${q(CONFIG_ERROR)})`), false);
+  await configClose(); fixture.state.repairMode = "success"; fixture.state.configMode = "success";
+  ok("bridge confirmed App metadata repair", "explicit inspect/plan/cancel/confirm, one apply plus read-only status refresh; unsafe state gets steps, no inference or configuration POST");
+  fixture.state.configMode = "get-model-conflict"; fixture.state.repairMode = "REPAIR_PARTIAL";
+  await click(configure); await until(() => cdp.eval(visible("#bc-repair")), "partial repair setup");
+  await click("#bc-repair-inspect"); await until(() => cdp.eval(visible("#bc-repair-plan")), "partial repair plan");
+  const partialReads = fixture.state.requests.filter(r => r.path === CONFIG_ROUTE && r.method === "GET").length;
+  await click("#bc-repair-apply"); await until(() => cdp.eval("document.querySelector('#bc-repair-steps').open && !document.querySelector('#bc-saved').classList.contains('hidden')"), "partial commit readonly status refresh");
+  assert.equal(fixture.state.requests.filter(r => r.path === CONFIG_ROUTE && r.method === "GET").length, partialReads + 1);
+  assert.ok(await cdp.eval(visible("#bc-repair-status")), "partial commit receipt is visible");
+  assert.equal(await cdp.eval(`document.querySelector('#bc-repair-status').innerText`), await cdp.eval(`I18N.t(${q("App 接口已写入，但映射收尾未完成；已尝试只读重查，请核对当前状态。不要反复执行修复，当前会话未切换。")})`));
+  assert.equal(await cdp.eval(`document.querySelector('#bridge-config-panel').innerText.includes(${q(CONFIG_ERROR)})`), false);
+  await unchanged(); await configClose(); fixture.state.repairMode = "success";
+  ok("bridge partial commit receipt", "provider already written is explicit; one read-only status refresh, no automatic apply retry or private error echo");
 
   // First-time setup: only an explicit user click may prepare a new session, never remote inference.
   fixture.state.configMode = "success";
@@ -524,6 +606,30 @@ try {
   await configClose();
   await cdp.eval("Theme.set('light')");
   ok("bridge narrow themes", `390×844; ${themeRows.join(', ')}; labels/font/scrollable save/no horizontal overflow`);
+
+  fixture.state.configMode = "get-provider-conflict";
+  await click(configure); await until(() => cdp.eval(visible("#bc-issue")), "narrow diagnostic card");
+  for (const skin of ["native", "qiusuo", "zhuyue", "goucheng"]) for (const mode of ["light", "dark"]) {
+    const pref = ({ native: "", qiusuo: "qs-", zhuyue: "zy-", goucheng: "gc-" })[skin] + mode;
+    await cdp.eval(`Theme.set(${q(pref)})`); await sleep(40);
+    const metrics = await cdp.eval(`(() => { const e = document.querySelector('#bc-issue'), o = document.querySelector('#bc-overview'), b = document.querySelector('#bc-check-again'), r = e.getBoundingClientRect(); return { left:r.left, right:r.right, width:innerWidth, issueOverflow:e.scrollWidth-e.clientWidth, overviewOverflow:o.scrollWidth-o.clientWidth, touch:b.getBoundingClientRect().height, detail:document.querySelector('#bc-issue-detail').innerText, code:document.querySelector('#bc-issue-code').innerText }; })()`);
+    assert.ok(metrics.left >= -1 && metrics.right <= metrics.width + 1, `${skin}/${mode} issue fits narrow viewport`);
+    assert.ok(metrics.issueOverflow <= 1 && metrics.overviewOverflow <= 1, `${skin}/${mode} issue has no horizontal overflow`);
+    assert.ok(metrics.touch >= 44); assert.ok(metrics.detail); assert.equal(metrics.code, "RUNTIME_CONFLICT · APP_PROVIDER");
+  }
+  await click("#bc-backup-help summary"); assert.equal(await cdp.eval("document.querySelector('#bc-backup-help').open"), true);
+  ok("bridge narrow diagnostic themes", "all eight theme combinations; independent state values, scoped backup help, >=44px read-only retry, no horizontal overflow");
+  await click("#bc-repair-inspect"); await until(() => cdp.eval(visible("#bc-repair-plan")), "narrow confirmed repair plan");
+  for (const skin of ["native", "qiusuo", "zhuyue", "goucheng"]) for (const mode of ["light", "dark"]) {
+    const pref = ({ native: "", qiusuo: "qs-", zhuyue: "zy-", goucheng: "gc-" })[skin] + mode;
+    await cdp.eval(`Theme.set(${q(pref)})`); await sleep(40);
+    const metrics = await cdp.eval(`(() => { const e = document.querySelector('#bc-repair'), r = e.getBoundingClientRect(); return { left:r.left, right:r.right, width:innerWidth, overflow:e.scrollWidth-e.clientWidth, touches:['#bc-repair-inspect','#bc-repair-apply','#bc-repair-cancel'].map(s=>document.querySelector(s).getBoundingClientRect().height) }; })()`);
+    assert.ok(metrics.left >= -1 && metrics.right <= metrics.width + 1 && metrics.overflow <= 1, `${skin}/${mode} repair plan fits narrow viewport`);
+    assert.ok(metrics.touches.every(height => height >= 44), "repair controls retain touch area");
+  }
+  await click("#bc-repair-cancel"); assert.equal(await cdp.eval(visible("#bc-repair-plan")), false);
+  await configClose(); fixture.state.configMode = "success"; await cdp.eval("Theme.set('light')");
+  ok("bridge narrow repair themes", "all eight theme combinations; scoped plan and >=44px inspection/confirm/cancel controls; no horizontal overflow");
 
   await cdp.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await until(() => cdp.eval("document.documentElement.dataset.motion === 'off'"), "reduced-motion preference applied");
