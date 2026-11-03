@@ -86,6 +86,8 @@ export const publishState = () => { saveRunMark(); publish({ type: "state", ...s
 const RUN_MARK = path.join(CFG.home, "ccapp-run-mark.json");
 const INTR_FILE = path.join(CFG.home, "ccapp-interrupted.json");
 export function saveRunMark() {
+  // 「有任务」标记跟着同步：在跑的，加上排着、会自己发出去的（挂起等 ⚡ 的不算）。外壳据此判断划掉时能不能停服务（审查 0601b）
+  runFlag(RUNS.size > 0 || QUEUE.some((q) => !q.held));
   try {
     if (!RUNS.size && !QUEUE.length) return fs.rmSync(RUN_MARK, { force: true });
     const live = runList().filter((r) => !r.ended);
@@ -192,7 +194,7 @@ export function endRun(run, fields = {}) {
   flushPend(run);
   run.ended = true;
   RUNS.delete(run.id);
-  if (!RUNS.size) runFlag(false);
+  if (!RUNS.size && !QUEUE.some((q) => !q.held)) runFlag(false);
   publish({ type: "run_end", runId: run.id, sessionId: run.sessionId, aborted: !!run.aborted, ...(run.auto ? { auto: run.auto } : {}), ...(run.sched ? { sched: true } : {}), ...fields });
   goalCheck(run.sessionId);
   tasksCheck(run.sessionId);

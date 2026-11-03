@@ -40,6 +40,8 @@ public class GatewayService extends Service {
     private Process proc;
     private PowerManager.WakeLock wake;
     private volatile boolean stopping;
+    /** 界面被划掉时还有任务在跑：跑完再停（重新打开界面就作罢） */
+    private volatile boolean closeWhenIdle;
     private Thread supervisor;
 
     /** 服务这会儿在不在（常驻通知里点了停止之后为 false） */
@@ -87,13 +89,18 @@ public class GatewayService extends Service {
      * 冻结检测：每 2 秒醒一次，uptime 跳得远说明 CPU 醒着而我们没在跑 —— 被系统冻住了
      * （深睡时 uptime 不走，不会误报）。前台服务挡不住厂商冻结器：实测红魔在后台 90 秒冻结整个进程组，
      * 网关和正在跑的任务全停。记下来，设置页据此提示用户去系统里允许后台运行。
+     * 顺带看「划掉时在跑、跑完再停」（onTaskRemoved）。
      */
     private void watchFreeze() {
         Thread t = new Thread(() -> {
             android.content.SharedPreferences sp = getSharedPreferences("bg", MODE_PRIVATE);
+            int idle = 0;
             while (!stopping) {
                 long t0 = android.os.SystemClock.uptimeMillis();
                 sleep(2000);
+                // 划掉时在跑的任务跑完了：连着三次（约 6 秒）都空闲才停，免得撞上队列里下一条、/goal 下一轮开跑前的空档
+                idle = closeWhenIdle && !busy() ? idle + 1 : 0;
+                if (idle >= 3) { Log.i(TAG, "划掉时在跑的任务跑完了，停止服务"); shutdown(); break; }
                 long gap = android.os.SystemClock.uptimeMillis() - t0 - 2000;
                 if (gap > 15_000) {
                     Log.w(TAG, "被冻结了约 " + gap / 1000 + " 秒");
@@ -112,15 +119,14 @@ public class GatewayService extends Service {
         // 只认自己通知里那个「停止」：服务是导出的，有跨用户权限的进程（shell、别的拿了 Shizuku 的应用）也能发；对不上就当普通启动（审查 v0.5.9 B5）
         String ik = i == null ? null : i.getStringExtra(MainActivity.IK);
         boolean mine = ik != null && java.security.MessageDigest.isEqual(ik.getBytes(), MainActivity.intentKey(this).getBytes());
-        if (i != null && ACTION_STOP.equals(i.getAction()) && mine) {
-            stopping = true;
-            killGateway();
-            ShizukuSetup.get(this).onExit();
-            stopForeground(true);
-            stopSelf();
-            return START_NOT_STICKY;
-        }
+        if (i != null && ACTION_STOP.equals(i.getAction()) && mine) { shutdown(); return START_NOT_STICKY; }
+        // 系统把被杀的服务带空 intent 重建：没任务在跑就不起了。用户在最近任务里划掉、ROM 只杀进程不强停时，
+        // 粘性重建出来的服务紧接着又被冻住，通知卡在「正在启动…」（红魔，11-03 用户反馈）。
+        // 定时任务不靠这个：到点由系统闹钟（SchedAlarm）拉起；下次打开界面也会拉起
+        if (i == null && !busy()) { Log.i(TAG, "粘性重建时没有任务在跑，不再拉起"); shutdown(); return START_NOT_STICKY; }
         // 开机重新激活 Shizuku 也只认自己的开机广播带来的口令（11-01 独立审查低-6）
+        // 有人明确要服务（打开界面、闹钟、开机）：划掉时记的「跑完就停」作罢。口令对不上的 STOP 不算（服务是导出的，审查 0601b）
+        if (i != null && !ACTION_STOP.equals(i.getAction())) closeWhenIdle = false;
         if (i != null && ACTION_BOOT.equals(i.getAction()) && mine) ShizukuSetup.get(this).reactivateAsync(true);
         if (supervisor == null || !supervisor.isAlive()) {
             supervisor = new Thread(this::supervise, "gateway-supervisor");
@@ -128,6 +134,27 @@ public class GatewayService extends Service {
         }
         // 被系统回收后自动重建（Android 会带空 intent 重启服务）
         return START_STICKY;
+    }
+
+    /** 在最近任务里划掉主界面 = 关掉：没任务在跑就停服务；有任务在跑照旧保活，跑完再停（守护循环里看） */
+    @Override public void onTaskRemoved(Intent root) {
+        android.content.ComponentName cn = root == null ? null : root.getComponent();
+        if (cn != null && MainActivity.class.getName().equals(cn.getClassName())) {
+            if (!busy()) { Log.i(TAG, "界面被划掉且没有任务在跑，停止服务"); shutdown(); }
+            else { Log.i(TAG, "界面被划掉，任务跑完再停"); closeWhenIdle = true; }
+        }
+        super.onTaskRemoved(root);
+    }
+
+    /** 有一轮在跑（标记文件由网关在一轮开始 / 全部结束时增删；网关被杀时会留下，正好算「跑到一半」） */
+    private boolean busy() { return new File(env.home, ".run-active").exists(); }
+
+    private void shutdown() {
+        stopping = true;
+        killGateway();
+        ShizukuSetup.get(this).onExit();
+        stopForeground(true);
+        stopSelf();
     }
 
     @Override public void onDestroy() {

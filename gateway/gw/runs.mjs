@@ -16,7 +16,8 @@ export const maxParallel = () => Math.max(1, Math.min(MAX_PARALLEL_CAP, Math.rou
 // 有任务在跑时落一个标记文件：cccodroid 的冻结检测只把「跑任务时被冻」算数 ——
 // 空闲时被厂商冻结器冻住无害，以前每次都记，设置页的提醒就老是弹
 const RUN_FLAG = path.join(CFG.home, ".run-active");
-export const runFlag = (on) => { try { on ? fs.writeFileSync(RUN_FLAG, String(process.pid)) : fs.rmSync(RUN_FLAG, { force: true }); } catch {} };
+let flagOn = null;   // 上次写的状态：saveRunMark 每次广播都会同步一次，没变就不碰文件
+export const runFlag = (on) => { if (flagOn === !!on) return; flagOn = !!on; try { on ? fs.writeFileSync(RUN_FLAG, String(process.pid)) : fs.rmSync(RUN_FLAG, { force: true }); } catch {} };
 runFlag(false);
 
 // 最近真正跑过的会话。落盘保存 —— 网关重启（热替换/重开 App）后前端还能接回原来的对话。
