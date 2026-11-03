@@ -118,9 +118,9 @@ final class Updater {
             File f = new File(st.optString("file", "/nonexistent"));
             String latest = st.optString("latest", ""), url = st.optString("url", "");
             long size = st.optLong("size");
-            int c = latest.isEmpty() || app.current.isEmpty() ? -1 : cmpVer(latest, app.current);
-            boolean swap = c == 0 && !st.optString("flavor", "").equals(flavor());
-            if (f.isFile() && f.length() == size && !url.isEmpty() && st.optString("flavor", "").equals(wantFlavor()) && (c > 0 || swap)) {
+            int vc = latest.isEmpty() || app.current.isEmpty() ? -1 : cmpVer(latest, app.current);
+            boolean swap = vc == 0 && !st.optString("flavor", "").equals(flavor());
+            if (f.isFile() && f.length() == size && !url.isEmpty() && st.optString("flavor", "").equals(wantFlavor()) && (vc > 0 || swap)) {
                 app.file = f; app.size = size; app.url = url; app.sha = st.optString("sha256", "");
                 app.latest = latest;
                 app.set("ready", "");
