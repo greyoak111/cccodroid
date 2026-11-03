@@ -51,3 +51,20 @@ test("设置写盘失败：返回 500，磁盘旧值原样保留（#122-3）", a
     if (had) fs.writeFileSync(PATHS.settings, before); else fs.rmSync(PATHS.settings, { force: true });
   }
 });
+
+test("输出风格的 name / description：冒号后没空格、值以 s 开头也照原样读（PR #118 第 3 条）", async (t) => {
+  const { CFG } = await import("../gw/config.mjs");
+  const dir = path.join(CFG.workspace, ".claude", "output-styles");
+  fs.mkdirSync(dir, { recursive: true });
+  const a = path.join(dir, "fmt-a.md"), b = path.join(dir, "fmt-b.md");
+  fs.writeFileSync(a, "---\nname:sunny\ndescription:short and sweet\n---\nbody\n");
+  fs.writeFileSync(b, "---\nname:\ndescription: x\n---\n");
+  t.after(() => { fs.rmSync(a, { force: true }); fs.rmSync(b, { force: true }); });
+  const { routeSettings } = await import("../gw/settings.mjs");
+  const { srv, call } = await serve(routeSettings);
+  t.after(() => srv.close());
+  const r = await call("/api/settings");
+  const st = r.body.outputStyles;
+  assert.ok(st.some((o) => o.id === "sunny" && o.desc === "short and sweet"), JSON.stringify(st));
+  assert.ok(!st.some((o) => o.id === "description: x"), "name 为空时不能把下一行当成名字");
+});

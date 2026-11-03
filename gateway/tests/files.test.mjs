@@ -67,3 +67,52 @@ test("保存时写盘失败：原文件一个字节都不动（#121-3）", async
     fs.rmSync(file, { force: true });
   }
 });
+
+// 请求体分两段到，中间执行 swap()
+function slowBody(swap) {
+  let n = 0;
+  const req = new Readable({ read() {
+    if (n === 0) { n++; this.push(Buffer.from("PWN")); }
+    else if (n === 1) { n++; swap(); this.push(Buffer.from("ED")); this.push(null); }
+  } });
+  req.method = "POST"; req.headers = {};
+  return req;
+}
+
+test("保存途中目标被换成悬空软链：拒绝，软链原样留着（#121-3 复核）", async () => {
+  fs.mkdirSync(CFG.workspace, { recursive: true });
+  const file = path.join(CFG.workspace, "dangle-me.txt"), ghost = path.join(CFG.home, "ghost-target.txt");
+  fs.rmSync(ghost, { force: true }); fs.rmSync(file, { force: true });
+  fs.writeFileSync(file, "old");
+  const mtime = fs.statSync(file).mtimeMs;
+  const res = fakeRes();
+  const u = new URL(`http://x/api/file/save?path=${encodeURIComponent(file)}&mtime=${mtime}`);
+  await routeFiles(slowBody(() => { fs.rmSync(file); fs.symlinkSync(ghost, file); }), res, u, "/api/file/save");
+  assert.notEqual(res.code, 200, JSON.stringify(res.body));
+  assert.ok(fs.lstatSync(file).isSymbolicLink(), "软链不能被悄悄换成普通文件");
+  assert.ok(!fs.existsSync(ghost));
+  fs.rmSync(file, { force: true });
+});
+
+test("新建文件在路由重核之后、落盘之前上级目录被换成软链：拒绝，别处不多出文件（#121-3 复核）", async (t) => {
+  const sub = path.join(CFG.workspace, "swap-dir"), away = path.join(CFG.home, "away-dir");
+  fs.rmSync(sub, { recursive: true, force: true }); fs.rmSync(away, { recursive: true, force: true });
+  fs.mkdirSync(sub, { recursive: true }); fs.mkdirSync(away, { recursive: true });
+  const file = path.join(sub, "fresh.txt");
+  // 卡在打开临时文件那一刻换：路由的重核已经过了，只剩 writeNoFollow 自己的核对
+  const open = fs.openSync;
+  let swapped = false;
+  const m = t.mock.method(fs, "openSync", (p, ...a) => {
+    if (!swapped && String(p).includes(".ccsave-")) { swapped = true; fs.rmSync(sub, { recursive: true }); fs.symlinkSync(away, sub); }
+    return open(p, ...a);
+  });
+  const req = Readable.from([Buffer.from("PWNED")]); req.method = "POST"; req.headers = {};
+  const res = fakeRes();
+  try {
+    await routeFiles(req, res, new URL(`http://x/api/file/save?path=${encodeURIComponent(file)}`), "/api/file/save");
+  } finally { m.mock.restore(); }
+  assert.ok(swapped, "要真的走到写临时文件那一步");
+  assert.notEqual(res.code, 200, JSON.stringify(res.body));
+  assert.deepEqual(fs.readdirSync(away), [], "不能顺着换上的软链写进别的目录（临时文件也要清掉）");
+  fs.rmSync(sub, { force: true }); fs.rmSync(away, { recursive: true, force: true });
+});

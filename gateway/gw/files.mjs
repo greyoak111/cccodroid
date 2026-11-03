@@ -92,10 +92,13 @@ function writeNoFollow(file, buf) {
   let mode = 0o644;
   // 已有文件：打开后按 /proc/self/fd 看实际打开的是哪个文件。核完路径到打开之间，上级目录也可能被换成软链（审查 10-30 第九份 后端低3），
   // O_NOFOLLOW 只管最后一级；对不上就不写。顺便沿用原权限
-  if (fs.existsSync(file)) {
+  // 用 lstat 不用 existsSync：悬空软链 existsSync 是 false，会被下面的 rename 悄悄换成普通文件；照旧拒绝（复核建议 2）
+  let st = null; try { st = fs.lstatSync(file); } catch (e) { if (e.code !== "ENOENT") throw e; }
+  if (st && st.isSymbolicLink()) throw Object.assign(new Error("symlink"), { code: "ELOOP" });
+  if (st) {
     const fd = fs.openSync(file, c.O_WRONLY | c.O_NOFOLLOW);
     try {
-      let real = null; try { real = fs.readlinkSync("/proc/self/fd/" + fd); } catch {}
+      let real = null; try { real = fs.readlinkSync("/proc/self/fd/" + fd); } catch (e) { log(`[file] 读不到打开的实际路径，跳过核对：${e.code || e.message}`); }
       if (real && real !== file) throw Object.assign(new Error("path changed"), { code: "ELOOP" });
       mode = (fs.fstatSync(fd).mode & 0o777) || 0o644;
     } finally { fs.closeSync(fd); }
@@ -105,6 +108,10 @@ function writeNoFollow(file, buf) {
   let fd = null;
   try {
     fd = fs.openSync(tmp, c.O_WRONLY | c.O_CREAT | c.O_EXCL | c.O_NOFOLLOW, mode);
+    // 临时文件实际落在哪个目录：核完路径之后上级目录被换成软链，这里就对不上，不写（新建文件也查，复核建议 2）。
+    // 剩下的窗口只在这次核对到 rename 之间；node 没有 renameat，按目录 fd 提交做不到，这点残余接受
+    let real = null; try { real = fs.readlinkSync("/proc/self/fd/" + fd); } catch (e) { log(`[file] 读不到临时文件的实际路径，跳过核对：${e.code || e.message}`); }
+    if (real && path.dirname(real) !== path.dirname(file)) throw Object.assign(new Error("path changed"), { code: "ELOOP" });
     fs.writeFileSync(fd, buf);
     fs.fsyncSync(fd);
     fs.closeSync(fd); fd = null;

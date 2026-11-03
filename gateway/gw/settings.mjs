@@ -26,8 +26,8 @@ function outputStyles() {
         const head = fs.readFileSync(path.join(dir, f), "utf8").slice(0, 2000);
         const fm = head.match(/^---\n([\s\S]*?)\n---/);
         if (fm) {
-          name = (fm[1].match(/^name:s*(.+)$/m) || [, name])[1].trim();
-          desc = (fm[1].match(/^description:s*(.+)$/m) || [, ""])[1].trim();
+          name = (fm[1].match(/^name:[ \t]*(.+)$/m) || [, name])[1].trim();
+          desc = (fm[1].match(/^description:[ \t]*(.+)$/m) || [, ""])[1].trim();
         }
       } catch {}
       if (!out.some((o) => o.id === name)) out.push({ id: name, desc });
@@ -144,13 +144,16 @@ export async function routeSettings(req, res, u, p) {
         }
       }
 
-      if (!saveSettings())
-        return sendJson(res, 500, { error: tz("设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）") });
+      // 工作岛开关不管写盘成没成功都要应用（以前排在 return 500 后面，失败时被跳过）：写盘失败时内存里已经是新值，
+      // 其他开关本次运行内也都按新值走，只有它不跟着，就成了「设置里是开的、实际没开」（#122-3 复核建议 3）。
+      // import 是异步的，实际在 saveSettings 之后才执行，这不影响
       if ("workIsland" in b) {
         import("./work-island.mjs")
           .then((m) => m.applyWorkIslandSetting())
           .catch((e) => log("工作岛设置应用失败: " + e.message));
       }
+      if (!saveSettings())
+        return sendJson(res, 500, { error: tz("设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）") });
       log(`设置已更新 provider=${PROVIDER.id} model=${SETTINGS.model || "(默认)"} effort=${SETTINGS.effort} autoCompact=${SETTINGS.autoCompactWindow || "(默认)"} workIsland=${SETTINGS.workIsland}`);
       return sendJson(res, 200, { ok: true, settings: SETTINGS, provider: PROVIDER.id, upstream: CFG.upstream });
     }
