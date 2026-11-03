@@ -141,6 +141,7 @@ const S = {
     }
     // 包里的前端要和工作树一致（打包后又改了代码就不算数）
     if (!DEV && git("status", "--porcelain")) throw new Error("打包后工作区又有改动，重打：--from build");
+    state.head = git("rev-parse", "HEAD");
     console.log(`  ${b.name}（${b.code}） ${(state.size / 1048576).toFixed(2)} MB  sha256 ${state.sha}`);
   },
   push() {
@@ -241,6 +242,19 @@ for (const s of plan) {
   if (PUBLIC.includes(s) && state.done.verify === "assumed") {
     try { await S.verify(); state.done.verify = new Date().toISOString(); save(); }
     catch (e) { console.error(`✗ verify（${s} 之前补核）：${e.message}`); save(); process.exit(1); }
+  }
+  // 续跑时 verify 可能是上次的：对外之前核对提交和两个包还是验过的那份，变了就作废 verify 及之后的步骤（审查 v0.5.20 10-002）
+  if (PUBLIC.includes(s) && !DEV) {
+    const why = state.head !== git("rev-parse", "HEAD") ? "提交变了"
+      : !fs.existsSync(APK) || shaFile(APK) !== state.sha || fs.statSync(APK).size !== state.size ? "cccodroid.apk 变了"
+      : !fs.existsSync(APK36) || shaFile(APK36) !== state.sha36 || fs.statSync(APK36).size !== state.size36 ? "cccodroid-36.apk 变了"
+      : git("status", "--porcelain") ? "工作区有改动" : "";
+    if (why) {
+      for (const k of STEPS.slice(STEPS.indexOf("verify"))) delete state.done[k];
+      save();
+      console.error(`✗ ${s} 之前核对：${why}，和验过的不是同一份。重跑 verify：node scripts/ship.mjs ${VER} --from verify${PUBLISH ? " --publish" : ""}`);
+      process.exit(1);
+    }
   }
   try { await S[s](); } catch (e) {
     console.error(`✗ ${s}：${e.message}\n  修好后再跑同一条命令，会从 ${s} 接着来`);

@@ -69,7 +69,8 @@ const files = new Map();     // path → { bin, mode }
   const parts = raw.split("\0");
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i];
-    if (p.startsWith(":")) { const [, , dst, , , st] = p.slice(1).split(/\s+/); files.set(parts[++i], { mode: dst, st, bin: false }); }
+    // raw 记录去掉冒号后是五段：源模式 目标模式 源 sha 目标 sha 状态（审查 v0.5.20 10-001：以前错位取到了 sha，模式规则全不生效）
+    if (p.startsWith(":")) { const [src, dst, , , st] = p.slice(1).split(/\s+/); files.set(parts[++i], { src, mode: dst, st: String(st || "")[0], bin: false }); }
     else if (/^(-|\d+)\t(-|\d+)\t/.test(p)) { const [a, b, f] = p.split("\t"); const name = f || parts[++i]; const x = files.get(name) || {}; x.bin = a === "-" && b === "-"; files.set(name, x); }
   }
 }
@@ -81,6 +82,7 @@ for (const [f, x] of files) {
   if (x.bin && x.st !== "D") add("high", f, 0, "二进制文件（看不了内容，要说明来源并能复现）");
   if (x.mode === "120000") add("high", f, 0, "符号链接");
   if (x.mode === "100755" && x.st === "A") add("med", f, 0, "新增可执行文件");
+  else if (x.mode === "100755" && x.src !== "100755" && x.st !== "D") add("med", f, 0, "改成了可执行");
 }
 
 // 逐行看新增的内容
