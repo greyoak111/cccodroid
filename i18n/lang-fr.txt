@@ -2636,3 +2636,4 @@
 2636	Activé : les commandes privilégiées ne sont plus confirmées une à une
 2637	✓ Désactivé ; chaque commande est de nouveau confirmée
 2638	Ne plus confirmer chaque commande privilégiée (à vos risques) : une fois activé, les commandes privilégiées s'exécutent directement et les tâches ne restent plus bloquées en arrière-plan ; celles qui touchent cccodroid ou Shizuku / Sui sont interceptées et soumises à confirmation autant que possible, sans garantie pour toutes les formes d'écriture. Pour n'autoriser qu'une session, cochez plutôt « Autoriser toutes les commandes privilégiées suivantes de cette session » dans la fenêtre de confirmation
+2639	C'est un fichier binaire ; l'ouvrir comme texte bloquerait l'application.

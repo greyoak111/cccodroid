@@ -2673,5 +2673,6 @@ window.I18N_DICT.en = {
   "正在关闭…": "Turning off…",
   "已打开：特权命令不再逐条确认": "On: privileged commands are no longer confirmed one by one",
   "✓ 已关闭，恢复逐条确认": "✓ Off; confirming each command again",
-  "特权命令不再逐条确认（风险自负）：打开后特权命令直接执行，在后台也不会卡在等确认；涉及 cccodroid 自身和 Shizuku / Sui 的会尽量拦下来再问，但拦不住所有写法。只想放行一个会话，在确认框里勾「这个会话后面的都允许」即可": "Stop confirming privileged commands one by one (at your own risk): once on, privileged commands run directly and tasks no longer stall waiting for confirmation in the background; commands touching cccodroid itself or Shizuku / Sui are caught and asked about where possible, but not every form can be caught. To allow just one session, tick \"Allow all later privileged commands in this session\" in the prompt instead"
+  "特权命令不再逐条确认（风险自负）：打开后特权命令直接执行，在后台也不会卡在等确认；涉及 cccodroid 自身和 Shizuku / Sui 的会尽量拦下来再问，但拦不住所有写法。只想放行一个会话，在确认框里勾「这个会话后面的都允许」即可": "Stop confirming privileged commands one by one (at your own risk): once on, privileged commands run directly and tasks no longer stall waiting for confirmation in the background; commands touching cccodroid itself or Shizuku / Sui are caught and asked about where possible, but not every form can be caught. To allow just one session, tick \"Allow all later privileged commands in this session\" in the prompt instead",
+  "这是二进制文件，当作文本打开会把界面卡住。": "This is a binary file; opening it as text would freeze the app."
 };

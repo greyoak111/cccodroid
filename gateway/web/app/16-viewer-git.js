@@ -365,7 +365,9 @@
     path: "", kind: "", size: 0, mode: "", text: "", mtime: 0, dirty: false,
     pdf: null, pdfObs: null, zoom: 1, wrap: localStorage.getItem("cc.vw.wrap") !== "0",
   };
-  const VW_EDIT_MAX = 16 * 1024 * 1024;   // 几百万字的长稿也要能开；预览分段渲染、字数增量统计
+  const VW_EDIT_MAX = 16 * 1024 * 1024;
+  // 明摆着是二进制的扩展名：不给「当作文本打开」（11MB 的 APK 解成一千多万字塞进编辑框，主线程卡死，群反馈 11-03）
+  const VW_BIN_EXT = /\.(apk|apks|aab|xapk|zip|jar|aar|dex|class|so|o|a|ko|exe|dll|bin|img|iso|gz|tgz|xz|zst|bz2|7z|rar|tar|deb|rpm|db|sqlite3?|wasm|ttf|otf|woff2?|mp[34]|m4a|aac|flac|opus|ogg|wav|webm|mkv|mov|avi|png|jpe?g|gif|webp)$/i;   // 几百万字的长稿也要能开；预览分段渲染、字数增量统计
   const isMd = (p) => /\.(md|markdown|mdx)$/i.test(p);
   const isHtml = (p) => /\.html?$/i.test(p);
 
@@ -399,7 +401,7 @@
     vwActs([]);
     $("vw-body").innerHTML = `<div class="vw-empty">
       <div>${t("这种文件没有内置预览。")}</div>
-      ${VW.size <= VW_EDIT_MAX ? `<button class="btn ghost sm" data-a="astext">${t("当作文本打开")}</button>` : ""}
+      ${VW.size <= VW_EDIT_MAX && !VW_BIN_EXT.test(path) ? `<button class="btn ghost sm" data-a="astext">${t("当作文本打开")}</button>` : ""}
       <button class="btn ghost sm" data-a="share">${shareIco()}${t("分享")}</button></div>`;
     $("vw-body").querySelector('[data-a="astext"]')?.addEventListener("click", () => { VW.kind = "text"; vwLoadText("edit"); });
   }
@@ -478,6 +480,14 @@
 
   /** 按字节认编码（审查 B06）：以前一律当 UTF-8 读，UTF-16 / GBK 的字节变成替代字符，保存时连原文一起写坏；UTF-8 的 BOM 也会丢。
    *  enc 非空 = 不是 UTF-8：照它解出来给人看，但只读 —— 浏览器只会编 UTF-8，存回去必然有损 */
+  /** 看着像二进制：前 64KB 里有 NUL，或控制字符超过一成（日志里的 ANSI 颜色占不到这么多）。带 UTF-16 BOM 的本来就有 NUL，不算 */
+  function vwLooksBinary(b) {
+    if ((b[0] === 0xff && b[1] === 0xfe) || (b[0] === 0xfe && b[1] === 0xff)) return false;
+    const n = Math.min(b.length, 65536);
+    let ctl = 0;
+    for (let i = 0; i < n; i++) { const c = b[i]; if (c === 0) return true; if (c < 9 || (c > 13 && c < 32)) ctl++; }
+    return n > 0 && ctl / n > 0.1;
+  }
   function vwDecode(b) {
     if (b[0] === 0xff && b[1] === 0xfe) return { text: new TextDecoder("utf-16le").decode(b), enc: "UTF-16LE", bom: false };
     if (b[0] === 0xfe && b[1] === 0xff) return { text: new TextDecoder("utf-16be").decode(b), enc: "UTF-16BE", bom: false };
@@ -564,7 +574,13 @@
       const r = await fetch(fileUrl(VW.path));
       if (!r.ok) throw new Error("HTTP " + r.status);
       mtime = Number(r.headers.get("x-mtime")) || 0;
-      dec = vwDecode(new Uint8Array(await r.arrayBuffer()));
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      // 二进制当文本解码会卡死界面（扩展名没认出来的也在这里拦）
+      if (vwLooksBinary(bytes)) {
+        if (gen === VW.gen) { vwActs([]); $("vw-body").innerHTML = `<div class="vw-empty"><div>${t("这是二进制文件，当作文本打开会把界面卡住。")}</div><button class="btn ghost sm" data-a="share">${shareIco()}${t("分享")}</button></div>`; }
+        return;
+      }
+      dec = vwDecode(bytes);
     } catch (e) {
       if (gen === VW.gen) $("vw-body").innerHTML = `<div class="vw-empty">${t("读取失败")}: ${esc(e.message)}</div>`;
       return;

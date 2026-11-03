@@ -2639,4 +2639,5 @@ window.I18N_DICT["es"] = {
   "已打开：特权命令不再逐条确认": "Activado: los comandos privilegiados ya no se confirman uno a uno",
   "✓ 已关闭，恢复逐条确认": "✓ Desactivado; se vuelve a confirmar cada comando",
   "特权命令不再逐条确认（风险自负）：打开后特权命令直接执行，在后台也不会卡在等确认；涉及 cccodroid 自身和 Shizuku / Sui 的会尽量拦下来再问，但拦不住所有写法。只想放行一个会话，在确认框里勾「这个会话后面的都允许」即可": "Dejar de confirmar cada comando privilegiado (bajo tu responsabilidad): al activarlo, los comandos privilegiados se ejecutan directamente y las tareas ya no se quedan esperando confirmación en segundo plano; los que afectan a cccodroid o a Shizuku / Sui se intentan detener para preguntar, aunque no se pueden detectar todas las formas de escribirlos. Para permitir solo una sesión, marca «Permitir todos los comandos privilegiados siguientes de esta sesión» en el diálogo de confirmación",
+  "这是二进制文件，当作文本打开会把界面卡住。": "Es un archivo binario; abrirlo como texto bloquearía la aplicación.",
 };

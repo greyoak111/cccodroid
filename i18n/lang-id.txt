@@ -2636,3 +2636,4 @@
 2636	Aktif: perintah istimewa tidak lagi dikonfirmasi satu per satu
 2637	✓ Nonaktif, kembali mengonfirmasi tiap perintah
 2638	Tidak lagi mengonfirmasi tiap perintah istimewa (risiko ditanggung sendiri): setelah aktif, perintah istimewa langsung dijalankan dan tugas di latar belakang tidak lagi tertahan menunggu konfirmasi; perintah yang menyentuh cccodroid atau Shizuku / Sui sebisa mungkin dicegat dan ditanyakan, tetapi tidak semua bentuk penulisan bisa terdeteksi. Untuk mengizinkan satu sesi saja, centang "Izinkan semua perintah istimewa berikutnya di sesi ini" di dialog konfirmasi
+2639	Ini file biner; membukanya sebagai teks akan membuat aplikasi macet.
