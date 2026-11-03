@@ -43,10 +43,18 @@ final class AppFiles {
     static synchronized List<String> tampered(Context c, File app) {
         List<String> bad = new ArrayList<>();
         Map<String, String> want = new HashMap<>();
-        try (InputStream in = c.getAssets().open("app/FILES");
-             BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+        byte[] list;
+        try (InputStream in = c.getAssets().open("app/FILES")) {
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[1 << 16];
+            for (int n; (n = in.read(buf)) > 0; ) bo.write(buf, 0, n);
+            list = bo.toByteArray();
+        } catch (Exception e) { return bad; }
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(new java.io.ByteArrayInputStream(list), StandardCharsets.UTF_8))) {
             for (String l; (l = r.readLine()) != null; ) if (l.length() > 65) want.put(l.substring(65), l.substring(0, 64));
         } catch (Exception e) { return bad; }
+        // 清单自己也要和安装包里的一样：网关启动时按 files/app/FILES 做运行期核对（gw/appfiles.mjs），改了它就等于改了核对标准
+        want.put("FILES", sha256(list));
         walk(app, "", want, bad);
         for (String k : want.keySet()) { if (bad.size() >= 20) break; if (!k.isEmpty()) bad.add(k + " (missing)"); }
         return bad;
@@ -62,10 +70,17 @@ final class AppFiles {
             int mode;
             try { mode = Os.lstat(f.getPath()).st_mode; } catch (Exception e) { bad.add(r); continue; }
             if (OsConstants.S_ISDIR(mode)) { walk(f, r, want, bad); continue; }
-            if (r.equals("FILES")) continue;
             String h = want.remove(r);
             if (h == null || !OsConstants.S_ISREG(mode) || !h.equals(sha256(f))) bad.add(r);
         }
+    }
+
+    private static String sha256(byte[] b) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            for (byte x : MessageDigest.getInstance("SHA-256").digest(b)) sb.append(String.format("%02x", x));
+            return sb.toString();
+        } catch (Exception e) { return ""; }
     }
 
     private static String sha256(File f) {

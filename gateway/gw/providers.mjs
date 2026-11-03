@@ -339,6 +339,7 @@ function saveProvidersRaw() {
     fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
     created = true;
     fs.writeFileSync(fd, JSON.stringify(PROVIDERS_RAW, null, 2));
+    fs.fsyncSync(fd);     // 先落盘再换名：掉电时不会换上一个还没写进去的空文件（密钥都在这里）
     fs.closeSync(fd); fd = undefined;
     fs.renameSync(temp, PROVIDERS_FILE);
   } finally {

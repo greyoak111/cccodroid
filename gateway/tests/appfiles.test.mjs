@@ -68,3 +68,17 @@ test("界面文件：对得上才发，对不上要求重启", () => {
   assert.equal(g.served("web/evil.html", Buffer.from("x"), null), false, "安装包里没有的不发");
   assert.ok(why.length >= 2 && g.restartWanted);
 });
+
+test("复核补：lib 也写回；清单里的子目录不当多余删；分段清单", () => {
+  const root = mkRoot("apf-lib", { ...FILES, "lib/seccomp-enosys.so": "ELF\n", "archive/sub/x.md": "x\n", "web/app/02-b.js": "let b=2;\n" });
+  const g = appGuard(root);
+  fs.writeFileSync(path.join(root, "lib/seccomp-enosys.so"), "EVIL\n");
+  fs.writeFileSync(path.join(root, "lib/evil.so"), "x");
+  const fixed = g.check();
+  assert.ok(fixed.includes("lib/seccomp-enosys.so") && fixed.some((f) => f.startsWith("lib/evil.so")), fixed.join());
+  assert.equal(fs.readFileSync(path.join(root, "lib/seccomp-enosys.so"), "utf8"), "ELF\n");
+  assert.ok(fs.existsSync(path.join(root, "archive/sub/x.md")), "清单里的子目录留着");
+  assert.deepEqual(g.check(), [], "不来回折腾");
+  assert.deepEqual(g.list("web/app/"), ["01-a.js", "02-b.js"]);
+  assert.ok(g.has("web/index.html") && !g.has("web/x.html"));
+});

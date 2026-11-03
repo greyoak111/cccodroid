@@ -106,6 +106,8 @@ let appCache = { key: "", data: null };
 export function appJs() {
   const dir = path.join(PATHS.web, "app"), parts = appParts();
   if (!parts.length) return null;
+  // 部署出来的那份：分段集合也要和清单一样 —— 删掉权限卡片那一段，剩下的每段哈希都对，界面就再也不出确认卡片
+  if (APP && parts.join("/") !== APP.list("web/app/").filter((f) => f.endsWith(".js")).join("/")) { APP.restart("web/app/（分段增删）"); return null; }
   const st = parts.map((f) => fs.statSync(path.join(dir, f)));
   const key = parts.map((f, i) => `${f}:${st[i].mtimeMs}:${st[i].size}`).join("|");
   if (appCache.key !== key) {
@@ -156,6 +158,8 @@ export function serveStatic(req, res, urlPath) {
   }
   const full = path.join(PATHS.web, rel);
   if (!full.startsWith(PATHS.web + path.sep) || !fs.existsSync(full) || fs.statSync(full).isDirectory()) {
+    const r = path.relative(path.dirname(PATHS.web), full);
+    if (APP && APP.has(r)) { APP.restart(`${r}（被删了）`); return sendJson(res, 503, { error: "app files modified" }); }
     // 404 不逐条记（审查 10-30 第九份 高3）：10 秒里只记第一条，其余的计数并进下一条
     const now = Date.now();
     if (now - miss404.at > 10e3) { log(`404 ${rel.slice(0, 200)}${miss404.n ? `（此前 10 秒内另有 ${miss404.n} 次 404）` : ""}`); miss404.at = now; miss404.n = 0; }

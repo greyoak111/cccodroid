@@ -10,9 +10,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { HERE, log } from "./config.mjs";
 
-const SNAP_DIRS = ["archive/", "guard/", "bin/", "pre/", "scripts/"];
+// lib/ 里是起 claude 时 --preload 的库和网关自己 --require 的 execpath.cjs，和 bin/claude 一样在执行链上（DeepSeek 复核 11-03 第三轮）
+const SNAP_DIRS = ["archive/", "guard/", "bin/", "pre/", "scripts/", "lib/"];
 const SNAP_FILES = ["TOOLS.md"];
-const EXEC_DIRS = ["bin/", "pre/", "scripts/"];
 const sha = (b) => crypto.createHash("sha256").update(b).digest("hex");
 
 export function appGuard(root, { onRestart } = {}) {
@@ -21,6 +21,8 @@ export function appGuard(root, { onRestart } = {}) {
     for (const l of fs.readFileSync(path.join(root, "FILES"), "utf8").split("\n")) if (l.length > 65) want.set(l.slice(65), l.slice(0, 64));
   } catch { return null; }
   if (!want.size) return null;
+  const dirs = new Set();          // 清单里出现过的目录（含各级上级），「多出来的」判断别把它们删了
+  for (const k of want.keys()) for (let i = k.indexOf("/"); i > 0; i = k.indexOf("/", i + 1)) dirs.add(k.slice(0, i));
   const snapped = (rel) => SNAP_FILES.includes(rel) || SNAP_DIRS.some((d) => rel.startsWith(d));
   const snap = new Map();          // rel → { buf, mode }
   const seen = new Map();          // rel → "size:mtime"，没变就不重读
@@ -67,7 +69,7 @@ export function appGuard(root, { onRestart } = {}) {
       let ents; try { ents = fs.readdirSync(path.join(root, d)); } catch { continue; }
       for (const n of ents) {
         const rel = d + n;
-        if (want.has(rel)) continue;
+        if (want.has(rel) || dirs.has(rel)) continue;
         try { fs.rmSync(path.join(root, rel), { recursive: true, force: true }); fixed.push(rel + "（多出来的）"); } catch {}
       }
     }
@@ -89,6 +91,10 @@ export function appGuard(root, { onRestart } = {}) {
 
   return {
     check, served,
+    has: (rel) => want.has(rel),
+    /** 清单里某个目录下的文件名（不含子目录），排好序：app.js 的分段以它为准，少一段、多一段都算改过 */
+    list: (dir) => [...want.keys()].filter((k) => k.startsWith(dir) && !k.slice(dir.length).includes("/")).map((k) => k.slice(dir.length)).sort(),
+    restart,
     text: (rel) => snap.get(rel)?.buf.toString("utf8") ?? null,
     get restartWanted() { return restartWanted; },
   };
@@ -109,6 +115,7 @@ export const APP = appGuard(HERE, {
     idleTimer.unref?.();
   },
 });
-if (APP) setInterval(() => { try { APP.check(); } catch {} }, 60e3).unref?.();
+// 10 秒一次：只是 lstat 几十个文件；guard 钩子每次工具调用都重新起、建档规范模型随时会读，窗口别留太长
+if (APP) setInterval(() => { try { APP.check(); } catch {} }, 10e3).unref?.();
 /** 每轮起 claude 前调：小目录被改的先写回 */
 export const checkAppFiles = () => { try { return APP ? APP.check() : []; } catch { return []; } };

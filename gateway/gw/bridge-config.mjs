@@ -598,10 +598,13 @@ export async function handleBridgeRepair(req, res) {
       });
       return { ok: true, repaired: true, scope: "APP_METADATA", providerId: id };
     });
+    // 请求已断开就不回写（同 handleBridgeModels）；修复本身已完成或已回滚，结果靠下次检查读出
+    if (res.destroyed || res.writableEnded) return;
     return sendJson(res, 200, result);
   } catch (error) {
     const code = ["BUSY", "REPAIR_STALE", "REPAIR_NOT_NEEDED", "REPAIR_PARTIAL", "invalid_input"].includes(error.code) ? error.code : "REPAIR_UNAVAILABLE";
     log(`[bridge-config] repair failed stage=${code}`);
+    if (res.destroyed || res.writableEnded) return;
     return sendJson(res, ["BUSY", "REPAIR_STALE", "REPAIR_UNAVAILABLE", "REPAIR_PARTIAL"].includes(code) ? 409 : 400, { ok: false, code,
       ...(code === "REPAIR_PARTIAL" ? { committed: true, scope: "APP_METADATA" } : {}) });
   } finally { release?.(); }

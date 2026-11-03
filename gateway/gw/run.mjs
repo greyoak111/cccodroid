@@ -296,7 +296,6 @@ export async function startRun(item) {
   // 上面拉模型清单、问设备工具、读建档提示都要等：这期间点了停止（还没有进程可杀）就别再起了（安全通告 GHSA-g35m）
   if (run.aborted) { log("⏹ 起进程前已停止"); return endRun(run, { durationMs: 0 }); }
   // 项目自带会自动运行的配置（钩子、.mcp.json…，见 projtrust.mjs）、又没被认过：先问；不同意就不加载项目级配置，这一轮照常
-  checkAppFiles();     // 建档规范、bin/claude、guard 这些小文件被改了先写回（见 appfiles.mjs）
   const proj = projectRisks(cwd);
   if (proj && !projectTrusted(cwd, proj.fp)) {
     const ok = run.unattended || run.auto ? false : await askProjectTrust(run, cwd, proj, emit);
@@ -309,6 +308,8 @@ export async function startRun(item) {
     log(`权限模式在起进程前改了：${permMode} → ${run.permMode}`);
     argv[pmAt + 1] = permMode = run.permMode;
   }
+  // 建档规范、bin/claude、guard、预加载的库这些被改了先写回（见 appfiles.mjs）。放在起进程紧前：上面等项目配置确认可能等很久
+  checkAppFiles();
   const [cmd0, args0] = claudeCmd(argv);
   const child = spawn(cmd0, args0, {
     cwd,
