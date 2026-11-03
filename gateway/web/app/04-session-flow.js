@@ -159,7 +159,7 @@
     for (const rv of runViews.values()) { rv.timer?.stop(); rv.av?.remove(); }   // av.remove 连阶段提示的每秒定时器一起停（审查 #49 P3-7）
     runViews.clear();
     TOOL_CARDS.clear();
-    PENDING_RESULTS.clear();
+    clearToolResults();
     agReset();
     olderEl.classList.add("hidden");
     syncWindow();
@@ -745,13 +745,19 @@
     // 正在跑的那一轮紧接着会被网关整轮重放过来
     if (helloCount === 1 && ev.run && !ev.run.ended) {
       // 刚打开界面时网关正忙：直接跟上那一轮（这才是用户最后在干的事）
-      if (ev.run.sessionId) view.sessionId = ev.run.sessionId;
-      else { view.sessionId = null; view.runIds.add(ev.run.id); }
+      const sid1 = ev.run.sessionId || null;
+      // 自动跟到别的会话也要按每会话草稿的契约交接（#120-3）：A 没发的字和附件留在 A，输入框换成 B 自己的草稿；
+      // 不然 A 的草稿会顶着 B 的会话号发出去
+      if (sid1 !== (view.sessionId || null)) draftSwap(view.sessionId, sid1);
+      view.sessionId = sid1;
+      if (!sid1) view.runIds.add(ev.run.id);
       saveUiState();
     } else if (helloCount === 1 && !ev.run && !view.sessionId && intrList(ev.interrupted).pop()?.sessionId) {
       // 刚打开、上一轮是被系统杀掉的：直接回到最近开始的那个会话，「继续」卡就挂在它底下；其余的在会话列表里标着
       // （最近那轮还没建会话就留在新会话页，「重发」卡在这里）
-      view.sessionId = intrList(ev.interrupted).pop().sessionId;
+      const sid1 = intrList(ev.interrupted).pop().sessionId;
+      if ((sid1 || null) !== (view.sessionId || null)) draftSwap(view.sessionId, sid1);   // 同上：草稿按会话交接
+      view.sessionId = sid1;
       saveUiState();
     }
     const keepRuns = new Set(view.runIds), keepCids = new Set(view.cids);

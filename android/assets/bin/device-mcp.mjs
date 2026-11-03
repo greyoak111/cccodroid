@@ -118,9 +118,10 @@ async function listTools() {
 
 async function callTool(name, args) {
   if (!TOOLS[name]) return { isError: true, content: [{ type: "text", text: "unknown tool " + name }] };
-  // 读写剪贴板、打开要等用户在 cccodroid 里点头（应用那头最多等 60 秒）：这边先超时报错、那边随后点了允许，就成了「报错了却做了」
-  const ask = name === "clipboard_read" || name === "clipboard_write" || name === "open";
-  const r = await app({ op: "dev", tool: name, args: args || {} }, ask ? 70000 : name.startsWith("screen") || name === "screenshot" ? 30000 : 20000);
+  // 读写剪贴板、打开、每个会话第一次用屏幕工具都要等用户在 cccodroid 里点头（应用那头最多等 60 秒）：
+  // 这边先超时报错、那边随后点了允许，就成了「报错了却做了」。屏幕工具以前只给 30 秒，首次原生确认必然丢（#123-4）
+  const ask = name === "clipboard_read" || name === "clipboard_write" || name === "open" || name.startsWith("screen") || name === "screenshot";
+  const r = await app({ op: "dev", tool: name, args: args || {} }, ask ? 70000 : 20000);
   if (!r.ok) return { isError: true, content: [{ type: "text", text: r.message || "failed" }] };
   delete r.ok;
   if (name === "screen_read") {

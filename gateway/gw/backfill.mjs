@@ -225,7 +225,10 @@ async function runSession(t) {
         const v = validateTitle(got[it.n], LAST_LANG);
         if (!v.ok) { fix[it.n] = { title: got[it.n] || "", errors: v.errors }; next.push(it); continue; }
         const w = await fileChapter(t.id, { title: v.title, chapter: it.n, by: "backfill" });
-        if (w.ok) JOB.ok++; else JOB.failed++;
+        // 预检查之后、提交之前有人起了名（#124-2）：fileChapter 同步段会拒绝，这里按「跳过」算，不算失败
+        if (w.ok) JOB.ok++;
+        else if ((w.errors || []).includes("chapter already titled")) JOB.skipped++;
+        else JOB.failed++;
         JOB.done++;
       }
       todo = next;

@@ -19,11 +19,17 @@ export async function handleLocalCommand(name, arg, reply, sid) {
   const want = curId || P.defaultModel;
   const cur = want ? models.find((m) => m.id === want) : models[0];
   const commit = (patch) => {
-    if (sid) return setSessModel(sid, patch);
+    // 等清单期间这个会话真跑的那家可能被改了（比如项目默认接口 A→B，审查 #122-2）：这里选中的型号是按旧那家的
+    // 清单校验的，不能再写到新那家名下。作废这次命令，让用户按新接口重来。
+    const nowP = sid ? providerById(effectiveModel(sid).provider) || PROVIDER : PROVIDER;
+    if (nowP.id !== P.id) return false;
+    if (sid) { setSessModel(sid, patch); return true; }
     if (patch.model !== undefined) SETTINGS.model = patch.model || null;
     if (patch.effort !== undefined) SETTINGS.effort = patch.effort || null;
     saveSettings();
+    return true;
   };
+  const staleReply = (tag) => reply("没改成：等型号清单的时候这个会话的接口换了。请按现在的接口重新执行一遍。", tag);
   const scope = sid ? "（只改这个会话）" : "（改的是全局默认）";
 
   // ── /autocompact ──
@@ -109,7 +115,7 @@ export async function handleLocalCommand(name, arg, reply, sid) {
     }
     const eff = normEffort(target, curEff, P);
     const effChanged = eff !== curEff;
-    commit({ model: target.id, effort: eff || "" });
+    if (!commit({ model: target.id, effort: eff || "" })) return staleReply("model");
     return reply(
       `已切换到 **${target.id}**${target.name ? "（" + target.name + "）" : ""}\n\n` +
       `- 上下文窗口：${Math.round((target.context_window || 0) / 1024)}k\n` +
@@ -137,13 +143,13 @@ export async function handleLocalCommand(name, arg, reply, sid) {
     }
     const t = arg.toLowerCase().trim();
     if (levels.includes(t)) {
-      commit({ effort: t });
+      if (!commit({ effort: t })) return staleReply("effort");
       return reply(`思考强度已设为 **${t}**（模型 ${curId || "默认"}）。\n\n下一条消息生效${scope}。`, "effort");
     }
     // claude 认 low/medium/high/xhigh/max，DeepSeek 只有 low/high/max，做个就近映射
     const alias = { medium: "high", xhigh: "max", highest: "max", lowest: "low", normal: "high" }[t];
     if (alias && levels.includes(alias)) {
-      commit({ effort: alias });
+      if (!commit({ effort: alias })) return staleReply("effort");
       return reply(`\`${arg}\` 不是 ${curId} 的档位，已就近设为 **${alias}**。\n\n` +
         `该模型支持：${levels.map((l) => "`" + l + "`").join("、")}`, "effort");
     }

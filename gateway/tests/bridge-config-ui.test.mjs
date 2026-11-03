@@ -187,7 +187,7 @@ test("bridge session handoff: real onHello preserves a new-session pin before mo
   const modelQueries = [], refreshes = [], state = { pendingModel: null }, view = { sessionId: "existing-session", runIds: new Set(), cids: new Set(), gen: 0 };
   const box = {
     URL, state, view, Set, Map, t: (s) => s, uiTag: "synthetic-ui", helloCount: 1, busReplay: false, welKeep: null,
-    WROTE: new Map(), TOOL_CARDS: new Map(), PENDING_RESULTS: new Map(), PERMS: new Map(), runViews: new Map(),
+    WROTE: new Map(), TOOL_CARDS: new Map(), TOOL_RESULTS: new Map(), clearToolResults() {}, PERMS: new Map(), runViews: new Map(),
     histEl: nodes(), liveEl: nodes(), olderEl: nodes(), statEl: nodes(),
     stripHidden: () => ({}), paintTitle() {}, renderRunStrip() {}, agReset() {}, syncWindow() {}, pickViewRun() {}, renderQueue() {}, paintProjChip() {}, syncInterject() {}, saveUiState() {},
     applyState() {}, beginReplay() {}, updateCtx() {}, renderSessions() {}, loadOlder() {}, showWelcome() {}, renderInterrupted() {}, calmStatus() {},

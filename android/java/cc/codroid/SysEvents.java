@@ -42,9 +42,14 @@ public class SysEvents extends BroadcastReceiver {
         String a = i.getAction();
         if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(a)) {
             Installer.deleteTree(new java.io.File(c.getFilesDir(), "updates"));
+            // 装完了：待装记录和安装包一起作废（Updater 下次启动也不会再拿它去装一遍）
+            c.getSharedPreferences("upd", Context.MODE_PRIVATE).edit().remove("appStaged").apply();
             if (new Env(c).devkitReady()) GatewayService.start(c);
             reopenUi(c);
         } else if (Intent.ACTION_BOOT_COMPLETED.equals(a)) {
+            // 系统重启会清空 AlarmManager 里的登记：定时任务和 Shizuku 自动激活是两件事，
+            // 没配 Shizuku 的用户也要按 home/ccapp-sched-next 把闹钟重新定上（#123-3）
+            SchedAlarm.fromFile(c);
             ShizukuSetup s = ShizukuSetup.get(c);
             s.prefs().edit().putLong("bootSeen", System.currentTimeMillis()).apply();
             if (s.prefs().getBoolean("autostart", true) && s.prefs().getBoolean("paired", false) && s.hasWss() && new Env(c).devkitReady())

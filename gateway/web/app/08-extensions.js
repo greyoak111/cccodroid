@@ -326,7 +326,7 @@
     const ok = new Set(["glibc", "bionic", "static", "script"]);
     const rows = r.programs.map((p, i) => {
       const can = ok.has(p.kind);
-      const clash = p.clash === "toolkit" ? t("工具包里已有同名命令，换个名字") : p.clash === "system" ? t("系统或 cccodroid 自带同名命令，换个名字") : p.clash === "custom" ? t("别的自定义组件占了这个名字") : p.clash === "bad" ? t("改个名字（只能用字母、数字和 ._+-）") : "";
+      const clash = p.clash === "toolkit" ? t("工具包里已有同名命令，换个名字") : p.clash === "system" ? t("系统或 cccodroid 自带同名命令，换个名字") : p.clash === "custom" ? t("别的自定义组件占了这个名字") : p.clash === "busy" ? t("另一个组件正在安装这个名字，稍后再试或换个名字") : p.clash === "bad" ? t("改个名字（只能用字母、数字和 ._+-）") : "";
       return '<div class="cu-prog' + (can ? "" : " dim") + '" data-i="' + i + '">' +
         '<label class="cu-row"><input type="checkbox" class="cu-on"' + (can ? "" : " disabled") + (can && p.suggest && !p.clash ? " checked" : "") + "> <code>" + esc(p.rel) + "</code>" +
         ' <span class="tiny">' + esc(KIND()[p.kind] || p.kind) + "</span></label>" +

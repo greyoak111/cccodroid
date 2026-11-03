@@ -13,7 +13,7 @@ import { goalCheck, tasksCheck } from "./goal.mjs";
 import { LAST_SESSION, RUNS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { BOOT, publish } from "./bus.mjs";
-import { pickProvider, startRun } from "./run.mjs";
+import { execIntent, pickProvider, startRun } from "./run.mjs";
 import { cleanMergeFrom } from "./merge.mjs";
 import { RATE_LIMITS } from "./stream.mjs";
 
@@ -34,6 +34,9 @@ function laneOf(item) {
 }
 export const laneOfItem = (q) => q.lane || (q.lane = laneOf(q));
 const sidOfLane = (lane) => lane.startsWith("s:") ? lane.slice(2) : (RUN_SESSIONS.get(lane.slice(2)) || null);
+/** 这条消息真正该续的会话：明确给了 → 跟着的那条已经跑出了会话号 → 车道上记着的会话号（#120-1：
+ *  跟的那条被撤销、从没启动时 RUN_SESSIONS 里没有它，但车道 n:<首条 runId> 还记着首条跑出来的会话，别因此另起一个会话） */
+export const sidForItem = (item) => item.sessionId || (item.follow && RUN_SESSIONS.get(item.follow)) || sidOfLane(laneOfItem(item)) || null;
 /** 这条车道上正在跑的那一轮（没有就 null）。新会话 init 之后会话号和车道名对得上 */
 function laneRun(lane) {
   const sid = sidOfLane(lane);
@@ -96,9 +99,9 @@ export function saveRunMark() {
       runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, text: r.text.slice(0, 4000), startedAt: r.startedAt, ...(r.idle && !r.bgTasks ? { done: true } : {}) })),
       // 已经写进 stdin、claude 还没吃进去的插话也算排队的：一起留下
       // 新会话首条还没拿到会话号时跟着发的（只有 follow）：首条已经结束、不在 runs 里了，重启后就认不出属于哪个会话。
-      // 落盘时按 RUN_SESSIONS 把会话号补上（#97 02-005）
+      // 落盘时把会话号补实（#97 02-005；跟的那条被撤销时按车道找首条跑出来的会话，#120-1）
       queue: [...live.flatMap((r) => (r.pendingInject || []).map((it) => ({ ...it, injected: false }))), ...QUEUE]
-        .map((q) => !q.sessionId && q.follow && RUN_SESSIONS.get(q.follow) ? { ...q, sessionId: RUN_SESSIONS.get(q.follow) } : q),
+        .map((q) => { const sid = q.sessionId || sidForItem(q); return sid ? { ...q, sessionId: sid } : q; }),
     }), { mode: 0o600 });
     fs.renameSync(RUN_MARK + ".tmp", RUN_MARK);
   } catch {}
@@ -329,7 +332,8 @@ export function enqueue(body) {
   // 塞不进去（这一轮已在收尾、或者不是同一个会话）就排到队首，这一轮一结束马上发。
   const busyRun = laneRun(laneOfItem(item));
   // 定时任务不走这条：塞进别人的轮次，它自己的工具限制、无人值守、时长上限都没了，结束时也认不出是它（审查 B05）。排队等那一轮结束
-  if (busyRun && busyRun.idle && !item.sched && tryInject(busyRun, item)) { item.injected = true; publishState(); return item; }
+  // 自动复用空闲进程前还要核对执行配置：面板里刚换了接口/模型/思考强度，消息就不能再悄悄交给旧进程（#120-2）
+  if (busyRun && busyRun.idle && !item.sched && sameExec(busyRun, item) && tryInject(busyRun, item)) { item.injected = true; publishState(); return item; }
   if ((body.mode === "inject" || body.mode === "interrupt") && busyRun) {
     if (tryInject(busyRun, item)) { item.injected = true; return item; }
     QUEUE.unshift(item);
@@ -346,6 +350,16 @@ function tryInject(run, item) {
   const same = item.sessionId ? item.sessionId === run.sessionId : (item.follow === run.id || !item.follow);
   if (!same) return false;
   return run.inject(item);
+}
+
+/** 空闲的后台进程能不能自动收下这条普通消息：除了会话对得上，执行配置也得还是它起跑时那份（#120-2）。
+ *  用户在面板里换了接口 / 模型 / 思考强度后保存已经生效；再把消息塞进旧进程就等于还按旧配置跑。
+ *  没记下配置的轮次一律不复用（照常排队），宁可慢一步也不静默用错配置。 */
+function sameExec(run, item) {
+  if (!run.exec) return false;
+  let now;
+  try { now = execIntent(item); } catch { return false; }
+  return now.P.id === run.exec.provider && now.model === run.exec.model && now.effort === run.exec.effort;
 }
 
 // ── 路由：/api/chat /api/interrupted/dismiss /api/queue/ ──
