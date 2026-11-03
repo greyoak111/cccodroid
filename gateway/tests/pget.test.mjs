@@ -116,3 +116,17 @@ test("curl 起不来：返回错误，不留未处理的 error 把网关带走�
   const err = await pget({ curl: path.join(DIR, "no-such-curl"), url: URL_, file: f, total: DATA.length });
   assert.match(err, /ENOENT/);
 });
+
+test("写盘失败：返回错误，别把网关带走（#121-2）", async (t) => {
+  reset("range");
+  const f = fresh("diskerr.part");
+  const orig = fs.writeSync;
+  const m = t.mock.method(fs, "writeSync", function (fd, b, off, len, pos) {
+    if (typeof pos === "number") throw Object.assign(new Error("ENOSPC"), { code: "ENOSPC" });
+    return orig.call(fs, fd, b, off, len, pos);
+  });
+  try {
+    const err = await pget({ curl: CURL, url: URL_, file: f, total: DATA.length });
+    assert.match(err, /ENOSPC|写盘/);
+  } finally { m.mock.restore(); }
+});

@@ -86,12 +86,18 @@ function loadSettings() {
   if ("appendSystemPrompt" in SETTINGS) { delete SETTINGS.appendSystemPrompt; setImmediate(saveSettings); }
 }
 
+/** 写盘成功返回 true；失败记日志并返回 false（调用方要如实告诉用户，别报「已保存」——#122-3） */
 export function saveSettings() {
   try {
     fs.mkdirSync(path.dirname(PATHS.settings), { recursive: true });
     // 先写临时文件再换名：写到一半被杀，下次读到半个 JSON 会回落默认，下一次保存就把密钥覆盖没了（审查 中1）
     fs.writeFileSync(PATHS.settings + ".tmp", JSON.stringify(SETTINGS, null, 2), { mode: 0o600 });
     fs.renameSync(PATHS.settings + ".tmp", PATHS.settings);
-  } catch (e) { log(`保存设置失败: ${e.message}`); }
+    return true;
+  } catch (e) {
+    try { fs.rmSync(PATHS.settings + ".tmp", { force: true }); } catch {}
+    log(`保存设置失败: ${e.message}`);
+    return false;
+  }
 }
 loadSettings();

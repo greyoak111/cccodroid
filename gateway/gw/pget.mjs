@@ -51,7 +51,16 @@ export async function pget({ curl, url, file, total, n = 4, curlArgs = [], onPro
           c.stdout.on("data", (b) => {
             const room = seg[1] - seg[0] + 1 - seg[2];
             const len = Math.min(b.length, room);
-            if (len > 0) { fs.writeSync(fd, b, 0, len, seg[0] + seg[2]); seg[2] += len; }
+            try {
+              if (len > 0) { fs.writeSync(fd, b, 0, len, seg[0] + seg[2]); seg[2] += len; }
+            } catch (er) {
+              // 写盘失败（ENOSPC/EIO）不能从 data 回调冒出去：网关只接 unhandledRejection，这里会把整个进程带走（#121-2）
+              fatal = true;
+              e = "写盘失败 " + (er.code || er.message);
+              c.kill("SIGKILL");
+              resolve(e);
+              return;
+            }
             if (b.length > room) c.kill("SIGKILL");                   // 服务器多给了（不该发生）：够了就停
           });
           c.stderr.on("data", (d) => { e += d; });

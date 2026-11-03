@@ -50,11 +50,12 @@ export async function handleLocalCommand(name, arg, reply, sid) {
       if (n < 10000) return reply(`${fmt(n)} 太小了，压缩线至少 10k。`, "autocompact");
     }
     SETTINGS.autoCompactWindow = n;
-    saveSettings();
+    const persisted = saveSettings();
     log(`⌘ /autocompact → ${n || "(默认)"}`);
     return reply(
       (n ? `自动压缩线已设为 **${fmt(n)} tokens**，下一轮起生效。` : "自动压缩线已恢复默认（由 claude 按模型窗口决定），下一轮起生效。") +
-      (n && win && n > win ? `\n\n> **注意**：比当前模型的窗口（${fmt(win)}）还大，实际会先撞上窗口上限。` : ""),
+      (n && win && n > win ? `\n\n> **注意**：比当前模型的窗口（${fmt(win)}）还大，实际会先撞上窗口上限。` : "") +
+      (persisted ? "" : "\n\n> **注意**：设置没能写入磁盘，只在本次运行内生效；重启后会恢复。"),
       "autocompact"
     );
   }

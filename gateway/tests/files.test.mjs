@@ -48,3 +48,22 @@ test("正常保存照旧", async () => {
   assert.equal(fs.readFileSync(file, "utf8"), "new");
   fs.rmSync(file, { force: true });
 });
+
+test("保存时写盘失败：原文件一个字节都不动（#121-3）", async (t) => {
+  fs.mkdirSync(CFG.workspace, { recursive: true });
+  const file = path.join(CFG.workspace, "save-disk-full.txt");
+  fs.writeFileSync(file, "ORIGINAL");
+  const mtime = fs.statSync(file).mtimeMs;
+  const m = t.mock.method(fs, "writeFileSync", () => { throw Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }); });
+  try {
+    const req = Readable.from([Buffer.from("NEW")]); req.method = "POST"; req.headers = {};
+    const res = fakeRes();
+    const u = new URL(`http://x/api/file/save?path=${encodeURIComponent(file)}&mtime=${mtime}`);
+    await routeFiles(req, res, u, "/api/file/save");
+    assert.equal(res.code, 500, JSON.stringify(res.body));
+    assert.equal(fs.readFileSync(file, "utf8"), "ORIGINAL");
+  } finally {
+    m.mock.restore();
+    fs.rmSync(file, { force: true });
+  }
+});

@@ -85,18 +85,35 @@ function safeWritePath(p) {
   return { file: path.join(dir, name), size: 0, mtime: 0, fresh: true };
 }
 
-/** 写文件但不跟最后一级软链（O_NOFOLLOW：是软链就报 ELOOP） */
+/** 写文件但不跟最后一级软链（O_NOFOLLOW：是软链就报 ELOOP）。
+ *  先写同目录临时文件、fsync 后再 rename 覆盖：写盘失败（ENOSPC/EIO）时原文件一个字节都不动（#121-3）。 */
 function writeNoFollow(file, buf) {
   const c = fs.constants;
-  // 先不截断：打开后按 /proc/self/fd 看实际打开的是哪个文件。核完路径到打开之间，上级目录也可能被换成软链（审查 10-30 第九份 后端低3），
-  // O_NOFOLLOW 只管最后一级；对不上就不写，原文件一个字节都不动
-  const fd = fs.openSync(file, c.O_WRONLY | c.O_CREAT | c.O_NOFOLLOW, 0o644);
+  let mode = 0o644;
+  // 已有文件：打开后按 /proc/self/fd 看实际打开的是哪个文件。核完路径到打开之间，上级目录也可能被换成软链（审查 10-30 第九份 后端低3），
+  // O_NOFOLLOW 只管最后一级；对不上就不写。顺便沿用原权限
+  if (fs.existsSync(file)) {
+    const fd = fs.openSync(file, c.O_WRONLY | c.O_NOFOLLOW);
+    try {
+      let real = null; try { real = fs.readlinkSync("/proc/self/fd/" + fd); } catch {}
+      if (real && real !== file) throw Object.assign(new Error("path changed"), { code: "ELOOP" });
+      mode = (fs.fstatSync(fd).mode & 0o777) || 0o644;
+    } finally { fs.closeSync(fd); }
+  }
+  // 临时文件必须和目标同一目录（rename 不跨文件系统）；写完 fsync 再覆盖，失败只删临时文件
+  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.ccsave-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`);
+  let fd = null;
   try {
-    let real = null; try { real = fs.readlinkSync("/proc/self/fd/" + fd); } catch {}
-    if (real && real !== file) throw Object.assign(new Error("path changed"), { code: "ELOOP" });
-    fs.ftruncateSync(fd, 0);
+    fd = fs.openSync(tmp, c.O_WRONLY | c.O_CREAT | c.O_EXCL | c.O_NOFOLLOW, mode);
     fs.writeFileSync(fd, buf);
-  } finally { fs.closeSync(fd); }
+    fs.fsyncSync(fd);
+    fs.closeSync(fd); fd = null;
+    fs.renameSync(tmp, file);      // rename 替换的是路径上的条目，不跟最后一级软链
+  } catch (e) {
+    if (fd != null) { try { fs.closeSync(fd); } catch {} }
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    throw e;
+  }
 }
 
 /** 供文件面板用的快捷入口 */

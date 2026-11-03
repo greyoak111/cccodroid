@@ -144,7 +144,8 @@ export async function routeSettings(req, res, u, p) {
         }
       }
 
-      saveSettings();
+      if (!saveSettings())
+        return sendJson(res, 500, { error: tz("设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）") });
       if ("workIsland" in b) {
         import("./work-island.mjs")
           .then((m) => m.applyWorkIslandSetting())

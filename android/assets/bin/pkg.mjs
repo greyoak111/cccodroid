@@ -749,7 +749,7 @@ flag("-y", "--yes", "--assume-yes", "-q", "--quiet", "--no-install-recommends");
 const sub = argv.shift() || "help", args = argv;
 
 if (["help", "-h", "--help"].includes(sub)) { console.log(HELP); process.exit(0); }
-const MUT = ["install", "add", "uninstall", "remove", "purge", "autoremove", "upgrade", "full-upgrade", "restore", "reinstall", "update"];
+const MUT = ["install", "add", "uninstall", "remove", "rm", "purge", "autoremove", "upgrade", "full-upgrade", "restore", "reinstall", "update"];
 if (MUT.includes(sub)) lock();
 if (sub !== "restore") {
   const l = lost();
