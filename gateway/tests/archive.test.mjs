@@ -145,6 +145,29 @@ test("杂项：AI 交档带 misc 归进去；用户移出后 AI 再带也不动�
   assert.equal(s.no, null);
 });
 
+test("杂项门槛：AI 标的杂项只对小会话算数，压缩过或超过 512 KB 就不算；用户归入的照旧（11-03）", async () => {
+  const { fileChapter, setMisc, archiveView } = await import("../gw/archive.mjs");
+  const { listSessions } = await import("../gw/sessions.mjs");
+  const { lineageGraph } = await import("../gw/lineage.mjs");
+  // 会话列表只读脉络的缓存（不等刷新），所以先让弹层刷一次索引，再看列表
+  const misc = async (sid) => { const v = (await archiveView(sid)).misc; return [listSessions().find((x) => x.id === sid).misc, v, (await lineageGraph()).nodes.find((n) => n.id === sid).misc]; };
+  const small = session(2, 0);
+  await fileChapter(small, { title: "试一下新模型", misc: true });
+  assert.deepEqual(await misc(small), [true, true, true], "小会话：AI 标了就算");
+  // 压缩过一次：第一轮被判成杂项，后来干成了正经活
+  const grown = session(4, 1);
+  assert.equal((await fileChapter(grown, { title: "调查本机反诈进程", misc: true, chapter: 1 })).ok, true);
+  assert.deepEqual(await misc(grown), [false, false, false], "压缩过：AI 的标记不算");
+  // 没压缩、但记录超过 512 KB
+  const big = session(2, 0);
+  await fileChapter(big, { title: "写调查报告", misc: true });
+  fs.appendFileSync(path.join(proj, big + ".jsonl"), JSON.stringify({ type: "user", uuid: crypto.randomUUID(), sessionId: big, timestamp: new Date(T0 + 9e6).toISOString(), message: { role: "user", content: "x".repeat(600 * 1024) } }) + "\n");
+  assert.deepEqual(await misc(big), [false, false, false], "超过 512 KB：AI 的标记不算");
+  // 用户自己归入的大会话照旧在杂项
+  setMisc(grown, true);
+  assert.deepEqual(await misc(grown), [true, true, true], "用户归入的不受门槛影响");
+});
+
 test("脉络弹层：分叉出来的会话带来源（标题、方式、分叉时间），原会话没有来源", async () => {
   const { archiveView } = await import("../gw/archive.mjs");
   const { forkSession } = await import("../gw/sessionops.mjs");

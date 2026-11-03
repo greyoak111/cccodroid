@@ -114,7 +114,7 @@ export function listSessions(limit = 150) {
   found.sort((a, b) => b.mtime - a.mtime);
   const shown = found.filter((s, i) => i < limit || PINS[s.id]);
   return shown.map((s) => {
-    const meta = peekSession(s.file), ab = archiveBrief(s.id);
+    const meta = peekSession(s.file), ab = archiveBrief(s.id, s.size, lineageCached(s.id)?.compacts?.length || 0);
     return {
       id: s.id,
       no: ab.no, misc: ab.misc,

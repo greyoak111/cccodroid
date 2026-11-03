@@ -51,9 +51,20 @@ export function archiveImport(id, e) {
 export const archivedTitle = (id) => archiveDb().sessions[id]?.title || null;
 
 /** 会话列表用：档号（会话号前 4 位·题名所在的最新一章）、是否杂项 */
-export function archiveBrief(id) {
+export function archiveBrief(id, size, compacts) {
   const e = archiveDb().sessions[id];
   if (!e) return { no: null, misc: false };
   const ns = Object.keys(e.chapters || {}).filter((k) => e.chapters[k]?.title).map(Number);
-  return { no: ns.length ? String(id).slice(0, 4) + "·" + Math.max(...ns) : null, misc: !!e.misc };
+  return { no: ns.length ? String(id).slice(0, 4) + "·" + Math.max(...ns) : null, misc: miscOf(e, size, compacts) };
+}
+
+// AI 标的杂项只对小会话算数：压缩过（有第 2 章，或记录里数到压缩）、会话文件超过 512 KB，就当它判错了 ——
+// AI 多在第一轮就判「用完即弃」，后来干成正经活也不会改口（11-03 群反馈）。用户自己归入的照旧算。
+// 档案里的标记不动，规则以后要改也能回退
+export const MISC_AI_MAX = 512 * 1024;
+export function miscOf(e, size = 0, compacts = 0) {
+  if (!e?.misc) return false;
+  if (e.miscBy === "user") return true;
+  const big = Object.keys(e.chapters || {}).some((k) => Number(k) >= 2) || compacts >= 1 || size > MISC_AI_MAX;
+  return !big;
 }

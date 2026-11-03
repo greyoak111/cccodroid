@@ -9,7 +9,7 @@ import path from "node:path";
 import { CFG, PATHS, log } from "./config.mjs";
 import { NEXT, sendJson } from "./http.mjs";
 import { NAMES, NAMES_REV, PINS } from "./sessions.mjs";
-import { archiveDb, archivedTitle } from "./archive-store.mjs";
+import { archiveDb, archivedTitle, miscOf } from "./archive-store.mjs";
 import { chapterView } from "./archive-core.mjs";
 import { runOfSession } from "./runs.mjs";
 import { emptyRecord, inferParents, scanSession, weakPrompt } from "./lineage-core.mjs";
@@ -166,7 +166,7 @@ export async function lineageGraph() {
     nodes.push({
       id: r.id, title: name || cv.sessionTitle || lastQ(r) || "", titleBy: name ? "user" : cv.sessionTitle ? "archive" : null,
       pinned: PINS[r.id] || 0, band, cwd: r.cwd || "", trashed: !!m.trashed,
-      sched: sched.get(r.id) || null, misc: !!entry?.misc, running: !!runOfSession(r.id),
+      sched: sched.get(r.id) || null, misc: miscOf(entry, r.size, r.compacts.length), running: !!runOfSession(r.id),
       firstTs: r.firstTs || r.birth || m.mtime || 0, lastTs: r.lastTs || m.mtime || 0, turns: r.turns, sizeKb: Math.round(r.size / 1024),
       chapters: cv.chapters.map((c) => ({ n: c.n, anchor: c.n === 1 ? "start" : c.anchor, from: c.from, to: c.to, title: c.title, by: c.by, same: c.same, status: c.status, q: (c.n === 1 ? r.lead || r.first : r.compacts[c.n - 2]?.q) || "" })),
     });

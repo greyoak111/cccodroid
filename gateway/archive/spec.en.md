@@ -17,7 +17,7 @@ node <archive command path> --title "Title" [--same] [--misc] [--status ongoing|
 ```
 
 - `--title`: the chapter title; rules below.
-- `--misc`: the whole session is a throwaway (a test, trying out a model, a greeting with no real work). It goes into "Misc", which the user can clear in one tap. Don't use it for sessions with real work.
+- `--misc`: the whole session is a throwaway with no real work (checking whether a connection works, trying out a model, a greeting). It goes into "Misc", which the user can clear in one tap. Writing code, debugging, running tests, investigating, research and writing documents are all real work: don't add it. When unsure, leave it out; the user can always move a session to Misc. Once a session grows long, the flag no longer counts.
 - `--same`: this chapter continues the same piece of work as the previous one (it was only split by compaction). The two chapters become one volume, titled by this entry.
 - `--status`: where the work stands now; optional.
 - The command tells you which chapter it filed (archive number). If it rejects the entry with a reason, fix it and run it again.

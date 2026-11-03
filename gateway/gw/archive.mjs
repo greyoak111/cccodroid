@@ -14,7 +14,7 @@ import { RUNS } from "./runs.mjs";
 import { NAMES } from "./sessions.mjs";
 import { publish } from "./bus.mjs";
 import { lineageParent, lineageRecord } from "./lineage.mjs";
-import { archiveDb, saveArchive } from "./archive-store.mjs";
+import { archiveDb, saveArchive, miscOf } from "./archive-store.mjs";
 import { SPEC_VERSION, archiveNo, chapterView, normStatus, pickChapter, validateTitle } from "./archive-core.mjs";
 
 const DIR = path.join(HERE, "archive");
@@ -72,7 +72,7 @@ export async function archiveView(sid) {
   if (!rec) return null;
   const entry = archiveDb().sessions[sid];
   const parent = await lineageParent(sid).catch(() => null);
-  return { id: sid, renamed: NAMES[sid] || null, misc: !!entry?.misc, parent, ...chapterView(rec, entry) };
+  return { id: sid, renamed: NAMES[sid] || null, misc: miscOf(entry, rec.size, rec.compacts.length), parent, ...chapterView(rec, entry) };
 }
 
 /**
@@ -82,7 +82,7 @@ export async function archiveView(sid) {
  */
 export async function archiveHint(sid) {
   const lang = LAST_LANG;
-  const rule = `Session archiving (cccodroid): this app keeps an archive of every session; each context compaction ends one chapter, and the session list shows the latest chapter's title. Whenever the context has just been compacted (you see a compaction summary, or a note saying so), first file the chapter that just ended, then continue your task: read ${specFile(lang)} once for the rules, then run \`node ${ARCHIVE_CLI} --title "<title>"\` (add --same if it continues the previous chapter's work; add --misc if the whole session is a throwaway such as a test or trying out a model). Write titles in ${langName(lang)}. If the command rejects the title, fix it as told and run it again. Don't mention archiving to the user unless asked.`;
+  const rule = `Session archiving (cccodroid): this app keeps an archive of every session; each context compaction ends one chapter, and the session list shows the latest chapter's title. Whenever the context has just been compacted (you see a compaction summary, or a note saying so), first file the chapter that just ended, then continue your task: read ${specFile(lang)} once for the rules, then run \`node ${ARCHIVE_CLI} --title "<title>"\` (add --same if it continues the previous chapter's work; add --misc only if the whole session is a throwaway with no real work, such as checking a connection, trying out a model or a greeting; coding, debugging, running tests and investigating are real work, and when unsure leave it out). Write titles in ${langName(lang)}. If the command rejects the title, fix it as told and run it again. Don't mention archiving to the user unless asked.`;
   if (!sid) return { rule, note: "" };
   const rec = await lineageRecord(sid).catch(() => null);
   if (!rec) return { rule, note: "" };
