@@ -1,7 +1,27 @@
 {
  "v": 1,
- "updated": "2026-11-03T11:33:56.165Z",
+ "updated": "2026-11-03T15:44:23.850Z",
  "notices": [
+  {
+   "id": "20261103-adb",
+   "level": "warn",
+   "from": "2026-11-03",
+   "title": {
+    "zh": "请升级到 0.6.2",
+    "en": "Please update to 0.6.2"
+   },
+   "body": {
+    "zh": "0.6.1 及更早版本激活 Shizuku 后，会在本机留下一个任何应用都能连的 adb 服务。升级到 0.6.2 后第一次打开会自动清理；暂时不升级的话，重启手机也能清掉。",
+    "en": "After activating Shizuku, versions 0.6.1 and earlier leave an adb server on the device that any app can connect to. The first launch after updating to 0.6.2 cleans it up automatically; if you can't update yet, restarting the phone also clears it."
+   },
+   "until": "2026-12-03",
+   "maxVer": "0.6.1",
+   "link": "https://github.com/greyoak111/cccodroid/security/advisories/GHSA-jghr-jjxm-vp8f",
+   "linkText": {
+    "zh": "看说明",
+    "en": "Details"
+   }
+  },
   {
    "id": "20261104-priv",
    "level": "info",
