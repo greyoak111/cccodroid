@@ -341,11 +341,12 @@
   function folds() { return sideFold ||= new Set((() => { try { return JSON.parse(localStorage.getItem("cc.sideFold") || "[]"); } catch { return []; } })()); }
   function renderSideRecent() {
     const box = $("side-recent"); if (!box) return;
-    // 杂项不进侧栏（正开着的那个除外），在「对话」整页最后一组
-    const list = (state.sessions || []).filter((x) => !x.misc || x.id === view.sessionId);
     const live = new Set(srv.runs.filter((x) => !x.idle).map((x) => x.sessionId).filter(Boolean));
     const ask = new Set(srv.runs.filter((x) => x.perms && x.perms.length).map((x) => x.sessionId).filter(Boolean));
     const intr = new Set((srv.intr || []).map((x) => x.sessionId).filter(Boolean));
+    // 杂项不进侧栏，在「对话」整页最后一组；但正开着的、置顶的、在跑 / 等确认 / 中断了的照常列出——
+    // 被 AI 归进杂项的会话，用户置顶了或正在跑，从侧栏消失只会让人找不着（群反馈：置顶的在跑会话点一下就不见了）
+    const list = (state.sessions || []).filter((x) => !x.misc || x.pinned || x.id === view.sessionId || live.has(x.id) || ask.has(x.id) || intr.has(x.id));
     const d0 = new Date(); d0.setHours(0, 0, 0, 0);
     const t0 = d0.getTime(), y0 = t0 - 86400000;
     const groups = [[t("置顶"), list.filter((x) => x.pinned), "pin"], [t("今天"), [], "today"], [t("昨天"), [], "yday"], [t("更早"), [], "older"]];
