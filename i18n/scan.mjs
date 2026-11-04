@@ -177,7 +177,8 @@ function loadDict(lang) {
 
 // ── 汇总 ─────────────────────────────────────────────────────────────
 // app.js 的源码拆在 web/app/ 下；i18n.js / langs.js 的中文是中英并列的逃生写法，不翻
-const jsFiles = [...fs.readdirSync(path.join(WEB, "app")).filter((x) => x.endsWith(".js")).sort().map((x) => "app/" + x), "layout.js"];
+// lineage/map.js 也调用 t("…")：不扫它会把正在用的键误报成孤儿，新加的键也查不出缺译
+const jsFiles = [...fs.readdirSync(path.join(WEB, "app")).filter((x) => x.endsWith(".js")).sort().map((x) => "app/" + x), "layout.js", "lineage/map.js"];
 const used = new Map();   // key → 出处
 const A = [];
 for (const f of jsFiles) {
