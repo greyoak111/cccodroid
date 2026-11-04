@@ -11,6 +11,22 @@ t() { # t 名称 命令… —— 每项限时 90 秒，卡住的算失败，不
   if [ $rc -eq 0 ]; then NP=$((NP+1)); [ -z "$Q" ] && echo "PASS $name :: $(echo "$out" | tail -1 | cut -c1-100)"
   else NF=$((NF+1)); echo "FAIL $name (rc=$rc$([ $rc = 124 ] && echo ' 超时')) :: $(echo "$out" | tr '\n' ' ' | cut -c1-300)"; fi
 }
+# tn 名称 探测 对照 命令… —— 联网项。国内连 Google 稳定不通、github.com 时通时不通，这类失败不是工具坏了（一加 Ace 7 Pro 适配报告 11-04）。
+# 本项失败后：「探测」（换个办法连同一个目标）通了 → 目标可达而工具不行，FAIL；探测不通、「对照」（国内外都通的站）通了 →
+# 当前网络连不上这个目标，记 INFO 不算失败；两个都不通 → FAIL，提示先查网络
+NN=0
+NET_BASE="curl -sS -o /dev/null --max-time 20 https://www.baidu.com || curl -sS -o /dev/null --max-time 20 https://www.cloudflare.com"
+tn() {
+  local name=$1 probe=$2; shift 2
+  local out; out=$(timeout -k 5 90 bash -c "$*" 2>&1 </dev/null); local rc=$?
+  if [ $rc -eq 0 ]; then NP=$((NP+1)); [ -z "$Q" ] && echo "PASS $name :: $(echo "$out" | tail -1 | cut -c1-100)"; return; fi
+  local why; why=$(echo "$out" | tr '\n' ' ' | cut -c1-160)
+  if timeout -k 5 30 bash -c "$probe" >/dev/null 2>&1 </dev/null; then
+    NF=$((NF+1)); echo "FAIL $name (rc=$rc$([ $rc = 124 ] && echo ' 超时')) :: $why"
+  elif timeout -k 5 45 bash -c "$NET_BASE" >/dev/null 2>&1 </dev/null; then
+    NN=$((NN+1)); echo "INFO 网络 $name :: 当前网络连不上这个目标（别的网站能连上），工具本身正常 :: $why"
+  else NF=$((NF+1)); echo "FAIL $name (rc=$rc$([ $rc = 124 ] && echo ' 超时')) :: 几个网站都连不上，先确认联网正常 :: $why"; fi
+}
 # 注意：命令里带管道时退出码是最后一段的，前面的命令不存在也会算 PASS —— 要么加 set -o pipefail，要么别让管道收尾
 # 模块化工具包（0.3.9 起）：没装的模块整节跳过（打 SKIP，不算失败 —— 不然 Claude 会以为是这台设备坏了）。整包工具包一律算装了
 has() { [ ! -f "$PREFIX/libexec/devkit/modules.json" ] || [ -f "$PREFIX/libexec/devkit/modules/$1/.ok" ]; }
@@ -90,8 +106,8 @@ t "keytool" "keytool -genkeypair -alias a -keyalg RSA -keysize 2048 -dname CN=t 
 else skip Java/Android "安卓打包"; fi
 echo "== VCS/网络"
 t "git" "git init -q g && cd g && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m x && git log --oneline | wc -l"
-t "git https clone" "git clone -q --depth 1 https://github.com/octocat/Hello-World.git hw && ls hw"
-t "curl https" "curl -sS -o /dev/null -w '%{http_code}' https://www.google.com/generate_204"
+tn "git https clone" "curl -sS -o /dev/null --max-time 20 https://github.com" "git clone -q --depth 1 https://github.com/octocat/Hello-World.git hw && ls hw"
+tn "curl https" false "curl -sS -o /dev/null -w '%{http_code}' https://www.google.com/generate_204"
 t "ssh" "ssh -V"
 t "ssh-keygen" "ssh-keygen -q -t ed25519 -N '' -f kk && ls kk.pub"
 t "openssl" "openssl version"
@@ -154,5 +170,5 @@ process.stdout.write(await get(p,{"X-CC-Sig":ts+"."+r+"."+mac("sig2:"+boot+":"+L
   if [ $? -ne 0 ]; then NF=$((NF+1)); echo "FAIL 状态对账 :: 问网关失败：$(echo "$out" | head -1 | cut -c1-160)"
   else while IFS= read -r l; do case "$l" in PASS*) NP=$((NP+1)); [ -z "$Q" ] && echo "$l";; FAIL*) NF=$((NF+1)); echo "$l";; esac; done <<< "$out"; fi
 fi
-echo "== 完：通过 $NP 项，失败 $NF 项"
+echo "== 完：通过 $NP 项，失败 $NF 项$([ $NN -gt 0 ] && echo "，网络连不上 $NN 项（见上面 INFO 网络）")"
 [ $NF -eq 0 ]

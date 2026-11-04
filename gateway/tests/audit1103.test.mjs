@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { CFG } from "../gw/config.mjs";
 import { NEXT } from "../gw/http.mjs";
 import { routeGit } from "../gw/git.mjs";
@@ -195,4 +195,43 @@ test("复核 11-03 C-2/C-3：disableAllHooks、超大文件、引号键、超过
   fs.unlinkSync(path.join(proj, ".claude", "agents", "big.md"));
   for (let i = 0; i < 305; i++) fs.writeFileSync(path.join(proj, ".claude", "agents", `a${i}.md`), "x");
   assert.ok(projectRisks(proj)?.risks.some((x) => x.endsWith("> 300")));
+});
+
+test("sha256 仓库：只读的属性来源换成同格式的空树，对比、历史、提交详情都能看", async () => {
+  const d = path.join(CFG.workspace, "s256");
+  fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true });
+  const g = (...a) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd: d, encoding: "utf8" });
+  g("init", "-q", "--object-format=sha256");
+  fs.writeFileSync(path.join(d, "f.txt"), "a\n");
+  // 还没提交：和 sha256 的空树比（暂存过的文件）
+  g("add", "f.txt");
+  const d0 = await gitGo("/api/git/diff?dir=" + encodeURIComponent(d));
+  assert.equal(d0.status, 200, JSON.stringify(d0.body));
+  assert.match(d0.body.diff, /\+a/);
+  g("commit", "-qm", "i");
+  fs.writeFileSync(path.join(d, "f.txt"), "a\nb\n");
+  const df = await gitGo("/api/git/diff?dir=" + encodeURIComponent(d));
+  assert.equal(df.status, 200, JSON.stringify(df.body));
+  assert.match(df.body.diff, /\+b/);
+  const lg = await gitGo("/api/git/log?dir=" + encodeURIComponent(d));
+  assert.equal(lg.body.error, undefined);
+  assert.equal(lg.body.commits.length, 1);
+  assert.equal(lg.body.commits[0].hash.length, 64);
+  const sh = await gitGo(`/api/git/show?dir=${encodeURIComponent(d)}&commit=${lg.body.commits[0].hash}`);
+  assert.equal(sh.status, 200, JSON.stringify(sh.body));
+  assert.equal(sh.body.files[0].path, "f.txt");
+  const dc = await gitGo(`/api/git/diff?dir=${encodeURIComponent(d)}&commit=${lg.body.commits[0].hash}`);
+  assert.equal(dc.status, 200, JSON.stringify(dc.body));
+  assert.match(dc.body.diff, /\+a/);
+  // 反证：拿 sha1 的空树当属性来源，git 自己就拒绝
+  const bad = spawnSync("git", ["--attr-source=4b825dc642cb6eb9a060e54bf8d69288fbee4904", "diff"], { cwd: d, encoding: "utf8" });
+  assert.match(bad.stderr, /bad --attr-source/);
+  // 反过来也一样：sha1 仓库拿 sha256 的空树，同样 fatal（选错格式只会报错，不会退回仓库自己的属性）
+  const s1 = path.join(CFG.workspace, "s1");
+  fs.rmSync(s1, { recursive: true, force: true }); fs.mkdirSync(s1, { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: s1 });
+  fs.writeFileSync(path.join(s1, "f.txt"), "a\n");
+  execFileSync("git", ["add", "f.txt"], { cwd: s1 });
+  const bad1 = spawnSync("git", ["--attr-source=6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321", "diff", "--cached"], { cwd: s1, encoding: "utf8" });
+  assert.match(bad1.stderr, /bad --attr-source/);
 });

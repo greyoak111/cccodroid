@@ -21,11 +21,11 @@ const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const EMPTY_TREE_256 = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
 const GIT_RO = new Set(["status", "diff", "show", "log", "for-each-ref", "rev-parse", "remote", "branch"]);
 const GIT_PRE = ["-c", "core.quotePath=false", "-c", "color.ui=false", "-c", "core.fsmonitor=false", "-c", "protocol.ext.allow=never"];
-function gitArgs(args) {
+function gitArgs(args, tree = EMPTY_TREE) {
   if (!GIT_RO.has(args[0])) return [...GIT_PRE, ...args];
   const extra = args[0] === "diff" || args[0] === "show" || args[0] === "log" ? ["--no-ext-diff", "--no-textconv"] : [];
   if ((args[0] === "status" || args[0] === "diff") && !args.includes("--no-index")) extra.push("--ignore-submodules=all");
-  return [...GIT_PRE, "-c", "log.showSignature=false", `--attr-source=${EMPTY_TREE}`, args[0], ...extra, ...args.slice(1)];
+  return [...GIT_PRE, "-c", "log.showSignature=false", `--attr-source=${tree}`, args[0], ...extra, ...args.slice(1)];
 }
 /** 仓库能读到的全部配置（含 include 进来的）：{ ok, list: [{ scope, raw, key, value }], odd }。读配置本身不执行任何东西。
  *  raw 是原样的键：过滤器名（中间那段）区分大小写，[filter "Evil"] 只能用 filter.Evil.* 盖住；key 是小写的，只拿来认。
@@ -49,17 +49,27 @@ function gitConfigList(cwd) {
       });
   });
 }
-/** 只读命令用：把每个过滤器的命令覆盖成空。走 GIT_CONFIG_COUNT（过滤器名可以带 = 和空格，-c 拆不开） */
+/** 只读命令用：把每个过滤器的命令覆盖成空。走 GIT_CONFIG_COUNT（过滤器名可以带 = 和空格，-c 拆不开）。
+ *  返回 { env, tree }：tree 是这个仓库对象格式下的空树 —— sha256 仓库里拿 sha1 的空树当 --attr-source，
+ *  diff / log -p 直接 fatal: bad --attr-source（11-04）。格式看仓库自己的 extensions.objectformat，认不出的不跑 */
 async function gitNeutral(cwd) {
   const names = new Set(), c = await gitConfigList(cwd);
   if (!c.ok || c.odd) return null;   // 看不懂的配置：盖不准，宁可不跑
-  for (const e of c.list) { const m = e.raw.match(/^filter\.(.+)\.(clean|smudge|process|required)$/i); if (m) names.add(m[1]); }
+  // 只认 local / worktree：git 自己定对象格式也只看仓库的配置文件，global / system 不算，放宽了两边会对不上。
+  // 万一还是选错，git 解析 --attr-source 时直接 fatal（两个方向都实测过），不会退回仓库自己的 .gitattributes
+  let fmt = "sha1";
+  for (const e of c.list) {
+    if (e.key === "extensions.objectformat" && (e.scope === "local" || e.scope === "worktree")) fmt = e.value.trim().toLowerCase();
+    const m = e.raw.match(/^filter\.(.+)\.(clean|smudge|process|required)$/i); if (m) names.add(m[1]);
+  }
+  const tree = fmt === "sha256" ? EMPTY_TREE_256 : fmt === "sha1" ? EMPTY_TREE : null;
+  if (!tree) return null;
   const env = {}; let n = 0;
   for (const nm of names) for (const [k, v] of [["clean", ""], ["smudge", ""], ["process", ""], ["required", "false"]]) {
     env["GIT_CONFIG_KEY_" + n] = `filter.${nm}.${k}`; env["GIT_CONFIG_VALUE_" + n] = v; n++;
   }
   if (n) env.GIT_CONFIG_COUNT = String(n);
-  return env;
+  return { env, tree };
 }
 // 仓库自己的配置（local / worktree，含它 include 进来的）里这些项会让提交、撤销、切分支、拉取推送执行命令。
 // git-lfs 装在仓库里时写的是固定的几行，放行
@@ -99,15 +109,15 @@ async function gitGate(root, body) {
 // 超时整组杀：提交时的钩子是 git 的子孙，只杀 git 本身它们还会接着写文件、和用户重试撞在一起（审查 B20）。
 // 新开进程组（spawn 的 detached；execFile 不认这个选项），到点 kill(-pid)；等 close（stdio 全关）才返回，等于等整组收尾
 async function git(cwd, args, opts = {}) {
-  const env = GIT_RO.has(args[0]) ? await gitNeutral(cwd) : {};
-  if (!env) return { code: 1, out: "", err: tz("这个仓库的配置读不懂（名字里有换行、引号之类），为安全起见没有执行。") };
-  return gitRun(cwd, args, opts, env);
+  const ro = GIT_RO.has(args[0]) ? await gitNeutral(cwd) : { env: {}, tree: EMPTY_TREE };
+  if (!ro) return { code: 1, out: "", err: tz("这个仓库的配置读不懂（名字里有换行、引号之类），为安全起见没有执行。") };
+  return gitRun(cwd, args, opts, ro.env, ro.tree);
 }
-function gitRun(cwd, args, { input, timeout = 30000, max = GIT_MAX } = {}, extraEnv = {}) {
+function gitRun(cwd, args, { input, timeout = 30000, max = GIT_MAX } = {}, extraEnv = {}, tree = EMPTY_TREE) {
   return new Promise((resolve) => {
     let timedOut = false, spawnErr = null, over = false;
     const out = [], errs = []; let outLen = 0, errLen = 0;
-    const c = spawn("git", gitArgs(args), { cwd, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_LITERAL_PATHSPECS: "1", LC_ALL: "C.UTF-8", ...extraEnv }, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    const c = spawn("git", gitArgs(args, tree), { cwd, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_LITERAL_PATHSPECS: "1", LC_ALL: "C.UTF-8", ...extraEnv }, detached: true, stdio: ["pipe", "pipe", "pipe"] });
     const killGroup = () => { try { process.kill(-c.pid, "SIGKILL"); } catch { try { c.kill("SIGKILL"); } catch {} } };
     const timer = setTimeout(() => { timedOut = true; killGroup(); }, timeout);
     c.stdout.on("data", (d) => { outLen += d.length; if (outLen > max * 2) { over = true; killGroup(); } else out.push(d); });
@@ -261,7 +271,7 @@ async function handleGit(req, res, p, u) {
     if (q("file") && file == null) return sendJson(res, 400, { error: "outside repo" });
     let r;
     if (commit) {
-      if (!/^[0-9a-f]{4,40}$/i.test(commit)) return sendJson(res, 400, { error: "bad commit" });
+      if (!/^[0-9a-f]{4,64}$/i.test(commit)) return sendJson(res, 400, { error: "bad commit" });
       r = await git(root, ["show", "--format=", "--patch", "-M", commit, ...(file ? ["--", file] : [])]);
     } else {
       const st = file ? await git(root, ["status", "--porcelain=v1", "-z", "--", file]) : null;
@@ -294,7 +304,7 @@ async function handleGit(req, res, p, u) {
 
   if (act === "show") {
     const c = q("commit");
-    if (!/^[0-9a-f]{4,40}$/i.test(c)) return sendJson(res, 400, { error: "bad commit" });
+    if (!/^[0-9a-f]{4,64}$/i.test(c)) return sendJson(res, 400, { error: "bad commit" });
     const meta = await git(root, ["show", "-s", "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%B", c]);
     if (meta.code) return sendJson(res, 404, { error: meta.err });
     const [hash, author, email, at, message] = meta.out.split("\x1f");

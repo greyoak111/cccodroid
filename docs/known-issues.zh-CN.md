@@ -74,7 +74,9 @@
 
 一加 Ace 5（ColorOS 16，Android 16）上，首装下工具包、对话、终端、可选组件、分屏横屏都正常（[#61](https://github.com/greyoak111/cccodroid/issues/61)）。
 
-- **后台迟早会被杀**，这是 ColorOS 的调度决定的，前台服务挡不住。报告者是靠第三方保活模块才留住的。
+一加 Ace 7 Pro（PMS110，OPlus ROM 17，Android 17）上，对话、终端、Shizuku、设备工具、短时后台都正常，可选组件 23 个里 20 个能用（2026-11-04 群友适配报告）。没用上的两个是 `gpu-driver-glibc` 和 `clvk-glibc`：glibc 侧的 Turnip 还不认识 Adreno 840；bionic 侧的 `gpu-driver` 正常。长时间挂后台、分屏横屏还没测。
+
+- **后台迟早会被杀**，这是 ColorOS 的调度决定的，前台服务挡不住。Ace 5 的报告者是靠第三方保活模块才留住的。
 - 能做的先做上：应用信息 → 耗电管理 → **允许后台行为**、**允许自启动**；多任务卡片锁住。
 
 ### vivo / iQOO（OriginOS / Funtouch OS）· 未实测

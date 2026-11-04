@@ -74,7 +74,9 @@ Known for aggressive background killing. App info → **Battery saver: No restri
 
 On a OnePlus Ace 5 (ColorOS 16, Android 16), first install with the devkit download, chatting, the terminal, optional components, and split screen / landscape all work ([#61](https://github.com/greyoak111/cccodroid/issues/61)).
 
-- **The app gets killed in the background sooner or later.** That comes from ColorOS scheduling, and the foreground service can't stop it. The reporter keeps it alive with a third-party keep-alive module.
+On a OnePlus Ace 7 Pro (PMS110, OPlus ROM 17, Android 17), chatting, the terminal, Shizuku, device tools and short stretches in the background all work, and 20 of 23 optional components work (community device report, 2026-11-04). The two that don't are `gpu-driver-glibc` and `clvk-glibc`: the glibc-side Turnip doesn't know the Adreno 840 yet, while the bionic-side `gpu-driver` works. Long stretches in the background and split screen / landscape haven't been tested.
+
+- **The app gets killed in the background sooner or later.** That comes from ColorOS scheduling, and the foreground service can't stop it. The Ace 5 reporter keeps it alive with a third-party keep-alive module.
 - Still worth doing: App info → Battery usage → **Allow background activity** and **Allow auto launch**, and lock the recents card.
 
 ### vivo / iQOO (OriginOS / Funtouch OS) · not tested

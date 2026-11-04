@@ -103,7 +103,7 @@ enosys-run -v <程序> ...        # 打印每次拦截，确认是不是这个�
 **如果刚编出来的程序一跑就 `Illegal instruction`（退出码 132）**，先看是不是用了 `-march=native` / `-mcpu=native`：
 
 ```sh
-clang -O2 -march=native prog.c          # ✗ 编译器生成 SVE 指令，本机执行必崩
+clang -O2 -march=native prog.c          # ✗ 编译器生成 SVE 指令，内核没开 SVE 的机器上执行必崩
 clang -O2 -mcpu=native+nosve prog.c     # ✓ 保留原生调优，只是不用 SVE
 clang -O2 -march=armv8.6-a+dotprod+i8mm+bf16 prog.c   # ✓ 显式基线
 ```
@@ -112,6 +112,8 @@ Armv9 的核（骁龙 8 Gen 2/3、天玑 9200+ 等）上，clang 按 CPU 型号�
 但 `llvm::sys::getHostCPUFeatures()` 只会把「看到的」特性置为开，**从不把「没看到的」置为关**，
 于是型号自带的 SVE2 就留了下来。而多数安卓内核根本没给用户态开 SVE，能力报的到处都是「没有」：
 Features 行里没有 `sve`，`HWCAP_SVE` 是 0，EL0 能读到的 `ID_AA64PFR0_EL1` 里 SVE 段也是 0。
+也有新内核已经开了（实测一加 Ace 7 Pro：Android 17、内核 6.12，SVE / SVE2 / SME 都能用）。本机以
+`grep -qw sve /proc/cpuinfo` 为准：有就能放心用 `native`；要拿到别的机器上跑的程序，仍用上面的显式基线。
 
 **不止 `native`：`-mcpu=cortex-x4` / `cortex-a720` / `cortex-a520`、`-march=armv9-a` / `armv9.2-a`
 同样会开 SVE，一样崩。**
