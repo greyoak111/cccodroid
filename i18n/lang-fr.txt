@@ -2733,3 +2733,30 @@
 2733	La commande {c} est en cours d'installation par un autre composant ; réessayez plus tard ou choisissez un autre nom.
 2734	La commande {c} a été prise pendant l'installation ; cette installation a été annulée.
 2735	Les réglages n'ont pas pu être écrits sur le disque ; ils peuvent encore s'appliquer pour cette exécution, mais reviendront aux anciennes valeurs après un redémarrage (voir les journaux de la passerelle).
+2736	La configuration utilisateur de Claude Code contient des modifications non confirmées, ou une conversation précédente a laissé des processus en arrière-plan : cette exécution a été ignorée. Ouvrez cccodroid, envoyez un message et confirmez dans la carte qui s'affiche, puis réessayez.
+2737	{n} élément(s) n'ont pas pu être restaurés (aucune copie gardée lors de la confirmation, ou la copie a aussi été modifiée) ; ce tour n'a pas été exécuté : {list}
+2738	Un hook ({e}) a ajouté {n} caractères au contexte de ce tour
+2739	Ajouté
+2740	Première vérification : la configuration ci-dessous est transmise à Claude à chaque conversation. Vérifiez que c'est bien vous qui l'avez placée.
+2741	modifié pendant l'exécution d'un tour
+2742	remodifié après annulation (fois {n})
+2743	Programmes laissés par des conversations précédentes, toujours en arrière-plan :
+2744	origine inconnue
+2745	Si vous n'avez pas fait ces modifications ou ne les reconnaissez pas, choisissez « Annuler » : la configuration revient à son état lors de la dernière confirmation (les nouveaux fichiers sont déplacés en quarantaine, pas supprimés) et les programmes restants sont arrêtés. Si c'est vous, choisissez « Conserver » : la question ne sera plus posée.
+2746	La configuration utilisateur transmise à Claude a changé sans votre confirmation
+2747	Une conversation précédente a laissé des programmes en arrière-plan
+2748	C'est moi, conserver
+2749	Annuler ▾
+2750	Annuler et arrêter
+2751	✓ Conservé
+2752	↩ Annulé et arrêté
+2753	↩ Annulé
+2754	Annuler les modifications
+2755	La configuration utilisateur a de nouveau changé après votre confirmation, ce tour n'a donc pas démarré : {list}. Envoyez un autre message et confirmez dans la carte qui s'affiche.
+2756	La configuration utilisateur de Claude Code contient des modifications non confirmées. Envoyez d'abord un message, confirmez dans la carte qui s'affiche, puis réessayez.
+2757	Modifié puis rétabli
+2758	Annuler le déplace dans ~/.ccapp-userconf/quarantine ; vous pourrez le récupérer.
+2759	La vérification de sécurité a elle-même échoué et n'a pas pu évaluer cette étape
+2760	Cela ne devrait pas arriver normalement. Si vous ne savez pas ce que fait cette étape, refusez-la.
+2761	Activé — se désactive automatiquement à {t}
+2762	Nom de dépôt distant invalide

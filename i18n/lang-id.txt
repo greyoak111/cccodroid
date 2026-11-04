@@ -2733,3 +2733,30 @@
 2733	Perintah {c} sedang dipasang oleh komponen lain; coba lagi nanti atau pilih nama lain.
 2734	Perintah {c} diambil alih saat pemasangan, jadi pemasangan ini dibatalkan.
 2735	Pengaturan tidak dapat ditulis ke disk; mungkin masih berlaku untuk jalannya ini, tetapi akan kembali ke nilai lama setelah mulai ulang (lihat log gateway untuk detail).
+2736	Konfigurasi tingkat pengguna Claude Code punya perubahan yang belum dikonfirmasi, atau percakapan sebelumnya meninggalkan proses di latar belakang, jadi kali ini tidak dijalankan. Buka cccodroid, kirim pesan, lalu konfirmasi di kartu yang muncul dan coba lagi.
+2737	{n} item tidak bisa dipulihkan (tidak ada salinan saat dikonfirmasi, atau salinannya juga berubah), jadi giliran ini tidak dijalankan: {list}
+2738	Hook ({e}) menambahkan {n} karakter ke konteks giliran ini
+2739	Ditambahkan
+2740	Pemeriksaan pertama: konfigurasi di bawah diberikan ke Claude di setiap percakapan. Pastikan Anda sendiri yang menaruhnya.
+2741	diubah saat sebuah giliran berjalan
+2742	diubah lagi setelah dibatalkan (ke-{n})
+2743	Program yang ditinggalkan percakapan sebelumnya dan masih berjalan di latar belakang:
+2744	asal tidak diketahui
+2745	Jika bukan Anda yang membuat perubahan ini atau Anda tidak mengenalinya, pilih "Batalkan": konfigurasi kembali seperti saat terakhir dikonfirmasi (file baru dipindahkan ke folder karantina, tidak dihapus), dan program yang tersisa dihentikan. Jika Anda sendiri yang mengubahnya, pilih "Simpan" dan tidak akan ditanya lagi.
+2746	Konfigurasi tingkat pengguna yang diberikan ke Claude berubah tanpa konfirmasi Anda
+2747	Percakapan sebelumnya meninggalkan program yang berjalan di latar belakang
+2748	Saya yang buat, simpan
+2749	Batalkan ▾
+2750	Batalkan dan hentikan
+2751	✓ Disimpan
+2752	↩ Dibatalkan dan dihentikan
+2753	↩ Dibatalkan
+2754	Batalkan perubahan
+2755	Konfigurasi tingkat pengguna berubah lagi setelah Anda mengonfirmasinya, jadi giliran ini tidak dimulai: {list}. Kirim pesan lagi dan konfirmasi di kartu yang muncul.
+2756	Konfigurasi tingkat pengguna Claude Code memiliki perubahan yang belum dikonfirmasi. Kirim pesan dulu, konfirmasi di kartu yang muncul, lalu coba lagi.
+2757	Diubah lalu dikembalikan
+2758	Membatalkan akan memindahkannya ke ~/.ccapp-userconf/quarantine, jadi masih bisa dikembalikan.
+2759	Pemeriksaan keamanan sendiri gagal dan tidak bisa menilai langkah ini
+2760	Ini biasanya tidak terjadi. Jika Anda tidak yakin apa yang dilakukan langkah ini, tolak saja.
+2761	Aktif — otomatis mati pada {t}
+2762	Nama remote tidak valid

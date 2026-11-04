@@ -2733,3 +2733,30 @@
 2733	El comando {c} lo está instalando otro componente; inténtalo más tarde o elige otro nombre.
 2734	El comando {c} fue ocupado durante la instalación; se canceló esta instalación.
 2735	No se pudieron escribir los ajustes en el disco; pueden seguir aplicándose en esta ejecución, pero volverán a los valores anteriores tras reiniciar (consulta los registros de la pasarela).
+2736	La configuración de usuario de Claude Code tiene cambios sin confirmar, o una conversación anterior dejó procesos en segundo plano, así que esta ejecución se omitió. Abre cccodroid, envía un mensaje y confirma en la tarjeta que aparece; luego vuelve a intentarlo.
+2737	No se pudieron restaurar {n} elemento(s) (no se guardó copia al confirmar, o la copia también cambió), así que este turno no se ejecutó: {list}
+2738	Un hook ({e}) añadió {n} caracteres al contexto de este turno
+2739	Añadido
+2740	Primera comprobación: la configuración de abajo se entrega a Claude en cada conversación. Confirma que la pusiste tú.
+2741	cambiado mientras se ejecutaba un turno
+2742	volvió a cambiar tras deshacer (vez {n})
+2743	Programas que dejaron conversaciones anteriores y siguen en segundo plano:
+2744	origen desconocido
+2745	Si no hiciste estos cambios o no los reconoces, elige «Deshacer»: la configuración vuelve a como estaba en la última confirmación (los archivos nuevos se mueven a una carpeta de cuarentena, no se borran) y los programas que quedaron se detienen. Si los hiciste tú, elige «Conservar» y no se volverá a preguntar.
+2746	La configuración de usuario que se entrega a Claude cambió sin tu confirmación
+2747	Una conversación anterior dejó programas en segundo plano
+2748	Lo hice yo, conservar
+2749	Deshacer ▾
+2750	Deshacer y detener
+2751	✓ Conservado
+2752	↩ Deshecho y detenido
+2753	↩ Deshecho
+2754	Deshacer cambios
+2755	La configuración de usuario volvió a cambiar después de que la confirmaras, así que este turno no se inició: {list}. Envía otro mensaje y confirma en la tarjeta que aparece.
+2756	La configuración de usuario de Claude Code tiene cambios sin confirmar. Envía primero un mensaje, confirma en la tarjeta que aparece y vuelve a intentarlo.
+2757	Cambiado y luego revertido
+2758	Revertir lo mueve a ~/.ccapp-userconf/quarantine, así que puedes recuperarlo.
+2759	La propia comprobación de seguridad falló y no pudo evaluar este paso
+2760	Esto no debería ocurrir normalmente. Si no sabes qué hace este paso, recházalo.
+2761	Activado: se desactiva automáticamente a las {t}
+2762	Nombre de remoto no válido
