@@ -83,3 +83,29 @@ test("试跑用新会话，不续正式 lastSid；结束钩子也不写回（#11
     drop(t2, it2);
   } finally { S.DB.allowLogin = false; }
 });
+
+test("失败重试被后来的成功运行取消，不再重复跑一次", async () => {
+  S.DB.allowLogin = true;
+  const t = mk({ freq: { kind: "once" }, retry: 1 });
+  try {
+    const first = await S.fire(t, { reason: "manual" });
+    assert.ok(first && first.sched, "并行槽已满：先入队");
+    for (const h of END_HOOKS) h({ sched: { ...first.sched, taskId: t.id }, sessionId: null, denied: [] }, { costRaw: 0.01, failed: true, finalText: "失败" });
+    assert.equal(S.hasRetry(t.id), true, "失败后排了 2 分钟重试");
+    t.on = true;                                     // once 失败后可能已被关；模拟用户/下一次又跑成功了
+    const second = await S.fire(t, { reason: "manual" });
+    assert.ok(second && second.sched);
+    for (const h of END_HOOKS) h({ sched: { ...second.sched, taskId: t.id }, sessionId: null, denied: [] }, { costRaw: 0.01, finalText: "成功" });
+    assert.equal(S.hasRetry(t.id), false, "成功运行取消重试");
+    drop(t, first); drop(t, second);
+  } finally { S.DB.allowLogin = false; }
+});
+
+test("「跳过下一次」遇到错过的计划：消费标记，不让再下一次也被跳", () => {
+  const t = mk({ freq: { kind: "daily", time: "09:30" }, nextAt: Date.now() - 20 * 60000, missed: "run", skipNext: true });
+  S.tick();
+  assert.equal(t.skipNext, false, "跳过的就是这次错过的计划");
+  const last = S.runlog().filter((r) => r.taskId === t.id && r.st === "skip").at(-1);
+  assert.ok(last && last.msg.includes("按设置跳过这一次"), "记一条跳过，而不是照跑");
+  drop(t);
+});
