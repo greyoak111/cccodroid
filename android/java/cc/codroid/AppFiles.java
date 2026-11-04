@@ -42,6 +42,53 @@ final class AppFiles {
         return j;
     }
 
+    // 升级和篡改分开（更新链复盘 U-04）：静默安装后服务自己重启、起网关前核对，新旧版本的差异以前全被记成「篡改留痕」，
+    // 还下一轮告诉模型有人改了程序文件。判据：盘上 TAG 和安装包的不一样，并且安装版本（versionCode + lastUpdateTime）
+    // 和上次核对通过时记下的不同 —— 才算升级。版本没变、文件却对不上的仍按篡改处理。
+    // TAG 和记录都是同 uid 能改的：光凭它们，篡改能被装成「升级」，每次都不留痕（DeepSeek 复核 v066 必修 1a；文件照样整树还原，丢的是留痕和提醒）。
+    // 所以再要一条同 uid 改不了的：系统记的安装时间（lastUpdateTime）在 24 小时内。装完服务一般马上起、当场核对，
+    // 24 小时是给「装完很久才打开」留的余地；能钻空子的只剩真实升级后的这一段
+    private static final long UPDATE_WINDOW = 24L * 3600 * 1000;
+    private static String updated = null;
+    private static long installedAt(Context c) {
+        try { return c.getPackageManager().getPackageInfo(c.getPackageName(), 0).lastUpdateTime; } catch (Exception e) { return 0; }
+    }
+    private static String pkgStamp(Context c) {
+        try {
+            android.content.pm.PackageInfo p = c.getPackageManager().getPackageInfo(c.getPackageName(), 0);
+            long vc = android.os.Build.VERSION.SDK_INT >= 28 ? p.getLongVersionCode() : p.versionCode;   // 8.0/8.1 没有 getLongVersionCode（#123-1）
+            return vc + ":" + p.lastUpdateTime + ":" + p.versionName;
+        } catch (Exception e) { return ""; }
+    }
+    /** 刚升级（或覆盖安装）过：返回「旧版本名->新版本名」，不是返回 null */
+    static synchronized String updatedFrom(Context c, File app) {
+        String now = pkgStamp(c);
+        if (now.isEmpty()) return null;
+        long age = System.currentTimeMillis() - installedAt(c);
+        if (age < 0 || age > UPDATE_WINDOW) return null;
+        String seen = c.getSharedPreferences("appfiles", Context.MODE_PRIVATE).getString("seen", "");
+        if (now.equals(seen)) return null;
+        String want, have;
+        try (InputStream in = c.getAssets().open("app/TAG")) { want = new String(readAll(in), StandardCharsets.UTF_8).trim(); } catch (Exception e) { return null; }
+        try { have = new String(java.nio.file.Files.readAllBytes(new File(app, "TAG").toPath()), StandardCharsets.UTF_8).trim(); } catch (Exception e) { have = ""; }
+        if (want.equals(have)) return null;
+        String from = seen.isEmpty() ? "?" : seen.substring(seen.lastIndexOf(58) + 1);
+        return from + "->" + now.substring(now.lastIndexOf(58) + 1);
+    }
+    /** files/app 和这个安装包对上了：记下安装版本，之后再对不上就不是升级 */
+    static synchronized void markSeen(Context c) {
+        String now = pkgStamp(c);
+        if (!now.isEmpty()) c.getSharedPreferences("appfiles", Context.MODE_PRIVATE).edit().putString("seen", now).apply();
+    }
+    static synchronized void noteUpdated(String v) { updated = v; }
+    static synchronized String takeUpdated() { String v = updated; updated = null; return v; }
+    private static byte[] readAll(InputStream in) throws java.io.IOException {
+        java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[1 << 16];
+        for (int n; (n = in.read(buf)) > 0; ) bo.write(buf, 0, n);
+        return bo.toByteArray();
+    }
+
     /** 整个按安装包重新铺一遍 */
     static synchronized void deploy(Context c, File app) throws Exception {
         Installer.deleteTree(app);

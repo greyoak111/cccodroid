@@ -13,6 +13,16 @@ const CHUNK = 1 << 20;
 /** 逐行回调 fn(line, i)，返回 false 就停。最后一行没有换行符也照交；行号和 split("\n") 的一致 */
 // 单行上限：内存只跟最长的一行有关，这里给最长的一行也封个顶（没有换行的超大文件别整个读进来，审查 v0513b 低-5）
 const LINE_MAX = 256 << 20;
+/** 写满为止：fs.writeSync 写进一部分后再出错（比如满盘）会返回不足的正数而不是抛错，只写一次会把半截当成写完（#150-1）。
+ *  剩下的再写一次，真出错就在那一次抛出来 */
+function writeAll(fd, b) {
+  for (let off = 0; off < b.length; ) {
+    const k = fs.writeSync(fd, b, off, b.length - off);
+    if (!(k > 0)) throw Object.assign(new Error("short write"), { code: "EIO" });
+    off += k;
+  }
+}
+
 export function forEachLine(file, fn) {
   const fd = fs.openSync(file, "r");
   try {
@@ -38,7 +48,7 @@ export function forEachLine(file, fn) {
 export function lineWriter(file) {
   const fd = fs.openSync(file, "w", 0o600);      // 会话记录只给自己读（分叉出来的以前跟着 umask 是 0644，审查 v0513b 低-10）
   let parts = [], len = 0;
-  const flush = () => { if (len) { fs.writeSync(fd, Buffer.concat(parts, len)); parts = []; len = 0; } };
+  const flush = () => { if (len) { writeAll(fd, Buffer.concat(parts, len)); parts = []; len = 0; } };
   return {
     write(line) { const b = Buffer.from(line + "\n", "utf8"); parts.push(b); len += b.length; if (len >= CHUNK) flush(); },
     close() { try { flush(); } finally { fs.closeSync(fd); } },
@@ -49,11 +59,11 @@ export function lineWriter(file) {
 export function rewriteLines(src, dst, fn) {
   const fd = fs.openSync(dst, "w");
   let parts = [], len = 0, prev = null;
-  const put = (s) => { const b = Buffer.from(s, "utf8"); parts.push(b); len += b.length; if (len >= CHUNK) { fs.writeSync(fd, Buffer.concat(parts, len)); parts = []; len = 0; } };
+  const put = (s) => { const b = Buffer.from(s, "utf8"); parts.push(b); len += b.length; if (len >= CHUNK) { writeAll(fd, Buffer.concat(parts, len)); parts = []; len = 0; } };
   try {
     forEachLine(src, (l) => { if (prev !== null) put(prev + "\n"); prev = fn(l); });
     if (prev) put(prev);
-    if (len) fs.writeSync(fd, Buffer.concat(parts, len));
+    if (len) writeAll(fd, Buffer.concat(parts, len));
   } finally { fs.closeSync(fd); }
 }
 
@@ -85,7 +95,7 @@ const dosDate = (d) => (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) <<
 export async function zipToFile(file, entries, fd0) {
   const fd = fd0 ?? fs.openSync(file, "w");
   let off = 0;
-  const put = (b) => { fs.writeSync(fd, b); off += b.length; };
+  const put = (b) => { writeAll(fd, b); off += b.length; };
   const now = new Date(), central = [];
   try {
     for (const e of entries) {

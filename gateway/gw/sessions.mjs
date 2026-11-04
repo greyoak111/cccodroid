@@ -482,7 +482,7 @@ export async function routeSessions(req, res, u, p) {
     if (req.method === "POST" && (action === "delmsg" || action === "undodel")) {
       const b = JSON.parse((await readBody(req)) || "{}");
       let r;
-      try { r = action === "delmsg" ? deleteMessage(id, String(b.userText || ""), Number(b.after) || 0, b.which === "user" ? "user" : "bot", String(b.uuid || "").slice(0, 64), String(b.replyUuid || "").slice(0, 64)) : undoDelete(id, String(b.undo || "")); }
+      try { r = action === "delmsg" ? deleteMessage(id, String(b.userText || ""), Number(b.after) || 0, b.which === "user" ? "user" : "bot", String(b.uuid || "").slice(0, 64), String(b.replyUuid || "").slice(0, 64), Array.isArray(b.offs) ? b.offs.slice(0, 64).map(Number) : []) : undoDelete(id, String(b.undo || "")); }
       catch (e) { r = { ok: false, status: 500, message: e.message }; }
       return sendJson(res, r.ok ? 200 : r.status, r.ok ? r : { ok: false, error: action, message: tr(LAST_LANG, r.message) });
     }

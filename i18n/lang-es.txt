@@ -2767,3 +2767,7 @@
 2767	La generación terminó sin resultado
 2768	El archivo anterior aún espera una ubicación para guardarse
 2769	El archivo original ya no está (se renombró, movió o eliminó).\nAceptar: guardar una copia con el nombre original\nCancelar: no guardar por ahora; los cambios se quedan en el editor
+2770	Pausar los hooks de este nivel (las reglas se conservan, solo dejan de ejecutarse)
+2771	Los hooks de este nivel están en pausa
+2772	Esta regla cambió o se eliminó mientras la editabas. Vuelve a abrirla y edítala de nuevo
+2773	Ya existe una carpeta con este nombre pero no tiene SKILL.md (probablemente quedó de una importación anterior que falló). Borra ~/.claude/skills/{d} en Archivos y vuelve a importar

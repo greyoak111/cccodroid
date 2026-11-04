@@ -2767,3 +2767,7 @@
 2767	Pembuatan selesai tanpa hasil
 2768	File sebelumnya masih menunggu lokasi penyimpanan
 2769	File aslinya sudah tidak ada (diganti nama, dipindah, atau dihapus).\nOK: simpan salinan dengan nama aslinya\nBatal: jangan simpan dulu, perubahan tetap di editor
+2770	Jeda hooks di tingkat ini (aturan tetap disimpan, hanya tidak dijalankan)
+2771	Hooks di tingkat ini dijeda
+2772	Aturan ini diubah atau dihapus saat Anda mengeditnya. Buka lagi lalu ulangi perubahan
+2773	Folder dengan nama ini sudah ada tetapi tidak berisi SKILL.md (kemungkinan sisa impor sebelumnya yang gagal). Hapus ~/.claude/skills/{d} di Berkas, lalu impor lagi

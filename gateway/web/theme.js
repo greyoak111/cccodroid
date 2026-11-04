@@ -23,7 +23,7 @@
   try { if (k) sessionStorage.setItem("cc.bk", k); else k = sessionStorage.getItem("cc.bk") || ""; } catch {}
   const PLAIN = ["hasPane", "paneCanBack", "whatsNew", "nightMode", "keyed", "wallColor"];
   const KEYED = ["privShot", "openUrl", "paneOpen", "paneBounds", "paneGoBack", "paneClose", "openBrowser", "shareText", "copyText",
-    "pickDevkit", "uninstall", "unfreeze", "whatsNewSeen", "setBars", "skinPref", "accentPref", "langPref", "themePref", "saveAs", "previewNet", "skinPal", "gcPal"];
+    "pickDevkit", "uninstall", "unfreeze", "ensureGateway", "whatsNewSeen", "setBars", "skinPref", "accentPref", "langPref", "themePref", "saveAs", "previewNet", "skinPal", "gcPal"];
   const w = {};
   for (const m of PLAIN) if (typeof raw[m] === "function") w[m] = (...a) => raw[m](...a);
   for (const m of KEYED) if (typeof raw[m] === "function") w[m] = (...a) => raw[m](k, ...a);

@@ -313,8 +313,11 @@ START_GUARDS.push((q) => {
 END_HOOKS.push((run, f) => {
   if (!run.sched) return;
   const ctx = RUNNING.get(run.sched.key); RUNNING.delete(run.sched.key);
-  const t = byId(run.sched.taskId); if (!t || !ctx) return;
-  const dur = Date.now() - ctx.startedAt, cost = Number(f.costRaw || f.costUsd || 0);
+  if (!ctx) return;
+  const t = byId(run.sched.taskId), cost = Number(f.costRaw || f.costUsd || 0);
+  // 跑着的时候任务被删了：已经花掉的钱照样记进当天的预算日桶，不然后面的任务会在超额以后继续跑（#149-1）
+  if (!t) { if (!ctx.trial && cost > 0) { spend(ctx.startedAt, cost); save(); } return; }
+  const dur = Date.now() - ctx.startedAt;
   const text = String(f.finalText || "").trim();
   let st = "ok", msg = text.split("\n").find((l) => l.trim()) || tz("（没有回复）");
   const over = run.overBudget || (t.limitCost > 0 && cost > t.limitCost);

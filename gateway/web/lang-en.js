@@ -2804,5 +2804,9 @@ window.I18N_DICT.en = {
   "生成失败（退出码 {code}）": "Generation failed (exit code {code})",
   "生成结束但没有返回结果": "Generation ended without a result",
   "上一个文件还没选好保存位置": "The previous file is still waiting for a save location",
-  "原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里": "The original file is gone (renamed, moved or deleted).\nOK: save a copy under the original name\nCancel: don't save for now; your changes stay in the editor"
+  "原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里": "The original file is gone (renamed, moved or deleted).\nOK: save a copy under the original name\nCancel: don't save for now; your changes stay in the editor",
+  "暂停这一层的 hooks（规则留着，先不跑）": "Pause hooks at this level (rules are kept, just not run)",
+  "这一层的 hooks 已暂停": "Hooks at this level are paused",
+  "这条规则在你编辑期间被改动或删掉了，重新打开它再改": "This rule was changed or deleted while you were editing it. Open it again and redo your edit",
+  "已有同名目录，但里面没有 SKILL.md（多半是以前导入到一半失败留下的）。到文件里删掉 ~/.claude/skills/{d} 再导入": "A folder with this name already exists but has no SKILL.md (most likely left over from an earlier import that failed). Delete ~/.claude/skills/{d} in Files, then import again"
 };

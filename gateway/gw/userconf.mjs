@@ -61,7 +61,10 @@ function fingerprint(rel, abs) {
   if (!st.isFile()) return null;
   let link = ""; try { if (fs.lstatSync(abs).isSymbolicLink()) link = "link:" + fs.readlinkSync(abs) + "\0"; } catch {}
   if (st.size > (rel === ".claude.json" ? 32 << 20 : BIG)) return { h: sha(link + `big:${st.size}:${st.mtimeMs}:${st.ctimeMs}`), big: true, size: st.size };
-  let raw; try { raw = fs.readFileSync(abs, "utf8"); } catch { return null; }
+  // 按字节读：副本要存原样（技能目录里的图片这类不是 UTF-8，按文本存会被换成 U+FFFD，#151-1）。
+  // 指纹 h 的算法不变（合法 UTF-8 的文件按文本、按字节算出来一样），不然升级后已认下的全都会被报成改过
+  let bytes; try { bytes = fs.readFileSync(abs); } catch { return null; }
+  const raw = bytes.toString("utf8");
   if (isJsonPart(rel)) {
     let j; try { j = JSON.parse(raw); } catch { j = undefined; }
     if (j !== undefined) {
@@ -71,7 +74,7 @@ function fingerprint(rel, abs) {
       return { h: sha(link + "json:" + c), text: c, part, size: st.size };
     }
   }
-  return { h: sha(link + raw), text: raw, size: st.size };
+  return { h: sha(link + raw), text: raw, bytes: bytes.length <= COPY_MAX ? bytes : undefined, mode: st.mode & 0o7777, size: st.size };   // 超过副本上限的本来也不存副本
 }
 
 /** 一个目录往下的文件指纹，放进 out。cnt：{ n } 共用的计数（防目录太大） */
@@ -96,26 +99,30 @@ export function ucScan() {
 }
 
 // ── 确认记录与副本 ──
-let REC = null;           // { files: { rel: h } }，没有记录文件时 null
+let REC = null;           // { files: { rel: h }, modes: { rel: 权限位 } }，没有记录文件时 null
 function loadRec() {
   if (REC) return REC;
-  try { const j = JSON.parse(fs.readFileSync(RECORD(), "utf8")); if (j && j.files && typeof j.files === "object") REC = { files: Object.assign(Object.create(null), j.files) }; } catch {}
+  try { const j = JSON.parse(fs.readFileSync(RECORD(), "utf8")); if (j && j.files && typeof j.files === "object") REC = { files: Object.assign(Object.create(null), j.files), modes: Object.assign(Object.create(null), j.modes && typeof j.modes === "object" ? j.modes : {}) }; } catch {}
   return REC;
 }
 function saveRec() {
   try {
     const tmp = RECORD() + ".tmp-" + process.pid;
-    fs.writeFileSync(tmp, JSON.stringify({ v: 1, at: Date.now(), files: REC.files }), { mode: 0o600 });
+    fs.writeFileSync(tmp, JSON.stringify({ v: 1, at: Date.now(), files: REC.files, modes: REC.modes }), { mode: 0o600 });
     fs.renameSync(tmp, RECORD());
   } catch (e) { log(`[用户配置] 记不下确认记录：${e.message}`); }
 }
 function putCopy(rel, f) {
   const p = path.join(STORE(), keyName(rel));
-  if (f.big || f.text == null || Buffer.byteLength(f.text) > COPY_MAX) { try { fs.rmSync(p, { force: true }); } catch {} return; }
-  try { fs.mkdirSync(STORE(), { recursive: true, mode: 0o700 }); fs.writeFileSync(p + ".tmp", f.text, { mode: 0o600 }); fs.renameSync(p + ".tmp", p); } catch {}
+  const data = f.bytes || f.text;
+  if (f.big || data == null || Buffer.byteLength(data) > COPY_MAX) { try { fs.rmSync(p, { force: true }); } catch {} return; }
+  try { fs.mkdirSync(STORE(), { recursive: true, mode: 0o700 }); fs.writeFileSync(p + ".tmp", data, { mode: 0o600 }); fs.renameSync(p + ".tmp", p); } catch {}
 }
 function getCopy(rel) {
   try { return fs.readFileSync(path.join(STORE(), keyName(rel)), "utf8"); } catch { return null; }
+}
+function getCopyBytes(rel) {
+  try { return fs.readFileSync(path.join(STORE(), keyName(rel))); } catch { return null; }
 }
 /** 副本总量超了：从最大的开始不留（还原时那几个就只能报「没法还原」） */
 function trimCopies() {
@@ -126,13 +133,13 @@ function trimCopies() {
 
 /** 认下：filter 不给就是全部 */
 function accept(cur, filter) {
-  if (!REC) REC = { files: Object.create(null) };
+  if (!REC) REC = { files: Object.create(null), modes: Object.create(null) };
   const keys = new Set([...Object.keys(REC.files), ...cur.keys(), ...SEEN.keys()]);
   for (const rel of keys) {
     if (filter && !filter(rel)) continue;
     const f = cur.get(rel);
-    if (f) { REC.files[rel] = f.h; putCopy(rel, f); }
-    else { delete REC.files[rel]; try { fs.rmSync(path.join(STORE(), keyName(rel)), { force: true }); } catch {} }
+    if (f) { REC.files[rel] = f.h; if (f.mode != null) REC.modes[rel] = f.mode; else delete REC.modes[rel]; putCopy(rel, f); }
+    else { delete REC.files[rel]; delete REC.modes[rel]; try { fs.rmSync(path.join(STORE(), keyName(rel)), { force: true }); } catch {} }
     ATTR.delete(rel); SEEN.delete(rel);
   }
   trimCopies();
@@ -321,7 +328,7 @@ export function ucPending() {
   if (!loadRec()) {
     // 第一次：不强的直接认；强的留着问一次
     first = true;
-    REC = { files: Object.create(null) };
+    REC = { files: Object.create(null), modes: Object.create(null) };
     accept(cur, (rel) => !STRONG(rel));
   }
   const changes = [];
@@ -350,10 +357,11 @@ export function ucKeep(rels) {
   log(`[用户配置] 用户保留了改动：${[...set].slice(0, 8).join(", ")}`);
 }
 
-function writeAtomic(abs, text) {
+function writeAtomic(abs, data, mode = 0o600) {
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   const tmp = abs + ".ccapp-" + crypto.randomBytes(4).toString("hex");
-  fs.writeFileSync(tmp, text, { mode: 0o600 });
+  fs.writeFileSync(tmp, data, { mode });
+  if (mode !== 0o600) fs.chmodSync(tmp, mode);     // umask 会吃掉建文件时给的位，可执行脚本还原后得能照样执行（#151-1）
   fs.renameSync(tmp, abs);
 }
 /** 把现在的样子先拷一份进隔离目录（还原会覆盖掉的、看不懂的） */
@@ -387,7 +395,7 @@ function moveAway(qdir, rel, abs) {
  *  还原不了的（没留副本、副本也被改了）：现在的样子挪进隔离目录，设置类 JSON 清掉要管的那一块 —— 不留在原地接着跑。返回这些 */
 export function ucRevert(rels) {
   flushSeen();
-  const cur = ucScan(), failed = [], moved = [];
+  const cur = ucScan(), failed = [], moved = [], exact = new Map();
   const qdir = path.join(STORE(), "quarantine", new Date().toISOString().replace(/[:.]/g, "-"));
   for (const rel of rels || []) {
     const was = REC?.files[rel], abs = path.join(CFG.home, rel);
@@ -405,17 +413,23 @@ export function ucRevert(rels) {
         continue;
       }
       if (!was) { if (moveAway(qdir, rel, abs)) moved.push(rel); continue; }
-      const copy = getCopy(rel);
+      const copy = getCopyBytes(rel);
       if (copy == null) { failed.push(rel); continue; }
       stash(qdir, rel, abs);
-      writeAtomic(abs, copy);
+      const mode = Number.isInteger(REC?.modes?.[rel]) ? REC.modes[rel] & 0o7777 : 0o600;   // 旧记录没存权限：照以前的 0600
+      writeAtomic(abs, copy, mode);
+      exact.set(rel, { copy, mode: Number.isInteger(REC?.modes?.[rel]) ? mode : null });
     } catch (e) { log(`[用户配置] 还原 ${rel} 失败：${e.message}`); failed.push(rel); }
   }
   // 再核一遍：副本自己被改过的、还原后还对不上的，都算没还原成
   const after = ucScan();
   for (const rel of rels || []) {
     if (failed.includes(rel)) continue;
-    if ((REC?.files[rel] || undefined) !== after.get(rel)?.h) failed.push(rel);
+    // 按副本还原的再逐字节、按权限核一遍：指纹按文本算，二进制文件改坏了、执行位丢了它都看不出来（#151-1）
+    const ex = exact.get(rel);
+    let same = true;
+    if (ex) try { const abs = path.join(CFG.home, rel); same = fs.readFileSync(abs).equals(ex.copy) && (ex.mode == null || (fs.statSync(abs).mode & 0o7777) === ex.mode); } catch { same = false; }
+    if (!same || (REC?.files[rel] || undefined) !== after.get(rel)?.h) failed.push(rel);
     else { AGAIN.set(rel, (AGAIN.get(rel) || 0) + 1); ATTR.delete(rel); SEEN.delete(rel); }
   }
   // 还原不成的不留在原地：挪走（设置类只清掉要管的那块）

@@ -208,11 +208,19 @@ public class GatewayService extends Service {
         // 起之前核一遍 files/app（见 AppFiles）：两次起网关之间被改过的，按安装包还原了再起
         java.util.List<String> bad = AppFiles.tampered(this, env.app);
         if (!bad.isEmpty()) {
-            Log.w(TAG, "files/app 被改过，起网关前还原：" + bad);
+            String upd = AppFiles.updatedFrom(this, env.app);
             AppFiles.deploy(this, env.app);
-            Ledger.add(env, "repair", true, Tr.t("界面与网关的文件被改动过，已按安装包还原：") + android.text.TextUtils.join(", ", bad), null);
-            AppFiles.noteRestored(bad);
+            if (upd != null) {
+                // 刚升级：文件不一样是版本差异，按新安装包铺好就是，不记篡改、不提醒模型（AppFiles.updatedFrom）
+                Log.i(TAG, "刚升级（" + upd + "），起网关前按新安装包重铺 files/app");
+                AppFiles.noteUpdated(upd);
+            } else {
+                Log.w(TAG, "files/app 被改过，起网关前还原：" + bad);
+                Ledger.add(env, "repair", true, Tr.t("界面与网关的文件被改动过，已按安装包还原：") + android.text.TextUtils.join(", ", bad), null);
+                AppFiles.noteRestored(bad);
+            }
         }
+        AppFiles.markSeen(this);
         File server = new File(env.app, "server.mjs");
         ProcessBuilder pb = new ProcessBuilder(env.cmd(env.bin("node").getPath(), server.getPath(), String.valueOf(Env.PORT)));
         env.apply(pb.environment());
@@ -220,6 +228,8 @@ public class GatewayService extends Service {
         // 篡改留痕：这次（或界面那边部署时）还原过的文件交给网关，它记日志、界面提示一次、下一轮告诉模型（gateway/gw/tamper.mjs）
         String restored = AppFiles.takeRestored();
         if (restored != null) pb.environment().put("CCAPP_TAMPERED", restored);
+        String updated = AppFiles.takeUpdated();
+        if (updated != null) pb.environment().put("CCAPP_UPDATED", updated);
         // 清单的哈希：网关拿它核对盘上的 FILES，核完到起进程之间被换了、或者读不到，网关不退回「不核」（gateway/gw/appfiles.mjs）
         String listSha = AppFiles.listSha(this);
         if (listSha != null) pb.environment().put("CCAPP_FILES_SHA", listSha);

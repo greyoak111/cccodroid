@@ -14,6 +14,13 @@ import { bodyToFile } from "./bigfile.mjs";
 // /api/file   把磁盘上的文件流给界面（消息里的图片靠它显示）
 // /api/upload 把界面拿到的东西（粘贴/拖放/选择）落盘成 claude 能读的路径
 export const UPLOAD_DIR = path.join(CFG.workspace, "uploads");
+/** 按 UTF-8 字节数截断，不切开多字节字符 */
+export function clipBytes(s, max) {
+  if (Buffer.byteLength(s) <= max) return s;
+  let out = "", n = 0;
+  for (const ch of s) { const b = Buffer.byteLength(ch); if (n + b > max) break; out += ch; n += b; }
+  return out;
+}
 const UPLOAD_MAX = 4 * 1024 ** 3;   // 单个附件上限（流式落盘）
 
 /** 绝不外发的路径：密钥所在的应用私有目录、运行时、以及几个具名的凭据文件。
@@ -104,7 +111,8 @@ function writeNoFollow(file, buf) {
     } finally { fs.closeSync(fd); }
   }
   // 临时文件必须和目标同一目录（rename 不跨文件系统）；写完 fsync 再覆盖，失败只删临时文件
-  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.ccsave-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`);
+  // 临时名不带原名：原名本身可以长到接近 255 字节，再拼后缀就超出文件名上限、保存失败（#148-2）
+  const tmp = path.join(path.dirname(file), `.ccsave-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`);
   let fd = null;
   try {
     fd = fs.openSync(tmp, c.O_WRONLY | c.O_CREAT | c.O_EXCL | c.O_NOFOLLOW, mode);
@@ -228,6 +236,8 @@ export async function routeFiles(req, res, u, p) {
     res.writeHead(200, head);
     const st = fs.createReadStream(null, { fd });
     st.on("error", () => { try { res.destroy(); } catch {} });
+    // 客户端中途断开（关查看器、切文件）：pipe 只会停下，不会关源，fd 一直占着（#148-1）
+    res.on("close", () => { if (!res.writableFinished) st.destroy(); });
     st.pipe(res);
     return;
   }
@@ -322,7 +332,10 @@ export async function routeFiles(req, res, u, p) {
     try { const sf = fs.statfsSync(UPLOAD_DIR); if (len && sf.bavail * sf.bsize < len + (512 << 20)) return sendJson(res, 507, { error: "no space" }); } catch {}
     const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
     // 同一秒同名的（一次附加两个同名文件）别互相覆盖：撞了就加 -2、-3
-    const nm = safe || "upload.bin", dot = nm.lastIndexOf("."), stem = dot > 0 ? nm.slice(0, dot) : nm, ext = dot > 0 ? nm.slice(dot) : "";
+    // 文件名上限是 255 字节不是字符：中文一个字 3 字节，按字符截到 120 还会超（#148-3）。时间戳前缀和「-序号」另留余量
+    const nm0 = safe || "upload.bin", dot0 = nm0.lastIndexOf(".");
+    const ext = dot0 > 0 ? clipBytes(nm0.slice(dot0), 32) : "", stem = clipBytes(dot0 > 0 ? nm0.slice(0, dot0) : nm0, 200 - Buffer.byteLength(ext)) || "upload";
+    const nm = stem + ext;
     let out = "";
     for (let i = 1; i < 1000 && !out; i++) {
       const cand = path.join(UPLOAD_DIR, `${stamp}-${i === 1 ? nm : stem + "-" + i + ext}`);

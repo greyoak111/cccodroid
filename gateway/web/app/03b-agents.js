@@ -206,7 +206,9 @@
       }
       // 等满了还没连上文档的（旧视图留下的卡）也算没加载到，别往脱离的节点上滚（#90）
       if (!card || card.lazy || !card.el?.isConnected) return toast(t("这个子代理的过程还没加载到"));
-      card.el.closest(".tgroup")?.classList.add("open");
+      // 用户手动收起过的组带着 shut，样式里它压过 open：显式点代理去看就把它一并去掉，记下的折叠偏好不动（#153-3）
+      const grp = card.el.closest(".tgroup");
+      if (grp) { grp.classList.add("open"); grp.classList.remove("shut"); }
       card.openSub?.();
       up = card;
     }

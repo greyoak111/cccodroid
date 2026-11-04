@@ -63,3 +63,10 @@ try {
   if (raw) { const a = JSON.parse(raw); if (Array.isArray(a) && a.length) tamperRecord("app", a); }
 } catch {}
 delete process.env.CCAPP_TAMPERED;   // 别再传给 claude、终端这些子进程
+
+// 刚升级：应用起网关前按新安装包重铺了 files/app（版本差异，不是篡改）。只记一行，不进留痕、不提醒模型（更新链复盘 U-04）
+{
+  const raw = String(process.env.CCAPP_UPDATED || "").replace(/[^\w.\->?+]/g, "_").slice(0, 80);
+  if (raw) log(`[更新] 应用已升级（${raw}），界面与网关文件已按新安装包铺好`);
+}
+delete process.env.CCAPP_UPDATED;

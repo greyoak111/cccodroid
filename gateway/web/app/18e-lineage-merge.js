@@ -134,12 +134,18 @@
     });
 
     // 材料：进第 2 步时一起取；挑的轮没变就不重取
+    // 取的时候选择还能改：回执只在选择没变时才收下，变了就按新选择再取一轮，不让旧材料贴上新选择的标签（#154-2）
+    const pickKey = (s) => s.how + "|" + (s.how === "excerpt" && s.picked ? [...s.picked].sort().join(",") : "");
     async function fetchAll() {
-      await Promise.all(src.map(async (s) => {
-        if (s.mat) return;
-        const u = s.how === "excerpt" && s.picked && s.picked.size ? "&uuids=" + [...s.picked].map(encodeURIComponent).join(",") : "";
-        s.mat = await api(`/api/lineage/material?id=${encodeURIComponent(s.id)}&how=${s.how}${u}`);
-      }));
+      for (let todo; (todo = src.filter((s) => !s.mat)).length;) {
+        if (todo.some((s) => s.how === "excerpt" && s.picked && !s.picked.size)) throw new Error(t("摘录至少勾一轮"));
+        await Promise.all(todo.map(async (s) => {
+          const k = pickKey(s);
+          const u = s.how === "excerpt" && s.picked && s.picked.size ? "&uuids=" + [...s.picked].map(encodeURIComponent).join(",") : "";
+          const m = await api(`/api/lineage/material?id=${encodeURIComponent(s.id)}&how=${s.how}${u}`);
+          if (pickKey(s) === k) s.mat = m;
+        }));
+      }
     }
 
     // 第 2 步：目标 + 放进哪个项目（养恩大于生恩：材料大半来自哪个项目就放哪，并列取最近活动的）
@@ -270,11 +276,13 @@
   }
   async function linGoRef(ref) {
     const s = ref.slice(0, 4), n = Number(ref.slice(5));
+    // 缓存的图可能是旧的（之后新开了会话、加了章）：标脏了就重取；没标脏但没对上，也重取一次再下结论（#154-4）
+    const miss = (g) => { const h = g.nodes.filter((x) => x.id.startsWith(s)); return !h.length || (h.length === 1 && n !== 1 && !(h[0].chapters || [])[n - 1]); };
     let g = LIN.g;
-    if (!g) {
+    if (!g || LIN.stale || miss(g)) {
       try { g = await api("/api/lineage"); } catch (e) { return toast(e.message, true); }
       if (g.building) return toast(t("脉络还在整理，稍后再点"));
-      LIN.g = g;
+      LIN.g = g; LIN.stale = false;
     }
     const hit = g.nodes.filter((x) => x.id.startsWith(s));
     if (!hit.length) return toast(t("没找到档号 {r} 对应的会话", { r: ref }), true);

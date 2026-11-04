@@ -224,13 +224,19 @@
     if (!msg) { toast(t("写一句提交说明"), true); $("git-msg")?.focus(); return; }
     // 状态列表截断了（超过 1000 项）：全选的只是看得见的这些，照样按清单传，没显示的不能跟着提交（#106 07-002）
     const all = GIT.sel.size === GIT.status.files.length && !GIT.status.truncated;
+    // 提交在途时面板可能已换到别的仓库：回执只收拾发起它的那个仓库，别清掉另一个仓库正在写的说明（#154-1）
+    const dir = GIT.dir;
     try {
       const r = await gpost("commit", { message: msg, files: all ? null : [...GIT.sel] });
       toast(r.message || t("已提交"));
-      GIT.sel = new Set(); GIT.known = null; GIT.msg = "";
-      if ($("git-msg")) $("git-msg").value = "";
+      if (GIT.dir !== dir) return;
+      GIT.sel = new Set(); GIT.known = null;
+      // 等的时候又改了说明（准备下一次提交）的，留着
+      const box = $("git-msg");
+      if (!box || box.value.trim() === msg) { GIT.msg = ""; if (box) box.value = ""; }
       gitLoad();
     } catch (e) {
+      if (GIT.dir !== dir) return toast(e.message, true);
       if (e.status === 409 && !again) return gitAskIdentity();
       toast(e.message, true);
     }

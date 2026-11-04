@@ -56,7 +56,7 @@
       if (pageOn("lineage")) LIN.poll = setTimeout(loadLineage, 800);
       return;
     }
-    LIN.g = g;
+    LIN.g = g; LIN.stale = false;
     linPaint(true);
     linFill();
     // 第一次来：提一句「怎么看」，不强拉进导览
@@ -159,6 +159,10 @@
     if (!map) return linState(t("脉络组件没加载出来，重新打开 App 试试"));
     linState(m.sessions.length ? "" : t("还没有会话。聊过几次之后，这里会画出它们之间的来龙去脉。"));
     if (LIN.band && !m.bands.some((b) => b.key === LIN.band)) LIN.band = "";
+    // 从别处点「在脉络中查看」：目标被留着的项目筛选或「不显示杂项」挡住时，先把挡住它的那一项放开，不然选中会被静默丢掉（#154-3）
+    const fx = LIN.focus && m.sessions.find((x) => x.id === LIN.focus);
+    if (fx && LIN.band && fx.band !== LIN.band) { LIN.band = ""; localStorage.setItem("cc.linBand", ""); }
+    if (fx && fx.misc && !LIN.misc) { LIN.misc = true; localStorage.setItem("cc.linMisc", "1"); }
     // 项目条：全部 + 各带；选中的滚进视野
     const seg = $("lin-bands");
     seg.innerHTML = [{ key: "", name: t("全部") }, ...m.bands].map((b) => `<button data-b="${esc(b.key)}" class="${b.key === LIN.band ? "on" : ""}">${esc(b.name)}</button>`).join("");
@@ -184,7 +188,8 @@
   });
   // 会话变了（建档、跑完、改名…）：脉络页开着就顺手重取，合并成一次
   function lineageDirty() {
-    if (!pageOn("lineage")) return;
+    // 页面没开不重取，但记一笔：档号跳转用的是缓存的图，脏了要先重取（#154-4）
+    if (!pageOn("lineage")) { LIN.stale = true; return; }
     clearTimeout(LIN.reload); LIN.reload = setTimeout(loadLineage, 1200);
   }
   // 运行状态变了：蓝点跟着动，不用重取

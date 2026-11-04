@@ -125,8 +125,10 @@ export function setInterrupted(list) {
     fs.renameSync(INTR_FILE + ".tmp", INTR_FILE);
   } catch {}
 }
-/** 这个会话（没建立会话的轮次：sid 为空）又跑起来了或被忽略：去掉它的中断记录 */
+/** 这个会话又跑起来了：去掉它的中断记录。没建立会话的（sid 为空）互相分不清，一律不在这里清 ——
+ *  界面「重发」「忽略」时按记录 id 单独清（/api/interrupted/dismiss）。以前空会话号会把别的未建会话的中断记录一起清掉（#149-2） */
 export function clearInterrupted(sid) {
+  if (!sid) return;
   const left = INTERRUPTED.filter((e) => (e.sessionId || "") !== (sid || ""));
   if (left.length !== INTERRUPTED.length) setInterrupted(left);
 }

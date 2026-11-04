@@ -2770,4 +2770,8 @@ window.I18N_DICT["id"] = {
   "生成结束但没有返回结果": "Pembuatan selesai tanpa hasil",
   "上一个文件还没选好保存位置": "File sebelumnya masih menunggu lokasi penyimpanan",
   "原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里": "File aslinya sudah tidak ada (diganti nama, dipindah, atau dihapus).\nOK: simpan salinan dengan nama aslinya\nBatal: jangan simpan dulu, perubahan tetap di editor",
+  "暂停这一层的 hooks（规则留着，先不跑）": "Jeda hooks di tingkat ini (aturan tetap disimpan, hanya tidak dijalankan)",
+  "这一层的 hooks 已暂停": "Hooks di tingkat ini dijeda",
+  "这条规则在你编辑期间被改动或删掉了，重新打开它再改": "Aturan ini diubah atau dihapus saat Anda mengeditnya. Buka lagi lalu ulangi perubahan",
+  "已有同名目录，但里面没有 SKILL.md（多半是以前导入到一半失败留下的）。到文件里删掉 ~/.claude/skills/{d} 再导入": "Folder dengan nama ini sudah ada tetapi tidak berisi SKILL.md (kemungkinan sisa impor sebelumnya yang gagal). Hapus ~/.claude/skills/{d} di Berkas, lalu impor lagi",
 };

@@ -280,11 +280,23 @@ async function energySample() {
     // CPU 增量：活着的进程看差值；退出的进程时间会并进父进程的 cutime（父进程也是我们的，就已经在 total 里），
     // 父进程不在了（被 init 收养）它的时间就跟着消失，要补回来
     let d = cur.total - prev.total;
-    for (const [pid, [start, v, ppid]] of Object.entries(prev.pids || {})) {
+    // 往上找第一个还活着的祖先：子进程被回收时 CPU 并进父进程，父进程再被回收又并进祖父……一路并上去。
+    // 只看直接父进程的话，孙进程和父进程在同一个采样间隔里先后被回收，孙进程那段会再补一次（#150-3）。
+    // 残余：父进程先退、孙进程被 init 收养后才结束，那段会算成已并入而少记 —— 正常的「CLI 等工具跑完」不是这样
+    const pp = prev.pids || {};
+    const folded = (ppid) => {
+      for (let p = ppid, k = 0; p && k < 64; k++) {
+        const was = pp[p], now = cur.pids[p];
+        if (!was) return false;                       // 上一级不是我们的进程（init、别的 uid）：时间跟着丢了
+        if (now && now[0] === was[0]) return true;    // 这一级还活着，已经计进它的 cutime
+        p = was[2];
+      }
+      return false;
+    };
+    for (const [pid, [start, v, ppid]] of Object.entries(pp)) {
       const n = cur.pids[pid];
       if (n && n[0] === start) continue;
-      const par = cur.pids[ppid], parPrev = (prev.pids || {})[ppid];
-      if (!par || !parPrev || par[0] !== parPrev[0]) d += v;
+      if (!folded(ppid)) d += v;
     }
     // 中间断了很久（网关没跑 / 关机）：只摊到现存最老的进程起来以后
     let from = prev.ts;

@@ -694,7 +694,6 @@
     $("hook-scope").innerHTML = d.scopes.map((s) =>
       `<button class="idx-chip${s.scope === HK.scope ? " on" : ""}" data-hscope="${esc(s.scope)}">${esc(SC[s.scope])}<span>${hkFlat(s).length}</span></button>`).join("");
     const sc = hkScopeData();
-    const user = d.scopes.find((s) => s.scope === "user");
     const SCD = {
       user: t("写在 ~/.claude/settings.json，所有项目都生效。"),
       project: t("写在项目的 .claude/settings.json，只在这个项目生效；项目进了 git 的话会跟着仓库走。"),
@@ -702,7 +701,7 @@
     };
     $("hook-bar").innerHTML = `<div class="tiny">${esc(SCD[HK.scope])}
         ${sc && sc.file ? `<a href="#" data-hk="open-file">${t("打开配置文件")}</a>` : ""}</div>
-      <label class="tiny hk-pause"><input type="checkbox" data-hk="pause"${user && user.disableAll ? " checked" : ""}> ${t("暂停全部 hooks（规则留着，先不跑）")}</label>`;
+      <label class="tiny hk-pause"><input type="checkbox" data-hk="pause"${sc && sc.disableAll ? " checked" : ""}> ${t("暂停这一层的 hooks（规则留着，先不跑）")}</label>`;
     if (!sc || sc.error && !sc.badJson) { $("ext-hooks").innerHTML = `<div class="tiny warn">${esc((sc && sc.error) || "")}</div>`; return; }
     if (sc.badJson) {
       $("ext-hooks").innerHTML = `<div class="tiny warn">${esc(t("这个配置文件不是合法的 JSON（{msg}），先打开修好，这里才能改。", { msg: sc.error }))}</div>`;
@@ -714,7 +713,7 @@
       const title = r ? t(r.title) : hkEvName(it.ev);
       const meta = [r ? hkEvName(it.ev) : it.ev, it.matcher ? t("匹配：{m}", { m: it.matcher }) : "", it.h.timeout ? t("超时 {n} 秒", { n: it.h.timeout }) : ""].filter(Boolean);
       const body = it.h.type === "command" ? it.h.command : JSON.stringify(it.h);
-      return `<div class="item hk-item${user && user.disableAll ? " off" : ""}" data-i="${i}">
+      return `<div class="item hk-item${sc.disableAll ? " off" : ""}" data-i="${i}">
         <div class="it-title">${esc(title)}</div>
         <div class="it-meta">${meta.map((m) => `<span>${esc(m)}</span>`).join("")}</div>
         <div class="hk-cmd mono">${esc(body)}</div>
@@ -853,7 +852,7 @@
       return hkSave(h);
     }
     if (a === "edit" && it) {
-      HK.edit = { ev: it.ev, gi: it.gi, hi: it.hi };
+      HK.edit = { ev: it.ev, gi: it.gi, hi: it.hi, scope: HK.scope, orig: JSON.stringify({ m: it.matcher || "", h: it.h }) };
       HK.recipe = hkRecipeOf(it.ev, it.h) || null;
       const param = HK.recipe && HK.recipe.back ? HK.recipe.back(shArgs(it.h.command)) : undefined;
       return hkForm({ event: it.ev, matcher: it.matcher, command: it.h.command, timeout: it.h.timeout, param });
@@ -873,6 +872,16 @@
       const entry = { type: "command", command: v.command };
       if (v.timeout) entry.timeout = v.timeout;
       if (HK.edit) {
+        // 编辑期间列表可能变了（删了前面一条、别处改了文件）：按下标找到的得还是原来那条，不是就在同一事件里按内容重新找；
+        // 都找不到就不存，不能把修改稿写到另一条规则上（#152-1）
+        const same = (g, x) => g && x && JSON.stringify({ m: g.matcher || "", h: x }) === HK.edit.orig;
+        let gi = HK.edit.gi, hi = HK.edit.hi;
+        if (HK.edit.scope !== HK.scope || !same(h[HK.edit.ev]?.[gi], h[HK.edit.ev]?.[gi]?.hooks?.[hi])) {
+          gi = hi = -1;
+          (h[HK.edit.ev] || []).some((g, a) => (g.hooks || []).some((x, b) => same(g, x) && ((gi = a), (hi = b), true)));
+        }
+        if (gi < 0 || HK.edit.scope !== HK.scope) { toast(t("这条规则在你编辑期间被改动或删掉了，重新打开它再改"), true); return hkCloseForm(); }
+        HK.edit.gi = gi; HK.edit.hi = hi;
         const old = h[HK.edit.ev][HK.edit.gi];
         const keep = old.hooks[HK.edit.hi];
         // 事件、匹配都没变就原地换；变了就从原组里摘掉，按新的事件 / 匹配放
@@ -885,9 +894,10 @@
   $("ext-hook-sec").addEventListener("change", async (e) => {
     if (e.target.dataset.hk !== "pause") return;
     const on = e.target.checked;
-    const r = await api("/api/ext/hooks/save", { method: "POST", body: JSON.stringify({ scope: "user", disableAll: on }) });
+    // 暂停的是当前这一层（所有项目 / 本项目 / 本项目·只在本机）：以前固定只停用户级，项目里的照跑却显示成停了（#152-2）
+    const r = await api("/api/ext/hooks/save", { method: "POST", body: JSON.stringify({ scope: HK.scope, dir: HK.data.dir, disableAll: on }) });
     if (r.ok === false) { e.target.checked = !on; return toast(t("保存失败：{msg}", { msg: r.message }), true); }
-    toast(on ? t("已暂停全部 hooks") : t("hooks 已恢复"));
+    toast(on ? t("这一层的 hooks 已暂停") : t("hooks 已恢复"));
     loadExtHooks();
   });
   /** 放进事件下匹配规则相同的那组（没有就新开一组） */

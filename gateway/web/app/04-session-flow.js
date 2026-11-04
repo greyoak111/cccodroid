@@ -537,6 +537,7 @@
   // ── 事件总线 ──────────────────────────────────────────────────────
   let es = null, lastEventId = "", helloCount = 0, busWatch = 0;
 
+  let busDownAt = 0, busKick = 0;
   function connectBus(resume) {
     if (es) { try { es.close(); } catch {} }
     // 换视图要整轮重放：旧视图的游标作废，免得重拨时又带着它续传，新视图缺东西（审查 #50 S2-05）
@@ -548,9 +549,13 @@
       let ev; try { ev = JSON.parse(m.data); } catch { return; }
       try { onBus(ev); } catch (e) { console.error(e); }
     };
-    es.onopen = () => setConn(true);
+    es.onopen = () => { busDownAt = 0; setConn(true); };
     es.onerror = () => {
       setConn(false);
+      // 一直连不上：多半是通知栏点了「停止」、网关服务没了，界面还开着就请壳把它拉起来（11-05 报告；服务在跑时壳那边什么也不做）
+      const now = Date.now();
+      if (!busDownAt) busDownAt = now;
+      if (now - busDownAt > 4000 && now - busKick > 10000 && !document.hidden && window.CCApp && window.CCApp.ensureGateway) { busKick = now; try { window.CCApp.ensureGateway(); } catch {} }
       // 网关重启时浏览器有时会直接放弃（CLOSED）：那就自己再拨
       if (es.readyState === 2) { clearTimeout(busWatch); busWatch = setTimeout(() => connectBus(true), 2000); }
     };

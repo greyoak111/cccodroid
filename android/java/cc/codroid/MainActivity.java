@@ -1149,6 +1149,8 @@ public class MainActivity extends Activity {
         File tag = new File(env.app, "TAG");
         String have = tag.isFile() ? new String(java.nio.file.Files.readAllBytes(tag.toPath())) : "";
         java.util.List<String> bad = want.equals(have) ? AppFiles.tampered(this, env.app) : null;
+        // TAG 对不上不一定是升级：同 uid 改了 TAG 就能让整树重铺不留痕。不是首次安装、又不是刚升级（AppFiles.updatedFrom）的，按篡改记
+        if (bad == null && tag.isFile() && AppFiles.updatedFrom(this, env.app) == null) bad = AppFiles.tampered(this, env.app);
         if (bad != null && bad.isEmpty()) return;
         if (bad != null) {
             android.util.Log.w("cccodroid", "files/app 被改过：" + bad);
@@ -1570,7 +1572,11 @@ public class MainActivity extends Activity {
                     if (p == null || p.isEmpty()) p = "/";
                     if (!p.startsWith("/api/")) {
                         android.webkit.WebResourceResponse r = Env.fetchStatic(p + (u.getEncodedQuery() != null ? "?" + u.getEncodedQuery() : ""));
-                        return r != null ? r : unavailable();
+                        if (r != null) return r;
+                        // 页面本身取不到（多半是通知栏点了「停止」、网关没了）：以前回空 502，WebView 停在 ERR_HTTP_RESPONSE_CODE_FAILURE 再没人管。
+                        // 换成一页「等待网关」，同时把服务拉起来，网关答话了重新载入（11-05 报告）
+                        if (req.isForMainFrame()) { ui.post(() -> recoverGateway(true)); return waitingPage(); }
+                        return unavailable();
                     }
                 }
                 return null;
@@ -1640,6 +1646,8 @@ public class MainActivity extends Activity {
             @android.webkit.JavascriptInterface public void uninstall(String k, String item) { if (!Env.bridgeOk(k)) return;
                 if ("devkit".equals(item) || "claude".equals(item)) uninstallUi(item);
             }
+            /** 界面连不上网关（事件流一直断着）：服务被停掉了就拉起来 */
+            @android.webkit.JavascriptInterface public void ensureGateway(String k) { if (!Env.bridgeOk(k)) return; ui.post(() -> recoverGateway(false)); }
             @android.webkit.JavascriptInterface public void unfreeze(String k) { if (!Env.bridgeOk(k)) return; ui.post(() -> bounce()); }
             /** 更新说明（见 WhatsNew）：页面启动时来取，显示出来后调 whatsNewSeen */
             @android.webkit.JavascriptInterface public String whatsNew(String lang) { return WhatsNew.pending(MainActivity.this, lang); }
@@ -1833,6 +1841,33 @@ public class MainActivity extends Activity {
         }, 6000);
     }
 
+    /** 网关服务没在跑就拉起来；reload：等网关答话后重新载入界面（界面停在「等待网关」页时） */
+    private volatile boolean recovering;
+    private final long[] recoverAt = new long[3];   // 最近三次自动重新载入的时刻
+    private void recoverGateway(boolean reload) {
+        if (!booted || isFinishing()) return;
+        if (!GatewayService.serviceUp()) { android.util.Log.i("cccodroid", "界面要用网关，服务不在：拉起来"); GatewayService.start(this); }
+        if (!reload || recovering) return;
+        // 网关答话、页面却还是取不到（资源缺了、对不上 HMAC）：别一秒一次地重载下去，一分钟最多三次，之后停在等待页
+        long now = System.currentTimeMillis();
+        if (now - recoverAt[0] < 60000) { android.util.Log.w("cccodroid", "界面页面一直取不到，不再自动重新载入"); return; }
+        System.arraycopy(recoverAt, 1, recoverAt, 0, 2); recoverAt[2] = now;
+        recovering = true;
+        new Thread(() -> {
+            try { for (int i = 0; i < 120 && !ping(); i++) Thread.sleep(500); } catch (InterruptedException ignored) {}
+            ui.post(() -> { recovering = false; if (web != null && bounceStage == 0 && !isFinishing()) loadUi(); });
+        }, "recover").start();
+    }
+    private android.webkit.WebResourceResponse waitingPage() {
+        boolean night = systemNight();
+        String html = "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><body style=\"margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font:15px sans-serif;"
+            + (night ? "background:#1b1b1b;color:#bbb" : "background:#fafafa;color:#555") + "\">" + android.text.TextUtils.htmlEncode(Tr.t("等待网关…")) + "</body>";
+        java.util.Map<String, String> h = new java.util.HashMap<>();
+        h.put("Cache-Control", "no-store");
+        h.put("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");   // 页面只有一行字：不许脚本、不许任何子请求
+        h.put("X-Content-Type-Options", "nosniff");
+        return new android.webkit.WebResourceResponse("text/html", "utf-8", 200, "OK", h, new java.io.ByteArrayInputStream(html.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    }
     private int bounceStage = 0;   // 0 没在脱困 · 1 正跳出去 · 2 正跳回来
     private void bounce() {
         if (web == null || bounceStage != 0) return;

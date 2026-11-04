@@ -361,7 +361,7 @@ async function handleGit(req, res, p, u) {
       if (st.files.some((f) => f.kind === "conflict")) return sendJson(res, 409, { error: "conflict", message: tz("还有没解决的冲突，先处理完再拉取。") });
       args = ["pull", "--ff-only"];      // 只快进：分叉了就停下说清楚，不替用户做合并
     } else {
-      if (!st.branch || /^HEAD|no branch/i.test(st.branch)) return sendJson(res, 409, { error: "detached", message: tz("现在不在任何分支上，先切到一个分支再推送。") });
+      if (!st.branch || st.branch === "HEAD (no branch)")     /* git status -b 游离时固定这么写；header、HEAD-notes 是正常分支（#148-4） */ return sendJson(res, 409, { error: "detached", message: tz("现在不在任何分支上，先切到一个分支再推送。") });
       if (st.upstream) args = ["push"];
       else {
         const rem = (await git(root, ["remote"])).out.split("\n").filter(Boolean);

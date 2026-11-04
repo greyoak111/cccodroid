@@ -157,6 +157,7 @@ export async function routeOffice(req, res, u, p) {
       res.writeHead(200, { "content-type": "application/pdf", "content-length": st.size, "cache-control": "no-store" });
       const rs = fs.createReadStream(out);
       rs.on("error", () => { try { res.destroy(); } catch {} });
+      res.on("close", () => { if (!res.writableFinished) rs.destroy(); });     // 客户端中途断开就关源（#148-1）
       rs.pipe(res);
       return;
     }

@@ -120,7 +120,7 @@ final class Updater {
             long size = st.optLong("size");
             int vc = latest.isEmpty() || app.current.isEmpty() ? -1 : cmpVer(latest, app.current);
             boolean swap = vc == 0 && !st.optString("flavor", "").equals(flavor());
-            if (f.isFile() && f.length() == size && !url.isEmpty() && st.optString("flavor", "").equals(wantFlavor()) && (vc > 0 || swap)) {
+            if (f.isFile() && f.length() == size && !url.isEmpty() && isSha(st.optString("sha256", "")) && st.optString("flavor", "").equals(wantFlavor()) && (vc > 0 || swap)) {
                 app.file = f; app.size = size; app.url = url; app.sha = st.optString("sha256", "");
                 app.latest = latest;
                 app.set("ready", "");
@@ -501,7 +501,9 @@ final class Updater {
                 app.alt2 = DL + "/dl/" + tag + "/" + name;
                 app.size = a.optLong("size");
                 String d = a.optString("digest", "");
-                app.sha = d.startsWith("sha256:") ? d.substring(7) : null;
+                app.sha = d.startsWith("sha256:") ? d.substring(7).toLowerCase(java.util.Locale.ROOT) : null;
+                // 没有哈希就只剩签名一道：同签名的别的产物（测试包、旧分支包）也能被换进来。三处更新源都给 digest，缺了就是不对（更新链复盘 U-02）
+                if (!isSha(app.sha)) { app.sha = null; app.set("error", Tr.f("v{0} 的 {1} 没有 sha256 校验值，不下载", app.latest, name)); return; }
                 app.file = new File(env.files, "updates/cccodroid-" + app.latest + "-" + want + ".apk");
                 String note = swap ? Tr.f("换成 targetSdk {0} 的安装包", want) : r.optBoolean("prerelease") ? Tr.t("预览版") : "";
                 app.set(app.file.isFile() && app.file.length() == app.size ? "ready" : "available", note);
@@ -864,7 +866,10 @@ final class Updater {
                 if (free < need) throw new IOException(String.format(java.util.Locale.ROOT, Tr.t("空间不够：需要约 %.1f GB，只剩 %.1f GB"), need / 1e9, free / 1e9));
             }
             if (it == devkit && it.modules != null) downloadModules(it);
-            else { Installer ins = installer(it); ins.download(it.url, new String[]{ it.alt, it.alt2 }, it.file, it.size, it.sha); via = ins.lastHost; }
+            else {
+                if (it == app && !isSha(it.sha)) throw new IOException(Tr.t("安装包没有 sha256 校验值，不下载"));
+                Installer ins = installer(it); ins.download(it.url, new String[]{ it.alt, it.alt2 }, it.file, it.size, it.sha); via = ins.lastHost;
+            }
             if (it == app) {
                 checkApkSigner(it.file);
                 // 待装记录：进程被杀 / 冷启动后，点之前那条「已下载」通知还能接着装（#123-2）
@@ -909,13 +914,20 @@ final class Updater {
         Installer.write(it.file, new String(it.modules, StandardCharsets.UTF_8));
     }
 
+    /** 发布证书（证书 DER 的 SHA-256，同 Apk.signer）。换钥匙时新旧都列上，过渡期后再删旧的 */
+    static final String[] SIGNERS = { "b70361595dd3d8d704dd210ed596fc577014ce2272884fb6980bf69623338fe0" };
+    private static boolean isSha(String h) { return h != null && h.matches("[0-9a-f]{64}"); }
+
     /** 下载来的 APK 必须是本应用、同一把签名钥匙。签名不同系统本来也拒装，这里先挡住，免得弹一个必失败的确认框 */
     private void checkApkSigner(File apk) throws Exception {
         PackageManager pm = ctx.getPackageManager();
         PackageInfo a = Apk.archiveInfo(ctx, apk);
         if (a == null || !ctx.getPackageName().equals(a.packageName)) throw new IOException(Tr.t("下载的不是 cccodroid 安装包"));
-        if (!Apk.signer(a).equals(Apk.signer(pm.getPackageInfo(ctx.getPackageName(), Apk.SIG_FLAGS))))
+        String sa = Apk.signer(a);
+        if (!sa.equals(Apk.signer(pm.getPackageInfo(ctx.getPackageName(), Apk.SIG_FLAGS))))
             throw new IOException(Tr.t("安装包签名与本应用不一致，拒绝安装"));
+        // 只比「已装的那张」不够：已装的被换过（root、别的安装途径），比较基准就跟着换了。另外钉死发布证书（更新链复盘 U-03）
+        if (!java.util.Arrays.asList(SIGNERS).contains(sa)) throw new IOException(Tr.t("安装包不是 cccodroid 发布证书签的，拒绝安装"));
         String got = a.applicationInfo != null && a.applicationInfo.targetSdkVersion >= 29 ? "36" : "28";
         if (!got.equals(wantFlavor())) throw new IOException(Tr.f("下载的是 targetSdk {0} 的安装包，要的是 {1}", got, wantFlavor()));
         // 比真实版本号，别只信更新源声称的 tag（审查 10-29 第六份 低1）：同版本只在换 28/36 时才装，不然中间人能让它反复重装
@@ -961,10 +973,23 @@ final class Updater {
             app.set("error", e.getMessage());
             return;
         }
+        // 下完到现在这份文件可能被换过：按更新源给的哈希再核一遍（更新链复盘 U-10）
+        try { if (!isSha(app.sha) || !app.sha.equals(Installer.sha256(app.file))) throw new IOException(Tr.t("安装包和下载时校验的不是同一份，已删掉，重新检查更新")); }
+        catch (Exception e) {
+            app.file.delete();
+            prefs().edit().remove("appStaged").apply();
+            app.set("error", e.getMessage());
+            return;
+        }
         app.set("installing", "");
         // 有 Shizuku 就静默装（进程会被系统替换掉，服务由 MY_PACKAGE_REPLACED 拉起）；否则走系统安装确认
         if (Priv.granted() && !gatewayBusy()) {
-            String out = Priv.pipeInstall(app.file, MainActivity.appForeground(), app.latest);
+            // 装的时候先停网关：旧网关和它的运行期文件核对不跟安装、新版重铺 files/app 搅在一起（更新链复盘 U-08）。
+            // 装上了本进程就没了，服务由 MY_PACKAGE_REPLACED 拉起；没装上马上放开
+            GatewayService.pause(true);
+            String out;
+            try { out = Priv.pipeInstall(app.file, MainActivity.appForeground(), app.latest); }
+            finally { GatewayService.pause(false); }
             Log.i(TAG, "pm install → " + out);     // 走到这里多半说明没装上（装上的话本进程已经没了）
             if (sdkTooOld(out) && "28".equals(wantFlavor())) { markOnly36(out.trim()); return; }
             if (!out.contains("Success")) app.set("ready", Tr.f("静默安装失败（{0}），点安装走系统确认", out));

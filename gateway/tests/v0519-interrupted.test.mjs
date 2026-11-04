@@ -37,8 +37,8 @@ test("再断一次：上次没处理的留着，同一会话以新的为准", ()
 test("某个会话接着跑起来只清它自己的；忽略按 id 只去一条，不带 id 全清（旧界面）", async () => {
   Q.clearInterrupted(sid(1));
   assert.deepEqual(Q.INTERRUPTED.map((e) => e.id), ["r3", "r4", "r2b"]);
-  Q.clearInterrupted(undefined);            // 新开一个还没会话的轮次：清掉没建会话的那条（与旧行为一致）
-  assert.deepEqual(Q.INTERRUPTED.map((e) => e.id), ["r3", "r2b"]);
+  Q.clearInterrupted(undefined);            // 新开一个还没会话的轮次：没建会话的中断记录互相分不清，一条都不清（#149-2）
+  assert.deepEqual(Q.INTERRUPTED.map((e) => e.id), ["r3", "r4", "r2b"]);
 
   const srv = http.createServer(async (req, res) => {
     const u = new URL(req.url, "http://x");
@@ -48,6 +48,8 @@ test("某个会话接着跑起来只清它自己的；忽略按 id 只去一条�
   after(() => srv.close());
   const post = (body) => fetch(`http://127.0.0.1:${srv.address().port}/api/interrupted/dismiss`, { method: "POST", body });
   assert.equal((await post(JSON.stringify({ id: "r3" }))).status, 200);
+  assert.deepEqual(Q.INTERRUPTED.map((e) => e.id), ["r4", "r2b"]);
+  assert.equal((await post(JSON.stringify({ id: "r4" }))).status, 200);     // 没建会话的那条按 id 单独清
   assert.deepEqual(Q.INTERRUPTED.map((e) => e.id), ["r2b"]);
   assert.equal((await post("")).status, 200);
   assert.deepEqual(Q.INTERRUPTED, []);

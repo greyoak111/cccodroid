@@ -523,14 +523,23 @@
     if (!turn) for (const u of users) if (u.compareDocumentPosition(msgEl) & Node.DOCUMENT_POSITION_FOLLOWING) turn = u;
     const after = users.length - 1 - users.indexOf(turn);
     if (!turn) return toast(t("这条回复前面没有你的消息，没法单独删"), true);
+    // 记录是原地重写的，删点之后的字节偏移都会挪：把手里的游标交给网关一起换算（#153-1）
+    const pages = [...histPages()], gen = view.gen;
+    const offs = [view.next, view.cursor, ...pages.flatMap((p) => [p.dataset.from, p.dataset.to])].filter((x) => x != null && x !== "").map(Number);
     if (!confirm(which === "user" ? t("删掉这条提问？Claude 之后就看不到它了（它的回复保留）。") : t("删掉这条回复？连同它的工具调用和结果一起删，Claude 之后就看不到了。"))) return;
     try {
       const r = await api("/api/session/" + encodeURIComponent(sid) + "/delmsg", {
         method: "POST", headers: { "content-type": "application/json" },
         // 回复自己的 uuid 一起带上：网关核对它确实在要删的那一轮里，对不上就拒绝，绝不删错
         body: JSON.stringify({ userText: userTextOf.get(turn), after, which, uuid: turn.dataset.uuid || "",
-          replyUuid: which === "user" ? "" : (msgEl.querySelector("[data-uuid]")?.dataset.uuid || "") }),
+          replyUuid: which === "user" ? "" : (msgEl.querySelector("[data-uuid]")?.dataset.uuid || ""), offs }),
       });
+      if (gen === view.gen && r.moved) {
+        const mv = (x) => (x == null || x === "" ? x : r.moved[Number(x)] ?? Number(x));
+        view.next = view.next == null ? null : mv(view.next) < r.size ? mv(view.next) : null;
+        if (view.cursor != null) view.cursor = mv(view.cursor);
+        for (const p of pages) { if (p.dataset.from !== undefined) p.dataset.from = mv(p.dataset.from); if (p.dataset.to !== undefined) p.dataset.to = mv(p.dataset.to); }
+      }
       if (which === "user") {
         // 它后面那几条回复（到下一条提问为止）成了没有提问的回复：标上，之后不许单独删
         const all = [...chatEl.querySelectorAll(".msg")];
@@ -592,7 +601,15 @@
       const n = r.files && r.files.canRewind && r.files.files ? r.files.files.length : 0;
       if (choice === "both") {
         if (r.fork && r.fork.fresh) newConversation(); else { openSession(r.fork.id); loadSessions(); }
-        setTimeout(() => { inputEl.value = userText; autoGrow(); inputEl.focus(); }, 300);
+        // 原文只回填到这次打开的目标：300ms 里用户已经切到别的会话，就记进目标会话的草稿，不覆盖眼前那个会话的输入框（#153-2）
+        const gen = view.gen, key = view.sessionId || "";
+        setTimeout(() => {
+          if (gen === view.gen) { inputEl.value = userText; autoGrow(); inputEl.focus(); return; }
+          const all = draftsRead();
+          if (all[key] && all[key].text && all[key].text.trim()) return;
+          all[key] = { text: userText, att: (all[key] && all[key].att) || [], at: Date.now() };
+          try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
+        }, 300);
         toast(n ? t("已撤销 {n} 个文件的修改，对话回到了这条消息之前", { n }) : t("对话回到了这条消息之前，原会话还在"));
       } else toast(t("已撤销 {n} 个文件的修改", { n }));
     } catch (e) { toast(e.message, true); }

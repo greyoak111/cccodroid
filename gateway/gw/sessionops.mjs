@@ -129,7 +129,7 @@ const UNDO = new Map();
 // UNDO：会话号 → 最近一次删消息的 { backup, size, mtime }：撤销前核对文件没再变过
 const ORPHAN_HEADS = new Map();   // 会话号 → 提问被删掉的那几轮回复的第一行 uuid（见 deleteMessage 里的 B04）
 const CHAIN_TYPES = new Set(["user", "assistant", "system", "progress", "attachment"]);
-export function deleteMessage(id, userText, after, which, uuid = "", replyUuid = "") {
+export function deleteMessage(id, userText, after, which, uuid = "", replyUuid = "", offs = []) {
   if (runOfSession(id)) return { ok: false, status: 409, message: tz("这个会话正在生成中，等它答完再删。") };
   const loc = locateUserTurn(id, userText, after, uuid);
   if (!loc.ok) return loc;
@@ -164,15 +164,24 @@ export function deleteMessage(id, userText, after, which, uuid = "", replyUuid =
   const dirty = checkSession(id, found.file);          // 改之前先核对，改完重新封签：网关自己改的不算外部改动，原本不干净的也不洗白
   const tmp = found.file + ".tmp-del";
   const w = lineWriter(tmp);
+  // 界面手里的字节游标（续读起点、各页起止）换算成改写后的位置：删掉的行、改了父链接的行都会让后面的偏移挪动，
+  // 拿旧偏移接着往下读会跳过没读的内容（#153-1）。旧偏移 X → 改写后第一条旧起点 ≥ X 的行的新起点
+  const want = [...new Set(offs)].filter((x) => Number.isFinite(x) && x >= 0).sort((a, b) => a - b);
+  const moved = {};
+  let oldAt = 0, newAt = 0, k = 0;
+  const put = (s) => { w.write(s); newAt += Buffer.byteLength(s) + 1; };
   try {
     forEachLine(found.file, (l, i) => {
+      for (; k < want.length && want[k] <= oldAt; k++) moved[want[k]] = newAt;
+      oldAt += Buffer.byteLength(l) + 1;
       if (drop.has(i) || !l.trim()) return;
-      if (!parentOf.size || !l.includes("arentUuid")) return w.write(l);
-      let ev; try { ev = JSON.parse(l); } catch { return w.write(l); }
+      if (!parentOf.size || !l.includes("arentUuid")) return put(l);
+      let ev; try { ev = JSON.parse(l); } catch { return put(l); }
       let ch = false;
       for (const k of ["parentUuid", "logicalParentUuid"]) if (ev[k] && parentOf.has(ev[k])) { ev[k] = up(ev[k]); ch = true; }
-      w.write(ch ? JSON.stringify(ev) : l);
+      put(ch ? JSON.stringify(ev) : l);
     });
+    for (; k < want.length; k++) moved[want[k]] = newAt;
   } catch (e) { w.close(); fs.rmSync(tmp, { force: true }); throw e; }
   w.close();
   fs.renameSync(tmp, found.file);
@@ -191,7 +200,7 @@ export function deleteMessage(id, userText, after, which, uuid = "", replyUuid =
   const st = fs.statSync(found.file);
   UNDO.set(id, { backup, size: st.size, mtime: st.mtimeMs });
   log(`删消息 ${id.slice(0, 8)}：第 ${best + 1} 轮的${which === "user" ? "提问" : "回复"}，${drop.size} 行`);
-  return { ok: true, removed: drop.size, undo: backup };
+  return { ok: true, removed: drop.size, undo: backup, moved, size: st.size };
 }
 /** 撤销删消息：把备份抄回去。只认这次网关运行里最近一次删除，且之后会话文件没再变过（免得吞掉新的一轮） */
 export function undoDelete(id, backup) {

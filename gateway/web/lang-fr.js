@@ -2770,4 +2770,8 @@ window.I18N_DICT["fr"] = {
   "生成结束但没有返回结果": "La génération s'est terminée sans résultat",
   "上一个文件还没选好保存位置": "Le fichier précédent attend encore un emplacement d'enregistrement",
   "原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里": "Le fichier d’origine n’existe plus (renommé, déplacé ou supprimé).\nOK : enregistrer une copie sous le nom d’origine\nAnnuler : ne pas enregistrer pour l’instant, les modifications restent dans l’éditeur",
+  "暂停这一层的 hooks（规则留着，先不跑）": "Suspendre les hooks de ce niveau (les règles restent, elles ne s'exécutent plus)",
+  "这一层的 hooks 已暂停": "Les hooks de ce niveau sont suspendus",
+  "这条规则在你编辑期间被改动或删掉了，重新打开它再改": "Cette règle a été modifiée ou supprimée pendant votre édition. Rouvrez-la puis refaites la modification",
+  "已有同名目录，但里面没有 SKILL.md（多半是以前导入到一半失败留下的）。到文件里删掉 ~/.claude/skills/{d} 再导入": "Un dossier de ce nom existe déjà mais ne contient pas de SKILL.md (sans doute le reste d'une importation précédente qui a échoué). Supprimez ~/.claude/skills/{d} dans Fichiers, puis réimportez",
 };

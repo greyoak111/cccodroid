@@ -111,7 +111,7 @@ export function envFacts() {
   // 这份 JSON 在 home 下、拼进系统提示（群友破甲清单 V-14）：只认自检写的几个字段，逐条压成单行、限长，别让它带进成段的文字
   let r = null; try { r = JSON.parse(fs.readFileSync(ENV_FACTS, "utf8")); } catch {}
   if (r && typeof r === "object") r = { key: String(r.key || ""), pass: Number(r.pass) | 0,
-    fail: (Array.isArray(r.fail) ? r.fail : []).slice(0, 12).map(line), info: (Array.isArray(r.info) ? r.info : []).slice(0, 8).map(line) };
+    fail: (Array.isArray(r.fail) ? r.fail : []).slice(0, 12).map((x) => line(x)), info: (Array.isArray(r.info) ? r.info : []).slice(0, 8).map((x) => line(x)) };   // 别直接 map(line)：下标会被当成长度上限（#150-2）
   else r = null;
   if (r) {
     const stale = r.key !== envFactsKey() ? "（工具包或应用更新前测的）" : "";

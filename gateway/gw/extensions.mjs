@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, PREFIX, log, tz } from "./config.mjs";
@@ -503,16 +504,27 @@ function importSkill(buf) {
     const dir = skillDirName(md.data.toString("utf8"), root.replace(/\/$/, "").split("/").pop());
     if (!dir || !SID_RE.test(dir)) { skipped.push({ name: root || md.name, why: tz("技能名不合法") }); continue; }
     const dst = path.join(SKILLS_DIR, dir);
+    if (fs.existsSync(dst) && !fs.existsSync(path.join(dst, "SKILL.md"))) { skipped.push({ name: dir, why: tz("已有同名目录，但里面没有 SKILL.md（多半是以前导入到一半失败留下的）。到文件里删掉 ~/.claude/skills/{d} 再导入", { d: dir }) }); continue; }
     if (fs.existsSync(dst) || dirs.includes(dir)) { skipped.push({ name: dir, why: tz("已有同名技能") }); continue; }
-    for (const f of files) {
-      if (!f.name.startsWith(root)) continue;
-      let rel = f.name.slice(root.length);
-      if (f === md) rel = "SKILL.md";       // 统一成 Claude 认的大写文件名
-      if (!rel || rel.split("/").some((x) => !x || x === "." || x === "..")) continue;
-      if (rel === ".cc-source.json") continue;   // 来源记录只由官方目录安装时写：导入的包自带一份就能冒充「官方」（11-03 审查 I-13）
-      const out = path.join(dst, rel);
-      fs.mkdirSync(path.dirname(out), { recursive: true });
-      fs.writeFileSync(out, f.data);
+    // 先写进临时目录，整个写完再改名过去：写到一半失败（满盘）不留下没有 SKILL.md 的半截目录占着名字（#151-2）。
+    // 临时目录在 .claude 下、不在用户配置的监控范围里，和技能目录同一个文件系统，改名是原子的
+    const tmp = path.join(path.dirname(SKILLS_DIR), ".ccapp-skill-import-" + crypto.randomBytes(4).toString("hex"));
+    try {
+      for (const f of files) {
+        if (!f.name.startsWith(root)) continue;
+        let rel = f.name.slice(root.length);
+        if (f === md) rel = "SKILL.md";       // 统一成 Claude 认的大写文件名
+        if (!rel || rel.split("/").some((x) => !x || x === "." || x === "..")) continue;
+        if (rel === ".cc-source.json") continue;   // 来源记录只由官方目录安装时写：导入的包自带一份就能冒充「官方」（11-03 审查 I-13）
+        const out = path.join(tmp, rel);
+        fs.mkdirSync(path.dirname(out), { recursive: true });
+        fs.writeFileSync(out, f.data);
+      }
+      fs.mkdirSync(SKILLS_DIR, { recursive: true });
+      fs.renameSync(tmp, dst);
+    } catch (e) {
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+      throw e;
     }
     dirs.push(dir);
   }

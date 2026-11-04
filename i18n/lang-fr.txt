@@ -2767,3 +2767,7 @@
 2767	La génération s'est terminée sans résultat
 2768	Le fichier précédent attend encore un emplacement d'enregistrement
 2769	Le fichier d’origine n’existe plus (renommé, déplacé ou supprimé).\nOK : enregistrer une copie sous le nom d’origine\nAnnuler : ne pas enregistrer pour l’instant, les modifications restent dans l’éditeur
+2770	Suspendre les hooks de ce niveau (les règles restent, elles ne s'exécutent plus)
+2771	Les hooks de ce niveau sont suspendus
+2772	Cette règle a été modifiée ou supprimée pendant votre édition. Rouvrez-la puis refaites la modification
+2773	Un dossier de ce nom existe déjà mais ne contient pas de SKILL.md (sans doute le reste d'une importation précédente qui a échoué). Supprimez ~/.claude/skills/{d} dans Fichiers, puis réimportez

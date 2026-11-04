@@ -189,6 +189,7 @@ function previewServe(req, res) {
   if (req.method === "HEAD" || !r.size) return res.end();
   const st = fs.createReadStream(r.file, { start, end });
   st.on("error", () => { try { res.destroy(); } catch {} });
+  res.on("close", () => { if (!res.writableFinished) st.destroy(); });     // 客户端中途断开就关源（#148-1）
   st.pipe(res);
 }
 
