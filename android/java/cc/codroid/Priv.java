@@ -191,16 +191,8 @@ final class Priv {
         return "notification";
     }
 
-    /** 跑一条命令：{退出码, 全部输出}；起不来退出码记 -1 */
-    static Object[] runRc(String cmd) {
-        try {
-            java.lang.Process p = newProcess(new String[]{"/system/bin/sh", "-c", cmd + " 2>&1"}, null, "/");
-            p.getOutputStream().close();
-            String out = new String(readAll(p.getInputStream()), StandardCharsets.UTF_8).trim();
-            return new Object[]{p.waitFor(), out};
-        } catch (Throwable t) { return new Object[]{-1, String.valueOf(t)}; }
-    }
-    static boolean amStarted(Object[] r) { return PrivRules.amStarted((Integer) r[0], (String) r[1]); }
+    /** runRc 的结果（退出码起不来是 "-"，记 -1）交给 PrivRules 判断 am start 成没成 */
+    static boolean amStarted(String[] r) { return PrivRules.amStarted("-".equals(r[0]) ? -1 : Integer.parseInt(r[0]), r[1]); }
 
     /** 跑一条命令拿全部输出（内部用：保活设置） */
     static String run(String cmd) {
