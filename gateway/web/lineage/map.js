@@ -82,7 +82,9 @@
       // 日期刻度：每天 0 点；落在压掉的空档里的不标，太挤的跳过；第一天也标
       const ticks = ts.length ? [[ts[0], LEFT - 4]] : [];
       let last = LEFT;
-      if (ts.length) for (let d = dayStart(ts[0]) + 864e5; d <= ts[ts.length - 1]; d = dayStart(d + 30 * 36e5)) {
+      // 初值也要走和步进相同的「跨过一天」：直接 +24h 在秋季回拨日（当地一天 25 小时）会落到当天 23:00，
+      // 下一次归零就跳到后天，第二天整天的刻度消失
+      if (ts.length) for (let d = dayStart(dayStart(ts[0]) + 30 * 36e5); d <= ts[ts.length - 1]; d = dayStart(d + 30 * 36e5)) {
         if (breaks.some(([a, b]) => d > a && d < b)) continue;
         const x = X(d); if (x - last < 84) continue; ticks.push([d, x]); last = x;
       }
@@ -94,14 +96,17 @@
     function layout() {
       const AX = st.AX, V = st.vis, BY = st.BY;
       const keys = (st.model.bands || []).map((b) => b.key).filter((k) => V.some((s) => s.band === k));
-      const kids = {}; V.forEach((s) => { if (s.parent && BY[s.parent]) (kids[s.parent] = kids[s.parent] || []).push(s.id); });
+      // 父子边只连同一项目带里的：会话经「移到项目」换带后 parent 还在，跨带的子会话是该带的根，
+      // 不能被父带的 DFS 拉过去占车道（否则父带多一条空车道，子会话也画到父项目里）
+      const sameBand = (s) => !!(s.parent && BY[s.parent] && BY[s.parent].band === s.band);
+      const kids = {}; V.forEach((s) => { if (sameBand(s)) (kids[s.parent] = kids[s.parent] || []).push(s.id); });
       const srcOf = (s) => [...(s.extra || []), ...(s.reads || []).filter((r) => r.early)].map((e) => e.id).filter((id) => BY[id]);
       const pos = {}, bandY = [];
       let y = 44;
       for (const key of keys) {
         const lanes = [], order = [], seen = new Set();
         const mine = V.filter((s) => s.band === key);
-        const roots = mine.filter((s) => !(s.parent && BY[s.parent]) && !srcOf(s).length).sort((a, b) => startOf(a) - startOf(b));
+        const roots = mine.filter((s) => !sameBand(s) && !srcOf(s).length).sort((a, b) => startOf(a) - startOf(b));
         const dfs = (s) => { if (seen.has(s.id)) return; seen.add(s.id); order.push(s); (kids[s.id] || []).map((k) => BY[k]).sort((a, b) => a.from - b.from).forEach(dfs); };
         roots.forEach(dfs);
         mine.filter((s) => !seen.has(s.id)).sort((a, b) => startOf(a) - startOf(b)).forEach(dfs);   // 汇合 / 接手的，排在来源后面
@@ -109,7 +114,7 @@
           const x0 = s.task ? AX.X(startOf(s)) - 8 : s.parent && BY[s.parent] ? AX.X(s.at || s.from) - 6 : AX.X(s.from) - 6;
           const x1 = Math.max(AX.X(endOf(s)), x0 + textW(clip(s.title)) + 30) + 26;
           let min = 0;
-          if (s.parent && pos[s.parent]) min = pos[s.parent].lane + 1;
+          if (sameBand(s) && pos[s.parent]) min = pos[s.parent].lane + 1;
           for (const id of srcOf(s)) if (pos[id] && BY[id].band === key) min = Math.max(min, pos[id].lane + 1);
           let L = min;
           while (lanes[L] && lanes[L].some(([a, b]) => !(x1 < a || x0 > b))) L++;
@@ -450,11 +455,13 @@
     // ── 手机：缩进树（行样式同会话页），只竖滚 ──
     function paintTree() {
       const V = st.vis, BY = st.BY;
-      const kids = {}; V.forEach((s) => { if (s.parent && BY[s.parent]) (kids[s.parent] = kids[s.parent] || []).push(s.id); });
+      // 同 layout()：跨带的父子不成边，子会话在自己那一带当根，否则自己的项目组会整个消失
+      const sameBand = (s) => !!(s.parent && BY[s.parent] && BY[s.parent].band === s.band);
+      const kids = {}; V.forEach((s) => { if (sameBand(s)) (kids[s.parent] = kids[s.parent] || []).push(s.id); });
       const last = (s) => Math.max(endOf(s), ...(kids[s.id] || []).map((k) => last(BY[k])));
       const rows = [];
       for (const b of st.model.bands || []) {
-        const roots = V.filter((s) => s.band === b.key && !(s.parent && BY[s.parent])).sort((x, y) => last(y) - last(x));
+        const roots = V.filter((s) => s.band === b.key && !sameBand(s)).sort((x, y) => last(y) - last(x));
         if (!roots.length) continue;
         rows.push({ grp: b.name });
         const walk = (s, depth, isLast, rails) => {

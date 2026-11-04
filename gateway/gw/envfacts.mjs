@@ -37,8 +37,16 @@ function envFactsRun() {
   envFactsJob.stdout.on("data", (d) => { if (out.length < 1 << 20) out += d; });
   envFactsJob.stderr.on("data", () => {});
   const t = setTimeout(() => { try { killTree(envFactsJob); } catch {} }, 15 * 60e3);
+  // 自检脚本可能在 existsSync 之后、spawn 之前被删/不可执行。不接 error 就是未处理的 error 事件，
+  // server.mjs 只兜 unhandledRejection，整个网关会跟着退出
+  let spawnFailed = false;
+  envFactsJob.on("error", (e) => {
+    spawnFailed = true; clearTimeout(t); envFactsJob = null;
+    log("[env] 自检启动失败：" + (e.code || e.message));
+  });
   envFactsJob.on("close", () => {
     clearTimeout(t); envFactsJob = null;
+    if (spawnFailed) return;
     const r = { key, at: Date.now(), pass: 0, fail: [], info: [] };
     for (const l of out.split("\n")) {
       if (l.startsWith("PASS ")) r.pass++;

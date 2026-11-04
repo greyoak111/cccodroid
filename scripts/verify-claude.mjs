@@ -59,7 +59,10 @@ const PORT = /^\d{1,5}$/.test(process.env.CCAPP_PORT || "") ? process.env.CCAPP_
 // App / 工具包版本：问本机网关（终端里有它的令牌文件）
 async function appInfo() {
   try {
-    const tok = fs.readFileSync(process.env.CCAPP_TOKEN_FILE, "utf8").trim(), mac = (s) => crypto.createHmac("sha256", tok).update(s).digest("hex");
+    // claudeEnv() 为防泄漏会删掉 CCAPP_TOKEN_FILE，应用内终端里跑这个脚本时变量不存在；
+    // 令牌就在 home 的固定位置（和 cc-archive.mjs 一样直接读），否则这里整段失败、结果里没有 App 版本
+    const tf = process.env.CCAPP_TOKEN_FILE || path.join(HOME || os.homedir(), ".gateway-token");
+    const tok = fs.readFileSync(tf, "utf8").trim(), mac = (s) => crypto.createHmac("sha256", tok).update(s).digest("hex");
     // 不发令牌原文（审查 10-30 第九份 高2）：先核身份（端口上可能是网关没起来时抢占的应用），再按 sig2 一次一签
     const n = crypto.randomBytes(16).toString("hex");
     const [boot, pm] = (await (await fetch(`http://127.0.0.1:${PORT}/__proof?n=${n}`, { signal: AbortSignal.timeout(8000) })).text()).trim().split(" ");
@@ -84,7 +87,8 @@ const installed = path.join(HOME, ".local/share/cccodroid/claude");
 let VER = "", BIN = "", npmOnly = false;
 if (GIVEN) {
   BIN = path.resolve(GIVEN);
-  VER = /\d+\.\d+\.\d+/.exec(spawnSync(LD, ["--library-path", path.join(PREFIX, "glibc/lib"), BIN, "--version"], { encoding: "utf8", env: { ...process.env, LD_PRELOAD: "" } }).stdout || "")?.[0] || "";
+  // 和 run() 一样套 seccomp 垫片：Android 14 上直接跑 glibc 程序会被拦成 SIGSYS，版本号就报不出来
+  VER = /\d+\.\d+\.\d+/.exec(spawnSync(ENOSYS, ["-v", "-f", LD, "--library-path", path.join(PREFIX, "glibc/lib"), "--preload", PRELOAD, BIN, "--version"], { encoding: "utf8", env: { ...process.env, LD_PRELOAD: "" } }).stdout || "")?.[0] || "";
   if (!VER) die(`${BIN} 报不出版本号`);
   say(`\n── 直接验 ${BIN}（${VER}）`);
 }

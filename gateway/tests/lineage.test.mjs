@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { scanSession, inferParents } from "../gw/lineage-core.mjs";
+import { scanSession, inferParents, direction } from "../gw/lineage-core.mjs";
 
 const DIR = fs.mkdtempSync(path.join(process.env.CCAPP_TMP, "lineage-"));
 const T0 = Date.parse("2026-10-20T00:00:00Z");
@@ -257,4 +257,15 @@ test("脉络：lineageForget 立刻落盘，重启后不会从旧缓存按旧 of
   lineageForget(S);
   const after = JSON.parse(fs.readFileSync(cache, "utf8")).recs;
   assert.ok(!after.some((r) => r.id === S), "删除要立刻落盘");
+});
+
+test("direction：两票各投一边时取开始得早的当父，两票一致时按票数", () => {
+  const a = { id: "a", firstTs: 100 }, b = { id: "b", firstTs: 200 };
+  // birth 弃权；after 投 b，name（a 无「分叉」后缀、b 有）投 a → 1:1，按注释取开始早的 a
+  const tie = direction(a, b, { afterA: 2, afterB: 1 }, { a: "父", b: "子 · 分叉" });
+  assert.equal(tie.parent, "a");
+  assert.equal(tie.child, "b");
+  // 两票一致投 b（a 带「分叉」后缀、after 也投 b）→ 按票数，不按 firstTs
+  const agree = direction(a, b, { afterA: 2, afterB: 1 }, { a: "子 · 分叉", b: "父" });
+  assert.equal(agree.parent, "b");
 });
