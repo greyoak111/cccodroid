@@ -43,6 +43,11 @@ final class PrivRules {
         return origin == 1 && authRequired && validitySec <= 0;
     }
 
+    /** am start 算不算拉起来了：退出码 0，且没报 Error（有的版本出错也退 0）。「已在前台、只把任务挪到前面」的 Warning 也算 */
+    static boolean amStarted(int rc, String out) {
+        return rc == 0 && out != null && !out.contains("Error") && !out.contains("Exception");
+    }
+
     static boolean risky(String[] argv) { return risky(argv, false, null); }
 
     static boolean risky(String[] argv, boolean env, String cwd) {

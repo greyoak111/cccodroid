@@ -602,10 +602,14 @@ async function queryBalance(v, k) {
   return null;
 }
 
+// 账户身份：同一家接口换了 Key（或地址）就是另一个账户，两个账户的余额差不是消费（#135）。只存哈希的前 16 位
+const acctOf = (v) => crypto.createHash("sha256").update(String(v.baseUrl || "") + "\0" + String(v.apiKey || "").trim()).digest("hex").slice(0, 16);
 /** 记一次余额：比上次少 → 消费；多 → 充值（只更新基准） */
-function noteBalance(id, cur, bal) {
+function noteBalance(id, cur, bal, acct) {
   if (!Number.isFinite(bal)) return;
   const b = billOf(id);
+  // 升级前记的基准没有账户指纹：分不清是不是同一个账户，重新起算一次（宁可少记这一笔，也别把两个账户的差额记成消费）
+  if (acct && b.last && b.last.acct !== acct) { b.last = null; log(`[账本] ${id} 换了账户（或基准是升级前记的），余额基准重新起算`); }
   if (b.currency && b.currency !== cur) {
     // 换了币种（换了线路、双币余额谁多换了）：余额基准重新起算；已记的消费是旧币种的，不能直接贴上新币种（#102 04-009）。
     // 人民币/美元之间按手上的汇率折过去；折不了就把旧账本收起来另存，从零记
@@ -626,7 +630,7 @@ function noteBalance(id, cur, bal) {
     if (d > 0) b.spends.push([now, d]);
     else if (d < 0) b.topups = (b.topups || 0) + 1;
   }
-  b.last = { at: now, bal };
+  b.last = { at: now, bal, ...(acct ? { acct } : {}) };
   const cut = now - KEEP_MS;
   while (b.spends.length && b.spends[0][0] < cut) b.spentOld += b.spends.shift()[1];
   saveBill();
@@ -657,20 +661,20 @@ export async function usdCny() {
   return FX;
 }
 
-const BAL_CACHE = new Map();   // id → { at, data }
+const BAL_CACHE = new Map();   // id → { at, acct, data }
 async function billingInfo(id, force) {
   const v = PROVIDERS_CFG.providers[id];
   if (!v) return { error: tz("没有这家厂商") };
   const k = billKind(v);
   const out = { id, kind: k.kind, hasKey: !!String(v.apiKey || "").trim() };
   if (k.kind !== "none" && out.hasKey) {
-    const c = BAL_CACHE.get(id);
-    if (!force && c && Date.now() - c.at < 60000) Object.assign(out, c.data);
+    const c = BAL_CACHE.get(id), acct = acctOf(v);   // 查之前取定：查的途中换了 Key，这次结果也算在查的那个账户上
+    if (!force && c && c.acct === acct && Date.now() - c.at < 60000) Object.assign(out, c.data);
     else {
       try {
         const d = await queryBalance(v, k);
-        if (d && d.currency && Number.isFinite(d.balance)) noteBalance(id, d.currency, d.balance);
-        BAL_CACHE.set(id, { at: Date.now(), data: { ...(d || {}), balanceAt: Date.now() } });
+        if (d && d.currency && Number.isFinite(d.balance)) noteBalance(id, d.currency, d.balance, acct);
+        BAL_CACHE.set(id, { at: Date.now(), acct, data: { ...(d || {}), balanceAt: Date.now() } });
         Object.assign(out, d || {}, { balanceAt: Date.now() });
       } catch (e) { out.balanceError = e.message; }
     }

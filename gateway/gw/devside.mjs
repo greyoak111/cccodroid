@@ -38,16 +38,19 @@ function claudeVersionOf(bin) {
   });
 }
 
+// 检查途中换了渠道：这次的结果是旧渠道的，不能记到新渠道名下；结束后按新渠道再查一次（#136）
+let devUpdAgain = false;
 async function devUpdCheck() {
-  if (devUpd.checking) return;
+  if (devUpd.checking) { devUpdAgain = true; return; }
   devUpd.checking = true; devUpd.error = "";
-  const c = devUpd.claude;
+  const c = devUpd.claude, ch = devUpd.channel;
   try {
     if (!c.current || c.state !== "installing") c.current = await claudeVersionOf(PATHS.claude);
-    const r = await fetch(`${CC_BASE}/${devUpd.channel}`, { signal: AbortSignal.timeout(20000) });
+    const r = await fetch(`${CC_BASE}/${ch}`, { signal: AbortSignal.timeout(20000) });
     const v = (await r.text()).trim();
+    if (devUpd.channel !== ch) { devUpdAgain = true; return; }
     if (!/^\d+\.\d+\.\d+/.test(v)) throw new Error(tz("版本号不对：{v}", { v: v.slice(0, 40) }));
-    c.latest = v;
+    c.latest = v; c.latestCh = ch;
     // 已装版本要和所选渠道「一致」：从 latest 切回 stable 时版本号变小，以前判成「已是最新」就一直停在 latest 上
     if (c.state !== "installing") {
       const d = cmpVer(v, c.current);
@@ -56,7 +59,10 @@ async function devUpdCheck() {
     }
     devUpd.lastCheck = Date.now();
   } catch (e) { devUpd.error = tz("连不上 downloads.claude.ai：{err}", { err: e.message }); }
-  finally { devUpd.checking = false; devUpdSave(); }
+  finally {
+    devUpd.checking = false; devUpdSave();
+    if (devUpdAgain) { devUpdAgain = false; setImmediate(devUpdCheck); }
+  }
 }
 
 /**
@@ -66,17 +72,19 @@ async function devUpdCheck() {
 async function devUpdInstall() {
   const c = devUpd.claude;
   if (c.state === "installing" || !c.latest) return;
+  if (c.latestCh && c.latestCh !== devUpd.channel) return;   // 查到的是换渠道之前那个渠道的版本
   c.state = "installing"; c.message = ""; c.done = 0; c.total = 0;
+  const want = c.latest;   // 开装时定死：装的途中换渠道会改 c.latest，清单、程序、试跑核对要是同一个版本（DeepSeek 复核 11-04）
   const part = PATHS.claude + ".part", tag = PATHS.claude + ".part.sha256";
   try {
     // 清单要过 Anthropic 的 PGP 签名（同 install-claude.mjs）：只靠 TLS 的话，装了别的根证书的代理能连清单带程序一起换掉（11-03 审查 L-11）
     const get = async (u) => { const r = await fetch(u, { signal: AbortSignal.timeout(20000) }); if (!r.ok) throw new Error("HTTP " + r.status + " " + u); return Buffer.from(await r.arrayBuffer()); };
-    const manBuf = await get(`${CC_BASE}/${c.latest}/manifest.json`);
+    const manBuf = await get(`${CC_BASE}/${want}/manifest.json`);
     const { ANTHROPIC_KEYS, verifyDetached } = await loadPgp();
-    try { verifyDetached(manBuf, (await get(`${CC_BASE}/${c.latest}/manifest.json.sig`)).toString("utf8"), ANTHROPIC_KEYS); }
+    try { verifyDetached(manBuf, (await get(`${CC_BASE}/${want}/manifest.json.sig`)).toString("utf8"), ANTHROPIC_KEYS); }
     catch (e) { throw new Error(tz("官方清单的签名验不过：{msg}", { msg: e.message })); }
     const man = JSON.parse(manBuf.toString("utf8"));
-    if (man.version && man.version !== c.latest) throw new Error(tz("清单内容不对"));
+    if (man.version && man.version !== want) throw new Error(tz("清单内容不对"));
     const plat = man.platforms && man.platforms["linux-arm64"];
     if (!plat || !/^[a-f0-9]{64}$/.test(plat.checksum)) throw new Error(tz("清单里没有 linux-arm64"));
     c.total = plat.size;
@@ -85,7 +93,7 @@ async function devUpdInstall() {
     if (!have) { fs.rmSync(part, { force: true }); fs.writeFileSync(tag, plat.checksum); }
     for (let attempt = 1; have < plat.size; attempt++) {
       try {
-        const r = await fetch(`${CC_BASE}/${c.latest}/linux-arm64/claude`, { headers: have ? { range: `bytes=${have}-` } : {} });
+        const r = await fetch(`${CC_BASE}/${want}/linux-arm64/claude`, { headers: have ? { range: `bytes=${have}-` } : {} });
         if (r.status !== 200 && r.status !== 206) throw new Error("HTTP " + r.status);
         if (r.status === 200) { have = 0; fs.rmSync(part, { force: true }); }
         const out = fs.openSync(part, "a");
@@ -105,7 +113,7 @@ async function devUpdInstall() {
     if (got !== plat.checksum) { fs.rmSync(part, { force: true }); throw new Error(tz("sha256 不符（期望 {want}…，实得 {got}…）", { want: plat.checksum.slice(0, 12), got: got.slice(0, 12) })); }
     fs.chmodSync(part, 0o755);
     const v = await claudeVersionOf(part);
-    if (v !== c.latest) throw new Error(tz("新版试跑失败（--version 得到「{v}」）", { v }));
+    if (v !== want) throw new Error(tz("新版试跑失败（--version 得到「{v}」）", { v }));
     fs.rmSync(PATHS.claude + ".prev", { force: true });
     fs.renameSync(PATHS.claude, PATHS.claude + ".prev");
     fs.renameSync(part, PATHS.claude);
@@ -182,8 +190,15 @@ async function devApp(op, b) {
     if (typeof b.auto === "boolean") devUpd.auto = b.auto;
     // 换渠道 = 明说要那个渠道的版本：查完对不上就直接换（自动更新关着也换）
     if ((b.channel === "stable" || b.channel === "latest") && b.channel !== devUpd.channel) {
-      devUpd.channel = b.channel;
-      devUpdCheck().then(() => { if (devUpd.claude.state === "available") devUpdInstall(); }).catch(() => {});
+      const want = devUpd.channel = b.channel, c = devUpd.claude;
+      // 等到按新渠道查完再换：旧渠道的检查可能还在途，它的结果不算（#136）
+      (async () => {
+        for (let i = 0; i < 30 && c.latestCh !== want && devUpd.channel === want; i++) {
+          await devUpdCheck();
+          if (c.latestCh !== want) await new Promise((r) => setTimeout(r, 1000));
+        }
+        if (devUpd.channel === want && c.latestCh === want && c.state === "available") devUpdInstall();
+      })().catch(() => {});
     }
     devUpdSave();
     return devUpdStatus();

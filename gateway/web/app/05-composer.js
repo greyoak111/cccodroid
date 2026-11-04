@@ -24,10 +24,12 @@
       newConversation(t("已清空上下文，开始新会话"));
       return;
     }
+    // 下面两个命令按用户打的字认（typed），不看接了附件引用的 text：带着附件时 /rename 会把 @路径 写进标题、
+    // /login console 会被当成网页登录（11-04 报告 三）。附件留在附件栏里，下一条照常带上
     // 官方账户登录：OAuth 全程由 claude 自己完成，网关只转递授权页地址；授权码不经手（要贴码就在终端里贴给 claude）
-    if (text === "/login" || text === "/login console" || text.startsWith("/login ")) {
+    if (typed === "/login" || typed.startsWith("/login ")) {
       if (fromInput) { inputEl.value = ""; autoGrow(); }
-      const arg = text.slice(6).trim();
+      const arg = typed.slice(6).trim();
       const post = (p, body) => api(p, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
       });
@@ -40,13 +42,13 @@
       } catch (e) { toast(e.message, true); }
       return;
     }
-    if (text.startsWith("/rename ")) {
+    if (typed.startsWith("/rename ")) {
       if (!view.sessionId) return toast(t("当前还没有会话"), true);
       const rgen = view.gen;
       try {
         await api(`/api/session/${encodeURIComponent(view.sessionId)}/rename`, {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ title: text.slice(8).trim() }),
+          body: JSON.stringify({ title: typed.slice(8).trim() }),
         });
         // 等回执期间又写了新草稿：别把它清掉（审查 #50 S2-01）
         // 切过会话的话，输入框里同样的字是那边新写的，也不清（审查 #52 S2-01）
@@ -434,6 +436,11 @@
     renderAttachments(); autoGrow();
     draftLast = inputEl.value; draftStash = ""; draftChip.classList.add("hidden");   // 「恢复误删」是上一个会话的，别带过来
   }
+  // 新会话（还没有会话号）的草稿在第一轮 init 时拿到会话号：同一代次里的空草稿就是那个会话的。
+  // 上传 / 选择器回执按这个找回发起的会话，不然切走之后会落进空草稿、被下一个新会话带出来（#133）
+  const DRAFT_ALIAS = new Map();   // 换草稿的代次 → 这一代的空草稿后来成了哪个会话
+  function draftAdopt(sid) { if (sid) DRAFT_ALIAS.set(draftEpoch, sid); }
+  const draftOwner = (ep, key) => key || DRAFT_ALIAS.get(ep) || "";
   /** 输入框有字或附件栏里有东西，就算有话要发 */
   function hasDraft() { return !!inputEl.value.trim() || state.attachments.length > 0; }
 
@@ -444,7 +451,7 @@
     const done = [];
     // 上传途中切了会话：回执要落回发起的那个会话的草稿，不能塞进现在这个（审查 B08）
     const ep0 = draftEpoch, key0 = view.sessionId || "";
-    const mine = () => draftEpoch === ep0 || (view.sessionId || "") === key0;
+    const mine = () => draftEpoch === ep0 || (view.sessionId || "") === draftOwner(ep0, key0);
     let away = 0;
     for (const f of list) {
       // 大文件（粘贴 / 拖进来的；从选择器挑的 App 壳已经分流了）：网关流式落盘，这里只提示一下要等
@@ -459,8 +466,8 @@
         done.push(j);
         if (insert && mine()) state.attachments.push(j);
         else if (insert) {
-          const all = draftsRead(), d = all[key0] || { text: "", att: [] };
-          d.att = [...(Array.isArray(d.att) ? d.att : []), j]; d.at = Date.now(); all[key0] = d;
+          const k = draftOwner(ep0, key0), all = draftsRead(), d = all[k] || { text: "", att: [] };
+          d.att = [...(Array.isArray(d.att) ? d.att : []), j]; d.at = Date.now(); all[k] = d;
           try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
           away++;
         }
@@ -484,9 +491,10 @@
     // 大小先不知道：按大附件算（不出缩略图、发出去只给路径），问到大小再改
     const a = { path: p, name, size: 0, big: true, kind: /\.(png|jpe?g|gif|webp|bmp|avif|heic)$/i.test(p) ? "image" : "other" };
     // 选择器里挑的大文件要在后台拷一阵：拷完时已经切到别的会话了，落回打开选择器那个会话的草稿（#105 06-014，同 uploadFiles）
-    if (from && from.ep !== draftEpoch && (view.sessionId || "") !== from.key) {
-      const all = draftsRead(), d = all[from.key] || { text: "", att: [] };
-      d.att = [...(Array.isArray(d.att) ? d.att : []), a]; d.at = Date.now(); all[from.key] = d;
+    const fk = from ? draftOwner(from.ep, from.key) : "";
+    if (from && from.ep !== draftEpoch && (view.sessionId || "") !== fk) {
+      const all = draftsRead(), d = all[fk] || { text: "", att: [] };
+      d.att = [...(Array.isArray(d.att) ? d.att : []), a]; d.at = Date.now(); all[fk] = d;
       try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
       return toast(t("{n} 个文件已附加到刚才那个会话的草稿", { n: 1 }));
     }

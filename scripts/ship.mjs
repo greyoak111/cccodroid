@@ -57,7 +57,25 @@ const git = (...a) => sh("git", ["-c", "safe.directory=*", "-C", ROOT, ...a]);
 const gitc = (...a) => sh("git", ["-c", "safe.directory=*", "-c", "user.name=greyoak111", "-c", "user.email=suny96636@gmail.com", "-C", ROOT, ...a]);
 const shaFile = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex");
 const mani = () => { const s = fs.readFileSync(MANI, "utf8"); return { code: +s.match(/android:versionCode="(\d+)"/)[1], name: s.match(/android:versionName="([^"]*)"/)[1] }; };
-const cmpVer = (a, b) => { const x = a.split(/[.-]/).map(Number), y = b.split(/[.-]/).map(Number); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; } return 0; };
+// 版本比较：先比主版本号；相同时正式版 > 预发布，预发布之间按「字母 + 数字」逐段比（beta1 < beta2 < rc1）。
+// 以前整串按 . - 切开转数字，beta1 成了 NaN 当 0，同底版本的 beta→正式、beta1→beta2 都被拦下（#136）
+const cmpVer = (a, b) => {
+  const [ab, ...ap] = String(a).split("-"), [bb, ...bp] = String(b).split("-");
+  const x = ab.split(".").map(Number), y = bb.split(".").map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; }
+  const pa = ap.join("-"), pb = bp.join("-");
+  if (!pa || !pb) return pa ? -1 : pb ? 1 : 0;
+  const seg = (s) => s.match(/\d+|\D+/g) || [];
+  const sa = seg(pa), sb = seg(pb);
+  for (let i = 0; i < Math.max(sa.length, sb.length); i++) {
+    const u = sa[i], v = sb[i];
+    if (u === undefined || v === undefined) return u === undefined ? -1 : 1;
+    const nu = /^\d/.test(u), nv = /^\d/.test(v);
+    const d = nu && nv ? +u - +v : u < v ? -1 : u > v ? 1 : 0;
+    if (d) return d;
+  }
+  return 0;
+};
 const wn = (lang) => path.join(WN, `v${VER}.${lang}.md`);
 // /sdcard 是 FUSE，刚写的小文件 stat 可能报旧大小：提交前逐个核 stat 与实际读到的字节数
 function fuseOk(files) {

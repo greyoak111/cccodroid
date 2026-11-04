@@ -102,6 +102,8 @@
   $("mod-list").addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-c]");
     if (!b) return;
+    // 模块列表在扩展页里：同样是 data-c 按钮，冒泡上去会被组件的处理器当成组件再装/卸一遍（取消确认框之后也会）
+    e.stopPropagation();
     const c = b.dataset.c, id = b.dataset.id;
     if (c === "remove") {
       if (b.dataset.usedby) return toast(t("{names} 要用它，先卸载那些", { names: b.dataset.usedby }), true);
@@ -1064,6 +1066,7 @@
       return loadGhAuth(true);
     }
     const cb = e.target.closest("button[data-c]");
+    if (cb && cb.closest("#mod-list")) return;   // 模块按钮归上面的处理器
     if (cb && !cb.disabled) {
       const c = cb.dataset.c, id = cb.dataset.id;
       if (c === "reindex") { cb.disabled = true; return loadComponents(true); }

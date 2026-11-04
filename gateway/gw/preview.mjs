@@ -106,6 +106,11 @@ function previewServe(req, res) {
     return;
   }
   if (req.method !== "GET" && req.method !== "HEAD") return fail(405, "read only");
+  // 预览页不许注册 Service Worker：worker 发的请求不经页面的 CSP 和 WebView 的拦截，原生层只能用全进程一个开关管，
+  // 那样会连应用内浏览器里正常网站的 worker 一起拦（#131）。浏览器取 worker 脚本时带 Service-Worker: script
+  // 依赖一个前提：预览端口每次随机。worker 按源（含端口）登记，旧版本留下的 worker 换了端口就再也碰不到；
+  // 改成固定端口的话，以前注册过的 worker 会在同一个源上复活，绕过这里的拦截
+  if (req.headers["service-worker"]) return fail(403, "service workers are not available in preview");
   let pathname, query;
   try { const u = new URL(req.url, "http://localhost"); pathname = decodeURIComponent(u.pathname); query = u.searchParams; } catch { return fail(400, "bad path"); }
   // 开发者工具（Eruda，MIT，随包内置）：本体从包里吐，不走网络；凭证随机，不会和 __cc 撞

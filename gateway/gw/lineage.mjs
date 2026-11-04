@@ -74,10 +74,12 @@ async function refresh() {
     // 只比大小会漏掉「原地改写成同样大小」：scanSession 里的开头哈希永远没机会核对。
     // 大小没变时再比 mtime，只有两者都没变才直接用缓存；mtime 变了仍交给 scanSession 核开头哈希。
     if (prev && prev.size === st.size && prev.off === st.size && prev.mtime === st.mtimeMs) continue;
+    // 扫的途中（跨块等待）会话可能被改写、挪走并 forget 了：这时扫出来的是旧样子，不能写回去（#133）
+    const fv = FORGOT.get(f.id) || 0;
     try {
       const rec = await scanSession(f.file, prev);
       rec.mtime = st.mtimeMs;
-      RECS.set(f.id, rec); dirty = true; gen++;
+      if ((FORGOT.get(f.id) || 0) === fv) { RECS.set(f.id, rec); dirty = true; gen++; }
     }
     catch (e) { log(`脉络：读 ${f.id.slice(0, 8)} 失败：${e.message}`); }
   }
@@ -87,10 +89,12 @@ async function refresh() {
 
 /** 会话记录被原地改写过（删消息、撤销删除）：扔掉它的索引，下次整份重扫。
  *  不扔的话，改写后又聊得比原来长，增量扫描会当成纯追加，章节的字节位置全错（审查 v0513b 低-27） */
+const FORGOT = new Map();   // 会话号 → 扔过几次索引（在途的扫描据此作废）
 export function lineageForget(sid) {
   loadCache();
   // 要立刻落盘：只清内存的话，进程在下次 refresh 前被杀，重启后又拿旧缓存按旧 off 增量续读，
   // 改写过的 cwd/消息就会永久留在索引里（移到项目后显示旧项目、轮数重复）。
+  FORGOT.set(sid, (FORGOT.get(sid) || 0) + 1);
   if (RECS.delete(sid)) { dirty = true; gen++; saveCache(); }
 }
 

@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { LAST_LANG, PREFIX, log, tr, tz } from "./config.mjs";
 import { killTree } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { compBaseDeps, compNeeds, compRecords, compRun, devkitIdentity, sha256File, breathe } from "./components.mjs";
+import { compBaseDeps, compJobsDeps, compNeeds, compRecords, compRun, devkitIdentity, sha256File, breathe } from "./components.mjs";
 import { archiveProblem, parseTarListing } from "./archive-check.mjs";
 
 // ── 模块化工具包（0.3.9 起）──────────────────────────────────────────
@@ -79,6 +79,8 @@ function modDependents(mj, id) {
     const deps = compBaseDeps(cid, rec.sha256, rec);
     if (!deps ? mine.size > 0 : deps.some((n) => mine.has(n))) comps.push(cid);
   }
+  // 正在下载 / 校验的组件也算：装完要用这块的底座包（#134）
+  for (const j of compJobsDeps()) if (!comps.includes(j.id) && j.baseDeps.some((n) => mine.has(n))) comps.push(j.id);
   const pkgs = [];
   for (const [name, r] of Object.entries(pkgRecords())) {
     // Depends 是 Debian 格式：「a (>= 1), b | c」—— 备选里有一个落在这块就算（保守）

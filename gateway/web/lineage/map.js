@@ -28,7 +28,23 @@
   const hm = (ms) => { const d = new Date(ms); return p2(d.getHours()) + ":" + p2(d.getMinutes()); };
   const range = (a, b) => (md(a) === md(b) ? md(b) + " " + hm(b) : md(a) + " – " + md(b));
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const textW = (s, px = 12.5) => [...String(s)].reduce((w, c) => w + (c.charCodeAt(0) > 255 ? px : px * 0.56), 0);
+  // 标题宽度：能量就按真实字体量（.t-title 是 500 字重的 --font-ui）；以前按半角 0.56em 估，长标题、等宽字形会把省略号裁掉（11-04 报告 三）。
+  // 量不了（没有 canvas）退回估算，半角按 0.62em 宁宽勿窄
+  let MEAS = null;
+  const meas = () => {
+    if (MEAS !== null) return MEAS;
+    try {
+      const c = document.createElement("canvas").getContext("2d");
+      const fam = getComputedStyle(document.documentElement).getPropertyValue("--font-ui").trim() || "sans-serif";
+      MEAS = c ? { c, fam } : false;
+    } catch { MEAS = false; }
+    return MEAS;
+  };
+  const textW = (s, px = 12.5) => {
+    const m = meas();
+    if (m) { m.c.font = "500 " + px + "px " + m.fam; return m.c.measureText(String(s)).width + 2; }
+    return [...String(s)].reduce((w, c) => w + (c.charCodeAt(0) > 255 ? px : px * 0.62), 0);
+  };
   // 图上的标题限宽（未建档的旧会话拿提问顶题名，可能很长）；卡片里照旧全文
   const clip = (s, px = 280) => { s = String(s || ""); if (textW(s) <= px) return s; while (s.length > 2 && textW(s + "…") > px) s = s.slice(0, -1); return s + "…"; };
   const fmt = (s, v) => String(s).replace(/\{(\w+)\}/g, (m, k) => (v && k in v ? v[k] : m));
@@ -337,7 +353,13 @@
     function animateTo(tx, ty) {
       const x0 = st.tx, y0 = st.ty, t0 = performance.now();
       cancelAnimationFrame(st.raf);
-      const step = (now) => { const p = Math.min(1, (now - t0) / 260), e = 1 - Math.pow(1 - p, 3); st.tx = x0 + (tx - x0) * e; st.ty = y0 + (ty - y0) * e; place(); if (p < 1) st.raf = requestAnimationFrame(step); };
+      // 每帧按当时的边界夹目标：动画途中视口变了（重新布局），别滑到新边界外面去（11-04 报告 三）
+      const step = (now) => {
+        const p = Math.min(1, (now - t0) / 260), e = 1 - Math.pow(1 - p, 3), b = bounds();
+        const X = Math.min(b.maxX, Math.max(b.minX, tx)), Y = Math.min(b.maxY, Math.max(b.minY, ty));
+        st.tx = x0 + (X - x0) * e; st.ty = y0 + (Y - y0) * e; place();
+        if (p < 1) st.raf = requestAnimationFrame(step);
+      };
       st.raf = requestAnimationFrame(step);
     }
     function settle() { const b = bounds(); animateTo(Math.min(b.maxX, Math.max(b.minX, st.tx)), Math.min(b.maxY, Math.max(b.minY, st.ty))); }
@@ -410,14 +432,15 @@
       if (e.type === "pointercancel") return settle();
       if (d.moved < 6) {
         const now = performance.now();
-        if (now - lastTap < 300) { lastTap = 0; return home(); }
-        lastTap = now;
         if (st.pick) {
-          // 多选：点站也算点这条线
+          // 多选：点站也算点这条线。连着点两条不能被当成双击回到「现在」（11-04 报告 三）
+          lastTap = 0;
           const h = d.target.closest && d.target.closest("[data-id],[data-st]");
           if (h) togglePick(h.getAttribute("data-id") || h.getAttribute("data-st"));
           return;
         }
+        if (now - lastTap < 300) { lastTap = 0; return home(); }
+        lastTap = now;
         const stn = d.target.closest && d.target.closest("[data-st]");
         if (stn && opts.onAct) { lastTap = 0; return opts.onAct("chapter", stn.getAttribute("data-n"), stn, stn.getAttribute("data-st")); }
         const hit = d.target.closest && d.target.closest("[data-id]");
@@ -443,6 +466,7 @@
     // 鼠标 / 触控板：滚轮平移，按住 Ctrl 缩放时间
     cv.addEventListener("wheel", (e) => {
       e.preventDefault();
+      cancelAnimationFrame(st.raf);   // 惯性 / 回弹 / 跳转动画还在走：滚轮接手，别被下一帧拉回去（11-04 报告 三）
       if (e.ctrlKey) {
         const r = cv.getBoundingClientRect(), mid = e.clientX - r.left, base = (mid - st.tx - LEFT) / st.k;
         st.k = Math.min(3, Math.max(0.45, st.k * Math.exp(-e.deltaY / 300)));

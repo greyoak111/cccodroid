@@ -48,7 +48,8 @@ int main(int argc, char **argv) {
   int m = posix_openpt(O_RDWR | O_NOCTTY);
   if (m < 0 || grantpt(m) < 0 || unlockpt(m) < 0) { perror("ptyhost: openpt"); return 1; }
   char sname[128];
-  if (ptsname_r(m, sname, sizeof sname) != 0) { perror("ptyhost: ptsname"); return 1; }
+  int pr = ptsname_r(m, sname, sizeof sname);   /* 返回的是错误号，不设 errno：perror 会打出不相干的原因（11-04 报告 二） */
+  if (pr != 0) { fprintf(stderr, "ptyhost: ptsname: %s\n", strerror(pr)); return 1; }
   setsize(m, rows, cols);
 
   pid_t pid = fork();
@@ -103,6 +104,7 @@ int main(int argc, char **argv) {
     }
     if (ictl >= 0 && p[ictl].revents) {
       ssize_t r = read(ctl, buf, sizeof buf);
+      if (r < 0 && errno == EINTR) continue;   /* 被信号打断不是管道关了，别从此不再调窗口大小（11-04 报告 二） */
       if (r <= 0) { ctl = -1; continue; }
       for (ssize_t i = 0; i < r; i++) {
         if (buf[i] == '\n') {

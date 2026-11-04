@@ -704,8 +704,10 @@ if (cmd === "ldso") {
     if (sha256(raw) !== vrec.sha256) throw new Error(`${vso} 的 sha256 与 ld.json 不符`);
     console.log(`  用仓库里存的 ld.so（glibc ${rec.version}）`);
   }
+  const fromVendored = !!raw;
   if (!raw) raw = await ldFromDeb(rec);
-  if (vdir && !(vrec && vrec.version === rec.version && vrec.deb === rec.sha256)) {
+  // 没用上仓库里那份就补回去：钉了新工具包（ld.json 对不上），或 ld.json 还在、ld.so 本身被删了（以前这种情况每次都联网下，也不补）
+  if (vdir && !fromVendored) {
     fs.mkdirSync(vdir, { recursive: true });
     fs.writeFileSync(vso, raw);
     fs.writeFileSync(vjson, JSON.stringify({ version: rec.version, deb: rec.sha256, sha256: sha256(raw) }, null, 2) + "\n");

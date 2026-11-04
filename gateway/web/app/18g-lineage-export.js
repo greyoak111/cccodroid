@@ -76,7 +76,8 @@
     const root = [...vars].map((v) => `--${v}:${cssv(cs.getPropertyValue("--" + v).trim() || "initial")}`).join(";");
     const keys = new Set([...src.matchAll(/\bt\("((?:[^"\\]|\\.)*)"/g)].map((m) => JSON.parse('"' + m[1] + '"')));
     const dict = Object.fromEntries([...keys].map((k) => [k, t(k)]));
-    const html = document.documentElement, attrs = ["data-skin", "data-motion", "dir"].filter((a) => html.getAttribute(a)).map((a) => ` ${a}="${esc(html.getAttribute(a))}"`).join("");
+    // data-theme 也要带上：样式里按 [data-theme=light] 分的规则（浅色底的配色）不带就落回深色（11-04 报告 三）
+    const html = document.documentElement, attrs = ["data-theme", "data-skin", "data-motion", "dir"].filter((a) => html.getAttribute(a)).map((a) => ` ${a}="${esc(html.getAttribute(a))}"`).join("");
     const safe = (s) => s.replace(/<\/(script|style)/gi, "<\\/$1");
     // 数据（会话标题、章名都在里面）塞进 <script>：< 一律写成 \u003c，标题里夹 <!--<script 之类也搅不乱解析；样式里用户能定的值（字体名、强调色）同理
     const js = (v) => JSON.stringify(v).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");

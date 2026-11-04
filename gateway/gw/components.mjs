@@ -339,6 +339,8 @@ export function compNeeds(id, rec) {
 /** 已装、且装在当前工具包上的组件记录（id → rec）：判断「谁还在用这些文件 / 底座包」都用它。
  *  工具包换过之后，旧组件的记录还在（界面显示「需要更新」），文件却已随旧 usr 一起没了 —— 不能再算它认领：
  *  不然 10.22 装的 pdf-tools 认领着 gnupg，卸 libreoffice 时它新装的 1038 个 gnupg 文件全留下（10-22 真机验证查出） */
+/** 正在装（还没结束）的组件和它们要的底座包 */
+export function compJobsDeps() { return [...COMP_JOBS].filter(([, j]) => !j.finished && j.baseDeps).map(([id, j]) => ({ id, baseDeps: j.baseDeps })); }
 export function compRecords() {
   const out = new Map(), dk = devkitIdentity();
   try {
@@ -426,7 +428,9 @@ async function compInstall(id) {
     const need = (b.bytes + b.installed) * 1.1;
     if (sf.bavail * sf.bsize < need) return { ok: false, message: tz("存储空间不够：需要约 {n} MB", { n: Math.ceil(need / 1048576) }) };
   } catch {}
-  const job = { phase: "downloading", done: 0, total: b.bytes, error: "", child: null, cancelled: false, finished: false };
+  // baseDeps 记在 job 上：下载、校验那几分钟里卸工具包模块，要知道这个在装的组件也在用（#134，见 modules.mjs modDependents）
+  const job = { phase: "downloading", done: 0, total: b.bytes, error: "", child: null, cancelled: false, finished: false,
+    baseDeps: (Array.isArray(b.baseDeps) ? b.baseDeps : []).map((d) => (typeof d === "string" ? d : d && d.name)).filter(Boolean) };
   COMP_JOBS.set(id, job);
   compRunInstall(id, b, job).then(
     () => { job.finished = true; log(`[comp] ${id} ${b.version} 装好了`); },
@@ -570,6 +574,10 @@ async function compRunInstall(id, b, job) {
     if (st.size !== Number(n) || (await sha256File(f, null, st.size)) !== h) throw new Error(tz("组件包里的文件校验不符：{file}", { file: rel }));
     job.done += st.size;
   }
+  // 下载、校验跨了很久：依赖的工具包模块这期间可能被卸了，搬进去之前再核一次（#134）
+  // 剩下的窗口只有「核完到搬完」这几毫秒：模块和组件两个管理器之间没有锁，真要严丝合缝得加一把（DeepSeek 复核 11-04）
+  const goneMods = modulesMissingFor(b.baseDeps);
+  if (goneMods.length) throw new Error(tz("要先装工具包模块：{names}（扩展页上方「工具包模块」）", { names: goneMods.map((m) => m.name.zh || m.id).join("、") }));
   // 3) 切换：先写"安装中"的记录（被打断就是 damaged，可以重装或卸载），再逐个搬进 $PREFIX
   job.phase = "installing";
   const old = compRecord(id);

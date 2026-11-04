@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, PATHS, log, tz } from "./config.mjs";
-import { dec, NEXT, readBody, sendJson } from "./http.mjs";
+import { dec, fileKind, NEXT, readBody, sendJson } from "./http.mjs";
 import { PEEK_CACHE, findSessionFile, listSessions, peekSession } from "./sessions.mjs";
 import { trashSession } from "./sessionops.mjs";
 import { termEnv } from "./terminal.mjs";
@@ -93,7 +93,12 @@ function topFiles(p, max = 40) {
   try { ents = fs.readdirSync(p.path, { withFileTypes: true }); } catch { return []; }
   return ents.filter((e) => e.name !== ".git")
     .sort((a, b) => (b.isDirectory() - a.isDirectory()) || a.name.localeCompare(b.name))
-    .slice(0, max).map((e) => ({ name: e.name, dir: e.isDirectory() }));
+    // 带上大小和类型：查看器按它们决定怎么打开、过不过 16 MB 的上限（以前不带，上限在项目页失效，11-04 报告 三）
+    .slice(0, max).map((e) => {
+      const dir = e.isDirectory();
+      let size = 0; if (!dir) try { size = fs.statSync(path.join(p.path, e.name)).size; } catch {}
+      return { name: e.name, dir, size, kind: fileKind(e.name, dir) };
+    });
 }
 
 function gitClone(url, dest) {

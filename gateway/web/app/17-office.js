@@ -295,12 +295,15 @@
     VW.pdfRatio = vp.height / vp.width;
     $("vw-body").innerHTML = `<div class="vw-pdf"><div class="vw-pages"></div></div><div class="vw-pageno tiny"></div>`;
     const pages = $("vw-body").querySelector(".vw-pages");
-    for (let i = 1; i <= doc.numPages; i++) {
+    // 页数封顶：每页一个占位节点，几万页的 PDF（页数也能伪造）会把界面卡死（11-04 报告 三）
+    const PDF_MAX_PAGES = 3000, np = Math.min(doc.numPages, PDF_MAX_PAGES);
+    for (let i = 1; i <= np; i++) {
       const h = document.createElement("div");
       h.className = "vw-page";
       h.dataset.n = i;
       pages.appendChild(h);
     }
+    if (doc.numPages > np) pages.insertAdjacentHTML("beforeend", `<div class="tiny muted" style="text-align:center;padding:12px">${esc(t("还有 {n} 项", { n: doc.numPages - np }))}</div>`);
     const scroller = $("vw-body").querySelector(".vw-pdf");
     VW.pdfObs = new IntersectionObserver((ents) => {
       for (const en of ents) {
@@ -333,9 +336,11 @@
   async function vwPdfRender(h) {
     if (h.dataset.state) return;
     h.dataset.state = "busy";
-    const doc = VW.pdf;
+    const doc = VW.pdf, gen = h._gen || 0;
     try {
       const page = await doc.getPage(Number(h.dataset.n));
+      // 等页面解析的工夫里这页已经离屏 / 重新排版被释放了：别再建画布，不然离屏的画布一直留着（#134）
+      if (VW.pdf !== doc || (h._gen || 0) !== gen) return;
       const v1 = page.getViewport({ scale: 1 });
       const ratio = v1.height / v1.width;
       if (Math.abs(ratio - (Number(h.dataset.ratio) || VW.pdfRatio)) > 0.001) {
@@ -353,7 +358,8 @@
       h.replaceChildren(c);
       h._task = page.render({ canvas: c, canvasContext: c.getContext("2d"), viewport: vp });
       await h._task.promise;
-      if (VW.pdf !== doc) return;
+      // 画完到这里之间这页被释放了（画布已拿走）：别记成 done，不然回到视野里也不再画，一直空白（11-04 报告 三）
+      if (VW.pdf !== doc || (h._gen || 0) !== gen) return;
       h.dataset.state = "done";
     } catch (e) {
       if (e?.name !== "RenderingCancelledException") h.dataset.state = "";
@@ -361,6 +367,7 @@
   }
 
   function vwPdfRelease(h) {
+    h._gen = (h._gen || 0) + 1;   // 在途的 vwPdfRender 据此作废
     try { h._task?.cancel(); } catch {}
     h._task = null;
     const c = h.querySelector("canvas");

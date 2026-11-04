@@ -9,7 +9,8 @@
 #    SIGN=apksigner  用 SDK 的 apksigner 签（再给 APKSIGNER、ZIPALIGN）；默认是平板上的签名库
 #  钥匙：KEY 指向 {"key": PEM 私钥, "cert": PEM 证书} 的 JSON，绝不进仓库（CI 里放在仓库 secret）。
 #        换钥匙 = 已装的用户必须卸载重装，所以它丢了就再也发不了更新 —— 要另做离线备份。
-#        只想自己编个包试试：给 KS（keystore 文件，口令 KS_PASS，默认 android），装不上正式版之上，但能单独装。
+#        只想自己编个包试试：SIGN=apksigner 再给 KS（keystore 文件，口令 KS_PASS，默认 android），装不上正式版之上，但能单独装。
+#        KS 只有 apksigner 那条路认；默认的平板签名库只认 KEY。
 # ─────────────────────────────────────────────────────────────────────
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -27,6 +28,7 @@ AJAR=${ANDROID_JAR:-$P/framework/android.jar}
 SIGN=${SIGN:-apklib}
 A=$ROOT/android
 OUT=$ROOT/dist
+[ -z "$KS" ] || [ "$SIGN" = apksigner ] || { echo "✗ KS 要配 SIGN=apksigner 用（默认的签名库只认 KEY 钥匙 JSON）"; exit 1; }
 [ -n "$KS" ] || [ -f "$KEY" ] || { echo "✗ 找不到签名钥匙 $KEY（不会自动生成：换钥匙会让已装用户无法升级）"; exit 1; }
 
 echo "▸ assets"
@@ -43,6 +45,8 @@ mkdir -p "$A/assets/app/pre"; cp "$A/assets/pre/"* "$A/assets/app/pre/"     # pk
 cp "$A/assets/TOOLS.md" "$A/assets/app/"     # 给 claude 的工具说明（网关读进系统提示）
 # 随包的第三方许可：Shizuku-API 编进了 classes.dex，MIT 要求随包带上版权与许可原文（#110 10-003）；网页里的库各自带着 LICENSE
 mkdir -p "$A/assets/app/licenses"; cp "$ROOT/NOTICE" "$ROOT/LICENSE" "$A/assets/app/licenses/"; cp "$ROOT/third_party/shizuku/LICENSE" "$A/assets/app/licenses/Shizuku-API-LICENSE"
+# glibc 的 ld.so 以 libldlinux.so 进了 lib/：LGPL 要求随包带上许可原文和取源码的途径
+cp "$ROOT/third_party/glibc/COPYING.LIB" "$A/assets/app/licenses/glibc-COPYING.LIB"; cp "$ROOT/third_party/glibc/README.md" "$A/assets/app/licenses/glibc-README.md"
 # 工具包下载地址（Release 目录，按序尝试）。测试时可用 DEVKIT_BASES="http://… https://…" 覆盖
 if [ -n "$DEVKIT_BASES" ]; then echo "$DEVKIT_BASES" | tr " " "\n" > "$A/assets/devkit-sources.txt"
 else cp "$ROOT/devkit-sources.txt" "$A/assets/devkit-sources.txt"; fi

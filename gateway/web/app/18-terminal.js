@@ -225,7 +225,8 @@
   function termMods(d) {
     if (!TERM.ctrl && !TERM.alt) return d;
     // 一整块（粘贴、输入法一次交上来的词）不吃粘住的 Ctrl / Alt，也不把它消耗掉：留给下一个单键（审查 F7）
-    if (d.length > 1 && !d.startsWith("\x1b")) return d;
+    // 括号粘贴（\x1b[200~…\x1b[201~）也是一整块，虽然以 ESC 开头：给它加 ESC 前缀就把粘贴标记弄坏了（11-04 报告 三）
+    if (d.length > 1 && (!d.startsWith("\x1b") || d.startsWith("\x1b[200~"))) return d;
     if (TERM.ctrl && d.length === 1) {
       const c = d.toUpperCase().charCodeAt(0);
       if (c >= 64 && c <= 95) d = String.fromCharCode(c - 64);
@@ -406,7 +407,10 @@
   $("term-new").addEventListener("click", newTerm);
   $("btn-term").addEventListener("click", openTerm);
   renderTermKeys();
-  // 换主题时跟着换
-  new MutationObserver(() => { for (const a of TERM.inst.values()) a.xt.options.theme = termTheme(); })
-    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  // 换主题、换外观（data-skin）、改强调色（html 上的 style 变量）时跟着换；一帧里只重算一次（11-04 报告 三）
+  let themeRaf = 0;
+  new MutationObserver(() => {
+    if (themeRaf || !TERM.inst.size) return;
+    themeRaf = requestAnimationFrame(() => { themeRaf = 0; const th = termTheme(); for (const a of TERM.inst.values()) a.xt.options.theme = th; });
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-skin", "style"] });
 

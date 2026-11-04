@@ -9,11 +9,13 @@ import { effectiveModel, setSessModel } from "./sessmodel.mjs";
 // 为什么不让 claude 自己处理：它自带的 /model 只改「当前会话」，
 // 而 GUI 每次调用都是新进程 —— 下一条消息就忘了。所以由网关记：
 // 0.3.16 起：在会话里打 → 只改这个会话（sid）；新会话里打（还没会话号）→ 改全局默认。
-export async function handleLocalCommand(name, arg, reply, sid) {
+export async function handleLocalCommand(name, arg, reply, sid, stopped = () => false) {
   // 清单、档位、校验都按这个会话真跑的那家：钉的 → 项目默认 → 全局（和 run.mjs、/api/models 同一套，#78）
   const now = effectiveModel(sid);
   const P = providerById(now.provider) || PROVIDER;
   const models = await fetchModels(false, P);   // 只是读清单：走 10 分钟缓存，项目那家清单地址慢时别每次干等
+  // 等清单期间用户点了停止：这条命令就算撤回了，迟到的清单不能再改型号、强度或压缩线（#142-1）
+  if (stopped()) return reply("已停止，没有改动。", name === "models" ? "model" : name);
   const curId = now.model, curEff = now.effort;
   // 只认同名的：指定的型号不在清单里就当不知道窗口，别借默认或第一项的（#82）；没指定才按那家默认 / 第一项
   const want = curId || P.defaultModel;

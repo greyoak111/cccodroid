@@ -766,15 +766,19 @@ final class Updater {
         else if ("ready".equals(devkit.state)) notifyReady(devkit);
     }
 
-    /** 后台定时：服务起来 20 秒后、之后每 30 分钟看一眼，距上次检查超过 6 小时就查 */
-    void loop() {
-        new Thread(() -> {
+    /** 后台定时：服务起来 20 秒后、之后每 30 分钟看一眼，距上次检查超过 6 小时就查。
+     *  服务停了又起（同一进程）会再调一次：进程里只留一条循环，不然每重启一次服务就多一条永远睡醒的线程（#131） */
+    private Thread loopThread;
+    synchronized void loop() {
+        if (loopThread != null && loopThread.isAlive()) return;
+        loopThread = new Thread(() -> {
             sleep(20_000);
             while (true) {
                 if (auto() && System.currentTimeMillis() - prefs().getLong("lastCheck", 0) > AUTO_EVERY) checkAsync(false);
                 sleep(30 * 60_000L);
             }
-        }, "upd-loop").start();
+        }, "upd-loop");
+        loopThread.start();
     }
 
     // ── 应用更新 ─────────────────────────────────────────────────────────
@@ -949,14 +953,14 @@ final class Updater {
         app.set("installing", "");
         // 有 Shizuku 就静默装（进程会被系统替换掉，服务由 MY_PACKAGE_REPLACED 拉起）；否则走系统安装确认
         if (Priv.granted() && !gatewayBusy()) {
-            String out = Priv.pipeInstall(app.file, MainActivity.visible, app.latest);
+            String out = Priv.pipeInstall(app.file, MainActivity.appForeground(), app.latest);
             Log.i(TAG, "pm install → " + out);     // 走到这里多半说明没装上（装上的话本进程已经没了）
             if (sdkTooOld(out) && "28".equals(wantFlavor())) { markOnly36(out.trim()); return; }
             if (!out.contains("Success")) app.set("ready", Tr.f("静默安装失败（{0}），点安装走系统确认", out));
             return;
         }
         // 走系统安装确认：装完系统把我们整个杀掉，界面不会自己回来 —— 记一笔，SysEvents 收到 MY_PACKAGE_REPLACED 时把界面拉起来
-        if (MainActivity.visible) ctx.getSharedPreferences("upd", Context.MODE_PRIVATE).edit().putLong("reopenAt", System.currentTimeMillis()).apply();
+        if (MainActivity.appForeground()) ctx.getSharedPreferences("upd", Context.MODE_PRIVATE).edit().putLong("reopenAt", System.currentTimeMillis()).apply();
         try { Apk.install(ctx, app.file, "app"); }
         catch (Exception e) { app.set("error", Tr.t("安装失败：") + e.getMessage()); }
     }
@@ -964,7 +968,7 @@ final class Updater {
     /** 自动模式：Shizuku 可用、没有任务在跑、界面不在前台 —— 静默装；否则通知用户 */
     private void maybeSilentInstallApp() {
         if (deferApp(false)) return;
-        if (Priv.granted() && !gatewayBusy() && !MainActivity.visible) installApp();
+        if (Priv.granted() && !gatewayBusy() && !MainActivity.appForeground()) installApp();
         else notifyReady(app);
     }
 

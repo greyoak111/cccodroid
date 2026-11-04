@@ -201,7 +201,8 @@ export function endRun(run, fields = {}) {
   run.ended = true;
   RUNS.delete(run.id);
   if (!RUNS.size && !QUEUE.some((q) => !q.held)) runFlag(false);
-  publish({ type: "run_end", runId: run.id, sessionId: run.sessionId, aborted: !!run.aborted, ...(run.auto ? { auto: run.auto } : {}), ...(run.sched ? { sched: true } : {}), ...fields });
+  // at：真正结束的时刻。断线后增量补发的 run_end 晚到几分钟，回复用时不能按收到的时刻算（#142-4）
+  publish({ type: "run_end", at: Date.now(), runId: run.id, sessionId: run.sessionId, aborted: !!run.aborted, ...(run.auto ? { auto: run.auto } : {}), ...(run.sched ? { sched: true } : {}), ...fields });
   goalCheck(run.sessionId);
   tasksCheck(run.sessionId);
   run.log = [];

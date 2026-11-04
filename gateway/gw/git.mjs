@@ -18,6 +18,7 @@ const GIT_MAX = 768 * 1024;
 // clean 过滤器。所以只读命令还要把配置里出现的每个过滤器都覆盖成空（实测空值即不执行），子模块不递归（它的配置另算），
 // 签名校验关掉（log.showSignature + gpg.program 能执行命令）
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const EMPTY_TREE_256 = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
 const GIT_RO = new Set(["status", "diff", "show", "log", "for-each-ref", "rev-parse", "remote", "branch"]);
 const GIT_PRE = ["-c", "core.quotePath=false", "-c", "color.ui=false", "-c", "core.fsmonitor=false", "-c", "protocol.ext.allow=never"];
 function gitArgs(args) {
@@ -267,7 +268,11 @@ async function handleGit(req, res, p, u) {
       if (st && st.out.startsWith("??")) r = await git(root, ["diff", "--no-index", "--", "/dev/null", file]);
       else {
         const head = await git(root, ["rev-parse", "--verify", "-q", "HEAD"]);
-        r = await git(root, ["diff", ...(head.code ? ["--cached"] : ["HEAD"]), "-M", ...(file ? ["--", file] : [])]);
+        // 还没有第一次提交：和空树比（看的是工作区现在的样子）。以前用 --cached 只看暂存那份，暂存后又改过的文件
+        // 对比里是旧的、提交时 add -A 进去的却是新的（#146-2）。sha256 仓库的空树是另一个哈希
+        let base = "HEAD";
+        if (head.code) { const fmt = await git(root, ["rev-parse", "--show-object-format"]); base = fmt.out.trim() === "sha256" ? EMPTY_TREE_256 : EMPTY_TREE; }
+        r = await git(root, ["diff", base, "-M", ...(file ? ["--", file] : [])]);
       }
       if (r.code === 1 && r.out) r.code = 0;            // --no-index 有差异时退出码是 1
     }

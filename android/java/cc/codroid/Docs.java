@@ -226,7 +226,10 @@ public final class Docs extends DocumentsProvider {
         // 打开以后按 fd 反查它实际是哪个文件，不在作用域里就关掉不给。根目录也按 fd 取，两边写法一致
         try {
             String real = android.system.Os.readlink("/proc/self/fd/" + pfd.getFd()), base = realHome();
-            if (real.equals(base) || real.startsWith(base + "/")) return pfd;
+            // 硬链接不改真实路径：工作区里一个硬链接就能指到凭据文件上，和 Share 一样，普通文件有多个名字就不给（11-04 报告 A9）
+            android.system.StructStat st = android.system.Os.fstat(pfd.getFileDescriptor());
+            boolean linked = android.system.OsConstants.S_ISREG(st.st_mode) && st.st_nlink > 1;
+            if (!linked && (real.equals(base) || real.startsWith(base + "/"))) return pfd;
         } catch (Exception e) { /* 落到下面：查不了也不给 */ }
         try { pfd.close(); } catch (java.io.IOException ignored) {}
         throw new FileNotFoundException("越界：" + docId);

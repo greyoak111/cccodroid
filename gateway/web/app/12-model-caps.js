@@ -270,6 +270,8 @@
       // 连着改型号时清单响应可能乱序回来：只认最后一次发出的，旧的别把下拉框和容量盖回去（#80）
       if (my !== modelsSeq) return null;          // null = 被后一次顶掉了（不是失败），调用方别拿原始设置去盖
       MODELS = r.models || [];
+      PJ.mLoaded = true;
+      dropProvModels();
       if (r.providers) state.provList = r.providers;
       const sel = $("set-model");
       // 原生厂商（官方账户）：不挑 = 用它自己的默认模型。
@@ -329,7 +331,7 @@
                     t("上下文 {n} · 输出上限 {out} · 输入 {mods}", { n: k(cur.context_window), out: k(cur.max_output_tokens), mods: (cur.input_modalities || []).join(" / ") }) +
           t("｜这是默认值；单个会话在输入栏下面的模型标签里另选");
         const ac = $("set-autocompact");
-        if (ac && document.activeElement !== ac) ac.value = r.autoCompactWindow || "";
+        if (ac && (acForce || document.activeElement !== ac)) ac.value = r.autoCompactWindow || "";
       } else if (r.nativeModels) {
         $("model-info").innerHTML =
                     t("没指定模型 → <b>由 claude 自己决定</b>（官方账户当前默认 <code>{model}</code>）。", { model: esc(r.defaultModel || t("claude 内置默认")) }) +
@@ -533,7 +535,7 @@
   });
   // ── 压缩线滑块（接口与型号页）：0–100 映射到 [20k, 模型窗口]；没设 = 交给 claude，滑块停在最右、虚线轨道 ──
   const AC_MIN = 20000;
-  let acWin = 0, acSet = 0;
+  let acWin = 0, acSet = 0, acForce = false;   // acForce：刚存过，焦点还在控件上也按存下的值回填（没存上就弹回去）
   function acStep() { return Math.max(1000, Math.ceil((acWin - AC_MIN) / 100 / 1000) * 1000); }
   function acTok(p) { return Math.min(acWin, Math.round((AC_MIN + (acWin - AC_MIN) * p / 100) / acStep()) * acStep()); }
   function acPos(v) { return Math.max(0, Math.min(100, (v - AC_MIN) / (acWin - AC_MIN) * 100)); }
@@ -550,19 +552,20 @@
     box.classList.toggle("hidden", acWin <= AC_MIN);
     if (acWin <= AC_MIN) return;
     const rg = $("ac-range");
-    if (document.activeElement !== rg) rg.value = acSet ? acPos(acSet) : 100;
+    if (acForce || document.activeElement !== rg) rg.value = acSet ? acPos(acSet) : 100;
+    acForce = false;
     $("ac-min").textContent = fmtTok(AC_MIN); $("ac-max").textContent = fmtTok(acWin);
     acShow(acSet);
   }
   $("ac-range").addEventListener("input", (e) => acShow(acTok(+e.target.value)));
   $("ac-range").addEventListener("change", (e) => {
     const v = acTok(+e.target.value);
-    saveSettings({ autoCompactWindow: v }).then(() => loadModels());
+    saveSettings({ autoCompactWindow: v }).then(() => { acForce = true; return loadModels(); });
   });
-  $("ac-auto").addEventListener("click", () => saveSettings({ autoCompactWindow: null }).then(() => loadModels()));
+  $("ac-auto").addEventListener("click", () => saveSettings({ autoCompactWindow: null }).then(() => { acForce = true; return loadModels(); }));
   $("set-autocompact").addEventListener("change", (e) => {
     const v = e.target.value.trim();
-    saveSettings({ autoCompactWindow: v ? Number(v) : null }).then(() => loadModels());
+    saveSettings({ autoCompactWindow: v ? Number(v) : null }).then(() => { acForce = true; return loadModels(); });
   });
   $("btn-add-dir").addEventListener("click", () => {
     const v = $("inp-dir").value.trim();
@@ -615,11 +618,14 @@
   const READ_TOOLS = new Set(["Read", "Grep", "Glob", "LS", "TodoWrite", "TodoRead", "Task", "Agent", "NotebookRead", "ExitPlanMode", "BashOutput", "KillShell", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"]);
   const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
   function toolPerm(name, mode, rules) {
-    const hit = (list) => (list || []).some((r) => r === name || (r.endsWith("*") && name.startsWith(r.slice(0, -1))));
+    // mcp__服务名 这样的规则管这个服务下的全部工具
+    const hit = (list) => (list || []).some((r) => r === name || (r.endsWith("*") && name.startsWith(r.slice(0, -1))) || (r.startsWith("mcp__") && !r.slice(5).includes("__") && name.startsWith(r + "__")));
     const part = (list) => (list || []).some((r) => r.startsWith(name + "("));
     if (hit(rules.deny)) return "deny";
     if (hit(rules.ask)) return "ask";
     if (hit(rules.allow)) return "allow";
+    // 带括号的拒绝 / 询问规则在任何模式下都照样生效：不能因为是免确认模式或只读工具就标「允许」
+    if (part(rules.deny) || part(rules.ask)) return "rule";
     if (mode === "bypassPermissions") return "allow";
     if (mode === "plan" && (EDIT_TOOLS.has(name) || name === "Bash")) return "deny";
     if (mode === "acceptEdits" && EDIT_TOOLS.has(name)) return "allow";

@@ -83,3 +83,12 @@ test("联网的网页里点链接跳到同目录别的网页：那一页照离�
   assert.equal(await csp("assets/app.js", "no-cors"), null, "那页自己的资源照常");
   await api({ path: path.join(site, "index.html"), net: false });
 });
+
+test("预览页不许注册 Service Worker：取 worker 脚本的请求一律拒（#131）", async () => {
+  for (const net of [false, true]) {
+    const r = await (await fetch(`http://127.0.0.1:${gw.address().port}/api/preview`, { method: "POST", body: JSON.stringify({ path: path.join(site, "index.html"), net }) })).json();
+    const base = r.url.replace(/index\.html$/, "");
+    assert.equal((await fetch(base + "assets/app.js", { headers: { "Service-Worker": "script" } })).status, 403, "net=" + net);
+    assert.equal((await fetch(base + "assets/app.js")).status, 200, "普通脚本照常");
+  }
+});

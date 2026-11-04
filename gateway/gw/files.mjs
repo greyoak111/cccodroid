@@ -258,6 +258,8 @@ export async function routeFiles(req, res, u, p) {
     let cur = null; try { cur = fs.statSync(r.file); } catch {}
     // 已有文件必须带打开时的 mtime：没带（0）说明界面还没读完就点了保存，会把它清空（私下反馈 10-29）
     if (cur && !base && u.searchParams.get("force") !== "1") return sendJson(res, 409, { error: "not loaded", mtime: cur.mtimeMs, size: cur.size });
+    // 打开时文件在（带着 mtime），现在没了：被改名 / 移走 / 删了。别悄悄按旧名新建一份，让界面问一句（#145-2）
+    if (!cur && base && u.searchParams.get("force") !== "1") return sendJson(res, 409, { error: "gone" });
     if (cur && base && Math.abs(cur.mtimeMs - base) > 1 && u.searchParams.get("force") !== "1") {
       return sendJson(res, 409, { error: "changed on disk", mtime: cur.mtimeMs, size: cur.size });
     }

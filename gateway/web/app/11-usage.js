@@ -353,8 +353,13 @@
   // 用量还没读回来时月份还没定：翻月先等一等，不然 null[0] 报脚本错误（审查 F-009）
   $("us-prev").addEventListener("click", () => { if (!us.month || !us.raw) return; const d = usMonth0(us.month[0], us.month[1] - 1); us.month = [d.getFullYear(), d.getMonth()]; usRender(); });
   $("us-next").addEventListener("click", () => { if (!us.month || !us.raw) return; const d = usMonth0(us.month[0], us.month[1] + 1); us.month = [d.getFullYear(), d.getMonth()]; usRender(); });
+  // 没存上：开关弹回原样（以前停在点过的位置，看着像生效了）；存的过程中先禁用，免得连点叠请求
   $("us-off").addEventListener("change", async (e) => {
-    try { await post("/api/usage/set", { off: !e.target.checked }); loadUsage(); } catch (err) { toast(err.message, true); }
+    const box = e.target, want = box.checked;
+    box.disabled = true;
+    try { await post("/api/usage/set", { off: !want }); loadUsage(); }
+    catch (err) { box.checked = !want; toast(err.message, true); }
+    finally { box.disabled = !us.raw; }
   });
   // 月报图片：先交给网关落成文件，再走「保存到」/ 系统分享；都没有就让浏览器自己下载
   async function usCardFile() {

@@ -28,6 +28,7 @@
   async function openGit(dir, opts = {}) {
     Object.assign(GIT, { dir, root: "", tab: opts.tab || "changes", status: null, file: opts.file || "", view: opts.file ? (opts.tab === "history" ? { kind: "log" } : { kind: "diff" }) : null });
     GIT.sel = new Set(); GIT.known = null;    // 重开和第一次一样默认全选（审查 C-010）
+    if (GIT.msgRoot !== dir) GIT.msg = "";   // 提交说明草稿只在同一个仓库面板里留着
     MO.cancel(gitEl); gitEl.classList.remove("hidden"); window.CCLayout && CCLayout.raise("git");
     $("git-name").textContent = String(dir).split("/").pop();
     $("git-info").textContent = "";
@@ -131,6 +132,8 @@
     const box = $("git-body");
     if (!s.files.length) { box.innerHTML = `<div class="vw-empty">${t("工作区是干净的：上次提交之后没有改动。")}</div>`; return; }
     const n = GIT.sel.size;
+    // 整块重画会换掉说明框：先把写了一半的说明收起来，画完放回去（#146-1：以前点一下全选或看一次对比再回来就没了）
+    if ($("git-msg")) GIT.msg = $("git-msg").value;
     box.innerHTML = `<div class="git-row tiny"><label><input type="checkbox" id="git-all" ${n === s.files.length ? "checked" : ""}> ${t("全选")}</label>
         <span style="flex:1"></span><span>${t("点文件看改了哪几行")}</span></div>
       ${s.files.map((f, i) => `<div class="git-row" data-i="${i}">
@@ -146,6 +149,9 @@
         <div class="row-actions"><button class="btn sm" id="git-do" ${n ? "" : "disabled"}>${t("提交选中的 {n} 个文件", { n })}</button>
           <button class="btn ghost sm" id="git-ask">${t("让 Claude 写说明并提交")}</button></div>
       </div>`;
+    const msgEl = box.querySelector("#git-msg");
+    msgEl.value = GIT.msg || ""; GIT.msgRoot = GIT.dir;
+    msgEl.oninput = () => { GIT.msg = msgEl.value; };
     box.querySelector("#git-all").onchange = (e) => { GIT.sel = e.target.checked ? new Set(s.files.map((f) => f.path)) : new Set(); gitShowChanges(); };
     box.onclick = async (e) => {
       const ck = e.target.dataset.ck, op = e.target.closest("[data-open]"), un = e.target.dataset.undo;
@@ -219,7 +225,8 @@
     try {
       const r = await gpost("commit", { message: msg, files: all ? null : [...GIT.sel] });
       toast(r.message || t("已提交"));
-      GIT.sel = new Set(); GIT.known = null;
+      GIT.sel = new Set(); GIT.known = null; GIT.msg = "";
+      if ($("git-msg")) $("git-msg").value = "";
       gitLoad();
     } catch (e) {
       if (e.status === 409 && !again) return gitAskIdentity();
@@ -240,30 +247,34 @@
     };
   }
 
-  /** 统一 diff → 带行号的红绿行 */
+  /** 统一 diff → 带行号的红绿行。合并提交的 diff --cc（两列 +/-）也认（11-04 报告 三） */
   function diffHtml(text) {
     if (!text.trim()) return `<div class="tiny">${t("没有差异")}</div>`;
-    const out = []; let o = 0, n = 0, open = false;
+    const out = []; let o = 0, n = 0, open = false, inHunk = false, cols = 1;
     const close = () => { if (open) out.push("</div>"); open = false; };
     for (const line of text.split("\n")) {
-      if (line.startsWith("diff --git ")) {
+      const fh = line.match(/^diff --(?:git a\/.+ b\/(.+)|cc (.+)|combined (.+))$/);
+      if (fh) {
         close();
-        const m = line.match(/ b\/(.+)$/);
-        out.push(`<div class="gdiff${GIT.wrap ? "" : " nowrap"}"><div class="fh">${esc(m ? m[1] : line)}</div>`); open = true; continue;
+        out.push(`<div class="gdiff${GIT.wrap ? "" : " nowrap"}"><div class="fh">${esc(fh[1] || fh[2] || fh[3])}</div>`); open = true;
+        inHunk = false; cols = line.startsWith("diff --git ") ? 1 : 2;
+        continue;
       }
       if (!open) { out.push(`<div class="gdiff${GIT.wrap ? "" : " nowrap"}">`); open = true; }
-      if (/^(index |--- |\+\+\+ |new file|deleted file|similarity|rename |old mode|new mode)/.test(line)) {
+      // 文件头只在头部认：进了块以后，删掉的「-- 注释」是「--- …」、加上的「++ x」是「+++ …」，都是正文
+      if (!inHunk && /^(index |--- |\+\+\+ |new file|deleted file|similarity|dissimilarity|rename |copy |old mode|new mode|mode )/.test(line)) {
         if (/^(new file|deleted file|rename )/.test(line)) out.push(`<div class="ln meta"><span class="no"></span><span class="tx">${esc(line)}</span></div>`);
         continue;
       }
-      if (line.startsWith("Binary files")) { out.push(`<div class="ln meta"><span class="no"></span><span class="tx">${t("二进制文件，无法逐行对比")}</span></div>`); continue; }
-      const h = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/);
-      if (h) { o = +h[1]; n = +h[2]; out.push(`<div class="ln hunk"><span class="no">⋯</span><span class="tx">${esc(h[3].trim() || "")}</span></div>`); continue; }
+      if (!inHunk && line.startsWith("Binary files")) { out.push(`<div class="ln meta"><span class="no"></span><span class="tx">${t("二进制文件，无法逐行对比")}</span></div>`); continue; }
+      const h = cols === 1 ? line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/) : line.match(/^@@@ -(\d+)(?:,\d+)? -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@@(.*)$/);
+      if (h) { o = +h[1]; n = +h[2]; inHunk = true; out.push(`<div class="ln hunk"><span class="no">⋯</span><span class="tx">${esc(h[3].trim() || "")}</span></div>`); continue; }
+      if (!inHunk) continue;
       if (line.startsWith("\\")) continue;      // \ No newline at end of file
-      const c = line[0];
-      if (c === "+") out.push(`<div class="ln add"><span class="no">${n++}</span><span class="tx">${esc(line.slice(1)) || " "}</span></div>`);
-      else if (c === "-") out.push(`<div class="ln del"><span class="no">${o++}</span><span class="tx">${esc(line.slice(1)) || " "}</span></div>`);
-      else if (c === " ") { out.push(`<div class="ln"><span class="no">${n}</span><span class="tx">${esc(line.slice(1)) || " "}</span></div>`); o++; n++; }
+      const pre = line.slice(0, cols), body = esc(line.slice(cols)) || " ";
+      if (pre.includes("+")) out.push(`<div class="ln add"><span class="no">${n++}</span><span class="tx">${body}</span></div>`);
+      else if (pre.includes("-")) out.push(`<div class="ln del"><span class="no">${o++}</span><span class="tx">${body}</span></div>`);
+      else if (pre.trim() === "" && pre.length === cols) { out.push(`<div class="ln"><span class="no">${n}</span><span class="tx">${body}</span></div>`); o++; n++; }
     }
     close();
     return out.join("");
@@ -1045,6 +1056,13 @@
     VW.saving = false;
     if (gen !== VW.gen) { if (r.ok) toast(t("已保存")); return; }   // 已经换了别的文件：别动现在这个的状态
     if (r.status === 409) {
+      let c = {};
+      try { c = await r.json(); } catch {}
+      // 原文件不在了（比如刚在文件面板里改了名）：问清楚再按原名另存，修改先留在编辑器里（#145-2）
+      if (c.error === "gone") {
+        if (confirm(t("原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里"))) return vwSave(true);
+        return;
+      }
       if (confirm(t("文件在你打开之后被改过了（可能是 Claude 改的）。\n确定：用你的版本覆盖\n取消：放弃你的修改，重新载入"))) return vwSave(true);
       VW.dirty = false;
       draftClear();

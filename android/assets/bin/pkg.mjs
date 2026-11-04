@@ -614,7 +614,12 @@ function install(names, { unverified = false, auto = false, upgrade = false } = 
     if (EXCLUDE.has(real)) die(`${real} 是给 Termux App 本身用的，在 cccodroid 里没有意义`);
     if (have.has(real) && !mine[real]) { console.log(`${real} 已在工具包里（${baseVersions().get(real) || "版本未知"}），不用装`); continue; }
     if (have.has(real) && mine[real] && mine[real].state !== "ok") console.log(`${real} 上次没装完，接着装`);
-    else if (have.has(real) && mine[real] && !upgrade) { console.log(`${real} ${mine[real].version} 已经装了`); continue; }
+    else if (have.has(real) && mine[real] && !upgrade) {
+      // 之前是作为依赖装上的、这次用户点名要装：改记成手动装的，卸原来那个包时别把它一起清掉（#134）
+      if (mine[real].auto && !auto) { const d = db(); d.pkgs[real].auto = false; writeJson(DB, d); console.log(`${real} ${mine[real].version} 已经装了（之前作为依赖装上，现在记为手动安装）`); }
+      else console.log(`${real} ${mine[real].version} 已经装了`);
+      continue;
+    }
     if (!VERIFIED[real] && !unverified && !auto) die(`${real} 还没在 cccodroid 上验证过。确定要试就加 --unverified：pkg install --unverified ${real}\n本机实测过的：${Object.keys(VERIFIED).join(" ")}`);
     roots.push(real);
   }
