@@ -27,15 +27,18 @@ const lines = keys.map((k, n) => {
     : v.startsWith("@") ? v.slice(1) : '"' + esc(v) + '"';
   return "  " + JSON.stringify(k) + ": " + body + ",";
 });
+// 注册名取「（」之前的部分（可用 name 附带说明），生成和自检必须用同一个名字，
+// 否则调用时 name 带「（」会让自检查不到条目、误报 0 条
+const dictName = name.split("（")[0];
 fs.writeFileSync(out,
   `// ${name} dictionary: Chinese source text (the key) → ${name}.  See i18n.js / langs.js for the rules.\n` +
-  `window.I18N_DICT = window.I18N_DICT || {};\nwindow.I18N_DICT[${JSON.stringify(name.split("（")[0])}] = {\n` +
+  `window.I18N_DICT = window.I18N_DICT || {};\nwindow.I18N_DICT[${JSON.stringify(dictName)}] = {\n` +
   lines.join("\n") + "\n};\n");
 // 运行期自检：语法对不代表值对（例如以 @ 开头的译文会变成未定义标识符，node --check 查不出来）
 const out_src = fs.readFileSync(out, "utf8");
 const box = { window: {} };
 vm.runInNewContext(out_src, box, { filename: out });
-const got = (box.window.I18N_DICT || {})[name] || {};
+const got = (box.window.I18N_DICT || {})[dictName] || {};
 const bad = Object.entries(got).filter(([, v]) => typeof v !== "string" && typeof v !== "function");
 if (Object.keys(got).length !== keys.length) { console.error(`✗ 条目数不对：${Object.keys(got).length} ≠ ${keys.length}`); process.exit(1); }
 if (bad.length) { console.error(`✗ ${bad.length} 条值不是字符串/函数：` + bad.slice(0, 5).map(([k, v]) => k + "=" + String(v).slice(0, 20)).join(" | ")); process.exit(1); }

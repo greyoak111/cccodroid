@@ -152,6 +152,9 @@
   document.addEventListener("change", (e) => { if (e.target && e.target.id === "set-lang") setLang(e.target.value); }, true);
   document.addEventListener("focusin", (e) => { if (e.target && e.target.id === "set-lang") fillSel(); }, true);
   document.addEventListener("pointerdown", (e) => { if (e.target && e.target.id === "set-lang") fillSel(); }, true);
-  fillSel();
+  // 「跟随系统」这一项要翻译：词典是上面 document.write 出来的脚本，本脚本执行完才轮到它们，
+  // 立刻填会把中文原文写死进 option（之后 __i18nFilled 又挡住重建）。等 DOM 解析完、词典就位再填第一次。
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fillSel, { once: true });
+  else fillSel();
 
 })();

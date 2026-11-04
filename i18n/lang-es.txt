@@ -3,8 +3,8 @@
 3	Capacidades
 4	ahora mismo
 5	hace {n} min
-6	@(v) => `hace ${v.n} hora${v.n > 1 ? "s" : ""}`
-7	@(v) => `hace ${v.n} día${v.n > 1 ? "s" : ""}`
+6	@(v) => `hace ${v.n} hora${v.n === 1 ? "" : "s"}`
+7	@(v) => `hace ${v.n} día${v.n === 1 ? "" : "s"}`
 8	Error del script de la interfaz: {msg}
 9	No se puede leer: {path}
 10	Copiado
@@ -65,15 +65,15 @@
 65	 · coincide con «{q}»
 66	Referenciar archivo · {path}
 67	No se pudo adjuntar «{name}»: {msg}
-68	@(v) => `${v.n} archivo${v.n > 1 ? "s" : ""} adjunto${v.n > 1 ? "s" : ""}`
+68	@(v) => `${v.n} archivo${v.n === 1 ? "" : "s"} adjunto${v.n === 1 ? "" : "s"}`
 69	{name} adjunto
 70	Contenido compartido insertado
 71	No se pudo abrir la carpeta: {msg}
 72	Quitar
 73	Carpeta
 74	Archivo
-75	@(v) => `${v.n} elemento${v.n > 1 ? "s" : ""}`
-76	@(v) => `${v.n} elemento${v.n > 1 ? "s" : ""} · ${v.path}`
+75	@(v) => `${v.n} elemento${v.n === 1 ? "" : "s"}`
+76	@(v) => `${v.n} elemento${v.n === 1 ? "" : "s"} · ${v.path}`
 77	(carpeta vacía)
 78	Leyendo…
 79	… (truncado)
@@ -2727,3 +2727,9 @@
 2727	El programa de Claude Code fue modificado y no se inició; 
 2728	Se modificaron archivos de la app y se restauraron desde el paquete de la app: 
 2729	El programa de Claude Code no coincide con el manifiesto oficial firmado y puede haber sido modificado, así que este turno no se inició. Reinstálalo en Ajustes → Actualizaciones y vuelve a intentarlo.
+2730	Apodo
+2731	No se puede leer la configuración de este repositorio (hay saltos de línea, comillas, etc. en el nombre), así que por seguridad no se ejecutó.
+2732	Otro componente está instalando ese nombre; inténtalo más tarde o elige otro nombre.
+2733	El comando {c} lo está instalando otro componente; inténtalo más tarde o elige otro nombre.
+2734	El comando {c} fue ocupado durante la instalación; se canceló esta instalación.
+2735	No se pudieron escribir los ajustes en el disco; pueden seguir aplicándose en esta ejecución, pero volverán a los valores anteriores tras reiniciar (consulta los registros de la pasarela).

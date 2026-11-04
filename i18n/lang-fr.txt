@@ -2727,3 +2727,9 @@
 2727	Le programme Claude Code a été modifié et n'a pas été lancé ; 
 2728	Des fichiers de l'app avaient été modifiés ; ils ont été restaurés depuis le paquet de l'app : 
 2729	Le programme Claude Code ne correspond pas au manifeste officiel signé et a peut-être été modifié ; ce tour n'a donc pas été lancé. Réinstallez-le dans Réglages → Mises à jour puis réessayez.
+2730	Pseudo
+2731	La configuration de ce dépôt est illisible (retours à la ligne, guillemets, etc. dans le nom), donc elle n'a pas été exécutée par sécurité.
+2732	Un autre composant installe ce nom ; réessayez plus tard ou choisissez un autre nom.
+2733	La commande {c} est en cours d'installation par un autre composant ; réessayez plus tard ou choisissez un autre nom.
+2734	La commande {c} a été prise pendant l'installation ; cette installation a été annulée.
+2735	Les réglages n'ont pas pu être écrits sur le disque ; ils peuvent encore s'appliquer pour cette exécution, mais reviendront aux anciennes valeurs après un redémarrage (voir les journaux de la passerelle).
