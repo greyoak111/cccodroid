@@ -338,7 +338,8 @@ export function enqueue(body) {
   // 自动复用空闲进程前还要核对执行配置：面板里刚换了接口/模型/思考强度，消息就不能再悄悄交给旧进程（#120-2）
   if (busyRun && busyRun.idle && !item.sched && sameExec(busyRun, item) && tryInject(busyRun, item)) { item.injected = true; publishState(); return item; }
   if ((body.mode === "inject" || body.mode === "interrupt") && busyRun) {
-    if (tryInject(busyRun, item)) { item.injected = true; return item; }
+    // 显式插话也要核对执行配置：面板刚换了接口/模型/思考强度，塞进旧进程就等于还按旧配置跑（同 #120-2）
+    if (sameExec(busyRun, item) && tryInject(busyRun, item)) { item.injected = true; return item; }
     QUEUE.unshift(item);
   } else {
     QUEUE.push(item);
@@ -408,7 +409,8 @@ export async function routeQueue(req, res, u, p) {
       const it = QUEUE.splice(i, 1)[0];
       it.held = false;                      // 挂起的消息靠这个放行
       const lr = laneRun(laneOfItem(it));
-      if (!(lr && tryInject(lr, it))) {
+      // ⚡ 也一样：执行配置变了就宁可排队等这一轮结束，不要把消息塞进用旧接口/旧模型的进程
+      if (!(lr && sameExec(lr, it) && tryInject(lr, it))) {
         QUEUE.unshift(it);
         // 那一轮答完了、只剩后台任务，输入又已经关了：这条只能等它结束。用户点了 ⚡ 就是不等——连同后台任务结束它，收尾后这条接着发
         if (lr && lr.idle && !lr.inputOpen && !lr.ended) { log("⚡ 上一轮只剩后台任务且输入已关，结束它好发出排着的消息"); abortRun(lr, { hold: false }); }

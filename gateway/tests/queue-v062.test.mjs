@@ -113,3 +113,34 @@ test("没记下执行配置的轮次不自动复用（#120-2）", () => {
     RUNS.delete(runId); RUN_LANE.delete(runId);
   }
 });
+
+test("显式插话也核对执行配置：换了模型就不再塞进旧进程（#120-2）", () => {
+  fill();
+  const sid = crypto.randomUUID();
+  setSessModel(sid, { model: "claude-v062-c" });
+  const intent = execIntent({ sessionId: sid });
+  let injected = 0;
+  const runId = "v062q-inject";
+  RUNS.set(runId, {
+    id: runId, text: "", startedAt: Date.now(), log: [], sessionId: sid, idle: true, ended: false, inputOpen: true,
+    lane: "s:" + sid, provider: intent.P.id, exec: { provider: intent.P.id, model: intent.model, effort: intent.effort },
+    inject: () => { injected++; return true; }, pendingInject: [],
+  });
+  RUN_LANE.set(runId, "s:" + sid);
+  let B, C;
+  try {
+    B = enqueue({ message: "插话", sessionId: sid, mode: "inject" });
+    assert.equal(B.injected, true, "配置没变：照常插进当前轮次");
+    assert.equal(injected, 1);
+    setSessModel(sid, { model: "claude-v062-d" });
+    C = enqueue({ message: "换过模型再插话", sessionId: sid, mode: "inject" });
+    assert.equal(!!C.injected, false, "配置变了：不能塞进旧进程");
+    assert.equal(injected, 1);
+    assert.ok(QUEUE.includes(C), "排到队首，等这一轮结束按新配置起进程");
+  } finally {
+    if (B) dropQ(B);
+    if (C) dropQ(C);
+    RUNS.delete(runId); RUN_LANE.delete(runId);
+    clearSessModel(sid);
+  }
+});
