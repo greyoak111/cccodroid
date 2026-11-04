@@ -202,7 +202,11 @@ export function undoDelete(id, backup) {
   const st = fs.statSync(found.file);
   if (st.size !== u.size || st.mtimeMs !== u.mtime) return { ok: false, status: 409, message: tz("删除之后会话又有了新内容，没法撤销。") };
   const dirty = checkSession(id, found.file);
-  fs.copyFileSync(src, found.file);
+  // 直接 copyFileSync 到活文件会先截断：写一半被杀/满盘会毁掉会话，而备份还在、size/mtime 校验却让重试被 409。
+  // 先抄到同目录临时文件，成功后再 rename 替换。
+  const tmp = found.file + ".undo-" + process.pid;
+  try { fs.copyFileSync(src, tmp); fs.renameSync(tmp, found.file); }
+  catch (e) { try { fs.rmSync(tmp, { force: true }); } catch {} throw e; }
   lineageForget(id);
   resealAfterEdit(id, found.file, dirty);
   PEEK_CACHE.delete(found.file);
