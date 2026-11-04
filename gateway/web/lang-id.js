@@ -2730,4 +2730,10 @@ window.I18N_DICT["id"] = {
   "Claude Code 程序被改过，已拒绝启动；": "Program Claude Code telah diubah dan tidak dijalankan; ",
   "应用文件被改过，已按安装包还原：": "File aplikasi telah diubah dan sudah dipulihkan dari paket aplikasi: ",
   "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。": "Program Claude Code tidak cocok dengan manifes resmi yang ditandatangani dan mungkin telah diubah, jadi giliran ini tidak dijalankan. Instal ulang di Pengaturan → Pembaruan lalu coba lagi.",
+  "昵称": "Nama panggilan",
+  "这个仓库的配置读不懂（名字里有换行、引号之类），为安全起见没有执行。": "Konfigurasi repositori ini tidak dapat dibaca (ada baris baru, tanda kutip, dan sejenisnya di nama), jadi demi keamanan tidak dijalankan.",
+  "另一个组件正在安装这个名字，稍后再试或换个名字": "Komponen lain sedang memasang nama itu; coba lagi nanti atau pilih nama lain.",
+  "命令 {c} 正在被另一个组件安装，稍后再试或换个名字": "Perintah {c} sedang dipasang oleh komponen lain; coba lagi nanti atau pilih nama lain.",
+  "命令 {c} 在安装期间被占了，已取消这次安装": "Perintah {c} diambil alih saat pemasangan, jadi pemasangan ini dibatalkan.",
+  "设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）": "Pengaturan tidak dapat ditulis ke disk; mungkin masih berlaku untuk jalannya ini, tetapi akan kembali ke nilai lama setelah mulai ulang (lihat log gateway untuk detail).",
 };

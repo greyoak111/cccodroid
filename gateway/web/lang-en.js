@@ -2764,5 +2764,11 @@ window.I18N_DICT.en = {
   "补算期间使用统计被清空了，这次补算的结果已丢弃。": "Usage stats were cleared while backfilling, so this backfill's results were discarded.",
   "Claude Code 程序被改过，已拒绝启动；": "The Claude Code program was modified and was not started; ",
   "应用文件被改过，已按安装包还原：": "App files were modified and have been restored from the app package: ",
-  "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。": "The Claude Code program doesn't match the official signed manifest and may have been modified, so this turn was not started. Reinstall it under Settings → Updates and try again."
+  "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。": "The Claude Code program doesn't match the official signed manifest and may have been modified, so this turn was not started. Reinstall it under Settings → Updates and try again.",
+  "昵称": "Nickname",
+  "这个仓库的配置读不懂（名字里有换行、引号之类），为安全起见没有执行。": "This repository's config can't be parsed (newlines or quotes in a name, etc.), so for safety it was not executed.",
+  "另一个组件正在安装这个名字，稍后再试或换个名字": "Another component is installing that name; try again later or choose a different name.",
+  "命令 {c} 正在被另一个组件安装，稍后再试或换个名字": "The command {c} is being installed by another component; try again later or choose a different name.",
+  "命令 {c} 在安装期间被占了，已取消这次安装": "The command {c} was taken during installation, so this install was canceled.",
+  "设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）": "Settings could not be written to disk; they may still apply for this run, but will revert after a restart (see gateway logs for details)."
 };

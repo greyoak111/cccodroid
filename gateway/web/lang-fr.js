@@ -2730,4 +2730,10 @@ window.I18N_DICT["fr"] = {
   "Claude Code 程序被改过，已拒绝启动；": "Le programme Claude Code a été modifié et n'a pas été lancé ; ",
   "应用文件被改过，已按安装包还原：": "Des fichiers de l'app avaient été modifiés ; ils ont été restaurés depuis le paquet de l'app : ",
   "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。": "Le programme Claude Code ne correspond pas au manifeste officiel signé et a peut-être été modifié ; ce tour n'a donc pas été lancé. Réinstallez-le dans Réglages → Mises à jour puis réessayez.",
+  "昵称": "Pseudo",
+  "这个仓库的配置读不懂（名字里有换行、引号之类），为安全起见没有执行。": "La configuration de ce dépôt est illisible (retours à la ligne, guillemets, etc. dans le nom), donc elle n'a pas été exécutée par sécurité.",
+  "另一个组件正在安装这个名字，稍后再试或换个名字": "Un autre composant installe ce nom ; réessayez plus tard ou choisissez un autre nom.",
+  "命令 {c} 正在被另一个组件安装，稍后再试或换个名字": "La commande {c} est en cours d'installation par un autre composant ; réessayez plus tard ou choisissez un autre nom.",
+  "命令 {c} 在安装期间被占了，已取消这次安装": "La commande {c} a été prise pendant l'installation ; cette installation a été annulée.",
+  "设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）": "Les réglages n'ont pas pu être écrits sur le disque ; ils peuvent encore s'appliquer pour cette exécution, mais reviendront aux anciennes valeurs après un redémarrage (voir les journaux de la passerelle).",
 };
