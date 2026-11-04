@@ -23,7 +23,10 @@ TAG="v$VER"
 [ -z "$(git -C "$ROOT" status --porcelain)" ] || { echo "✗ 工作区有未提交的改动，发布要对应一个确定的提交"; exit 1; }
 DEVKIT=$(sed -n 's|.*/download/\([^/]*\)/.*|\1|p' "$ROOT/devkit-sources.txt" | head -1)
 SHA=$(sha256sum "$APK" | cut -d' ' -f1)
-SHA36=$([ -s "$APK36" ] && sha256sum "$APK36" | cut -d' ' -f1)
+# 没有 36 包是正常情况（旧流程只发 28）。写成 [ -s ] && … 的话，文件不存在时这条命令返回 1，
+# set -e 会让脚本在建设 Release 之前直接退出
+SHA36=""
+[ -s "$APK36" ] && SHA36=$(sha256sum "$APK36" | cut -d' ' -f1) || true
 COMMIT=$(git -C "$ROOT" rev-parse HEAD)
 # 提交得先在 GitHub 上，tag 才建得出来（2026-10-17 推送被网络打断过一次，Release 跟着失败）
 git -C "$ROOT" fetch -q origin main 2>/dev/null || true
