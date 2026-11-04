@@ -32,23 +32,30 @@ function prove() {
     // 对面不回话、一个字一个字地拖、回一大串：都要先判失败再断开（只 destroy 不 resolve 会让这条命令一直挂着 —— DeepSeek 复核 11-03）
     const cut = () => { ok(false); rq.destroy(); };
     setTimeout(cut, 15000).unref();
-    const rq = http.get({ host: "127.0.0.1", port, path: "/__proof?n=" + n, timeout: 10000 }, (res) => {
+    const rq = http.get({ host: "127.0.0.1", port, path: "/__proof?for=tool&n=" + n, timeout: 10000 }, (res) => {
       let s = ""; res.setEncoding("utf8");
       res.on("data", (d) => { s += d; if (s.length > 4096) cut(); });
       res.on("end", () => {
         const [boot, got] = s.trim().split(" ");
-        const want = boot && crypto.createHmac("sha256", token).update(`proof:${n}:${boot}:127.0.0.1`).digest("hex");
-        ok(!!(want && got && want.length === got.length && crypto.timingSafeEqual(Buffer.from(want), Buffer.from(got))));
+        const want = boot && crypto.createHmac("sha256", token).update(`tproof:${n}:${boot}:127.0.0.1`).digest("hex");
+        ok(/^[0-9a-f]{32}$/.test(boot || "") && want && got && want.length === got.length && crypto.timingSafeEqual(Buffer.from(want), Buffer.from(got)) ? boot : false);
       });
     });
     rq.on("error", () => ok(false)); rq.on("timeout", cut);
   });
 }
-if (!token || !(await prove())) { console.error("cc-archive: the gateway on port " + port + " could not prove itself; token not sent"); process.exit(2); }
+const boot = token ? await prove() : false;
+if (!boot) { console.error("cc-archive: the gateway on port " + port + " could not prove itself; token not sent"); process.exit(2); }
 
+// 不交令牌原文，按 sig2 只签这一个请求（和自检对账一样）：核完身份到发请求之间网关万一换了人，拿到的也只是绑着这次 BOOT 的一次性签名（DeepSeek 复核 11-04）
+function sig2(method, p, b) {
+  const ts = String(Date.now()), r = crypto.randomBytes(16).toString("hex"), e = crypto.createHash("sha256").update(b).digest("hex");
+  const m = crypto.createHmac("sha256", token).update(`sig2:${boot}:127.0.0.1:${method}:${ts}:${r}:${e}:${p}`).digest("hex");
+  return { "x-cc-sig": `${ts}.${r}.${m}`, "x-cc-body": e };
+}
 const body = JSON.stringify({ run, title: opt.title, same: !!opt.same, misc: !!opt.misc, status: opt.status, chapter: opt.chapter != null ? Number(opt.chapter) : undefined });
 const req = http.request({ host: "127.0.0.1", port, path: "/api/archive", method: "POST",
-  headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body), "x-cc-token": token } }, (res) => {
+  headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body), ...sig2("POST", "/api/archive", body) } }, (res) => {
   let s = ""; res.setEncoding("utf8");
   res.on("data", (d) => (s += d));
   res.on("end", () => {

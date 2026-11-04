@@ -65,8 +65,8 @@ async function appInfo() {
     const tok = fs.readFileSync(tf, "utf8").trim(), mac = (s) => crypto.createHmac("sha256", tok).update(s).digest("hex");
     // 不发令牌原文（审查 10-30 第九份 高2）：先核身份（端口上可能是网关没起来时抢占的应用），再按 sig2 一次一签
     const n = crypto.randomBytes(16).toString("hex");
-    const [boot, pm] = (await (await fetch(`http://127.0.0.1:${PORT}/__proof?n=${n}`, { signal: AbortSignal.timeout(8000) })).text()).trim().split(" ");
-    if (!/^[0-9a-f]{32}$/.test(boot || "") || pm !== mac(`proof:${n}:${boot}:127.0.0.1`)) throw new Error("not the gateway");
+    const [boot, pm] = (await (await fetch(`http://127.0.0.1:${PORT}/__proof?for=tool&n=${n}`, { signal: AbortSignal.timeout(8000) })).text()).trim().split(" ");
+    if (!/^[0-9a-f]{32}$/.test(boot || "") || pm !== mac(`tproof:${n}:${boot}:127.0.0.1`)) throw new Error("not the gateway");
     const sig = (p) => { const ts = Date.now(), r = crypto.randomBytes(16).toString("hex"); return { "X-CC-Sig": `${ts}.${r}.${mac(`sig2:${boot}:127.0.0.1:GET:${ts}:${r}:${crypto.createHash("sha256").update("").digest("hex")}:${p}`)}` }; };
     const r = await fetch(`http://127.0.0.1:${PORT}/api/app/upd_status`, { headers: sig("/api/app/upd_status"), signal: AbortSignal.timeout(8000) });
     const j = await r.json(), it = (id) => (j.items || []).find((x) => x.id === id)?.current || "";

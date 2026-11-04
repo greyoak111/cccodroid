@@ -103,6 +103,17 @@ const mac = (s) => crypto.createHmac("sha256", KEY).update(s).digest("hex");
 export function proof(n, local = UI_HOST) {
   return /^[0-9a-f]{32,128}$/.test(String(n || "")) ? `${BOOT} ${mac(`proof:${n}:${BOOT}:${local}`)}` : null;
 }
+// 终端里的工具（cccodroid-selftest、cc-archive）用的证明：它们手里只有令牌，算不出上面那个按应用随机数派生的钥匙 ——
+// 0.6.3 起 proof 换了钥匙，它们就永远核不过、不交凭据，建档 / 补档和自检对账全失败（11-04 真机自检发现）。
+// 这里直接用令牌、换个前缀：别的应用（不同 uid）读不到令牌，照样冒充不了；同 uid 的本来就读得到令牌，没多给什么。
+// 前缀不同，算出来的东西当不了界面那条证明，也当不了 sig2 签名
+/** /__proof 的应答：带 for=tool 的是终端工具，答令牌域的那条；其余（App）答派生钥匙那条 */
+export function proofFor(u, local) {
+  return (u.searchParams.get("for") === "tool" ? toolProof : proof)(u.searchParams.get("n"), local);
+}
+export function toolProof(n, local = UI_HOST) {
+  return /^[0-9a-f]{32,128}$/.test(String(n || "")) ? `${BOOT} ${crypto.createHmac("sha256", TOKEN).update(`tproof:${n}:${BOOT}:${local}`).digest("hex")}` : null;
+}
 // 界面的页面与静态资源由 App 在原生层代取（MainActivity.shouldInterceptRequest，审查 10-29 第六份 中3）：
 // App 带一个随机数 X-CC-Nonce，这里用令牌对「随机数 + 请求行 + 内容哈希」算 HMAC 放在 X-CC-Mac 里回去。
 // 网关没起来的空档里抢占端口的应用算不出来，它给的页面和脚本 App 一律不交给 WebView

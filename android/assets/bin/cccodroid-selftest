@@ -163,8 +163,8 @@ if [ -z "$CCAPP_ENVFACTS" ] && [ -r "$TF" ]; then
 const c=require("crypto"),fs=require("fs"),h=require("http");
 const T=fs.readFileSync(process.env.TF,"utf8").replace(/[\r\n]/g,""),P=+process.env.GP,L="127.0.0.1",mac=s=>c.createHmac("sha256",T).update(s).digest("hex");
 const get=(p,hd)=>new Promise((ok,no)=>{const r=h.get({host:L,port:P,path:p,headers:hd,timeout:60e3},s=>{let b="";s.setEncoding("utf8");s.on("data",d=>b+=d);s.on("end",()=>s.statusCode===200?ok(b):no(new Error("HTTP "+s.statusCode+" "+b.slice(0,120))))});r.on("timeout",()=>r.destroy(new Error("超时")));r.on("error",no)});
-(async()=>{const n=c.randomBytes(16).toString("hex");const [boot,m]=(await get("/__proof?n="+n)).trim().split(" ");
-if(!/^[0-9a-f]{32}$/.test(boot||"")||m!==mac("proof:"+n+":"+boot+":"+L))throw new Error("端口上的不是本机网关（身份核验没过），没交凭据");
+(async()=>{const n=c.randomBytes(16).toString("hex");const [boot,m]=(await get("/__proof?for=tool&n="+n)).trim().split(" ");
+if(!/^[0-9a-f]{32}$/.test(boot||"")||m!==mac("tproof:"+n+":"+boot+":"+L))throw new Error("端口上的不是本机网关（身份核验没过），没交凭据");
 const p="/api/reconcile?run=1&format=selftest",ts=String(Date.now()),r=c.randomBytes(16).toString("hex"),e=c.createHash("sha256").update("").digest("hex");
 process.stdout.write(await get(p,{"X-CC-Sig":ts+"."+r+"."+mac("sig2:"+boot+":"+L+":GET:"+ts+":"+r+":"+e+":"+p)}))})().catch(e=>{console.error(e.message);process.exit(1)})' 2>&1)
   if [ $? -ne 0 ]; then NF=$((NF+1)); echo "FAIL 状态对账 :: 问网关失败：$(echo "$out" | head -1 | cut -c1-160)"

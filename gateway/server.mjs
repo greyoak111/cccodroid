@@ -82,7 +82,7 @@ import { routeMerge } from "./gw/merge.mjs";
 import { routeProfile } from "./gw/profile.mjs";
 import { routeBackfill } from "./gw/backfill.mjs";
 import { routeArchive } from "./gw/archive.mjs";
-import { COOKIE, SESSION, UI_HOST, cookieHostOk, denyLog, denyReason, localAddr, proof, tokenOk } from "./gw/access.mjs";
+import { COOKIE, SESSION, UI_HOST, cookieHostOk, denyLog, denyReason, localAddr, proofFor, tokenOk } from "./gw/access.mjs";
 import { startWorkIsland, stopWorkIslandSync } from "./gw/work-island.mjs";
 
 // 各模块的路由函数，按原来分支的先后排；返回 NEXT 表示不归它管
@@ -116,7 +116,7 @@ const server = http.createServer(async (req, res) => {
   if (req.socket && req.ccAuthed) req.socket.__cc = 1;      // 带凭据过了鉴权：连接槽快满时不挤它（见 guardSlots）；/ 这类不要凭据的页面不算
   // App 核身份用（见 access.mjs 的 proof）：不要令牌，回的东西没有令牌算不出来
   if (req.method === "GET" && p === "/__proof") {
-    const r = proof(u.searchParams.get("n"), localAddr(req));
+    const r = proofFor(u, localAddr(req));
     if (!r) return sendJson(res, 400, { error: "bad nonce" });
     res.writeHead(200, { "content-type": "text/plain", "cache-control": "no-store" });
     return res.end(r);

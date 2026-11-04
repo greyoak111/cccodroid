@@ -6,7 +6,7 @@ import http from "node:http";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { TOKEN, localAddr, proof, sigOk } from "../gw/access.mjs";
+import { BOOT, TOKEN, localAddr, proof, proofFor, sigOk, toolProof } from "../gw/access.mjs";
 import { agentBook, settleAgentRecs } from "../gw/agents.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -32,7 +32,8 @@ test("自检对账：真网关核过身份后按 sig2 签名通过，全程不�
   const srv = await serve((req, res) => {
     seen.push(JSON.stringify([req.url, req.headers]));
     const u = new URL(req.url, "http://x");
-    if (u.pathname === "/__proof") return res.end(proof(u.searchParams.get("n"), localAddr(req)));
+    // 照应用里的样子答：界面那条证明用应用随机数派生的钥匙，自检算不出（给一串对不上的），只能走 for=tool（11-04）
+    if (u.pathname === "/__proof") return res.end(u.searchParams.get("for") === "tool" ? toolProof(u.searchParams.get("n"), localAddr(req)) : BOOT + " " + "f".repeat(64));
     if (!sigOk(req.headers["x-cc-sig"], req.url, { method: req.method, local: localAddr(req) })) { res.statusCode = 403; return res.end("no"); }
     res.end("PASS 对账 :: ok\n");
   });
@@ -214,4 +215,16 @@ test("模型清单地址：同主机 / 同站点 + https 才带密钥去问", ()
   assert.equal(ok("http://localhost:4000/anthropic", "http://localhost:4000/v1/models"), true);
   assert.equal(ok("http://127.0.0.1:8080", "http://192.168.1.2:8080/v1/models"), false);
   assert.equal(ok("http://192.168.1.2:8080", "http://192.168.1.2:8080/v1/models"), false);
+});
+
+test("工具证明（for=tool）：令牌派生、前缀和界面那条不同，互相顶替不了", () => {
+  const n = "a".repeat(32);
+  const [b1, m1] = toolProof(n, "127.0.0.1").split(" ");
+  assert.equal(b1, BOOT);
+  assert.equal(m1, crypto.createHmac("sha256", TOKEN).update(`tproof:${n}:${BOOT}:127.0.0.1`).digest("hex"));
+  assert.notEqual(m1, crypto.createHmac("sha256", TOKEN).update(`proof:${n}:${BOOT}:127.0.0.1`).digest("hex"));
+  assert.equal(toolProof("zz", "127.0.0.1"), null);
+  // /__proof 的分派：带 for=tool 才答令牌域那条，App 的请求照旧答 proof
+  assert.equal(proofFor(new URL("http://x/__proof?for=tool&n=" + n), "127.0.0.1"), toolProof(n, "127.0.0.1"));
+  assert.equal(proofFor(new URL("http://x/__proof?n=" + n), "127.0.0.1"), proof(n, "127.0.0.1"));
 });

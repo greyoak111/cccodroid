@@ -109,11 +109,18 @@ test("命令行 cc-archive：带本轮编号交档，网关认出会话；不合
   const { RUNS } = await import("../gw/runs.mjs");
   const sid = session(4, 1);
   RUNS.set("run-arch-1", { id: "run-arch-1", sessionId: sid });
-  const { proof, localAddr } = await import("../gw/access.mjs");
-  // 和 server.mjs 一样答 /__proof：cc-archive 先确认对面是真网关才交令牌（11-03 审查 L-6）
+  const { toolProof, localAddr, BOOT, sigOk } = await import("../gw/access.mjs");
+  let sawToken = false;
+  // 和 server.mjs 一样答 /__proof：cc-archive 先确认对面是真网关才交令牌（11-03 审查 L-6）。
+  // 照应用里的样子答：界面那条证明用应用随机数派生的钥匙，终端工具算不出（这里给一串对不上的），工具只能走 for=tool（11-04）
   const srv = http.createServer((req, res) => {
     const u = new URL(req.url, "http://127.0.0.1");
-    if (u.pathname === "/__proof") { res.writeHead(200); return res.end(proof(u.searchParams.get("n"), localAddr(req))); }
+    if (u.pathname === "/__proof") { res.writeHead(200); return res.end(u.searchParams.get("for") === "tool" ? toolProof(u.searchParams.get("n"), localAddr(req)) : BOOT + " " + "f".repeat(64)); }
+    // 和网关的鉴权一样核 sig2（含请求体哈希）；令牌原文一律不该出现
+    if (req.headers["x-cc-token"]) sawToken = true;
+    const b = String(req.headers["x-cc-body"] || "");
+    if (!sigOk(req.headers["x-cc-sig"], req.url, { method: req.method, local: localAddr(req), body: b })) { res.writeHead(403); return res.end("{}"); }
+    req.ccBodySha = b;
     routeArchive(req, res, u, u.pathname);
   });
   await new Promise((r) => srv.listen(0, "127.0.0.1", r));
@@ -128,6 +135,7 @@ test("命令行 cc-archive：带本轮编号交档，网关认出会话；不合
   const r2 = await run("--title", "审 GPU 驱动组件");
   assert.equal(r2.code, 0, r2.o);
   assert.match(r2.o, /filed .*·1: 审 GPU 驱动组件/);
+  assert.equal(sawToken, false, "交档请求带了令牌原文");
   srv.close();
   RUNS.delete("run-arch-1");
   // 冒牌的（端口上是别的监听者）：答不出 /__proof，令牌一个字节都不给它
