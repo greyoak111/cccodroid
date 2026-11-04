@@ -83,7 +83,9 @@ async function refresh() {
  *  不扔的话，改写后又聊得比原来长，增量扫描会当成纯追加，章节的字节位置全错（审查 v0513b 低-27） */
 export function lineageForget(sid) {
   loadCache();
-  if (RECS.delete(sid)) { dirty = true; gen++; }
+  // 要立刻落盘：只清内存的话，进程在下次 refresh 前被杀，重启后又拿旧缓存按旧 off 增量续读，
+  // 改写过的 cwd/消息就会永久留在索引里（移到项目后显示旧项目、轮数重复）。
+  if (RECS.delete(sid)) { dirty = true; gen++; saveCache(); }
 }
 
 /** 索引与亲缘边的代次戳：变了才需要重算整张图（剖面按它缓存各会话的子边） */

@@ -67,8 +67,15 @@ export async function scanSession(file, prev) {
       rest = Buffer.from(data.subarray(start));
       if (rest.length > 64 << 20) rest = Buffer.alloc(0);   // 单行超长（巨型工具结果）：不要它，免得吃光内存
     }
-    // 最后一行没换行：可能还在写，下次从它开头再读
+    // 最后一行没换行：可能还在写，下次从它开头再读。但导入的会话包常把最后一行完整写到最后（没有换行），
+    // 那不是半行：JSON 能解析就收下并推进 off，否则留给下次。
     r.off = pos - rest.length;
+    if (rest.length && rest.length <= 8e6) {
+      const s = rest.toString("utf8");
+      if (s.includes('"uuid"')) {
+        try { JSON.parse(s); line(rest, pos - rest.length); r.off = pos; } catch {}
+      }
+    }
     return r;
 
     function line(b, at) {
