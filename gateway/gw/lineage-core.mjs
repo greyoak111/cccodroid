@@ -147,7 +147,10 @@ export function direction(a, b, r, names = {}) {
   if (!parent) {
     const tally = {};
     for (const v of [votes.after, votes.name]) if (v) tally[v] = (tally[v] || 0) + 1;
-    parent = Object.entries(tally).sort((x, y) => y[1] - x[1])[0]?.[0] || (a.firstTs <= b.firstTs ? a.id : b.id);
+    const top = Object.entries(tally).sort((x, y) => y[1] - x[1]);
+    // 两票各投一边（1:1）时不能按插入顺序取 after：注释说的是取开始得早的那个
+    const win = top.length && (top.length === 1 || top[0][1] > top[1][1]) ? top[0][0] : null;
+    parent = win || (a.firstTs <= b.firstTs ? a.id : b.id);
   }
   return { parent, child: parent === a.id ? b.id : a.id, votes };
 }
