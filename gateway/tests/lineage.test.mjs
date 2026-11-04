@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { scanSession, inferParents } from "../gw/lineage-core.mjs";
+import { scanSession, inferParents, direction } from "../gw/lineage-core.mjs";
 
 const DIR = fs.mkdtempSync(path.join(process.env.CCAPP_TMP, "lineage-"));
 const T0 = Date.parse("2026-10-20T00:00:00Z");
@@ -229,4 +229,15 @@ test("旧会话兼容：章首提问跳过「你好，claude」「继续」，�
   assert.equal(r.lead, "看看这台设备的开发能力");
   assert.equal(r.first, "你好，claude");
   assert.equal(r.compacts[0].q, "继续", "前 3 句都没内容就留第一句，不往后找");
+});
+
+test("direction：两票各投一边时取开始得早的当父，两票一致时按票数", () => {
+  const a = { id: "a", firstTs: 100 }, b = { id: "b", firstTs: 200 };
+  // birth 弃权；after 投 b，name（a 无「分叉」后缀、b 有）投 a → 1:1，按注释取开始早的 a
+  const tie = direction(a, b, { afterA: 2, afterB: 1 }, { a: "父", b: "子 · 分叉" });
+  assert.equal(tie.parent, "a");
+  assert.equal(tie.child, "b");
+  // 两票一致投 b（a 带「分叉」后缀、after 也投 b）→ 按票数，不按 firstTs
+  const agree = direction(a, b, { afterA: 2, afterB: 1 }, { a: "子 · 分叉", b: "父" });
+  assert.equal(agree.parent, "b");
 });

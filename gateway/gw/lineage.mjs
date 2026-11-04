@@ -71,8 +71,14 @@ async function refresh() {
     let st; try { st = fs.statSync(f.file); } catch { continue; }
     META.set(f.id, { file: f.file, project: f.project, trashed: f.trashed, mtime: st.mtimeMs });
     const prev = RECS.get(f.id);
-    if (prev && prev.size === st.size && prev.off === st.size) continue;
-    try { RECS.set(f.id, await scanSession(f.file, prev)); dirty = true; gen++; }
+    // 只比大小会漏掉「原地改写成同样大小」：scanSession 里的开头哈希永远没机会核对。
+    // 大小没变时再比 mtime，只有两者都没变才直接用缓存；mtime 变了仍交给 scanSession 核开头哈希。
+    if (prev && prev.size === st.size && prev.off === st.size && prev.mtime === st.mtimeMs) continue;
+    try {
+      const rec = await scanSession(f.file, prev);
+      rec.mtime = st.mtimeMs;
+      RECS.set(f.id, rec); dirty = true; gen++;
+    }
     catch (e) { log(`脉络：读 ${f.id.slice(0, 8)} 失败：${e.message}`); }
   }
   for (const id of [...RECS.keys()]) if (!alive.has(id)) { RECS.delete(id); META.delete(id); dirty = true; gen++; }
