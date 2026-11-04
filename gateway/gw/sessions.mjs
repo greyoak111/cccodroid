@@ -33,16 +33,23 @@ const sessionTitle = (id, meta) => NAMES[id] || archivedTitle(id) || meta.title;
 
 // 改名表的版本：每次落盘加一。脉络/剖面的缓存戳带上它，改名（键数不变）也会重建（DeepSeek 复核 #6）
 export let NAMES_REV = 0;
+/** 写 JSON 表：先写同目录临时文件再 rename。直接写目标文件在写一半被杀/满盘时会留下截断 JSON，
+ *  下次启动只能按空表起，用户改过的标题/置顶就全丢了。 */
+function writeJsonTable(file, obj) {
+  const tmp = file + ".tmp-" + process.pid;
+  try { fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: 0o600 }); fs.renameSync(tmp, file); }
+  catch { try { fs.rmSync(tmp, { force: true }); } catch {} }
+}
 export function saveNames() {
   NAMES_REV++;
-  try { fs.writeFileSync(PATHS.names, JSON.stringify(NAMES, null, 2), { mode: 0o600 }); } catch {}
+  writeJsonTable(PATHS.names, NAMES);
 }
 // 置顶表：会话号 → 置顶时刻
 const PINS_FILE = path.join(CFG.home, "ccapp-session-pins.json");
 export let PINS = {};
-try { PINS = JSON.parse(fs.readFileSync(PINS_FILE, "utf8")); } catch {}
+try { const j = JSON.parse(fs.readFileSync(PINS_FILE, "utf8")); if (j && typeof j === "object" && !Array.isArray(j)) PINS = j; } catch {}
 export function savePins() {
-  try { fs.writeFileSync(PINS_FILE, JSON.stringify(PINS, null, 2), { mode: 0o600 }); } catch {}
+  writeJsonTable(PINS_FILE, PINS);
 }
 
 // ── 会话（claude 的 transcript 文件）─────────────────────────────────

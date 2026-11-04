@@ -506,10 +506,34 @@ async function testProvider(id) {
 //       多了是充值（不算消费）。算的是整个账号的真实花费，同一把 Key 在别处用掉的也算。
 // token：每轮结束按 claude 报的用量记一笔，所有厂商都有（查不了余额的平台就看这个）。
 const BILL_FILE = path.join(CFG.home, "ccapp-billing.json");
-let BILL = (() => { try { return JSON.parse(fs.readFileSync(BILL_FILE, "utf8")) || {}; } catch { return {}; } })();
+// 账本缺字段时 noteTokens 会抛异常，而 server.mjs 不接 uncaughtException（整条 result 会带崩网关）。
+// 读进来先补成完整形状；整体不是对象就按空账本处理。
+function billShape(j) {
+  if (!j || typeof j !== "object" || Array.isArray(j)) return {};
+  for (const [id, b] of Object.entries(j)) {
+    if (!b || typeof b !== "object" || Array.isArray(b)) { delete j[id]; continue; }
+    if (!Array.isArray(b.spends)) b.spends = [];
+    if (!Array.isArray(b.tok)) b.tok = [];
+    if (!b.tokOld || typeof b.tokOld !== "object") b.tokOld = { in: 0, out: 0, cache: 0 };
+    else for (const k of ["in", "out", "cache"]) if (typeof b.tokOld[k] !== "number") b.tokOld[k] = 0;
+    if (typeof b.spentOld !== "number") b.spentOld = 0;
+    if (typeof b.since !== "number") b.since = Date.now();
+  }
+  return j;
+}
+let BILL = (() => { try { return billShape(JSON.parse(fs.readFileSync(BILL_FILE, "utf8"))); } catch { return {}; } })();
 let billSaveT = null;
-const saveBill = () => { clearTimeout(billSaveT); billSaveT = setTimeout(() => { try { fs.writeFileSync(BILL_FILE, JSON.stringify(BILL), { mode: 0o600 }); } catch {} }, 500); };
-const billOf = (id) => (BILL[id] ||= { since: Date.now(), spends: [], spentOld: 0, tok: [], tokOld: { in: 0, out: 0, cache: 0 } });
+const saveBill = () => { clearTimeout(billSaveT); billSaveT = setTimeout(() => {
+  // 直接写目标文件会先截断：写一半被杀/满盘就把整个账本毁了，下次启动只能当空账本。先写临时文件再 rename。
+  const tmp = BILL_FILE + ".tmp-" + process.pid;
+  try { fs.writeFileSync(tmp, JSON.stringify(BILL), { mode: 0o600 }); fs.renameSync(tmp, BILL_FILE); }
+  catch { try { fs.rmSync(tmp, { force: true }); } catch {} }
+}, 500); };
+const billOf = (id) => {
+  const b = (BILL[id] ||= {});
+  b.since ||= Date.now(); b.spends ||= []; b.spentOld ||= 0; b.tok ||= []; b.tokOld ||= { in: 0, out: 0, cache: 0 };
+  return b;
+};
 const KEEP_MS = 92 * 86400e3;   // 明细留三个月，更早的并进累计
 
 /** 按端点认平台。认不出的（含自定义）就只记 token */
