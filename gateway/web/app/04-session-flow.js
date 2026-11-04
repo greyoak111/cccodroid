@@ -674,7 +674,7 @@
       }
       case "init": {
         if (!view.runIds.has(ev.runId)) return;
-        if (!view.sessionId && ev.sessionId) { view.sessionId = ev.sessionId; adoptPendingModel(); saveUiState(); }
+        if (!view.sessionId && ev.sessionId) { view.sessionId = ev.sessionId; draftAdopt(ev.sessionId); adoptPendingModel(); saveUiState(); }
         if (ev.model) { state.model = ev.model; paintModel(ev.model); }
         if (ev.permissionMode) setPermChip(ev.permissionMode);
         return;
@@ -801,11 +801,11 @@
     // 不在当前视图里画的一轮（别的会话在后台跑完）：数照样按会话记下，切过去就能看到
     if (!rv) { if (!ev.localCommand && ev.sessionId) { const st = statBits(ev); if (st) statSave(ev.sessionId, st); } if (belongs(ev)) loadSessions(); return; }
     const av = rv.av;
-    rv.timer?.stop();
+    rv.timer?.stop(ev.at);
     // 实时那份先停；本地命令（/context 等）不算一轮，底栏回到上一轮的数，普通一轮下面再定格
     if (statRun === ev.runId) { statStop(); statEl.textContent = statLast[view.sessionId || ev.sessionId] || ""; }
     for (const [id, it] of PERMS) if (it.runId === ev.runId && !it.done) permDone(id, "stopped");
-    if (ev.sessionId && !view.sessionId && view.runIds.has(ev.runId)) { view.sessionId = ev.sessionId; adoptPendingModel(); saveUiState(); }
+    if (ev.sessionId && !view.sessionId && view.runIds.has(ev.runId)) { view.sessionId = ev.sessionId; draftAdopt(ev.sessionId); adoptPendingModel(); saveUiState(); }
     if (ev.usage?.context_tokens) liveCtx(ev.usage.context_tokens, ev.usage.context_window || state.ctxTotal);
 
     if (ev.localCommand && ev.resultText) {
@@ -912,8 +912,9 @@
     scrollDown(true);
   }
   const isBusy = () => !!srv.run && !srv.run.idle;
-  /** 并行上限真的满了（不算只剩后台任务的空闲轮次） */
-  const atCap = () => srv.runs.filter((r) => !r.idle).length >= (srv.max || 3);
+  /** 并行上限满了：和网关 pump 同一口径按进程数算，只剩后台任务的空闲轮次也占着槽（#142-3：以前不算它，
+   *  满了却说成「这个会话的上一轮还没结束」，新会话哪来的上一轮） */
+  const atCap = () => srv.runs.length >= (srv.max || 3);
 
   /** 并行多会话：从网关的全部轮次和队列里挑出属于当前视图的 */
   function runInView(r) {

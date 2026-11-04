@@ -16,7 +16,7 @@
 // ─────────────────────────────────────────────────────────────────────
 import fs from "node:fs";
 import path from "node:path";
-import { ROOT, die, signAndPublish } from "./signed-pub.mjs";
+import { ROOT, die, loadPublished, signAndPublish } from "./signed-pub.mjs";
 
 const F = path.join(ROOT, "notices/notices.json");
 const SITE = "https://cccodroid.net/notices.json";
@@ -25,7 +25,7 @@ const opt = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv.splice(i, 2
 const flag = (k) => { const i = argv.indexOf(k); return i >= 0 ? (argv.splice(i, 1), true) : false; };
 const DATE = /^\d{4}-\d{2}-\d{2}$/, VER = /^\d+\.\d+\.\d+$/;
 
-const load = () => { try { return JSON.parse(fs.readFileSync(F, "utf8")); } catch { return { v: 1, updated: "", notices: [] }; } };
+const load = () => loadPublished(F, { v: 1, updated: "", notices: [] }, (d) => Array.isArray(d.notices));
 const cmd = argv.shift();
 
 if (cmd === "list" || !cmd) {

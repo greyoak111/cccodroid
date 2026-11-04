@@ -1,11 +1,15 @@
   // 0.3.16：项目 / 定时任务也能指定接口；别家的模型清单按需拉一次，缓存在 PJ.pm
   PJ.pm = {};
+  PJ.pmGen = 0;
+  /** 接口配置变了（设置页保存、受管桥改清单、全局清单重拉）：别家清单缓存作废，下次用到再取；在途的旧响应也不许写回（#143-3） */
+  function dropProvModels() { PJ.pm = {}; PJ.pmGen++; }
   // 项目颜色只认 #rrggbb：网关存的时候已经卡过，这里再卡一道，别让旧数据或手改的文件把别的东西塞进 style（审查 v0513b 低-34）
   const pjCol = (c) => (/^#[0-9a-f]{6}$/i.test(c) ? c : "currentColor");
   function provModelsOf(id) {
     if (!id || id === globalProv()) return Promise.resolve(MODELS);
     if (PJ.pm[id]) return Promise.resolve(PJ.pm[id]);
-    return api("/api/models?browse=" + encodeURIComponent(id)).then((r) => { if (r.providers) state.provList = r.providers; return (PJ.pm[id] = r.models || []); }).catch(() => []);
+    const g = PJ.pmGen;
+    return api("/api/models?browse=" + encodeURIComponent(id)).then((r) => { if (r.providers) state.provList = r.providers; const ms = r.models || []; if (g === PJ.pmGen) PJ.pm[id] = ms; return ms; }).catch(() => []);
   }
   const usableProvs = () => (state.provList || []).filter((p) => p.usable && !p.hidden);
   const provChoices = (follow, cur) => [["", follow], ...usableProvs().map((p) => [p.id, provLabel(p.id)]),
@@ -64,7 +68,8 @@
     const keepDraft = oldTa && oldTa.dataset.pid === id && oldTa.value !== (d.instr || "") ? oldTa.value : null;
     const p = d.project;
     setOv(p.name); setPageSub("projects", p.path);
-    if (!MODELS.length) api("/api/models").then((r) => { MODELS = r.models || []; PJ.effLevels = r.effortLevels || []; if (PJ.cur === id) renderProject(box); }).catch(() => {});
+    // 拉回来是空清单（端侧模型删光了）也算拉过：以前按「空 = 没拉过」判断，回执重画又拉，一直循环（#143-2）
+    if (!MODELS.length && !PJ.mLoaded) api("/api/models").then((r) => { MODELS = r.models || []; PJ.mLoaded = true; PJ.effLevels = r.effortLevels || []; if (PJ.cur === id) renderProject(box); }).catch(() => {});
     const opt = (v, l, cur) => `<option value="${esc(v)}"${v === (cur || "") ? " selected" : ""}>${esc(l)}</option>`;
     const follow = t("跟随全局");
     // 项目指定了别家：型号清单换成那家的（没拉过先拉，拉回来重画）
@@ -122,7 +127,12 @@
     if (a === "memory") { const m = PJ.detail.memory[0]; return openFiles(m.path.replace(/\/[^/]+$/, "")); }
     if (a === "newtask") return taskDlg(null, { projectId: p.id });
     const f = e.target.closest("[data-file]");
-    if (f) { const full = p.path.replace(/\/$/, "") + "/" + f.dataset.file; return f.dataset.dir ? openFiles(full) : openViewer(full); }
+    if (f) {
+      const full = p.path.replace(/\/$/, "") + "/" + f.dataset.file;
+      if (f.dataset.dir) return openFiles(full);
+      // 项目摘要里只有名字和是不是目录，没有类型：走 openPath 先问一次 stat，和文件浏览器进同一个查看器（#145-1）
+      return openPath(full);
+    }
     if (a === "instr-undo") { box.querySelector(".pj-instr").value = PJ.detail.instr || ""; box.querySelector(".pj-save").classList.add("hidden"); return; }
     if (a === "instr-save") {
       const ta = box.querySelector(".pj-instr");
@@ -549,10 +559,13 @@
     });
     q("#t-try")?.addEventListener("click", () => runTaskNow(x, true));
     // 换接口：型号下拉换成那家的清单（旧型号名是给原来那家的，清掉）
-    let fmN = 0;
+    let fmN = 0, fmPid = "";
+    // 这个任务真用哪家：接口留空（跟随）时和网关一样先看所选项目指定的那家，再落到全局（#143-1：以前空接口一律当全局，列出的是全局那家的型号）
+    const effProv = () => (q("#t-prov") ? q("#t-prov").value : "") || (PJ.list.find((p) => p.id === q("#t-proj").value) || {}).provider || "";
     const fillModels = async (keep) => {
       // 快速连换接口：慢的那家清单迟到不许盖掉现在这家的（审查 E04）
-      const n = ++fmN, pid = q("#t-prov") ? q("#t-prov").value : "", msel = q("#t-model");
+      const n = ++fmN, pid = effProv(), msel = q("#t-model");
+      fmPid = pid;
       if (!msel) return;
       // 清单回来之前型号框锁住、旧型号先清掉：否则这时点保存会存成「新接口 + 旧型号」（审查 #52 E04）
       const cur = keep ? msel.value : "";
@@ -565,8 +578,10 @@
         .map(([a, b]) => `<option value="${esc(a)}"${a === cur ? " selected" : ""}>${esc(b)}</option>`).join("");
     };
     q("#t-prov")?.addEventListener("change", () => fillModels(false));
-    if (v.provider && v.provider !== globalProv()) fillModels(true);
-    if (!MODELS.length) api("/api/models").then((r) => { MODELS = r.models || []; PJ.effLevels = r.effortLevels || []; }).catch(() => {});
+    // 接口跟随项目时换了项目：有效那家可能变了，型号清单跟着换（同一家就不动，免得清掉已选的）
+    q("#t-proj").addEventListener("change", () => { if (!(q("#t-prov") ? q("#t-prov").value : "") && effProv() !== fmPid) fillModels(false); });
+    if (effProv() && effProv() !== globalProv()) fillModels(true);
+    if (!MODELS.length && !PJ.mLoaded) api("/api/models").then((r) => { MODELS = r.models || []; PJ.mLoaded = true; PJ.effLevels = r.effortLevels || []; }).catch(() => {});
     setTimeout(() => (edit ? null : q("#t-name").focus()), 50);
   }
 

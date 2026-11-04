@@ -2763,4 +2763,11 @@ window.I18N_DICT["id"] = {
   "正常情况下不会出现。拿不准这一步是做什么的，就拒绝。": "Ini biasanya tidak terjadi. Jika Anda tidak yakin apa yang dilakukan langkah ini, tolak saja.",
   "已打开，{t} 自动关闭": "Aktif — otomatis mati pada {t}",
   "远端名不合法": "Nama remote tidak valid",
+  "选位置时应用被系统关掉了，找不回要保存的文件，再保存一次就好": "Aplikasi ditutup sistem saat Anda memilih lokasi, sehingga file yang akan disimpan hilang. Simpan lagi.",
+  "Claude Code 被别的程序结束了（{why}），不是模型或接口的问题": "Claude Code dihentikan oleh program lain ({why}); ini bukan masalah model atau API",
+  "生成中断（{sig}）": "Pembuatan terputus ({sig})",
+  "生成失败（退出码 {code}）": "Pembuatan gagal (kode keluar {code})",
+  "生成结束但没有返回结果": "Pembuatan selesai tanpa hasil",
+  "上一个文件还没选好保存位置": "File sebelumnya masih menunggu lokasi penyimpanan",
+  "原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里": "File aslinya sudah tidak ada (diganti nama, dipindah, atau dihapus).\nOK: simpan salinan dengan nama aslinya\nBatal: jangan simpan dulu, perubahan tetap di editor",
 };

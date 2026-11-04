@@ -231,7 +231,12 @@
     try { st = await api("/api/login/status"); } catch {}
     const box = $("quota-field"), l = st && st.loggedIn !== false && st.limits;
     box.classList.toggle("hidden", !(st && st.loggedIn));
-    if (!l) { $("quota-tiles").innerHTML = ""; $("quota-note").textContent = t("额度：发一条消息后显示（5 小时 / 每周）"); return; }
+    if (!l) {
+      $("quota-tiles").innerHTML = ""; $("quota-note").textContent = t("额度：发一条消息后显示（5 小时 / 每周）");
+      // 退出 / 换了个还没额度数据的账户：用量看板和设置摘要里的周额度也得撤掉，别挂着上一个账户的数（#144-2）
+      if (usDash.quota) { usDash.quota = null; usPaint(); paintSetUsage(); }
+      return;
+    }
     const tile = (label, w) => {
       if (!w) return "";
       const pct = Math.max(0, Math.min(100, w.used));
@@ -575,9 +580,10 @@
     let list = [];
     try { list = (await api("/api/providers")).providers || []; } catch {}
     // 官方账户先问清登没登录再决定列不列：先列「读取中…」再删掉，行数一变下面的卡片就往上跳（#38）
-    const lst = list.some((p) => !p.active && p.login) ? await api("/api/login/status").catch(() => null) : null;
+    const lst = list.some((p) => p.login && p.id !== (cur ? cur.id : state.serverStatus?.provider)) ? await api("/api/login/status").catch(() => null) : null;
     if (curPage !== "usage") return;
-    const others = list.filter((p) => !p.active && !p.local && (p.login ? !!(lst && lst.loggedIn) : p.hasKey));
+    // 「其他」= 主卡那家以外的：主卡按会话那家算（可能不是全局），这里也按它排，别把会话那家列两遍、全局那家漏掉（#144-1）
+    const others = list.filter((p) => p.id !== (cur ? cur.id : state.serverStatus?.provider) && !p.local && (p.login ? !!(lst && lst.loggedIn) : p.hasKey));
     const box = $("us-acct-others");
     const keep = new Set([...box.querySelectorAll("details[open]")].map((d) => d.dataset.id));
     box.innerHTML = others.length ? `<div class="sub">${t("其他接口")}</div>` + others.map((p) =>
@@ -680,6 +686,7 @@
   async function reloadProv(msg, thenTest) {
     toast(msg);
     const id = state.provView;
+    dropProvModels();   // 改的可能是别家（项目 / 定时任务菜单用的那份缓存）
     await loadProviders();
     if (id === state.providerActive) await loadModels(true);
     refreshSessModel();   // 默认型号可能改了：跟随默认（或钉在这家默认型号上）的会话标签跟着重画（#81）
@@ -718,6 +725,8 @@
   }
   async function importFont(file) {
     if (!file) return;
+    // 槽位在开始时取走：上传没完又从另一个槽位导入，ufFor 会被改掉，先回来的那个不能用到别的槽上（#133）
+    const slot = ufFor; ufFor = "";
     if (file.size > 40 * 1024 * 1024) { toast(t("字体文件不能超过 40 MB"), true); return; }
     toast(t("正在导入 {name}…", { name: file.name }));
     let r;
@@ -727,8 +736,7 @@
       if (!res.ok) throw new Error(r.message || r.error || "HTTP " + res.status);
     } catch (e) { toast(t("导入失败：{msg}", { msg: e.message }), true); return; }
     await loadFonts();
-    if (ufFor) { Theme.setType(ufFor, "u:" + r.font.id); paintFonts(null); }
-    ufFor = "";
+    if (slot) { Theme.setType(slot, "u:" + r.font.id); paintFonts(null); }
     toast(r.dup ? t("这个字体已经导入过了：{name}", { name: r.font.name }) : t("已导入 {name}", { name: r.font.name }));
     const row = document.querySelector(`#uf-list [data-uf-id="${r.font.id}"]`); if (row) MO.play(row, "mo-in-rise", 1400);
   }

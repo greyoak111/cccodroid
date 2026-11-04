@@ -142,6 +142,17 @@ let ucHooked = false;
 const askProjectTrust = (run, cwd, proj, emit) => askCard(run, emit, { key: "proj", tool: "ProjectConfig", input: { dir: cwd, risks: proj.risks },
   guard: { cat: "project", what: cwd }, what: `项目配置 ${proj.risks.length} 项`, yes: "✓ 允许", no: "✗ 不加载" });
 
+// claude 异常退出时给用户的一句话。143 / 137（SIGTERM / SIGKILL）是被别的程序结束的：系统回收内存、别的应用、终端里 kill……
+// 不是模型或接口的问题，说清楚，别让人以为要换模型（11-04 用户反馈）
+function exitHint(code, signal) {
+  if (signal === "SIGTERM" || signal === "SIGKILL" || code === 143 || code === 137)
+    return tz("Claude Code 被别的程序结束了（{why}），不是模型或接口的问题", { why: signal || code });
+  return signal ? tz("生成中断（{sig}）", { sig: signal }) : tz("生成失败（退出码 {code}）", { code });
+}
+// 错误详情里不放 claude 的「[claude-code:unrecognized_model]」提示行：第三方型号名它都不认识，每次都有，
+// 跟这次为什么失败无关，反而让人去怀疑模型（日志里照留）
+const exitDetail = (stderr) => String(stderr || "").split("\n").filter((l) => !/^\[claude-code:unrecognized_model\]/.test(l.trim())).join("\n").trim().slice(0, 1200);
+
 export async function startRun(item) {
   const { sid0, pdef0, P } = pickProvider(item);
   const KEY = keyOf(P);
@@ -181,7 +192,7 @@ export async function startRun(item) {
   if (local) {
     log(`⌘ 本地命令 /${local[1]}`);   // 参数不记：诊断包说了不含消息内容（审查 v0.5.20 08-001）
     return handleLocalCommand(local[1], (local[2] || "").trim(),
-      (text, cmd) => endRun(run, { localCommand: cmd || local[1], resultText: text, durationMs: 0, costUsd: 0 }), run.sessionId);
+      (text, cmd) => endRun(run, { localCommand: cmd || local[1], resultText: text, durationMs: 0, costUsd: 0 }), run.sessionId, () => run.aborted);
   }
 
   if (!KEY && !P.login) {
@@ -700,10 +711,10 @@ export async function startRun(item) {
     }
     // 最后一个 result 之后又起了一轮、没等到它的 result 就异常退出：按失败算，别沿用上一轮的成功
     if (lastResult && resultStale && (code !== 0 || signal)) {
-      const hint = signal ? `生成中断（${signal}）` : `生成失败（退出码 ${code}）`;
+      const hint = exitHint(code, signal);
       log(`✖ ${hint}（上一轮已答完，接着的这一轮没答完）${stderr ? " :: " + stderr.trim().slice(0, 300) : ""}`);
       billAfterRun(run.provider);
-      emit({ type: "error", message: hint, detail: stderr.trim().slice(0, 1200) });
+      emit({ type: "error", message: tr(LAST_LANG, hint), detail: exitDetail(stderr) });
       return endRun(run, { failed: true, durationMs: ms, ...spent() });
     }
     if (lastResult) {
@@ -736,9 +747,9 @@ export async function startRun(item) {
         ...(run.sched ? { finalText: String(lastResult.result || "").slice(0, 4000), costRaw: Number(lastResult.total_cost_usd || 0) } : {}),
       });
     }
-    const hint = code !== 0 ? `生成失败（退出码 ${code}）` : "生成结束但没有返回结果";
+    const hint = code !== 0 || signal ? exitHint(code, signal) : tz("生成结束但没有返回结果");
     log(`✖ ${hint}${stderr ? " :: " + stderr.trim().slice(0, 300) : ""}`);
-    emit({ type: "error", message: hint, detail: stderr.trim().slice(0, 1200) });
+    emit({ type: "error", message: tr(LAST_LANG, hint), detail: exitDetail(stderr) });
     endRun(run, { failed: true, durationMs: ms, ...spent() });
   };
 

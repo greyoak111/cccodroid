@@ -140,9 +140,13 @@ public final class Share extends ContentProvider {
     }
 
     /** 按扩展名猜类型；猜不出就当二进制 */
-    static String mimeOf(File f) {
-        String ext = android.webkit.MimeTypeMap.getFileExtensionFromUrl(Uri.encode(f.getName()));
-        String m = ext == null || ext.isEmpty() ? null : android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.toLowerCase());
+    static String mimeOf(File f) { return mimeOfName(f.getName()); }
+    /** 只看最后一个点后面的后缀。以前先 Uri.encode 再交给 getFileExtensionFromUrl：后者整名只认 [a-zA-Z_0-9.\-()%]，
+     *  O'Reilly.pdf、report~draft.pdf、photo!.jpg 这种普通名字就取不到后缀，一律报成二进制（#147-2） */
+    static String mimeOfName(String name) {
+        int dot = name == null ? -1 : name.lastIndexOf('.');
+        String ext = dot < 0 ? "" : name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
+        String m = ext.isEmpty() || !ext.matches("[a-z0-9]{1,16}") ? null : android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
         return m == null ? "application/octet-stream" : m;
     }
 
@@ -389,8 +393,8 @@ public final class Share extends ContentProvider {
     }
 
     @Override public String getType(Uri uri) {
-        String p = uri.getPath();
-        return p != null && p.endsWith(".zip") ? "application/zip" : p != null && p.endsWith(".jpg") ? "image/jpeg" : "application/octet-stream";
+        // 和发出去时 Intent 里写的类型同一套（月报 PNG、PDF 以前在这里都报成二进制，按类型打开的接收方会被系统拒掉，#147-3）
+        return mimeOfName(uri.getLastPathSegment());
     }
     @Override public Uri insert(Uri uri, ContentValues v) { throw new UnsupportedOperationException(); }
     @Override public int delete(Uri uri, String s, String[] a) { throw new UnsupportedOperationException(); }

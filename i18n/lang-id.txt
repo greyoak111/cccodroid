@@ -2760,3 +2760,10 @@
 2760	Ini biasanya tidak terjadi. Jika Anda tidak yakin apa yang dilakukan langkah ini, tolak saja.
 2761	Aktif — otomatis mati pada {t}
 2762	Nama remote tidak valid
+2763	Aplikasi ditutup sistem saat Anda memilih lokasi, sehingga file yang akan disimpan hilang. Simpan lagi.
+2764	Claude Code dihentikan oleh program lain ({why}); ini bukan masalah model atau API
+2765	Pembuatan terputus ({sig})
+2766	Pembuatan gagal (kode keluar {code})
+2767	Pembuatan selesai tanpa hasil
+2768	File sebelumnya masih menunggu lokasi penyimpanan
+2769	File aslinya sudah tidak ada (diganti nama, dipindah, atau dihapus).\nOK: simpan salinan dengan nama aslinya\nBatal: jangan simpan dulu, perubahan tetap di editor

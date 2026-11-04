@@ -44,6 +44,9 @@ ${alias(["Microsoft YaHei", "微软雅黑", "Microsoft YaHei UI", "SimHei", "黑
 
 // 一次只转一个（LibreOffice 吃内存，同一个配置目录也不能两个实例同时用）；同一份文件重复请求合并成一个
 const officeJobs = new Map();
+// 转完交出去的是哪一版：key → 源文件。转换途中源文件被别的应用存了一次，读的时候按现在的源文件算出来的是另一个 key，
+// 刚转好的那份就找不到了（#145-3）。POST 回执把 key 带给前端，GET 认这张表里同一个文件的 key；只留最近几十条
+const officeDone = new Map();
 let officeQ = Promise.resolve();
 function officePdf(file) {
   const st = fs.statSync(file);
@@ -147,7 +150,9 @@ export async function routeOffice(req, res, u, p) {
     const r = safeFilePath(req.method === "GET" ? u.searchParams.get("path") : JSON.parse((await readBody(req)) || "{}").path);
     if (r.error) return sendJson(res, r.status || 404, { error: r.error });
     if (req.method === "GET") {
-      const out = path.join(OFFICE_DIR, officeKey(r.file, fs.statSync(r.file)) + ".pdf");
+      const k = u.searchParams.get("k") || "";
+      const key = /^[0-9a-f]{20}$/.test(k) && officeDone.get(k) === r.file ? k : officeKey(r.file, fs.statSync(r.file));
+      const out = path.join(OFFICE_DIR, key + ".pdf");
       let st; try { st = fs.statSync(out); } catch { return sendJson(res, 404, { error: "not converted" }); }
       res.writeHead(200, { "content-type": "application/pdf", "content-length": st.size, "cache-control": "no-store" });
       const rs = fs.createReadStream(out);
@@ -156,8 +161,12 @@ export async function routeOffice(req, res, u, p) {
       return;
     }
     if (!officeHave()) return sendJson(res, 200, { ok: false, missing: true, can: !!PREFIX });
-    try { await officePdf(r.file); } catch (e) { return sendJson(res, 200, { ok: false, message: e.message }); }
-    return sendJson(res, 200, { ok: true, url: "/api/office/pdf?path=" + encodeURIComponent(r.file) });
+    let out;
+    try { out = await officePdf(r.file); } catch (e) { return sendJson(res, 200, { ok: false, message: e.message }); }
+    const key = path.basename(out, ".pdf");
+    officeDone.delete(key); officeDone.set(key, r.file);
+    if (officeDone.size > 64) officeDone.delete(officeDone.keys().next().value);
+    return sendJson(res, 200, { ok: true, url: "/api/office/pdf?path=" + encodeURIComponent(r.file) + "&k=" + key });
   }
   return NEXT;
 }

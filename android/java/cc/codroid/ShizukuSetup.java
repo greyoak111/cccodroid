@@ -237,7 +237,14 @@ final class ShizukuSetup {
         new Thread(() -> {
             try { doActivate(); }
             catch (Exception e) { set("error", e.getMessage()); }
-            finally { if (handedOff) handedOff = false; else idle(); }
+            finally {
+                if (handedOff) handedOff = false;
+                else {
+                    // 没激活成：我们打开的无线调试关回去（11-04 报告 A6）。转去配对的除外，用户正要在里面点配对码
+                    if (!Priv.running() && !"pairing".equals(phase)) restoreWifi();
+                    idle();
+                }
+            }
         }, "shz-activate").start();
     }
 
@@ -392,7 +399,7 @@ final class ShizukuSetup {
             } catch (Exception e) {
                 // 别只改状态：通知还停在常驻的「配对中…」，用户划不掉
                 failNote(Tr.t("配对出错：") + e.getMessage());
-            } finally { idle(); fin.run(); }
+            } finally { idle(); fin.run(); }   // 配对失败不关无线调试：码填错了用户还要接着在里面重配
         }, "shz-pair").start();
     }
 
@@ -442,7 +449,7 @@ final class ShizukuSetup {
                 try {
                     if (!onWifi()) { failNote(Tr.t("没连 Wi‑Fi，Shizuku 没能自动激活。连上 Wi‑Fi 后点此重试")); return; }
                     if (!connectAndStart()) failNote(Tr.t("Shizuku 自动激活没成功，点此重试"));
-                } finally { idle(); }
+                } finally { if (!Priv.running()) restoreWifi(); idle(); }
             } catch (Exception e) {
                 failNote(Tr.t("Shizuku 自动激活失败：") + e.getMessage());
             }
@@ -466,15 +473,22 @@ final class ShizukuSetup {
             try {
                 List<Integer> ports = discover("_adb-tls-connect._tcp", 6000);
                 if (ports.isEmpty()) ports = probeLocalAdb();
+                // 只有 adb 明说认证不过（failed to authenticate / unauthorized）才算配对失效；连不上、超时、端口刚好在重开，
+                // 都只是这次验证不了，换下一个端口试，试完也不改记录 —— 不然无线调试临时断一下就把自动激活关了（#131）
                 for (int port : ports) {
                     String serial = "127.0.0.1:" + port;
                     String out = adb(15, "connect", serial);
-                    boolean ok = out.contains("connected to") && adb(10, "-s", serial, "get-state").trim().equals("device");
+                    String state = out.contains("connected to") ? adb(10, "-s", serial, "get-state").trim() : "";
                     adb(10, "disconnect", serial);
-                    pairOk = ok ? 1 : 0;
-                    if (!ok) { prefs().edit().putBoolean("paired", false).apply(); log("配对已失效（无线调试里被取消保存了）"); }
-                    return;
+                    if (state.equals("device")) { pairOk = 1; return; }
+                    if (out.contains("failed to authenticate") || state.contains("unauthorized")) {
+                        pairOk = 0;
+                        prefs().edit().putBoolean("paired", false).apply();
+                        log("配对已失效（无线调试里被取消保存了）");
+                        return;
+                    }
                 }
+                if (!ports.isEmpty()) log("这次没能验证配对（连不上无线调试），配对记录不改");
             } catch (Exception e) { log("验证配对出错：" + e.getMessage()); }
             finally { idle(); }
         }, "shz-verify").start();

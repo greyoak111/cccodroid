@@ -2763,4 +2763,11 @@ window.I18N_DICT["fr"] = {
   "正常情况下不会出现。拿不准这一步是做什么的，就拒绝。": "Cela ne devrait pas arriver normalement. Si vous ne savez pas ce que fait cette étape, refusez-la.",
   "已打开，{t} 自动关闭": "Activé — se désactive automatiquement à {t}",
   "远端名不合法": "Nom de dépôt distant invalide",
+  "选位置时应用被系统关掉了，找不回要保存的文件，再保存一次就好": "L'application a été fermée par le système pendant le choix de l'emplacement : le fichier à enregistrer est perdu. Enregistrez-le à nouveau.",
+  "Claude Code 被别的程序结束了（{why}），不是模型或接口的问题": "Claude Code a été arrêté par un autre programme ({why}) ; ce n'est pas un problème de modèle ou d'API",
+  "生成中断（{sig}）": "Génération interrompue ({sig})",
+  "生成失败（退出码 {code}）": "Échec de la génération (code de sortie {code})",
+  "生成结束但没有返回结果": "La génération s'est terminée sans résultat",
+  "上一个文件还没选好保存位置": "Le fichier précédent attend encore un emplacement d'enregistrement",
+  "原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里": "Le fichier d’origine n’existe plus (renommé, déplacé ou supprimé).\nOK : enregistrer une copie sous le nom d’origine\nAnnuler : ne pas enregistrer pour l’instant, les modifications restent dans l’éditeur",
 };

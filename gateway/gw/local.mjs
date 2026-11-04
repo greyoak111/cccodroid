@@ -360,6 +360,8 @@ function modelFetch(e, urls) {
         try { fs.readSync(fd, head, 0, 4, 0); } finally { fs.closeSync(fd); }
         if (head.toString("latin1") !== "GGUF") { fs.rmSync(part, { force: true }); throw new Error(tz("下下来的不是 GGUF 模型文件（已删除）")); }
       }
+      // 校验那几秒里点了取消（界面答应了）：不发布（#134）
+      if (job.cancelled) throw new Error("cancelled");
       fs.renameSync(part, dst);
       try { fs.rmSync(meta, { force: true }); } catch {}
       MDL.delete(e.id);

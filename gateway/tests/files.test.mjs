@@ -116,3 +116,26 @@ test("新建文件在路由重核之后、落盘之前上级目录被换成软�
   assert.deepEqual(fs.readdirSync(away), [], "不能顺着换上的软链写进别的目录（临时文件也要清掉）");
   fs.rmSync(sub, { force: true }); fs.rmSync(away, { recursive: true, force: true });
 });
+
+test("打开后原文件被改名：带着打开时的 mtime 保存要 409，不按旧名悄悄新建（#145-2）", async () => {
+  fs.mkdirSync(CFG.workspace, { recursive: true });
+  const file = path.join(CFG.workspace, "note145.txt"), moved = path.join(CFG.workspace, "renamed145.txt");
+  fs.writeFileSync(file, "old");
+  const mtime = fs.statSync(file).mtimeMs;
+  fs.renameSync(file, moved);
+  const save = async (force) => {
+    const req = Readable.from([Buffer.from("edited")]); req.method = "POST"; req.headers = {};
+    const res = fakeRes();
+    await routeFiles(req, res, new URL(`http://x/api/file/save?path=${encodeURIComponent(file)}&mtime=${mtime}${force ? "&force=1" : ""}`), "/api/file/save");
+    return res;
+  };
+  const r1 = await save(false);
+  assert.equal(r1.code, 409, JSON.stringify(r1.body));
+  assert.equal(r1.body.error, "gone");
+  assert.equal(fs.existsSync(file), false, "旧名不能被悄悄建出来");
+  const r2 = await save(true);   // 用户确认按原名另存
+  assert.equal(r2.code, 200, JSON.stringify(r2.body));
+  assert.equal(fs.readFileSync(file, "utf8"), "edited");
+  assert.equal(fs.readFileSync(moved, "utf8"), "old");
+  fs.rmSync(file, { force: true }); fs.rmSync(moved, { force: true });
+});

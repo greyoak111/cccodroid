@@ -98,14 +98,16 @@ export function nextAt(task, from = Date.now()) {
   }
   if (fq.kind === "cron") {
     let c; try { c = parseCron(fq.cron); } catch { return null; }
-    const d = new Date(from); d.setSeconds(0, 0); d.setMinutes(d.getMinutes() + 1);
+    // 分、时按绝对毫秒往前走：本地时间的 setter 在秋季回拨的重复那一小时里会选到第一次的 02:00，
+    // 算出来的「下次」反而比 from 早，下一次 tick 就当成错过了（#132）。跨天才用本地 setter，结果再核一遍晚于 from
+    let d = new Date(Math.floor(from / 60000) * 60000 + 60000);
     for (let i = 0; i < 366 * 24 * 60; ) {
       const domOk = c.dom.has(d.getDate()), dowOk = c.dow.has(d.getDay());
       const dayOk = c.mon.has(d.getMonth() + 1) && (c.domAny && c.dowAny ? true : c.domAny ? dowOk : c.dowAny ? domOk : domOk || dowOk);
-      if (!dayOk) { d.setDate(d.getDate() + 1); d.setHours(0, 0, 0, 0); i += 1440; continue; }
-      if (!c.hour.has(d.getHours())) { d.setHours(d.getHours() + 1, 0, 0, 0); i += 60; continue; }
-      if (c.min.has(d.getMinutes())) return d.getTime();
-      d.setMinutes(d.getMinutes() + 1); i++;
+      if (!dayOk) { const n = new Date(d); n.setDate(n.getDate() + 1); n.setHours(0, 0, 0, 0); d = n > d ? n : new Date(d.getTime() + 3600e3); i += 1440; continue; }
+      if (!c.hour.has(d.getHours())) { d = new Date(d.getTime() + (60 - d.getMinutes()) * 60000); i += 60; continue; }
+      if (c.min.has(d.getMinutes()) && after(d)) return d.getTime();
+      d = new Date(d.getTime() + 60000); i++;
     }
     return null;
   }
@@ -260,7 +262,7 @@ async function fireNow(t, { reason, attempt, trial }) {
     internal: true, message, projectId: p ? p.id : null,
     sessionId: !trial && t.session === "same" && t.lastSid ? t.lastSid : null,
     model: t.model || null, effort: t.effort || null, provider: t.provider || null, ...perm,
-    unattended: true, timeoutMs: Math.max(1, +t.limitMin || 15) * 60000, limitCost: +t.limitCost || 0, sched: { taskId: t.id, key },
+    unattended: true, timeoutMs: Math.max(1, +t.limitMin || 15) * 60000, limitCost: +t.limitCost || 0, sched: { taskId: t.id, key, ...(trial ? { trial: true } : {}) },
   });
   log(`⏰ 定时任务「${t.name}」开跑（${reason}${trial ? "，试跑" : ""}）`);
   if (!trial) { t.lastFiredAt = Date.now(); save(); }
@@ -269,8 +271,16 @@ async function fireNow(t, { reason, attempt, trial }) {
 
 // 入队之后、真开跑之前任务被删 / 被关：不跑了，记一笔跳过（DeepSeek 复核 中-2；入队前那道见 fireNow）
 START_GUARDS.push((q) => {
-  const ctx = q.sched && RUNNING.get(q.sched.key);
-  if (!ctx || ctx.trial) return true;
+  if (!q.sched) return true;
+  let ctx = RUNNING.get(q.sched.key);
+  // 网关重启后从队列恢复的条目（挂起、用户点了放行）：内存里的调度记录没了，按条目重建一份，
+  // 守卫照样核、结束照样记运行和次数（#132）。任务已经删了就不跑
+  if (!ctx) {
+    if (!byId(q.sched.taskId)) { log("⏭ 恢复的定时任务条目：任务已经删了，不跑"); return false; }
+    ctx = { taskId: q.sched.taskId, startedAt: Date.now(), attempt: 0, trial: !!q.sched.trial, reason: "recovered" };
+    RUNNING.set(q.sched.key, ctx);
+  }
+  if (ctx.trial) return true;
   const t = byId(ctx.taskId);
   // 排队期间会话可能被改钉到官方账户：真开跑前按这一条实际会用的那家再核一次订阅许可
   if (t && !DB.allowLogin && (() => { try { return isLoginMode(pickProvider(q).P); } catch { return false; } })()) {
@@ -290,6 +300,7 @@ START_GUARDS.push((q) => {
     note(t, tz("定时任务已跳过"), tz("「{n}」：今天的花费已到上限", { n: t.name }), null, false);
     return false;
   }
+  // 不是到点触发的（手动跑、重启后恢复的 reason:"recovered"）任务关着也放行：和手动跑一个意思，旧版缺 ctx 时也是直接放行
   if (t && (ctx.reason !== "due" || t.on)) return true;
   RUNNING.delete(q.sched.key);
   const msg = tz("排队时任务被关掉或删了");

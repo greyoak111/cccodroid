@@ -2760,3 +2760,10 @@
 2760	Cela ne devrait pas arriver normalement. Si vous ne savez pas ce que fait cette étape, refusez-la.
 2761	Activé — se désactive automatiquement à {t}
 2762	Nom de dépôt distant invalide
+2763	L'application a été fermée par le système pendant le choix de l'emplacement : le fichier à enregistrer est perdu. Enregistrez-le à nouveau.
+2764	Claude Code a été arrêté par un autre programme ({why}) ; ce n'est pas un problème de modèle ou d'API
+2765	Génération interrompue ({sig})
+2766	Échec de la génération (code de sortie {code})
+2767	La génération s'est terminée sans résultat
+2768	Le fichier précédent attend encore un emplacement d'enregistrement
+2769	Le fichier d’origine n’existe plus (renommé, déplacé ou supprimé).\nOK : enregistrer une copie sous le nom d’origine\nAnnuler : ne pas enregistrer pour l’instant, les modifications restent dans l’éditeur

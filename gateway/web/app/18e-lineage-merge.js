@@ -255,6 +255,8 @@
     for (const n of hits) {
       const f = document.createDocumentFragment();
       let i = 0;
+      // matchAll 会照抄正则当前的 lastIndex 当起点：上面最后一次 test 成功会把它留在中间，开头的档号就漏了（11-04 报告 三）
+      CH_REF.lastIndex = 0;
       for (const m of n.data.matchAll(CH_REF)) {
         f.append(n.data.slice(i, m.index));
         const a = document.createElement("span");

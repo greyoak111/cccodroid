@@ -328,6 +328,8 @@
     fold: () => ({ fold, fv, fh }),
     setAvoid(x) { avoid = x == null ? null : +x; apply(); },
     cover(on) { ovCover = !!on; placeBrowser(); },
+    // 原生浏览器窗格眼下摆在哪（[左, 上, 宽, 高]，CSS px）；没摆出来返回 null。提示条据此躲开它
+    paneRect: () => (lastB && lastB !== "0" ? lastB.split(",").map(Number) : null),
     apply,
   };
 })();

@@ -15,17 +15,19 @@
 // ─────────────────────────────────────────────────────────────────────
 import fs from "node:fs";
 import path from "node:path";
-import { ROOT, die, signAndPublish } from "./signed-pub.mjs";
+import { ROOT, die, loadPublished, signAndPublish } from "./signed-pub.mjs";
 
 const FILE = "claude-code/verified.json", F = path.join(ROOT, FILE);
 const SITE = "https://cccodroid.net/claude-code/verified.json";
 const VER = /^\d+\.\d+\.\d+$/;
 const argv = process.argv.slice(2);
 const opt = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv.splice(i, 2)[1] : undefined; };
-const load = () => { try { return JSON.parse(fs.readFileSync(F, "utf8")); } catch { return { v: 1, updated: "", versions: {}, bad: {} }; } };
+const isMap = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+const load = () => loadPublished(F, { v: 1, updated: "", versions: {}, bad: {} }, (d) => isMap(d.versions) && (d.bad === undefined || isMap(d.bad)));
 const cmpVer = (a, b) => { const x = a.split(".").map(Number), y = b.split(".").map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
 const devName = (r) => `${r.device} · Android ${r.android}`;
 const d = load();
+d.bad ||= {};
 const cmd = argv.shift();
 
 if (cmd === "list" || !cmd) {

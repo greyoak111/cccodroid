@@ -377,9 +377,22 @@ int main(int argc, char **argv) {
         perror("waitpid");
         return 127;
     }
+    /* exec 之前到的信号也会先停一次：不是 exec 的 SIGTRAP 就原样投回去、接着等，别吞掉（11-04 报告 二） */
+    for (int i = 0; i < 64 && WIFSTOPPED(status) && WSTOPSIG(status) != SIGTRAP; i++) {
+        if (ptrace(PTRACE_CONT, pid, 0, (void *)(long)WSTOPSIG(status)) != 0) break;
+        while (waitpid(pid, &status, 0) < 0) if (errno != EINTR) { perror("waitpid"); return 127; }
+    }
     if (!WIFSTOPPED(status)) {
         /* 还没进跟踪就结束了（比如 exec 失败） */
         /* 被信号结束的照 shell 的规矩报 128+信号（审查 #108 09-008）：以前一律 127，和「找不到命令」混在一起 */
+        return WIFEXITED(status) ? WEXITSTATUS(status) : WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 127;
+    }
+    /* 跟进模式下，一上来跑的就是 gdb / strace 这类要自己 ptrace 的：同中途 exec 到它们时一样放手（见 supervise），
+       不然它 fork 出的被调试程序被我们先跟上了，它自己 attach 不上（11-04 报告 二） */
+    if (follow && wants_ptrace(pid)) {
+        if (verbose) fprintf(stderr, "[enosys] pid %d 自己要用 ptrace，放手\n", (int)pid);
+        ptrace(PTRACE_DETACH, pid, 0, 0);
+        while (waitpid(pid, &status, 0) < 0) if (errno != EINTR) { perror("waitpid"); return 127; }
         return WIFEXITED(status) ? WEXITSTATUS(status) : WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 127;
     }
 

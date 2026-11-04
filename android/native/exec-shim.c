@@ -50,6 +50,12 @@ extern int *__errno_location(void);
 #define NR_execve 221
 #define ENOENT_ 2
 #define E2BIG_ 7
+#define ENOEXEC_ 8
+#define EACCES_ 13
+#define ENOTDIR_ 20
+#define ETXTBSY_ 26
+#define AT_EMPTY_PATH_ 0x1000
+#define NR_execveat 281
 
 static long sc(long n, long a, long b, long c, long d) {
     register long x8 __asm__("x8") = n;
@@ -94,7 +100,8 @@ static int kind(const char *path, char *line, size_t cap) {
     if (fd < 0) return K_OTHER;
     unsigned char h[64];
     int k = K_OTHER;
-    if (sc(NR_pread64, fd, (long)h, 64, 0) == 64 && h[0] == 0x7f && h[1] == 'E' && h[2] == 'L' && h[3] == 'F' && h[4] == 2) {
+    long hn = sc(NR_pread64, fd, (long)h, 64, 0);   /* 短文件读不满 64 字节：只看读到的（11-04 报告 二） */
+    if (hn == 64 && h[0] == 0x7f && h[1] == 'E' && h[2] == 'L' && h[3] == 'F' && h[4] == 2) {
         unsigned long phoff = *(unsigned long *)(h + 32);
         unsigned short phent = *(unsigned short *)(h + 54), phnum = *(unsigned short *)(h + 56);
         k = ends(path, "ld-linux-aarch64.so.1") ? K_LDSO : K_OTHER;
@@ -110,7 +117,7 @@ static int kind(const char *path, char *line, size_t cap) {
             k = ends(ip, "linker64") ? K_BIONIC : ends(ip, "ld-linux-aarch64.so.1") ? K_GLIBC : K_OTHER;
             break;
         }
-    } else if (h[0] == '#' && h[1] == '!') {
+    } else if (hn >= 2 && h[0] == '#' && h[1] == '!') {
         long n = sc(NR_pread64, fd, (long)line, cap - 1, 2);
         if (n > 0) {
             line[n] = 0;
@@ -261,6 +268,8 @@ static long raw_execve(const char *p, char *const *a, char *const *e) { return s
 #ifdef BIONIC
 typedef int (*execve_fn)(const char *, char *const[], char *const[]);
 static execve_fn next_execve;
+/* 装载时就取好：第一次 execve 可能发生在 vfork 出来的子进程里，那时再 dlsym 要拿 loader 的锁（11-04 报告 二） */
+__attribute__((constructor)) static void init_next(void) { next_execve = (execve_fn)dlsym(RTLD_NEXT, "execve"); }
 #endif
 
 /*
@@ -323,9 +332,22 @@ extern char **environ;
 
 int execv(const char *path, char *const argv[]) { return execve(path, argv, environ); }
 
-/* 在 PATH 里找；找不到返回 0。空项（开头、中间、结尾的冒号）是当前目录，同 execvp（审查 #108 09-007） */
-static const char *which(const char *f, char *out, size_t cap) {
-    if (has(f, '/')) return f;
+static long sc5(long n, long a, long b, long c, long d, long e) {
+    register long x8 __asm__("x8") = n;
+    register long x0 __asm__("x0") = a;
+    register long x1 __asm__("x1") = b;
+    register long x2 __asm__("x2") = c;
+    register long x3 __asm__("x3") = d;
+    register long x4 __asm__("x4") = e;
+    __asm__ volatile("svc 0" : "+r"(x0) : "r"(x8), "r"(x1), "r"(x2), "r"(x3), "r"(x4) : "memory");
+    return x0;
+}
+static int executable(const char *p) { return sc(NR_faccessat, AT_FDCWD, (long)p, 1 /* X_OK */, 0) == 0; }
+
+/* PATH 里第 skip 个（从 0 数）可执行的候选；没有了返回 0。空项（开头、中间、结尾的冒号）是当前目录，同 execvp（审查 #108 09-007）。
+ * 只认能执行的（X_OK）：前面一个同名的普通文件不能把后面的真身挡住（11-04 报告 二） */
+static const char *which_nth(const char *f, char *out, size_t cap, int skip) {
+    if (has(f, '/')) return skip ? 0 : f;
     const char *P = getenv("PATH");
     if (!P) P = "/system/bin";
     size_t fl = slen(f);
@@ -338,22 +360,98 @@ static const char *which(const char *f, char *out, size_t cap) {
             for (size_t i = 0; i < dl; i++) out[i] = d[i];
             out[dl] = '/';
             for (size_t i = 0; i <= fl; i++) out[dl + 1 + i] = f[i];
-            if (exists(out)) return out;
+            if (executable(out) && skip-- == 0) return out;
         }
         if (!P[n]) break;
         P += n + 1;
     }
     return 0;
 }
+__attribute__((unused)) static const char *which(const char *f, char *out, size_t cap) { return which_nth(f, out, cap, 0); }
 
 int execvpe(const char *file, char *const argv[], char *const envp[]) {
     char tmp[1024];
-    const char *p = which(file, tmp, sizeof tmp);
-    if (!p) { ERRNO = ENOENT_; return -1; }
-    return execve(p, argv, envp);
+    if (!file || !*file) { ERRNO = ENOENT_; return -1; }
+    int eacces = 0;
+    for (int i = 0; i < 256; i++) {
+        const char *p = which_nth(file, tmp, sizeof tmp, i);
+        if (!p) break;
+        execve(p, argv, envp);
+        int e = ERRNO;
+        if (e == ENOEXEC_) {
+            /* 没有 #! 的脚本：同 bionic / glibc 的 execvp，交给 sh 跑；sh 也起不来再接着找 */
+            int ac = 0; while (argv && argv[ac]) ac++;
+            if (ac < 250) {
+                char *sv[ac + 3]; sv[0] = (char *)"sh"; sv[1] = (char *)p;
+                for (int j = 1; j <= ac; j++) sv[j + 1] = argv[j];
+                if (ac == 0) sv[2] = 0;
+                execve("/system/bin/sh", sv, envp);
+            }
+            e = ENOEXEC_;
+        }
+        /* 这几种换下一个接着试（同 glibc execvpe）；别的错误直接报 */
+        if (e == EACCES_) eacces = 1;
+        else if (e != ENOENT_ && e != ENOTDIR_ && e != ENOEXEC_ && e != ETXTBSY_) return -1;
+        if (has(file, '/')) break;
+    }
+    ERRNO = eacces ? EACCES_ : ENOENT_;
+    return -1;
 }
 
 int execvp(const char *file, char *const argv[]) { return execvpe(file, argv, environ); }
+
+/* execl / execle / execlp：参数表收进栈上的数组再走 execve / execvp（11-04 报告 二：以前这几个绕过了垫片） */
+#define EXECL_ARGS(first, ap, av, n, envp_out)                                   \
+    __builtin_va_list ap; char *av[256]; int n = 0; av[n++] = (char *)(first);   \
+    __builtin_va_start(ap, first);                                               \
+    while (n < 255 && (av[n] = __builtin_va_arg(ap, char *))) n++;               \
+    if (n >= 255) { __builtin_va_end(ap); ERRNO = E2BIG_; return -1; }          \
+    av[n] = 0
+int execl(const char *path, const char *arg0, ...) {
+    EXECL_ARGS(arg0, ap, av, n, 0);
+    __builtin_va_end(ap);
+    return execve(path, av, environ);
+}
+int execlp(const char *file, const char *arg0, ...) {
+    EXECL_ARGS(arg0, ap, av, n, 0);
+    __builtin_va_end(ap);
+    return execvp(file, av);
+}
+int execle(const char *path, const char *arg0, ...) {
+    EXECL_ARGS(arg0, ap, av, n, 0);
+    char **envp = __builtin_va_arg(ap, char **);   /* NULL 后面跟着环境 */
+    __builtin_va_end(ap);
+    return execve(path, av, envp);
+}
+
+/* 按 fd 执行：/proc/self/fd/N 是个能 open、能读头的路径，照常改写 */
+static char *fdpath(char *out, int fd) {
+    const char *pre_ = "/proc/self/fd/"; int i = 0;
+    while (pre_[i]) { out[i] = pre_[i]; i++; }
+    char d[12]; int k = 0; unsigned v = (unsigned)fd;
+    do { d[k++] = (char)('0' + v % 10); v /= 10; } while (v && k < 11);
+    while (k) out[i++] = d[--k];
+    out[i] = 0;
+    return out;
+}
+int fexecve(int fd, char *const argv[], char *const envp[]) {
+    char p[32];
+    if (fd < 0) { ERRNO = 9 /* EBADF */; return -1; }
+    return execve(fdpath(p, fd), argv, envp);
+}
+int execveat(int dirfd, const char *path, char *const argv[], char *const envp[], int flags) {
+    if (path && !*path && (flags & AT_EMPTY_PATH_) && !(flags & ~AT_EMPTY_PATH_)) return fexecve(dirfd, argv, envp);
+    if (path && *path && !flags) {
+        if (path[0] == '/' || dirfd == AT_FDCWD) return execve(path, argv, envp);
+        char p[1024]; fdpath(p, dirfd);
+        size_t a = slen(p), b = slen(path);
+        if (a + 1 + b + 1 <= sizeof p) { p[a] = '/'; for (size_t i = 0; i <= b; i++) p[a + 1 + i] = path[i]; return execve(p, argv, envp); }
+    }
+    /* 别的组合（AT_SYMLINK_NOFOLLOW 等）不改写，原样交给内核 */
+    long r = sc5(NR_execveat, dirfd, (long)path, (long)argv, (long)envp, flags);
+    ERRNO = (int)-r;
+    return -1;
+}
 
 #ifndef BIONIC   /* bionic 的 posix_spawn 在 libc 里头直接 execve，拦不到也不用拦 */
 typedef int (*spawn_fn)(int *, const char *, const void *, const void *, char *const[], char *const[]);

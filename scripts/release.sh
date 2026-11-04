@@ -73,14 +73,29 @@ const body = "**简体中文** · [English](#english)\n\n" + read(NOTES) + [
   "- Source commit: " + COMMIT,
 ].join("\n");
 let rel;
-try { rel = await api("GET", `https://api.github.com/repos/${REPO}/releases/tags/${TAG}`); console.log("  已有 Release " + TAG + "，更新附件"); }
-catch { rel = await api("POST", `https://api.github.com/repos/${REPO}/releases`, JSON.stringify({ tag_name: TAG, target_commitish: COMMIT, name: "cccodroid " + TAG, body, prerelease: TAG.includes("-") })); console.log("  已建 Release " + TAG); }
+try { rel = await api("GET", `https://api.github.com/repos/${REPO}/releases/tags/${TAG}`); }
+catch {}
+if (rel) {
+  // 同一版本重发：tag 已经指着某个提交。换了提交就不能只换附件——正文里的 sha 和「源码提交」会对不上实际的包
+  const ref = await api("GET", `https://api.github.com/repos/${REPO}/git/ref/tags/${TAG}`);
+  let sha = ref.object.sha;
+  if (ref.object.type === "tag") sha = (await api("GET", ref.object.url)).object.sha;   // 附注 tag 再解一层
+  if (sha !== COMMIT) { console.error("✗ " + TAG + " 已指向 " + sha.slice(0, 12) + "，和这次的提交 " + COMMIT.slice(0, 12) + " 不同：换个版本号，或先手动删掉那个 Release 和 tag"); process.exit(1); }
+  rel.patchBody = true;   // 正文最后再改：先把附件换完，中途断了也不会出现「正文是新 sha、附件还是旧包」
+  console.log("  已有 Release " + TAG + "（同一提交），更新附件和正文");
+}
+else {
+  rel = await api("POST", `https://api.github.com/repos/${REPO}/releases`, JSON.stringify({ tag_name: TAG, target_commitish: COMMIT, name: "cccodroid " + TAG, body, prerelease: TAG.includes("-") })); console.log("  已建 Release " + TAG);
+}
 const files = [["cccodroid.apk", APK], ...(SHA36 ? [["cccodroid-36.apk", APK36]] : [])];
+// 这次没有 36 包：上一次发的那份留着就和正文对不上了，一并删掉
+if (!SHA36) for (const a of rel.assets || []) if (a.name === "cccodroid-36.apk") await api("DELETE", a.url);
 for (const [name, file] of files) {
   for (const a of rel.assets || []) if (a.name === name) await api("DELETE", a.url);
   const up = rel.upload_url.replace(/\{.*\}$/, "") + "?name=" + name;
   const asset = await api("POST", up, fs.readFileSync(file), { "content-type": "application/vnd.android.package-archive" });
   console.log("  ✓ " + asset.browser_download_url + "  " + (asset.size / 1048576).toFixed(2) + " MB");
 }
+if (rel.patchBody) { await api("PATCH", rel.url, JSON.stringify({ body })); console.log("  ✓ 正文已按这次的包重写"); }
 console.log("  " + rel.html_url);
 '

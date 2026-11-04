@@ -13,6 +13,8 @@ import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 
 export const CMD_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 const MAX_BODY = 64 * 1024;
+// 文件比正文多出 frontmatter 和结尾换行：列表按这个上限读，保存时也按写出去的整份核，免得刚存的读不出来（#133）
+const MAX_FILE = MAX_BODY + 4096;
 
 function cmdDir(scope, dir) {
   if (scope === "user") return path.join(process.env.HOME || CFG.home, ".claude", "commands");
@@ -75,7 +77,7 @@ export function listCmds(scope, dir) {
   const items = [];
   for (const f of names) {
     const name = f.slice(0, -3);
-    let txt = ""; try { const st = fs.statSync(path.join(d, f)); if (!st.isFile() || st.size > MAX_BODY) continue; txt = fs.readFileSync(path.join(d, f), "utf8"); } catch { continue; }
+    let txt = ""; try { const st = fs.statSync(path.join(d, f)); if (!st.isFile() || st.size > MAX_FILE) continue; txt = fs.readFileSync(path.join(d, f), "utf8"); } catch { continue; }
     const c = parseCmd(txt);
     items.push({ name, description: c.description, hint: c.hint, body: c.body, extra: c.extra, editable: CMD_NAME_RE.test(name) });
   }
@@ -108,7 +110,9 @@ function saveCmd(b, builtin) {
   // 改名 / 编辑时把我们不管的 frontmatter 项（allowed-tools 等）带过去
   let extra = "";
   try { extra = parseCmd(fs.readFileSync(path.join(d, (old || name) + ".md"), "utf8")).extra; } catch {}
-  fs.writeFileSync(file + ".tmp", formatCmd({ description: desc, hint, body, extra }));
+  const text = formatCmd({ description: desc, hint, body, extra });
+  if (Buffer.byteLength(text) > MAX_FILE) return { ok: false, message: "指令内容太长了（上限 64 KB）" };
+  fs.writeFileSync(file + ".tmp", text);
   fs.renameSync(file + ".tmp", file);
   if (old) { try { fs.unlinkSync(path.join(d, old + ".md")); } catch {} }
   if (scope === "user") ucAppWrote([d], ucb);   // 用户在常用指令页自己存的：认下（见 userconf.mjs）

@@ -176,7 +176,8 @@ final class Priv {
      */
     static String toFront(Context ctx, String text) {
         String cmp = ctx.getPackageName() + "/" + MainActivity.class.getName();
-        if (running() && granted() && run("am start --activity-reorder-to-front -n " + cmp).isEmpty()) return "shizuku";
+        // am start 成功时也有输出（Starting: Intent …），按退出码和有没有报错判断（11-04 报告 A3：以前看输出是否为空，恒走通知）
+        if (running() && granted() && amStarted(runRc("am start --activity-reorder-to-front -n " + cmp))) return "shizuku";
         android.app.NotificationManager nm = ctx.getSystemService(android.app.NotificationManager.class);
         nm.createNotificationChannel(new android.app.NotificationChannel("front", Tr.t("回到应用"), android.app.NotificationManager.IMPORTANCE_HIGH));
         android.app.PendingIntent pi = android.app.PendingIntent.getActivity(ctx, 41,
@@ -189,6 +190,17 @@ final class Priv {
             .setContentIntent(pi).setAutoCancel(true).setTimeoutAfter(120_000).build());
         return "notification";
     }
+
+    /** 跑一条命令：{退出码, 全部输出}；起不来退出码记 -1 */
+    static Object[] runRc(String cmd) {
+        try {
+            java.lang.Process p = newProcess(new String[]{"/system/bin/sh", "-c", cmd + " 2>&1"}, null, "/");
+            p.getOutputStream().close();
+            String out = new String(readAll(p.getInputStream()), StandardCharsets.UTF_8).trim();
+            return new Object[]{p.waitFor(), out};
+        } catch (Throwable t) { return new Object[]{-1, String.valueOf(t)}; }
+    }
+    static boolean amStarted(Object[] r) { return PrivRules.amStarted((Integer) r[0], (String) r[1]); }
 
     /** 跑一条命令拿全部输出（内部用：保活设置） */
     static String run(String cmd) {

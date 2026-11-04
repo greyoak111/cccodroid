@@ -37,10 +37,12 @@ final class Battery {
         else if (screenSince != 0) { screenMs += now - screenSince; screenSince = 0; }
     }
 
-    /** MainActivity.onResume / onPause 调 */
+    /** MainActivity / BrowserActivity 的 onResume / onPause 调；两个界面可能同时在前台（分屏），按个数算 */
+    private static int fgCount;
     static synchronized void foreground(boolean on) {
         long now = SystemClock.elapsedRealtime();
-        if (on) { if (fgSince == 0) fgSince = now; }
+        fgCount = Math.max(0, fgCount + (on ? 1 : -1));
+        if (fgCount > 0) { if (fgSince == 0) fgSince = now; }
         else if (fgSince != 0) { fgMs += now - fgSince; fgSince = 0; }
     }
 

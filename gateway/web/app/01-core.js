@@ -439,8 +439,21 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
   const dropReq = (k) => { LATEST[k] = (LATEST[k] || 0) + 1; };
 
   let toastTimer = null;
+  // 原生浏览器窗格永远浮在页面上面，提示条落在它底下就看不见了：挪到没被盖住的那一边居中（11-04 报告 三）
+  function placeToast() {
+    const s = toastEl.style;
+    s.left = s.maxWidth = "";
+    const r = window.CCLayout && CCLayout.paneRect && CCLayout.paneRect();
+    if (!r) return;
+    const [x, , w] = r, lf = x, rf = innerWidth - (x + w);
+    if (Math.max(lf, rf) < 160) return;   // 两边都没地方（窄屏铺满）：保持原样
+    const a = lf >= rf ? 0 : x + w, span = Math.max(lf, rf);
+    s.left = a + span / 2 + "px";
+    s.maxWidth = Math.max(140, Math.min(560, span - 24)) + "px";
+  }
   function toast(msg, isErr) {
     MO.cancel(toastEl);
+    placeToast();
     toastEl.textContent = msg;
     toastEl.className = isErr ? "err" : "";
     clearTimeout(toastTimer);
@@ -449,6 +462,7 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
   // 带一个按钮的提示条（撤销之类），多停几秒
   function toastAct(msg, label, fn) {
     MO.cancel(toastEl);
+    placeToast();
     toastEl.textContent = msg + " ";
     const b = document.createElement("button");
     b.className = "toast-act"; b.textContent = label;
@@ -466,7 +480,7 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
   window.__ccSaved = guardHook("__ccSaved", (ok, msg) => {
     if (ok) return toast(t("已保存：{name}", { name: msg }));
     if (msg === "cancel") return;
-    toast(t("保存失败：{msg}", { msg: msg === "missing" ? t("文件不存在") : msg === "nopicker" ? t("系统里没有可用的文件面板") : msg === "forbidden" ? t("这个文件不能导出") : msg }), true);
+    toast(t("保存失败：{msg}", { msg: msg === "missing" ? t("文件不存在") : msg === "nopicker" ? t("系统里没有可用的文件面板") : msg === "forbidden" ? t("这个文件不能导出") : msg === "lost" ? t("选位置时应用被系统关掉了，找不回要保存的文件，再保存一次就好") : msg === "busy" ? t("上一个文件还没选好保存位置") : msg }), true);
   });
   // 页面里所有指向 /api/file 的下载链接（文件浏览器的 ⤓、查看器的「下载」）：WebView 自己不会处理下载
   document.addEventListener("click", (e) => {
@@ -604,7 +618,9 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
   function uiSet(k, v) {
     if (v == null) delete UIS.d[k]; else UIS.d[k] = v;
     try { localStorage.setItem("cc.ui", JSON.stringify(UIS.d)); } catch {}
-    api("/api/ui", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ [k]: v == null ? null : v }) }).catch(() => {});
+    // 网关没存上：这里先显示的新样子只是本地镜像，重开会被网关的旧值盖回去，要说一声（#133）
+    api("/api/ui", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ [k]: v == null ? null : v }) })
+      .catch((e) => toast(t("保存失败：{msg}", { msg: (e.body && e.body.error) || e.message }), true));
     document.dispatchEvent(new CustomEvent("cc:ui", { detail: { key: k } }));
   }
   // ── 外链图片点一下才加载（0.5.12）：md 里写的 http(s) 图一渲染就会去请求对方服务器，对方能看到 IP 和读的时间。

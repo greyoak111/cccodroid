@@ -149,7 +149,7 @@ function customCmdClash(cmd, selfId) {
 }
 
 /** 测试用：直接看命令名预留和冲突判断（#122-4） */
-export const _customForTest = { CMD_RESERVED, customCmdClash, rmTree, runCapped, headOf };
+export const _customForTest = { CMD_RESERVED, customCmdClash, customSkill, rmTree, runCapped, headOf };
 
 const GZ_MAX = 256 << 20, DEB_MAX = 512 << 20;
 // Termux glibc 仓库的 Contents（文件 → 包）与 Packages（包 → 下载地址、sha256），缓存一天。
@@ -434,12 +434,13 @@ function customWrapper(id, p, appDir, libs, opts) {
   return head + `exec ${shq(prog)} "$@"\n`;          // 脚本：保留 termux-exec，#!/usr/bin/env 之类才认得
 }
 
+// description 一律写成带引号的 YAML 字符串：说明里有「用途: 转换」这种冒号，裸写就是不合法的 YAML（#135）
 function customSkill(rec) {
   const kindZh = { glibc: "glibc 程序（Linux 发行版那种），经本应用的 glibc 加载器启动", bionic: "安卓原生程序（bionic）", static: "静态链接程序", script: "脚本" };
   const lines = rec.entries.map((e) => `- \`${e.cmd}\` → \`${path.join(rec.dir, "app", e.rel)}\`：${kindZh[e.kind] || e.kind}${e.gpu ? "，经 gpu-driver-glibc 的 lgpu-run 用 GPU（Vulkan / Turnip）" : ""}${e.patchelf ? "，已用 patchelf 改了解释器和 RUNPATH" : ""}`);
   return `---
 name: custom-${rec.id}
-description: 用户自己导入的程序「${rec.name.replace(/\n/g, " ")}」${rec.desc ? "：" + rec.desc.replace(/\n/g, " ") : ""}（cccodroid 自定义组件）。命令：${rec.entries.map((e) => e.cmd).join("、")}。用户提到它或要用这些命令时使用。
+description: ${JSON.stringify(`用户自己导入的程序「${rec.name.replace(/\n/g, " ")}」${rec.desc ? "：" + rec.desc.replace(/\n/g, " ") : ""}（cccodroid 自定义组件）。命令：${rec.entries.map((e) => e.cmd).join("、")}。用户提到它或要用这些命令时使用。`)}
 ---
 
 # ${rec.name}（自定义组件）

@@ -189,7 +189,7 @@ final class DeviceTools {
             .put("metered", cm.isActiveNetworkMetered()));
         PowerManager pm = c.getSystemService(PowerManager.class);
         r.put("screen_on", pm.isInteractive()).put("power_save", pm.isPowerSaveMode());
-        r.put("app_in_foreground", MainActivity.visible);
+        r.put("app_in_foreground", MainActivity.appForeground());
         JSONObject st = new JSONObject();
         for (String[] d : new String[][]{{"app", c.getFilesDir().getPath()}, {"shared", "/sdcard"}}) {
             try { StatFs fs = new StatFs(d[1]); st.put(d[0] + "_free_gb", Math.round(fs.getAvailableBytes() / 1e8) / 10.0); } catch (Exception ignored) {}
@@ -259,7 +259,7 @@ final class DeviceTools {
             return t == null ? "" : t.toString();
         });
         // 安卓 10 起，应用不在前台读不到剪贴板（系统直接给 null）
-        if (s == null) return fail(MainActivity.visible ? Tr.t("剪贴板是空的") : Tr.t("安卓不让后台应用读剪贴板：要读的话，请用户先切回 cccodroid"));
+        if (s == null) return fail(MainActivity.appForeground() ? Tr.t("剪贴板是空的") : Tr.t("安卓不让后台应用读剪贴板：要读的话，请用户先切回 cccodroid"));
         return new JSONObject().put("ok", true).put("text", clip(s, 20000));
     }
 
@@ -371,7 +371,7 @@ final class DeviceTools {
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (i.getComponent() == null && i.resolveActivity(c.getPackageManager()) == null && !Intent.ACTION_CHOOSER.equals(i.getAction()))
             return fail(Tr.t("这台设备上没有能处理它的应用"));
-        if (MainActivity.visible || A11y.self != null) {
+        if (MainActivity.appForeground() || A11y.self != null) {
             try { c.startActivity(i); return new JSONObject().put("ok", true).put("shown", "opened"); }
             catch (ActivityNotFoundException e) { return fail(Tr.t("这台设备上没有能处理它的应用")); }
             catch (Exception ignored) { }

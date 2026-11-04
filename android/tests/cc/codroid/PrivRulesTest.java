@@ -18,6 +18,12 @@ public final class PrivRulesTest {
     }
 
     public static void main(String[] a) {
+        // 11-04 报告 A3：am start 成功也有输出
+        if (!PrivRules.amStarted(0, "Starting: Intent { cmp=cc.codroid/.MainActivity }")) { fail++; System.out.println("FAIL amStarted 成功输出"); }
+        if (!PrivRules.amStarted(0, "Warning: Activity not started, its current task has been brought to the front")) { fail++; System.out.println("FAIL amStarted 已在前台"); }
+        if (PrivRules.amStarted(0, "Error: Activity class {cc.codroid/x} does not exist.")) { fail++; System.out.println("FAIL amStarted 报错退 0"); }
+        if (PrivRules.amStarted(1, "Starting: Intent")) { fail++; System.out.println("FAIL amStarted 退出码非 0"); }
+        if (PrivRules.amStarted(-1, "java.lang.SecurityException")) { fail++; System.out.println("FAIL amStarted 起不来"); }
         // 0601c：免问命令点了本应用 / Shizuku 的名也要问
         names(true, "am force-stop cc.codroid");
         names(true, "am stop-app 'cc.codro''id'");

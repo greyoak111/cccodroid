@@ -417,7 +417,19 @@
     }
     const list = pendingPerms();
     if (!list.length) return;
-    if (b.classList.contains("pb-view")) { list[0].el?.scrollIntoView({ block: "center", behavior: "smooth" }); return; }
+    if (b.classList.contains("pb-view")) {
+      const show = (el) => el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      if (!backToLatest()) return show(list[0].el);
+      // 正看着旧章节 / 书签那一段时 #live 整个藏着，卡在里面滚不过去：先回到最新，等重放把卡重新画出来再滚过去（#142-2）
+      const id = list[0].p.id, t0 = Date.now();
+      const wait = () => {
+        const all = pendingPerms(), it = all.find((x) => x.p.id === id) || all[0];
+        if (it?.el?.isConnected && it.el.offsetParent) return show(it.el);
+        if (Date.now() - t0 < 6000) setTimeout(wait, 150);
+      };
+      setTimeout(wait, 150);
+      return;
+    }
     if (b.classList.contains("pb-allow")) return permAnswer(list[0].p.id, { behavior: "allow" });
     if (b.classList.contains("pb-all")) list.forEach((it) => permAnswer(it.p.id, { behavior: "allow" }));
   });

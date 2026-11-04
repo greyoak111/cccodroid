@@ -11,6 +11,18 @@ export const die = (s) => { console.error("✗ " + s); process.exit(1); };
 const git = (...a) => execFileSync("git", ["-c", "safe.directory=*", "-c", "user.name=greyoak111", "-c", "user.email=suny96636@gmail.com", "-C", ROOT, ...a], { encoding: "utf8" }).trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** 读已发布的那份记录：文件不存在才算「从空开始」。读不全、解析不了、结构不对一律中止——
+ *  以前一律当空记录，截断的 JSON（/sdcard 的 FUSE 会报过时的大小 0）跑一次就把线上所有记录清空并签名推出去 */
+export function loadPublished(F, empty, ok) {
+  let raw;
+  try { raw = fs.readFileSync(F); } catch (e) { if (e.code === "ENOENT") return empty; die(`读不了 ${F}：${e.message}`); }
+  if (fs.statSync(F).size !== raw.length) die(`${F} 大小对不上（/sdcard FUSE），再跑一次`);
+  let d;
+  try { d = JSON.parse(raw.toString("utf8")); } catch (e) { die(`${F} 不是完整的 JSON（${e.message}）：先从 git 恢复再发`); }
+  if (!d || typeof d !== "object" || !ok(d)) die(`${F} 的结构不对：先从 git 恢复再发`);
+  return d;
+}
+
 /** @param file 仓库里的相对路径  @param data 要发布的对象  @param msg 提交说明  @param site cccodroid.net 上的地址 */
 export async function signAndPublish({ file, data, msg, site }) {
   const F = path.join(ROOT, file);
@@ -19,6 +31,7 @@ export async function signAndPublish({ file, data, msg, site }) {
   const sig = crypto.sign(null, body, key).toString("base64");
   // 用 App 里那把公钥验一遍：签错钥匙的话，所有用户都会丢弃这份
   const pubPem = /-----BEGIN PUBLIC KEY-----\\n([A-Za-z0-9+/=]+)\\n/.exec(fs.readFileSync(path.join(ROOT, "gateway/gw/notices.mjs"), "utf8"))?.[1];
+  if (!pubPem) die("在 gateway/gw/notices.mjs 里找不到 App 用的公钥");
   const pub = crypto.createPublicKey(`-----BEGIN PUBLIC KEY-----\n${pubPem}\n-----END PUBLIC KEY-----\n`);
   if (!crypto.verify(null, body, pub, Buffer.from(sig, "base64"))) die("签出来的和 App 里的公钥对不上");
   // 推送前先看一眼：别的改动已经暂存、或本地有没推的提交，push HEAD:main 会把它们一起发出去（审查 10-29 L19）

@@ -11,6 +11,9 @@ run unmodified, subject to Anthropic's terms.
 Bundled third-party components:
   - Shizuku-API 13.1.5 (MIT) — third_party/shizuku/LICENSE
   - xz-decompress 0.2.3 (MIT) — devkit/vendor/xz-decompress (build-time only)
+  - GNU C Library 2.44 dynamic loader (LGPL-2.1-or-later), shipped as
+    lib/arm64-v8a/libldlinux.so — third_party/glibc/COPYING.LIB; source and
+    build recipe links in third_party/glibc/README.md
 
 The developer toolkit (devkit) released alongside this project consists of
 unmodified Termux packages (path prefix rewritten in place), each distributed

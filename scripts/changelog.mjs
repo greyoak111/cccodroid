@@ -39,8 +39,9 @@ function split(body) {
 const ymd = (d) => [d.getFullYear(), d.getMonth() + 1, d.getDate()].map((n) => String(n).padStart(2, "0")).join("-");
 let released = null;
 try {
-  const raw = execFileSync("gh", ["api", "--paginate", `repos/${REPO}/releases?per_page=100`], { encoding: "utf8", maxBuffer: 64 << 20, stdio: ["ignore", "pipe", "pipe"] });
-  const list = JSON.parse(raw.replace(/\]\s*\[/g, ","));
+  // 每条 Release 一行 JSON。以前把各页的数组用正则 ][ → , 拼起来：正文里写了 [文字][引用] 这种 Markdown 就被拼坏了
+  const raw = execFileSync("gh", ["api", "--paginate", `repos/${REPO}/releases?per_page=100`, "--jq", ".[] | {tag_name, prerelease, draft, published_at, created_at, body}"], { encoding: "utf8", maxBuffer: 64 << 20, stdio: ["ignore", "pipe", "pipe"] });
+  const list = raw.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
   released = { zh: [], en: [] };
   for (const r of list) {
     if (!/^v\d+\.\d+\.\d+$/.test(r.tag_name) || r.prerelease || r.draft) continue;

@@ -92,7 +92,8 @@ export async function routeBus(req, res, u, p) {
       for (let i = 0; i < lines.length; i++) {
         if (res.destroyed) return;
         const ok = res.write(lines[i]); lines[i] = null;
-        if (!ok) await new Promise((r) => { res.once("drain", r); res.once("close", r); });
+        // 两个监听谁先到都要把另一个摘掉：以前 drain 先到时 close 监听留在 res 上，整轮重放一卡一顿就攒出几十个（MaxListenersExceededWarning）
+        if (!ok) await new Promise((r) => { const go = () => { res.off("drain", go); res.off("close", go); r(); }; res.once("drain", go); res.once("close", go); });
       }
       const q = res.__q; res.__q = null;
       if (!res.destroyed && q) for (const l of q) res.write(l);

@@ -72,8 +72,10 @@ public class MainActivity extends Activity {
     static final String ACTION_CONSENT = "cc.codroid.CONSENT";
     /** 配对通知的 fullScreenIntent：只为让通知常驻顶部，真被拉起（锁屏时）也什么都不做 */
     static final String ACTION_SHIZUKU_NOOP = "cc.codroid.SHIZUKU_NOOP";
-    /** 界面在前台吗：自动静默更新只在用户没盯着界面时做 */
+    /** 主界面（聊天）在前台吗：通知只在用户没盯着聊天时发 */
     static volatile boolean visible;
+    /** 本应用有界面在前台吗（主界面或独立浏览器）：静默更新、读剪贴板这类按「用户在不在用本应用」判断（11-04 报告 A4） */
+    static boolean appForeground() { return visible || BrowserActivity.visible; }
 
     private Env env;
     private volatile boolean booted;
@@ -121,7 +123,6 @@ public class MainActivity extends Activity {
         syncSplash();
         env = new Env(this);
         buildSetupUi(env.devkitReady() && !secondaryUser(this));
-        edgeToEdge();
         fold = new Fold(this, f -> pushFold());
         fold.start();
         pending = getIntent();
@@ -520,7 +521,9 @@ public class MainActivity extends Activity {
             android.net.Uri u = i.getParcelableExtra(Intent.EXTRA_STREAM);
             if (u != null) uris.add(u);
         }
-        String text0 = i.getStringExtra(Intent.EXTRA_TEXT);
+        // 有的应用分享的是带格式的 CharSequence（Spanned），getStringExtra 会拿到 null（11-04 报告 A4）
+        CharSequence cs0 = i.getCharSequenceExtra(Intent.EXTRA_TEXT);
+        String text0 = cs0 == null ? null : cs0.toString();
         // 收多少有个数：一次最多 32 个文件、文字最多 1 MB；复制时剩余空间低于 512 MB 就停，别把存储写满（审查 低12）
         final String text = text0 != null && text0.length() > (1 << 20) ? text0.substring(0, 1 << 20) : text0;
         if (uris.size() > 32) {
@@ -848,7 +851,7 @@ public class MainActivity extends Activity {
             }
             showChooser(true);
         });
-        done.await();
+        awaitAlive(done);
         return pick[0];
     }
 
@@ -925,7 +928,7 @@ public class MainActivity extends Activity {
             chooserFoot.addView(go, new LinearLayout.LayoutParams(-1, -2));
             showChooser(true);
         });
-        done.await();
+        awaitAlive(done);
         return out;
     }
 
@@ -942,8 +945,7 @@ public class MainActivity extends Activity {
             try { startActivityForResult(devkitPickIntent(), REQ_DEVKIT); }
             catch (Exception e) { say("✗ " + e.getMessage()); l.countDown(); }
         });
-        l.await();
-        pickWait = null;
+        try { awaitAlive(l); } finally { pickWait = null; }
         return picked;
     }
 
@@ -966,11 +968,15 @@ public class MainActivity extends Activity {
     private boolean askBlocking(String msg, String yes) throws InterruptedException {
         final boolean[] ok = {false};
         CountDownLatch l = new CountDownLatch(1);
-        ui.post(() -> new android.app.AlertDialog.Builder(this).setMessage(msg)
-            .setPositiveButton(yes, (d, w) -> ok[0] = true)
-            .setNegativeButton(Tr.t("取消"), null)
-            .setOnDismissListener(d -> l.countDown()).show());
-        l.await();
+        // 和 confirmPriv 一样过 guard：按钮一秒后才能点、被盖住时不收触摸（问的是装不装来源不明的工具包，11-04 报告 A4）
+        ui.post(() -> {
+            android.app.AlertDialog d = new android.app.AlertDialog.Builder(this).setMessage(msg)
+                .setPositiveButton(yes, (x, w) -> ok[0] = true)
+                .setNegativeButton(Tr.t("取消"), null)
+                .setOnDismissListener(x -> l.countDown()).create();
+            if (!guard(d, android.content.DialogInterface.BUTTON_POSITIVE)) l.countDown();
+        });
+        awaitAlive(l);
         return ok[0];
     }
 
@@ -1089,6 +1095,10 @@ public class MainActivity extends Activity {
 
     /** 等进度页换上来。界面在这之前被销毁的话（onDestroy 清掉了还没执行的 post），永远等不到：
      *  不再干等，返回 false 让调用的放弃（DeepSeek 复核 b7 高-1：以前 DEVKIT_APPLYING 会永久卡在 true） */
+    /** boot 线程等界面上的选择：界面没了就别干等（onDestroy 会清掉还没执行的 post，倒数永远不会到），抛出去让这条线程结束（11-04 报告 A4） */
+    private void awaitAlive(CountDownLatch l) throws InterruptedException {
+        while (!l.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)) if (isDestroyed()) throw new InterruptedException("界面已关闭");
+    }
     private boolean awaitShown(CountDownLatch l) throws InterruptedException {
         while (!l.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)) if (isDestroyed()) return false;
         return true;
@@ -1174,10 +1184,12 @@ public class MainActivity extends Activity {
         PowerManager pm = getSystemService(PowerManager.class);
         SharedPreferences sp = getSharedPreferences("ui", MODE_PRIVATE);
         if (pm.isIgnoringBatteryOptimizations(getPackageName()) || sp.getBoolean("askedBattery", false)) return;
-        sp.edit().putBoolean("askedBattery", true).apply();
         ui.post(() -> {
+            // 界面在前台、真弹出来了才记「问过」：后台起 Activity 会被系统拦（36 包更严），以前先记后弹，被拦一次就永远不再问（11-04 报告 A4）
+            if (!visible || isFinishing() || isDestroyed()) return;
             try {
                 startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())));
+                sp.edit().putBoolean("askedBattery", true).apply();
             } catch (Exception ignored) {}
         });
     }
@@ -1405,6 +1417,9 @@ public class MainActivity extends Activity {
         }
         setContentView(root);
         applyBars(dark);
+        // 每次重建 root 都要重新挂系统栏监听：以前只在 onCreate 挂，重试 / 换工具包重建后安全区就不跟着变了（11-04 报告 A4）
+        edgeToEdge();
+        root.requestApplyInsets();
     }
 
     /** 平时启动途中碰上要看细节的事（出错、要下载、要选来源）：收起居中标识，换回完整的安装页 */
@@ -1517,6 +1532,8 @@ public class MainActivity extends Activity {
                 v.destroy();
                 if (v != web) return true;
                 web = null;
+                // 选文件 / 拍照的回调属于死掉的那个 WebView：清掉，结果回来时走「界面重建过」那条路（放进 uploads 递给新页面，11-04 报告 A4）
+                if (fileCb != null) { try { fileCb.onReceiveValue(null); } catch (Exception ignored) {} fileCb = null; }
                 if (!isDestroyed()) ui.post(() -> { if (web == null && !isDestroyed()) showWeb(); });
                 return true;
             }
@@ -1823,7 +1840,7 @@ public class MainActivity extends Activity {
         web.setVisibility(View.INVISIBLE);
         web.loadUrl("http://127.0.0.3:9/");     // 必须跨站：界面自己在 127.0.0.2（Env.HOST），同站跳一次不管用
         ui.postDelayed(() -> { if (bounceStage == 1) bounceBack(); }, 1500);   // 落地回调没来
-        ui.postDelayed(() -> { if (bounceStage != 0) { bounceStage = 0; web.setVisibility(View.VISIBLE); } }, 10000);
+        ui.postDelayed(() -> { if (bounceStage != 0) { bounceStage = 0; if (web != null) web.setVisibility(View.VISIBLE); } }, 10000);   // 这 10 秒里渲染进程可能没了、web 已换成 null（11-04 报告 A4）
     }
     private void bounceBack() {
         bounceStage = 2;
@@ -1913,28 +1930,46 @@ public class MainActivity extends Activity {
         File f = path == null ? null : new File(path);
         if (f == null || !f.isFile()) { savedJs(false, "missing"); return; }
         try { Share.guard(this, f); } catch (Exception e) { savedJs(false, "forbidden"); return; }
+        // 只有一个槽：上一次还在选位置时又来一次，回来的结果会配给后一个文件，把用户选的位置写成别的文件（11-04 报告 A4）
+        if (savePending != null) { savedJs(false, "busy"); return; }
         savePending = f;
+        // 选位置的工夫里本进程可能被系统回收：源文件路径也落盘，回来时从这里找回（#131）
+        getSharedPreferences("ui", MODE_PRIVATE).edit().putString("savePending", f.getPath()).commit();   // 同步落盘：马上要跳去系统选择器，进程随时可能被杀（DeepSeek 复核 11-04）
         Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
             .setType(mime == null || mime.isEmpty() ? "application/octet-stream" : mime)
             .putExtra(Intent.EXTRA_TITLE, name == null || name.isEmpty() ? f.getName() : name);
         try { startActivityForResult(i, 8); }
-        catch (Exception e) { savePending = null; savedJs(false, "nopicker"); }
+        catch (Exception e) { savePending = null; getSharedPreferences("ui", MODE_PRIVATE).edit().remove("savePending").apply(); savedJs(false, "nopicker"); }
     }
 
     /** 复制放后台线程：大文件（几百 MB 的导出包）别卡住界面 */
     private void finishSaveAs(Uri dst) {
         File src = savePending;
         savePending = null;
-        if (src == null) return;
+        SharedPreferences sp = getSharedPreferences("ui", MODE_PRIVATE);
+        String kept = sp.getString("savePending", null);
+        sp.edit().remove("savePending").apply();
+        if (src == null && kept != null) {
+            // 进程被回收重建过：按落盘的路径找回，照样过一遍分享范围的检查
+            File f = new File(kept);
+            try { if (f.isFile()) { Share.guard(this, f); src = f; } } catch (Exception ignore) {}
+        }
+        if (src == null) {
+            // 找不回要存的是哪个文件：刚建出来的空文档删掉，告诉页面没存上，别留一个空壳
+            try { android.provider.DocumentsContract.deleteDocument(getContentResolver(), dst); } catch (Exception ignore) {}
+            savedJs(false, "lost");
+            return;
+        }
+        final File from = src;
         new Thread(() -> {
             boolean ok = false;
             String msg;
-            try (InputStream in = new java.io.FileInputStream(src); OutputStream out = getContentResolver().openOutputStream(dst, "w")) {
+            try (InputStream in = new java.io.FileInputStream(from); OutputStream out = getContentResolver().openOutputStream(dst, "w")) {
                 if (out == null) throw new java.io.IOException(Tr.t("openOutputStream 返回 null"));
                 byte[] buf = new byte[1 << 16];
                 for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
                 ok = true;
-                msg = src.getName();
+                msg = from.getName();
             } catch (Exception e) {
                 msg = String.valueOf(e.getMessage());
                 try { android.provider.DocumentsContract.deleteDocument(getContentResolver(), dst); } catch (Exception ignore) {}
@@ -2031,7 +2066,7 @@ public class MainActivity extends Activity {
         }
         if (req == 8) {
             if (res == RESULT_OK && data != null && data.getData() != null) finishSaveAs(data.getData());
-            else { savePending = null; savedJs(false, "cancel"); }
+            else { savePending = null; getSharedPreferences("ui", MODE_PRIVATE).edit().remove("savePending").apply(); savedJs(false, "cancel"); }
             return;
         }
         if (req == REQ_CAMERA) {
@@ -2077,10 +2112,15 @@ public class MainActivity extends Activity {
             ValueCallback<Uri[]> cb = fileCb;
             fileCb = null;
             if (all == null) { cb.onReceiveValue(null); return; }
-            java.util.ArrayList<Uri> small = new java.util.ArrayList<>(), big = new java.util.ArrayList<>();
-            for (Uri u : all) (sizeOf(u) > BIG_ATTACH ? big : small).add(u);
-            cb.onReceiveValue(small.isEmpty() ? null : small.toArray(new Uri[0]));
-            if (!big.isEmpty()) attachBig(big, true);
+            // 查大小要问别的应用的 provider（云盘可能要联网），别在主线程上等（11-04 报告 A4）
+            new Thread(() -> {
+                java.util.ArrayList<Uri> small = new java.util.ArrayList<>(), big = new java.util.ArrayList<>();
+                for (Uri u : all) (sizeOf(u) > BIG_ATTACH ? big : small).add(u);
+                ui.post(() -> {
+                    try { cb.onReceiveValue(small.isEmpty() ? null : small.toArray(new Uri[0])); } catch (Exception ignored) {}
+                    if (!big.isEmpty() && !isDestroyed()) attachBig(big, true);
+                });
+            }, "attach-size").start();
         }
     }
 
@@ -2093,15 +2133,16 @@ public class MainActivity extends Activity {
     }
     /** HTML 预览不联网时为 true：界面 WebView 只许连本机 */
     static volatile boolean pvOffline;
-    /** Service Worker 发的请求不经各个 WebView 的 WebViewClient，走全进程的这一个：不联网预览时同样只许连本机。
-     *  应用内浏览器里的网站照常用（pvOffline 只在查看器开着不联网预览时为 true） */
+    /** Service Worker 发的请求不经各个 WebView 的 WebViewClient，走全进程的这一个，分不出是哪个页面的 worker：
+     *  这里只拦界面专用地址。不联网预览不靠这里 —— 预览服务不给注册 worker（gw/preview.mjs），
+     *  以前按 pvOffline 拦外网，会把应用内浏览器里正常网站的 worker 一起拦掉（#131） */
     static void guardServiceWorkers() {
         try {
             android.webkit.ServiceWorkerController.getInstance().setServiceWorkerClient(new android.webkit.ServiceWorkerClient() {
                 @Override public android.webkit.WebResourceResponse shouldInterceptRequest(android.webkit.WebResourceRequest req) {
                     Uri u = req.getUrl();
                     if (u != null && isUiHost(u.getHost())) return blocked();
-                    return pvOffline && u != null && !localHost(u.getHost()) ? blocked() : null;
+                    return null;
                 }
             });
         } catch (Throwable ignored) {}

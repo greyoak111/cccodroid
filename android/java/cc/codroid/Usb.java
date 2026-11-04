@@ -79,7 +79,8 @@ final class Usb {
             @Override public void onReceive(Context x, Intent i) {
                 // 只认这台设备的结果（审查 #107 09-005）：同时在问两台时，A 的回复以前会让还在等确认的 B 提前收工、报「被拒绝」
                 UsbDevice got = i.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-                if (got == null || d.getDeviceName().equals(got.getDeviceName())) done.countDown();
+                // 没带设备信息的不算（同 action 的空广播不能让等待提前结束，11-04 报告 A2）
+                if (got != null && d.getDeviceName().equals(got.getDeviceName())) done.countDown();
             }
         };
         if (android.os.Build.VERSION.SDK_INT >= 33) c.registerReceiver(r, new IntentFilter(ACTION), 4 /* RECEIVER_NOT_EXPORTED */);

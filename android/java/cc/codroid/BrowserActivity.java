@@ -62,8 +62,10 @@ public class BrowserActivity extends Activity implements BrowserPane.Host {
         if (!pane.back()) finish();
     }
 
-    @Override protected void onPause() { super.onPause(); pane.pause(); }
-    @Override protected void onResume() { super.onResume(); FrameRate.apply(this); pane.resume(); }
+    /** 独立浏览器在前台吗（见 MainActivity.appForeground） */
+    static volatile boolean visible;
+    @Override protected void onPause() { visible = false; Battery.foreground(false); super.onPause(); pane.pause(); }
+    @Override protected void onResume() { super.onResume(); visible = true; Battery.foreground(true); FrameRate.apply(this); pane.resume(); }
     @Override protected void onDestroy() {
         if (pane != null) pane.destroy();
         super.onDestroy();

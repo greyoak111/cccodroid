@@ -338,7 +338,12 @@ function fmField(md, k) {
   const lines = fm[1].split("\n"), i = lines.findIndex((l) => l.startsWith(k + ":"));
   if (i < 0) return "";
   const v = lines[i].slice(k.length + 1).trim();
-  if (!/^[>|][+-]?$/.test(v)) return v.replace(/^["']|["']$/g, "").trim();
+  if (!/^[>|][+-]?$/.test(v)) {
+    // 双引号标量按转义解开（自定义组件的说明用 JSON.stringify 写，里面的 \" 不该显示成反斜杠）；单引号里 '' 是一个 '
+    if (v.length >= 2 && v[0] === '"' && v.endsWith('"')) try { return String(JSON.parse(v)).trim(); } catch {}
+    if (v.length >= 2 && v[0] === "'" && v.endsWith("'")) return v.slice(1, -1).replace(/''/g, "'").trim();
+    return v.replace(/^["']|["']$/g, "").trim();
+  }
   const body = [];
   for (const l of lines.slice(i + 1)) { if (l.trim() && !/^\s/.test(l)) break; body.push(l.trim()); }
   return (v[0] === ">" ? body.join(" ") : body.join("\n")).replace(/\s+$/, "").trim();
