@@ -231,6 +231,34 @@ test("旧会话兼容：章首提问跳过「你好，claude」「继续」，�
   assert.equal(r.compacts[0].q, "继续", "前 3 句都没内容就留第一句，不往后找");
 });
 
+test("增量：末尾是完整 JSON 但没有换行，也要收下（导入的会话包常见）", async () => {
+  const S = id();
+  const L = chain(S, 2);
+  const f = path.join(DIR, S + ".jsonl");
+  fs.writeFileSync(f, L.map((l) => JSON.stringify(l)).join("\n"));   // 没有结尾换行
+  const r = await scanSession(f);
+  assert.equal(r.uu.length, 4);
+  assert.equal(r.turns, 2);
+  const r2 = await scanSession(f, r);   // 再扫一次不能重复计入
+  assert.equal(r2.uu.length, 4);
+});
+
+test("脉络：lineageForget 立刻落盘，重启后不会从旧缓存按旧 off 续读", async () => {
+  const home = process.env.CCAPP_HOME;
+  const proj = path.join(home, ".claude", "projects", "-work-forget");
+  fs.mkdirSync(proj, { recursive: true });
+  const S = id();
+  fs.writeFileSync(path.join(proj, S + ".jsonl"), chain(S, 2).map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const { lineageGraph, lineageForget } = await import("../gw/lineage.mjs");
+  await lineageGraph();
+  const cache = path.join(home, ".cache", "ccapp-lineage-index.json");
+  const before = JSON.parse(fs.readFileSync(cache, "utf8")).recs;
+  assert.ok(before.some((r) => r.id === S), "先要有缓存");
+  lineageForget(S);
+  const after = JSON.parse(fs.readFileSync(cache, "utf8")).recs;
+  assert.ok(!after.some((r) => r.id === S), "删除要立刻落盘");
+});
+
 test("direction：两票各投一边时取开始得早的当父，两票一致时按票数", () => {
   const a = { id: "a", firstTs: 100 }, b = { id: "b", firstTs: 200 };
   // birth 弃权；after 投 b，name（a 无「分叉」后缀、b 有）投 a → 1:1，按注释取开始早的 a
