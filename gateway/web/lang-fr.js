@@ -2736,4 +2736,11 @@ window.I18N_DICT["fr"] = {
   "命令 {c} 正在被另一个组件安装，稍后再试或换个名字": "La commande {c} est en cours d'installation par un autre composant ; réessayez plus tard ou choisissez un autre nom.",
   "命令 {c} 在安装期间被占了，已取消这次安装": "La commande {c} a été prise pendant l'installation ; cette installation a été annulée.",
   "设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）": "Les réglages n'ont pas pu être écrits sur le disque ; ils peuvent encore s'appliquer pour cette exécution, mais reviendront aux anciennes valeurs après un redémarrage (voir les journaux de la passerelle).",
+  "选位置时应用被系统关掉了，找不回要保存的文件，再保存一次就好": "L'application a été fermée par le système pendant le choix de l'emplacement : le fichier à enregistrer est perdu. Enregistrez-le à nouveau.",
+  "Claude Code 被别的程序结束了（{why}），不是模型或接口的问题": "Claude Code a été arrêté par un autre programme ({why}) ; ce n'est pas un problème de modèle ou d'API",
+  "生成中断（{sig}）": "Génération interrompue ({sig})",
+  "生成失败（退出码 {code}）": "Échec de la génération (code de sortie {code})",
+  "生成结束但没有返回结果": "La génération s'est terminée sans résultat",
+  "上一个文件还没选好保存位置": "Le fichier précédent attend encore un emplacement d'enregistrement",
+  "原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里": "Le fichier d’origine n’existe plus (renommé, déplacé ou supprimé).\nOK : enregistrer une copie sous le nom d’origine\nAnnuler : ne pas enregistrer pour l’instant, les modifications restent dans l’éditeur",
 };

@@ -2770,5 +2770,12 @@ window.I18N_DICT.en = {
   "另一个组件正在安装这个名字，稍后再试或换个名字": "Another component is installing that name; try again later or choose a different name.",
   "命令 {c} 正在被另一个组件安装，稍后再试或换个名字": "The command {c} is being installed by another component; try again later or choose a different name.",
   "命令 {c} 在安装期间被占了，已取消这次安装": "The command {c} was taken during installation, so this install was canceled.",
-  "设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）": "Settings could not be written to disk; they may still apply for this run, but will revert after a restart (see gateway logs for details)."
+  "设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）": "Settings could not be written to disk; they may still apply for this run, but will revert after a restart (see gateway logs for details).",
+  "选位置时应用被系统关掉了，找不回要保存的文件，再保存一次就好": "The app was closed by the system while you picked a location, so the file to save was lost. Please save it again.",
+  "Claude Code 被别的程序结束了（{why}），不是模型或接口的问题": "Claude Code was ended by another program ({why}); this isn't a model or API problem",
+  "生成中断（{sig}）": "Generation interrupted ({sig})",
+  "生成失败（退出码 {code}）": "Generation failed (exit code {code})",
+  "生成结束但没有返回结果": "Generation ended without a result",
+  "上一个文件还没选好保存位置": "The previous file is still waiting for a save location",
+  "原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里": "The original file is gone (renamed, moved or deleted).\nOK: save a copy under the original name\nCancel: don't save for now; your changes stay in the editor"
 };

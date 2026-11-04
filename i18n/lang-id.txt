@@ -2733,3 +2733,10 @@
 2733	Perintah {c} sedang dipasang oleh komponen lain; coba lagi nanti atau pilih nama lain.
 2734	Perintah {c} diambil alih saat pemasangan, jadi pemasangan ini dibatalkan.
 2735	Pengaturan tidak dapat ditulis ke disk; mungkin masih berlaku untuk jalannya ini, tetapi akan kembali ke nilai lama setelah mulai ulang (lihat log gateway untuk detail).
+2736	Aplikasi ditutup sistem saat Anda memilih lokasi, sehingga file yang akan disimpan hilang. Simpan lagi.
+2737	Claude Code dihentikan oleh program lain ({why}); ini bukan masalah model atau API
+2738	Pembuatan terputus ({sig})
+2739	Pembuatan gagal (kode keluar {code})
+2740	Pembuatan selesai tanpa hasil
+2741	File sebelumnya masih menunggu lokasi penyimpanan
+2742	File aslinya sudah tidak ada (diganti nama, dipindah, atau dihapus).\nOK: simpan salinan dengan nama aslinya\nBatal: jangan simpan dulu, perubahan tetap di editor

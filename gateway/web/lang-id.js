@@ -2736,4 +2736,11 @@ window.I18N_DICT["id"] = {
   "命令 {c} 正在被另一个组件安装，稍后再试或换个名字": "Perintah {c} sedang dipasang oleh komponen lain; coba lagi nanti atau pilih nama lain.",
   "命令 {c} 在安装期间被占了，已取消这次安装": "Perintah {c} diambil alih saat pemasangan, jadi pemasangan ini dibatalkan.",
   "设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）": "Pengaturan tidak dapat ditulis ke disk; mungkin masih berlaku untuk jalannya ini, tetapi akan kembali ke nilai lama setelah mulai ulang (lihat log gateway untuk detail).",
+  "选位置时应用被系统关掉了，找不回要保存的文件，再保存一次就好": "Aplikasi ditutup sistem saat Anda memilih lokasi, sehingga file yang akan disimpan hilang. Simpan lagi.",
+  "Claude Code 被别的程序结束了（{why}），不是模型或接口的问题": "Claude Code dihentikan oleh program lain ({why}); ini bukan masalah model atau API",
+  "生成中断（{sig}）": "Pembuatan terputus ({sig})",
+  "生成失败（退出码 {code}）": "Pembuatan gagal (kode keluar {code})",
+  "生成结束但没有返回结果": "Pembuatan selesai tanpa hasil",
+  "上一个文件还没选好保存位置": "File sebelumnya masih menunggu lokasi penyimpanan",
+  "原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里": "File aslinya sudah tidak ada (diganti nama, dipindah, atau dihapus).\nOK: simpan salinan dengan nama aslinya\nBatal: jangan simpan dulu, perubahan tetap di editor",
 };

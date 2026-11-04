@@ -2736,4 +2736,11 @@ window.I18N_DICT["es"] = {
   "命令 {c} 正在被另一个组件安装，稍后再试或换个名字": "El comando {c} lo está instalando otro componente; inténtalo más tarde o elige otro nombre.",
   "命令 {c} 在安装期间被占了，已取消这次安装": "El comando {c} fue ocupado durante la instalación; se canceló esta instalación.",
   "设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）": "No se pudieron escribir los ajustes en el disco; pueden seguir aplicándose en esta ejecución, pero volverán a los valores anteriores tras reiniciar (consulta los registros de la pasarela).",
+  "选位置时应用被系统关掉了，找不回要保存的文件，再保存一次就好": "El sistema cerró la app mientras elegías la ubicación y se perdió el archivo a guardar. Vuelve a guardarlo.",
+  "Claude Code 被别的程序结束了（{why}），不是模型或接口的问题": "Otro programa terminó Claude Code ({why}); no es un problema del modelo ni de la API",
+  "生成中断（{sig}）": "Generación interrumpida ({sig})",
+  "生成失败（退出码 {code}）": "La generación falló (código de salida {code})",
+  "生成结束但没有返回结果": "La generación terminó sin resultado",
+  "上一个文件还没选好保存位置": "El archivo anterior aún espera una ubicación para guardarse",
+  "原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里": "El archivo original ya no está (se renombró, movió o eliminó).\nAceptar: guardar una copia con el nombre original\nCancelar: no guardar por ahora; los cambios se quedan en el editor",
 };

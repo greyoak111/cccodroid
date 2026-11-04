@@ -2733,3 +2733,10 @@
 2733	La commande {c} est en cours d'installation par un autre composant ; réessayez plus tard ou choisissez un autre nom.
 2734	La commande {c} a été prise pendant l'installation ; cette installation a été annulée.
 2735	Les réglages n'ont pas pu être écrits sur le disque ; ils peuvent encore s'appliquer pour cette exécution, mais reviendront aux anciennes valeurs après un redémarrage (voir les journaux de la passerelle).
+2736	L'application a été fermée par le système pendant le choix de l'emplacement : le fichier à enregistrer est perdu. Enregistrez-le à nouveau.
+2737	Claude Code a été arrêté par un autre programme ({why}) ; ce n'est pas un problème de modèle ou d'API
+2738	Génération interrompue ({sig})
+2739	Échec de la génération (code de sortie {code})
+2740	La génération s'est terminée sans résultat
+2741	Le fichier précédent attend encore un emplacement d'enregistrement
+2742	Le fichier d’origine n’existe plus (renommé, déplacé ou supprimé).\nOK : enregistrer une copie sous le nom d’origine\nAnnuler : ne pas enregistrer pour l’instant, les modifications restent dans l’éditeur
