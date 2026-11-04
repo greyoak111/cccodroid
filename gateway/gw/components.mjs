@@ -13,6 +13,7 @@ import { retireManagedBridge } from "./managed-bridge.mjs";
 import { clearBridgeConfigMapping, handleBridgeConfig, handleBridgeModels, handleBridgeRepair } from "./bridge-config.mjs";
 import { archiveProblem, parseTarListing } from "./archive-check.mjs";
 import { baseOwnedPaths } from "./orphans.mjs";
+import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 
 /** 前端文件（web/ 下全部，含 i18n.js 与各语言词典）的最后修改时间戳。界面拿它来判断「我是不是该刷新了」——
  *  这样以后只改 web/ 也能自动生效，不用重开 App。 */
@@ -396,7 +397,7 @@ function compRemoveFiles(id, rec) {
   const sk = rec.skill && skillDst(rec.skill);
   // 标记写着别的组件（那边接管了同名目录）就不删；没有标记的是旧版装的，照旧删
   let owner = ""; try { owner = sk ? fs.readFileSync(path.join(sk, SKILL_OWNER), "utf8").trim() : ""; } catch {}
-  if (sk && (!owner || owner === id)) fs.rmSync(sk, { recursive: true, force: true });
+  if (sk && (!owner || owner === id)) { const ucb = ucAppBegin(); fs.rmSync(sk, { recursive: true, force: true }); ucAppWrote([sk], ucb); }
 }
 
 async function compInstall(id) {
@@ -452,6 +453,7 @@ function compInstallSkill(id, rel, rec) {
   // 同名目录已经在：用户自己的、手动导入的、别的组件的 —— 不是本组件的就不碰（#104 05-010）。
   // 本组件上一版的技能在升级/重装时已由 compRemoveFiles 按 rec.skill 删掉；空目录（v0.1.9 留下的）照旧删。
   // 目录里的 .cccodroid-component 记着是哪个组件放的：装到一半被杀、记录还没写上 skill 的，重装时认得出是自己的
+  const ucb = ucAppBegin();
   try { fs.rmdirSync(dst); } catch {}
   let owner = ""; try { owner = fs.readFileSync(path.join(dst, SKILL_OWNER), "utf8").trim(); } catch {}
   if (owner === id) fs.rmSync(dst, { recursive: true, force: true });
@@ -461,6 +463,7 @@ function compInstallSkill(id, rel, rec) {
     fs.writeFileSync(path.join(dst, SKILL_OWNER), id + "\n");
     for (const f of fs.readdirSync(src)) fs.copyFileSync(path.join(src, f), path.join(dst, f));
     rec.skill = name;
+    ucAppWrote([dst], ucb);    // 组件带的技能是应用装的：认下（见 userconf.mjs）
   } catch (e) { log(`[comp] ${id} 技能没装上：${e.message}`); }
 }
 // v0.1.9 拼错了 skill 路径（多了一层 usr/），装好的组件没有 skill：发现就补上

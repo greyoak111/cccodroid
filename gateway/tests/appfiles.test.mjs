@@ -101,3 +101,16 @@ test("加载钩子用的 code()：快照里的给内存那份，清单里的现�
   fs.writeFileSync(path.join(root, "gw/new.mjs"), "x");
   assert.equal(g.code("gw/new.mjs"), null, "安装包里没有的");
 });
+
+test("应用交来了清单哈希：FILES 读不到、或者被换了，不退回「不核」，报给 onBadList；对得上照常启用", () => {
+  const root = mkRoot("apf-expect", FILES);
+  const good = sha(fs.readFileSync(path.join(root, "FILES")));
+  const bad = [];
+  assert.ok(appGuard(root, { expect: good, onBadList: (w) => bad.push(w) }));
+  assert.deepEqual(bad, []);
+  fs.appendFileSync(path.join(root, "FILES"), sha(Buffer.from("x")) + " gw/evil.mjs\n");
+  assert.equal(appGuard(root, { expect: good, onBadList: (w) => bad.push(w) }), null);
+  fs.rmSync(path.join(root, "FILES"));
+  assert.equal(appGuard(root, { expect: good, onBadList: (w) => bad.push(w) }), null);
+  assert.deepEqual(bad, ["FILES（和安装包对不上）", "FILES（读不到）"]);
+});

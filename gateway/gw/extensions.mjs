@@ -8,6 +8,7 @@ import { NEXT, readBody, readBodyBuf, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
 import { COMP_DIR, compIndex, compIndexCache, compRecord } from "./components.mjs";
 import { retrustProject } from "./projtrust.mjs";
+import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 
 // ── 扩展：插件 / 技能 / MCP ───────────────────────────────────────────
 // 全部转给 claude 自己的命令行（claude plugin … / claude mcp …），网关不自己改它的配置文件 ——
@@ -17,6 +18,7 @@ let EXT_LOCK = Promise.resolve();
 function extRun(args, timeoutMs = 180000) {
   const job = EXT_LOCK.then(() => new Promise((resolve) => {
     const [cmd0, args0] = claudeCmd(args);
+    const ucb = writes ? ucAppBegin() : null;
     const child = spawn(cmd0, args0, {
       cwd: fs.existsSync(CFG.workspace) ? CFG.workspace : CFG.home,
       env: claudeEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true,
@@ -25,9 +27,17 @@ function extRun(args, timeoutMs = 180000) {
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
     child.stdout.on("data", (d) => (out += d)); child.stderr.on("data", (d) => (err += d));
     const t = setTimeout(() => killTree(child), timeoutMs);
-    child.on("close", (code) => { clearTimeout(t); resolve({ code, out, err }); });
+    child.on("close", (code) => { clearTimeout(t); appWrote(code === 0 ? ucb : null); resolve({ code, out, err }); });
     child.on("error", (e) => { clearTimeout(t); resolve({ code: -1, out, err: err + e.message }); });
   }));
+  // 装卸插件、加删 MCP 是应用替用户做的：这次命令改到的当场认下，别下一轮反过来问他（见 userconf.mjs）。命令失败的不认，下一轮照问。
+  // 只认对应的地方：插件只动 plugins/ 和设置里的 enabledPlugins / extraKnownMarketplaces，MCP 只动 .claude.json
+  const writes = ["plugin", "mcp"].includes(args[0]) && !args.includes("list") && !args.includes("get");
+  const appWrote = (ucb) => {
+    if (!writes) return;
+    if (args[0] === "mcp") ucAppWrote([".claude.json"], ucb);
+    else ucAppWrote([".claude/settings.json", ".claude/plugins/"], ucb, { ".claude/settings.json": ["enabledPlugins", "extraKnownMarketplaces"] });
+  };
   EXT_LOCK = job.catch(() => {});
   return job;
 }
@@ -240,6 +250,7 @@ export function saveHooks({ scope, dir, hooks, disableAll }) {
     delete j.disableAllHooks;
     const pause = disableAll !== undefined ? !!disableAll : !!paused;
     const want = clean !== undefined ? clean : (paused || j.hooks || {});
+    const ucb = scope === "user" ? ucAppBegin() : null;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     if (r.exists) { try { fs.copyFileSync(file, file + ".bak"); } catch {} }
     const put = (dst, obj) => { const tmp = dst + ".tmp-" + process.pid; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n"); fs.renameSync(tmp, dst); };
@@ -248,7 +259,8 @@ export function saveHooks({ scope, dir, hooks, disableAll }) {
     put(file, j);
     if (!pause) try { fs.unlinkSync(pausedFile(file)); } catch {}
     log(`hooks 已保存：${file}`);
-    if (scope !== "user") retrustProject(path.dirname(path.dirname(file)));   // 用户在这里亲手改的：之前认过这个目录就跟着认新的（见 projtrust.mjs）
+    if (scope !== "user") retrustProject(path.dirname(path.dirname(file)));
+    else ucAppWrote([".claude/settings.json"], ucb, { ".claude/settings.json": ["hooks"] });   // 用户在扩展页亲手改的钩子：只认 hooks 这一块（见 userconf.mjs）
     return { ok: true, file };
   });
   EXT_LOCK = job.catch(() => {});
@@ -266,8 +278,10 @@ export async function migrateHookPause() {
   }
 }
 function installHookScripts() {
+  const ucb = ucAppBegin();
   fs.mkdirSync(HOOK_SCRIPTS_DIR, { recursive: true });
   for (const [name, src] of Object.entries(HOOK_SCRIPTS)) fs.writeFileSync(path.join(HOOK_SCRIPTS_DIR, name), src);
+  ucAppWrote([".claude/hooks/"], ucb);
   return { ok: true, dir: HOOK_SCRIPTS_DIR };
 }
 /** 试运行用的 stdin：照 claude 真实传给 hook 的 JSON 造一份（工具类事件按匹配规则挑个像样的工具） */
@@ -352,7 +366,9 @@ function deleteSkill(dir) {
   if (!SID_RE.test(dir)) return { ok: false, message: "bad name" };
   const p = path.join(SKILLS_DIR, dir);
   if (!fs.existsSync(path.join(p, "SKILL.md"))) return { ok: false, message: "not found" };
+  const ucb = ucAppBegin();
   fs.rmSync(p, { recursive: true, force: true });
+  ucAppWrote([".claude/skills/" + dir], ucb);
   return { ok: true };
 }
 // ── 官方目录：技能（anthropics/skills）与 MCP 注册表（registry.modelcontextprotocol.io）──
@@ -398,6 +414,7 @@ async function installCatalogSkill(dir) {
   if (fs.existsSync(dest)) return { ok: false, message: tz("已经有同名技能，先删掉再装") };
   if (it.bytes > 50 << 20) return { ok: false, message: tz("太大了（超过 50 MB）") };
   const tmp = path.join(SKILLS_DIR, `.tmp-${dir}-${process.pid}`);
+  const ucb = ucAppBegin();
   fs.rmSync(tmp, { recursive: true, force: true });
   try {
     for (const f of it.files) {
@@ -408,6 +425,7 @@ async function installCatalogSkill(dir) {
     }
     fs.writeFileSync(path.join(tmp, ".cc-source.json"), JSON.stringify({ repo: SKILL_REPO, sha: c.sha, path: "skills/" + dir, at: new Date().toISOString() }) + "\n");
     fs.renameSync(tmp, dest);
+    ucAppWrote([dest, tmp], ucb);
     return { ok: true };
   } catch (e) { fs.rmSync(tmp, { recursive: true, force: true }); return { ok: false, message: e.message }; }
 }

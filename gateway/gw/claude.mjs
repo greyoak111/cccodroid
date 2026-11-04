@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, GLIBC_PRELOAD, NO_BRIDGE, PATHS, PREFIX, glibcEnv, log, sleep } from "./config.mjs";
-import { SETTINGS } from "./settings-store.mjs";
+import { SETTINGS, outputStyles } from "./settings-store.mjs";
 import { PROVIDER, keyOf } from "./providers.mjs";
 import { cachedModels } from "./models.mjs";
 import { fixedBaseUrl } from "./streamfix.mjs";
@@ -358,6 +358,15 @@ export function claudeCmd(extra) {
  *
  *  所以 spawn 时加了 detached:true，让 claude 当进程组长；这里对负 pid 下刀，
  *  一次带走整组。取不到组就退回杀单进程，别什么都不做。 */
+/** 装着的 claude 版本（取自版本目录名）不低于 v：认不出版本的一律当不够 */
+export function claudeAtLeast(v) {
+  let cur; try { cur = path.basename(path.dirname(fs.realpathSync(PATHS.claude))); } catch { return false; }
+  const a = cur.split(".").map(Number), b = v.split(".").map(Number);
+  if (a.length !== 3 || a.some((x) => !Number.isInteger(x))) return false;
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return true;
+}
+
 export function killTree(child) {
   if (!child || !child.pid) return;
   // 光杀组不够：claude 的 Bash 工具会给子 shell 另开进程组（setsid），实测中断后
@@ -406,7 +415,7 @@ export function reapOrphans() {
 }
 
 /** root 的全部子孙 pid（读 /proc/<pid>/stat 的第 4 列 ppid） */
-function descendants(root) {
+export function descendants(root) {
   const kids = new Map();
   let names = [];
   try { names = fs.readdirSync("/proc"); } catch { return []; }
@@ -465,7 +474,8 @@ export function readLedger(n = 100) {
 export function settingsArgs(p = PROVIDER) {
   const st = {};
   const safe = safeMode();
-  if (SETTINGS.outputStyle && !safe) st.outputStyle = SETTINGS.outputStyle;
+  // 只认列得出来的（内置 + 用户目录）：旧设置里存着工作区那份的名字，这里不再传（输出风格目录的安全报告）
+  if (SETTINGS.outputStyle && !safe && outputStyles().some((o) => o.id === SETTINGS.outputStyle)) st.outputStyle = SETTINGS.outputStyle;
   if (!p.local) {
     st.hooks = archiveHooks();   // 压缩后提醒建档（只陈述事实，规则在系统提示里，见 archive.mjs）
     const g = guardHooks();

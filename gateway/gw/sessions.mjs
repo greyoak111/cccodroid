@@ -418,7 +418,7 @@ export async function routeSessions(req, res, u, p) {
       // 从尾部异步倒读最近约 400 项：以前给的是开头 400 项，长代理最后几步和汇报反而看不到；
       // 也别为拿尾巴同步从头扫到尾卡住网关（#71）。和翻历史共用 readSessionPage
       const pick = (ev) => ev.type === "user" && typeof ev.message?.content === "string" ? []   // 第一条是主代理给它的提示，Agent 卡参数里已有
-        : transcriptItems({ ...ev, isSidechain: false }).filter((it) => it.role !== "thinking" && it.role !== "user");
+        : transcriptItems({ ...ev, isSidechain: false }).filter((it) => it.role !== "thinking" && it.role !== "user" && it.role !== "hookctx");
       let items = [], more = false;
       try { const p = await readSessionPage(f, { limit: 100, pick }); items = p.items; more = p.cursor > 0; } catch {}
       // 截掉的头上别留着「调用被截掉、只剩结果」的孤儿

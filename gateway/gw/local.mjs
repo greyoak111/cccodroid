@@ -12,6 +12,7 @@ import { termEnv } from "./terminal.mjs";
 import { compIndex, compIndexCache, compRun, sha256File } from "./components.mjs";
 import { runEmit } from "./queue.mjs";
 import { privCall } from "./usage.mjs";
+import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 
 // ── 端侧小模型：网关按需拉起 llama-server，空闲一阵自动停（模型常驻要占好几 GB 内存） ──
 // 模型放 /sdcard/cccodroid/models（和 llama-cpp 组件的 llama-run 同一个目录）或 home/models。
@@ -144,10 +145,14 @@ function llamaStart(m, note) {
     note && note("load", tz("正在加载端侧模型 {name}（{how}）…", { name: m.id, how: gpu ? "GPU" : "CPU" }));
     const c = spawn(argv[0], argv.slice(1), { env: termEnv(), cwd: CFG.home, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     Object.assign(LL, { child: c, file: m.file, id: m.id, sig, gpu, state: "loading", since: Date.now(), err: "", loadMs: 0 });
-    let tail = "", lastNote = 0;
+    let tail = "", lastNote = 0, listened = false;
+    // 端口是固定的，别的应用能先占上它、对 /health 回 200：光看 health 会把提示词和钥匙送给它（11-04 报告）。
+    // 还要看到自己这个子进程打出「listening … 端口」那行（占不上端口它会报错退出，不会打这行）
+    const LISTEN = new RegExp(`listening[^\\n]*\\b${LLAMA_PORT}\\b`, "i");
     const eat = (d) => {
       try { fs.writeSync(logFd, d); } catch {}
       tail = (tail + d).slice(-6000);
+      if (!listened && LISTEN.test(tail)) listened = true;
       // 读提示的进度（llama-server 每读一批打一行 progress = 0.41）报给当前这一轮：首字前别让人干等
       const s = String(d), mm = s.match(/prompt processing, n_tokens =\s*(\d+), progress = ([\d.]+)/g);
       if (mm && LL.run && !LL.run.ended && Date.now() - lastNote > 1500) {
@@ -182,7 +187,7 @@ function llamaStart(m, note) {
       while (!done && Date.now() - t0 < 240e3) {
         await new Promise((r) => setTimeout(r, 500));
         if (done) return;
-        if (await llamaHealthy()) {
+        if (listened && c.exitCode === null && c.signalCode === null && await llamaHealthy()) {
           done = true;
           Object.assign(LL, { state: "ready", loadMs: Date.now() - t0, lastUse: Date.now() });
           log(`[local] 模型已加载 ${m.id}（${Math.round(LL.loadMs / 100) / 10}s）`);
@@ -417,8 +422,10 @@ function installLocalSkill() {
     const src = fs.readFileSync(path.join(HERE, "web", "skills", "local-model-mode", "SKILL.md"), "utf8");
     let cur = null; try { cur = fs.readFileSync(LOCAL_SKILL_FILE, "utf8"); } catch {}
     if (cur === src || (cur != null && !cur.includes("cccodroid:managed"))) return;
+    const ucb = ucAppBegin();
     fs.mkdirSync(path.dirname(LOCAL_SKILL_FILE), { recursive: true });
     fs.writeFileSync(LOCAL_SKILL_FILE, src);
+    ucAppWrote([path.dirname(LOCAL_SKILL_FILE)], ucb);
     log("[local] 已装 local-model-mode 技能");
   } catch (e) { log(`[local] 技能没装上：${e.message}`); }
 }

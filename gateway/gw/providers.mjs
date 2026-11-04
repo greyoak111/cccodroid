@@ -300,6 +300,9 @@ function composeProvider(id, raw) {
     if (raw && Array.isArray(raw.fallbackModels) && raw.fallbackModels.length) v.fallbackModels = raw.fallbackModels;
   } else {
     v = { group: "custom", authStyle: "bearer", modelsAuth: "bearer", ...raw, custom: true };
+    // 这几个是内置条目才有的身份标志，自定义条目（能分享导入）自己写了也不认：
+    // explicit:false 会让密钥回落到 DeepSeek 那把、送去它的地址；local/login 会关掉地址修正和防护提示（11-04 报告）
+    for (const k of ["id", "explicit", "login", "local", "nativeModels"]) delete v[k];
   }
   if (v.endpoints && v.endpoints.length) {
     const ep = v.endpoints.find((e) => e.id === v.endpoint) || v.endpoints[0];
@@ -318,9 +321,13 @@ function composeProvider(id, raw) {
 Object.setPrototypeOf(PRESETS, null);
 const bare = (o) => Object.assign(Object.create(null), o);
 let PROVIDERS_RAW = { active: null, providers: bare({}) };   // 配置文件原样（只含用户字段与自定义条目）
+let PROV_DISK_H = null;    // 盘上那份最后读写时的样子（见 providersDiskCheck）
+const provHash = (s) => crypto.createHash("sha256").update(s).digest("hex");
 function loadProviders() {
   try {
-    const j = JSON.parse(fs.readFileSync(PROVIDERS_FILE, "utf8"));
+    const raw = fs.readFileSync(PROVIDERS_FILE, "utf8");
+    PROV_DISK_H = provHash(raw);
+    const j = JSON.parse(raw);
     if (j && typeof j === "object") PROVIDERS_RAW = { ...j, providers: bare((j.providers && typeof j.providers === "object") ? j.providers : {}) };
   } catch {}
   const providers = bare({});
@@ -338,15 +345,25 @@ function saveProvidersRaw() {
   try {
     fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
     created = true;
-    fs.writeFileSync(fd, JSON.stringify(PROVIDERS_RAW, null, 2));
+    const out = JSON.stringify(PROVIDERS_RAW, null, 2);
+    fs.writeFileSync(fd, out);
     fs.fsyncSync(fd);     // 先落盘再换名：掉电时不会换上一个还没写进去的空文件（密钥都在这里）
     fs.closeSync(fd); fd = undefined;
     fs.renameSync(temp, PROVIDERS_FILE);
+    PROV_DISK_H = provHash(out);
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
     if (created) { try { fs.unlinkSync(temp); } catch {} }
   }
   PROVIDERS_CFG = loadProviders();
+}
+/** 网关跑着时厂商配置以内存为准：盘上被别人改了（换接口地址就能把密钥送出去），按内存写回，返回 true（调用方记留痕）。
+ *  网关没跑时改的，启动时照常读进来 */
+export function providersDiskCheck() {
+  if (PROV_DISK_H == null) return false;
+  let raw; try { raw = fs.readFileSync(PROVIDERS_FILE, "utf8"); } catch { raw = null; }
+  if (raw != null && provHash(raw) === PROV_DISK_H) return false;
+  try { saveProvidersRaw(); return true; } catch (e) { log(`[厂商配置] 写回失败：${e.message}`); return false; }
 }
 export let PROVIDERS_CFG = loadProviders();
 // 受控修复会重写整表，必须核对整份原始配置，包括删除的字段、无关接口和 active。
@@ -783,7 +800,8 @@ export function applyProvider() {
 // PERM_MODES 挪到 config.mjs：settings.mjs 加载时就要用，放这里会因循环依赖在单独导入时撞上暂时性死区（审查 10-30 v0.5.12 低5）
 export { PERM_MODES } from "./config.mjs";
 
-function pickProvider(id) { return { id, explicit: !!PROVIDERS_RAW.providers[id] || id !== BUILTIN_PROVIDER.id, ...PROVIDERS_CFG.providers[id] }; }
+// id / explicit 放最后：条目里自带的同名字段不能盖过它们（见 composeProvider）
+function pickProvider(id) { return { ...PROVIDERS_CFG.providers[id], id, explicit: !!PROVIDERS_RAW.providers[id] || id !== BUILTIN_PROVIDER.id }; }
 /** 生效厂商：设置里的 provider 优先，其次配置文件 active，最后内置兜底 */
 function resolveProvider() {
   const want = SETTINGS.provider;

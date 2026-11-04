@@ -1,4 +1,5 @@
 import { PATHS } from "../gw/config.mjs"; // scripts/test.mjs 先隔离 HOME / fake PREFIX。
+import "./fixtures/uc-baseline.mjs";   // 共用 home 里前面测试留下的 ~/.claude 改动先认下，免得真起一轮时卡在确认卡片
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

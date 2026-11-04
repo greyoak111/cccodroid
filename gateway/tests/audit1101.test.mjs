@@ -1,5 +1,6 @@
 // 十路并发 Bug 审查（11-01）的回归测试：一条一个，编号对应报告 B01–B30
 import "../gw/config.mjs";
+import "./fixtures/uc-baseline.mjs";   // 共用 home 里前面测试留下的 ~/.claude 改动先认下，免得真起一轮时卡在确认卡片
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

@@ -9,32 +9,8 @@ import { customRefresh } from "./custom.mjs";
 import { idleDisarmAll, publishState, pump, setPermMode, strList } from "./queue.mjs";
 
 export { SETTINGS, saveSettings } from "./settings-store.mjs";
-import { SETTINGS, saveSettings } from "./settings-store.mjs";
+import { SETTINGS, saveSettings, outputStyles } from "./settings-store.mjs";
 
-/** claude 认的输出风格：内置两种 + ~/.claude/output-styles 与工作区 .claude/output-styles 里的 .md（名字取 frontmatter 的 name） */
-function outputStyles() {
-  const out = [
-    { id: "Explanatory", desc: "边做边解释实现取舍" },
-    { id: "Learning", desc: "留 TODO 让你亲手写一部分" },
-  ];
-  for (const dir of [path.join(CFG.home, ".claude/output-styles"), path.join(CFG.workspace, ".claude/output-styles")]) {
-    let files = [];
-    try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { continue; }
-    for (const f of files) {
-      let name = f.slice(0, -3), desc = "";
-      try {
-        const head = fs.readFileSync(path.join(dir, f), "utf8").slice(0, 2000);
-        const fm = head.match(/^---\n([\s\S]*?)\n---/);
-        if (fm) {
-          name = (fm[1].match(/^name:[ \t]*(.+)$/m) || [, name])[1].trim();
-          desc = (fm[1].match(/^description:[ \t]*(.+)$/m) || [, ""])[1].trim();
-        }
-      } catch {}
-      if (!out.some((o) => o.id === name)) out.push({ id: name, desc });
-    }
-  }
-  return out;
-}
 
 
 // ── 路由：/api/settings ──
@@ -80,8 +56,11 @@ export async function routeSettings(req, res, u, p) {
       for (const k of ["model", "outputStyle", "effort", "titleModel"]) {
         // 只收字符串：塞个对象进来会落盘，之后每一轮都在 .trim() / spawn 那里抛错，重启也好不了（审查 10-29 低7）
         // 长度也限：model 原样进 claude 的命令行，单个参数过 128 KB 就 E2BIG，每一轮都起不来（v0514 审查低-3）
-        if (k in b) { if (b[k] != null && (typeof b[k] !== "string" || b[k].length > 200 || /[\x00-\x1f\x7f]/.test(b[k]))) return sendJson(res, 400, { error: `${k} must be a string (max 200)` }); SETTINGS[k] = b[k] || null; }
+        if (k in b) { if (b[k] != null && (typeof b[k] !== "string" || b[k].length > 200 || /[\x00-\x1f\x7f]/.test(b[k]))) return sendJson(res, 400, { error: `${k} must be a string (max 200)` }); }
       }
+      // 输出风格只收列出来的那些（内置两种 + 用户目录里的）：直发请求也选不了工作区里别人放的文件
+      if (b.outputStyle && !outputStyles().some((o) => o.id === b.outputStyle)) return sendJson(res, 400, { error: "unknown outputStyle" });
+      for (const k of ["model", "outputStyle", "effort", "titleModel"]) if (k in b) SETTINGS[k] = b[k] || null;
       // 权限模式只收 claude 认的值；正在跑的那一轮也当场切过去
       if ("permissionMode" in b && b.permissionMode !== SETTINGS.permissionMode) setPermMode(String(b.permissionMode || "default"));
       if (b.permNotice === false) SETTINGS.permNotice = false;

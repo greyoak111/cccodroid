@@ -15,7 +15,8 @@ export const onTamper = (fn) => { notify = fn; };
 
 export function tamperRecord(src, files) {
   // 文件名是改动的人起的，要拼进给模型的提醒：只留路径里常见的字符，别让它借文件名塞一段话进去（DeepSeek 复核建议 6）
-  const list = (Array.isArray(files) ? files : [files]).map((f) => String(f).replace(/[^\w.\/:() -]/g, "_").replace(/\s+/g, " ").trim().slice(0, 120)).filter(Boolean).slice(0, 20);
+  // 空格也换掉：留着空格就能用一串文件名拼出一句英文指令（11-04 报告）
+  const list = (Array.isArray(files) ? files : [files]).map((f) => String(f).trim().replace(/[^\w.\/:()-]/g, "_").slice(0, 120)).filter(Boolean).slice(0, 20);
   if (!list.length) return null;
   // 一直有人在改（每 10 秒写回一次）：并进还没点过「知道了」的同一类，没有新文件就不再推，免得提示连着弹
   const open = EVENTS.findLast((e) => e.src === src && !e.acked && Date.now() - e.at < 3600e3);

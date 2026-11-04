@@ -11,6 +11,7 @@ import { termEnv } from "./terminal.mjs";
 import { sha256File } from "./components.mjs";
 import { SKILLS_DIR } from "./extensions.mjs";
 import { archiveProblem, parseTarListing, zipEntries } from "./archive-check.mjs";
+import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 
 // ── 自定义组件：用户自己导入的 Linux arm64 程序（不经市场，来源由用户负责） ─────────────────
 // 放在 ~/.cccodroid/custom/<id>/（app/ 原样解开的程序，deps/ 自动补的 glibc 库），不进 $PREFIX：换工具包不会被冲掉。
@@ -86,6 +87,40 @@ function glibcVersion() {
 }
 const runP = (cmd, args, opts = {}) => new Promise((resolve) => execFile(cmd, args, { env: termEnv(), timeout: 600000, maxBuffer: 16 << 20, ...opts },
   (err, out, errOut) => resolve({ code: err ? (err.code || 1) : 0, out: String(out || ""), err: String(errOut || err?.message || "") })));
+/** 包里的目录可能是只读的（0555，tar / unzip 都照原样还原）：之后遍历、删除都会 EACCES。解开后把真目录都放开成本人可读写（不跟软链） */
+function openDirs(p) {
+  let st; try { st = fs.lstatSync(p); } catch { return; }
+  if (!st.isDirectory()) return;
+  if ((st.mode & 0o700) !== 0o700) try { fs.chmodSync(p, (st.mode & 0o7777) | 0o700); } catch {}
+  let ds = []; try { ds = fs.readdirSync(p); } catch {}
+  for (const d of ds) openDirs(path.join(p, d));
+}
+/** 删目录：删不动（只读目录）就先放开权限再删；还删不掉只记日志，不抛（11-04 报告 六-9） */
+function rmTree(p) {
+  try { fs.rmSync(p, { recursive: true, force: true }); return; } catch {}
+  try { openDirs(p); fs.rmSync(p, { recursive: true, force: true }); } catch (e) { log(`[custom] 删不掉 ${p}：${e.code || e.message}`); }
+}
+/**
+ * 解压，同时盯着实际写了多少：包里登记的大小能造假（zip 中央目录写 1 KB，数据流解出几 GB），
+ * 所以按所在分区可用空间的减少量算，超过上限、条目数太多、或者分区快满了就杀掉（11-04 报告 六-9）
+ */
+const UNPACK_MAX_FILES = 200000, UNPACK_RESERVE = 512 * 1024 * 1024;
+function runCapped(cmd, args, dir, max) {
+  return new Promise((resolve) => {
+    let f0; try { f0 = fs.statfsSync(dir); } catch {}
+    let over = 0;
+    const ch = execFile(cmd, args, { env: termEnv(), timeout: 600000, maxBuffer: 16 << 20 }, (err, out, errOut) => {
+      clearInterval(t);
+      resolve(over ? { code: "TOOBIG", used: over, out: "", err: "" } : { code: err ? (err.code || 1) : 0, out: String(out || ""), err: String(errOut || err?.message || "") });
+    });
+    const t = setInterval(() => {
+      if (over || !f0) return;
+      let f; try { f = fs.statfsSync(dir); } catch { return; }
+      const used = (f0.bavail - f.bavail) * f.bsize, files = f0.ffree - f.ffree;
+      if (used > max || files > UNPACK_MAX_FILES || f.bavail * f.bsize < UNPACK_RESERVE) { over = Math.max(used, 1); try { ch.kill("SIGKILL"); } catch {} }
+    }, 200);
+  });
+}
 function walkFiles(root, rel = "", out = [], cap = 50000) {
   for (const d of fs.readdirSync(path.join(root, rel), { withFileTypes: true })) {
     if (out.length >= cap) break;
@@ -114,7 +149,7 @@ function customCmdClash(cmd, selfId) {
 }
 
 /** 测试用：直接看命令名预留和冲突判断（#122-4） */
-export const _customForTest = { CMD_RESERVED, customCmdClash };
+export const _customForTest = { CMD_RESERVED, customCmdClash, rmTree, runCapped, headOf };
 
 const GZ_MAX = 256 << 20, DEB_MAX = 512 << 20;
 // Termux glibc 仓库的 Contents（文件 → 包）与 Packages（包 → 下载地址、sha256），缓存一天。
@@ -184,12 +219,12 @@ async function customAnalyze(src) {
   if (!path.isAbsolute(sp)) sp = path.join(CFG.workspace, sp);
   let st; try { st = fs.statSync(sp); } catch { return { ok: false, message: tz("找不到文件：{p}", { p: sp }) }; }
   if (!st.isFile()) return { ok: false, message: tz("要选一个文件（程序本身或压缩包）") };
-  for (const [k, v] of CUSTOM_STAGES) if (Date.now() - v.at > 3600000) { fs.rmSync(v.dir, { recursive: true, force: true }); CUSTOM_STAGES.delete(k); }
+  for (const [k, v] of CUSTOM_STAGES) if (Date.now() - v.at > 3600000) { rmTree(v.dir); CUSTOM_STAGES.delete(k); }
   const stage = crypto.randomBytes(6).toString("hex");
   const dir = path.join(CUSTOM_DIR, ".stage-" + stage), x = path.join(dir, "x");
   fs.mkdirSync(x, { recursive: true });
   const base = path.basename(sp), warnings = [];
-  const fail = (m) => { fs.rmSync(dir, { recursive: true, force: true }); return { ok: false, message: m }; };
+  const fail = (m) => { rmTree(dir); return { ok: false, message: m }; };
   const isTar = /\.(tar\.(gz|xz|bz2|zst)|tgz|txz|tbz2?|tar)$/i.test(base), isZip = /\.zip$/i.test(base);
   if (isTar || isZip) {
     // 先拷进私有暂存区再查、再解：查和解是两次打开，源文件在共享存储上，中间能被换成另一个包（11-03 审查 L-5）
@@ -213,10 +248,12 @@ async function customAnalyze(src) {
     if (bad) return fail(tz("这个压缩包里有条目会写到包外面（{p}），为安全起见不解开", { p: String(bad.name).slice(0, 200) }));
   }
   if (isTar) {
-    const r = await runP(path.join(PREFIX, "bin", "tar"), ["-xf", sp, "-C", x, "--no-same-owner"]);
+    const r = await runCapped(path.join(PREFIX, "bin", "tar"), ["-xf", sp, "-C", x, "--no-same-owner"], x, UNPACK_MAX);
+    if (r.code === "TOOBIG") return fail(tz("解开后有 {n} MB，超过 {max} MB 的上限", { n: Math.round(r.used / 1048576), max: UNPACK_MAX >> 20 }));
     if (r.code) return fail(tz("解压失败：{msg}", { msg: r.err.trim().split("\n").slice(-2).join(" ") }));
   } else if (isZip) {
-    const r = await runP(path.join(PREFIX, "bin", "unzip"), ["-q", "-o", sp, "-d", x]);
+    const r = await runCapped(path.join(PREFIX, "bin", "unzip"), ["-q", "-o", sp, "-d", x], x, UNPACK_MAX);
+    if (r.code === "TOOBIG") return fail(tz("解开后有 {n} MB，超过 {max} MB 的上限", { n: Math.round(r.used / 1048576), max: UNPACK_MAX >> 20 }));
     if (r.code > 1) return fail(tz("解压失败：{msg}", { msg: r.err.trim().split("\n").slice(-2).join(" ") }));
   } else if (/\.(deb|rpm|apk|appimage)$/i.test(base)) {
     return fail(tz("{ext} 包还不支持：请用程序本身、或 .tar.gz / .zip 压缩包", { ext: base.split(".").pop() }));
@@ -226,6 +263,7 @@ async function customAnalyze(src) {
     const name = base.replace(/[^\w.+-]/g, "_");
     fs.copyFileSync(sp, path.join(x, name)); fs.chmodSync(path.join(x, name), 0o755);
   }
+  openDirs(x);
   // 解出来的软链只许指向包内：绝对路径或者跳出去的一律删掉（不然装进去以后顺着它能碰到别处）
   const all = walkFiles(x);
   for (const f of all.filter((a) => a.link)) {
@@ -457,7 +495,7 @@ async function customInstall(b) {
   try {
     fs.mkdirSync(dir, { recursive: true });
     fs.renameSync(s.root, appDir);
-    fs.rmSync(s.dir, { recursive: true, force: true });
+    rmTree(s.dir);
     CUSTOM_STAGES.delete(b.stage);
     // 补库
     let got = [], still = [];
@@ -489,9 +527,10 @@ async function customInstall(b) {
       bytes: s.report.bytes,
     };
     fs.writeFileSync(path.join(dir, CUSTOM_REC), JSON.stringify(rec, null, 1));
-    const sk = path.join(SKILLS_DIR, "custom-" + id);
+    const sk = path.join(SKILLS_DIR, "custom-" + id), ucb = ucAppBegin();
     fs.mkdirSync(sk, { recursive: true });
     fs.writeFileSync(path.join(sk, "SKILL.md"), customSkill(rec));
+    ucAppWrote([sk], ucb);
     log(`[custom] ${id} 已装：${entries.map((e) => e.cmd + "(" + e.kind + ")").join(" ")}，补库 ${got.length} 个`);
     return { ok: true, id, log: msgs, unresolved: rec.unresolved };
   } catch (e) {
@@ -543,14 +582,23 @@ function customSkillOurs(sk, id) {
     return t.startsWith(`---\nname: custom-${id}\n`) && t.includes("（cccodroid 自定义组件）");
   } catch { return false; }
 }
+/** 普通文件（不跟软链）的开头 n 字节；别的类型返回空串 */
+function headOf(f, n) {
+  try {
+    if (!fs.lstatSync(f).isFile()) return "";
+    const fd = fs.openSync(f, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    try { const b = Buffer.alloc(n); return b.toString("utf8", 0, fs.readSync(fd, b, 0, n, 0)); } finally { fs.closeSync(fd); }
+  } catch { return ""; }
+}
 function customRemove(id, quiet) {
   if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) return { ok: false, message: "bad id" };
   const dir = path.join(CUSTOM_DIR, id);
   if (!fs.existsSync(dir)) return { ok: false, message: "not installed" };
-  try { for (const f of fs.readdirSync(CUSTOM_BIN)) { const w = path.join(CUSTOM_BIN, f); if (fs.readFileSync(w, "utf8").slice(0, 400).includes("cccodroid-custom-id: " + id + "\n")) fs.rmSync(w, { force: true }); } } catch {}
-  fs.rmSync(dir, { recursive: true, force: true });
+  // 只看普通文件的开头：命令目录里要是混进一个 FIFO，整读会把网关卡死（11-04 报告 六-9）
+  try { for (const f of fs.readdirSync(CUSTOM_BIN)) { const w = path.join(CUSTOM_BIN, f); if (headOf(w, 400).includes("cccodroid-custom-id: " + id + "\n")) fs.rmSync(w, { force: true }); } } catch {}
+  rmTree(dir);
   const sk = path.join(SKILLS_DIR, "custom-" + id);
-  if (customSkillOurs(sk, id)) fs.rmSync(sk, { recursive: true, force: true });
+  if (customSkillOurs(sk, id)) { const ucb = ucAppBegin(); fs.rmSync(sk, { recursive: true, force: true }); ucAppWrote([sk], ucb); }
   if (!quiet) log(`[custom] ${id} 已卸载`);
   return { ok: true };
 }
@@ -599,7 +647,7 @@ async function handleCustom(req, res, p, u) {
   let body = {}; try { body = JSON.parse((await readBody(req)) || "{}"); } catch {}
   if (p === "/api/custom/analyze") return sendJson(res, 200, await customAnalyze(body.path));
   if (p === "/api/custom/install") return sendJson(res, 200, await customInstall(body));
-  if (p === "/api/custom/discard") { const s = CUSTOM_STAGES.get(String(body.stage || "")); if (s) { fs.rmSync(s.dir, { recursive: true, force: true }); CUSTOM_STAGES.delete(body.stage); } return sendJson(res, 200, { ok: true }); }
+  if (p === "/api/custom/discard") { const s = CUSTOM_STAGES.get(String(body.stage || "")); if (s) { rmTree(s.dir); CUSTOM_STAGES.delete(body.stage); } return sendJson(res, 200, { ok: true }); }
   if (p === "/api/custom/remove") return sendJson(res, 200, customRemove(String(body.id || "")));
   if (p === "/api/custom/try") return sendJson(res, 200, await customTry(String(body.id || ""), String(body.cmd || "")));
   return sendJson(res, 404, { error: "not found" });

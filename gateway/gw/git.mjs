@@ -352,7 +352,9 @@ async function handleGit(req, res, p, u) {
         const rem = (await git(root, ["remote"])).out.split("\n").filter(Boolean);
         if (!rem.length) return sendJson(res, 409, { error: "no_remote", message: tz("这个仓库还没有设置远端（remote）。") });
         const to = rem.includes("origin") ? "origin" : rem[0];
-        args = ["push", "-u", to, st.branch];       // 第一次推：顺便建立关联，以后直接推/拉
+        // 远端名来自仓库配置（别人给的仓库能手写成 --receive-pack=… 这种）：只收普通名字，再用 -- 隔开参数
+        if (!/^[A-Za-z0-9._/-]+$/.test(to) || to.startsWith("-") || st.branch.startsWith("-")) return sendJson(res, 409, { error: "bad_remote", message: tz("远端名不合法") });
+        args = ["push", "-u", "--", to, st.branch];       // 第一次推：顺便建立关联，以后直接推/拉
       }
     }
     const t0 = Date.now();

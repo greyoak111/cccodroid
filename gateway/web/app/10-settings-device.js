@@ -105,6 +105,10 @@
     $("priv-na-row").style.opacity = st.state === "ok" ? "1" : ".45";
     $("priv-na").disabled = st.state !== "ok";
     $("priv-na").checked = !!st.noask;
+    // 免确认限时 24 小时（应用侧到点自动关）：开着时写上到什么时候
+    const naOut = $("priv-na-result");
+    if (st.noask && st.noaskUntil) { naOut.className = "prov-state warn"; naOut.textContent = t("已打开，{t} 自动关闭", { t: new Date(st.noaskUntil).toLocaleString() }); naOut.dataset.until = "1"; }
+    else if (naOut.dataset.until) { naOut.textContent = ""; delete naOut.dataset.until; }
     // 安装、配对、启动都在进行时自己刷新（设置页开着才刷）
     clearTimeout(privPoll);
     if (busy && pageOn("settings")) privPoll = setTimeout(loadPriv, 1500);
@@ -137,7 +141,7 @@
     // 原地换成一句确认、不重排：整段收起会让下面的开关挪到手指底下被误点。下次打开设置页才真正消失
     if (act === "bootack") { localStorage.setItem("cc.bootAck", e.target.dataset.boot); $("priv-setup").textContent = t("好的，下次开机后再检查。"); e.target.disabled = true; return; }
     if (act === "repair") { await post("/api/app/shz_repair").catch((e2) => toast(e2.message, true)); return setTimeout(loadPriv, 500); }
-    if (act === "activate") { await post("/api/app/shz_activate").catch((e2) => toast(e2.message, true)); return setTimeout(loadPriv, 500); }
+    if (act === "activate") { const r = await post("/api/app/shz_activate").catch((e2) => toast(e2.message, true)); if (r && r.ok === false && r.message) toast(r.message, true); return setTimeout(loadPriv, 500); }
     if (act === "request") {
       const r = await post("/api/priv/request").catch((e2) => ({ message: e2.message }));
       toast(r.message || t("已请求"));
@@ -158,7 +162,8 @@
     await post("/api/app/shz_pair", { code: code + " " + port }).catch((e2) => toast(e2.message, true));
     setTimeout(loadPriv, 500);
   });
-  $("priv-auto").addEventListener("change", (e) => post("/api/app/shz_autostart", { enable: e.target.checked }).catch(() => {}));
+  // 打开要在原生对话框里点头（再验一次锁屏存档）：没允许时开关按实际状态弹回去
+  $("priv-auto").addEventListener("change", (e) => post("/api/app/shz_autostart", { enable: e.target.checked }).catch(() => {}).finally(() => setTimeout(loadPriv, 300)));
 
   // ── 更新：应用本体 / 开发工具包 / Claude Code ──
     const UPD_TEXT = { uptodate: t("已是最新"), available: t("有新版本"), downloading: t("下载中"), ready: t("已下载，待安装"), installing: t("安装中"), error: t("出错"), unknown: t("未检查"), verifying: t("校验中"), damaged: t("已损坏"), missing: t("未安装") };
@@ -452,7 +457,9 @@
     out.textContent = r.ok
             ? (on ? t("✓ 已应用") + (r.phantom ? t("（幽灵进程上限 {n}）", { n: r.phantom }) : "") : t("✓ 已恢复"))
       : "✗ " + (r.message || t("失败"));
-    loadPriv();
+    await loadPriv();
+    // 关的时候有几步没恢复成：开关留在开着，再点一次关就是重试（GHSA-7wwv）
+    if (!on && !r.ok) $("priv-ka").checked = true;
   });
 
   // 特权命令免确认：打开时由应用弹原生的免责说明（这里不另问一遍），点了「打开」才生效

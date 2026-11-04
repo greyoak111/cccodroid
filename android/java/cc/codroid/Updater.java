@@ -574,10 +574,19 @@ final class Updater {
         planModules(base);
         // 整包清单只靠 TLS 不够（装了根证书的代理、仓库被攻破都能换掉整个工具包 —— 审查 H3）：
         // 不是 APK 钉的那份、又没有验得过的 .sig，就只许按块装（modules.json 验过签）；按块的没核实成就报错，不再静默退回整包
-        if (devkit.modules == null && lock != pin && !lockSigned(base, lockBytes))
+        if (devkit.modules == null && lock != pin && !lockSigned(base, lockBytes)) {
+            // 上面已经把这份没核实的清单填进了 devkit：清掉，不然出错后点「重试」会照着它下载安装（审查 A5）
+            dropDevkitPlan();
             throw new IOException(Tr.f("{0} 的工具包清单没核实成（签名对不上或没取到）；过会儿再检查更新", best));
+        }
         String mb = String.format(java.util.Locale.ROOT, "%.0f MB", devkit.size / 1048576.0);
         devkit.set("available", have.isEmpty() && env.devkitReady() ? mb + Tr.t(" · 无法确认已装的是哪一版，建议更新一次") : mb);
+    }
+
+    /** 清掉待下载的工具包（地址、哈希、文件）：清单没核实成时用 */
+    private void dropDevkitPlan() {
+        devkit.url = null; devkit.alt = null; devkit.sha = null; devkit.tarSha = null; devkit.base = null; devkit.file = null;
+        devkit.modules = null; devkit.modSha = null; devkit.moduleIds = null;
     }
 
     /** devkit.lock.json 带了 ed25519 签名（devkit.lock.json.sig，和 modules.json 同一把钥匙）且验得过，
@@ -812,6 +821,8 @@ final class Updater {
                 new Thread(() -> installClaude(v), "upd-claude").start();
                 return r.put("ok", true).put("message", claude.current.isEmpty() ? Tr.f("开始安装 Claude Code {0}", v) : Tr.t("开始更新 Claude Code"));
             }
+            // 工具包「出错」时的「重试」一律重新检查：清单的签名在检查里核，不能拿出错前留下的地址直接下（审查 A5）
+            if (it == devkit && "error".equals(it.state)) { checkAsync(true); return r.put("ok", true).put("message", Tr.t("正在重新检查更新")); }
             if (it.url == null) {
                 // 「出错」时的「重试」：没有待下载的东西（出错的是检查本身），就重新检查一遍
                 if ("error".equals(it.state)) { checkAsync(true); return r.put("ok", true).put("message", Tr.t("正在重新检查更新")); }
@@ -1171,8 +1182,10 @@ final class Updater {
             devkit.file = new File(env.files, gz.getString("file"));
             devkit.modules = null; devkit.modSha = null; devkit.moduleIds = null;
             if (modular) planModules(base);       // 模块化：按已装的块重装
-            if (devkit.modules == null && lock != pin && !lockSigned(base, lockBytes))
+            if (devkit.modules == null && lock != pin && !lockSigned(base, lockBytes)) {
+                dropDevkitPlan();   // 同 checkDevkit：没核实的地址别留着给后面的「更新」「重试」用（审查 A5）
                 return r.put("ok", false).put("message", Tr.f("{0} 的工具包清单没核实成（签名对不上或没取到）；过会儿再试", tagOf(base)));
+            }
             devkit.set("available", Tr.t("修复：重装 ") + devkit.latest);
             repairing = true;
             Ledger.add(env, "repair", true, Tr.t("开始修复：重新下载 ") + devkit.latest, null);

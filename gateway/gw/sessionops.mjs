@@ -10,6 +10,7 @@ import { LAST_SESSION, forgetSession, runOfSession } from "./runs.mjs";
 import { forgetChild, recordPrimary } from "./lineage-store.mjs";
 import { lineageForget } from "./lineage.mjs";
 import { checkSession, neutralizeMarkers, resealAfterEdit, sealSession, isInjected } from "./integrity.mjs";
+import { ucPending } from "./userconf.mjs";
 import { forEachLine, lineWriter, zipEntries, zipExtract, zipToFile } from "./bigfile.mjs";
 import { archiveDb, archiveImport, saveArchive } from "./archive-store.mjs";
 
@@ -221,6 +222,8 @@ export function undoDelete(id, backup) {
 export function rewindFiles(sid, userUuid, dryRun) {
   // 这里也 --resume 起了 claude：它要是往记录里写了什么，是我们起的，不算外部改动（见 integrity.mjs）
   const sf = findSessionFile(sid)?.file, dirty = checkSession(sid, sf);
+  // 起 claude 就会加载用户级钩子：有没确认的改动先别起（见 userconf.mjs），发一条消息在卡片里处理
+  if (ucPending()) return Promise.resolve({ ok: false, error: tz("Claude Code 的用户级配置有改动还没确认。先发一条消息，在弹出的卡片里确认后再试。") });
   return new Promise((resolve) => {
     const [cmd0, args0] = claudeCmd(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--resume", sid]);
     const child = spawn(cmd0, args0, { cwd: fs.existsSync(CFG.workspace) ? CFG.workspace : CFG.home, env: claudeEnv(), stdio: ["pipe", "pipe", "pipe"], detached: true });

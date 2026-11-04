@@ -54,12 +54,14 @@ test("设置写盘失败：返回 500，磁盘旧值原样保留（#122-3）", a
 
 test("输出风格的 name / description：冒号后没空格、值以 s 开头也照原样读（PR #118 第 3 条）", async (t) => {
   const { CFG } = await import("../gw/config.mjs");
-  const dir = path.join(CFG.workspace, ".claude", "output-styles");
-  fs.mkdirSync(dir, { recursive: true });
-  const a = path.join(dir, "fmt-a.md"), b = path.join(dir, "fmt-b.md");
+  // 只列用户目录里的；工作区 .claude/output-styles 是谁都能放文件的地方，不列（输出风格目录的安全报告）
+  const dir = path.join(CFG.home, ".claude", "output-styles"), wdir = path.join(CFG.workspace, ".claude", "output-styles");
+  fs.mkdirSync(dir, { recursive: true }); fs.mkdirSync(wdir, { recursive: true });
+  const a = path.join(dir, "fmt-a.md"), b = path.join(dir, "fmt-b.md"), w = path.join(wdir, "fmt-w.md");
   fs.writeFileSync(a, "---\nname:sunny\ndescription:short and sweet\n---\nbody\n");
   fs.writeFileSync(b, "---\nname:\ndescription: x\n---\n");
-  t.after(() => { fs.rmSync(a, { force: true }); fs.rmSync(b, { force: true }); });
+  fs.writeFileSync(w, "---\nname: planted\n---\n");
+  t.after(() => { for (const x of [a, b, w]) fs.rmSync(x, { force: true }); });
   const { routeSettings } = await import("../gw/settings.mjs");
   const { srv, call } = await serve(routeSettings);
   t.after(() => srv.close());
@@ -67,4 +69,5 @@ test("输出风格的 name / description：冒号后没空格、值以 s 开头�
   const st = r.body.outputStyles;
   assert.ok(st.some((o) => o.id === "sunny" && o.desc === "short and sweet"), JSON.stringify(st));
   assert.ok(!st.some((o) => o.id === "description: x"), "name 为空时不能把下一行当成名字");
+  assert.ok(!st.some((o) => o.id === "planted"), "工作区里的风格文件不列");
 });

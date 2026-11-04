@@ -1,5 +1,6 @@
 // v0.6.2 审查 #120：撤销 follow 链中间项后仍续原会话；空闲进程复用前核对执行配置
 import "../gw/config.mjs";
+import "./fixtures/uc-baseline.mjs";   // 共用 home 里前面测试留下的 ~/.claude 改动先认下，免得真起一轮时卡在确认卡片
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";

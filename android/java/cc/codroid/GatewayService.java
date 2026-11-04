@@ -220,6 +220,9 @@ public class GatewayService extends Service {
         // 篡改留痕：这次（或界面那边部署时）还原过的文件交给网关，它记日志、界面提示一次、下一轮告诉模型（gateway/gw/tamper.mjs）
         String restored = AppFiles.takeRestored();
         if (restored != null) pb.environment().put("CCAPP_TAMPERED", restored);
+        // 清单的哈希：网关拿它核对盘上的 FILES，核完到起进程之间被换了、或者读不到，网关不退回「不核」（gateway/gw/appfiles.mjs）
+        String listSha = AppFiles.listSha(this);
+        if (listSha != null) pb.environment().put("CCAPP_FILES_SHA", listSha);
         // 防冒名：现造一个随机数，起来后经 stdin 交过去（见 Env.spawnKey、gateway/gw/access.mjs）
         byte[] kb = new byte[32];
         new java.security.SecureRandom().nextBytes(kb);

@@ -284,7 +284,8 @@ export async function routeDevside(req, res, u, p) {
       b[k] = v;
     }
     if (!PREFIX) return sendJson(res, 200, await devApp(op, b));
-    return sendJson(res, 200, await privCall({ ...b, op }));
+    // 激活 / 打开自动激活要等用户在原生对话框里点（最多 60 秒），和 keepalive 一样放长
+    return sendJson(res, 200, await privCall({ ...b, op }, op === "shz_activate" || op === "shz_autostart" ? 65000 : undefined));
   }
   return NEXT;
 }

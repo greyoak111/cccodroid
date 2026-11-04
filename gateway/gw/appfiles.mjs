@@ -19,11 +19,15 @@ const SNAP_DIRS = ["archive/", "guard/", "bin/", "pre/", "scripts/", "lib/", "gw
 const SNAP_FILES = ["TOOLS.md"];
 const sha = (b) => crypto.createHash("sha256").update(b).digest("hex");
 
-export function appGuard(root, { onRestart } = {}) {
+export function appGuard(root, { onRestart, expect, onBadList } = {}) {
   const want = new Map();
-  try {
-    for (const l of fs.readFileSync(path.join(root, "FILES"), "utf8").split("\n")) if (l.length > 65) want.set(l.slice(65), l.slice(0, 64));
-  } catch { return null; }
+  let list = null;
+  try { list = fs.readFileSync(path.join(root, "FILES")); } catch {}
+  // 应用起网关时交来了安装包里清单的哈希（GatewayService）：盘上这份读不到、或者对不上（核完到起进程这一下被换了），
+  // 不能退回「没有清单就不核」—— 那等于删掉 FILES 就关掉整层（11-03 自查审计 G-06）
+  if (expect && (!list || sha(list) !== expect)) { onBadList?.(list ? "FILES（和安装包对不上）" : "FILES（读不到）"); return null; }
+  if (!list) return null;
+  for (const l of list.toString("utf8").split("\n")) if (l.length > 65) want.set(l.slice(65), l.slice(0, 64));
   if (!want.size) return null;
   const dirs = new Set();          // 清单里出现过的目录（含各级上级），「多出来的」判断别把它们删了
   for (const k of want.keys()) for (let i = k.indexOf("/"); i > 0; i = k.indexOf("/", i + 1)) dirs.add(k.slice(0, i));
@@ -117,7 +121,16 @@ export function appGuard(root, { onRestart } = {}) {
 
 // 网关自己用的那一份：只在部署出来的目录上（有 FILES）
 let idleTimer = null;
+const FILES_SHA = process.env.CCAPP_FILES_SHA || "";
+delete process.env.CCAPP_FILES_SHA;
 export const APP = appGuard(HERE, {
+  expect: FILES_SHA,
+  // 刚起来、还没有回话和终端：直接退出，应用重拉前按安装包还原（AppFiles.tampered 也核 FILES 自己）
+  onBadList(why) {
+    log(`⚠️ [应用文件] ${why}，退出等应用按安装包还原`);
+    tamperRecord("runtime", [why]);
+    setImmediate(() => process.exit(3));
+  },
   onRestart() {
     if (idleTimer) return;
     // 等空闲再退：正在跑的回话和终端不打断。退出后 GatewayService 一秒后重拉，起之前按安装包还原

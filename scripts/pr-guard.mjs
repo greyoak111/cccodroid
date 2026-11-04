@@ -5,6 +5,7 @@
 // 输出分三档：高（要维护者逐行看，检查标红）/ 中（顺带看一眼）/ 提示。它只是把该看的地方指出来，不能代替人审。
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { i18nFnProblem } from "../i18n/fnsafe.mjs";
 
 const [base, head] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const mdOut = process.argv.includes("--md") ? process.argv[process.argv.indexOf("--md") + 1] : "";
@@ -23,6 +24,7 @@ const HIGH_PATHS = [
   [/(^|\/)(package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|requirements[^/]*\.txt|Cargo\.(toml|lock)|go\.(mod|sum)|[^/]*\.lock(\.json)?)$/, "依赖清单"],
   [/^(gateway\/web\/(vendor|office|pdfjs|mdedit)\/|gateway\/web\/xterm[^/]*$|devkit\/vendor\/|third_party\/|claude-code\/)/, "第三方代码（应与上游发布逐字节一致）"],
   [/^gateway\/guard\//, "敏感操作再确认（安全兜底）"],
+  [/^i18n\/[^/]*\.mjs$/, "译文生成脚本（决定哪些译文能当代码进界面）"],
   [/(^|\/)[^/]*(sign|pgp|verify|token|auth|access|guard|secret|keystore|cert)[^/]*$/i, "签名 / 校验 / 令牌 / 权限相关"],
 ];
 const MED_PATHS = [
@@ -96,8 +98,13 @@ for (const l of diff.split("\n")) {
   if (l.startsWith("@@")) { ln = Number((/\+(\d+)/.exec(l) || [])[1] || 0); continue; }
   if (!l.startsWith("+") || l.startsWith("+++")) continue;
   const s = l.slice(1), here = ln++;
-  if (/^gateway\/web\/lang-[\w-]+\.js$|^i18n\//.test(cur)) {   // 译文：只查不可见字符
+  if (/^gateway\/web\/lang-[\w-]+\.js$|^i18n\/[^/]*\.txt$/.test(cur)) {   // 译文：查不可见字符 + 当代码执行的那几行
     for (const r of RULES) if (r.any && r.re.test(s)) add(r.lv, cur, here, r.why);
+    // 译文里的代码会原样在界面里跑（拿得到网关令牌）：txt 的 @ 行、生成的 js 里不是字符串的值都要过 fnsafe 的白名单
+    let fn = null;
+    if (cur.endsWith(".txt")) { const m = /^\d+\t@(?!@)(.*)$/.exec(s); if (m) fn = m[1]; }
+    else { const m = /^ {2}"(?:[^"\\]|\\.)*": (.*),$/.exec(s); if (m && !/^"(?:[^"\\]|\\.)*"$/.test(m[1])) fn = m[1]; else if (!m && !/^(\/\/|window\.I18N_DICT|\};?$)/.test(s)) add("high", cur, here, "译文文件里不是词条的行"); }
+    if (fn != null) { const p = i18nFnProblem(fn); add(p ? "high" : "med", cur, here, p ? `译文里的代码不合规（${p}），会在界面里执行` : "译文里的代码（复数等），会在界面里执行"); }
     continue;
   }
   const test = /^gateway\/tests\//.test(cur);   // 测试里本来就会造假钥匙、假令牌：降一档

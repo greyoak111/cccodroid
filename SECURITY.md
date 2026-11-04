@@ -68,8 +68,10 @@ cccodroid follows Anthropic's terms: it doesn't modify Claude Code, doesn't remo
 - **Fake system tags are defused.** Tags such as `<system-reminder>` that Claude Code uses to talk to the model are replaced with a full-width `＜` when they appear in what you type or paste, and Claude is told about it for that turn.
 - **Conversation history is sealed.** After every turn the app records the size and hash of the conversation file. If it changed outside the app before the next turn (edited by hand, by another program, or continued in the terminal), or the conversation was imported from a file, Claude is told for that turn that the earlier messages, including ones shown as its own, may not be real. The app's own edits (deleting a message, undo, branching) keep the seal, and don't clear an existing warning.
 - **Asking before changing what controls Claude.** Writing to Claude Code's settings and hooks, output styles, conversation records, the seal file or the safety check itself asks you first, even when everything is allowed.
+- **Changes to your Claude Code config need your OK.** Before every turn the app checks what in `~/.claude` gets loaded into every conversation or runs on its own: CLAUDE.md, rules, output styles, skills, commands, agents, hooks, plugins and MCP servers. If anything differs from what you last confirmed, including something that was changed and then changed back, you're asked whether to keep it or revert it. Reverted files go to a quarantine folder rather than being deleted. Background programs left running by an earlier conversation are listed the same way. Scheduled tasks don't run while there are unconfirmed changes.
+- **Skipping confirmation for privileged commands is time-limited.** It turns itself off after 24 hours.
 
-What this can't do: the app ships a full terminal with Claude Code in it, so someone determined can run it with whatever options they like. These measures close the gaps in the app itself and tell Claude when something looks wrong. The last line of defense is Claude's own training and Anthropic's safeguards.
+What this can't do: the app ships a full terminal with Claude Code in it, so someone determined can run it with whatever options they like. Any program running as the app, including commands Claude runs, can also rewrite the app's own records along with the files they cover. These checks are aimed at quiet changes and changes driven by prompt injection, not at an attacker who already runs code as the app or has root. The app doesn't filter what the model writes; that's the job of the model provider's safeguards. These measures close the gaps in the app itself and tell Claude when something looks wrong. The last line of defense is Claude's own training and Anthropic's safeguards.
 
 Testing tip: use a spare install or a separate test gateway, never the data you actually use. Some of these bugs delete things.
 
@@ -143,7 +145,9 @@ cccodroid 守 Anthropic 的条款：不改 Claude Code，不删它的登录方�
 - **冒充系统的标签会被拆掉。** Claude Code 和模型之间用 `<system-reminder>` 这类标签传话。你打的字、粘贴进来的内容里要是出现这些标签，尖括号会换成全角的 `＜`，那一轮也会告诉 Claude 一声。
 - **会话记录有封签。** 每轮结束，应用记下会话文件的大小和哈希。下一轮开始前文件在应用外变过（手改、别的程序改、在终端里接着聊了），或者这段会话是从文件导入的，这一轮就告诉 Claude：之前的消息，包括显示成它说的那些，不一定是真的。应用自己的改动（删消息、撤销、分叉）会重新封签，原有的提醒也不会因此消掉。
 - **改管着 Claude 的文件要先问你。** 写 Claude Code 的设置和钩子、输出风格、会话记录、封签文件，或者这道安全检查本身，开了全部放行也会先问。
+- **用户级配置变了要你点头。** `~/.claude` 里每次对话都会加载、或者打开就会运行的东西（CLAUDE.md、规则、输出风格、技能、命令、子代理、钩子、插件、MCP 服务器），每轮开始前都核一遍。和你上次确认的不一样，哪怕是改了又改回去，都先问你保留还是撤销；撤销的文件挪进隔离目录，不删。之前的对话留在后台没退的程序，也一样列出来让你定。有没确认的改动时，定时任务不跑。
+- **特权命令免确认有时限。** 打开 24 小时后自动关掉。
 
-做不到的：应用里有完整的终端，Claude Code 就装在那里，铁了心的人可以自己带任何参数去跑它。上面这些做的是不在应用里留口子，看出不对劲时告诉 Claude。最后一道防线是 Claude 自己的训练和 Anthropic 的安全机制。
+做不到的：应用里有完整的终端，Claude Code 就装在那里，铁了心的人可以自己带任何参数去跑它。以应用身份运行的程序（包括 Claude 跑的命令）也能把应用自己的记录连同文件一起改掉。所以这些检查防的是悄悄改、被注入的指令驱动着改，防不住已经能以应用身份跑代码的人，也防不住 root。模型写出什么内容，应用不做过滤，那归模型提供方的安全机制管。上面这些做的是不在应用里留口子，看出不对劲时告诉 Claude。最后一道防线是 Claude 自己的训练和 Anthropic 的安全机制。
 
 测试时请用一台测试机或单独的测试网关，别用你真正在用的数据。有些问题一触发就会删东西。

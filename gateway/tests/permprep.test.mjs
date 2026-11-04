@@ -2,6 +2,7 @@
 // 用户把「全部放行」改回逐项确认 —— 新进程要按改后的模式起，不能按开头读到的旧模式。用假 CLI 记下真实 argv；
 // 准备阶段卡在哪儿：消息带一张要先缩的大图，假 magick 等测试放行才退出（读模式之后、起进程之前的一个真实 await）
 import { PATHS } from "../gw/config.mjs";
+import "./fixtures/uc-baseline.mjs";   // 共用 home 里前面测试留下的 ~/.claude 改动先认下，免得真起一轮时卡在确认卡片
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

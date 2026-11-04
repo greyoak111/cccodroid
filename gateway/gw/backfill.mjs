@@ -7,7 +7,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { CFG, LAST_LANG, log } from "./config.mjs";
+import { CFG, LAST_LANG, log, tz } from "./config.mjs";
+import { ucPending } from "./userconf.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { publish } from "./bus.mjs";
 import { claudeCmd, claudeEnv, currentModelInfo, ensureBridge, killTree, settingsArgs } from "./claude.mjs";
@@ -159,6 +160,8 @@ export function parseTitles(text) {
 const WORK = path.join(CFG.home, ".cache", "ccapp-backfill");
 /** 问一次。o.provider / o.model：自动起名用对话那家（autotitle.mjs）；不给就是补档，走全局默认、子进程挂在 JOB 上好停 */
 export function ask(prompt, o = {}) {
+  // 起 claude 就会加载用户级钩子、CLAUDE.md：有没确认的改动先别起（见 userconf.mjs）
+  if (ucPending()) return Promise.resolve({ error: tz("Claude Code 的用户级配置有改动还没确认。先发一条消息，在弹出的卡片里确认后再试。") });
   return new Promise((resolve) => {
     fs.mkdirSync(WORK, { recursive: true });
     const P = o.provider || PROVIDER, own = !o.provider;

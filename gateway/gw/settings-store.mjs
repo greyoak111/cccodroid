@@ -2,7 +2,8 @@
 // 不再经 settings.mjs ↔ providers.mjs 的环（审查 10-30 v0.5.12 低5：单独导入 providers 会撞暂时性死区，重排 server.mjs 的 import 就可能启动即崩）
 import fs from "node:fs";
 import path from "node:path";
-import { PATHS, PERM_MODES, log } from "./config.mjs";
+import crypto from "node:crypto";
+import { CFG, PATHS, PERM_MODES, log } from "./config.mjs";
 
 // ── 设置（模型 / 权限模式 / 目录 …）──────────────────────────────────
 export const SETTINGS = {
@@ -51,10 +52,15 @@ export function capList(a, n, len, total = Infinity) {
   }
   return out;
 }
+// 盘上那份最后是什么样（网关自己读进来 / 写出去时记下）：跑着的时候被别人改了，起下一轮前写回内存里的（见 settingsDiskCheck）
+let DISK_H = null;
+const hashOf = (s) => crypto.createHash("sha256").update(s).digest("hex");
 function loadSettings() {
   let had = false;
   try {
-    Object.assign(SETTINGS, JSON.parse(fs.readFileSync(PATHS.settings, "utf8")));
+    const raw = fs.readFileSync(PATHS.settings, "utf8");
+    DISK_H = hashOf(raw);
+    Object.assign(SETTINGS, JSON.parse(raw));
     had = true;
   } catch {}
   // 旧版没限过：已经存进去的超长列表在这里截住，别让它每一轮把 claude 的命令行撑爆（审查 v0513b 低-3）
@@ -93,8 +99,10 @@ export function saveSettings() {
   try {
     fs.mkdirSync(path.dirname(PATHS.settings), { recursive: true });
     // 先写临时文件再换名：写到一半被杀，下次读到半个 JSON 会回落默认，下一次保存就把密钥覆盖没了（审查 中1）
-    fs.writeFileSync(PATHS.settings + ".tmp", JSON.stringify(SETTINGS, null, 2), { mode: 0o600 });
+    const out = JSON.stringify(SETTINGS, null, 2);
+    fs.writeFileSync(PATHS.settings + ".tmp", out, { mode: 0o600 });
     fs.renameSync(PATHS.settings + ".tmp", PATHS.settings);
+    DISK_H = hashOf(out);
     return true;
   } catch (e) {
     try { fs.rmSync(PATHS.settings + ".tmp", { force: true }); } catch {}
@@ -103,3 +111,38 @@ export function saveSettings() {
   }
 }
 loadSettings();
+
+/** 网关跑着时设置以内存为准、只有网关写盘：盘上那份和最后读写的对不上，就是别人改的 —— 写回去，返回 true（调用方记留痕） */
+export function settingsDiskCheck() {
+  if (DISK_H == null) return false;
+  let raw; try { raw = fs.readFileSync(PATHS.settings, "utf8"); } catch { raw = null; }
+  if (raw != null && hashOf(raw) === DISK_H) return false;
+  return saveSettings();
+}
+
+/** claude 认的输出风格：内置两种 + ~/.claude/output-styles 里的 .md（名字取 frontmatter 的 name）。
+ *  工作区里的 .claude/output-styles 不列：那是谁都能往里放文件的地方，列出来就成了一个看不出来源、选了就进系统提示的条目
+ *  （输出风格目录的安全报告，11-04）。项目自带的风格按项目配置走确认（projtrust.mjs） */
+export function outputStyles() {
+  const out = [
+    { id: "Explanatory", desc: "边做边解释实现取舍" },
+    { id: "Learning", desc: "留 TODO 让你亲手写一部分" },
+  ];
+  for (const dir of [path.join(CFG.home, ".claude/output-styles")]) {
+    let files = [];
+    try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { continue; }
+    for (const f of files) {
+      let name = f.slice(0, -3), desc = "";
+      try {
+        const head = fs.readFileSync(path.join(dir, f), "utf8").slice(0, 2000);
+        const fm = head.match(/^---\n([\s\S]*?)\n---/);
+        if (fm) {
+          name = (fm[1].match(/^name:[ \t]*(.+)$/m) || [, name])[1].trim();
+          desc = (fm[1].match(/^description:[ \t]*(.+)$/m) || [, ""])[1].trim();
+        }
+      } catch {}
+      if (!out.some((o) => o.id === name)) out.push({ id: name, desc });
+    }
+  }
+  return out;
+}

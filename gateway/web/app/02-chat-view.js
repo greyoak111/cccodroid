@@ -78,6 +78,26 @@
     scrollDown(true);
     return b;
   }
+  // 钩子往上下文里塞的话：平时只露一行「钩子塞了多少字」，点开才把原文放进 DOM（长文本别常驻，同思考块的懒渲染）
+  function hookCtxEl(ev, text) {
+    const el = document.createElement("div");
+    el.className = "hook-ctx";
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "hook-ctx-h";
+    b.textContent = t("钩子（{e}）往这一轮的上下文里加了 {n} 字", { e: ev || "?", n: String(text).length });
+    b.setAttribute("aria-expanded", "false");
+    b.onclick = () => {
+      const open = b.getAttribute("aria-expanded") !== "true";
+      b.setAttribute("aria-expanded", String(open));
+      if (!open) return el.querySelector(".hook-ctx-b")?.remove();
+      const pre = document.createElement("pre");
+      pre.className = "hook-ctx-b"; pre.textContent = text;
+      el.appendChild(pre);
+    };
+    el.appendChild(b);
+    return el;
+  }
+  function addHookCtx(ev, text, parent) { const el = hookCtxEl(ev, text); (parent || liveEl).appendChild(el); return el; }
   function addNote(text, parent) {
     const el = document.createElement("div");
     el.className = "note";

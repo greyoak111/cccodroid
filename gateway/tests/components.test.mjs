@@ -10,6 +10,7 @@ import http from "node:http";
 const COMP_DIR = path.join(path.dirname(process.env.CCAPP_PREFIX), "components");
 const CACHE = path.join(COMP_DIR, "index.cache");
 fs.mkdirSync(COMP_DIR, { recursive: true });
+fs.rmSync(CACHE, { force: true });   // 「第一次」要从空缓存开始：同一进程里前面的测试可能留过一份
 process.env.CCAPP_COMPONENTS_ALLOW_UNSIGNED = "1";
 
 const hits = { preset: 0, presetMirror: 0, community: 0, communityMirror: 0 };

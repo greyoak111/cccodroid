@@ -33,22 +33,48 @@ import java.util.concurrent.ConcurrentHashMap;
  *     下次启动凭签名恢复；没签名、签名不对，就当没同意过；
  *   · 只认本机生成、要求每次验证（有效期 0）的钥匙：同 uid 的代码导入自己的钥匙（origin 不是 GENERATED），
  *     或生成一把「解锁后若干秒内可用」的钥匙蹭用户日常解锁，都过不了验签；
- *   · 关掉 = 删掉这条的钥匙，之前留下的签名一起作废，存了旧文件也翻不了案。
- * 安卓 11 以下或没设锁屏：签不了，只在本次运行有效。
+ *   · 验签用的公钥不信 entry 上的证书（同 uid 能 setKeyEntry 换成自己的，11-04 报告 A1），只信硬件密钥认证链：
+ *     链到 Google 认证根、扩展里写明每次验证 / 本机生成 / 本应用 / challenge 对得上，规则见 KeyAttest；
+ *   · 关掉 = 删掉这条的钥匙，之前留下的签名一起作废：旧链和旧签名放回新生成的 entry 上，创建时间对不上，翻不了案。
+ * 安卓 11 以下、没设锁屏、或这台设备做不了硬件密钥认证（没有 Google 根、KeyMint 以前的老硬件）：
+ * 签不了，只在本次运行有效。以前存的同意没有认证链，升级后要重新打开一次。
  */
 final class Consent {
     static final String TAG = "cccodroid-consent";
-    static final String NOASK = "noask", KEEPALIVE = "keepalive", DEV_ON = "dev.on", DEV_A11Y = "dev.a11y", WEBDEBUG = "webdebug";
+    static final String NOASK = "noask", KEEPALIVE = "keepalive", DEV_ON = "dev.on", DEV_A11Y = "dev.a11y", WEBDEBUG = "webdebug", SHZ_AUTO = "shz.autostart";
     private static final String PREFS = "consent", ALIAS = "cc_consent_";
     /** 本次运行确认过或验过签的：名字 → 值 */
     private static final Map<String, String> MEM = new ConcurrentHashMap<>();
     /** 等着弹锁屏验证去签名的（只由 grant 放进来，外面没法塞） */
     private static final ArrayDeque<String[]> PENDING = new ArrayDeque<>();
     private static final Object LOCK = new Object();
+    /** Google 硬件密钥认证根的公钥（SubjectPublicKeyInfo 的 SHA-256）：RSA 老根，和 2025 年起的 EC P-384 根。
+     *  取自 https://android.googleapis.com/attestation/root（11-04） */
+    static final java.util.Set<String> ROOTS = new java.util.HashSet<>(java.util.Arrays.asList(
+        "feb2ea7551ee316ed4bb443c8293b884dbfdea40b603ee3e4f4a897e4580fbae",
+        "3ee44512a1af2beb39c889490c60ea3f82e43f5d5a5532f5ab9419f676cd07ec"));
 
     private static SharedPreferences sp(Context c) { return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
     private static byte[] msg(Context c, String name, String value) {
         return (c.getPackageName() + "\0consent\0" + name + "\0" + value).getBytes(StandardCharsets.UTF_8);
+    }
+    /** 生成钥匙时放进认证扩展的 challenge：绑定这条同意的名字和值 */
+    private static byte[] challenge(Context c, String name, String value) throws Exception {
+        return java.security.MessageDigest.getInstance("SHA-256").digest(msg(c, name, value));
+    }
+    /** 这条的认证链验不验得过：过了返回叶子证书，不过返回 null（原因进日志） */
+    private static java.security.cert.X509Certificate attested(Context c, KeyStore ks, String name, String value) throws Exception {
+        java.security.cert.Certificate[] ch = ks.getCertificateChain(ALIAS + name);
+        java.util.Date d = ks.getCreationDate(ALIAS + name);
+        if (ch == null || d == null) { Log.w(TAG, name + " 没有认证链"); return null; }
+        java.security.cert.X509Certificate[] x = new java.security.cert.X509Certificate[ch.length];
+        for (int i = 0; i < ch.length; i++) {
+            if (!(ch[i] instanceof java.security.cert.X509Certificate)) return null;
+            x[i] = (java.security.cert.X509Certificate) ch[i];
+        }
+        String why = KeyAttest.check(x, ROOTS, challenge(c, name, value), c.getPackageName(), d.getTime());
+        if (!why.isEmpty()) { Log.w(TAG, name + " 的认证链验不过：" + why); return null; }
+        return x[0];
     }
 
     /** 当前值；没同意过（或签名验不过）返回 null */
@@ -158,8 +184,16 @@ final class Consent {
                 .setUserAuthenticationRequired(true)
                 .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL)
                 .setInvalidatedByBiometricEnrollment(false)
+                .setAttestationChallenge(challenge(a, name, value))
                 .build());
             PrivateKey k = g.generateKeyPair().getPrivate();
+            // 先验一遍认证链：这台设备做不了（没有 Google 根等）的话，存了下次也认不了，别让用户白验
+            KeyStore ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null);
+            if (attested(a, ks, name, value) == null) {
+                try { ks.deleteEntry(ALIAS + name); } catch (Exception ignored) {}
+                done(a, Tr.f("这台设备做不了硬件密钥认证，「{0}」只在这次运行有效", label(name, value)));
+                return;
+            }
             s = Signature.getInstance("SHA256withECDSA");
             s.initSign(k);
         } catch (Exception e) {
@@ -212,8 +246,11 @@ final class Consent {
             KeyStore.PrivateKeyEntry pe = (KeyStore.PrivateKeyEntry) e;
             KeyInfo ki = KeyFactory.getInstance(pe.getPrivateKey().getAlgorithm(), "AndroidKeyStore").getKeySpec(pe.getPrivateKey(), KeyInfo.class);
             if (!keyOk(ki.getOrigin(), ki.isUserAuthenticationRequired(), ki.getUserAuthenticationValidityDurationSeconds())) return false;
+            // entry 上的证书同 uid 能换，只信认证链验过的叶子公钥
+            java.security.cert.X509Certificate leaf = attested(c, ks, name, value);
+            if (leaf == null) return false;
             Signature s = Signature.getInstance("SHA256withECDSA");
-            s.initVerify(pe.getCertificate().getPublicKey());
+            s.initVerify(leaf.getPublicKey());
             s.update(msg(c, name, value));
             return s.verify(Base64.decode(sig, Base64.NO_WRAP));
         } catch (Exception ex) { Log.w(TAG, "验签出错 " + name, ex); return false; }

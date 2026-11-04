@@ -109,6 +109,19 @@ function contextUsage(u, flags, sse) {
   sse({ type: "usage", contextTokens: n, outputTokens: u.output_tokens || 0 });
 }
 
+/** 钩子输出里会进模型上下文的那段：JSON 的 additionalContext；SessionStart / UserPromptSubmit 正常退出时纯文本的 stdout 也算 */
+export function hookContext(ev) {
+  const out = String(ev.stdout ?? ev.output ?? "").trim();
+  if (!out) return "";
+  let j = null;
+  if (out.startsWith("{")) { try { j = JSON.parse(out); } catch {} }
+  if (j && typeof j === "object") {
+    const c = j.hookSpecificOutput?.additionalContext;
+    return typeof c === "string" ? c.slice(0, 20000) : Array.isArray(c) ? c.join("\n").slice(0, 20000) : "";
+  }
+  return ["SessionStart", "UserPromptSubmit"].includes(ev.hook_event) && !ev.exit_code ? out.slice(0, 20000) : "";
+}
+
 /** 把 claude 的 stream-json 事件翻译成前端事件 */
 export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider }) {
   if (!ev || typeof ev !== "object") return;
@@ -129,6 +142,12 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
       }
       else if (ev.subtype === "task_notification" && ev.tool_use_id) {
         sse({ type: "sub_done", parent: ev.tool_use_id, status: String(ev.status || "") });
+      }
+      // 钩子往这一轮塞了话（SessionStart / UserPromptSubmit 的输出、additionalContext）：界面上折叠显示原文，
+      // 每轮注入的东西摆在用户眼前（需要 --include-hook-events；会话记录里是 hook_additional_context，见 transcript.mjs）
+      else if (ev.subtype === "hook_response") {
+        const text = hookContext(ev);
+        if (text) sse({ type: "hook_ctx", event: String(ev.hook_event || ev.hook_name || "").slice(0, 60), text });
       }
       else if (ev.subtype === "compact_boundary") {
         // 压缩（手动 /compact 或自动）完成。以前不认这条：界面显示「无输出」，上下文条要等下一轮才变

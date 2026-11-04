@@ -7,15 +7,17 @@
   const gitEl = $("git");
   const GIT = { dir: "", root: "", tab: "changes", status: null, sel: new Set(), file: "", view: null, wrap: true };
   const gapi = (act, params) => api(`/api/git/${act}?` + new URLSearchParams({ dir: GIT.dir, ...(params || {}) }));
-  const gpost0 = (act, body) => api(`/api/git/${act}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dir: GIT.dir, ...body }) });
-  // 仓库自己的配置会在这一步执行命令（过滤器、钩子等）：网关回 untrusted，列出来让用户确认一次，确认后网关按仓库记住
+  const gpost0 = (act, body, dir = GIT.dir) => api(`/api/git/${act}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ dir, ...body }) });
+  // 仓库自己的配置会在这一步执行命令（过滤器、钩子等）：网关回 untrusted，列出来让用户确认一次，确认后网关按仓库记住。
+  // 仓库在发起时取定：等确认的工夫里打开了别的仓库，重试也还是发给原来那个（GHSA-w37q）
   const gpost = async (act, body) => {
-    try { return await gpost0(act, body); }
+    const dir = GIT.dir;
+    try { return await gpost0(act, body, dir); }
     catch (e) {
       const b = e.body;
       if (!(e.status === 409 && b && b.error === "untrusted")) throw e;
       if (!confirm(b.message + "\n\n" + b.risks.slice(0, 12).join("\n") + (b.risks.length > 12 ? "\n…" : "") + "\n\n" + t("这些命令来自仓库里的配置文件。从网上下载、别人给的仓库，先在终端里看清楚再继续。继续？"))) throw new Error(t("已取消"));
-      return gpost0(act, { ...body, trust: b.fp });
+      return gpost0(act, { ...body, trust: b.fp }, dir);
     }
   };
   const GS = { modified: "M", added: "A", new: "U", deleted: "D", renamed: "R", conflict: "!" };

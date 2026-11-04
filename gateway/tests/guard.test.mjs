@@ -95,3 +95,13 @@ test("guard 没有全局关闭开关：设置里存 false 也照挂", () => {
     assert.match(hooks[0].hooks[0].command, /cc-guard\.mjs/);
   } finally { SETTINGS.guard = old; }
 });
+
+test("钩子自己出错（看不懂输入）回 ask，不静默放行；正常的普通操作照旧不输出", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const g = fileURLToPath(new URL("../guard/cc-guard.mjs", import.meta.url));
+  const run = (input) => spawnSync(process.execPath, [g], { input, encoding: "utf8" }).stdout;
+  assert.match(run("{ 不是 JSON"), /cccodroid-guard\|error\|guard error/);
+  assert.match(run("null"), /cccodroid-guard\|error\|/);
+  assert.equal(run(JSON.stringify({ tool_name: "Read", tool_input: { file_path: "/proj/README.md" } })), "");
+});

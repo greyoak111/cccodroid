@@ -152,7 +152,7 @@ final class ShizukuSetup {
         JSONArray lg;
         synchronized (ring) { lg = new JSONArray(ring); }
         o.put("setup", new JSONObject().put("phase", phase).put("message", message).put("done", done).put("total", total).put("log", lg));
-        o.put("autostart", prefs().getBoolean("autostart", false));
+        o.put("autostart", autostart());
         o.put("paired", prefs().getBoolean("paired", false));
         o.put("pairOk", pairOk);
         if (Priv.running()) verifyPairAsync();
@@ -160,7 +160,7 @@ final class ShizukuSetup {
         // 这次开机有没有收到 BOOT_COMPLETED（国产 ROM 的"自启动管理"会拦）。配对之后重启过才有意义
         long bootAt = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime();
         SharedPreferences sp = prefs();
-        o.put("bootMissed", sp.getBoolean("paired", false) && sp.getBoolean("autostart", false)
+        o.put("bootMissed", sp.getBoolean("paired", false) && autostart()
             && bootAt > sp.getLong("pairedAt", Long.MAX_VALUE) && sp.getLong("bootSeen", 0) < bootAt);
         o.put("bootAt", bootAt / 60000);                     // 本次开机的分钟数：前端据此把「我已允许」记到下次开机
         o.put("wireless", Build.VERSION.SDK_INT >= 30);
@@ -430,7 +430,7 @@ final class ShizukuSetup {
      * 开机时 Wi‑Fi 可能还没连上，最多等 3 分钟。
      */
     void reactivateAsync(boolean boot) {
-        if (!prefs().getBoolean("autostart", false) || !prefs().getBoolean("paired", false) || !hasWss()) return;
+        if (!autostart() || !prefs().getBoolean("paired", false) || !hasWss()) return;
         if (Build.VERSION.SDK_INT < 30 || !Priv.installed() || Priv.sui()) return;   // Sui 随系统起，不用无线调试拉
         new Thread(() -> {
             try {
@@ -493,7 +493,14 @@ final class ShizukuSetup {
         }, "shz-repair").start();
     }
 
-    void setAutostart(boolean on) { prefs().edit().putBoolean("autostart", on).apply(); }
+    /** 开机 / Shizuku 被杀后自动重开无线调试：用户点过头的同意（Consent 签名存档），不再是谁都能改的 prefs。
+     *  paired 仍是普通 prefs：它只是「配对过」的记号，单独改它不会让任何东西自己跑起来（自动拉起还要这条同意），
+     *  真用时 verifyPairAsync 会按实际连不连得上纠正（11-04 报告 A6）。旧版存在 prefs 里的 autostart 不认，升级后要重新打开 */
+    boolean autostart() { return Consent.on(ctx, Consent.SHZ_AUTO); }
+    void setAutostart(boolean on) {
+        if (on) Consent.grant(ctx, Consent.SHZ_AUTO, "1"); else Consent.revoke(ctx, Consent.SHZ_AUTO);
+        prefs().edit().remove("autostart").apply();
+    }
 
     // ── 工具 ───────────────────────────────────────────────────────────
     private boolean onWifi() {

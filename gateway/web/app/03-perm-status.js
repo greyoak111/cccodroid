@@ -57,6 +57,14 @@
         h = `<div class="perm-path">${esc(i.notebook_path || "")}</div><pre class="perm-cmd">${esc(String(i.new_source || "").slice(0, 3000))}</pre>`;
         break;
       case "WebFetch": h = `<pre class="perm-cmd">${esc(i.url || "")}</pre>` + (i.prompt ? `<div class="perm-sub">${esc(i.prompt)}</div>` : ""); break;
+      case "UserConfig": {
+        // 用户级配置的改动 + 之前的对话留下的后台进程（网关 userconf.mjs / leftover.mjs）
+        const kindL = (k) => ({ added: t("新增"), changed: t("改动"), removed: t("删除"), transient: t("改过又改回") }[k] || "");
+        h = (i.first ? `<div class="perm-sub">${t("第一次检查：下面这些配置每次对话都会交给 Claude，确认一下是不是你自己放的。")} ${t("撤销会把它挪进 ~/.ccapp-userconf/quarantine，找得回来。")}</div>` : "")
+          + (i.changes || []).map((c) => c.kind === "more" ? `<div class="perm-path">${esc(c.rel)}</div>${c.preview ? `<pre class="perm-cmd">${esc(c.preview)}</pre>` : ""}` : `<div class="perm-path">${esc(kindL(c.kind))} ~/${esc(c.rel)}${c.during ? " · " + t("在一轮对话运行期间改的") : ""}${c.again ? " · " + t("撤销后又被改回来（第 {n} 次）", { n: c.again + 1 }) : ""}</div>${c.preview ? `<pre class="perm-cmd">${esc(c.preview)}</pre>` : ""}`).join("")
+          + ((i.procs || []).length ? `<div class="perm-sub">${t("之前的对话留下、还在后台运行的程序：")}</div><pre class="perm-cmd">${esc(i.procs.map((x) => `${x.pid}  ${x.kind === "unknown" ? "[" + t("来源不明") + "] " : ""}${x.cmd}`).join("\n"))}</pre>` : "");
+        break;
+      }
       case "ProjectConfig": h = `<div class="perm-path">${esc(i.dir || "")}</div><pre class="perm-cmd">${esc((i.risks || []).join("\n"))}</pre>`; break;
       case "WebSearch": h = `<pre class="perm-cmd">${esc(i.query || "")}</pre>`; break;
       case "ExitPlanMode": h = `<div class="perm-plan">${renderMd(String(i.plan || ""))}</div>`; break;
@@ -77,14 +85,20 @@
     if (p.blockedPath && !["Edit", "Write", "MultiEdit"].includes(p.tool) && !String(i.command || "").includes(p.blockedPath)) h += `<div class="perm-sub">${t("涉及路径：{p}", { p: esc(p.blockedPath) })}</div>`;
     if (p.reason && typeof p.reason === "string") h += `<div class="perm-sub">${t("原因：{r}", { r: esc(p.reason) })}</div>`;
     // 敏感操作再确认（网关的 guard 钩子）：说清楚碰到了什么、为什么要多问一句
-    if (p.guard) h = `<div class="perm-guard"><b>${esc(permGuardWhat(p.guard))}</b><p>${p.guard.cat === "project"
+    if (p.guard) h = `<div class="perm-guard"><b>${esc(permGuardWhat(p.guard, p.input))}</b><p>${p.guard.cat === "userconf"
+      ? t("这些改动如果不是你自己做的、或者认不出来，选「撤销」：配置恢复到上次确认时的样子（新多出来的文件挪进隔离目录，不删），留下的程序会被结束。是你自己改的就选「保留」，以后不再问。")
+      : p.guard.cat === "error"
+      ? t("正常情况下不会出现。拿不准这一步是做什么的，就拒绝。")
+      : p.guard.cat === "project"
       ? t("这些配置会以本应用的身份直接运行程序。不是你自己写的、或者来路不明的项目，选「不加载」：这一轮照常进行，只是不用它们。允许后记住，配置变了会再问。")
       : t("如果不是你让它这么做的，多半是它读到的网页或文件里藏了指令，建议拒绝。允许后，这一轮里同一类操作不再问。")}</p></div>` + h;
     return h;
   }
 
-  function permGuardWhat(g) {
+  function permGuardWhat(g, i) {
     const c = String(g.cat || "");
+    if (c === "userconf") return (i?.changes || []).length ? t("会交给 Claude 的用户级配置有变化，没经过你确认") : t("之前的对话留下了还在运行的后台程序");
+    if (c === "error") return t("安全检查自己出错了，判断不了这一步");
     if (c === "device:screen") return t("要读屏幕或替你操作别的应用（{w}）", { w: g.what });
     if (c === "device:clipboard") return t("要读剪贴板");
     if (c === "device:share") return t("要把文件分享到别的应用");
@@ -101,8 +115,8 @@
   const WIDE_MODES = ["bypassPermissions", "auto", "dontAsk"];
   function permActions(p, runId) {
     if (p.guard) return `
-      <button class="pa-allow">${p.guard.cat === "project" ? t("允许并记住") : t("允许")}</button>
-      <button class="pa-more primary">${p.guard.cat === "project" ? t("不加载 ▾") : t("拒绝 ▾")}</button>`;
+      <button class="pa-allow">${p.guard.cat === "userconf" ? t("是我做的，保留") : p.guard.cat === "project" ? t("允许并记住") : t("允许")}</button>
+      <button class="pa-more primary">${p.guard.cat === "userconf" ? t("撤销 ▾") : p.guard.cat === "project" ? t("不加载 ▾") : t("拒绝 ▾")}</button>`;
     if (p.tool === "ExitPlanMode") {
       // 用户本来就放得比「自动接受编辑」宽（全部放行等）时，批准计划不该顺手把全局模式降下来（群友反馈）
       const cur = runMode(runId), keep = WIDE_MODES.includes(cur);
@@ -135,8 +149,8 @@
       <div class="perm-deny hidden">
         <textarea rows="2" placeholder="${p.tool === "ExitPlanMode" ? t("说说要怎么改（会发回给 Claude）") : t("可选：告诉 Claude 为什么 / 该怎么做")}"></textarea>
         <div class="perm-acts">
-          <button class="pa-deny">${p.tool === "ExitPlanMode" ? t("发回意见") : t("拒绝")}</button>
-          <button class="pa-stop">${t("拒绝并停止")}</button>
+          <button class="pa-deny">${p.tool === "ExitPlanMode" ? t("发回意见") : p.tool === "UserConfig" ? t("撤销改动") : t("拒绝")}</button>
+          <button class="pa-stop">${p.tool === "UserConfig" ? t("撤销并停止") : t("拒绝并停止")}</button>
         </div>
       </div>`;
     const tc = p.toolUseId && TOOL_CARDS.get(p.toolUseId);
@@ -203,7 +217,9 @@
     it.done = true;
     const p = it.p;
     const what = p.tool === "Bash" ? (p.input.command || "") : (p.input.file_path || p.input.url || p.input.query || "");
-    const label = behavior === "allow"
+    const label = p.tool === "UserConfig" && behavior === "allow" ? t("✓ 已保留")
+      : p.tool === "UserConfig" && behavior === "deny" ? (o.interrupt ? t("↩ 已撤销并停止") : t("↩ 已撤销"))
+      : behavior === "allow"
       ? (p.tool === "ExitPlanMode" ? t("✓ 已批准计划") : p.tool === "AskUserQuestion" ? t("✓ 已回答") : o.always ? t("✓ 已允许（始终）") : t("✓ 已允许"))
       : behavior === "deny" ? (o.interrupt ? t("✗ 已拒绝并停止") : p.tool === "ExitPlanMode" ? t("↩ 已退回修改") : t("✗ 已拒绝"))
       : behavior === "cancel" ? t("已撤回") : behavior === "stopped" ? t("已停止（这一轮结束了）") : t("已失效");
@@ -728,6 +744,7 @@
         bubble.insertBefore(p, tailEl);
         keepTail();
       },
+      hookCtx(e, text) { undot(); last = null; bubble.appendChild(hookCtxEl(e, text)); keepTail(); },
       note(t, solid) { undot(); last = null; if (solid) any = true; bubble.insertAdjacentHTML("beforeend", `<p class="run-note">${esc(t)}</p>`); keepTail(); },
       // 同一个 key 的提示原地更新（加载模型、读提示的进度），不一条条往下堆
       noteK(k, t, solid) {
@@ -803,6 +820,7 @@
     for (const m of items) {
       if (m.role === "user") { renderUser(m.text, page, m.uuid); av = null; continue; }
       if (m.role === "note") { (m.chapter ? chapterSep : addNote)(m.chapter ? m : m.text, page); av = null; continue; }
+      if (m.role === "hookctx") { addHookCtx(m.event, m.text, page); av = null; continue; }
       if (m.role === "tool_result") { toolResult(m.id, m.ok, m.text); continue; }
       if (!av) { av = AssistantView(page, false); avs.push(av); }
       if (m.role === "assistant") av.text(m.text, m.uuid);

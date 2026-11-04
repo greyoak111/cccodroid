@@ -2,6 +2,7 @@
 //   · 工作目录 .claude/settings.json、settings.local.json 里的 hooks、env、各种 *Helper、插件、MCP 开关……
 //   · 工作目录以及每一级上级目录的 .mcp.json（claude 会一路往上找；/sdcard/.mcp.json 任何有存储权限的应用都能放）
 //   · 工作目录 .claude/agents、.claude/skills 里 frontmatter 带 hooks 的
+//   · 工作目录 .claude/output-styles 里的风格（选中就进系统提示）
 // 实测不加载的（不用扫）：上级目录的 .claude/settings*.json（git 根也不读）、--add-dir 目录里的 .mcp.json。
 // clone 下来的仓库、别的应用放进共享存储的文件都可能带这些。起一轮前先看一眼：有、又没被用户认过，就出一张卡片问；
 // 不同意（或者没人看着的定时任务）这一轮加 --setting-sources user，项目级的配置一概不加载，对话照常。
@@ -13,7 +14,7 @@ import { CFG, log } from "./config.mjs";
 
 const MAX = 8 << 20;   // 超过的读不全：记成风险，指纹按大小 + 修改时间
 // 项目设置里不会让什么东西跑起来的键；其余的（含以后新加的）一律当风险报出来，宁可多问一次
-const SAFE_KEYS = new Set(["$schema", "model", "outputStyle", "includeCoAuthoredBy", "includeGitInstructions", "cleanupPeriodDays",
+export const SAFE_KEYS = new Set(["$schema", "model", "outputStyle", "includeCoAuthoredBy", "includeGitInstructions", "cleanupPeriodDays",
   "language", "alwaysThinkingEnabled", "spinnerTipsEnabled", "respectGitignore", "theme", "verbose", "attribution", "effortLevel"]);
 // disableAllHooks 不在里面：项目级的这一项连 --settings 挂的 guard 钩子一起关掉（2.1.311 实测，DeepSeek 复核 11-03 C-3）
 
@@ -81,6 +82,17 @@ export function projectRisks(cwd) {
       if (!r || (!r.big && !hasFrontHooks(r.raw))) continue;
       take(f, r);
       risks.push(`${path.join(".claude", sub, sub === "agents" ? e.name : e.name + "/SKILL.md")}: ${r.big ? "?" : "hooks"}`);
+    }
+  }
+  // 项目自带的输出风格：选中（项目设置里的 outputStyle 就能选）就成了系统提示的一部分（输出风格目录的安全报告，11-04）
+  {
+    const base = path.join(cwd, ".claude", "output-styles");
+    let ents = []; try { ents = fs.readdirSync(base).filter((f) => f.endsWith(".md")).sort(); } catch {}
+    for (const f of ents.slice(0, 50)) {
+      const r = readSmall(path.join(base, f));
+      if (!r) continue;
+      take(path.join(base, f), r);
+      risks.push(`${path.join(".claude", "output-styles", f)}: output style`);
     }
   }
   return risks.length ? { fp: h.digest("hex").slice(0, 32), risks: risks.length > 40 ? [...risks.slice(0, 39), `… +${risks.length - 39}`] : risks } : null;

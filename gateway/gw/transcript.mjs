@@ -35,6 +35,12 @@ export function agentFilesOf(sessionFile) {
 export function transcriptItems(ev) {
   const out = [];
   if (!ev || ev.isSidechain || ev.isMeta) return out;
+  // 钩子往上下文里塞的话（SessionStart / UserPromptSubmit…）：界面折叠显示原文（实时那边见 stream.mjs 的 hookContext）
+  if (ev.type === "attachment" && ev.attachment?.type === "hook_additional_context") {
+    const c = ev.attachment.content, text = (Array.isArray(c) ? c.join("\n") : String(c ?? "")).slice(0, 20000);
+    if (text.trim()) out.push({ role: "hookctx", event: String(ev.attachment.hookEvent || ev.attachment.hookName || "").slice(0, 60), text });
+    return out;
+  }
   if (ev.type === "user") {
     // 压缩处：带上 uuid，界面画成章节分隔（第几章、题名由路由按脉络索引补上），脉络页跳转也靠它落地
     if (ev.isCompactSummary) { out.push({ role: "note", text: tr(LAST_LANG, tz("（此前的对话已被压缩成摘要）")), compact: true, uuid: ev.uuid || null }); return out; }

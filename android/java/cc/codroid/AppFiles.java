@@ -74,6 +74,16 @@ final class AppFiles {
         return bad;
     }
 
+    /** 安装包里清单（assets/app/FILES）的 sha256，交给网关核对盘上那份（gateway/gw/appfiles.mjs）。没有返回 null */
+    static String listSha(Context c) {
+        try (InputStream in = c.getAssets().open("app/FILES")) {
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[1 << 16];
+            for (int n; (n = in.read(buf)) > 0; ) bo.write(buf, 0, n);
+            return sha256(bo.toByteArray());
+        } catch (Exception e) { return null; }
+    }
+
     private static void walk(File dir, String rel, Map<String, String> want, List<String> bad) {
         String[] kids = dir.list();
         if (kids == null) return;

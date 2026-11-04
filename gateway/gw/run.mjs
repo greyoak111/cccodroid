@@ -2,15 +2,15 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { CFG, LAST_LANG, PATHS, log, tr, tz, permModeAction } from "./config.mjs";
-import { SETTINGS, capList } from "./settings-store.mjs";
-import { PERM_MODES, PROVIDER, billAfterRun, keyOf, noteTokens, providerById } from "./providers.mjs";
+import { SETTINGS, capList, settingsDiskCheck } from "./settings-store.mjs";
+import { PERM_MODES, PROVIDER, billAfterRun, keyOf, noteTokens, providerById, providersDiskCheck } from "./providers.mjs";
 import { ALIAS_SEEN, effortLevelsOf, fetchModels, isLoginMode, modelsCached, normEffort } from "./models.mjs";
-import { claudeCmd, claudeEnv, currentModelInfo, ensureBridge, safeModePerm, settingsArgs } from "./claude.mjs";
+import { claudeAtLeast, claudeCmd, claudeEnv, currentModelInfo, ensureBridge, safeModePerm, settingsArgs } from "./claude.mjs";
 import { tasksCheck } from "./goal.mjs";
 import { setLastInit } from "./caps.mjs";
 import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setPermMode, sidForItem } from "./queue.mjs";
+import { END_HOOKS, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setPermMode, sidForItem } from "./queue.mjs";
 import { handleLocalCommand } from "./modelcmd.mjs";
 import { LL, ensureLlama, localCustomActive } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "./usage.mjs";
@@ -31,6 +31,8 @@ import { refNote, refNoteSync } from "./merge.mjs";
 import { ensureManagedBridge } from "./managed-bridge.mjs";
 import { projectRisks, projectTrusted, trustProject } from "./projtrust.mjs";
 import { checkAppFiles } from "./appfiles.mjs";
+import { ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "./userconf.mjs";
+import { keepProcs, killProcs, leftoverProcs, procStart } from "./leftover.mjs";
 
 // 必须由人回答的工具：全部放行也照问（问题、计划审批）
 const HUMAN_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
@@ -105,13 +107,12 @@ export function execIntent(item, ctx) {
   return { sid0, pdef0, P, model, effort };
 }
 
-/** 起进程前的那张「项目配置」卡片：借用敏感操作卡（guard），答复走同一个 /api/perm/answer。
- *  允许 → true；拒绝 → false；「拒绝并停止」或这期间点了停止 → 停掉这一轮 */
-function askProjectTrust(run, cwd, proj, emit) {
+/** 起进程前要用户点头的卡片（项目配置、用户级配置）：借用敏感操作卡（guard），答复走同一个 /api/perm/answer。
+ *  允许 → true；拒绝 → false（「拒绝并停止」同时停掉这一轮）；这期间点了停止 → null */
+function askCard(run, emit, { key, tool, input, guard, what, yes, no }) {
   return new Promise((resolve) => {
-    const id = "ccapp-proj-" + run.id;
-    const p = { id, tool: "ProjectConfig", input: { dir: cwd, risks: proj.risks }, suggestions: [], at: Date.now(),
-      runId: run.id, sessionId: run.sessionId || null, guard: { cat: "project", what: cwd } };
+    const id = `ccapp-${key}-` + run.id;
+    const p = { id, tool, input, suggestions: [], at: Date.now(), runId: run.id, sessionId: run.sessionId || null, guard };
     const done = (v) => {
       if (!run.perms?.delete(id)) return;
       run.readyAbort = null; run.answerPerm = null;
@@ -120,21 +121,26 @@ function askProjectTrust(run, cwd, proj, emit) {
     };
     run.perms = new Map([[id, p]]);
     run.readyAbort = new AbortController();
-    run.readyAbort.signal.addEventListener("abort", () => { emit({ type: "perm_resolved", id, behavior: "cancel" }); done(false); });
+    run.readyAbort.signal.addEventListener("abort", () => { emit({ type: "perm_resolved", id, behavior: "cancel" }); done(null); });
     run.answerPerm = (pid, a) => {
       if (pid !== id || !run.perms?.has(id)) return false;
       const allow = a.behavior === "allow";
-      log(`${allow ? "✓ 允许" : "✗ 不加载"} 项目配置${a.interrupt ? "（并停止）" : ""}`);
+      log(`${allow ? yes : no} ${what}${a.interrupt ? "（并停止）" : ""}`);
       emit({ type: "perm_resolved", id, behavior: allow ? "allow" : "deny", interrupt: !!a.interrupt });
       if (a.interrupt) { holdLane(run); run.aborted = true; }
       done(allow);
       return true;
     };
-    log(`⏸ 等确认 项目配置 ${proj.risks.length} 项`);
+    log(`⏸ 等确认 ${what}`);
     emit({ type: "perm_request", ...p });
     publishState();
   });
 }
+// 一轮结束：比一比运行期间改了哪些用户级配置（见 userconf.mjs）。头一轮开跑时才挂：queue.mjs 和这里互相引用，模块加载时它还没初始化
+let ucHooked = false;
+
+const askProjectTrust = (run, cwd, proj, emit) => askCard(run, emit, { key: "proj", tool: "ProjectConfig", input: { dir: cwd, risks: proj.risks },
+  guard: { cat: "project", what: cwd }, what: `项目配置 ${proj.risks.length} 项`, yes: "✓ 允许", no: "✗ 不加载" });
 
 export async function startRun(item) {
   const { sid0, pdef0, P } = pickProvider(item);
@@ -249,6 +255,8 @@ export async function startRun(item) {
     "--input-format", "stream-json",
     "--replay-user-messages",
     "--output-format", "stream-json",
+    // 钩子注入的原文给界面看（见 stream.mjs 的 hookContext）。旧版 claude 不认这个旗标会直接起不来，只给核实过的版本加
+    ...(claudeAtLeast("2.1.311") ? ["--include-hook-events"] : []),
     "--verbose",
     "--include-partial-messages",
     "--permission-mode", permMode,
@@ -316,6 +324,30 @@ export async function startRun(item) {
   const refN = isCmd || P.local ? "" : await refNote(message, run.sessionId).catch((e) => { log("档号引用失败: " + e.message); return ""; });
   // 上面拉模型清单、问设备工具、读建档提示都要等：这期间点了停止（还没有进程可杀）就别再起了（安全通告 GHSA-g35m）
   if (run.aborted) { log("⏹ 起进程前已停止"); return endRun(run, { durationMs: 0 }); }
+  // 用户级配置（~/.claude）有没确认的改动、之前的对话留下了后台进程（见 userconf.mjs / leftover.mjs）：先问。
+  // 没人看着的（定时任务、空闲压缩）不跑：定时任务按失败记、照任务设置通知
+  const ucp = ucPending(), procs = leftoverProcs(new Map([...RUNS].filter(([k]) => k !== run.id).map(([k, r]) => [String(k), r.childStart ?? null])));
+  if (ucp || procs.length) {
+    if (run.unattended || run.auto) {
+      const msg = tz("Claude Code 的用户级配置有改动还没确认，或者之前的对话留下了后台进程，这次没有运行。打开 cccodroid 发一条消息，在弹出的卡片里确认后再试。");
+      log(`⏭ 用户级配置 / 留下的进程没确认，${run.auto ? "空闲压缩" : "无人值守的这一轮"}不跑`);
+      if (!run.auto) emit({ type: "error", message: tr(LAST_LANG, msg) });
+      return endRun(run, run.auto ? { durationMs: 0 } : { failed: true, finalText: msg });
+    }
+    const ok = await askCard(run, emit, { key: "uc", tool: "UserConfig", input: { first: !!ucp?.first, changes: ucp?.changes || [], procs },
+      guard: { cat: "userconf", what: "~/.claude" }, what: `用户级配置 ${ucp?.rels.length || 0} 项、留下的进程 ${procs.length} 个`, yes: "✓ 保留", no: "✗ 撤销" });
+    if (ok) { if (ucp) ucKeep(ucp.rels); keepProcs(procs); }
+    else if (ok === false) {
+      const r = ucp ? ucRevert(ucp.rels) : { failed: [] };
+      if (procs.length) killProcs(procs);
+      ucSetRevertNote(ucp?.rels, procs.length);
+      if (r.failed.length && !run.aborted) {
+        emit({ type: "error", message: tr(LAST_LANG, tz("有 {n} 项没法还原（确认时没留副本，或者副本也被改了），这一轮没有运行：{list}", { n: r.failed.length, list: r.failed.slice(0, 6).join(", ") })) });
+        return endRun(run, { failed: true });
+      }
+    }
+    if (run.aborted) { log("⏹ 等用户级配置确认时停止"); return endRun(run, { durationMs: 0 }); }
+  }
   // 项目自带会自动运行的配置（钩子、.mcp.json…，见 projtrust.mjs）、又没被认过：先问；不同意就不加载项目级配置，这一轮照常
   const proj = projectRisks(cwd);
   if (proj && !projectTrusted(cwd, proj.fp)) {
@@ -332,6 +364,8 @@ export async function startRun(item) {
   }
   // 建档规范、bin/claude、guard、预加载的库这些被改了先写回（见 appfiles.mjs）。放在起进程紧前：上面等项目配置确认可能等很久
   checkAppFiles();
+  // 设置、厂商配置网关跑着时只有网关自己写：被别人改了按内存写回，留痕（换了接口地址就能把密钥送出去）
+  for (const [f, chk] of [["ccapp-settings.json", settingsDiskCheck], ["ccapp-providers.json", providersDiskCheck]]) if (chk()) tamperRecord("runtime", [f]);
   // claude 程序本身：和版本目录里存的 Anthropic 签名清单对不上就不起（被改过字符串的二进制，见 claudeseal.mjs）
   if (!P.local) {
     const seal = await claudeSeal();
@@ -341,15 +375,24 @@ export async function startRun(item) {
     }
     if (run.aborted) { log("⏹ 核验 Claude Code 时停止"); return endRun(run, { durationMs: 0 }); }
   }
+  // 用户级配置起进程紧前再核一次：点完卡片之后（等项目配置确认、核验程序都要时间）又被改了、或者看见过改了又改回，就不起。
+  // 同时开始记这一轮运行期间的改动（结束时 ucAfterRun 比对）
+  if (!ucHooked) { ucHooked = true; END_HOOKS.push((r) => ucAfterRun(r)); }
+  const drift = ucBeforeRun(run);
+  if (drift.length) {
+    emit({ type: "error", message: tr(LAST_LANG, tz("用户级配置在确认之后又被改了，这一轮没有启动：{list}。再发一条消息，在弹出的卡片里确认。", { list: drift.slice(0, 6).join(", ") })) });
+    return endRun(run, { failed: true });
+  }
   const [cmd0, args0] = claudeCmd(argv);
   const child = spawn(cmd0, args0, {
     cwd,
-    // CCAPP_RUN_ID / CCAPP_GW_PORT：建档命令 cc-archive 靠它们告诉网关「这是哪一轮」
-    env: { ...claudeEnv({ model, provider: P }), CCAPP_RUN_ID: String(run.id), CCAPP_GW_PORT: String(CFG.port), ...((run.privTok = privToken(run)) ? { CCAPP_PRIV_SESS: run.privTok } : {}) },
+    // CCAPP_RUN_ID / CCAPP_GW_PORT：建档命令 cc-archive 靠它们告诉网关「这是哪一轮」；CCAPP_GW_PID 给 leftover.mjs 认是不是本网关起的
+    env: { ...claudeEnv({ model, provider: P }), CCAPP_RUN_ID: String(run.id), CCAPP_GW_PORT: String(CFG.port), CCAPP_GW_PID: String(process.pid), ...((run.privTok = privToken(run)) ? { CCAPP_PRIV_SESS: run.privTok } : {}) },
     stdio: ["pipe", "pipe", "pipe"],
     detached: true,            // 当进程组长，中断时好整组带走（见 killTree）
   });
   run.child = child;
+  run.childStart = procStart(child.pid);   // 留下的进程冒充这一轮时比启动先后（见 leftover.mjs）
   // 核过之后、真正执行之前程序被换掉了（来回替换卡时间窗）：这一轮停掉（DeepSeek 复核建议 2）
   if (!P.local && !sealStillValid()) {
     log("⚠️ [Claude Code 核验] 核过之后程序文件又变了，停掉这一轮");
@@ -374,7 +417,8 @@ export async function startRun(item) {
   const pathNote = isCmd || P.local ? "" : takePathNote(run.sessionId);
   // 应用文件被改过、已还原（tamper.mjs）：告诉模型一次，别再去改回来
   const tamperN = isCmd || P.local ? "" : tamperNote();
-  writeUser(withNotes(message, [tamperN, integNote, arch?.note, pathNote, refN].filter(Boolean).join("\n\n"), imgs0));
+  const ucN = isCmd || P.local ? "" : ucTakeNote();
+  writeUser(withNotes(message, [tamperN, ucN, integNote, arch?.note, pathNote, refN].filter(Boolean).join("\n\n"), imgs0));
   run.inputOpen = true;
   run.pendingInject = [];      // 已写进 stdin、还没被 claude 吃进去的插话
   run.bgTasks = 0;             // claude 报的后台任务数（见 feed）

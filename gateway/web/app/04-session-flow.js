@@ -719,6 +719,7 @@
       // 压缩中的状态会连来好几条：同一次压缩只留一行，压完原地换成结果（#67）
       case "compacting":     av.phase(null); av.noteK("cmp" + cmpGen, t("正在压缩上下文…")); scrollDown(); break;
       case "note":           av.noteK(ev.key, ev.text); scrollDown(); break;
+      case "hook_ctx":       av.hookCtx(ev.event, ev.text); scrollDown(); break;
       case "compacted":
         av.noteK("cmp" + cmpGen++, ev.pre != null && ev.post != null
           ? t("上下文已压缩：{pre} → {post} tokens", { pre: ev.pre.toLocaleString(), post: ev.post.toLocaleString() })

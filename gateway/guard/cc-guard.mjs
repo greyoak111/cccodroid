@@ -5,7 +5,9 @@
 // 网关认出 reason 里的 cccodroid-guard 前缀，出一张「敏感操作」卡片，不按全部放行自动允许。
 //
 // 这是兜底，不是围墙：命令写得绕一点（base64、变量拼接）就认不出来。防的是 Claude 被网页 / 文件里藏的指令带偏，
-// 顺手去读密钥、操作别的应用这类「明面上」的动作。出错一律放行（不输出），别因为它把正常的活卡死。
+// 顺手去读密钥、操作别的应用这类「明面上」的动作。
+// 自己出错（读不到、看不懂 claude 给的输入）就回 ask：静默放行等于喂它一段怪输入就能让这一层失效（11-03 自查审计）。
+// judge 对各种工具输入都是按类型挑字段，正常的活走不到这里。
 import fs from "node:fs";
 
 // 密钥与凭据：按路径特征认，不依赖具体 home 在哪
@@ -43,6 +45,9 @@ const PROMPT = [
   [/(?:^|[\/\s"'=~@<>:])\.claude\.json\b/, "Claude Code MCP config"],
   [/\.claude\/(?:hooks|agents)\//, "hooks and agents"],
   [/ccapp-project-trust\.json\b/, "trusted project list"],
+  // 用户级的 skill、斜杠命令、插件也是每个会话都加载；改了由 gw/userconf.mjs 在下一轮前问用户，这里是第一道（第四份破甲审计）
+  [/(?:(?:^|[\s"'=:])(?:~|\$\{?HOME\}?)|\/files\/home)\/\.claude\/(?:skills|commands|plugins)\//, "user-level skills, commands and plugins (loaded into every session)"],
+  [/\.ccapp-userconf\b|ccapp-userconf\.json\b/, "the record of confirmed Claude Code config"],
   // 整个 files/app 都是：界面脚本、TOOLS.md（拼进系统提示）、建档规范（模型自己会去读）也在里面（群友破甲清单 V-12/V-13）
   [/(?:\/files|(?:~|\$\{?HOME\}?)\/\.\.)\/app(?=$|[\/\s"';|&)])/, "cccodroid gateway code"],
   [/\.cccodroid-env\.json\b/, "device facts in the system prompt"],
@@ -93,16 +98,17 @@ export function judge(tool, inp) {
 
 // 当钩子跑：stdin 是 claude 给的 JSON。网关挂钩子时不读盘上这个文件，把启动时核过的源码整段经 node -e 跑，末尾补一句 runHook()（见 gw/claude.mjs）
 export function runHook() {
-  let raw = "";
-  try { raw = fs.readFileSync(0, "utf8"); } catch {}
+  const ask = (r) => process.stdout.write(JSON.stringify({ hookSpecificOutput: {
+    hookEventName: "PreToolUse", permissionDecision: "ask",
+    permissionDecisionReason: `cccodroid-guard|${r.cat}|${r.what}`,
+  } }));
+  let r;
   try {
-    const ev = JSON.parse(raw);
-    const r = judge(ev.tool_name, ev.tool_input);
-    if (r) process.stdout.write(JSON.stringify({ hookSpecificOutput: {
-      hookEventName: "PreToolUse", permissionDecision: "ask",
-      permissionDecisionReason: `cccodroid-guard|${r.cat}|${r.what}`,
-    } }));
-  } catch {}
+    const ev = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (!ev || typeof ev !== "object") throw new Error("not an object");
+    r = judge(ev.tool_name, ev.tool_input);
+  } catch (e) { r = { cat: "error", what: "guard error: " + String(e && e.message || e).slice(0, 80) }; }
+  try { if (r) ask(r); } catch {}
   process.exit(0);
 }
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) runHook();

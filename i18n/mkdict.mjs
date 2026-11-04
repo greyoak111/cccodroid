@@ -4,6 +4,7 @@
 //   生成前校验：1..N 每个序号恰好出现一次，否则报错退出
 import fs from "node:fs";
 import vm from "node:vm";
+import { i18nFnProblem } from "./fnsafe.mjs";
 const [src, tpl, out, name] = process.argv.slice(2);
 const keys = [...fs.readFileSync(tpl, "utf8").matchAll(/^  "((?:[^"\\]|\\.)*)":/gm)].map((m) => JSON.parse('"' + m[1] + '"'));
 const vals = new Map();
@@ -14,7 +15,10 @@ for (const line of fs.readFileSync(src, "utf8").split("\n")) {
   const i = Number(line.slice(0, t));
   if (!Number.isInteger(i) || i < 1 || i > keys.length) { console.error("序号越界：" + line.slice(0, 20)); process.exit(1); }
   if (vals.has(i)) { console.error("序号重复：" + i); process.exit(1); }
-  vals.set(i, line.slice(t + 1));
+  const v = line.slice(t + 1);
+  // @ 行原样进界面执行，只放行复数之类的几种形状（fnsafe.mjs）
+  if (v.startsWith("@") && !v.startsWith("@@")) { const p = i18nFnProblem(v.slice(1)); if (p) { console.error(`第 ${i} 条的 @ 行不合规（${p}）：` + v.slice(0, 60)); process.exit(1); } }
+  vals.set(i, v);
 }
 const miss = [];
 for (let i = 1; i <= keys.length; i++) if (!vals.has(i)) miss.push(i);

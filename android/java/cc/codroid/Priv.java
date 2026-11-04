@@ -142,7 +142,9 @@ final class Priv {
         o.put("state", !ins ? "not_installed" : !run ? "not_running" : !ok ? "no_permission" : "ok");
         o.put("installed", ins);
         o.put("sui", sui);
-        o.put("noask", noAsk());
+        long naUntil = noAskUntil();
+        o.put("noask", naUntil > 0);
+        if (naUntil > 0) o.put("noaskUntil", naUntil);
         o.put("running", run);
         o.put("granted", ok);
         if (run) {
@@ -190,14 +192,18 @@ final class Priv {
 
     /** 跑一条命令拿全部输出（内部用：保活设置） */
     static String run(String cmd) {
+        String[] r = runRc(cmd);
+        return r[0].equals("0") ? r[1] : r[0].equals("-") ? Tr.t("[失败] ") + r[1] : "[rc=" + r[0] + "] " + r[1];
+    }
+    /** 同上，退出码单独给：{退出码（起不来是 "-"）, 输出} */
+    static String[] runRc(String cmd) {
         try {
             java.lang.Process p = newProcess(new String[]{"/system/bin/sh", "-c", cmd + " 2>&1"}, null, "/");
             p.getOutputStream().close();
             String out = new String(readAll(p.getInputStream()), StandardCharsets.UTF_8).trim();
-            int rc = p.waitFor();
-            return (rc == 0 ? "" : "[rc=" + rc + "] ") + out;
+            return new String[]{String.valueOf(p.waitFor()), out};
         } catch (Throwable t) {
-            return Tr.t("[失败] ") + t;
+            return new String[]{"-", String.valueOf(t)};
         }
     }
 
@@ -265,6 +271,7 @@ final class Priv {
     }
     static JSONObject keepAlive(boolean on) {
         JSONObject r = new JSONObject();
+        // 关：先撤同意（以后不再自动打开）；恢复没成的照实报失败，界面把开关留在开着，再点一次关就是重试
         if (!on) Consent.revoke(ctx, Consent.KEEPALIVE);
         if (!granted()) { try { r.put("ok", false).put("message", Tr.t("Shizuku 未就绪或未授权")); } catch (Exception ignored) {} return r; }
         String[] K = keepAliveOn();
@@ -278,10 +285,18 @@ final class Priv {
             {Tr.t("恢复幽灵进程上限"), "device_config delete activity_manager max_phantom_processes; device_config set_sync_disabled_for_tests none"},
             {Tr.t("恢复幽灵进程监控"), "settings delete global settings_enable_monitor_phantom_procs"},
         };
+        // 每一步看退出码：中途 Shizuku 断了、某条命令被 ROM 拒了，不能报「已恢复」（GHSA-7wwv）
         try {
             JSONArray arr = new JSONArray();
-            for (String[] s : steps) arr.put(new JSONObject().put("step", s[0]).put("out", run(s[1])));
-            r.put("ok", true).put("steps", arr);
+            java.util.List<String> bad = new java.util.ArrayList<>();
+            for (String[] s : steps) {
+                String[] x = runRc(s[1]);
+                boolean ok = x[0].equals("0");
+                if (!ok) bad.add(s[0]);
+                arr.put(new JSONObject().put("step", s[0]).put("ok", ok).put("out", (ok ? "" : "[rc=" + x[0] + "] ") + x[1]));
+            }
+            r.put("ok", bad.isEmpty()).put("steps", arr);
+            if (!bad.isEmpty()) r.put("message", Tr.f("这几步没成功：{0}。可以再点一次开关重试。", String.join(Tr.t("、"), bad)));
             if (on) r.put("phantom", run("device_config get activity_manager max_phantom_processes"));
         } catch (Exception ignored) {}
         Log.i(TAG, "保活增强 " + (on ? "开" : "关") + "：" + r);
@@ -356,11 +371,12 @@ final class Priv {
                     if (on && !noAsk() && !confirm(Tr.t("特权命令不再逐条确认（风险自负）") + "\n\n"
                             + Tr.t("打开后，Claude、终端和本机其他程序发来的特权命令都不再弹框问你，直接以 Shizuku（shell）身份执行，cccodroid 在后台时也一样。这类命令能装卸应用、改权限和系统设置。") + "\n\n"
                             + Tr.t("命令写错、模型判断失误、或者混进来的脚本，都可能造成数据丢失、应用异常甚至需要恢复出厂设置。打开即表示你了解并自行承担这些风险，cccodroid 及其作者不对由此造成的损失负责。") + "\n\n"
-                            + Tr.t("涉及 cccodroid 自身、Shizuku / Sui 的命令会尽量拦下来再问你，但拦不住所有写法（比如藏在脚本文件里的）。随时可以在设置里关掉。"), caller(pid), "noask")) {
+                            + Tr.t("涉及 cccodroid 自身、Shizuku / Sui 的命令会尽量拦下来再问你，但拦不住所有写法（比如藏在脚本文件里的）。随时可以在设置里关掉。") + "\n\n"
+                            + Tr.t("24 小时后自动关闭，恢复逐条确认。"), caller(pid), "noask")) {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("没有确认，仍然逐条询问"));
                         break;
                     }
-                    if (on) { if (!noAsk()) Consent.grant(ctx, Consent.NOASK, "1"); } else Consent.revoke(ctx, Consent.NOASK);
+                    if (on) { if (!noAsk()) Consent.grant(ctx, Consent.NOASK, String.valueOf(System.currentTimeMillis() + NOASK_TTL)); } else Consent.revoke(ctx, Consent.NOASK);
                     Log.w(TAG, "特权命令免确认 " + (on ? "打开" : "关闭"));
                     resp = new JSONObject().put("ok", true).put("noask", on);
                     break;
@@ -376,10 +392,27 @@ final class Priv {
                 case "usb_list": resp = Usb.list(ctx); break;
                 // 一键安装 / 激活 Shizuku（ShizukuSetup），进度在 status 的 setup 字段里
                 case "shz_install": ShizukuSetup.get(ctx).install(false); resp = status(); break;
-                case "shz_activate": ShizukuSetup.get(ctx).activate(); resp = status(); break;
+                case "shz_activate": {
+                    // 激活会打开无线调试、拉起 Shizuku：要用户在原生对话框里点头，脚本发一条没用（11-04 报告 A6）
+                    int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
+                    if (!confirm(Tr.t("激活 Shizuku：会临时打开无线调试，用配对过的钥匙启动 Shizuku 服务。"), caller(pid), "shz_activate")) {
+                        resp = status().put("ok", false).put("message", Tr.t("没有允许，没有激活 Shizuku"));
+                        break;
+                    }
+                    ShizukuSetup.get(ctx).activate(); resp = status(); break;
+                }
                 case "shz_pair": ShizukuSetup.get(ctx).onCode(req.optString("code")); resp = status(); break;
                 case "shz_repair": ShizukuSetup.get(ctx).repair(); resp = status(); break;
-                case "shz_autostart": ShizukuSetup.get(ctx).setAutostart(req.optBoolean("enable", true)); resp = status(); break;
+                case "shz_autostart": {
+                    // 打开 = 以后开机时不问就打开无线调试：和保活一样，要原生确认并签名存档；关掉随时可以
+                    boolean on = req.optBoolean("enable", true);
+                    int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
+                    if (on && !ShizukuSetup.get(ctx).autostart() && !confirm(Tr.t("开机后自动激活 Shizuku：每次开机会临时打开无线调试，用配对过的钥匙启动 Shizuku。"), caller(pid), "shz_autostart")) {
+                        resp = status().put("ok", false).put("message", Tr.t("没有允许，自动激活没有打开"));
+                        break;
+                    }
+                    ShizukuSetup.get(ctx).setAutostart(on); resp = status(); break;
+                }
                 // 更新（Updater）
                 case "upd_status": resp = Updater.get(ctx).status(); break;
                 case "upd_check": Updater.get(ctx).checkAsync(true); resp = Updater.get(ctx).status(); break;
@@ -551,7 +584,17 @@ final class Priv {
         return true;
     }
     /** 存在 Consent 里（锁屏签名），不再是谁都能改的 prefs（11-03 审查 H-2） */
-    static boolean noAsk() { return Consent.on(ctx, Consent.NOASK); }
+    /** 免确认是限时的：同意时存的是到期时刻（和同意一起签名，改不了），到点自动关。旧版存的 "1" 当作已到期 */
+    static final long NOASK_TTL = 24L * 3600 * 1000;
+    static boolean noAsk() { return noAskUntil() > 0; }
+    static long noAskUntil() {
+        String v = Consent.get(ctx, Consent.NOASK);
+        if (v == null) return 0;
+        long t, now = System.currentTimeMillis();
+        try { t = Long.parseLong(v); } catch (NumberFormatException e) { t = 0; }
+        if (t <= now || t > now + NOASK_TTL + 60000) { Consent.revoke(ctx, Consent.NOASK); Log.w(TAG, "特权命令免确认到期，已关闭"); return 0; }
+        return t;
+    }
     /** 动到本应用、Shizuku / Sui 自己的命令：开了免确认也照样问。规则见 PrivRules.touchesSelf */
     static boolean touchesSelf(String text) { return PrivRules.touchesSelf(text, ctx.getPackageName()); }
 

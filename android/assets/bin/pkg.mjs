@@ -563,6 +563,15 @@ const restOf = (script) => (script || "").replace(/# Automatically added by term
 const relOf = (abs) => abs.startsWith(TARGET + "files/usr/") ? abs.slice((TARGET + "files/usr/").length) : null;
 
 // ── 装 ─────────────────────────────────────────────────────────────────
+// 落盘的目录得真在 $PREFIX 里：前面某个包放了个指向外面的目录链接（usr/share/x -> /data/...），
+// 后面的文件按路径往里搬就落到前缀外头去了（11-04 报告）。mkdir -p 会顺着链接走，所以搬之前按真实路径核一遍
+let REAL_PREFIX = null;
+function mkdirInPrefix(dir) {
+  REAL_PREFIX ||= fs.realpathSync(PREFIX);
+  fs.mkdirSync(dir, { recursive: true });
+  const real = fs.realpathSync(dir);
+  if (real !== REAL_PREFIX && !real.startsWith(REAL_PREFIX + "/")) throw new Error(`${path.relative(PREFIX, dir)} 经链接指到了前缀外面（${real}），不往里放文件`);
+}
 function placeOne(p, u, { auto, upgrade }, d) {
   const old = d.pkgs[p.name], mineBefore = new Set((old && old.files) || []);
   // 升级 / 重装：先清掉旧版独有的文件（新版也有的直接覆盖）
@@ -579,11 +588,11 @@ function placeOne(p, u, { auto, upgrade }, d) {
   d.pkgs[p.name] = rec; writeJson(DB, d);                      // 先记"将要放哪些"：搬到一半被杀也能按它卸干净
   for (const r of rec.files) {
     const dst = path.join(PREFIX, r);
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    mkdirInPrefix(path.dirname(dst));
     try { fs.rmSync(dst, { force: true }); } catch {}
     fs.renameSync(path.join(u.root, r), dst);
   }
-  for (const r of u.dirs) fs.mkdirSync(path.join(PREFIX, r), { recursive: true });
+  for (const r of u.dirs) mkdirInPrefix(path.join(PREFIX, r));
   rec.alts = alternatives(u.scripts.postinst);                 // 链接由 relinkAlts 统一摆
   // 卸载时要跑的脚本、首次配置脚本：前缀已改写，放在 files/pkg/scripts/<包>/
   const sd = path.join(STATE, "scripts", p.name);

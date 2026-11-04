@@ -9,6 +9,7 @@ import path from "node:path";
 import { CFG, log } from "./config.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { pathBlocked } from "./files.mjs";
+import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 
 export const CMD_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 const MAX_BODY = 64 * 1024;
@@ -100,6 +101,7 @@ function saveCmd(b, builtin) {
   const old = b.oldName && b.oldName !== name ? String(b.oldName) : "";
   if (old && !CMD_NAME_RE.test(old)) return { ok: false, message: "bad name" };
   if ((old || b.fresh) && fs.existsSync(file)) return { ok: false, message: "已经有同名的指令了" };
+  const ucb = scope === "user" ? ucAppBegin() : null;
   fs.mkdirSync(d, { recursive: true });
   const desc = String(b.description || "").replace(/[\r\n]+/g, " ").trim().slice(0, 200);
   const hint = String(b.hint || "").replace(/[\r\n]+/g, " ").trim().slice(0, 80);
@@ -109,6 +111,7 @@ function saveCmd(b, builtin) {
   fs.writeFileSync(file + ".tmp", formatCmd({ description: desc, hint, body, extra }));
   fs.renameSync(file + ".tmp", file);
   if (old) { try { fs.unlinkSync(path.join(d, old + ".md")); } catch {} }
+  if (scope === "user") ucAppWrote([d], ucb);   // 用户在常用指令页自己存的：认下（见 userconf.mjs）
   log(`[commands] 保存 /${name}（${scope}）${old ? "，原名 /" + old : ""}`);
   return { ok: true, name, file };
 }
@@ -128,7 +131,9 @@ export function commandRoutes(builtinNames) {
         const name = String(b.name || "");
         if (!CMD_NAME_RE.test(name)) return sendJson(res, 400, { ok: false, message: "bad name" });
         const f = path.join(cmdDir(b.scope === "project" ? "project" : "user", b.dir), name + ".md");
+        const ucb = b.scope !== "project" ? ucAppBegin() : null;
         try { fs.unlinkSync(f); } catch (e) { if (e.code !== "ENOENT") throw e; }
+        if (b.scope !== "project") ucAppWrote([path.dirname(f)], ucb);
         log(`[commands] 删除 /${name}（${b.scope}）`);
         return sendJson(res, 200, { ok: true });
       }
