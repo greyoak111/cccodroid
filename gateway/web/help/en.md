@@ -28,7 +28,7 @@ The thin line under the top bar shows **context usage**; the further right, the 
 
 ## Make it yours
 
-- **Appearance**: Settings → General → Appearance offers four styles: Native, Qiusuo, Zhuyue and Construct, each in light and dark. Construct has square corners, heavy ink lines and red on kraft paper, for when you want something bolder.
+- **Appearance**: Settings → General → Appearance offers five styles: Native, Qiusuo, Zhuyue, Construct and Material, each in light and dark. Construct has square corners, heavy ink lines and red on kraft paper, for when you want something bolder; Material takes its colors from your wallpaper (Material You).
 - **Accent color**: Settings → General → Accent color offers eight presets or a color of your own. It's adjusted for the current appearance, so it stays readable in light and dark.
 - **Buttons under messages**: in Settings → General, tap the ones you don't use (bookmark or fork, say) to hide them; your messages and Claude's replies are set separately.
 - **Top bar buttons**: Settings → General → Top bar buttons. Each button can be Pinned (always on the top bar, no need to tap ⋯ first), In ⋯, or Hidden. Hold the handle on the left and drag to reorder. Restore default puts everything back.
