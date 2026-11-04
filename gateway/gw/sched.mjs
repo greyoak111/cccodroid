@@ -322,6 +322,8 @@ END_HOOKS.push((run, f) => {
     if (t.session === "same" && !ctx.trial) t.lastSid = sid;
   }
   if (ctx.trial) { note(t, tz("试跑完成"), msg, sid, st === "ok"); return; }
+  // 这次成功了：之前失败排的 2 分钟重试作废，别再重复跑一遍（手动/计划成功都算）
+  if (st === "ok") cancelRetry(t.id);
   spend(ctx.startedAt, cost);   // 每日预算的独立日桶（#119-3）
   addRun({ taskId: t.id, at: ctx.startedAt, st, msg: msg.slice(0, 300), full: text.slice(0, 2000), cost, dur, sid, attempt: ctx.attempt });
   t.runsDone = (t.runsDone || 0) + 1;
@@ -362,8 +364,12 @@ function tick() {
     // 晚了 3 分钟以上：应用没在跑 / 机器睡死了 —— 按「错过了」的设置来，不默默补跑
     if (late > 3 * 60000 && gap > 3 * 60000 || late > 15 * 60000) {
       const when = t.nextAt;
-      if (t.missed === "run") fire(t, { reason: "missed" });
-      else if (t.missed === "skip") addRun({ taskId: t.id, at: when, st: "skip", msg: tz("错过了（当时应用没在跑），按设置跳过") });
+      if (t.missed === "run") {
+        // 「跳过下一次」指的正是这次错过的计划：消费掉标记，别让再下一次 due 被跳
+        if (t.skipNext) { t.skipNext = false; addRun({ taskId: t.id, at: when, st: "skip", msg: tz("按设置跳过这一次") }); }
+        else fire(t, { reason: "missed" });
+      }
+      else if (t.missed === "skip") { t.skipNext = false; addRun({ taskId: t.id, at: when, st: "skip", msg: tz("错过了（当时应用没在跑），按设置跳过") }); }
       else if (!DB.missed.some((m) => m.taskId === t.id && m.at === when)) { DB.missed.push({ taskId: t.id, at: when }); publish({ type: "sched", op: "missed" }); }
       log(`⏰ 定时任务「${t.name}」错过 ${new Date(when).toLocaleString()}（${t.missed || "ask"}）`);
     } else fire(t, { reason: "due" });
@@ -462,6 +468,8 @@ export async function routeSched(req, res, u, p) {
     if (i < 0) return sendJson(res, 404, { error: "not missed" });
     const m = DB.missed.splice(i, 1)[0]; save();
     const t = byId(m.taskId);
+    // 这次错过就是「下一次」：补跑或不补跑都消费 skipNext，别把再下一次也跳掉
+    if (t && t.skipNext) { t.skipNext = false; save(); }
     if (t && b.act === "run") fire(t, { reason: "missed" });
     else if (t) addRun({ taskId: t.id, at: m.at, st: "skip", msg: tz("错过了，没补跑") });
     return sendJson(res, 200, { ok: true });
@@ -514,4 +522,4 @@ export async function routeSched(req, res, u, p) {
   }
   return NEXT;
 }
-export const _schedForTest = { fire, tick, DB, runlog: () => RUNLOG, running: () => runningNow(), costToday };   // 只给测试用
+export const _schedForTest = { fire, tick, DB, runlog: () => RUNLOG, running: () => runningNow(), costToday, hasRetry: (id) => RETRY.has(id) };   // 只给测试用
