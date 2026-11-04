@@ -72,7 +72,9 @@ final class AppFiles {
         try (InputStream in = c.getAssets().open("app/TAG")) { want = new String(readAll(in), StandardCharsets.UTF_8).trim(); } catch (Exception e) { return null; }
         try { have = new String(java.nio.file.Files.readAllBytes(new File(app, "TAG").toPath()), StandardCharsets.UTF_8).trim(); } catch (Exception e) { have = ""; }
         if (want.equals(have)) return null;
-        String from = seen.isEmpty() ? "?" : seen.substring(seen.lastIndexOf(58) + 1);
+        // seen 是 0.6.6 才有的；从更早的版本升上来时借更新说明记的「上次看到的版本」，只用来显示
+        String from = !seen.isEmpty() ? seen.substring(seen.lastIndexOf(58) + 1)
+                : c.getSharedPreferences("ui", Context.MODE_PRIVATE).getString("whatsNewSeen", "?");
         return from + "->" + now.substring(now.lastIndexOf(58) + 1);
     }
     /** files/app 和这个安装包对上了：记下安装版本，之后再对不上就不是升级 */
