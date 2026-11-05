@@ -102,6 +102,7 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCb;
     /** 「保存到」：等系统文件面板回来时要复制的源文件。static：挑位置期间界面被回收重建也还在 */
     private static File savePending;
+    private static java.lang.ref.WeakReference<MainActivity> saveOwner;
     /** 安装失败时露出来；点了从头再走 boot（每一步都会跳过已经完成的部分） */
     private android.widget.Button retry, stuck;
     /** 首装时「工具包从哪装」的选择面板（安装页上，平时藏着） */
@@ -1149,8 +1150,11 @@ public class MainActivity extends Activity {
         File tag = new File(env.app, "TAG");
         String have = tag.isFile() ? new String(java.nio.file.Files.readAllBytes(tag.toPath())) : "";
         java.util.List<String> bad = want.equals(have) ? AppFiles.tampered(this, env.app) : null;
-        // TAG 对不上不一定是升级：同 uid 改了 TAG 就能让整树重铺不留痕。不是首次安装、又不是刚升级（AppFiles.updatedFrom）的，按篡改记
-        if (bad == null && tag.isFile() && AppFiles.updatedFrom(this, env.app) == null) bad = AppFiles.tampered(this, env.app);
+        // TAG 对不上不一定是升级：同 uid 改了 TAG 就能让整树重铺不留痕。不是首次安装、又不是刚升级（AppFiles.updatedFrom）的，按篡改记。
+        // 删掉 TAG、换成目录也一样（审查 11-05 #18）：目录里还有别的文件就不是首次安装；整个目录没了（清除数据）才按首次铺
+        String[] left = env.app.list();
+        boolean deployed = tag.exists() || (left != null && left.length > 0);
+        if (bad == null && deployed && AppFiles.updatedFrom(this, env.app) == null) bad = AppFiles.tampered(this, env.app);
         if (bad != null && bad.isEmpty()) return;
         if (bad != null) {
             android.util.Log.w("cccodroid", "files/app 被改过：" + bad);
@@ -1966,8 +1970,11 @@ public class MainActivity extends Activity {
         if (f == null || !f.isFile()) { savedJs(false, "missing"); return; }
         try { Share.guard(this, f); } catch (Exception e) { savedJs(false, "forbidden"); return; }
         // 只有一个槽：上一次还在选位置时又来一次，回来的结果会配给后一个文件，把用户选的位置写成别的文件（11-04 报告 A4）
-        if (savePending != null) { savedJs(false, "busy"); return; }
+        // 发起那次的界面已经没了（任务被划掉、进程靠前台服务活着）：选择器的结果回不来，槽算过期，别永远「忙」（审查 11-05 #1）
+        MainActivity owner = saveOwner == null ? null : saveOwner.get();
+        if (savePending != null && owner != null && !owner.isDestroyed()) { savedJs(false, "busy"); return; }
         savePending = f;
+        saveOwner = new java.lang.ref.WeakReference<>(this);
         // 选位置的工夫里本进程可能被系统回收：源文件路径也落盘，回来时从这里找回（#131）
         getSharedPreferences("ui", MODE_PRIVATE).edit().putString("savePending", f.getPath()).commit();   // 同步落盘：马上要跳去系统选择器，进程随时可能被杀（DeepSeek 复核 11-04）
         Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)

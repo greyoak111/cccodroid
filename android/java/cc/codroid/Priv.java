@@ -249,8 +249,14 @@ final class Priv {
                 + (reopenUi ? "; ok=; for i in 1 2 3; do am start -W -n " + pkg + "/.MainActivity >> " + STAGE_LOG + " 2>&1; sleep 3; "
                      + "if " + up + "; then ok=1; break; fi; echo \"界面没起来（第 $i 次）\" >> " + STAGE_LOG + "; done; [ -n \"$ok\" ] || " + notify
                    : "; grep -q Error " + STAGE_LOG + " && " + notify);
+            run("rm -f " + STAGE_LOG);       // 上一次的结果别被当成这一次的
             run("setsid sh -c '" + job + "' < /dev/null > /dev/null 2>&1 &");
-            Thread.sleep(60_000);       // 装上的话本进程在这期间就没了
+            // 装上的话本进程在这期间就没了。没装上（pm 回 Failure / Error）就别睡满 60 秒：调用方停着网关在等（审查 11-05 #12）
+            for (int i = 0; i < 60; i++) {
+                Thread.sleep(1000);
+                String[] r = runRc("cat " + STAGE_LOG);
+                if (r[0].equals("0") && (r[1].contains("Failure") || r[1].contains("Error") || r[1].contains("Exception"))) return r[1];
+            }
             return run("cat " + STAGE_LOG);
         } catch (Throwable t) {
             return Tr.t("[失败] ") + t;

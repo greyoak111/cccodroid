@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, PATHS, log, tz } from "./config.mjs";
 import { isLoginMode, noteLoggedIn } from "./models.mjs";
-import { claudeArgv, claudeEnv } from "./claude.mjs";
+import { claudeArgv, claudeBlocked, claudeEnv } from "./claude.mjs";
 import { RUNS } from "./runs.mjs";
 import { providerById } from "./providers.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
@@ -31,7 +31,9 @@ function authEnv() {
   return env;
 }
 
-function loginStart(flag) {
+async function loginStart(flag) {
+  const blocked = await claudeBlocked();
+  if (blocked) return { ok: false, message: blocked };
   if (LOGIN && LOGIN.child.exitCode === null) try { LOGIN.child.kill("SIGKILL"); } catch {}
   fs.mkdirSync(LOGIN_DIR, { recursive: true });
   const urlFile = path.join(LOGIN_DIR, "url");
@@ -75,7 +77,9 @@ function loginStart(flag) {
 }
 
 /** 登录状态由 claude 自己报（claude auth status），网关不读凭据文件 */
-function runAuth(args, timeoutMs = 20000) {
+async function runAuth(args, timeoutMs = 20000) {
+  const blocked = await claudeBlocked();
+  if (blocked) return { code: -1, out: blocked };
   return new Promise((resolve) => {
     const child = spawn(PATHS.loader, claudeArgv(["auth", ...args]), { cwd: CFG.home, env: authEnv(), stdio: ["ignore", "pipe", "pipe"] });
     let out = "";

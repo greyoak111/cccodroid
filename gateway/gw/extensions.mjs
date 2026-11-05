@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, PREFIX, log, tz } from "./config.mjs";
-import { claudeCmd, claudeEnv, ensureShell, killTree } from "./claude.mjs";
+import { claudeBlocked, claudeCmd, claudeEnv, ensureShell, killTree } from "./claude.mjs";
 import { SID_RE, zipRead } from "./sessionops.mjs";
 import { NEXT, readBody, readBodyBuf, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
@@ -18,7 +18,7 @@ import { sealed } from "./edition.mjs";
 // 同一时刻只跑一个改配置的命令，免得两个安装同时写 settings.json。
 let EXT_LOCK = Promise.resolve();
 function extRun(args, timeoutMs = 180000) {
-  const job = EXT_LOCK.then(() => new Promise((resolve) => {
+  const job = EXT_LOCK.then(() => claudeBlocked()).then((blocked) => blocked ? { code: -1, out: "", err: blocked } : new Promise((resolve) => {
     const [cmd0, args0] = claudeCmd(args);
     const ucb = writes ? ucAppBegin() : null;
     const child = spawn(cmd0, args0, {

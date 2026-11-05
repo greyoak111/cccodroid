@@ -67,3 +67,18 @@ test("格式不对：不认", async () => {
   assert.match((await verifiedInfo("zh")).verifiedError, /格式不对/);
   assert.ok((await verifiedInfo("zh")).verified["2.1.300"]);
 });
+
+test("磁盘上那份被人改过（同 uid 能写）：重启后不认，验过签的原样那份照认（审查 11-05 安全 1）", async () => {
+  publish(doc("2026-10-26T00:00:00Z"), other);          // 发布地址取不到可信的：只能靠磁盘
+  const good = fs.readFileSync(VERIFIED_CACHE);
+  assert.ok(fs.existsSync(VERIFIED_CACHE + ".sig"), "签名跟着存");
+  const fresh = await import("../gw/ccverified.mjs?reload=1");
+  assert.ok((await fresh.verifiedInfo("zh")).verified["2.1.300"], "原样的那份：认");
+  const forged = JSON.parse(good.toString("utf8")); forged.updated = "2099-01-01T00:00:00Z"; forged.bad = { "2.1.300": { zh: "假的", en: "fake" } };
+  fs.writeFileSync(VERIFIED_CACHE, JSON.stringify(forged));
+  const again = await import("../gw/ccverified.mjs?reload=2");
+  const r = await again.verifiedInfo("zh");
+  assert.equal(r.bad["2.1.300"], undefined);
+  assert.deepEqual(r.verified, {});
+  fs.writeFileSync(VERIFIED_CACHE, good);
+});

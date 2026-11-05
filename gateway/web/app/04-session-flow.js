@@ -459,8 +459,9 @@
   });
   function welSync() {
     const w = histEl.childElementCount === 1 && !!histEl.querySelector(":scope > .msg.welcome") && !liveEl.childElementCount;
-    // 发出第一条后问候语就退场：留着会变成一条顶着「Claude」名字的假回复（重新打开会话时本来也没有它）
-    if (!w && histEl.childElementCount > 1) { const old = histEl.querySelector(":scope > .msg.welcome"); if (old) { old.remove(); return welSync(); } }
+    // 发出第一条后问候语就退场：留着会变成一条顶着「Claude」名字的假回复（重新打开会话时本来也没有它）。
+    // 首条画在 #live 不在 #hist：只看 #hist 的条数永远等不到（审查 11-05 #42）
+    if (!w && (histEl.childElementCount > 1 || liveEl.childElementCount)) { const old = histEl.querySelector(":scope > .msg.welcome"); if (old) { old.remove(); return welSync(); } }
     if (document.documentElement.classList.contains("wel") === w) return;
     document.documentElement.classList.toggle("wel", w);
     syncPlaceholder(); paintProjChip(); welNarrow();

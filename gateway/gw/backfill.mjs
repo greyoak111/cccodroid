@@ -11,7 +11,8 @@ import { CFG, LAST_LANG, log, tz } from "./config.mjs";
 import { ucPending } from "./userconf.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { publish } from "./bus.mjs";
-import { claudeCmd, claudeEnv, currentModelInfo, ensureBridge, killTree, settingsArgs } from "./claude.mjs";
+import { claudeBlocked, claudeCmd, claudeEnv, currentModelInfo, ensureBridge, killTree, settingsArgs } from "./claude.mjs";
+import { sealed } from "./edition.mjs";
 import { isLoginMode } from "./models.mjs";
 import { SETTINGS } from "./settings-store.mjs";
 import { PROVIDER } from "./providers.mjs";
@@ -159,9 +160,12 @@ export function parseTitles(text) {
 
 const WORK = path.join(CFG.home, ".cache", "ccapp-backfill");
 /** 问一次。o.provider / o.model：自动起名用对话那家（autotitle.mjs）；不给就是补档，走全局默认、子进程挂在 JOB 上好停 */
-export function ask(prompt, o = {}) {
-  // 起 claude 就会加载用户级钩子、CLAUDE.md：有没确认的改动先别起（见 userconf.mjs）
-  if (ucPending()) return Promise.resolve({ error: tz("Claude Code 的用户级配置有改动还没确认。先发一条消息，在弹出的卡片里确认后再试。") });
+export async function ask(prompt, o = {}) {
+  // 起 claude 就会加载用户级钩子、CLAUDE.md：有没确认的改动先别起（见 userconf.mjs）。发行版封口，用户级配置一概不读，也就没有卡片
+  if (!sealed() && ucPending()) return { error: tz("Claude Code 的用户级配置有改动还没确认。先发一条消息，在弹出的卡片里确认后再试。") };
+  const blocked = await claudeBlocked();
+  if (blocked) return { error: blocked };
+  if (!o.provider && JOB.stop) return { error: "stopped" };   // 核验那一下里用户点了停止：别再起（调用方先看 JOB.stop，这条不记错）
   return new Promise((resolve) => {
     fs.mkdirSync(WORK, { recursive: true });
     const P = o.provider || PROVIDER, own = !o.provider;

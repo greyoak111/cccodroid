@@ -19,11 +19,26 @@ const SOURCES = (process.env.CCAPP_NOTICES_URL ? [process.env.CCAPP_NOTICES_URL]
 export const PUBKEY = crypto.createPublicKey(!LIVE && process.env.CCAPP_TEST_PUBKEY ? process.env.CCAPP_TEST_PUBKEY :
   "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4u1V3UuRVZgXwqXXQaQIBaefPf2PCGqKqvsna9Pgzzs=\n-----END PUBLIC KEY-----\n");
 const EVERY = 3 * 3600e3;
+/** 读回验过签才存的那份：正文原样字节 + 旁边的 .sig；签名对不上、缺 .sig（旧版存的）都当没有，等下次联网重取 */
+export function loadSigned(file) {
+  try {
+    const body = fs.readFileSync(file), sig = fs.readFileSync(file + ".sig", "utf8").trim();
+    if (!crypto.verify(null, body, PUBKEY, Buffer.from(sig, "base64"))) { log(`[signed] ${path.basename(file)} 签名对不上，不认`); return null; }
+    return JSON.parse(body.toString("utf8"));
+  } catch { return null; }
+}
+/** 存正文原样字节（不重新序列化，签名才对得上）和签名；先写 .sig 再换正文，换到一半也只是验不过、当没有 */
+export function saveSigned(file, body, sig) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file + ".sig.tmp", sig); fs.renameSync(file + ".sig.tmp", file + ".sig");
+  fs.writeFileSync(file + ".tmp", body); fs.renameSync(file + ".tmp", file);
+}
 const CACHE = path.join(CFG.home, ".cache", "cccodroid", "notices.json");
 const SEEN = path.join(CFG.home, ".config", "cccodroid", "notices-seen.json");
 
 let data = null, fetchedAt = 0, lastError = "", appVer = "", busy = null;
-try { data = JSON.parse(fs.readFileSync(CACHE, "utf8")); } catch {}
+// 磁盘上那份连同签名一起存（CACHE.sig），读回来再验一遍：同 uid 的程序能写这个文件，没签名的不认（审查 11-05 安全 1）
+data = loadSigned(CACHE);
 
 const readSeen = () => { try { return new Set(JSON.parse(fs.readFileSync(SEEN, "utf8")).dismissed || []); } catch { return new Set(); } };
 
@@ -37,7 +52,7 @@ async function fetchOne(url) {
   if (!crypto.verify(null, body, PUBKEY, Buffer.from(sig, "base64"))) throw new Error("签名对不上");
   const j = JSON.parse(body.toString("utf8"));
   if (!Array.isArray(j.notices)) throw new Error("格式不对");
-  return j;
+  return { j, body, sig };
 }
 
 export async function refreshNotices(force = false) {
@@ -51,12 +66,11 @@ export async function refreshNotices(force = false) {
     const errs = [];
     for (const u of SOURCES) {
       try {
-        const j = await fetchOne(u);
+        const { j, body, sig } = await fetchOne(u);
         // 两个来源可能一新一旧（官网每半小时同步）：只往新的换
         if (!data || !(String(j.updated || "") < String(data.updated || ""))) {
           data = j;
-          fs.mkdirSync(path.dirname(CACHE), { recursive: true });
-          fs.writeFileSync(CACHE, JSON.stringify(j));
+          saveSigned(CACHE, body, sig);
         }
         fetchedAt = Date.now(); lastError = "";
         return;

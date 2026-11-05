@@ -2774,3 +2774,4 @@
 2774	Estos archivos de configuración de Claude Code contienen instrucciones de anulación (pedir al modelo que ignore sus reglas, hacerse pasar por mensajes del sistema, etc.). cccodroid no los carga, así que este turno no se ejecutó. Edita o elimina lo siguiente y vuelve a enviar:\n{list}
 2775	La versión pública no ejecuta los hooks configurados aquí: un hook puede ejecutar cualquier comando y meter cualquier cosa en la conversación, y cccodroid no puede revisarlo. Las reglas se quedan en el archivo y no se borran.
 2776	cccodroid revisa estas habilidades antes de pasarlas a Claude Code. Para llamar a una con barra, antepón user: a su nombre, por ejemplo /user:{name}.
+2777	Claude Code no superó la verificación de integridad, así que no se ejecutó: {why}

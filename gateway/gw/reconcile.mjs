@@ -21,7 +21,13 @@ import { NEXT, sendJson } from "./http.mjs";
 const STATE = PREFIX ? path.join(CFG.home, ".cache", "cccodroid", "reconcile.json") : "";
 const CUSTOM_DIR = PREFIX ? path.join(CFG.home, ".cccodroid", "custom") : "";
 let last = null, busy = null;
+// 上次的结果存在 home 下（同 uid 能写），读回来只认形状对的：findings 得是对象数组（审查 11-05 第 19 组 1）
 try { last = JSON.parse(fs.readFileSync(STATE, "utf8")); } catch {}
+if (!last || typeof last !== "object" || !Array.isArray(last.findings)) last = null;
+else last.findings = last.findings.filter((f) => f && typeof f === "object" && typeof f.k === "string"
+  && (f.v == null || typeof f.v === "object") && (f.fix == null || typeof f.fix === "string"));
+/** 拼进系统提示的：压成一行、限长 —— 字段来自组件 / 模块记录和上面那份缓存，别让换行把「## 新规则」带进去 */
+const one = (x, n = 260) => String(x == null ? "" : x).replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").slice(0, n);
 
 const exists = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
 const readLines = (f) => { try { return fs.readFileSync(f, "utf8").split("\n").filter(Boolean); } catch { return null; } };
@@ -145,7 +151,7 @@ export function reconcileFacts() {
   const bad = (last && last.findings || []).filter((f) => f.level !== "info");
   if (!bad.length) return [];
   return [`- **状态对账发现 ${bad.length} 处记录和磁盘对不上**（相关功能可能用不了；修法照写的告诉用户，别自己动 $PREFIX 去补）：`,
-    ...bad.slice(0, 6).map((f) => `  - ${tzFill(f)}${f.fix ? " —— " + f.fix : ""}`)];
+    ...bad.slice(0, 6).map((f) => `  - ${one(tzFill(f))}${f.fix ? " —— " + one(f.fix, 160) : ""}`)];
 }
 
 if (PREFIX && LIVE) setTimeout(() => reconcileRun(), 60e3).unref?.();

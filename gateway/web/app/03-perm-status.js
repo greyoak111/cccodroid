@@ -601,10 +601,11 @@
       const n = r.files && r.files.canRewind && r.files.files ? r.files.files.length : 0;
       if (choice === "both") {
         if (r.fork && r.fork.fresh) newConversation(); else { openSession(r.fork.id); loadSessions(); }
-        // 原文只回填到这次打开的目标：300ms 里用户已经切到别的会话，就记进目标会话的草稿，不覆盖眼前那个会话的输入框（#153-2）
-        const gen = view.gen, key = view.sessionId || "";
+        // 原文只回填到这次打开的目标：300ms 里用户已经切到别的会话，就记进目标会话的草稿，不覆盖眼前那个会话的输入框（#153-2）。
+        // 按会话号认，不按 view.gen：打开后 hello 一到 resetView 就会把 gen 加一，正常路径也会被当成「切走了」（审查 11-05 #40）
+        const key = view.sessionId || "";
         setTimeout(() => {
-          if (gen === view.gen) { inputEl.value = userText; autoGrow(); inputEl.focus(); return; }
+          if ((view.sessionId || "") === key) { inputEl.value = userText; autoGrow(); inputEl.focus(); return; }
           const all = draftsRead();
           if (all[key] && all[key].text && all[key].text.trim()) return;
           all[key] = { text: userText, att: (all[key] && all[key].att) || [], at: Date.now() };

@@ -160,6 +160,7 @@ public class GatewayService extends Service {
     @Override public void onDestroy() {
         if (self == this) self = null;
         stopping = true;
+        Updater.get(this).stopLoop();
         Notify.get(this).stop();
         killGateway();
         if (wake != null && wake.isHeld()) wake.release();

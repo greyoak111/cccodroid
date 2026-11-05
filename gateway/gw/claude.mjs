@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { CFG, GLIBC_PRELOAD, NO_BRIDGE, PATHS, PREFIX, glibcEnv, log, sleep } from "./config.mjs";
+import { CFG, GLIBC_PRELOAD, NO_BRIDGE, PATHS, PREFIX, glibcEnv, log, sleep, tz } from "./config.mjs";
 import { SETTINGS, outputStyles } from "./settings-store.mjs";
 import { PROVIDER, keyOf } from "./providers.mjs";
 import { cachedModels } from "./models.mjs";
@@ -11,6 +11,7 @@ import { archiveHooks } from "./archive-core.mjs";
 import { fileURLToPath } from "node:url";
 import { APP } from "./appfiles.mjs";
 import { sealArgv, sealEnv } from "./edition.mjs";
+import { claudeSeal } from "./claudeseal.mjs";
 
 // 敏感操作再确认：PreToolUse 钩子（guard/cc-guard.mjs），碰密钥 / 读屏点按 / 往外分享时让 claude 停下来问，全部放行也一样。
 // 不设全局关闭开关：整层关掉就等于没有；旧设置里存过 guard:false 也不再认。要放行就在确认卡片上逐次「允许」。
@@ -524,7 +525,16 @@ export function termKeyFile(p = PROVIDER) {
 }
 
 /** 跑一次 claude 并收集全部 stdout（用于取 CLI 状态类输出） */
-export function runClaude(args, { cwd, timeoutMs = 60000 } = {}) {
+/** 起 claude 之前核程序本身（claudeseal.mjs）：对不上返回给人看的原因，能起返回 ""。
+ *  开会话以外的路也要核：mcp list、doctor、登录、补档、回退文件、扩展命令都会执行它（审查 11-05 第 16 组 1） */
+export async function claudeBlocked() {
+  const s = await claudeSeal().catch((e) => ({ ok: false, why: e.message }));
+  return s.ok === false ? tz("Claude Code 程序核验没过，这次没有运行：{why}", { why: String(s.why || "") }) : "";
+}
+
+export async function runClaude(args, { cwd, timeoutMs = 60000 } = {}) {
+  const blocked = await claudeBlocked();
+  if (blocked) return { out: "", err: blocked, error: true };
   return new Promise((resolve) => {
     let out = "", err = "", done = false;
     const [cmd0, args0] = claudeCmd([...settingsArgs(), ...args]);   // mcp list 之类会拉起 MCP 服务器，也要罩住

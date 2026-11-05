@@ -743,9 +743,12 @@ final class Updater {
      */
     private String knownBad(String v) {
         try {
-            File f = new File(env.home, ".cache/cccodroid/claude-verified.json");
-            if (!f.isFile()) return null;
-            JSONObject bad = new JSONObject(new String(java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8)).optJSONObject("bad");
+            File f = new File(env.home, ".cache/cccodroid/claude-verified.json"), sf = new File(f.getPath() + ".sig");
+            if (!f.isFile() || !sf.isFile() || f.length() > (4 << 20)) return null;
+            // 网关存的是验过签的原样字节加 .sig：这里再验一遍，同 uid 写进来的假记录不认（审查 11-05 安全 1）
+            byte[] body = java.nio.file.Files.readAllBytes(f.toPath());
+            if (!Ed25519.verifyIndex(body, new String(java.nio.file.Files.readAllBytes(sf.toPath()), StandardCharsets.UTF_8))) return null;
+            JSONObject bad = new JSONObject(new String(body, StandardCharsets.UTF_8)).optJSONObject("bad");
             JSONObject e = bad == null ? null : bad.optJSONObject(v);
             if (e == null) return null;
             String zh = e.optString("zh", ""), en = e.optString("en", "");
@@ -765,6 +768,7 @@ final class Updater {
 
     /** 自动模式的规则：见类注释 */
     private void autoApply() {
+        if (!loopOn) return;
         boolean unmetered = !ctx.getSystemService(ConnectivityManager.class).isActiveNetworkMetered();
         if ("available".equals(claude.state) && unmetered && !claudeHeld && !claudeOlder && !switching.get()) {
             // 版本只读一次，装之前再按已装的现读比一遍：几个字段可能是两次检查交错写的，别凭拼起来的状态装回旧版（10-31 八轮核验）
@@ -780,17 +784,22 @@ final class Updater {
     /** 后台定时：服务起来 20 秒后、之后每 30 分钟看一眼，距上次检查超过 6 小时就查。
      *  服务停了又起（同一进程）会再调一次：进程里只留一条循环，不然每重启一次服务就多一条永远睡醒的线程（#131） */
     private Thread loopThread;
+    /** 服务在跑才自动装：用户「彻底停止」后进程可能还活着，循环和已经发出去的检查不能再装东西、把服务拉起来（审查 11-05 #16） */
+    private volatile boolean loopOn;
     synchronized void loop() {
+        loopOn = true;
         if (loopThread != null && loopThread.isAlive()) return;
         loopThread = new Thread(() -> {
             sleep(20_000);
             while (true) {
-                if (auto() && System.currentTimeMillis() - prefs().getLong("lastCheck", 0) > AUTO_EVERY) checkAsync(false);
+                if (loopOn && auto() && System.currentTimeMillis() - prefs().getLong("lastCheck", 0) > AUTO_EVERY) checkAsync(false);
                 sleep(30 * 60_000L);
             }
         }, "upd-loop");
         loopThread.start();
     }
+    /** 服务停了（GatewayService.onDestroy）：循环留着睡，只是不再检查、不再自动装；服务再起时 loop() 打开 */
+    void stopLoop() { loopOn = false; }
 
     // ── 应用更新 ─────────────────────────────────────────────────────────
     /** @param user 用户点的（或从通知点进来的）：APK 就走安装确认；工具包就去替换 */
@@ -1003,6 +1012,7 @@ final class Updater {
 
     /** 自动模式：Shizuku 可用、没有任务在跑、界面不在前台 —— 静默装；否则通知用户 */
     private void maybeSilentInstallApp() {
+        if (!loopOn) return;
         if (deferApp(false)) return;
         if (Priv.granted() && !gatewayBusy() && !MainActivity.appForeground()) installApp();
         else notifyReady(app);

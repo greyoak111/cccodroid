@@ -4,11 +4,10 @@
 // （与应用内通知同一把钥匙、同一条路：官网验过签才镜像）。这里先取官网、取不到取 GitHub，只认签名对得上的。
 // 用处：版本选单标「已验证」/ 有问题的原因（/api/claude/versions 带上）；验过签的那份存到
 // home/.cache/cccodroid/claude-verified.json，Java 的自动更新读它——渠道走到有问题的版本时先不自动装。
-import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { CFG, LIVE, log } from "./config.mjs";
-import { PUBKEY } from "./notices.mjs";
+import { PUBKEY, loadSigned, saveSigned } from "./notices.mjs";
 
 // CCAPP_CLAUDE_VERIFIED_URL：只用这一个地址（测试用）
 const SOURCES = process.env.CCAPP_CLAUDE_VERIFIED_URL ? [process.env.CCAPP_CLAUDE_VERIFIED_URL]
@@ -17,7 +16,8 @@ const EVERY = 3 * 3600e3;
 export const VERIFIED_CACHE = path.join(CFG.home, ".cache", "cccodroid", "claude-verified.json");
 
 let data = null, fetchedAt = 0, lastError = "", busy = null;
-try { data = JSON.parse(fs.readFileSync(VERIFIED_CACHE, "utf8")); } catch {}
+// 磁盘上那份连同签名一起存（VERIFIED_CACHE.sig），读回来再验一遍：同 uid 的程序能写这个文件，没签名的不认（审查 11-05 安全 1）
+data = loadSigned(VERIFIED_CACHE);
 
 async function fetchOne(url) {
   const get = async (u) => { const r = await fetch(u, { signal: AbortSignal.timeout(15000), headers: { "cache-control": "no-cache" } }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return Buffer.from(await r.arrayBuffer()); };
@@ -25,7 +25,7 @@ async function fetchOne(url) {
   if (!crypto.verify(null, body, PUBKEY, Buffer.from(sig, "base64"))) throw new Error("签名对不上");
   const j = JSON.parse(body.toString("utf8"));
   if (!j || typeof j.versions !== "object" || typeof j.bad !== "object") throw new Error("格式不对");
-  return j;
+  return { j, body, sig };
 }
 
 export function refreshVerified(force = false) {
@@ -35,13 +35,11 @@ export function refreshVerified(force = false) {
     const errs = [];
     for (const u of SOURCES) {
       try {
-        const j = await fetchOne(u);
+        const { j, body, sig } = await fetchOne(u);
         // 官网每半小时同步，两个来源可能一新一旧：只往新的换
         if (!data || !(String(j.updated || "") < String(data.updated || ""))) {
           data = j;
-          fs.mkdirSync(path.dirname(VERIFIED_CACHE), { recursive: true });
-          fs.writeFileSync(VERIFIED_CACHE + ".tmp", JSON.stringify(j));
-          fs.renameSync(VERIFIED_CACHE + ".tmp", VERIFIED_CACHE);
+          saveSigned(VERIFIED_CACHE, body, sig);
         }
         fetchedAt = Date.now(); lastError = "";
         return;

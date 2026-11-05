@@ -2777,4 +2777,5 @@ window.I18N_DICT["fr"] = {
   "这些 Claude Code 配置里有越权指令的特征（要模型无视规则、冒充系统消息这一类），cccodroid 不加载它们，这一轮没有运行。改掉或删掉下面的内容后再发：\n{list}": "Ces fichiers de configuration Claude Code contiennent des instructions de contournement (demander au modèle d'ignorer ses règles, se faire passer pour un message système…). cccodroid ne les charge pas, ce tour n'a donc pas été exécuté. Modifiez ou supprimez ce qui suit, puis renvoyez :\n{list}",
   "发行版不运行这里配置的 hooks：hooks 能执行任意命令、把任意内容放进对话，cccodroid 没法检查。规则留在文件里，不会被删。": "La version publique n'exécute pas les hooks configurés ici : un hook peut lancer n'importe quelle commande et injecter n'importe quoi dans la conversation, ce que cccodroid ne peut pas vérifier. Les règles restent dans le fichier et ne sont pas supprimées.",
   "cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。": "cccodroid vérifie ces compétences avant de les transmettre à Claude Code. Pour en appeler une avec une barre oblique, préfixez son nom par user:, par exemple /user:{name}.",
+  "Claude Code 程序核验没过，这次没有运行：{why}": "Claude Code n’a pas passé la vérification d’intégrité, il n’a donc pas été lancé : {why}",
 };
