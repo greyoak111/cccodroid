@@ -10,7 +10,7 @@
    "url": "https://github.com/greyoak111/cccodroid",
    "provider": "github",
    "link_mode": "web",
-   "revision": "abe9782812f211d96fe956346b9665ae4afb9c88"
+   "revision": "bff420821970149c7bf40a3c967858840288936e"
   }
  },
  "components": [
@@ -32,8 +32,8 @@
    "id": "ui",
    "type": "frontend",
    "label": "UI",
-   "sublabel": "WebView · web/app, 19 parts",
-   "tag": "9 languages",
+   "sublabel": "WebView · web/app, 27 parts",
+   "tag": "10 languages",
    "pos": [
     220,
     196
@@ -45,13 +45,13 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/MainActivity.java",
-     "line": 1142,
-     "end_line": 1142
+     "line": 1897,
+     "end_line": 1897
     },
     {
      "path": "gateway/gw/http.mjs",
-     "line": 79,
-     "end_line": 80
+     "line": 100,
+     "end_line": 101
     }
    ]
   },
@@ -71,8 +71,35 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/GatewayService.java",
-     "line": 63,
-     "end_line": 64
+     "line": 68,
+     "end_line": 69
+    }
+   ]
+  },
+  {
+   "id": "gwrt",
+   "type": "security",
+   "label": "Gateway runtime",
+   "sublabel": "files/gw · Node · glibc",
+   "tag": "pinned to the APK",
+   "pos": [
+    220,
+    40
+   ],
+   "size": [
+    170,
+    64
+   ],
+   "sources": [
+    {
+     "path": "android/java/cc/codroid/GwRuntime.java",
+     "line": 18,
+     "end_line": 24
+    },
+    {
+     "path": "gateway/gw/gwpin.mjs",
+     "line": 1,
+     "end_line": 5
     }
    ]
   },
@@ -81,7 +108,7 @@
    "type": "backend",
    "label": "Gateway",
    "sublabel": "server.mjs + gw/ modules",
-   "tag": "token · event bus",
+   "tag": "token · signed requests · bus",
    "pos": [
     460,
     196
@@ -97,14 +124,14 @@
      "end_line": 12
     },
     {
-     "path": "gateway/gw/bus.mjs",
-     "line": 18,
-     "end_line": 18
+     "path": "gateway/gw/access.mjs",
+     "line": 55,
+     "end_line": 58
     },
     {
-     "path": "gateway/gw/run.mjs",
-     "line": 32,
-     "end_line": 32
+     "path": "gateway/gw/bus.mjs",
+     "line": 33,
+     "end_line": 33
     }
    ]
   },
@@ -113,7 +140,7 @@
    "type": "backend",
    "label": "Claude Code",
    "sublabel": "official binary, unmodified",
-   "tag": "seccomp shim",
+   "tag": "signed manifest · seccomp shim",
    "pos": [
     740,
     196
@@ -125,13 +152,49 @@
    "sources": [
     {
      "path": "gateway/gw/run.mjs",
-     "line": 187,
-     "end_line": 187
+     "line": 454,
+     "end_line": 454
     },
     {
      "path": "gateway/gw/stream.mjs",
-     "line": 85,
-     "end_line": 85
+     "line": 126,
+     "end_line": 126
+    },
+    {
+     "path": "gateway/gw/claudeseal.mjs",
+     "line": 1,
+     "end_line": 9
+    }
+   ]
+  },
+  {
+   "id": "seal",
+   "type": "security",
+   "label": "Config check",
+   "sublabel": "jailbreak scan · allow-list",
+   "pos": [
+    990,
+    124
+   ],
+   "size": [
+    180,
+    56
+   ],
+   "sources": [
+    {
+     "path": "gateway/gw/seal.mjs",
+     "line": 1,
+     "end_line": 11
+    },
+    {
+     "path": "gateway/gw/breach.mjs",
+     "line": 1,
+     "end_line": 6
+    },
+    {
+     "path": "gateway/gw/edition.mjs",
+     "line": 1,
+     "end_line": 6
     }
    ]
   },
@@ -152,8 +215,8 @@
    "sources": [
     {
      "path": "gateway/gw/providers.mjs",
-     "line": 10,
-     "end_line": 12
+     "line": 12,
+     "end_line": 14
     },
     {
      "path": "gateway/gw/sessmodel.mjs",
@@ -178,13 +241,13 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/Updater.java",
-     "line": 27,
-     "end_line": 37
+     "line": 28,
+     "end_line": 38
     },
     {
      "path": "android/java/cc/codroid/Updater.java",
-     "line": 135,
-     "end_line": 138
+     "line": 175,
+     "end_line": 178
     },
     {
      "path": "android/java/cc/codroid/Installer.java",
@@ -209,13 +272,13 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/Updater.java",
-     "line": 33,
-     "end_line": 33
+     "line": 34,
+     "end_line": 34
     },
     {
      "path": "android/java/cc/codroid/Updater.java",
-     "line": 44,
-     "end_line": 44
+     "line": 45,
+     "end_line": 45
     }
    ]
   },
@@ -244,7 +307,7 @@
    "id": "priv",
    "type": "security",
    "label": "Priv relay",
-   "sublabel": "checks peer uid",
+   "sublabel": "private file socket · peer uid",
    "pos": [
     220,
     380
@@ -256,13 +319,13 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/Priv.java",
-     "line": 30,
-     "end_line": 33
+     "line": 31,
+     "end_line": 37
     },
     {
      "path": "android/java/cc/codroid/Priv.java",
-     "line": 255,
-     "end_line": 255
+     "line": 322,
+     "end_line": 322
     }
    ]
   },
@@ -282,13 +345,13 @@
    "sources": [
     {
      "path": "gateway/gw/config.mjs",
-     "line": 11,
-     "end_line": 11
+     "line": 21,
+     "end_line": 21
     },
     {
      "path": "gateway/gw/sessions.mjs",
-     "line": 65,
-     "end_line": 65
+     "line": 96,
+     "end_line": 96
     }
    ]
   },
@@ -314,8 +377,8 @@
     },
     {
      "path": "gateway/gw/modules.mjs",
-     "line": 21,
-     "end_line": 38
+     "line": 23,
+     "end_line": 40
     }
    ]
   },
@@ -336,8 +399,8 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/Env.java",
-     "line": 173,
-     "end_line": 177
+     "line": 345,
+     "end_line": 345
     },
     {
      "path": "android/native/exec-shim.c",
@@ -394,8 +457,8 @@
    "sources": [
     {
      "path": "gateway/gw/components.mjs",
-     "line": 354,
-     "end_line": 354
+     "line": 460,
+     "end_line": 460
     }
    ]
   },
@@ -416,13 +479,13 @@
    "sources": [
     {
      "path": "gateway/gw/components.mjs",
-     "line": 29,
-     "end_line": 29
+     "line": 35,
+     "end_line": 35
     },
     {
      "path": "gateway/gw/components.mjs",
-     "line": 69,
-     "end_line": 69
+     "line": 106,
+     "end_line": 106
     }
    ]
   },
@@ -448,7 +511,9 @@
    "wraps": [
     "ui",
     "svc",
+    "gwrt",
     "gw",
+    "seal",
     "claude",
     "upd",
     "priv",
@@ -495,6 +560,27 @@
    "from": "svc",
    "to": "gw",
    "label": "starts · restarts"
+  },
+  {
+   "id": "gwrt-gw",
+   "from": "gwrt",
+   "to": "gw",
+   "label": "runs the gateway",
+   "variant": "security"
+  },
+  {
+   "id": "gw-seal",
+   "from": "gw",
+   "to": "seal",
+   "label": "before each run",
+   "variant": "security"
+  },
+  {
+   "id": "seal-claude",
+   "from": "seal",
+   "to": "claude",
+   "label": "hands over checked config",
+   "variant": "security"
   },
   {
    "id": "upd-dl",
@@ -596,9 +682,10 @@
    "dot": "rose",
    "title": "Security",
    "items": [
-    "Gateway /api/* requires a 256-bit token and checks Host and Origin",
-    "Sign-in is the official flow: the code is pasted to claude in the terminal, never through the gateway",
-    "priv accepts only this app's uid; device tools (an MCP server for Claude) are off by default, and the user confirms before another app opens"
+    "The UI lives on a dedicated 127.0.0.2; the app signs every request with HMAC, so the token never leaves the private dir",
+    "Claude Code is checked against Anthropic's signed manifest every run; the gateway runs on its own runtime, checked against the APK",
+    "Config handed to Claude Code is scanned for jailbreak patterns; self-running config and leftover background programs are shown to you first",
+    "priv accepts only this app's uid; device tools are off by default; sign-in codes never pass through the gateway"
    ]
   },
   {

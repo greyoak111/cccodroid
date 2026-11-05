@@ -10,7 +10,7 @@
    "url": "https://github.com/greyoak111/cccodroid",
    "provider": "github",
    "link_mode": "web",
-   "revision": "abe9782812f211d96fe956346b9665ae4afb9c88"
+   "revision": "bff420821970149c7bf40a3c967858840288936e"
   }
  },
  "components": [
@@ -32,8 +32,8 @@
    "id": "ui",
    "type": "frontend",
    "label": "界面",
-   "sublabel": "WebView · web/app 19 段",
-   "tag": "9 种语言",
+   "sublabel": "WebView · web/app 27 段",
+   "tag": "10 种语言",
    "pos": [
     220,
     196
@@ -45,13 +45,13 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/MainActivity.java",
-     "line": 1142,
-     "end_line": 1142
+     "line": 1897,
+     "end_line": 1897
     },
     {
      "path": "gateway/gw/http.mjs",
-     "line": 79,
-     "end_line": 80
+     "line": 100,
+     "end_line": 101
     }
    ]
   },
@@ -71,8 +71,35 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/GatewayService.java",
-     "line": 63,
-     "end_line": 64
+     "line": 68,
+     "end_line": 69
+    }
+   ]
+  },
+  {
+   "id": "gwrt",
+   "type": "security",
+   "label": "网关运行库",
+   "sublabel": "files/gw · Node · glibc",
+   "tag": "按 APK 钉的哈希核",
+   "pos": [
+    220,
+    40
+   ],
+   "size": [
+    170,
+    64
+   ],
+   "sources": [
+    {
+     "path": "android/java/cc/codroid/GwRuntime.java",
+     "line": 18,
+     "end_line": 24
+    },
+    {
+     "path": "gateway/gw/gwpin.mjs",
+     "line": 1,
+     "end_line": 5
     }
    ]
   },
@@ -81,7 +108,7 @@
    "type": "backend",
    "label": "网关",
    "sublabel": "server.mjs + gw/ 模块",
-   "tag": "令牌 · 事件总线",
+   "tag": "令牌 · 按次签名 · 事件总线",
    "pos": [
     460,
     196
@@ -97,14 +124,14 @@
      "end_line": 12
     },
     {
-     "path": "gateway/gw/bus.mjs",
-     "line": 18,
-     "end_line": 18
+     "path": "gateway/gw/access.mjs",
+     "line": 55,
+     "end_line": 58
     },
     {
-     "path": "gateway/gw/run.mjs",
-     "line": 32,
-     "end_line": 32
+     "path": "gateway/gw/bus.mjs",
+     "line": 33,
+     "end_line": 33
     }
    ]
   },
@@ -113,7 +140,7 @@
    "type": "backend",
    "label": "Claude Code",
    "sublabel": "官方原版二进制",
-   "tag": "seccomp 垫片",
+   "tag": "签名清单 · seccomp 垫片",
    "pos": [
     740,
     196
@@ -125,13 +152,49 @@
    "sources": [
     {
      "path": "gateway/gw/run.mjs",
-     "line": 187,
-     "end_line": 187
+     "line": 454,
+     "end_line": 454
     },
     {
      "path": "gateway/gw/stream.mjs",
-     "line": 85,
-     "end_line": 85
+     "line": 126,
+     "end_line": 126
+    },
+    {
+     "path": "gateway/gw/claudeseal.mjs",
+     "line": 1,
+     "end_line": 9
+    }
+   ]
+  },
+  {
+   "id": "seal",
+   "type": "security",
+   "label": "配置检查",
+   "sublabel": "破甲特征 · 白名单回填",
+   "pos": [
+    990,
+    124
+   ],
+   "size": [
+    180,
+    56
+   ],
+   "sources": [
+    {
+     "path": "gateway/gw/seal.mjs",
+     "line": 1,
+     "end_line": 11
+    },
+    {
+     "path": "gateway/gw/breach.mjs",
+     "line": 1,
+     "end_line": 6
+    },
+    {
+     "path": "gateway/gw/edition.mjs",
+     "line": 1,
+     "end_line": 6
     }
    ]
   },
@@ -152,8 +215,8 @@
    "sources": [
     {
      "path": "gateway/gw/providers.mjs",
-     "line": 10,
-     "end_line": 12
+     "line": 12,
+     "end_line": 14
     },
     {
      "path": "gateway/gw/sessmodel.mjs",
@@ -178,13 +241,13 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/Updater.java",
-     "line": 27,
-     "end_line": 37
+     "line": 28,
+     "end_line": 38
     },
     {
      "path": "android/java/cc/codroid/Updater.java",
-     "line": 135,
-     "end_line": 138
+     "line": 175,
+     "end_line": 178
     },
     {
      "path": "android/java/cc/codroid/Installer.java",
@@ -209,13 +272,13 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/Updater.java",
-     "line": 33,
-     "end_line": 33
+     "line": 34,
+     "end_line": 34
     },
     {
      "path": "android/java/cc/codroid/Updater.java",
-     "line": 44,
-     "end_line": 44
+     "line": 45,
+     "end_line": 45
     }
    ]
   },
@@ -244,7 +307,7 @@
    "id": "priv",
    "type": "security",
    "label": "Priv 提权中转",
-   "sublabel": "核对对端 uid",
+   "sublabel": "私有文件套接字 · 核对 uid",
    "pos": [
     220,
     380
@@ -256,13 +319,13 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/Priv.java",
-     "line": 30,
-     "end_line": 33
+     "line": 31,
+     "end_line": 37
     },
     {
      "path": "android/java/cc/codroid/Priv.java",
-     "line": 255,
-     "end_line": 255
+     "line": 322,
+     "end_line": 322
     }
    ]
   },
@@ -282,13 +345,13 @@
    "sources": [
     {
      "path": "gateway/gw/config.mjs",
-     "line": 11,
-     "end_line": 11
+     "line": 21,
+     "end_line": 21
     },
     {
      "path": "gateway/gw/sessions.mjs",
-     "line": 65,
-     "end_line": 65
+     "line": 96,
+     "end_line": 96
     }
    ]
   },
@@ -314,8 +377,8 @@
     },
     {
      "path": "gateway/gw/modules.mjs",
-     "line": 21,
-     "end_line": 38
+     "line": 23,
+     "end_line": 40
     }
    ]
   },
@@ -336,8 +399,8 @@
    "sources": [
     {
      "path": "android/java/cc/codroid/Env.java",
-     "line": 173,
-     "end_line": 177
+     "line": 345,
+     "end_line": 345
     },
     {
      "path": "android/native/exec-shim.c",
@@ -394,8 +457,8 @@
    "sources": [
     {
      "path": "gateway/gw/components.mjs",
-     "line": 354,
-     "end_line": 354
+     "line": 460,
+     "end_line": 460
     }
    ]
   },
@@ -416,13 +479,13 @@
    "sources": [
     {
      "path": "gateway/gw/components.mjs",
-     "line": 29,
-     "end_line": 29
+     "line": 35,
+     "end_line": 35
     },
     {
      "path": "gateway/gw/components.mjs",
-     "line": 69,
-     "end_line": 69
+     "line": 106,
+     "end_line": 106
     }
    ]
   },
@@ -448,7 +511,9 @@
    "wraps": [
     "ui",
     "svc",
+    "gwrt",
     "gw",
+    "seal",
     "claude",
     "upd",
     "priv",
@@ -495,6 +560,27 @@
    "from": "svc",
    "to": "gw",
    "label": "拉起 · 崩溃重启"
+  },
+  {
+   "id": "gwrt-gw",
+   "from": "gwrt",
+   "to": "gw",
+   "label": "运行网关",
+   "variant": "security"
+  },
+  {
+   "id": "gw-seal",
+   "from": "gw",
+   "to": "seal",
+   "label": "起进程前",
+   "variant": "security"
+  },
+  {
+   "id": "seal-claude",
+   "from": "seal",
+   "to": "claude",
+   "label": "查过才回填",
+   "variant": "security"
   },
   {
    "id": "upd-dl",
@@ -596,9 +682,10 @@
    "dot": "rose",
    "title": "安全",
    "items": [
-    "网关 /api/* 必须带 256 位令牌，校验 Host 与 Origin",
-    "登录走官方流程：授权码在终端里贴给 claude，网关不经手",
-    "priv 只接受本应用 uid 的调用；设备工具（给 Claude 的 MCP）默认关，打开别的应用前由用户确认"
+    "界面在专用的 127.0.0.2；App 的请求按次 HMAC 签名，令牌原文不出私有目录",
+    "Claude Code 每轮按 Anthropic 签名清单核对；网关跑在按 APK 核对的独立运行库上",
+    "交给 Claude Code 的配置先过破甲特征检查；会自动运行的配置、留下的后台程序先问你",
+    "priv 只接受本应用 uid；设备工具默认关，登录授权码网关不经手"
    ]
   },
   {
