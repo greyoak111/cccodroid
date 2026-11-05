@@ -118,8 +118,10 @@ function handle(req, res) {
   delete headers.connection; delete headers.cookie;   // 只有 claude 会来，用不着 Cookie；别把浏览器的带出去
   if (isMsg) headers["accept-encoding"] = "identity";   // 要读 SSE，别让上游压缩
   const mod = target.protocol === "https:" ? https : http;
+  let sseRes = false;      // 上游回的是不是 SSE：error 分支据此决定能不能直接销毁下游
   const up = mod.request(target, { method: req.method, headers }, (ur) => {
     const sse = isMsg && /text\/event-stream/i.test(String(ur.headers["content-type"] || ""));
+    sseRes = sse;
     if (!sse) {
       res.writeHead(ur.statusCode || 502, ur.headers); ur.pipe(res);
       // pipe 不管来源半路断：上游没收完就断了，下游也立刻断，claude 马上重试，不用干等自己的超时（#102 04-007）
@@ -147,7 +149,8 @@ function handle(req, res) {
   });
   up.on("error", (e) => {
     if (!res.headersSent) { res.writeHead(502, { "content-type": "application/json" }); res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: `upstream: ${e.message}` } })); }
-    else res.destroy();
+    // SSE 的补尾要靠 ur 的 aborted/error/close：这里先 destroy 会把补出来的 message_delta/message_stop 丢掉
+    else if (!sseRes) res.destroy();
   });
   res.on("close", () => { if (!res.writableFinished) up.destroy(); });
   req.pipe(up);
