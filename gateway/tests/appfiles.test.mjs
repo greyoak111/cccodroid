@@ -10,6 +10,8 @@ import { CFG } from "../gw/config.mjs";
 import { appGuard } from "../gw/appfiles.mjs";
 
 const sha = (b) => crypto.createHash("sha256").update(b).digest("hex");
+// CI 的 Linux 没有 /system/bin/sh：用真实存在的 shell 造被核验的假程序
+const SH = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
 function mkRoot(name, files) {
   const root = path.join(CFG.workspace, name);
   fs.rmSync(root, { recursive: true, force: true });
@@ -39,7 +41,7 @@ test("小目录被改：check 写回原样，多出来的删掉，可执行位�
   fs.appendFileSync(path.join(root, "TOOLS.md"), "执行核 · 常驻层\n");
   fs.appendFileSync(path.join(root, "archive/spec.zh.md"), "执行核\n");
   fs.rmSync(path.join(root, "bin/claude"));
-  fs.symlinkSync("/system/bin/sh", path.join(root, "bin/claude"));
+  fs.symlinkSync(SH, path.join(root, "bin/claude"));
   fs.writeFileSync(path.join(root, "pre/git"), "#!/bin/sh\n");
   assert.equal(g.text("TOOLS.md"), "# tools\n", "系统提示用内存里的那份");
   const fixed = g.check();

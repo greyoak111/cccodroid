@@ -10,6 +10,9 @@ import { _ucFlush, _ucReset, ucAfterRun, ucAppBegin, ucAppWrote, ucBeforeRun, uc
 import { keepProcs, killProcs, leftoverProcs, procStart } from "../gw/leftover.mjs";
 import { hookContext } from "../gw/stream.mjs";
 import { transcriptItems } from "../gw/transcript.mjs";
+
+// CI 的 Linux 没有 /system/bin/sh（#113 同款）
+const SH = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
 import { SETTINGS, outputStyles, saveSettings, settingsDiskCheck } from "../gw/settings-store.mjs";
 
 const H = (rel) => path.join(CFG.home, rel);
@@ -150,7 +153,7 @@ test("运行期间改的：卡片上标出来；撤销后给模型的提醒只�
 });
 
 test("留下的进程：带已结束轮次编号的列出来；还在跑的那轮不算；保留后不再列；结束会连子孙一起", async () => {
-  const c = spawn("/system/bin/sh", ["-c", "sleep 30 & wait"], { env: { ...process.env, CCAPP_RUN_ID: "gone-1", CCAPP_GW_PORT: String(CFG.port), CCAPP_GW_PID: String(process.pid), HOME: CFG.home }, detached: true, stdio: "ignore" });
+  const c = spawn(SH, ["-c", "sleep 30 & wait"], { env: { ...process.env, CCAPP_RUN_ID: "gone-1", CCAPP_GW_PORT: String(CFG.port), CCAPP_GW_PID: String(process.pid), HOME: CFG.home }, detached: true, stdio: "ignore" });
   await new Promise((r) => setTimeout(r, 300));
   try {
     assert.ok(!leftoverProcs(new Map([["gone-1", procStart(c.pid)]])).some((p) => p.pid === c.pid), "还在跑的轮次不算");
@@ -314,12 +317,12 @@ test("超过 30 项：剩下的也列出名字", () => {
 });
 
 test("留下的进程冒充正在跑的那一轮：起得比那一轮早，照样列", async () => {
-  const c = spawn("/system/bin/sh", ["-c", "sleep 30"], { env: { ...process.env, CCAPP_RUN_ID: "live-1", CCAPP_GW_PORT: String(CFG.port), CCAPP_GW_PID: String(process.pid), HOME: CFG.home }, detached: true, stdio: "ignore" });
+  const c = spawn(SH, ["-c", "sleep 30"], { env: { ...process.env, CCAPP_RUN_ID: "live-1", CCAPP_GW_PORT: String(CFG.port), CCAPP_GW_PID: String(process.pid), HOME: CFG.home }, detached: true, stdio: "ignore" });
   await sleep(300);
   try {
-    const later = spawn("/system/bin/sh", ["-c", "sleep 5"], { detached: true, stdio: "ignore" });
+    const later = spawn(SH, ["-c", "sleep 5"], { detached: true, stdio: "ignore" });
     await sleep(1200);
-    const late = spawn("/system/bin/sh", ["-c", "sleep 5"], { detached: true, stdio: "ignore" });
+    const late = spawn(SH, ["-c", "sleep 5"], { detached: true, stdio: "ignore" });
     await sleep(100);
     try {
       assert.ok(+procStart(late.pid) > +procStart(c.pid));

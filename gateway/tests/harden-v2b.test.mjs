@@ -8,6 +8,9 @@ import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { CFG } from "../gw/config.mjs";
 import { NEXT } from "../gw/http.mjs";
+
+// CI 的 Linux 没有 /system/bin/sh（#113 同款）
+const SH = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
 import { routeGit } from "../gw/git.mjs";
 
 async function serve(...routes) {
@@ -64,7 +67,7 @@ test("端侧模型：端口被别人占着、对 /health 回 200，也不当成�
   fs.writeFileSync(path.join(pre, "fake.js"), `const port = process.argv[process.argv.indexOf("--port") + 1];
     if (!require("fs").existsSync(${JSON.stringify(path.join(pre, "bind"))})) { console.error("couldn't bind HTTP server socket, hostname: 127.0.0.1, port: " + port); setTimeout(() => process.exit(1), 1500); }
     else require("http").createServer((q, s) => s.end("{}")).listen(port, "127.0.0.1", () => console.log("main: server is listening on http://127.0.0.1:" + port + " - starting the main loop"));`);
-  fs.writeFileSync(path.join(pre, "bin", "llama-server"), `#!/system/bin/sh\nLD_LIBRARY_PATH=${JSON.stringify(process.env.LD_LIBRARY_PATH || "")} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(pre, "fake.js"))} "$@"\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(pre, "bin", "llama-server"), `#!${SH}\nLD_LIBRARY_PATH=${JSON.stringify(process.env.LD_LIBRARY_PATH || "")} exec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(pre, "fake.js"))} "$@"\n`, { mode: 0o755 });
   const port = await new Promise((ok) => { const s = http.createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => ok(p)); }); });
   const gw = new URL("../gw/", import.meta.url).href;
   const src = `const l = await import(${JSON.stringify(gw + "local.mjs")});

@@ -40,6 +40,8 @@ import { NEXT, readBody, sendJson } from "./http.mjs";
 // 找不到就抛 "No suitable shell found"。它认 CLAUDE_CODE_SHELL 覆盖，
 // 但会校验路径形态必须是 bash/zsh —— 于是造个名叫 bash 的包装转发给 mksh。
 let SHELL_PATH = null;
+// 非安卓环境（CI 的 Linux）没有 /system/bin/sh：包装脚本的 shebang 和最终 exec 都要回落到 /bin/sh
+const SYS_SH = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
 export function ensureShell() {
   if (SHELL_PATH) return SHELL_PATH;
   // 开发端（旧布局）没有 CCAPP_SHELL：有 files/cbash/bash（glibc 版真 bash）就用它。
@@ -47,7 +49,7 @@ export function ensureShell() {
   // 快照里的 grep/find/pkill 函数于是每次都报 "local: inaccessible or not found"。
   const cbash = path.join(CFG.runtime, "..", "cbash", "bash");
   const want = process.env.CCAPP_SHELL || (!PREFIX && fs.existsSync(cbash) ? cbash : "");
-  const real = want && fs.existsSync(want) ? want : "/system/bin/sh";
+  const real = want && fs.existsSync(want) ? want : SYS_SH;
 
   // 包一层再交给 claude，顺手卸掉 CLAUDE_CODE_EXECPATH：
   // claude 的 shell 快照把 grep/find 换成内置 ugrep/bfs，调法是 exec -a ugrep "$CLAUDE_CODE_EXECPATH" -G …，
@@ -66,7 +68,7 @@ export function ensureShell() {
     // 经加载器时用 termux-exec 的 linker 版（Env.java 给的 CCAPP_BIONIC_PRELOAD）：数据目录里的程序都改成经 linker64 起
     const tx = process.env.CCAPP_BIONIC_PRELOAD || (PREFIX ? path.join(PREFIX, "lib", "libtermux-exec-ld-preload.so") : "");
     const pre = tx && fs.existsSync(tx) ? 'export LD_PRELOAD="' + tx + '"\n' : "";
-    const body = '#!/system/bin/sh\nunset CLAUDE_CODE_EXECPATH\n' + pre + 'exec "' + real + '" "$@"\n';
+    const body = '#!' + SYS_SH + '\nunset CLAUDE_CODE_EXECPATH\n' + pre + 'exec "' + real + '" "$@"\n';
     let need = true;
     try { need = fs.readFileSync(sh, "utf8") !== body; } catch {}
     if (need) fs.writeFileSync(sh, body, { mode: 0o755 });
@@ -74,7 +76,7 @@ export function ensureShell() {
     SHELL_PATH = sh;
   } catch (e) {
     log(`造 shell 包装失败: ${e.message}`);
-    SHELL_PATH = "/system/bin/sh";
+    SHELL_PATH = SYS_SH;
   }
   return SHELL_PATH;
 }
