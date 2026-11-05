@@ -6,6 +6,7 @@
 
 [![版本](https://img.shields.io/github/v/release/greyoak111/cccodroid?color=c96442&label=版本)](https://github.com/greyoak111/cccodroid/releases/latest)
 [![下载](https://img.shields.io/github/downloads/greyoak111/cccodroid/total?color=c96442&label=下载)](https://github.com/greyoak111/cccodroid/releases)
+[![星标](https://img.shields.io/github/stars/greyoak111/cccodroid?color=c96442&label=星标)](https://github.com/greyoak111/cccodroid/stargazers)
 ![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3ddc84)
 [![许可](https://img.shields.io/github/license/greyoak111/cccodroid?label=许可)](LICENSE)
 
@@ -69,7 +70,7 @@ cccodroid 让执行回到你自己的设备上：云端只负责模型推理，�
 - **工具包按模块装**（扩展 → 工具包模块，0.3.9 起）：开发工具包分成基础、命令行工具、C/C++ 编译、Java 与安卓打包、图形库、音视频、文档与数据、Go 语言、Node.js 生态几块，首次安装时勾选，之后随装随卸。每块写明用途、主要命令、大小、依赖和被谁用着；在终端敲一个没装的命令会提示它在哪块。从 0.3.8 及以前升级会装上全部模块，功能一样不少。
 - **可选组件**（扩展 → 可选组件）：体积大的工具不随应用安装，用得上再下载。每个组件包都对应特定版本的工具包，装之前先核对 SHA-256 和逐文件清单，卸载干净。
   - **浏览器组件（无头 Chromium 155）**：下载约 254 MB，装好后约 750 MB。让 Claude 在后台打开网页：截图、导出 PDF、取渲染后的页面、用 puppeteer-core 操作网页。附带一个技能，告诉 Claude 怎么用。
-  - **社区组件**：还可以装 [cccodroid-components](https://github.com/greyoak111/cccodroid-components) 仓库里的组件。目前 28 个，加上面的浏览器共 29 个。开发：GitHub CLI（gh）、Godot（无头运行 / 导出 APK）、Graphviz / PlantUML 画图、Hugo 建站、逆向分析（rizin、binwalk）；图像影音：Blender（无头合成 / 渲染，3D 走 GPU）、LilyPond（乐谱排版）、音乐制作工具链；办公：LibreOffice、Pandoc、PDF 工具箱、OCR（简繁中英）、LaTeX（Tectonic，支持中文）；AI：llama.cpp；3D 与科学计算：OpenSCAD、GNU Octave、科学计算 Python（numpy / scipy / matplotlib）；电子设计：ngspice / gnucap、Icarus Verilog / Yosys；GPU：骁龙驱动（Vulkan / OpenGL / OpenCL）、Mali 驱动、GPU 跑分；网络：Cloudflare（wrangler）、rclone。见[完整列表](https://github.com/greyoak111/cccodroid-components/blob/main/README.zh-CN.md#组件列表)。索引带 ed25519 签名，核对不过不装；社区组件标「社区」，没人在真机上验证过的会先提示一声再装。
+  - **社区组件**：还可以装 [cccodroid-components](https://github.com/greyoak111/cccodroid-components) 仓库里的组件。目前 29 个，加上面的浏览器共 30 个。开发：GitHub CLI（gh）、Godot（无头运行 / 导出 APK）、Graphviz / PlantUML 画图、Hugo 建站、逆向分析（rizin、binwalk）；图像影音：Blender（无头合成 / 渲染，3D 走 GPU）、LilyPond（乐谱排版）、音乐制作工具链；办公：LibreOffice、Pandoc、PDF 工具箱、OCR（简繁中英）、LaTeX（Tectonic，支持中文）；AI：llama.cpp、OpenAI 桥（预览，把 OpenAI 兼容接口转成 Claude Code 能用的接口）；3D 与科学计算：OpenSCAD、GNU Octave、科学计算 Python（numpy / scipy / matplotlib）；电子设计：ngspice / gnucap、Icarus Verilog / Yosys；GPU：骁龙驱动（Vulkan / OpenGL / OpenCL）、Mali 驱动、GPU 跑分；网络：Cloudflare（wrangler）、rclone。见[完整列表](https://github.com/greyoak111/cccodroid-components/blob/main/README.zh-CN.md#组件列表)。索引带 ed25519 签名，核对不过不装；社区组件标「社区」，没人在真机上验证过的会先提示一声再装。
   - **自定义组件**：市场里没有的 Linux arm64 程序可以自己导入（单个程序或 .tar.gz / .zip），自动认出它是 glibc、安卓原生、静态程序还是脚本，缺的库从 Termux glibc 仓库补上；装好就是一条命令，Claude 和终端都能用。来源由你自己负责。
 - **多种接入方式**：
   - Claude 账户登录：应用内完成，浏览器授权后自动回到应用。账户卡片显示 5 小时额度与每周额度的占用和重置时间（取自 Claude Code 每轮自己回报的数据，应用不拿你的凭据去查任何东西）。
@@ -99,7 +100,11 @@ cccodroid 让执行回到你自己的设备上：云端只负责模型推理，�
   - 开发工具包：只在 Wi‑Fi 下预先下载，下次打开应用时替换；你用 pip / npm -g 装进去的东西会保留。
   - 更新之间不会互相打断：工具包在下载或替换时，应用本体的更新会等它完成。替换前先按发布清单核对解出来的内容，核对不过就不动旧工具包；替换中途被打断（应用重启、进程被杀），下次打开时会接着装完或退回旧版。
   - 设置页的**校验 / 修复**：逐个文件核对工具包的哈希；修复会重装同一版本，你自己装的包照常保留。每次启动也会做一次快速自检。
-- **扩展**：在「扩展」页安装、启用、停用、卸载 Claude Code 插件（搜索官方目录，或添加别的插件市场），从 zip 安装技能，添加 / 移除 MCP 服务器。全部经 Claude Code 自己的 `claude plugin` / `claude mcp` 命令完成；需要执行命令才能装的插件，会先把命令给你过目。
+- **扩展**：在「扩展」页安装、启用、停用、卸载 Claude Code 插件（搜索官方目录，或添加别的插件市场），从 zip 安装技能，添加 / 移除 MCP 服务器。全部经 Claude Code 自己的 `claude plugin` / `claude mcp` 命令完成；需要执行命令才能装的插件，会先把命令给你过目。0.6.7 起插件里的钩子不运行，你自己的技能用 `/user:名字` 调用。
+- **运行前先核对**（0.6.7 起）：
+  - Claude Code 要对得上 Anthropic 签名的清单才运行；网关用自己的一份运行库，每次启动前按安装包核一遍，pkg 升级、工具包更新都碰不到它。
+  - CLAUDE.md、规则、技能、命令、子代理、MCP、自动记忆这些要交给 Claude Code 的配置，先过一遍破甲特征检查：命中的那一轮不运行，告诉你是哪个文件哪一行。
+  - 项目里打开就会自动运行的配置（钩子、MCP 服务器）、用户级配置的改动、之前的对话留下的后台程序，都先问你再继续。
 - **排障**：
   - **安全模式**：钩子、插件、MCP 或 CLAUDE.md 把东西弄坏了，就开安全模式 —— Claude Code 用自带的 `--safe-mode` 启动，自定义项一概不加载；登录、Key、会话、模型照旧。不挪、不改任何文件，关掉即恢复。
   - **我卡住了 · 打包诊断**（设置页，安装失败页也有）：诊断信息、应用日志、网关日志与修复账本打成 zip，交给系统分享面板。打包前先列出包里有什么；密钥、令牌、邮箱和你发给 Claude 的消息内容都先抹掉，会话记录不在包里。
@@ -108,7 +113,7 @@ cccodroid 让执行回到你自己的设备上：云端只负责模型推理，�
   - **已知问题**：还没查清、也没完全排除的问题，以及目前知道的情况，列在 [docs/known-issues.zh-CN.md](docs/known-issues.zh-CN.md)。
   - **权限说明**：每个权限拿来干什么、什么时候问、不给会怎样，见 [docs/permissions.zh-CN.md](docs/permissions.zh-CN.md)；发现安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
 - **USB 调试另一台设备**：OTG 线连上后运行 `usb-adb`，就能照常 `adb devices / install / shell`。
-- **自检**：`cccodroid-selftest` 逐项实测约 70 项工具与用法（含 ffmpeg 与硬件编码探测）；工具说明会注入 Claude 的系统提示，让它知道手里有什么。
+- **自检**：`cccodroid-selftest` 逐项实测 70 多项工具与用法（含 ffmpeg 与硬件编码探测）；工具说明会注入 Claude 的系统提示，让它知道手里有什么。
 
 ## 安装
 
@@ -131,7 +136,7 @@ cccodroid 让执行回到你自己的设备上：云端只负责模型推理，�
 
 **离线安装**：先把 `devkit-cc.codroid.tar.gz` 下到手机上，首次启动时选「选择本地文件…」挑它，不再下载。装之前会核对它是不是已发布的版本。
 
-**版本**：v0.3.0 是第一个稳定版。每个大版本走 21 个小版本（0.3.0–0.3.20，现在是 0.4.x）；每一版都能覆盖安装，数据和装好的东西都会保留。
+**版本**：v0.3.0 是第一个稳定版。每个大版本走 21 个小版本（0.3.0–0.3.20，现在是 0.6.x）；每一版都能覆盖安装，数据和装好的东西都会保留。
 
 ## 交流与参与
 
@@ -140,7 +145,7 @@ cccodroid 让执行回到你自己的设备上：云端只负责模型推理，�
 - **讨论区**：[GitHub Discussions](https://github.com/greyoak111/cccodroid/discussions)，想法和提问都欢迎。
 - **Discord**：[cccodroid society](https://discord.gg/jE6KW8kwpe)，中英文都行。
 
-**这个项目目前只有作者一个人在维护，非常需要帮手。** 机型报告、译文校对、组件配方、文档、代码，不会写代码也能帮上忙。怎么参与见 [贡献指南](CONTRIBUTING.zh-CN.md)。
+**这个项目的日常维护目前主要靠作者一个人，有几位群友帮着测试、审查和做红队，仍然非常需要帮手。** 机型报告、译文校对、组件配方、文档、代码，不会写代码也能帮上忙。怎么参与见 [贡献指南](CONTRIBUTING.zh-CN.md)。
 
 <img src="docs/assets/qq-group.jpg" alt="QQ 交流群二维码，群号 1062538743" width="220">
 
@@ -162,6 +167,7 @@ cccodroid.apk（Java 外壳：安装器 + 前台服务 + WebView）
   ├─ 官方 Claude Code（linux-arm64 glibc 版，原版二进制）
   │     └─ 由 glibc 加载器运行，--preload 一个处理 seccomp 的小库
   ├─ lib/arm64-v8a/libldlinux.so   同一份 glibc 加载器，36 版经它启动 glibc 程序
+  ├─ files/gw/       网关自己的运行库（Node、glibc 等，0.6.7 起），每次启动前按安装包核对
   └─ 网关 gateway/server.mjs + gw/（Node）：管理 claude 进程、事件流、队列、接口配置 → 界面 gateway/web/
 ```
 
@@ -173,7 +179,7 @@ cccodroid.apk（Java 外壳：安装器 + 前台服务 + WebView）
 
 ## 工程演进
 
-从第一个提交到 v0.5.19 用了 20 天：570 个提交，104 个版本。下表按工程阶段整理，每一行都能在提交历史和 [Releases](https://github.com/greyoak111/cccodroid/releases) 里查到。
+从第一个提交到 v0.6.6 用了 24 天：639 个提交，112 个版本。下表按工程阶段整理，每一行都能在提交历史和 [Releases](https://github.com/greyoak111/cccodroid/releases) 里查到。
 
 | 阶段 | 版本 | 关键工程 |
 |---|---|---|
@@ -183,6 +189,7 @@ cccodroid.apk（Java 外壳：安装器 + 前台服务 + WebView）
 | 结构重整 | 0.3.4 – 0.4.0 | 网关拆成路由层加 `gw/` 下的功能模块；前端拆成 `web/app/` 下的分段，由网关拼接下发；工具包按模块装卸，模块清单签名；记录与磁盘状态主动对账；会话级模型与接口，各会话可以钉在不同接口上并行；targetSdk 36：exec 改走 linker64 和 APK 自带的 ld.so，配 exec 垫片，28 / 36 双包；定时任务由系统闹钟唤起 |
 | 体验与原创 | 0.4.1 – 0.5.0 | 分段并行下载与备用线路；`gw/streamfix.mjs` 给第三方调用的流式回答补上结尾事件，避免整段重答；网关测试接入 CI 与发版前置；脉络：会话亲缘图、档号、按窗口懒加载；动效系统统一进场与退场；子代理卡与联络簿；界面配置收进 `ccapp-ui.json`；发版收成一条流水线（构建 → 核包 → 发布 → 官网直链核对） |
 | 安全加固 | 0.5.1 – 0.5.19 | 经过十余轮外部审查：原子写盘，环境变量黑名单，所有清单签名并绑定 release 防回放；界面迁到专用回环地址 127.0.0.2，网关请求按次 HMAC 签名，不再传令牌原文；PreToolUse 钩子对敏感操作再确认；提示词与会话记录完整性封签；PR 防投毒初筛，正式签名钥匙只对 main 放行；特权命令白名单，白名单之外逐条原生确认 |
+| 审查与纵深防御 | 0.5.20 – 0.6.7 | 群友逐版审查（单 0.6.0 一版就处理了 80 多条），外加群友的红队测试；会改宿主行为的开关（保活增强、特权命令免确认、设备工具）改为系统锁屏验证后才生效，激活 Shizuku 要在原生对话框点允许；项目里会自动运行的钩子、MCP 先问；界面与网关文件启动和运行中都和安装包核对；Claude Code 按 Anthropic 签名清单放行，网关用独立的运行库；交给 Claude Code 的配置先过破甲特征检查 |
 
 一直守着的几条约束：
 
@@ -196,7 +203,7 @@ cccodroid.apk（Java 外壳：安装器 + 前台服务 + WebView）
 
 cccodroid 力求遵守 [Anthropic 对运行 Claude Code 的产品的条款](https://code.claude.com/docs/en/legal-and-compliance)。下面如实写明应用实际怎么做，你可以自己判断：
 
-- **程序怎么运行。** Claude Code 的程序文件与官方 linux-arm64 版逐字节一致：按官方 sha256 清单校验，不打任何补丁。安卓没有 `/lib/ld-linux-aarch64.so.1`，所以由 glibc 加载器启动（工具包里那份，36 版用的是 APK 里的同一份），并预加载一个 61 行的小库（[`seccomp-enosys.c`](android/native/seccomp-enosys.c)），把安卓 seccomp 过滤器禁止的系统调用改成返回 ENOSYS。这个库不读、不改 Claude Code 的代码和内存，只让进程不被系统杀掉。
+- **程序怎么运行。** Claude Code 的程序文件与官方 linux-arm64 版逐字节一致：按官方 sha256 清单校验，不打任何补丁。安卓没有 `/lib/ld-linux-aarch64.so.1`，所以由 glibc 加载器启动（工具包里那份，36 版用的是 APK 里的同一份），并预加载一个 67 行的小库（[`seccomp-enosys.c`](android/native/seccomp-enosys.c)），把安卓 seccomp 过滤器禁止的系统调用改成返回 ENOSYS。这个库不读、不改 Claude Code 的代码和内存，只让进程不被系统杀掉。
 - **用 Claude 订阅登录。** 登录就是 Claude Code 自己的 `claude auth login`：你在浏览器里的 Anthropic 页面上授权，令牌由 Claude Code 写进它自己的 `~/.claude/.credentials.json`（应用从不读这个文件）；登录状态下，Claude Code 直连 api.anthropic.com，不经过我们的任何进程。实际上这和"SSH 到一台自己的 Linux 机器上运行 Claude Code 并登录"是一回事：这台 Linux 机器就是手机，应用是屏幕和键盘。每一轮都由你发起：要么是你发的消息，要么是你自己设的定时任务。定时任务跑在你自己的手机、你自己的账户上，用的仍是同一个未修改的 Claude Code；跑的时候没人看着，所以凡是需要确认的操作一律拒绝，应用不会替你点「允许」。0.4.2 起，用订阅账户跑的定时任务默认不执行，要你自己打开，并先确认「无人值守使用以 Anthropic 条款为准」。Anthropic 的条款对这种情况有明文：不妨碍「终端用户用自己的 Claude 订阅登录未经修改的 Claude Code 程序，包括由平台托管 Claude Code 的情形」（原文：does not prevent an end user from signing in to the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude Code）。
 - **一次性授权码。** 正常情况下，浏览器在本机直接把授权码交回 Claude Code，不经过应用。自动回传失败时（比如在别的设备上授权），应用打开内置终端并在里面运行 `claude auth login`，你把授权码贴给 Claude Code 自己的提示。终端只是通用的字节通道，和 Termux、SSH 一样；应用没有任何接收授权码的输入框，也不解析、不保存、不记录它。
 - **权限确认。** 和官方命令行一样，Claude 在改文件、跑命令、联网之前会先问你，你在对话里回答。默认模式是「逐项确认」；「全部放行」可以选，但要先确认一次。
@@ -281,9 +288,13 @@ App 下载哪个版本的工具包，由 [devkit-sources.txt](devkit-sources.txt
 - **[wangxp12](https://github.com/wangxp12)**：0.3.x 期间在交流群里的项目反馈与 bug 报告。
 - **[unoyg](https://github.com/unoyg)**：0.3.x 期间在交流群里的项目反馈与 bug 报告。
 - **[fisHarly0](https://github.com/fisHarly0)**：0.3.x 期间在交流群里提的改进建议。
-- **[chenshi723](https://github.com/chenshi723)**：0.4.x 期间在交流群里对界面前端提的改进意见。整套界面动效就是从 ta 那句「动效寒酸」开始做的（0.4.11），之后又指出侧栏收起的残影、新对话问候语重复渲染、流式输出不够顺、DeepSeek 余额显示为 0、字体跟随系统不全，0.4.11–0.4.12 陆续修好。0.5.15 的 OpenAI 桥图形配置与安全卸载也出自 ta 的 PR（[#58](https://github.com/greyoak111/cccodroid/pull/58)）。
+- **[chenshi723](https://github.com/chenshi723)**：0.4.x 期间在交流群里对界面前端提的改进意见。整套界面动效就是从 ta 那句「动效寒酸」开始做的（0.4.11），之后又指出侧栏收起的残影、新对话问候语重复渲染、流式输出不够顺、DeepSeek 余额显示为 0、字体跟随系统不全，0.4.11–0.4.12 陆续修好。0.5.15 的 OpenAI 桥图形配置与安全卸载也出自 ta 的 PR（[#58](https://github.com/greyoak111/cccodroid/pull/58)），组件 [cccodroid-openai-bridge](https://github.com/chenshi723/cccodroid-openai-bridge) 也是 ta 维护的。0.5.20 起逐版做全面审查（0.6.0 一版 80 多条，0.6.4 一版十二份报告），还排查出后台程序「保留」后仍反复确认的问题（[#167](https://github.com/greyoak111/cccodroid/issues/167)，0.6.7 修复）。
 - **[leemwood](https://github.com/leemwood)**：在交流群里指出网页预览「缺了元素选取」，促成了 0.4.14 的开发者工具和「选取元素，交给 Claude」。
 - **[hwsyyds666](https://github.com/hwsyyds666)**：一加 Ace 5（ColorOS 16）机型报告（[#61](https://github.com/greyoak111/cccodroid/issues/61)）。
+- **[zx-5426](https://github.com/zx-5426)**、**[1fshi26](https://github.com/1fshi26)**、**[FatBrother1](https://github.com/FatBrother1)**：红队主力，对 0.6.x 的安全加固贡献很大。
+  - zx-5426 提供的红队资料，让 0.6.7 的破甲特征检查补上了好几类专为躲检测改写的说法；另有 21 个修复提交（分段下载写盘、补尾、并发缩图、定时任务、队列卡住、账本容错等），0.6.4–0.6.7 陆续合并。
+  - 1fshi26 整理的破甲研究资料用在了 0.6.2 的加固上：项目里打开就会自动运行的钩子、MCP 改成先问你再加载。
+  - FatBrother1 参与红队测试。
 
 报告问题、测试机型、审查代码同样是贡献，都会记在这里。
 

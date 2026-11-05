@@ -6,6 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/greyoak111/cccodroid?color=c96442&label=release)](https://github.com/greyoak111/cccodroid/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/greyoak111/cccodroid/total?color=c96442)](https://github.com/greyoak111/cccodroid/releases)
+[![Stars](https://img.shields.io/github/stars/greyoak111/cccodroid?color=c96442)](https://github.com/greyoak111/cccodroid/stargazers)
 ![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3ddc84)
 [![License](https://img.shields.io/github/license/greyoak111/cccodroid)](LICENSE)
 
@@ -68,7 +69,7 @@ See **[Design philosophy](docs/design-philosophy.md)**.
 - **The toolchain installs by module** (Extensions → Toolkit modules, from 0.3.9): it is split into base, command-line tools, C/C++ compilers, Java and Android packaging, graphics libraries, audio/video, docs and data, Go and the Node.js ecosystem. You pick modules on first install and can add or remove them later. Each one lists its purpose, main commands, size, dependencies and which components use it; typing a command from a module you have not installed tells you where to find it. Upgrading from 0.3.8 or earlier installs every module, so nothing goes missing.
 - **Optional components** (Extensions → Optional components): large tools that don't ship with the app; download them only if you need them. Each build matches a specific toolchain release, is checked against its SHA-256 and a per-file manifest before anything is installed, and uninstalls cleanly.
   - **Browser component (headless Chromium 155)**, about 254 MB to download and 750 MB installed: lets Claude open pages headlessly — screenshots, PDF export, the rendered DOM, and scripted browsing with puppeteer-core. It comes with a skill that tells Claude how to use it.
-  - **Community components** from the [cccodroid-components](https://github.com/greyoak111/cccodroid-components) repository. There are currently 28, or 29 with the browser above. Dev: GitHub CLI (gh), Godot (headless runs, APK export), Graphviz / PlantUML diagrams, Hugo, reverse engineering (rizin, binwalk). Media: Blender (headless compositing and rendering, 3D on the GPU), LilyPond (music engraving), a music production toolchain. Office: LibreOffice, Pandoc, a PDF toolbox, OCR (Chinese and English), LaTeX (Tectonic, with Chinese support). AI: llama.cpp. 3D and science: OpenSCAD, GNU Octave, scientific Python (numpy / scipy / matplotlib). EDA: ngspice / gnucap, Icarus Verilog / Yosys. GPU: Snapdragon driver (Vulkan / OpenGL / OpenCL), Mali driver, GPU benchmarks. Net: Cloudflare (wrangler), rclone. See the [full list](https://github.com/greyoak111/cccodroid-components#components). Indexes are ed25519-signed and rejected if they do not check out; community components are labelled as such, and builds nobody has verified on a real device ask first.
+  - **Community components** from the [cccodroid-components](https://github.com/greyoak111/cccodroid-components) repository. There are currently 29, or 30 with the browser above. Dev: GitHub CLI (gh), Godot (headless runs, APK export), Graphviz / PlantUML diagrams, Hugo, reverse engineering (rizin, binwalk). Media: Blender (headless compositing and rendering, 3D on the GPU), LilyPond (music engraving), a music production toolchain. Office: LibreOffice, Pandoc, a PDF toolbox, OCR (Chinese and English), LaTeX (Tectonic, with Chinese support). AI: llama.cpp, OpenAI bridge (preview; turns an OpenAI-compatible API into one Claude Code can use). 3D and science: OpenSCAD, GNU Octave, scientific Python (numpy / scipy / matplotlib). EDA: ngspice / gnucap, Icarus Verilog / Yosys. GPU: Snapdragon driver (Vulkan / OpenGL / OpenCL), Mali driver, GPU benchmarks. Net: Cloudflare (wrangler), rclone. See the [full list](https://github.com/greyoak111/cccodroid-components#components). Indexes are ed25519-signed and rejected if they do not check out; community components are labelled as such, and builds nobody has verified on a real device ask first.
   - **Custom components**: import a Linux arm64 program the market doesn't have (a single binary or a .tar.gz / .zip). It works out whether the program is glibc, Android-native, static or a script, and pulls missing libraries from the Termux glibc repository; once installed it is one command that both Claude and the terminal can use. Where it comes from is your responsibility.
 - **Several ways to connect**:
   - Sign in with a Claude account inside the app; after authorizing in the browser you are brought back automatically. The account card shows your 5-hour and weekly usage limits with their reset times (taken from what Claude Code itself reports after each turn — the app never queries anything with your credentials).
@@ -98,7 +99,11 @@ See **[Design philosophy](docs/design-philosophy.md)**.
   - Toolchain: pre-downloaded on Wi‑Fi only and swapped in the next time the app opens; anything you installed with pip / npm -g is kept.
   - Updates never cut each other off: while the toolchain is downloading or being replaced, the app update waits. The replacement is checked against the release manifest before the old toolchain is touched, and if it is interrupted (app restart, process killed) the next launch finishes it or rolls back.
   - **Verify / Repair** in Settings checks every toolchain file against its recorded hash; Repair reinstalls the same version and keeps your own packages. A quick check also runs at each launch.
-- **Extensions**: install, enable, disable and uninstall Claude Code plugins (search the official directory or add other marketplaces), install skills from a zip, and add or remove MCP servers — all from the Extensions tab. Everything goes through Claude Code’s own `claude plugin` / `claude mcp` commands; a plugin that needs to run a command to install shows it to you first.
+- **Extensions**: install, enable, disable and uninstall Claude Code plugins (search the official directory or add other marketplaces), install skills from a zip, and add or remove MCP servers — all from the Extensions tab. Everything goes through Claude Code’s own `claude plugin` / `claude mcp` commands; a plugin that needs to run a command to install shows it to you first. From 0.6.7, plugin hooks don't run, and your own skills are invoked as `/user:name`.
+- **Checked before anything runs** (from 0.6.7):
+  - Claude Code only runs if it matches Anthropic's signed manifest. The gateway uses its own copy of its runtime, checked against the app package before every start, so package upgrades and toolkit updates can't touch it.
+  - Config handed to Claude Code (CLAUDE.md, rules, skills, commands, agents, MCP servers, auto memory) is scanned for jailbreak patterns first. If something matches, that turn doesn't run and you're told which file and line.
+  - Project config that would run on its own (hooks, MCP servers), changes to your user-level config, and background programs left by an earlier conversation are all shown to you before anything continues.
 - **Troubleshooting**:
   - **Safe mode**: if a hook, plugin, MCP server or CLAUDE.md breaks things, turn on safe mode and Claude Code starts with its built-in `--safe-mode` — no customizations loaded, while sign-in, keys, sessions and model stay as they are. Nothing is moved or edited; turning it off restores everything.
   - **I'm stuck · bundle diagnostics** (in Settings, and on the install-failure screen): diagnostics, the app log, the gateway log and the repair ledger, packed into a zip and handed to the system share sheet. Before packing, you see a list of what goes in. Keys, tokens, email addresses and the content of your messages to Claude are scrubbed first, and conversation transcripts are not included.
@@ -107,7 +112,7 @@ See **[Design philosophy](docs/design-philosophy.md)**.
   - **Known issues**: problems not yet fully explained or ruled out, and what we know about each, are listed in [docs/known-issues.md](docs/known-issues.md).
   - **Permissions**: what each permission is for, when you're asked and what happens if you say no, in [docs/permissions.md](docs/permissions.md). Found a security problem? Report it privately as described in [SECURITY.md](SECURITY.md).
 - **USB debugging of another device**: connect it with an OTG cable and run `usb-adb`, then `adb devices / install / shell` as usual.
-- **Self-test**: `cccodroid-selftest` exercises about 70 tools and usages (including ffmpeg and a hardware-encoding probe); the tool notes are injected into Claude's system prompt so it knows what it has.
+- **Self-test**: `cccodroid-selftest` exercises more than 70 tools and usages (including ffmpeg and a hardware-encoding probe); the tool notes are injected into Claude's system prompt so it knows what it has.
 
 ## Install
 
@@ -130,7 +135,7 @@ RedMagic / ZTE: App info → App battery usage → Battery optimization → **Ba
 
 **Offline install**: download `devkit-cc.codroid.tar.gz` to the phone first, then on first launch choose "Choose a local file…" and pick it. Nothing else is downloaded, and the file is checked against the published releases before installing.
 
-**Versions**: v0.3.0 was the first stable release. Each minor series runs 21 releases (0.3.0–0.3.20, now 0.4.x); every release installs over the old one and keeps your data and installed tools.
+**Versions**: v0.3.0 was the first stable release. Each minor series runs 21 releases (0.3.0–0.3.20, now 0.6.x); every release installs over the old one and keeps your data and installed tools.
 
 ## Community and contributing
 
@@ -138,7 +143,7 @@ RedMagic / ZTE: App info → App battery usage → Battery optimization → **Ba
 - **Chat**: the [cccodroid society](https://discord.gg/jE6KW8kwpe) Discord server, English or Chinese.
 - **Bugs**: in the app, tap Settings → Report on GitHub; your device and self-test results are filled in for you.
 
-**cccodroid is maintained by one person and badly needs help.** Device reports, translation fixes, component recipes, docs and code are all welcome, and you can help without writing code. See the [contributing guide](CONTRIBUTING.md).
+**Day-to-day maintenance is still mostly one person, with a few community members testing, reviewing and red-teaming, so help is very welcome.** Device reports, translation fixes, component recipes, docs and code are all welcome, and you can help without writing code. See the [contributing guide](CONTRIBUTING.md).
 
 ## Architecture
 
@@ -158,6 +163,7 @@ cccodroid.apk (Java shell: installer + foreground service + WebView)
   ├─ official Claude Code (linux-arm64 glibc build, unmodified binary)
   │     └─ started by the glibc loader with --preload of a tiny seccomp library
   ├─ lib/arm64-v8a/libldlinux.so   the same glibc loader; the 36 build starts glibc programs through it
+  ├─ files/gw/       the gateway's own runtime (Node, glibc and so on, from 0.6.7), checked against the app package before every start
   └─ gateway gateway/server.mjs + gw/ (Node): runs claude, event stream, queue, provider config → UI gateway/web/
 ```
 
@@ -169,7 +175,7 @@ cccodroid.apk (Java shell: installer + foreground service + WebView)
 
 ## Engineering history
 
-From the first commit to v0.5.19 took 20 days: 570 commits and 104 releases. The table groups the work by engineering phase; every row can be traced in the commit history and on the [Releases](https://github.com/greyoak111/cccodroid/releases) page.
+From the first commit to v0.6.6 took 24 days: 639 commits and 112 releases. The table groups the work by engineering phase; every row can be traced in the commit history and on the [Releases](https://github.com/greyoak111/cccodroid/releases) page.
 
 | Phase | Versions | Key engineering |
 |---|---|---|
@@ -179,6 +185,7 @@ From the first commit to v0.5.19 took 20 days: 570 commits and 104 releases. The
 | Restructuring | 0.3.4 – 0.4.0 | Gateway split into a routing layer plus feature modules under `gw/`; front end split into parts under `web/app/` that the gateway joins and serves; toolkit installed and removed per module, with signed module manifests; active reconciliation of records against disk; per-session model and provider, so sessions pinned to different providers run in parallel; targetSdk 36: exec through linker64 and an ld.so shipped in the APK, with an exec shim, shipped as twin 28 / 36 APKs; scheduled tasks woken by system alarms |
 | Experience and original features | 0.4.1 – 0.5.0 | Segmented parallel downloads with fallback routes; `gw/streamfix.mjs` adds the missing end-of-stream events to third-party streaming replies so whole answers aren't regenerated; gateway tests wired into CI and the release gate; Lineage: a session ancestry graph with archive IDs and windowed lazy loading; one motion system for every enter and exit; subagent cards and a contact log; UI settings consolidated into `ccapp-ui.json`; releases reduced to one pipeline (build → verify → publish → site link check) |
 | Hardening | 0.5.1 – 0.5.19 | More than ten rounds of external review: atomic writes, an environment-variable deny-list, every manifest signed and bound to its release against replay; the UI moved to a dedicated loopback address, 127.0.0.2, with per-request HMAC signatures to the gateway instead of the raw token; a PreToolUse hook that asks again before sensitive actions; integrity seals on prompts and session logs; PR poisoning screening, with the release signing key released only to main; an allow-list for privileged commands, with a native confirmation for everything outside it |
+| Review and defense in depth | 0.5.20 – 0.6.7 | Release-by-release community review (0.6.0 alone handled more than 80 findings) plus red-team testing by community members; switches that change how the host behaves (keep-alive boost, no per-command confirmation for privileged commands, device tools) only take effect after the system lock-screen check, and activating Shizuku needs a tap on a native dialog; project hooks and MCP servers that would run on their own are asked about first; UI and gateway files are checked against the app package at startup and while running; Claude Code is allowed to run only against Anthropic's signed manifest, and the gateway runs on its own runtime; config handed to Claude Code is scanned for jailbreak patterns |
 
 Rules the project has held to throughout:
 
@@ -192,7 +199,7 @@ Rules the project has held to throughout:
 
 cccodroid aims to follow [Anthropic's terms for products that run Claude Code](https://code.claude.com/docs/en/legal-and-compliance). Below is exactly what the app does, so you can judge for yourself:
 
-- **How the binary runs.** The Claude Code file is byte-for-byte the official linux-arm64 build: checked against the official sha256 manifest and never patched. Android has no `/lib/ld-linux-aarch64.so.1`, so it is started through the glibc loader (the toolchain's copy, or in the 36 build the identical copy inside the APK), with a 61-line preload library ([`seccomp-enosys.c`](android/native/seccomp-enosys.c)) that turns system calls Android's seccomp filter forbids into ENOSYS. The library does not read or change Claude Code's code or memory; it only keeps the process from being killed.
+- **How the binary runs.** The Claude Code file is byte-for-byte the official linux-arm64 build: checked against the official sha256 manifest and never patched. Android has no `/lib/ld-linux-aarch64.so.1`, so it is started through the glibc loader (the toolchain's copy, or in the 36 build the identical copy inside the APK), with a 67-line preload library ([`seccomp-enosys.c`](android/native/seccomp-enosys.c)) that turns system calls Android's seccomp filter forbids into ENOSYS. The library does not read or change Claude Code's code or memory; it only keeps the process from being killed.
 - **Signing in with a Claude subscription.** Sign-in is Claude Code's own `claude auth login`. You authorize on Anthropic's page in your browser, Claude Code writes the token to its own `~/.claude/.credentials.json` (the app never reads that file), and while signed in Claude Code talks to api.anthropic.com directly, not through any process of ours. In practice this is the same as SSHing into a Linux machine you own, running Claude Code there and signing in: here the Linux machine is the phone, and the app is the screen and keyboard. Every turn starts with you: either a message you send, or a scheduled task you set up yourself. Scheduled tasks run on your own phone, under your own account, with the same unmodified Claude Code; since nobody is watching, anything that needs approval is refused — the app never clicks "Allow" for you. Since 0.4.2, scheduled tasks that would run on a subscription account are off by default; you turn them on yourself after accepting that unattended use is governed by Anthropic's terms. Anthropic's terms cover this case explicitly: they do not prevent "an end user from signing in to the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude Code".
 - **The one-time authorization code.** Normally the browser hands the code back to Claude Code automatically, on this device, without passing through the app. If that fails (for example you authorized on another device), the app opens its built-in terminal and runs `claude auth login` there; you paste the code into Claude Code's own prompt. The terminal is a generic byte channel, like Termux or SSH; the app has no field that accepts the code and never parses, saves or logs it.
 - **Permission prompts.** Like the official CLI, Claude asks before editing files, running commands or going online, and you answer in the chat. The default mode is "Ask each time"; "Allow everything" is available but asks for confirmation first.
@@ -277,9 +284,13 @@ Layout:
 - **[wangxp12](https://github.com/wangxp12)**: feedback and bug reports in the community group throughout 0.3.x.
 - **[unoyg](https://github.com/unoyg)**: feedback and bug reports in the community group throughout 0.3.x.
 - **[fisHarly0](https://github.com/fisHarly0)**: suggestions for improvements in the community group during 0.3.x.
-- **[chenshi723](https://github.com/chenshi723)**: front-end suggestions in the community group during 0.4.x. The whole interface motion system in 0.4.11 started from their remark that the app's motion felt bare; they then pointed out the sidebar's leftover animation when closing, the new-chat greeting rendering twice, choppy streaming, the DeepSeek balance showing 0 and fonts not fully following the system — fixed across 0.4.11–0.4.12. The OpenAI bridge configuration panel and safe uninstall in 0.5.15 came from their PR ([#58](https://github.com/greyoak111/cccodroid/pull/58)).
+- **[chenshi723](https://github.com/chenshi723)**: front-end suggestions in the community group during 0.4.x. The whole interface motion system in 0.4.11 started from their remark that the app's motion felt bare; they then pointed out the sidebar's leftover animation when closing, the new-chat greeting rendering twice, choppy streaming, the DeepSeek balance showing 0 and fonts not fully following the system — fixed across 0.4.11–0.4.12. The OpenAI bridge configuration panel and safe uninstall in 0.5.15 came from their PR ([#58](https://github.com/greyoak111/cccodroid/pull/58)), and they maintain the [cccodroid-openai-bridge](https://github.com/chenshi723/cccodroid-openai-bridge) component. From 0.5.20 on they have reviewed every release in depth (more than 80 findings for 0.6.0, twelve reports for 0.6.4), and they tracked down why background programs kept asking for confirmation after "Keep" ([#167](https://github.com/greyoak111/cccodroid/issues/167), fixed in 0.6.7).
 - **[leemwood](https://github.com/leemwood)**: pointed out in the community group that the web preview lacked element picking, which led to the DevTools and "pick an element for Claude" in 0.4.14.
 - **[hwsyyds666](https://github.com/hwsyyds666)**: device report for the OnePlus Ace 5 on ColorOS 16 ([#61](https://github.com/greyoak111/cccodroid/issues/61)).
+- **[zx-5426](https://github.com/zx-5426)**, **[1fshi26](https://github.com/1fshi26)** and **[FatBrother1](https://github.com/FatBrother1)**: the core of the red team, and a big part of the 0.6.x security work.
+  - zx-5426's red-team material let the 0.6.7 jailbreak check catch several kinds of wording written specifically to dodge detection. They also contributed 21 fix commits (segmented download writes, the stream fix, concurrent thumbnails, scheduled tasks, a stuck queue, ledger robustness and more), merged across 0.6.4–0.6.7.
+  - 1fshi26's jailbreak research notes went into the 0.6.2 hardening: hooks and MCP servers in a project that would run on their own now ask you before loading.
+  - FatBrother1 takes part in red-team testing.
 
 Reports, device testing and code review are contributions too, and they're recorded here.
 
