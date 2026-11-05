@@ -415,8 +415,9 @@ export async function routeQueue(req, res, u, p) {
       // ⚡ 也一样：执行配置变了就宁可排队等这一轮结束，不要把消息塞进用旧接口/旧模型的进程
       if (!(lr && sameExec(lr, it) && tryInject(lr, it))) {
         QUEUE.unshift(it);
-        // 那一轮答完了、只剩后台任务，输入又已经关了：这条只能等它结束。用户点了 ⚡ 就是不等——连同后台任务结束它，收尾后这条接着发
-        if (lr && lr.idle && !lr.inputOpen && !lr.ended) { log("⚡ 上一轮只剩后台任务且输入已关，结束它好发出排着的消息"); abortRun(lr, { hold: false }); }
+        // 那一轮答完了、只剩后台任务：这条只能等它结束。用户点了 ⚡ 就是不等——连同后台任务结束它，收尾后这条接着发。
+        // 输入还开着也要结束：配置已经变了，继续等它不会变成能注入的状态（#139 回归）
+        if (lr && lr.idle && !lr.ended) { log("⚡ 上一轮只剩后台任务，结束它好发出排着的消息"); abortRun(lr, { hold: false }); }
       }
     } else if (act === "edit") {
       const t = String(b.text || "").trim();

@@ -5,13 +5,19 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { CFG } from "../gw/config.mjs";
+import { NEXT } from "../gw/http.mjs";
 
-const { QUEUE, RUN_LANE, RUN_SESSIONS, enqueue, saveRunMark, sidForItem } = await import("../gw/queue.mjs");
+const { QUEUE, RUN_LANE, RUN_SESSIONS, enqueue, saveRunMark, sidForItem, routeQueue } = await import("../gw/queue.mjs");
 const { pickProvider, execIntent } = await import("../gw/run.mjs");
 const { RUNS, maxParallel } = await import("../gw/runs.mjs");
 const { setSessModel, clearSessModel } = await import("../gw/sessmodel.mjs");
+const srv = http.createServer(async (req, res) => { const u = new URL(req.url, "http://x"); if ((await routeQueue(req, res, u, u.pathname)) === NEXT) res.writeHead(404).end(); });
+await new Promise((ok) => srv.listen(0, "127.0.0.1", ok));
+after(() => srv.close());
+const post = async (p, b) => { const r = await fetch(`http://127.0.0.1:${srv.address().port}${p}`, { method: "POST", body: JSON.stringify(b) }); return { status: r.status, body: await r.json() }; };
 
 const RUN_MARK = path.join(CFG.home, "ccapp-run-mark.json");
 const fake = [];
@@ -141,6 +147,37 @@ test("显式插话也核对执行配置：换了模型就不再塞进旧进程�
   } finally {
     if (B) dropQ(B);
     if (C) dropQ(C);
+    RUNS.delete(runId); RUN_LANE.delete(runId);
+    clearSessModel(sid);
+  }
+});
+
+test("配置变化后 ⚡ 会结束空闲轮次，而不是永久卡住（#139 回归）", async () => {
+  fill();
+  const sid = crypto.randomUUID();
+  setSessModel(sid, { model: "claude-v062-e" });
+  const intent = execIntent({ sessionId: sid });
+  let injected = 0;
+  const runId = "v062q-promote";
+  const run = {
+    id: runId, text: "", startedAt: Date.now(), log: [], sessionId: sid, idle: true, ended: false, inputOpen: true,
+    lane: "s:" + sid, provider: intent.P.id, exec: { provider: intent.P.id, model: intent.model, effort: intent.effort },
+    inject: () => { injected++; return true; }, pendingInject: [],
+  };
+  RUNS.set(runId, run); RUN_LANE.set(runId, "s:" + sid);
+  let it;
+  try {
+    setSessModel(sid, { model: "claude-v062-f" });          // 面板已换模型：旧进程不能再用
+    it = enqueue({ message: "立即发", sessionId: sid });
+    assert.ok(QUEUE.includes(it), "配置不一致：先排队");
+    const r = await post("/api/queue/promote", { id: it.id });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(injected, 0, "不能塞进旧进程");
+    assert.equal(run.aborted, true, "应结束旧的空闲轮次，让消息按新配置起");
+    assert.equal(run.retired, true);
+    assert.ok(QUEUE.includes(it), "消息仍排着，等这一轮收尾后发出");
+  } finally {
+    if (it) dropQ(it);
     RUNS.delete(runId); RUN_LANE.delete(runId);
     clearSessModel(sid);
   }
