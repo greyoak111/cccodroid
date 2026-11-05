@@ -37,6 +37,21 @@ const COMP_COMMUNITY_INDEX = process.env.CCAPP_COMPONENTS_COMMUNITY_INDEX ||
 const COMP_INDEX_PUBKEY = crypto.createPublicKey(
   "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA4u1V3UuRVZgXwqXXQaQIBaefPf2PCGqKqvsna9Pgzzs=\n-----END PUBLIC KEY-----\n");
 export const COMP_DIR = PREFIX ? path.join(path.dirname(PREFIX), "components") : "";
+/** 读普通文件（lstat + O_NOFOLLOW|O_NONBLOCK）：FIFO/设备文件直接当读不到，别把网关事件循环卡死 */
+function readSmall(f, max = 1 << 20) {
+  try {
+    if (!fs.lstatSync(f).isFile()) return null;
+    const fd = fs.openSync(f, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    try {
+      const st = fs.fstatSync(fd);
+      if (!st.isFile() || st.size > max) return null;
+      const b = Buffer.alloc(st.size);
+      let off = 0;
+      while (off < b.length) { const n = fs.readSync(fd, b, off, b.length - off, off); if (!n) break; off += n; }
+      return b.subarray(0, off).toString("utf8");
+    } finally { fs.closeSync(fd); }
+  } catch { return null; }
+}
 const COMP_JOBS = new Map();      // id → { phase, done, total, error, child, cancelled }
 export let compIndexCache = { at: 0, data: null, error: "" };
 
@@ -44,7 +59,9 @@ export function devkitIdentity() {
   try { return JSON.parse(fs.readFileSync(path.join(PREFIX, ".devkit-ok"), "utf8")); } catch { return null; }
 }
 const compRecFile = (id) => path.join(COMP_DIR, id + ".json");
-export function compRecord(id) { try { return JSON.parse(fs.readFileSync(compRecFile(id), "utf8")); } catch { return null; } }
+export function compRecord(id) {
+  try { const t = readSmall(compRecFile(id)); return t == null ? null : JSON.parse(t); } catch { return null; }
+}
 function compWriteRecord(id, rec) {
   fs.mkdirSync(COMP_DIR, { recursive: true });
   fs.writeFileSync(compRecFile(id) + ".tmp", JSON.stringify(rec, null, 1));
@@ -99,7 +116,8 @@ const compCacheFile = () => COMP_DIR && path.join(COMP_DIR, "index.cache");
 function compLoadDiskCache() {
   if (compIndexCache.data || !compCacheFile()) return;
   try {
-    const c = JSON.parse(fs.readFileSync(compCacheFile(), "utf8"));
+    const t = readSmall(compCacheFile()); if (t == null) return;
+    const c = JSON.parse(t);
     if (c && c.data && c.data.components) { compIndexCache = { at: c.at || 0, data: c.data, error: "" }; compIndexViaMirror = c.viaMirror && typeof c.viaMirror === "object" ? c.viaMirror : {}; }
   } catch {}
 }
@@ -398,7 +416,7 @@ function compRemoveFiles(id, rec) {
   for (const d of [...dirs].sort((a, b) => b.length - a.length)) { try { fs.rmdirSync(path.join(PREFIX, d)); } catch {} }
   const sk = rec.skill && skillDst(rec.skill);
   // 标记写着别的组件（那边接管了同名目录）就不删；没有标记的是旧版装的，照旧删
-  let owner = ""; try { owner = sk ? fs.readFileSync(path.join(sk, SKILL_OWNER), "utf8").trim() : ""; } catch {}
+  let owner = sk ? (readSmall(path.join(sk, SKILL_OWNER), 512) || "").trim() : "";
   if (sk && (!owner || owner === id)) { const ucb = ucAppBegin(); fs.rmSync(sk, { recursive: true, force: true }); ucAppWrote([sk], ucb); }
 }
 
@@ -459,7 +477,7 @@ function compInstallSkill(id, rel, rec) {
   // 目录里的 .cccodroid-component 记着是哪个组件放的：装到一半被杀、记录还没写上 skill 的，重装时认得出是自己的
   const ucb = ucAppBegin();
   try { fs.rmdirSync(dst); } catch {}
-  let owner = ""; try { owner = fs.readFileSync(path.join(dst, SKILL_OWNER), "utf8").trim(); } catch {}
+  let owner = (readSmall(path.join(dst, SKILL_OWNER), 512) || "").trim();
   if (owner === id) fs.rmSync(dst, { recursive: true, force: true });
   if (fs.existsSync(dst)) { log(`[comp] ${id} 的技能 ${name} 跟已有技能同名，没装（保留原来的）`); return; }
   try {
@@ -484,7 +502,7 @@ export function compHealSkills() {
     try {
       const want = skillDst((skillMeta(path.join(PREFIX, rel.slice(4))) || {}).name || id);
       if (!want) continue;                                            // 技能名不合法：安装时已记过日志
-      let owner = ""; try { owner = fs.readFileSync(path.join(want, SKILL_OWNER), "utf8").trim(); } catch {}
+      let owner = (readSmall(path.join(want, SKILL_OWNER), 512) || "").trim();
       if (fs.existsSync(want) && owner !== id && (!fs.statSync(want).isDirectory() || fs.readdirSync(want).length)) continue;   // 同名已有别人的技能（或同名文件）：不补，也别每次刷列表都记一条日志
       compInstallSkill(id, rel, rec);
       if (rec.skill) { compWriteRecord(id, rec); log(`[comp] ${id} 补装技能 ${rec.skill}`); }
