@@ -209,6 +209,7 @@ export async function startRun(item) {
   const message = run.text;
   const local = message.trim().match(LOCAL_CMD_RE);
   if (local) {
+    local[1] = local[1].toLowerCase();   // /MODEL 也是网关的（复核 v067b-4）
     log(`⌘ 本地命令 /${local[1]}`);   // 参数不记：诊断包说了不含消息内容（审查 v0.5.20 08-001）
     return handleLocalCommand(local[1], (local[2] || "").trim(),
       (text, cmd) => endRun(run, { localCommand: cmd || local[1], resultText: text, durationMs: 0, costUsd: 0 }), run.sessionId, () => run.aborted);
@@ -494,7 +495,10 @@ export async function startRun(item) {
   writeUser(withNotes(message, [tamperN, ucN, integNote, arch?.note, pathNote, refN].filter(Boolean).join("\n\n"), imgs0));
   run.inputOpen = true;
   run.pendingInject = [];      // 已写进 stdin、还没被 claude 吃进去的插话
-  run.slashFlight = [];        // 空闲时送进去的斜杠命令（见 run.inject）：等它的 result
+  run.slashFlight = [];        // 空闲时送进去的斜杠命令（见 run.inject）：等它的 result。只在空闲时送，同时最多一条
+  run.slashMark = { seen: false, bg: false };   // 那条命令有没有动静（回显、压缩事件、<synthetic> 输出）、送进去后后台任务有没有变
+  const WROTE = new WeakMap();  // 普通插话 → 写进 stdin 的文字（回显按它认，别按内容猜成斜杠命令的，复核 v067b-1）
+  const textOf = (c) => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((x) => x && x.type === "text").map((x) => x.text).join("\n") : "").trim();
   run.bgTasks = 0;             // claude 报的后台任务数（见 feed）
   run.bgList = [];             // 后台任务明细：{ id, type, desc }（shell / 子代理 / monitor / 工作流），界面列出来、可单独停
   run.replays = 0;
@@ -525,6 +529,7 @@ export async function startRun(item) {
       // 所以写进去就当场画出来、算新的一轮；回显来了吞掉，它的 result 出来就算办完
       try { writeUser(item.message); } catch { return false; }
       run.slashFlight.push(item);
+      run.slashMark = { seen: false, bg: false };
       run.idle = false; resultStale = true;
       emit({ type: "inject", text: item.message, cid: item.cid, itemId: item.id });   // 先画消息（前端借它另起气泡、重新计时）
       emit({ type: "run_busy", startedAt: Date.now() });
@@ -535,7 +540,9 @@ export async function startRun(item) {
     // 插话里的档号也附上那一章的摘要（同步版：只查已有索引，等不起整理）
     let refI = "";
     if (!P.local) try { refI = refNoteSync(item.message, run.sessionId); } catch (e) { log("插话档号引用失败: " + e.message); }
-    try { writeUser(withNotes(item.message, refI || null, inlineImagesSync(item.message, P))); } catch { return false; }
+    const content = withNotes(item.message, refI || null, inlineImagesSync(item.message, P));
+    try { writeUser(content); } catch { return false; }
+    WROTE.set(item, textOf(content));
     run.pendingInject.push(item);
     saveRunMark();     // 马上落盘：送达前 App 被强停，下次启动它还能回到队列里，不会凭空消失
     log(`↪ 插话 ${item.message.trim().slice(0, 60).replace(/\s+/g, " ")}`);   // 压成一行：诊断包按行抹掉对话内容
@@ -669,8 +676,15 @@ export async function startRun(item) {
   };
   const onResult = (r) => {
     lastResult = r; resultStale = false;
-    // 空闲时送进去的斜杠命令：这个 result 就是它的（送进去前这一轮已经答完）。后台任务恰好同时回报的话会早一步认领，只影响计数
-    const slashDone = run.slashFlight.length ? run.slashFlight.shift() : null;
+    // 空闲时送进去的斜杠命令：这个 result 一般就是它的（送进去前这一轮已经答完）。
+    // 送进去后后台任务有变、命令自己又还没动静：这个多半是后台任务回报那一轮的，不认领（认领了会在命令还没办完时关 stdin，复核 v067b-3）；
+    // 只让一次，下一个 result 照认，免得没动静的命令永远挂着
+    let slashDone = null;
+    if (run.slashFlight.length) {
+      if (run.slashMark.seen || !run.slashMark.bg) { slashDone = run.slashFlight.shift(); run.slashMark = { seen: false, bg: false }; saveRunMark(); }
+      else run.slashMark.bg = false;
+    }
+    run.lastSlash = !!slashDone;
     run.meter.result(r, !isCmd && !slashDone);   // 斜杠命令不算一轮对话，但 /compact 这类真花了的 token 照记
     // 接口账本每个 result 各记各的：同一进程后台回报、插话会出好几个 result，只在结束时记最后一个会少记（#102 04-008）
     noteTokens(run.provider, r.usage);
@@ -686,24 +700,22 @@ export async function startRun(item) {
         return;
       }
     }
-    if (run.pendingInject.length) { resultStale = true; return; }   // 插话还没送到：claude 接着还要答一轮
+    if (run.pendingInject.length || run.slashFlight.length) { resultStale = true; return; }   // 插话还没送到 / 命令还没办完：claude 接着还要答一轮
     if (!run.bgTasks) return closeInput();
     // 答完了，只是后台任务（本地服务之类）还在跑：界面上算这一轮结束，进程和 stdin 留着等任务回报
     run.idle = true;
     emit({ type: "run_idle", bg: run.bgTasks, at: Date.now() });
     publishState();
   };
-  const slashEcho = (ev) => {
-    const c = ev.message?.content;
-    const txt = (typeof c === "string" ? c : Array.isArray(c) ? c.filter((x) => x && x.type === "text").map((x) => x.text).join("\n") : "").trim();
-    if (/^<local-command-(?:stdout|stderr)>/.test(txt)) return true;
-    const i = run.slashFlight.findIndex((it) => it.message.trim() === txt);
-    return i >= 0;
-  };
+  // 斜杠命令在途时才认它的回显：「<local-command-…」或命令原文
+  const slashEcho = (txt) => run.slashFlight.length > 0 && (/^<local-command-(?:stdout|stderr)>/.test(txt) || run.slashFlight.some((it) => it.message.trim() === txt));
   const onReplay = (ev) => {
     // 第一条回显是本轮的原始消息；之后每条都是一条送达的插话（按写入顺序）
-    // 斜杠命令的回显（「<local-command-…」或命令原文）吞掉：它在送进去时已经画过了，也不占普通插话的位置
-    if (run.replays > 0 && slashEcho(ev)) return;
+    // 斜杠命令的回显吞掉：它在送进去时已经画过了，也不占普通插话的位置。和排在最前的普通插话写进去的一字不差的，算那条插话
+    if (run.replays > 0) {
+      const txt = textOf(ev.message?.content), head = run.pendingInject[0];
+      if (!(head && WROTE.get(head) === txt) && slashEcho(txt)) { run.slashMark.seen = true; return; }
+    }
     const said = run.replays === 0 ? message : run.pendingInject[0] && run.pendingInject[0].message;
     if (said && usageIsPrompt(said)) usageAdd({ m: 1 }, run.sessionId);
     if (run.replays++ === 0) return;
@@ -714,6 +726,8 @@ export async function startRun(item) {
     let ev; try { ev = JSON.parse(line); } catch { return; }
     if (ev.type === "control_request") return onControl(ev);
     run.meter.feed(ev);
+    if (run.slashFlight.length && ((ev.type === "system" && (ev.subtype === "compact_boundary" || (ev.subtype === "status" && ev.status === "compacting"))) ||
+        (ev.type === "assistant" && ev.message?.model === "<synthetic>"))) run.slashMark.seen = true;
     // 清单工具一出结果就推，不等 4 秒轮询
     if (ev.type === "user" && ev.tool_use_result && (ev.tool_use_result.task || ev.tool_use_result.statusChange || ev.tool_use_result.updatedFields)) setImmediate(() => tasksCheck(run.sessionId));
     // 我们发的 set_permission_mode 的回执：被拒要记下来（以前直接丢掉，切了没生效也看不出来）
@@ -733,6 +747,7 @@ export async function startRun(item) {
     // claude 有任何别的动静（开始请求、回显通知…）就不替它收尾了：之后的 result 会正常关 stdin
     if (run.idleClose && !(ev.type === "system" && ev.subtype === "background_tasks_changed")) { clearTimeout(run.idleClose); run.idleClose = null; }
     if (ev.type === "system" && ev.subtype === "background_tasks_changed" && Array.isArray(ev.tasks)) {
+      if (run.slashFlight.length && ev.tasks.length !== run.bgTasks) run.slashMark.bg = true;
       run.bgTasks = ev.tasks.length;
       run.bgList = ev.tasks.slice(0, 30).map((t) => ({ id: String(t.task_id || ""), type: String(t.task_type || ""), desc: String(t.description || "").slice(0, 200) }));
       if (run.idle && run.bgTasks) emit({ type: "run_idle", bg: run.bgTasks });
@@ -789,6 +804,12 @@ export async function startRun(item) {
       QUEUE.unshift(...run.pendingInject.map((it) => ({ ...it, injected: false, held: !!((run.aborted && !run.retired) || run.laneHeld) })));
       run.pendingInject = [];
     }
+    // 没办完的斜杠命令也退回（复核 v067b-2）。可能已经办了一半（比如压缩完了没等到 result）：一律挂起，等用户点 ⚡ 再发
+    if (run.slashFlight.length) {
+      log(`斜杠命令 ${run.slashFlight.length} 条没等到结果，挂起退回队首`);
+      QUEUE.unshift(...run.slashFlight.map((it) => ({ ...it, injected: false, held: true })));
+      run.slashFlight = [];
+    }
     const ms = Date.now() - t0;
     // 定时任务已经花掉的（崩了、没出 result 也一样）：按 0 记会让它当作没花钱再重试（DeepSeek 复核 #1）
     const spent = () => (run.sched && run.costSeen ? { costRaw: run.costSeen } : {});
@@ -805,7 +826,7 @@ export async function startRun(item) {
       return endRun(run, { failed: true, durationMs: ms, ...spent() });
     }
     if (lastResult) {
-      const localCmd = lastResult.local_command || null;
+      const localCmd = run.lastSlash ? null : lastResult.local_command || null;   // 插进去的命令的输出已经画过，别把整轮画成命令卡（复核 v067b-5）
       log(`✔ 完成 ${ms}ms  ${lastResult.num_turns || "?"} 轮  ` +
           `上下文=${flags.contextTokens ?? "?"} out=${lastResult.usage?.output_tokens ?? "?"}  ` +
           `$${Number(lastResult.total_cost_usd || 0).toFixed(5)}${localCmd ? "  [" + localCmd + "]" : ""}`);

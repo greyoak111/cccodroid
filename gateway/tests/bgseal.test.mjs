@@ -185,11 +185,15 @@ test("斜杠命令：还在生成时照旧排队；网关自己处理的命令�
   await startRun({ id: "rslash-local", message: "fixture", cwd: root });
   const run2 = RUNS.get("rslash-local");
   await until(() => run2.idle && run2.bgTasks === 1);
-  for (const m of ["/model fixture-model", "/effort high", "/autocompact 50"]) {
+  for (const m of ["/model fixture-model", "/MODEL fixture-model", "/effort high", "/autocompact 50"]) {
     const b = enqueue({ message: m, sessionId: s2 });
     assert.equal(!!b.injected, false, m);
     QUEUE.splice(QUEUE.indexOf(b), 1);
   }
+  run2.unattended = true;            // 定时任务那一轮：用户的命令不往里插（复核 v067b-6）
+  const c = enqueue({ message: "/compact", sessionId: s2 });
+  assert.equal(!!c.injected, false, "无人值守的轮次不收命令");
+  QUEUE.splice(QUEUE.indexOf(c), 1);
   abortRun(run2);
   await until(() => endOf("rslash-local"));
 });
@@ -211,4 +215,71 @@ test("斜杠命令：不回显的（/cost /context）靠 result 收尾，之后�
   await until(() => run.pendingInject.length === 0 && events.some((e) => e.runId === "rslash-cost" && e.type === "inject" && e.text === "接着说"));
   abortRun(run);
   await until(() => endOf("rslash-cost"));
+});
+
+test("复核 v067b-1：没有命令在途时，以 <local-command- 开头的普通插话照常算送达，不被当成命令回显吞掉", async () => {
+  const s = crypto.randomUUID();
+  const t = "<local-command-stdout>报错原文</local-command-stdout> 这是什么意思";
+  script([init(s), echo("fixture"), mainStart, { sleep: 2 }, echo(t), result(), { sleep: 30 }]);
+  await startRun({ id: "rslash-fake", message: "fixture", cwd: root });
+  const run = RUNS.get("rslash-fake");
+  await until(() => run.inputOpen && run.inject && run.sessionId === s && !run.idle);
+  assert.equal(enqueue({ message: t, sessionId: s, mode: "inject" }).injected, true);
+  await until(() => events.some((e) => e.runId === "rslash-fake" && e.type === "inject" && e.text === t));
+  await until(() => !run.inputOpen);
+  assert.equal(run.pendingInject.length, 0, "送达了，result 之后照常收尾");
+  abortRun(run);
+  await until(() => endOf("rslash-fake"));
+});
+
+test("复核 v067b-3：命令在途时后台任务先回报一轮，那个 result 不认领命令、不关输入", async () => {
+  const s = crypto.randomUUID();
+  script([init(s), echo("fixture"), bg(1, "server"), result(), { sleep: 2 },
+    bg(0), mainStart, result(),                                  // 后台任务跑完，claude 回报一轮
+    { sleep: 2 },
+    { type: "system", subtype: "status", status: "compacting" },
+    { type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "manual", pre_tokens: 5000, post_tokens: 800 } },
+    { type: "user", isReplay: true, message: { role: "user", content: "<local-command-stdout>Compacted </local-command-stdout>" } },
+    { ...result(), result: "" },
+    { sleep: 30 }]);
+  await startRun({ id: "rslash-bg", message: "fixture", cwd: root });
+  const run = RUNS.get("rslash-bg");
+  await until(() => run.idle && run.bgTasks === 1);
+  assert.equal(enqueue({ message: "/compact", sessionId: s }).injected, true);
+  await until(() => run.bgTasks === 0);
+  await new Promise((r) => setTimeout(r, 800));
+  assert.equal(run.slashFlight.length, 1, "回报那一轮的 result 不算命令的");
+  assert.equal(run.inputOpen, true, "命令还没办完，输入留着");
+  await until(() => run.slashFlight.length === 0);
+  await until(() => !run.inputOpen);
+  abortRun(run);
+  await until(() => endOf("rslash-bg"));
+});
+
+test("复核 v067b-2/5：命令在途时落盘挂起；没等到 result 进程就退了退回队首挂起；命令的 result 不把整轮画成命令卡", async () => {
+  const s = crypto.randomUUID();
+  script([init(s), echo("fixture"), bg(1, "server"), result(), { sleep: 2 }]);
+  await startRun({ id: "rslash-lost", message: "fixture", cwd: root });
+  const run = RUNS.get("rslash-lost");
+  await until(() => run.idle && run.bgTasks === 1);
+  const it = enqueue({ message: "/compact", sessionId: s });
+  assert.equal(it.injected, true);
+  const mark = JSON.parse(fs.readFileSync(path.join(home, "ccapp-run-mark.json"), "utf8"));
+  assert.ok(mark.queue.some((q) => q.id === it.id && q.held), "在途的命令进了落盘快照，挂起");
+  await until(() => endOf("rslash-lost"));
+  const back = QUEUE.find((q) => q.id === it.id);
+  assert.ok(back && back.held && !back.injected, "退回队首、挂起等用户点");
+  QUEUE.splice(QUEUE.indexOf(back), 1);
+
+  const s2 = crypto.randomUUID();
+  script([init(s2), echo("fixture"), bg(1, "server"), result(), { sleep: 2 },
+    bg(0), { type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text: "Total cost: $0" }] } }, { ...result(), local_command: "cost" }]);
+  await startRun({ id: "rslash-lc", message: "fixture", cwd: root });
+  const run2 = RUNS.get("rslash-lc");
+  await until(() => run2.idle && run2.bgTasks === 1);
+  assert.equal(enqueue({ message: "/cost", sessionId: s2 }).injected, true);
+  await until(() => endOf("rslash-lc"));
+  assert.equal(run2.slashFlight.length, 0, "后台任务变了但命令有输出：照认");
+  assert.ok(!endOf("rslash-lc").localCommand, JSON.stringify(endOf("rslash-lc")));
+  assert.ok(!endOf("rslash-lc").failed);
 });

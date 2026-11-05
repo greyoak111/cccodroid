@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, PATHS } from "../gw/config.mjs";
 import { _ucFlush, _ucReset, ucAfterRun, ucAppBegin, ucAppWrote, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "../gw/userconf.mjs";
-import { keepProcs, killProcs, leftoverProcs, procStart } from "../gw/leftover.mjs";
+import { _keptReset, keepProcs, killProcs, leftoverProcs, procStart } from "../gw/leftover.mjs";
 import { hookContext } from "../gw/stream.mjs";
 import { transcriptItems } from "../gw/transcript.mjs";
 
@@ -169,6 +169,34 @@ test("留下的进程：带已结束轮次编号的列出来；还在跑的那�
     let st = ""; try { st = fs.readFileSync(`/proc/${c.pid}/stat`, "utf8"); } catch {}
     assert.ok(!alive || / Z /.test(st), "进程已结束");
   } finally { try { process.kill(-c.pid, "SIGKILL"); } catch {} }
+});
+
+test("#167 保留的看护后来起的子进程不再问；网关重启后照认；命令行对不上不认；别的照问", async () => {
+  const env = { ...process.env, CCAPP_RUN_ID: "gone-2", CCAPP_GW_PORT: String(CFG.port), CCAPP_GW_PID: String(process.pid), HOME: CFG.home };
+  const c = spawn(SH, ["-c", "while :; do sleep 0.1; done"], { env, detached: true, stdio: "ignore" });
+  const other = spawn(SH, ["-c", "sleep 30 & wait"], { env, detached: true, stdio: "ignore" });
+  await sleep(300);
+  try {
+    const me = leftoverProcs(new Map()).find((p) => p.pid === c.pid);
+    assert.ok(me);
+    keepProcs([me]);
+    await sleep(400);                 // 看护换了好几茬 sleep
+    const mineOrKids = (l) => l.some((p) => p.pid === c.pid || p.ppid === c.pid);
+    let l = leftoverProcs(new Map());
+    assert.ok(!mineOrKids(l), "新起的子进程跟着保留");
+    assert.ok(l.some((p) => p.pid === other.pid), "没保留的照问");
+    _keptReset();
+    l = leftoverProcs(new Map());
+    assert.ok(!mineOrKids(l), "网关重启后照认");
+    const f = H("ccapp-leftover-kept.json"), j = JSON.parse(fs.readFileSync(f, "utf8"));
+    for (const k of Object.keys(j.kept)) j.kept[k] = "别的命令";
+    fs.writeFileSync(f, JSON.stringify(j));
+    _keptReset();
+    assert.ok(leftoverProcs(new Map()).some((p) => p.pid === c.pid), "命令行对不上（pid 复用）不认");
+    fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(JSON.stringify(j)), boot: "x" }));
+    _keptReset();
+    assert.ok(leftoverProcs(new Map()).some((p) => p.pid === c.pid), "换了开机不认");
+  } finally { for (const x of [c, other]) try { process.kill(-x.pid, "SIGKILL"); } catch {} fs.rmSync(H("ccapp-leftover-kept.json"), { force: true }); _keptReset(); }
 });
 
 test("钩子注入可见：stream 的 hook_response 和会话记录里的 hook_additional_context", () => {

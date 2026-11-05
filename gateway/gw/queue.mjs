@@ -104,7 +104,8 @@ export function saveRunMark() {
       // 已经写进 stdin、claude 还没吃进去的插话也算排队的：一起留下
       // 新会话首条还没拿到会话号时跟着发的（只有 follow）：首条已经结束、不在 runs 里了，重启后就认不出属于哪个会话。
       // 落盘时把会话号补实（#97 02-005；跟的那条被撤销时按车道找首条跑出来的会话，#120-1）
-      queue: [...live.flatMap((r) => (r.pendingInject || []).map((it) => ({ ...it, injected: false }))), ...QUEUE]
+      // 送进去还没等到结果的斜杠命令也留下，挂起（可能已经办了一半，等用户点 ⚡ 再发）
+      queue: [...live.flatMap((r) => [...(r.pendingInject || []).map((it) => ({ ...it, injected: false })), ...(r.slashFlight || []).map((it) => ({ ...it, injected: false, held: true }))]), ...QUEUE]
         .map((q) => { const sid = q.sessionId || sidForItem(q); return sid ? { ...q, sessionId: sid } : q; }),
     }), { mode: 0o600 });
     fs.renameSync(RUN_MARK + ".tmp", RUN_MARK);
@@ -358,7 +359,8 @@ function tryInject(run, item) {
   // 斜杠命令：这一轮答完、只剩后台任务在跑时直接送进 claude（stdin 上照样认 /compact /context 这类，11-05 实测：
   // 就地压缩、后台任务不受影响）。还在生成时照旧排队等这一轮结束；网关自己处理的（/model 等）得自己单跑一轮
   const msg = item.message.trim();
-  if (msg.startsWith("/") && (!run.idle || LOCAL_CMD_RE.test(msg))) return false;
+  // 定时任务 / 无人值守的那一轮不收用户的命令：花费会记到任务头上、超预算还会把任务打断（复核 v067b-6）
+  if (msg.startsWith("/") && (!run.idle || LOCAL_CMD_RE.test(msg) || run.sched || run.unattended || run.auto)) return false;
   const same = item.sessionId ? item.sessionId === run.sessionId : (item.follow === run.id || !item.follow);
   if (!same) return false;
   return run.inject(item);
@@ -383,7 +385,7 @@ export async function routeQueue(req, res, u, p) {
     // 看这条消息要用的那家（新会话首条选的 / 会话钉的 / 全局的），不是只看全局
     const bp = pickProvider({ sessionId: b.sessionId ? String(b.sessionId) : null, follow: b.follow || null, projectId: b.projectId ? String(b.projectId) : null,
       pin: !b.sessionId && b.pin && typeof b.pin.provider === "string" ? { provider: b.pin.provider } : null }).P;
-    if (!keyOf(bp) && !bp.login && !/^\/(model|models|effort|autocompact)\b/.test(String(b.message).trim())) {
+    if (!keyOf(bp) && !bp.login && !/^\/(model|models|effort|autocompact)\b/i.test(String(b.message).trim())) {
       return sendJson(res, 503, {
         error: "no_api_key",
         message: tz("「{name}」还没填 Key。到 设置 → 接口 里填好保存，或换一个接口。", { name: bp.label || bp.id }),

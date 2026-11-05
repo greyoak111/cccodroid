@@ -10,7 +10,7 @@ import { effectiveModel, setSessModel } from "./sessmodel.mjs";
 // 而 GUI 每次调用都是新进程 —— 下一条消息就忘了。所以由网关记：
 // 0.3.16 起：在会话里打 → 只改这个会话（sid）；新会话里打（还没会话号）→ 改全局默认。
 /** 网关自己处理的命令：不交给 claude，也就不能插进正在跑的进程（queue.mjs 的 tryInject） */
-export const LOCAL_CMD_RE = /^\/(model|models|effort|autocompact)(?:\s+([\s\S]*))?$/;
+export const LOCAL_CMD_RE = /^\/(model|models|effort|autocompact)(?:\s+([\s\S]*))?$/i;
 export async function handleLocalCommand(name, arg, reply, sid, stopped = () => false) {
   // 清单、档位、校验都按这个会话真跑的那家：钉的 → 项目默认 → 全局（和 run.mjs、/api/models 同一套，#78）
   const now = effectiveModel(sid);
