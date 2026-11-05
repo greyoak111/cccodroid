@@ -50,7 +50,10 @@ export async function claudeSeal(bin0 = PATHS.claude, { force = false, home = CF
   try { bin = fs.realpathSync(bin0); } catch { return { ok: null, why: "missing" }; }
   const dir = path.dirname(bin), mf = path.join(dir, "manifest.json"), sf = mf + ".sig";
   const fp = fpFor(bin);
-  if (cache.fp === fp && cache.res) return cache.res;
+  // 刚改过的不信缓存：时间戳有粒度，同一刻里写两遍、大小不变，指纹就一样（gwpin.mjs 同理）
+  let fresh = false;
+  try { fresh = Date.now() - fs.statSync(bin).ctimeMs <= 2000; } catch {}
+  if (cache.fp === fp && cache.res && !fresh) return cache.res;
   let res;
   const ROOT = path.join(home, ".local", "share", "cccodroid", "claude");
   let m = null, sig = null, root = ROOT;

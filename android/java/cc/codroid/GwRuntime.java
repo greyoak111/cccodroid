@@ -2,6 +2,7 @@ package cc.codroid;
 
 import android.content.Context;
 import android.system.Os;
+import android.system.OsConstants;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -132,21 +133,43 @@ final class GwRuntime {
         try { return android.system.OsConstants.S_ISLNK(Os.lstat(f.getPath()).st_mode); } catch (Exception e) { return false; }
     }
 
-    /** 拷进来：先写 .tmp、再核一遍、再换名；swap 非空时边拷边改前缀（等长） */
+    /**
+     * 拷进来：写到随机名的临时文件、核过再换名；swap 非空时边拷边改前缀（等长）。
+     * 目录同 uid 可写，写的时候别人能抢先放符号链接、写完换成别的文件（DeepSeek 复核 v067 必修 1）：
+     * 临时文件 O_CREAT|O_EXCL 新建（不跟已有的链接），权限用 fchmod 打在自己打开的那个上，
+     * 换名前后都按 inode 认是不是自己写的那个，不是就删掉报错（下次起网关重来）
+     */
     private static void put(File from, File dst, String want, byte[][] swap) throws IOException {
-        File tmp = new File(dst.getPath() + ".tmp");
-        tmp.delete();
+        File tmp = new File(dst.getPath() + ".tmp-" + Long.toHexString(new java.security.SecureRandom().nextLong() & Long.MAX_VALUE));
         MessageDigest md = md();
-        try (InputStream in = new FileInputStream(from); FileOutputStream o = new FileOutputStream(tmp)) {
+        java.io.FileDescriptor fd;
+        try { fd = Os.open(tmp.getPath(), OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_EXCL | OsConstants.O_NOFOLLOW, 0600); }
+        catch (android.system.ErrnoException e) { throw new IOException(e.getMessage()); }
+        long ino;
+        try (InputStream in = new FileInputStream(from); FileOutputStream o = new FileOutputStream(fd)) {
             byte[] all = swap == null ? null : readAll(in);
             if (all != null) { swapInPlace(all, swap[0], swap[1]); md.update(all); o.write(all); }
             else { byte[] b = new byte[1 << 20]; for (int n; (n = in.read(b)) > 0; ) { md.update(b, 0, n); o.write(b, 0, n); } }
-            o.getFD().sync();
+            o.flush();
+            Os.fsync(fd);
+            Os.fchmod(fd, 0700);
+            ino = Os.fstat(fd).st_ino;
+        } catch (android.system.ErrnoException e) {
+            tmp.delete(); throw new IOException(e.getMessage());
+        } finally {
+            try { Os.close(fd); } catch (Exception ignored) {}
         }
         String got = Installer.hex(md.digest());
         if (!want.equals(got)) { tmp.delete(); throw new IOException(Tr.f("{0} 拷过来以后对不上", dst.getName())); }
-        try { Os.chmod(tmp.getPath(), 0700); } catch (Exception e) { throw new IOException(e.getMessage()); }
-        if (!tmp.renameTo(dst)) { tmp.delete(); throw new IOException(Tr.t("换名失败: ") + dst); }
+        try {
+            android.system.StructStat t = Os.lstat(tmp.getPath());
+            if (!OsConstants.S_ISREG(t.st_mode) || t.st_ino != ino) { tmp.delete(); throw new IOException(Tr.f("{0} 拷过来以后对不上", dst.getName())); }
+            Os.rename(tmp.getPath(), dst.getPath());
+            android.system.StructStat d = Os.lstat(dst.getPath());
+            if (!OsConstants.S_ISREG(d.st_mode) || d.st_ino != ino) { dst.delete(); throw new IOException(Tr.f("{0} 拷过来以后对不上", dst.getName())); }
+        } catch (android.system.ErrnoException e) {
+            tmp.delete(); throw new IOException(Tr.t("换名失败: ") + dst);
+        }
         CACHE.remove(dst.getPath());
     }
 

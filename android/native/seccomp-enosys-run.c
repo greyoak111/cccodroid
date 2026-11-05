@@ -60,6 +60,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/ptrace.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
@@ -357,6 +358,14 @@ int main(int argc, char **argv) {
        子进程里关掉它、摘掉变量：claude 起的东西里再套一层监督器时别往一个不相干的 fd 里写 */
     int pidfd = -1;
     { const char *pf = getenv("ENOSYS_RUN_PIDFD"); if (pf) { pidfd = atoi(pf); if (pidfd <= 2) pidfd = -1; } unsetenv("ENOSYS_RUN_PIDFD"); }
+    /* 网关起的（带 ENOSYS_RUN_PIDFD）：网关没了就跟着走。claude 的 PDEATHSIG 指向的是这一层（nodump.c），
+       这层不跟着走，网关崩了 claude 那棵树会一直跑到下次起网关才被清（DeepSeek 复核 v067 建议 5）。
+       终端里用户自己套的监督器不设：nohup / 后台跑的程序不该因为启动它的 shell 退出而被杀 */
+    if (pidfd >= 0) {
+        pid_t pp = getppid();
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        if (getppid() != pp) return 127;     /* 设之前网关已经没了 */
+    }
 
     pid_t pid = fork();
     if (pid < 0) {
