@@ -529,8 +529,11 @@ function billShape(j) {
   if (!j || typeof j !== "object" || Array.isArray(j)) return {};
   for (const [id, b] of Object.entries(j)) {
     if (!b || typeof b !== "object" || Array.isArray(b)) { delete j[id]; continue; }
+    // 数组元素也要校验：noteTokens/noteBalance 直接按下标读，null/字符串会抛 TypeError 带崩网关
     if (!Array.isArray(b.spends)) b.spends = [];
+    else b.spends = b.spends.filter((x) => Array.isArray(x) && x.length >= 2 && Number.isFinite(x[0]) && Number.isFinite(x[1]));
     if (!Array.isArray(b.tok)) b.tok = [];
+    else b.tok = b.tok.filter((x) => Array.isArray(x) && x.length >= 4 && Number.isFinite(x[0]) && Number.isFinite(x[1]) && Number.isFinite(x[2]) && Number.isFinite(x[3]));
     if (!b.tokOld || typeof b.tokOld !== "object") b.tokOld = { in: 0, out: 0, cache: 0 };
     else for (const k of ["in", "out", "cache"]) if (typeof b.tokOld[k] !== "number") b.tokOld[k] = 0;
     if (typeof b.spentOld !== "number") b.spentOld = 0;
@@ -886,4 +889,4 @@ export async function routeProviders(req, res, u, p) {
 
 // 设置已在 settings-store.mjs 载入；本模块的变量此时都已初始化，在这里解析生效厂商（原来在 settings.mjs 顶层调，单独导入时会撞死区）
 applyProvider();
-export const _billForTest = { noteBalance, billOf };   // 只给测试用
+export const _billForTest = { noteBalance, billOf, billShape, noteTokens };   // 只给测试用
