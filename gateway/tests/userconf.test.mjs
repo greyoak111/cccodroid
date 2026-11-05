@@ -69,6 +69,43 @@ test("CLAUDE.md 被改：撤销按副本写回；新冒出来的 skill 挪进隔
   assert.equal(ucPending(), null);
 });
 
+test("插件目录里 Claude Code 自己记的 .in_use/<pid>、.orphaned_at 不算改动；同目录别的文件、链接、大文件照样问", () => {
+  fresh();
+  const V = ".claude/plugins/cache/mk/rev/1.5.0";
+  put(V + "/hooks/hooks.json", "{}");
+  ucKeep(ucPending().rels);
+  // 开一轮、再开一轮：两个进程各一份标记，第一份退出删掉
+  put(V + "/.in_use/7412", "");
+  put(V + "/.in_use/2779", "");
+  put(V + "/.orphaned_at", "1793833006038");
+  _ucFlush();
+  assert.equal(ucPending(), null);
+  assert.deepEqual(ucBeforeRun({ id: "r-marker" }), []);
+  fs.rmSync(H(V + "/.in_use/7412"));
+  _ucFlush();
+  assert.equal(ucPending(), null);
+  ucAfterRun({ id: "r-marker" });
+  // 不是纯数字、不在版本目录根上、符号链接、超大的：照样问
+  put(V + "/.in_use/run.sh", "echo hi\n");
+  put(".claude/plugins/cache/mk/rev/.in_use/12", "");
+  put(V + "/.in_use/99", "x".repeat(5000));
+  fs.symlinkSync(H(V + "/hooks/hooks.json"), H(V + "/.in_use/100"));
+  const p = ucPending();
+  assert.deepEqual(p.rels.sort(), [V + "/.in_use/100", V + "/.in_use/99", V + "/.in_use/run.sh", ".claude/plugins/cache/mk/rev/.in_use/12"].sort());
+});
+
+test("升级前认下过的运行标记：从确认记录里剔掉，删了也不报", () => {
+  fresh();
+  const V = ".claude/plugins/cache/mk/rev/1.5.0";
+  put(V + "/hooks/hooks.json", "{}");
+  ucKeep(ucPending().rels);
+  const rec = JSON.parse(fs.readFileSync(H("ccapp-userconf.json"), "utf8"));
+  rec.files[V + "/.in_use/7412"] = "deadbeef";
+  fs.writeFileSync(H("ccapp-userconf.json"), JSON.stringify(rec));
+  _ucReset();
+  assert.equal(ucPending(), null);
+});
+
 test("副本也被改了：还原后对不上，报没法还原", () => {
   fresh();
   put(".claude/CLAUDE.md", "原来的\n");

@@ -55,10 +55,17 @@ function riskyPart(rel, j) {
 }
 const isJsonPart = (rel) => rel === ".claude.json" || /\/settings(\.local)?\.json$/.test(rel);
 
+// Claude Code 自己在插件版本目录根上记的运行状态：每个进程一份 .in_use/<pid>（开一轮就多一个、退出删掉），清理时的 .orphaned_at。
+// 不是配置，官方给插件算摘要时也把它们排除在外（2.1.311 实测）；算进来的话开着一轮时再开一轮，必定弹「用户级配置改了」，
+// 卡片没点就一直显示排队（11-05 群友日志）。只放过这个确切的位置、小的普通文件，别处同名的照样盯。
+const MARKER = /^\.claude\/plugins\/cache\/[^/]+\/[^/]+\/[^/]+\/(?:\.in_use\/[0-9]{1,10}|\.orphaned_at)$/;
+const MARKER_MAX = 4096;
+const isMarker = (rel, abs) => { if (!MARKER.test(rel)) return false; try { const l = fs.lstatSync(abs); return l.isFile() && l.size <= MARKER_MAX; } catch { return false; } };
+
 /** 一个文件的指纹：{ h, text?（能存副本的内容）, big? } */
 function fingerprint(rel, abs) {
   let st; try { st = fs.statSync(abs); } catch { return null; }
-  if (!st.isFile()) return null;
+  if (!st.isFile() || isMarker(rel, abs)) return null;
   let link = ""; try { if (fs.lstatSync(abs).isSymbolicLink()) link = "link:" + fs.readlinkSync(abs) + "\0"; } catch {}
   if (st.size > (rel === ".claude.json" ? 32 << 20 : BIG)) return { h: sha(link + `big:${st.size}:${st.mtimeMs}:${st.ctimeMs}`), big: true, size: st.size };
   // 按字节读：副本要存原样（技能目录里的图片这类不是 UTF-8，按文本存会被换成 U+FFFD，#151-1）。
@@ -103,6 +110,8 @@ let REC = null;           // { files: { rel: h }, modes: { rel: 权限位 } }，
 function loadRec() {
   if (REC) return REC;
   try { const j = JSON.parse(fs.readFileSync(RECORD(), "utf8")); if (j && j.files && typeof j.files === "object") REC = { files: Object.assign(Object.create(null), j.files), modes: Object.assign(Object.create(null), j.modes && typeof j.modes === "object" ? j.modes : {}) }; } catch {}
+  // 以前认下过的运行标记（见 MARKER）：现在不算了，不然升级后它们一删就又被报成「删掉了」
+  if (REC) for (const k of Object.keys(REC.files)) if (MARKER.test(k)) { delete REC.files[k]; delete REC.modes[k]; }
   return REC;
 }
 function saveRec() {
