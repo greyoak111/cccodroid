@@ -216,7 +216,7 @@ async function fireNow(t, { reason, attempt, trial }) {
   const skip = (msg) => { log(`⏭ 定时任务「${t.name}」跳过：${msg}`); if (!trial) addRun({ taskId: t.id, at: Date.now(), st: "skip", msg }); };
   if (!trial) {
     if (t.until?.kind === "date" && t.until.date && Date.now() > new Date(t.until.date + "T23:59:59").getTime()) { t.on = false; refreshNext(t); save(); return skip(tz("已过有效期，任务已关")); }
-    if (t.skipNext && reason === "due") { t.skipNext = false; save(); return skip(tz("按设置跳过这一次")); }
+    if (t.skipNext && reason === "due" && (!t.skipAt || t.skipAt === t.nextAt)) { t.skipNext = false; t.skipAt = 0; save(); return skip(tz("按设置跳过这一次")); }
     if (usesLogin(t) && !DB.allowLogin) {
       skip(tz("用订阅账户跑定时任务默认关闭"));
       note(t, tz("定时任务已跳过"), tz("「{n}」要用订阅账户跑：到定时任务页底部「订阅账户」里打开（无人值守使用以 Anthropic 条款为准），或给任务换一个用 API Key 的接口", { n: t.name }), null, false);
@@ -380,10 +380,10 @@ function tick() {
       const when = t.nextAt;
       if (t.missed === "run") {
         // 「跳过下一次」指的正是这次错过的计划：消费掉标记，别让再下一次 due 被跳
-        if (t.skipNext) { t.skipNext = false; addRun({ taskId: t.id, at: when, st: "skip", msg: tz("按设置跳过这一次") }); }
+        if (t.skipNext && (!t.skipAt || t.skipAt === when)) { t.skipNext = false; t.skipAt = 0; addRun({ taskId: t.id, at: when, st: "skip", msg: tz("按设置跳过这一次") }); }
         else fire(t, { reason: "missed" });
       }
-      else if (t.missed === "skip") { t.skipNext = false; addRun({ taskId: t.id, at: when, st: "skip", msg: tz("错过了（当时应用没在跑），按设置跳过") }); }
+      else if (t.missed === "skip") { if (t.skipNext && (!t.skipAt || t.skipAt === when)) { t.skipNext = false; t.skipAt = 0; } addRun({ taskId: t.id, at: when, st: "skip", msg: tz("错过了（当时应用没在跑），按设置跳过") }); }
       else if (!DB.missed.some((m) => m.taskId === t.id && m.at === when)) { DB.missed.push({ taskId: t.id, at: when }); publish({ type: "sched", op: "missed" }); }
       log(`⏰ 定时任务「${t.name}」错过 ${new Date(when).toLocaleString()}（${t.missed || "ask"}）`);
     } else fire(t, { reason: "due" });
@@ -482,8 +482,8 @@ export async function routeSched(req, res, u, p) {
     if (i < 0) return sendJson(res, 404, { error: "not missed" });
     const m = DB.missed.splice(i, 1)[0]; save();
     const t = byId(m.taskId);
-    // 这次错过就是「下一次」：补跑或不补跑都消费 skipNext，别把再下一次也跳掉
-    if (t && t.skipNext) { t.skipNext = false; save(); }
+    // 只有「跳过」标记早于这次错过时才消费；用户是在错过卡出现之后才设的跳过，要留给下一次计划
+    if (t && t.skipNext && (!t.skipAt || t.skipAt <= m.at)) { t.skipNext = false; t.skipAt = 0; save(); }
     if (t && b.act === "run") fire(t, { reason: "missed" });
     else if (t) addRun({ taskId: t.id, at: m.at, st: "skip", msg: tz("错过了，没补跑") });
     return sendJson(res, 200, { ok: true });
@@ -504,7 +504,7 @@ export async function routeSched(req, res, u, p) {
     const b = await body();
     try { clean(b, {}); } catch (e) { return sendJson(res, 400, { error: e.message }); }
     Object.assign(t, clean(b, t));
-    if (b.on === true) { t.pausedUntil = 0; t.skipNext = false; }
+    if (b.on === true) { t.pausedUntil = 0; t.skipNext = false; t.skipAt = 0; }
     if (b.on === false) cancelRetry(t.id);
     refreshNext(t); save();
     return sendJson(res, 200, { ok: true, task: summary(t) });
@@ -529,6 +529,7 @@ export async function routeSched(req, res, u, p) {
   if (sub === "/pause" && req.method === "POST") {
     const b = await body();
     t.skipNext = b.mode === "skip";
+    t.skipAt = t.skipNext ? (t.nextAt || 0) : 0;   // 绑定到当前这一次计划，之后的补跑/改期不会误消费
     t.pausedUntil = b.mode === "1d" ? Date.now() + 864e5 : b.mode === "1w" ? 7 * 864e5 + Date.now() : 0;
     if (t.pausedUntil) cancelRetry(t.id);
     refreshNext(t); save();

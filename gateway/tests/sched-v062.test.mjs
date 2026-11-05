@@ -3,14 +3,20 @@ import "../gw/config.mjs";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import crypto from "node:crypto";
 import { CFG } from "../gw/config.mjs";
+import { NEXT } from "../gw/http.mjs";
 
 const { PROJECTS } = await import("../gw/projects.mjs");
-const { _schedForTest: S } = await import("../gw/sched.mjs");
+const { _schedForTest: S, routeSched } = await import("../gw/sched.mjs");
 const { QUEUE, START_GUARDS, END_HOOKS } = await import("../gw/queue.mjs");
 const { RUNS, maxParallel } = await import("../gw/runs.mjs");
+const srv = http.createServer(async (req, res) => { const u = new URL(req.url, "http://x"); if ((await routeSched(req, res, u, u.pathname)) === NEXT) res.writeHead(404).end(); });
+await new Promise((ok) => srv.listen(0, "127.0.0.1", ok));
+after(() => srv.close());
+const post = async (p, b) => { const r = await fetch(`http://127.0.0.1:${srv.address().port}${p}`, { method: "POST", body: JSON.stringify(b) }); return { status: r.status, body: await r.json() }; };
 
 const dir = path.join(CFG.workspace, "v062sched");
 fs.mkdirSync(dir, { recursive: true });
@@ -107,5 +113,28 @@ test("「跳过下一次」遇到错过的计划：消费标记，不让再下�
   assert.equal(t.skipNext, false, "跳过的就是这次错过的计划");
   const last = S.runlog().filter((r) => r.taskId === t.id && r.st === "skip").at(-1);
   assert.ok(last && last.msg.includes("按设置跳过这一次"), "记一条跳过，而不是照跑");
+  drop(t);
+});
+
+test("错过卡之后才设置的「跳过下一次」不会被补跑消费（#140 回归）", async () => {
+  const t = mk({ freq: { kind: "daily", time: "09:30" }, nextAt: Date.now() - 20 * 60000, missed: "ask" });
+  S.tick();
+  const m = S.DB.missed.find((x) => x.taskId === t.id);
+  assert.ok(m, "错过项已记录");
+  t.skipNext = true; t.skipAt = Date.now() + 3600e3;
+  const r = await post("/api/sched/missed", { taskId: t.id, at: m.at, act: "skip" });
+  assert.equal(r.status, 200);
+  assert.equal(t.skipNext, true, "下次计划的跳过不能被这次补跑/不补跑消费");
+  assert.ok(t.skipAt > Date.now());
+  const i = S.DB.missed.indexOf(m); if (i >= 0) S.DB.missed.splice(i, 1);
+  drop(t);
+});
+
+test("错过之前设置的跳过会消费，且标记绑定到那一次计划", () => {
+  const when = Date.now() - 20 * 60000;
+  const t = mk({ freq: { kind: "daily", time: "09:30" }, nextAt: when, missed: "run", skipNext: true, skipAt: when });
+  S.tick();
+  assert.equal(t.skipNext, false, "这次错过就是被跳过的那次");
+  assert.equal(t.skipAt, 0);
   drop(t);
 });
