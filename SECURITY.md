@@ -73,6 +73,18 @@ cccodroid follows Anthropic's terms: it doesn't modify Claude Code, doesn't remo
 
 What this can't do: the app ships a full terminal with Claude Code in it, so someone determined can run it with whatever options they like. Any program running as the app, including commands Claude runs, can also rewrite the app's own records along with the files they cover. These checks are aimed at quiet changes and changes driven by prompt injection, not at an attacker who already runs code as the app or has root. The app doesn't filter what the model writes; that's the job of the model provider's safeguards. These measures close the gaps in the app itself and tell Claude when something looks wrong. The last line of defense is Claude's own training and Anthropic's safeguards.
 
+## The code the gateway and Claude Code run
+
+Since 0.6.7 the release build also checks the programs themselves, so that something running as the app can't quietly swap in a modified gateway or Claude Code:
+
+- **Claude Code runs only if it matches Anthropic's signed manifest.** The manifest and its signature are saved when Claude Code is installed, and every launch checks the program against them. A version with no manifest doesn't run until one is fetched.
+- **The gateway's code is checked as it loads.** The app passes the gateway a small bootstrap taken from the APK. It checks the bytes of every module the gateway loads against the file list in the APK, so swapping a file between the check and the load doesn't work.
+- **The gateway runs from its own copy of its runtime.** Node, the libraries it needs and the glibc it starts Claude Code with are kept in a separate folder (`files/gw`), outside the toolkit, and checked against hashes pinned in the APK before each start. Package upgrades and toolkit updates don't touch it. If it doesn't match, the app copies the right files back or downloads them again; if that fails, the gateway doesn't start. Before every Claude Code launch the gateway checks that glibc again.
+- **The app's own helper programs are inside the APK**, where the app itself can't change them.
+- **The gateway and Claude Code can't be debugged by other processes.** They're marked non-dumpable, so other programs running as the app can't attach to them or read and write their memory.
+
+What's left: there are a few milliseconds between a check and the moment a program is mapped into memory. The safety-check hook that Claude Code runs before each tool uses the toolkit's Node and bash. Claude Code started from the terminal uses the toolkit's glibc. Developer builds fall back to the toolkit's runtime when the copy can't be restored.
+
 Testing tip: use a spare install or a separate test gateway, never the data you actually use. Some of these bugs delete things.
 
 ---
@@ -149,5 +161,17 @@ cccodroid 守 Anthropic 的条款：不改 Claude Code，不删它的登录方�
 - **特权命令免确认有时限。** 打开 24 小时后自动关掉。
 
 做不到的：应用里有完整的终端，Claude Code 就装在那里，铁了心的人可以自己带任何参数去跑它。以应用身份运行的程序（包括 Claude 跑的命令）也能把应用自己的记录连同文件一起改掉。所以这些检查防的是悄悄改、被注入的指令驱动着改，防不住已经能以应用身份跑代码的人，也防不住 root。模型写出什么内容，应用不做过滤，那归模型提供方的安全机制管。上面这些做的是不在应用里留口子，看出不对劲时告诉 Claude。最后一道防线是 Claude 自己的训练和 Anthropic 的安全机制。
+
+## 网关和 Claude Code 跑的代码
+
+0.6.7 起，正式版连程序本身也核，免得以应用身份运行的东西悄悄把网关或 Claude Code 换成改过的：
+
+- **Claude Code 要对得上 Anthropic 签名的清单才运行。** 装 Claude Code 时把清单和签名一起存下来，每次启动都拿它核程序。没有清单的版本，补到清单之前不运行。
+- **网关的代码边加载边核。** 应用从安装包里取出一小段引导交给网关，网关读进来的每个模块，都按安装包里的文件清单核字节。核完再换文件不管用。
+- **网关用自己那份运行库。** Node、它要的库、它拿来启动 Claude Code 的 glibc，单独放在工具包外面的 `files/gw`，每次启动前按安装包里钉好的哈希核一遍。pkg 升级、工具包更新都碰不到它。对不上就把对的文件拷回来或重新下载；还不行，网关就不启动。每次启动 Claude Code 前，网关还会再核一遍那份 glibc。
+- **应用自己的小程序放在安装包里**，应用自己也改不了。
+- **网关和 Claude Code 不让别的进程调试。** 它们被设成不可转储，以应用身份运行的其他程序没法挂上去，也读写不了它们的内存。
+
+剩下的口子：从核完到程序真正映射进内存，中间有几毫秒。Claude Code 每次用工具前跑的那道安全检查，用的是工具包里的 Node 和 bash。从终端里启动的 Claude Code 用的是工具包里的 glibc。开发版那份运行库恢复不了时，会退回用工具包里的。
 
 测试时请用一台测试机或单独的测试网关，别用你真正在用的数据。有些问题一触发就会删东西。
