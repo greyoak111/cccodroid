@@ -10,7 +10,7 @@ import { fixedBaseUrl } from "./streamfix.mjs";
 import { archiveHooks } from "./archive-core.mjs";
 import { fileURLToPath } from "node:url";
 import { APP } from "./appfiles.mjs";
-import { sealArgv, sealEnv } from "./edition.mjs";
+import { sealArgv, sealEnv, sealed } from "./edition.mjs";
 import { claudeSeal } from "./claudeseal.mjs";
 
 // 敏感操作再确认：PreToolUse 钩子（guard/cc-guard.mjs），碰密钥 / 读屏点按 / 往外分享时让 claude 停下来问，全部放行也一样。
@@ -243,6 +243,9 @@ export function claudeEnv(o = {}) {
   };
 
   for (const k of ["LD_LIBRARY_PATH", "ANTHROPIC_BASE_URL"]) if (!env[k]) delete env[k];
+  // 发行版：claude 起来就设不可转储（预加载的 libccnodump.so 认这个变量，见 android/native/nodump.c），
+  // 会话里跑的命令就不能 ptrace 它、改它的内存。终端（terminal.mjs）摘掉：那是机主自己的 claude
+  if (sealed()) env.CCAPP_NODUMP = "1"; else delete env.CCAPP_NODUMP;
   sealEnv(env);   // 发行版：能让 claude 另找配置 / 记忆目录的变量清掉（见 edition.mjs）
   // 网关令牌文件的位置不交给 claude：Bash 里 cat "$CCAPP_TOKEN_FILE" 不带 .gateway-token 字样，再确认钩子认不出（11-03 审查 L-6）
   delete env.CCAPP_TOKEN_FILE;
@@ -342,7 +345,7 @@ export function claudeArgv(extra) {
   return ["--library-path", PATHS.glibcLib, ...pre, PATHS.claude, ...extra];
 }
 
-/** seccomp 监督器：cccodroid 放在 seccomp-enosys.so 旁边（app/lib），开发端在 files/devbin */
+/** seccomp 监督器：cccodroid 在 APK 原生库目录（libccenosysrun.so，Env.java 经 CCAPP_ENOSYS_RUN 交来），开发端在 files/devbin */
 let ENOSYS_RUN;
 export function enosysRun() {
   if (ENOSYS_RUN !== undefined) return ENOSYS_RUN;
@@ -383,6 +386,8 @@ export function killTree(child) {
   // `sh -c … sleep 60` 留下来被 init 收养。所以先顺着 /proc 的父子关系把整棵树
   // 摘出来（得在杀之前摘，杀完父子关系就断了），再逐个连组带进程一起杀。
   const tree = descendants(child.pid);
+  // 套着监督器、claude 又不可转储时，/proc 里从监督器顺不下去：监督器报上来的 claude pid（run.mjs）单独往下摘
+  if (child.claudePid > 0 && child.claudePid !== child.pid) for (const p of [child.claudePid, ...descendants(child.claudePid)]) if (!tree.includes(p)) tree.push(p);
   try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch {} }
   for (const p of tree) {
     try { process.kill(-p, "SIGKILL"); } catch {}
@@ -424,7 +429,19 @@ export function reapOrphans() {
   }
 }
 
-/** root 的全部子孙 pid（读 /proc/<pid>/stat 的第 4 列 ppid） */
+/** pid 的直接子进程，按 /proc/<pid>/task/<tid>/children 列（看得见 pid 才读得到；列出来的子进程本身看不见也照样列） */
+export function childrenOf(pid) {
+  const out = [];
+  let tids = [];
+  try { tids = fs.readdirSync(`/proc/${pid}/task`); } catch { return out; }
+  for (const t of tids) {
+    try { for (const x of fs.readFileSync(`/proc/${pid}/task/${t}/children`, "utf8").split(/\s+/)) if (/^\d+$/.test(x)) out.push(+x); } catch {}
+  }
+  return out;
+}
+
+/** root 的全部子孙 pid（读 /proc/<pid>/stat 的第 4 列 ppid）。
+ *  发行版里 claude 不可转储（libccnodump.so），/proc 里看不见它：经 children 文件补上这一环，它下面的子孙照样找得到 */
 export function descendants(root) {
   const kids = new Map();
   let names = [];
@@ -439,9 +456,10 @@ export function descendants(root) {
     if (!kids.has(ppid)) kids.set(ppid, []);
     kids.get(ppid).push(+n);
   }
-  const out = [], stack = [root];
+  const out = [], stack = [root], seen = new Set([root]);
   while (stack.length) {
-    for (const k of kids.get(stack.pop()) || []) { out.push(k); stack.push(k); }
+    const p = stack.pop();
+    for (const k of [...(kids.get(p) || []), ...childrenOf(p)]) if (!seen.has(k)) { seen.add(k); out.push(k); stack.push(k); }
   }
   return out;
 }

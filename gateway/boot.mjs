@@ -19,6 +19,12 @@ if (!root || !path.isAbsolute(root)) die("引导没拿到 files/app 目录");
 const self = process.env.TERMUX_EXEC__PROC_SELF_EXE;
 if (self && /\/linker64$/.test(process.execPath)) process.execPath = self;
 if (process.env.CCAPP_NODE_OPTIONS) { process.env.NODE_OPTIONS = process.env.CCAPP_NODE_OPTIONS; delete process.env.CCAPP_NODE_OPTIONS; }
+// 网关自己经 LD_PRELOAD 挂了 libccnodump.so（不可转储，见 android/native/nodump.c）；子进程用应用原来给的那份
+if ("CCAPP_CHILD_LD_PRELOAD" in process.env) {
+  const pre = process.env.CCAPP_CHILD_LD_PRELOAD;
+  if (pre) process.env.LD_PRELOAD = pre; else delete process.env.LD_PRELOAD;
+  delete process.env.CCAPP_CHILD_LD_PRELOAD;
+}
 
 const sha = (b) => crypto.createHash("sha256").update(b).digest("hex");
 let list = null;

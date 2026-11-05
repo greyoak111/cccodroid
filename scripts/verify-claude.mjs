@@ -33,9 +33,10 @@ const die = (s) => { console.log("✗ " + s); process.exit(1); };
 const { PREFIX, HOME, CCAPP_BIN } = process.env;
 if (!PREFIX || !CCAPP_BIN) die("要在 cccodroid 的终端里跑（没有 PREFIX / CCAPP_BIN）");
 const APP = path.dirname(CCAPP_BIN);
-const ENOSYS = path.join(APP, "lib", "seccomp-enosys-run");
+const NL = process.env.CCAPP_NATIVE_LIB || "/nonexistent";
+const ENOSYS = process.env.CCAPP_ENOSYS_RUN || path.join(NL, "libccenosysrun.so");
 const LD = process.env.CCAPP_LD || path.join(PREFIX, "glibc/lib/ld-linux-aarch64.so.1");
-const PRELOAD = process.env.CCAPP_GLIBC_PRELOAD || process.env.CCAPP_CLAUDE_PRELOAD || path.join(APP, "lib/seccomp-enosys.so");
+const PRELOAD = process.env.CCAPP_GLIBC_PRELOAD || process.env.CCAPP_CLAUDE_PRELOAD || path.join(NL, "libccenosys.so");
 for (const f of [ENOSYS, path.join(APP, "scripts/install-claude.mjs")]) if (!fs.existsSync(f)) die("找不到 " + f + "（App 太旧？）");
 
 // aarch64 上较新的系统调用号 → 名字。KNOWN 是已知会被拦、但 claude（Bun）遇到 ENOSYS 会自己退回老调用的

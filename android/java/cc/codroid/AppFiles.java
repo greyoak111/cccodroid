@@ -95,7 +95,7 @@ final class AppFiles {
     static synchronized void deploy(Context c, File app) throws Exception {
         Installer.deleteTree(app);
         copyAssetDir(c, "app", app);
-        // lib/ 里除了 .so 还有可执行的 seccomp-enosys-run、ptyhost
+        // 原生小库与小程序已经搬进 APK 原生库目录（build.sh），lib/ 里只剩 execpath.cjs；照旧给可执行位无妨
         for (String d : new String[]{"scripts", "bin", "pre", "lib"}) {
             File[] fs = new File(app, d).listFiles();
             if (fs != null) for (File f : fs) f.setExecutable(true, true);

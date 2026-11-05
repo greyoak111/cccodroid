@@ -8,7 +8,7 @@ import { claudeEnv, ensureShell, killTree, termKeyFile } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 
 // ── 应用内终端 ────────────────────────────────────────────────────────
-// node 没有 pty：cccodroid 自带原生小程序 app/lib/ptyhost（源码 android/native/ptyhost.c）；
+// node 没有 pty：cccodroid 自带原生小程序 ptyhost（APK 原生库目录里的 libccptyhost.so，经 CCAPP_PTYHOST 交来；源码 android/native/ptyhost.c）；
 // 开发端没有 lib/，退回到同一协议的 python3 pty 版。协议：
 //   ptyhost <rows> <cols> <程序> [参数…]；stdin→pty，pty→stdout，fd 3 一行 "rows cols" 改窗口大小。
 // 输出留一段环形缓冲：界面重开 / 断线重连时先回放，再接着推实时输出（SSE）。
@@ -72,6 +72,7 @@ function ptyCommand() {
 // ── 应用内终端：新开 / 读写 / 关闭 ──────────────────────────────────
 export function termEnv() {
   const env = claudeEnv();
+  delete env.CCAPP_NODUMP;     // 终端里的东西是机主自己的，不设不可转储（见 claude.mjs claudeEnv）
   for (const k of ["CI", "NO_COLOR", "CLAUDE_CODE_SHELL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CCAPP_RUN"]) delete env[k];   // 终端里用户自己起的东西不算 claude 运行，网关重启时别当孤儿清
   env.TERM = "xterm-256color";
   env.COLORTERM = "truecolor";

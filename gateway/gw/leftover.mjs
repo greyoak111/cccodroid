@@ -8,6 +8,7 @@
 // 还在跑的轮次编号别人也读得到（同 uid 能读 /proc/<claude>/environ）：带着它、但比那一轮的 claude 进程起得早的照样列
 // （真是那一轮起的都是 claude 的子孙，只会更晚；execve 换环境不改启动时刻。安卓上应用读不了 /proc/stat 的开机时刻，所以比滴答数不比墙钟）。
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import { CFG, LIVE, PREFIX, log } from "./config.mjs";
 import { descendants } from "./claude.mjs";
 
@@ -27,6 +28,11 @@ function readProc(pid) {
 }
 /** 进程启动时刻（开机后的时钟滴答，/proc/<pid>/stat 第 22 项）。读不到返回 null */
 export function procStart(pid) { const p = pid ? readProc(pid) : null; return p ? p.start : null; }
+/** 「现在」的开机滴答：安卓上应用读不了 /proc/uptime，起一个一闪而过的进程读它自己的启动时刻 */
+export function nowTicks() {
+  try { const s = execFileSync("/system/bin/cat", ["/proc/self/stat"], { encoding: "utf8", timeout: 3000 }); return s.slice(s.lastIndexOf(")") + 2).split(" ")[19] || null; }
+  catch { return null; }
+}
 const allPids = () => { try { return fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n)).map(Number); } catch { return []; } };
 
 /** 留下来的进程。active：还在跑的轮次 Map(编号字符串 → 那一轮 claude 进程的启动滴答，还没起是 null) */

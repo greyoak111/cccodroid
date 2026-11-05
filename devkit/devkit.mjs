@@ -720,7 +720,112 @@ if (cmd === "ldso") {
   console.log(`✓ ${out}  glibc ${rec.version} · ${buf.length} 字节 · 前缀改写 ${n} 处 · sha256 ${sha256(buf)}`);
   process.exit(0);
 }
-async function ldFromDeb(rec) {
+// gwpin：网关和 claude 执行链上来自工具包的文件（node 及它要的库、termux-exec 的预加载库、glibc 的 ld.so 和 claude 要的库）
+// 装好后应有的 sha256，build.sh 打进 APK（assets/gwpin.json）。应用起网关前按它核、把这些文件拷一份到
+// $PREFIX/libexec/cccodroid/gw/（pkg 升级碰不到），网关只从那里加载（安全 4 第 2 层）。
+// 来源是钉住那一版工具包的基础模块包（已按目标包名改好前缀）：APK 钉的 devkit-pin.json → modules.json 的 sha256 → 基础模块包的 sha256，一路核下来。
+// （Termux 仓库池里的旧 deb 会被删，不能从 deb 现算：nodejs 26.12.1 在 11-05 已经取不到了）
+// 要哪些库不写死：从 node 的 DT_NEEDED 起逐个找，找不到又不是系统库就报错
+//   node devkit.mjs gwpin --pin <devkit-pin.json> [--target 包名] [--out 文件] [--vendored 目录]
+// --target 和钉的工具包不是同一个包名时（开发版 cc.codrdev 用正式版的工具包），按同样的等长替换改一遍前缀再算
+const BIONIC_SYS = new Set(["libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so"]);
+// claude（Bun，glibc）要的：版本号写在 soname 里、多年不变，直接列
+const CLAUDE_GLIBC = ["ld-linux-aarch64.so.1", "libc.so.6", "librt.so.1", "libpthread.so.0", "libdl.so.2", "libm.so.6"];
+/** ELF64 小端的 DT_NEEDED 列表 */
+function elfNeeded(b) {
+  if (b.length < 64 || b.readUInt32BE(0) !== 0x7f454c46 || b[4] !== 2) return [];
+  const phoff = Number(b.readBigUInt64LE(32)), phsz = b.readUInt16LE(54), phn = b.readUInt16LE(56);
+  const loads = []; let dyn = null;
+  for (let i = 0; i < phn; i++) {
+    const o = phoff + i * phsz, type = b.readUInt32LE(o);
+    const off = Number(b.readBigUInt64LE(o + 8)), va = Number(b.readBigUInt64LE(o + 16)), fsz = Number(b.readBigUInt64LE(o + 32));
+    if (type === 1) loads.push({ off, va, fsz });
+    if (type === 2) dyn = { off, fsz };
+  }
+  if (!dyn) return [];
+  const v2o = (va) => { const l = loads.find((x) => va >= x.va && va < x.va + x.fsz); return l ? va - l.va + l.off : -1; };
+  let strtab = -1; const need = [];
+  for (let o = dyn.off; o + 16 <= dyn.off + dyn.fsz; o += 16) {
+    const tag = Number(b.readBigInt64LE(o)), val = Number(b.readBigUInt64LE(o + 8));
+    if (tag === 0) break;
+    if (tag === 5) strtab = v2o(val);
+    if (tag === 1) need.push(val);
+  }
+  if (strtab < 0) return [];
+  return need.map((x) => { const st = strtab + x; return b.toString("utf8", st, b.indexOf(0, st)); });
+}
+if (cmd === "gwpin") {
+  const pinFile = opt("pin") || (() => { throw new Error("--pin <devkit-pin.json> 必填"); })();
+  const pinRaw = fs.readFileSync(pinFile), pin = JSON.parse(pinRaw.toString("utf8"));
+  const target = opt("target", pin.target);
+  const out = opt("out", path.join(OUT, `gwpin-${target}.json`));
+  const vdir = opt("vendored"), vfile = vdir && path.join(vdir, `gwpin-${target}.json`);
+  const key = `${pin.tag}:${pin.modules && pin.modules.sha256}`;
+  if (vfile && fs.existsSync(vfile)) {
+    const v = JSON.parse(fs.readFileSync(vfile, "utf8"));
+    if (v.key === key && v.target === target) {
+      fs.mkdirSync(path.dirname(out), { recursive: true }); fs.copyFileSync(vfile, out);
+      console.log(`  用仓库里存的 ${path.basename(vfile)}`); process.exit(0);
+    }
+  }
+  if (!pin.modules || !/^[0-9a-f]{64}$/.test(pin.modules.sha256 || "")) throw new Error("devkit-pin.json 里没有 modules.json 的 sha256");
+  fs.mkdirSync(CACHE, { recursive: true });
+  const grab = (name, sha, local = name) => {
+    const dest = path.join(CACHE, local);
+    if (fs.existsSync(dest) && sha256(fs.readFileSync(dest)) === sha) return fs.readFileSync(dest);
+    execFileSync("curl", ["-fsSL", "--retry", "3", "-o", dest + ".part", pin.base + name], { stdio: "inherit" });
+    const b = fs.readFileSync(dest + ".part");
+    if (sha256(b) !== sha) { fs.rmSync(dest + ".part", { force: true }); throw new Error(`${name} 的 sha256 ${sha256(b)} 与钉的 ${sha} 不符`); }
+    fs.renameSync(dest + ".part", dest);
+    return b;
+  };
+  const mods = JSON.parse(grab("modules.json", pin.modules.sha256, `modules-${pin.tag}.json`).toString("utf8"));
+  const base = (mods.modules || []).find((m) => m.kind === "base");
+  if (!base || !base.gz || !/^[0-9a-f]{64}$/.test(base.gz.sha256 || "")) throw new Error("modules.json 里没有基础模块的 gz");
+  const gz = grab(base.gz.file, base.gz.sha256);
+  const files = new Map();
+  const A = Buffer.from(`/data/data/${pin.target}/`), B = Buffer.from(`/data/data/${target}/`);
+  if (A.length !== B.length) throw new Error(`目标包名须与 ${pin.target} 等长`);
+  const swap = (buf) => { if (target === pin.target) return buf; const o = Buffer.from(buf); for (let i = o.indexOf(A); i >= 0; i = o.indexOf(A, i + A.length)) B.copy(o, i); return o; };
+  for (const e of readTar(zlib.gunzipSync(gz))) {
+    const n = e.name.replace(/^\.\//, "");
+    if (!n.startsWith("usr/")) continue;
+    if (e.type === "0") files.set(n.slice(4), { data: swap(e.data) });
+    else if (e.type === "2") files.set(n.slice(4), { link: e.link });
+  }
+  const real = (r) => {
+    for (let hop = 0; hop < 8; hop++) {
+      const f = files.get(r);
+      if (!f) return null;
+      if (!f.link) return r;
+      if (f.link.startsWith("/")) return null;      // 基础包里的软链都是相对的；绝对的不认
+      r = path.posix.normalize(path.posix.join(path.posix.dirname(r), f.link));
+    }
+    return null;
+  };
+  const entry = (r) => { const x = real(r); return x ? { src: x, sha256: sha256(files.get(x).data) } : null; };
+  const must = (r, why) => entry(r) || (() => { throw new Error(`基础模块里没有 ${r}（${why}）`); })();
+  const gw = { node: must("bin/node", "网关"), "libtermux-exec-linker-ld-preload.so": must("lib/libtermux-exec-linker-ld-preload.so", "经加载器时网关的预加载") };
+  const queue = ["node", "libtermux-exec-linker-ld-preload.so"], seen = new Set();
+  while (queue.length) {
+    const k = queue.shift();
+    for (const n of elfNeeded(files.get(gw[k].src).data)) {
+      if (seen.has(n)) continue; seen.add(n);
+      const e = entry("lib/" + n);
+      if (!e) { if (BIONIC_SYS.has(n)) continue; throw new Error(`${k} 要的 ${n} 在基础模块的 lib/ 里没有`); }
+      gw[n] = e; queue.push(n);
+    }
+  }
+  const glibc = {};
+  for (const n of CLAUDE_GLIBC) glibc[n] = must("glibc/lib/" + n, "claude");
+  const text = JSON.stringify({ target, key, gw, glibc }, null, 1) + "\n";
+  fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, text);
+  if (vfile) { fs.mkdirSync(vdir, { recursive: true }); fs.writeFileSync(vfile, text); console.log(`  ⚠ 已更新 ${vfile}，记得提交`); }
+  console.log(`✓ ${out}  网关 ${Object.keys(gw).length} 个文件 · glibc ${Object.keys(glibc).length} 个`);
+  process.exit(0);
+}
+async function ldFromDeb(rec) { return ldFile(await ldDeb(rec)); }
+async function ldDeb(rec) {
   let deb;
   try { deb = await fetchDeb({ ...rec, repo: REPOS.find((r) => (r.name || "main") === rec.repo) || REPOS[0] }); }
   catch (e) {
@@ -731,6 +836,9 @@ async function ldFromDeb(rec) {
       (err, out) => err ? rej(err) : res(out)));
     if (sha256(deb) !== rec.sha256) throw new Error(`Release 上的 glibc.deb sha256 ${sha256(deb)} 与锁文件 ${rec.sha256} 不符`);
   }
+  return deb;
+}
+async function ldFile(deb) {
   const dir = TERMUX.slice(1) + "files/usr/glibc/lib/";
   const ents = [...readTar(await dataTar(deb))];
   let name = "ld-linux-aarch64.so.1", e;

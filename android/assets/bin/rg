@@ -4,6 +4,6 @@
 # Grep / Glob 不报错、一律返回「没找到」（2.1.311 实测）。所以起 claude 时设了 USE_BUILTIN_RIPGREP=0 让它按 PATH 找 rg：
 # 装了模块用工具包的 rg（PATH 里排在前面），没装就落到这里。启动方式和 bin/claude 一样。
 unset LD_PRELOAD
-PRE=${CCAPP_GLIBC_PRELOAD:-${CCAPP_CLAUDE_PRELOAD:-${CCAPP_BIN%/bin}/lib/seccomp-enosys.so}}
+PRE=${CCAPP_GLIBC_PRELOAD:-${CCAPP_CLAUDE_PRELOAD:-${CCAPP_NATIVE_LIB:-/nonexistent}/libccenosys.so}}
 exec "${CCAPP_LD:-$PREFIX/glibc/lib/ld-linux-aarch64.so.1}" --library-path "$PREFIX/glibc/lib" ${PRE:+--preload "$PRE"} \
   --argv0 rg "$HOME/.local/share/cccodroid/claude/current/claude" "$@"

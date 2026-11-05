@@ -623,9 +623,34 @@ final class Priv {
             if (pp <= 0) return null;
             // 网关经引导起时命令行里是 boot.mjs 的原文，原文里也有 "server.mjs"（GatewayService.spawnGateway）
             if (pp == me) return below > 0 && proc(cur, "cmdline").contains("server.mjs") ? envToken(below) : null;
+            // 0.6.7 起网关和发行版的 claude 不可转储（android/native/nodump.c）：/proc 里看不见，读不了 stat 也读不了环境。
+            // 往上数碰到看不见的那一层就问网关作证（它认得自己起的每一轮 claude，见 gateway/gw/run.mjs privWitness）。
+            // 请求方自己就看不见（上面 pp<=0）不问：会话里的命令都是 claude 的子孙，看得见
+            if (pp != 1 && ppid(pp) <= 0) return witness(pp, cur);
             below = cur; cur = pp;
         }
         return null;
+    }
+
+    /** 问网关：anc（看不见的祖先）、top（它下面看得见的那个）是不是它起的某一轮 claude，口令是什么。应答按派生钥匙验签 */
+    static String witness(int anc, int top) {
+        try {
+            byte[] nb = new byte[16];
+            new java.security.SecureRandom().nextBytes(nb);
+            StringBuilder n = new StringBuilder();
+            for (byte x : nb) n.append(String.format("%02x", x));
+            java.net.HttpURLConnection c = Env.gateway("/api/priv/witness?n=" + n + "&anc=" + anc + "&top=" + top);
+            c.setConnectTimeout(800); c.setReadTimeout(1500);
+            try {
+                if (c.getResponseCode() != 200) return null;
+                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                try (java.io.InputStream in = c.getInputStream()) { byte[] b = new byte[1024]; for (int k; bo.size() < 4096 && (k = in.read(b)) > 0; ) bo.write(b, 0, k); }
+                JSONObject j = new JSONObject(new String(bo.toByteArray(), StandardCharsets.UTF_8));
+                String tok = j.optString("tok", ""), mac = j.optString("mac", "");
+                if (!Env.witnessOk(n.toString(), anc, top, tok, mac)) { Log.w(TAG, "网关作证的签名对不上"); return null; }
+                return tok.matches("[0-9a-f]{32}") ? tok : null;
+            } finally { c.disconnect(); }
+        } catch (Exception e) { Log.w(TAG, "问网关作证失败：" + e.getMessage()); return null; }
     }
     /** /proc/<pid>/stat 的父进程号；进程名里可能有空格和括号，从最后一个 ')' 后面数 */
     static int ppid(int pid) {

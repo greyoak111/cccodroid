@@ -63,6 +63,16 @@ final class Env {
     /** 忘掉上次核到的启动号：下一次核身份一定回调 onBoot（界面刚接上 onBoot 时用，不然后台服务先核过了，Cookie 就种不上） */
     static void resetBoot() { boot = ""; provedAt = 0; }
 
+    /** 网关作证应答的签名（gateway/gw/access.mjs witnessMac）：按启动随机数派生的钥匙、核到的启动号、监听地址 */
+    static boolean witnessOk(String n, int anc, int top, String tok, String mac) {
+        String k = key();
+        if (k.isEmpty() || mac == null) return false;
+        try {
+            String want = hmac(k, "witness:" + n + ":" + boot + ":" + HOST + ":" + anc + ":" + top + ":" + tok);
+            return java.security.MessageDigest.isEqual(want.getBytes(), mac.getBytes());
+        } catch (Exception e) { return false; }
+    }
+
     static boolean proveGateway() {
         if (System.currentTimeMillis() - provedAt < 3000) return true;    // 刚核过：别每个请求都多跑一趟
         String t = key();
@@ -242,6 +252,9 @@ final class Env {
 
     File bin(String name) { return new File(usr, "bin/" + name); }
 
+    /** APK 原生库目录里的文件（/data/app/…/lib/arm64，安装时系统解出来，应用 uid 只读） */
+    String nlib(String name) { return new File(nativeLib, name).getPath(); }
+
     // 经加载器时程序不会被直接执行，只看文件在不在（canExecute 走 access(X_OK)，不该拿它判断能不能跑）
     boolean devkitReady() { return new File(usr, ".devkit-ok").isFile() && (loader ? bin("node").isFile() : bin("node").canExecute()); }
 
@@ -303,8 +316,14 @@ final class Env {
         e.put("CCAPP_LOADER", new File(usr, "glibc/lib/ld-linux-aarch64.so.1").getPath());
         e.put("CCAPP_GLIBC_LIB", new File(usr, "glibc/lib").getPath());
         e.put("CCAPP_CLAUDE", claude().getPath());
-        // ld-linux --preload 给 claude 挂上：被 seccomp 拦下的调用改回 ENOSYS（Android 14 拦 epoll_pwait2）
-        e.put("CCAPP_CLAUDE_PRELOAD", new File(app, "lib/seccomp-enosys.so").getPath());
+        // ld-linux --preload 给 claude 挂上：被 seccomp 拦下的调用改回 ENOSYS（Android 14 拦 epoll_pwait2）。
+        // 应用自己的原生小库、小程序都在 APK 原生库目录里（应用 uid 改不了，安全 4 第 1 层；build.sh 打包时改名 libcc*.so）
+        e.put("CCAPP_CLAUDE_PRELOAD", nlib("libccenosys.so"));
+        e.put("CCAPP_ENOSYS_RUN", nlib("libccenosysrun.so"));
+        e.put("CCAPP_PTYHOST", nlib("libccptyhost.so"));
+        // glibc 程序（claude）--preload 的完整列表：再加 libccnodump.so —— 带 CCAPP_NODUMP=1 起的（网关起的发行版 claude）设不可转储，
+        // 别的进程不认这个变量、什么也不做（安全 4 第 3 层，android/native/nodump.c）。经加载器时 applyLoader 再插一个 exec-shim
+        e.put("CCAPP_GLIBC_PRELOAD", nlib("libccenosys.so") + ":" + nlib("libccnodump.so"));
         e.put("CCAPP_LOG", log.getPath());
         e.put("CCAPP_LEDGER", Ledger.file(this).getPath());   // 修复账本：网关记安全模式、界面能翻
         e.put("CCAPP_SEED", new File(home, "seed.json").getPath());
@@ -326,10 +345,10 @@ final class Env {
     private void applyLoader(Map<String, String> e) {
         String ld = new File(nativeLib, "libldlinux.so").getPath();
         // bionic 进程：先过 exec-shim-bionic（glibc 程序 / glibc ld.so 改走 APK 里的 ld.so），其余交给 termux-exec 的 linker 版
-        String tx = new File(app, "lib/exec-shim-bionic.so").getPath() + ":" + new File(usr, "lib/libtermux-exec-linker-ld-preload.so").getPath();
+        String tx = nlib("libccexecshimb.so") + ":" + new File(usr, "lib/libtermux-exec-linker-ld-preload.so").getPath();
         e.put("CCAPP_LD", ld);
         e.put("CCAPP_LOADER", ld);
-        e.put("CCAPP_GLIBC_PRELOAD", new File(app, "lib/seccomp-enosys.so").getPath() + ":" + new File(app, "lib/exec-shim.so").getPath());
+        e.put("CCAPP_GLIBC_PRELOAD", nlib("libccenosys.so") + ":" + nlib("libccexecshim.so") + ":" + nlib("libccnodump.so"));
         e.put("CCAPP_BIONIC_PRELOAD", tx);
         e.put("LD_PRELOAD", tx);
         e.put("TERMUX_APP__DATA_DIR", files.getParent());

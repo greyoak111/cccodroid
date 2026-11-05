@@ -284,3 +284,31 @@ test("网关引导 boot.mjs：核过 FILES 才起，静态 import 的模块按�
   assert.equal(r.status, 3); assert.doesNotMatch(r.stdout, /pwned/);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test("给应用作证（Priv 问特权口令）：只认本网关起的、还在跑的那一轮", async () => {
+  const { privWitness } = await import("../gw/run.mjs");
+  const { RUNS } = await import("../gw/runs.mjs");
+  const { descendants } = await import("../gw/claude.mjs");
+  const { spawn } = await import("node:child_process");
+  const sup = spawn(SH, ["-c", "sleep 30 & wait"], { stdio: "ignore" });
+  await new Promise((r) => setTimeout(r, 300));
+  const tok = "ab".repeat(16);
+  RUNS.set("witness-test", { id: "witness-test", child: sup, privTok: tok, claudePid: 0 });
+  try {
+    const kids = descendants(sup.pid);
+    assert.ok(kids.length >= 1, "sleep 是监督器（这里用 sh 代替）的子进程");
+    assert.equal(privWitness(process.pid, sup.pid), tok, "看不见的祖先是网关自己：top 得是这一轮的直接子进程");
+    assert.equal(privWitness(process.pid, kids[0]), "", "不是直接子进程的不认");
+    assert.equal(privWitness(kids[0], 4242), "", "监督器还没报上 claude 的 pid：不认");
+    RUNS.get("witness-test").claudePid = kids[0];
+    assert.equal(privWitness(kids[0], 4242), tok, "看不见的祖先是监督器报上来的那个 claude");
+    assert.equal(privWitness(sup.pid, 4242), tok);
+    assert.equal(privWitness(999999, 4242), "", "不认得的 pid 不给");
+    RUNS.get("witness-test").privTok = "";
+    assert.equal(privWitness(process.pid, sup.pid), "", "无人值守的轮次没有口令");
+  } finally {
+    RUNS.delete("witness-test");
+    try { process.kill(sup.pid, "SIGKILL"); } catch {}
+    for (const k of descendants(sup.pid)) try { process.kill(k, "SIGKILL"); } catch {}
+  }
+});

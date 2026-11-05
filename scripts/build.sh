@@ -77,25 +77,30 @@ DK_BASE=$(head -1 "$A/assets/devkit-sources.txt")
 if [ -n "$DEVKIT_BASES" ]; then node "$ROOT/scripts/pin-devkit.mjs" "$DK_BASE" "$A/assets/devkit-pin.json" || exit 1
 else cp "$ROOT/devkit-pin.json" "$A/assets/devkit-pin.json"; fi
 node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(p.base!==process.argv[2]){console.error("✗ devkit-pin.json 是 "+p.base+"，devkit-sources.txt 是 "+process.argv[2]+"：跑 node scripts/pin-devkit.mjs 重新生成");process.exit(1)}' "$A/assets/devkit-pin.json" "$DK_BASE" || exit 1
-# 原生小库：seccomp 拦截 → ENOSYS（不依赖 libc，见源码注释）。Android 14 上没有它 claude 起不来
-mkdir -p "$A/assets/app/lib"
+# 原生小库与小程序一律进 APK 的原生库目录（lib/arm64-v8a，名字得是 lib*.so）：安装时系统解到 /data/app/…/lib/arm64，
+# 应用自己的 uid 也改不了，起网关、起 claude 时直接从那里加载，没有「核过之后被换」的窗口（安全 4 第 1 层）。路径由 Env.java 经环境变量交出去
+NL="$A/nativelib"; rm -rf "$NL"; mkdir -p "$NL" "$A/assets/app/lib"     # build/ 下面会被 javac 那步整个清掉，先放这里、打包前拷过去
+# seccomp 拦截 → ENOSYS（不依赖 libc，见源码注释）。Android 14 上没有它 claude 起不来
 $CC_ANDROID -O2 -shared -fPIC -nostdlib -fno-stack-protector -Wl,-z,noexecstack -Wl,--hash-style=both \
-  -o "$A/assets/app/lib/seccomp-enosys.so" "$A/native/seccomp-enosys.c"
+  -o "$NL/libccenosys.so" "$A/native/seccomp-enosys.c"
 # 同一条思路的「从进程外面」版本：静态二进制挂不上 --preload，只好用 ptrace 做同一件事。
 # 这个是**可执行文件**不是库，所以不用 -nostdlib（它自己就是被启动的那个进程，可以正常链 libc）。
 # 入口包装在 assets/bin/enosys-run
-$CC_ANDROID -O2 -o "$A/assets/app/lib/seccomp-enosys-run" "$A/native/seccomp-enosys-run.c"
+$CC_ANDROID -O2 -o "$NL/libccenosysrun.so" "$A/native/seccomp-enosys-run.c"
 # 应用内终端的伪终端（node 没有 pty）：stdin/stdout 与 pty 对转，fd 3 收窗口大小
-$CC_ANDROID -O2 -o "$A/assets/app/lib/ptyhost" "$A/native/ptyhost.c"
+$CC_ANDROID -O2 -o "$NL/libccptyhost.so" "$A/native/ptyhost.c"
 # 「经加载器」执行方式（targetSdk 36 只能这样）：glibc 程序拉子进程时的 exec 改写垫片，和 seccomp-enosys.so 一起 --preload 给 claude；
 # execpath.cjs 给经 linker64 起的 node 纠正 process.execPath（NODE_OPTIONS --require）
 $CC_ANDROID -O2 -shared -fPIC -nostdlib -fno-stack-protector -Wl,-z,noexecstack -Wl,--hash-style=both \
-  -o "$A/assets/app/lib/exec-shim.so" "$A/native/exec-shim.c"
+  -o "$NL/libccexecshim.so" "$A/native/exec-shim.c"
 # 同一份源码的 bionic 版：排在 termux-exec 前面，把 bionic 进程里 exec glibc 程序 / glibc ld.so 改走 APK 里的 ld.so
 $CC_ANDROID -DBIONIC -O2 -shared -fPIC -fno-stack-protector -Wl,-z,noexecstack -Wl,--hash-style=both \
-  -o "$A/assets/app/lib/exec-shim-bionic.so" "$A/native/exec-shim.c" -ldl
+  -o "$NL/libccexecshimb.so" "$A/native/exec-shim.c" -ldl
+# 不可转储：网关（LD_PRELOAD）和发行版的 claude（--preload）挂它，认 CCAPP_NODUMP=1。不依赖 libc，bionic / glibc 两边都能载
+$CC_ANDROID -O2 -shared -fPIC -nostdlib -fno-stack-protector -Wl,-z,noexecstack -Wl,--hash-style=both \
+  -o "$NL/libccnodump.so" "$A/native/nodump.c"
 cp "$A/native/execpath.cjs" "$A/assets/app/lib/"
-TAG=$(cat "$A/assets/app/server.mjs" "$A/assets/app/boot.mjs" "$A/assets/app/gw/"* "$A/assets/app/archive/"* "$A/assets/app/guard/"* "$A/assets/app/TOOLS.md" $(find "$A/assets/app/web" -type f | sort) "$A/assets/app/scripts/"* "$A/assets/app/bin/"* "$A/assets/app/pre/"* "$A/assets/app/lib/"* | md5sum | cut -c1-12)
+TAG=$(cat "$A/assets/app/server.mjs" "$A/assets/app/boot.mjs" "$A/assets/app/gw/"* "$A/assets/app/archive/"* "$A/assets/app/guard/"* "$A/assets/app/TOOLS.md" $(find "$A/assets/app/web" -type f | sort) "$A/assets/app/scripts/"* "$A/assets/app/bin/"* "$A/assets/app/pre/"* "$A/assets/app/lib/"* "$NL/"libcc*.so | md5sum | cut -c1-12)
 echo "$TAG" > "$A/assets/app/TAG"
 echo "  tag $TAG"
 # 逐文件清单（sha256 + 相对路径）：启动时应用按它核对 files/app，被改过、多出来的就从安装包还原（防项目钩子 / MCP 之类偷偷改网关）
@@ -126,6 +131,10 @@ node -e 'const fs=require("fs"),c=require("crypto");const p=JSON.parse(fs.readFi
 if(!p.lock||!/^[0-9a-f]{64}$/.test(p.lock.sha256||"")){console.error("✗ devkit-pin.json 里没有 lock 的 sha256：跑 node scripts/pin-devkit.mjs 重新生成");process.exit(1)}
 const h=c.createHash("sha256").update(fs.readFileSync(process.argv[2])).digest("hex");
 if(h!==p.lock.sha256){fs.rmSync(process.argv[2],{force:true});console.error("✗ devkit.lock.json 的 sha256 是 "+h+"，钉的是 "+p.lock.sha256+"（已删缓存）");process.exit(1)}' "$A/assets/devkit-pin.json" "$LOCK" || exit 1
+cp "$NL/"libcc*.so "$A/build/lib/arm64-v8a/"
+# 网关和 claude 执行链上来自工具包的文件该有的 sha256（安全 4 第 2 层，见 devkit.mjs gwpin、GwRuntime.java）。
+# 算一次要下基础模块包（约 130 MB），结果按包名存在 android/prebuilt/，钉的工具包没变就直接用
+node "$ROOT/devkit/devkit.mjs" gwpin --pin "$A/assets/devkit-pin.json" --target "$PIN_TARGET" --vendored "$A/prebuilt" --out "$A/assets/gwpin.json" || exit 1
 node "$ROOT/devkit/devkit.mjs" ldso --lock "$LOCK" --target "$PIN_TARGET" --release "$PIN_BASE" --vendored "$A/prebuilt/glibc" --out "$A/build/lib/arm64-v8a/libldlinux.so"
 
 echo "▸ aapt2 + 签名"
@@ -148,7 +157,7 @@ node -e 'const fs=require("fs"),b=fs.readFileSync(process.argv[1]);let e=b.lengt
   if(miss.length){console.error("✗ FILES 里有 "+miss.length+" 个文件没进 APK：",miss.slice(0,5).join(" "));process.exit(1)}' "$A/build/unsigned.apk" "$A/assets/app/FILES" || exit 1
 if [ "$SIGN" = apksigner ]; then
   # SDK 的 apksigner：先把 classes.dex 塞进包、对齐，再签（最低 API 26，它自己决定出 v2 / v3）
-  ( cd "$A/build" && zip -q unsigned.apk classes.dex && zip -q -0 unsigned.apk lib/arm64-v8a/libldlinux.so )
+  ( cd "$A/build" && zip -q unsigned.apk classes.dex && zip -q -0 unsigned.apk lib/arm64-v8a/libldlinux.so lib/arm64-v8a/libcc*.so )
   ${ZIPALIGN:-zipalign} -p -f 4 "$A/build/unsigned.apk" "$A/build/aligned.apk"
   if [ -n "$KS" ]; then
     ${APKSIGNER:-apksigner} sign --ks "$KS" --ks-pass "pass:${KS_PASS:-android}" --out "$OUT/cccodroid.apk" "$A/build/aligned.apk"
@@ -167,7 +176,8 @@ node --input-type=module -e "
 import fs from 'node:fs'; import { signApk } from '$B/apklib.mjs';
 const r = signApk('$A/build/unsigned.apk', '$OUT/cccodroid.apk',
   [{ name: 'classes.dex', data: fs.readFileSync('$A/build/classes.dex'), method: 8 },
-   { name: 'lib/arm64-v8a/libldlinux.so', data: fs.readFileSync('$A/build/lib/arm64-v8a/libldlinux.so'), method: 0 }], '$KEY');
+   ...['libldlinux.so', ...fs.readdirSync('$NL').filter((n) => /^libcc.*\.so$/.test(n)).sort()]
+     .map((n) => ({ name: 'lib/arm64-v8a/' + n, data: fs.readFileSync('$A/build/lib/arm64-v8a/' + n), method: 0 }))], '$KEY');
 console.log('  ' + r.entries + ' 个条目 · ' + (r.size / 1048576).toFixed(2) + ' MB');
 "
 fi

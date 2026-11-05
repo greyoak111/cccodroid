@@ -13,7 +13,7 @@ import { pathToFileURL } from "node:url";
 import { HERE, log } from "./config.mjs";
 import { tamperRecord } from "./tamper.mjs";
 
-// lib/ 里是起 claude 时 --preload 的库和网关自己 --require 的 execpath.cjs，和 bin/claude 一样在执行链上（DeepSeek 复核 11-03 第三轮）。
+// lib/ 里是子 node 经 NODE_OPTIONS --require 的 execpath.cjs（预加载的原生库 0.6.7 起搬进了 APK 原生库目录，见 build.sh）。
 // gw/ 是网关自己的源码：已经加载的模块不会热换，但被改过的文件要在下一次起进程（包括不是 Java 托管的那种）之前写回核过的那份。
 const SNAP_DIRS = ["archive/", "guard/", "bin/", "pre/", "scripts/", "lib/", "gw/"];
 const SNAP_FILES = ["TOOLS.md"];

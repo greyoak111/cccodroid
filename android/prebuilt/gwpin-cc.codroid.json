@@ -1,0 +1,80 @@
+{
+ "target": "cc.codroid",
+ "key": "devkit-2026.10.28:5a0521833f73bd7b8e5fa423ce4f7d96180afbacff9fa9710313bd87fcc64fcd",
+ "gw": {
+  "node": {
+   "src": "bin/node",
+   "sha256": "4f6994c4fadea6a927689b6bc951e255f9721cc39bae9064771028de029a29e5"
+  },
+  "libtermux-exec-linker-ld-preload.so": {
+   "src": "lib/libtermux-exec-linker-ld-preload.so",
+   "sha256": "8a2cb26e883feb432f4898fa136a959c9f286b498b037eb012a2cf77ee12591d"
+  },
+  "libz.so.1": {
+   "src": "lib/libz.so.1.3.2",
+   "sha256": "d4906678656668bc6987ea4ee2805e845e2a1db2cb5ff23f4843e05686c0c69e"
+  },
+  "libcares.so": {
+   "src": "lib/libcares.so",
+   "sha256": "521b99c20535ffb3012d5d78cc54e83ae3b67fc60abafb661c4438176a9523c3"
+  },
+  "libsqlite3.so": {
+   "src": "lib/libsqlite3.so.3.54.1",
+   "sha256": "13a92874925cab4c05b64d51596731540102b8d194284dbb744a38de9fe7670a"
+  },
+  "libffi.so": {
+   "src": "lib/libffi.so",
+   "sha256": "de4e5e33eaba7908a04b987c484ced9a585e086875f56bd7afe1a718ce5f14ec"
+  },
+  "libcrypto.so.3": {
+   "src": "lib/libcrypto.so.3",
+   "sha256": "562227bd86977df203a1120f156b5c281794375806eac39d05dd5fd493c3d784"
+  },
+  "libssl.so.3": {
+   "src": "lib/libssl.so.3",
+   "sha256": "da54ebbcac8f65712205b4f05a06b14c5b40165d145dc99bbec5f8f7dd91700a"
+  },
+  "libicui18n.so.78": {
+   "src": "lib/libicui18n.so.78.3",
+   "sha256": "38ea82c8323318fdf4f7fa330de243e80948cfe31754459d5225a6ade372ccbe"
+  },
+  "libicuuc.so.78": {
+   "src": "lib/libicuuc.so.78.3",
+   "sha256": "9fe530d7453c7f0beee848e479c00424ff81ad9bd3e2e96930a92591d9eaf33a"
+  },
+  "libc++_shared.so": {
+   "src": "lib/libc++_shared.so",
+   "sha256": "05bef9d3901910c3ff8ab450b03bc8b28383d363a2290f2f7b9aed7331ea6ff7"
+  },
+  "libicudata.so.78": {
+   "src": "lib/libicudata.so.78.3",
+   "sha256": "bac9e83922f7a64236bc0efffd9743c2dded119290310b313148531dd8dc288b"
+  }
+ },
+ "glibc": {
+  "ld-linux-aarch64.so.1": {
+   "src": "glibc/lib/ld-linux-aarch64.so.1",
+   "sha256": "fec30c21486994329ae0d2faac222468b0457c59c8cf62a773928b8b243f2f2e"
+  },
+  "libc.so.6": {
+   "src": "glibc/lib/libc.so.6",
+   "sha256": "71c3a61e583b41b0d8d7a725e780a1e06369205fb71e1ef4ad2ff54189a33dd8"
+  },
+  "librt.so.1": {
+   "src": "glibc/lib/librt.so.1",
+   "sha256": "a941a6c9eb45597c47597e7711e8cd24b039eb488f20337d2a96e35c22daf327"
+  },
+  "libpthread.so.0": {
+   "src": "glibc/lib/libpthread.so.0",
+   "sha256": "adf2a3b38694cdd6b8e6c08f56a64786420cb20d736ceece48c3871147357ff2"
+  },
+  "libdl.so.2": {
+   "src": "glibc/lib/libdl.so.2",
+   "sha256": "9c8504547ea2ae94146760551135ae49b19659ee3f6d913c1f2f055695a7fce7"
+  },
+  "libm.so.6": {
+   "src": "glibc/lib/libm.so.6",
+   "sha256": "dce6f39bfbc971b14dd696759d2fb12016e23a0cf70e0fa8083989c341b8a646"
+  }
+ }
+}

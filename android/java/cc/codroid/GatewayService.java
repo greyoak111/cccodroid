@@ -231,6 +231,13 @@ public class GatewayService extends Service {
         // NODE_OPTIONS 的 --require 也是从盘上读的：网关自己不挂（引导里做同样的事），交给引导转给它拉的子 node
         String nodeOpts = pb.environment().remove("NODE_OPTIONS");
         if (nodeOpts != null) pb.environment().put("CCAPP_NODE_OPTIONS", nodeOpts);
+        // 网关不可转储（安全 4 第 3 层，android/native/nodump.c）：同 uid 的进程（会话里的命令、终端）不能 ptrace 它、读写它的内存。
+        // libccnodump.so 在 APK 原生库目录里，经 LD_PRELOAD 挂上；它认 CCAPP_NODUMP=1，生效后把变量改成 0。
+        // 子进程不该带着它：原来的 LD_PRELOAD 经 CCAPP_CHILD_LD_PRELOAD 交给引导（gateway/boot.mjs）放回去
+        String pre = pb.environment().get("LD_PRELOAD");
+        pb.environment().put("CCAPP_CHILD_LD_PRELOAD", pre == null ? "" : pre);
+        pb.environment().put("LD_PRELOAD", env.nlib("libccnodump.so") + (pre == null || pre.isEmpty() ? "" : ":" + pre));
+        pb.environment().put("CCAPP_NODUMP", "1");
         if (env.loader) pb.environment().put("TERMUX_EXEC__PROC_SELF_EXE", env.bin("node").getPath());   // 给 execpath.cjs
         // 篡改留痕：这次（或界面那边部署时）还原过的文件交给网关，它记日志、界面提示一次、下一轮告诉模型（gateway/gw/tamper.mjs）
         String restored = AppFiles.takeRestored();

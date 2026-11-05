@@ -32,7 +32,8 @@ import { ensureManagedBridge } from "./managed-bridge.mjs";
 import { projectRisks, projectTrusted, trustProject } from "./projtrust.mjs";
 import { checkAppFiles } from "./appfiles.mjs";
 import { ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "./userconf.mjs";
-import { keepProcs, killProcs, leftoverProcs, procStart } from "./leftover.mjs";
+import { keepProcs, killProcs, leftoverProcs, nowTicks, procStart } from "./leftover.mjs";
+import { localAddr, witnessMac } from "./access.mjs";
 import { sealed } from "./edition.mjs";
 import { sealBlockMessage, sealCleanup, sealPrepare, sealRecheck } from "./seal.mjs";
 
@@ -64,6 +65,21 @@ function privToken(run) {
   if (run.sessionId) PRIV_TOK.set(run.sessionId, tok);
   if (PRIV_TOK.size > 500) PRIV_TOK.delete(PRIV_TOK.keys().next().value);
   return tok;
+}
+
+/**
+ * 给应用作证（Priv.java chainToken）：发起特权请求的进程往上数，碰到一个看不见的祖先 anc（不可转储的 claude 或网关自己，
+ * 见 android/native/nodump.c），它下面那个看得见的是 top。应用读不了它们的环境，来问网关：这是不是我起的哪一轮 claude、口令是什么。
+ *   anc 是网关自己：top 得是某一轮的直接子进程（claude 本身，或套在外面的 seccomp 监督器）
+ *   anc 是别的：得是某一轮的 claude（直接子进程，或监督器下面那个）
+ */
+export function privWitness(anc, top) {
+  for (const run of RUNS.values()) {
+    const c = run.child;
+    if (!c || !c.pid || !run.privTok || c.exitCode !== null || c.signalCode !== null) continue;
+    if (anc === process.pid ? top === c.pid : anc === c.pid || (run.claudePid > 0 && anc === run.claudePid)) return run.privTok;
+  }
+  return "";
 }
 
 // 工具确认进日志只记参数多长，不记原文：命令、路径、网址可能带着用户的业务内容，诊断包里不该有（审查 v0.5.20 08-001）
@@ -429,15 +445,24 @@ export async function startRun(item) {
     return endRun(run, { failed: true, finalText: msg });
   }
   const [cmd0, args0] = claudeCmd(argv);
+  // 外面套着 seccomp 监督器时，claude 是监督器的子进程：监督器把它的 pid 从 fd 3 报上来（不可转储的 claude 在 /proc 里看不见，作证要用，见 privWitness）
+  const wrapped = cmd0 !== PATHS.loader;
   const child = spawn(cmd0, args0, {
     cwd,
     // CCAPP_RUN_ID / CCAPP_GW_PORT：建档命令 cc-archive 靠它们告诉网关「这是哪一轮」；CCAPP_GW_PID 给 leftover.mjs 认是不是本网关起的
-    env: { ...claudeEnv({ model, provider: P }), CCAPP_RUN_ID: String(run.id), CCAPP_GW_PORT: String(CFG.port), CCAPP_GW_PID: String(process.pid), ...((run.privTok = privToken(run)) ? { CCAPP_PRIV_SESS: run.privTok } : {}) },
-    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...claudeEnv({ model, provider: P }), CCAPP_RUN_ID: String(run.id), CCAPP_GW_PORT: String(CFG.port), CCAPP_GW_PID: String(process.pid), ...((run.privTok = privToken(run)) ? { CCAPP_PRIV_SESS: run.privTok } : {}), ...(wrapped ? { ENOSYS_RUN_PIDFD: "3" } : {}) },
+    stdio: wrapped ? ["pipe", "pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe"],
     detached: true,            // 当进程组长，中断时好整组带走（见 killTree）
   });
   run.child = child;
-  run.childStart = procStart(child.pid);   // 留下的进程冒充这一轮时比启动先后（见 leftover.mjs）
+  run.claudePid = wrapped ? 0 : child.pid;
+  if (wrapped && child.stdio[3]) {
+    let got = "";
+    child.stdio[3].on("data", (d) => { got += d; const m = /^(\d+)\n/.exec(got); if (m) run.claudePid = child.claudePid = +m[1]; });
+    child.stdio[3].on("error", () => {});
+  }
+  // 留下的进程冒充这一轮时比启动先后（见 leftover.mjs）。claude 不可转储时 /proc 里看不见它：拿一个刚起的进程的启动时刻代替（不会更晚于 claude）
+  run.childStart = procStart(child.pid) ?? nowTicks();
   // 核过之后、真正执行之前程序被换掉了（来回替换卡时间窗）：这一轮停掉（DeepSeek 复核建议 2）
   if (!P.local && !sealStillValid()) {
     log("⚠️ [Claude Code 核验] 核过之后程序文件又变了，停掉这一轮");
@@ -797,6 +822,13 @@ export async function startRun(item) {
 
 // ── 路由：/api/perm/answer /api/perm/mode /api/task/stop /api/abort ──
 export async function routeRun(req, res, u, p) {
+  // ── 给应用作证：特权请求来自哪一轮 claude（见 privWitness）。应答带签名，应用按启动随机数派生的钥匙核 ──
+  if (req.method === "GET" && p === "/api/priv/witness") {
+    const n = String(u.searchParams.get("n") || ""), anc = +u.searchParams.get("anc"), top = +u.searchParams.get("top");
+    if (!/^[0-9a-f]{32}$/.test(n) || !(anc > 1) || !(top > 1)) return sendJson(res, 400, { error: "bad request" });
+    const tok = privWitness(anc, top);
+    return sendJson(res, 200, { tok, mac: witnessMac(n, anc, top, tok, localAddr(req)) });
+  }
   // ── 权限确认：回答 claude 的 can_use_tool ──
   if (req.method === "POST" && p === "/api/perm/answer") {
     const b = JSON.parse((await readBody(req)) || "{}");

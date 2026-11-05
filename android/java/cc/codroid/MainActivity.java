@@ -203,7 +203,7 @@ public class MainActivity extends Activity {
                 }
                 Updater.get(this).dropStagedIfInstalled();
                 ins.dropTrash();                  // 卸载删到一半被打断的残骸
-                // 界面与网关先部署：first-run 的 bash 要预加载 app/lib/exec-shim-bionic.so（36 的包），晚了就 CANNOT LINK、first-run 整个没跑
+                // 界面与网关先部署：0.6.7 起 first-run 的 bash 预加载的 exec-shim-bionic 在 APK 原生库目录里，不再依赖这一步；先部署照旧无害
                 deployAssets();
                 if (!env.devkitReady()) {
                     installFirstDevkit(ins);

@@ -352,14 +352,22 @@ int main(int argc, char **argv) {
 
     fflush(NULL);               /* fork 前清干净，别让缓冲区被复制成两份 */
 
+    /* ENOSYS_RUN_PIDFD=<fd>：把目标进程的 pid 写进这个 fd（网关拿它认出这一轮的 claude —— 发行版里 claude 不可转储，
+       /proc 里看不见，这台内核也没有 /proc/<pid>/task/<tid>/children 可查，见 gateway/gw/run.mjs privWitness）。
+       子进程里关掉它、摘掉变量：claude 起的东西里再套一层监督器时别往一个不相干的 fd 里写 */
+    int pidfd = -1;
+    { const char *pf = getenv("ENOSYS_RUN_PIDFD"); if (pf) { pidfd = atoi(pf); if (pidfd <= 2) pidfd = -1; } unsetenv("ENOSYS_RUN_PIDFD"); }
+
     pid_t pid = fork();
     if (pid < 0) {
         perror("fork");
         return 127;
     }
 
+    if (pid > 0 && pidfd >= 0) { dprintf(pidfd, "%d\n", (int)pid); close(pidfd); }
     if (pid == 0) {
         /* 子进程 */
+        if (pidfd >= 0) close(pidfd);
         if (ptrace(PTRACE_TRACEME, 0, 0, 0) != 0) {
             /* 拦不住跟踪就照常跑 —— 退化成"没有这个工具"，而不是拒绝启动。
                某些 SELinux 策略会拒绝，这里不该因此把用户挡在门外。 */

@@ -9,6 +9,6 @@
 #   enosys-run -v gh pr create --fill     # 看拦截了什么
 #
 # 原理与适用场景见 android/native/seccomp-enosys-run.c 顶部注释。
-# 路径自己推导（和 priv 一样用 dirname "$0"）：不依赖 CCAPP_BIN —— 它指向别处时
-# 会让这个命令悄悄跑错二进制。
-exec "$(dirname "$0")/../lib/seccomp-enosys-run" "$@"
+# 程序在 APK 原生库目录里（libccenosysrun.so，应用 uid 改不了；那个目录每次更新都换名，没法从 "$0" 推导），
+# 路径由应用经环境变量交来（CCAPP_ENOSYS_RUN，没有就用 CCAPP_NATIVE_LIB 拼）
+exec "${CCAPP_ENOSYS_RUN:-${CCAPP_NATIVE_LIB:-/nonexistent}/libccenosysrun.so}" "$@"

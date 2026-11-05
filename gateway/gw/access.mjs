@@ -111,6 +111,8 @@ export function proof(n, local = UI_HOST) {
 export function proofFor(u, local) {
   return (u.searchParams.get("for") === "tool" ? toolProof : proof)(u.searchParams.get("n"), local);
 }
+/** 给应用（Priv.java）作证的应答签名：哪一轮 claude 的特权会话口令（见 run.mjs privWitness） */
+export function witnessMac(n, anc, top, tok, local = UI_HOST) { return mac(`witness:${n}:${BOOT}:${local}:${anc}:${top}:${tok}`); }
 export function toolProof(n, local = UI_HOST) {
   return /^[0-9a-f]{32,128}$/.test(String(n || "")) ? `${BOOT} ${crypto.createHmac("sha256", TOKEN).update(`tproof:${n}:${BOOT}:${local}`).digest("hex")}` : null;
 }

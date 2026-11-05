@@ -6,7 +6,7 @@ unset LD_PRELOAD
 # 自带的 ripgrep 经加载器调不起来（Grep / Glob 一律「没找到」），改用 PATH 里的 rg，见 bin/rg
 export USE_BUILTIN_RIPGREP=0
 # 经加载器时（targetSdk 36）：ld.so 用 APK 里那份（CCAPP_LD），预加载列表多一个 exec-shim.so（CCAPP_GLIBC_PRELOAD）
-PRE=${CCAPP_GLIBC_PRELOAD:-${CCAPP_CLAUDE_PRELOAD:-${CCAPP_BIN%/bin}/lib/seccomp-enosys.so}}
+PRE=${CCAPP_GLIBC_PRELOAD:-${CCAPP_CLAUDE_PRELOAD:-${CCAPP_NATIVE_LIB:-/nonexistent}/libccenosys.so}}
 # 和网关起的一样挂上敏感操作再确认（../guard/cc-guard.mjs），并显式 disableAllHooks:false 压过设置里的关闭（见 gw/claude.mjs）；
 # 应用内终端：网关把这家的密钥放在 0600 私有文件里、只给路径（不进环境变量），照网关起 claude 的办法交给 apiKeyHelper。
 # 放在最前面：用户自己再带 --settings 时，以用户的为准（claude 只认最后一个 --settings）；在会话里让 Claude 这样起，guard 会先问
