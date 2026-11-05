@@ -144,7 +144,8 @@ function customCmdClash(cmd, selfId) {
   const rsv = CMD_RESERVED.get(cmd);
   if (rsv && rsv !== selfId) return "busy";
   const w = path.join(CUSTOM_BIN, cmd);
-  if (fs.existsSync(w)) { const m = /cccodroid-custom-id: ([a-z0-9-]+)/.exec(fs.readFileSync(w, "utf8").slice(0, 400)); if (!m || m[1] !== selfId) return "custom"; }
+  // 用 headOf：lstat + O_NOFOLLOW|O_NONBLOCK，FIFO/设备文件不会把网关事件循环卡死（审查 11-05）
+  if (fs.existsSync(w)) { const m = /cccodroid-custom-id: ([a-z0-9-]+)/.exec(headOf(w, 400)); if (!m || m[1] !== selfId) return "custom"; }
   return "";
 }
 
