@@ -235,3 +235,30 @@ test("sha256 仓库：只读的属性来源换成同格式的空树，对比、�
   const bad1 = spawnSync("git", ["--attr-source=6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321", "diff", "--cached"], { cwd: s1, encoding: "utf8" });
   assert.match(bad1.stderr, /bad --attr-source/);
 });
+
+test("git 信任指纹覆盖钩子内容与配置尾部（换内容/改尾部要重新确认）", async () => {
+  const r = repo("trust-fp");
+  const hook = path.join(r.d, ".git", "hooks", "pre-commit");
+  fs.writeFileSync(hook, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  fs.writeFileSync(path.join(r.d, "f.txt"), "b\n");
+  const a = await gitGo("/api/git/commit", { dir: r.d, message: "m" });
+  assert.equal(a.status, 409);
+  assert.ok(a.body.risks.some((x) => x.includes("hook: pre-commit")));
+  assert.equal((await gitGo("/api/git/commit", { dir: r.d, message: "m", trust: a.body.fp })).status, 200);
+  // 同名钩子内容变了：必须重新确认
+  fs.writeFileSync(hook, "#!/bin/sh\nexit 0 # changed\n", { mode: 0o755 });
+  fs.writeFileSync(path.join(r.d, "f.txt"), "c\n");
+  const b = await gitGo("/api/git/commit", { dir: r.d, message: "m2" });
+  assert.equal(b.status, 409, "钩子内容变了还沿用旧信任");
+  // 配置值只改 200 字之后的部分：指纹也必须变
+  assert.equal((await gitGo("/api/git/commit", { dir: r.d, message: "m3", trust: b.body.fp })).status, 200);
+  r.g("config", "filter.px.clean", "echo " + "a".repeat(210) + "1");
+  fs.writeFileSync(path.join(r.d, "f.txt"), "d\n");
+  const c1 = await gitGo("/api/git/commit", { dir: r.d, message: "m4" });
+  assert.equal(c1.status, 409, "新增长配置值要确认");
+  assert.equal((await gitGo("/api/git/commit", { dir: r.d, message: "m4", trust: c1.body.fp })).status, 200);
+  r.g("config", "filter.px.clean", "echo " + "a".repeat(210) + "2");
+  fs.writeFileSync(path.join(r.d, "f.txt"), "e\n");
+  const c2 = await gitGo("/api/git/commit", { dir: r.d, message: "m5" });
+  assert.equal(c2.status, 409, "配置尾部变了还沿用旧信任");
+});
