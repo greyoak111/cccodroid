@@ -6,6 +6,7 @@
 // 两条路并存：@路径 文字一字不动，模型照样能 Read、能拿路径改文件；只是多一份图。
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { log } from "./config.mjs";
 
@@ -54,7 +55,8 @@ function block(buf) {
 
 /** 太大的图缩到长边 1568（官方建议的尺寸）再发；没有 magick 或缩失败就不带，留给 Read 那条路 */
 function shrink(file, { tmpDir, env }) {
-  const out = path.join(tmpDir, `inline-${process.pid}-${Date.now().toString(36)}.jpg`);
+  // 同一毫秒可能有两个会话在跑：只用 pid+时间戳会撞名，读/写/删同一个临时文件
+  const out = path.join(tmpDir, `inline-${process.pid}-${Date.now().toString(36)}-${crypto.randomBytes(4).toString("hex")}.jpg`);
   return new Promise((ok) => {
     execFile("magick", [file + "[0]", "-auto-orient", "-resize", "1568x1568>", "-quality", "85", out], { timeout: 30000, env }, (err) => {
       let buf = null;
