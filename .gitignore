@@ -9,3 +9,4 @@ out/
 cache/
 android/assets/devkit-pin.json
 android/nativelib/
+android/assets/gwpin.json

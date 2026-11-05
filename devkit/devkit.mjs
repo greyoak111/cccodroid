@@ -760,7 +760,7 @@ if (cmd === "gwpin") {
   const target = opt("target", pin.target);
   const out = opt("out", path.join(OUT, `gwpin-${target}.json`));
   const vdir = opt("vendored"), vfile = vdir && path.join(vdir, `gwpin-${target}.json`);
-  const key = `${pin.tag}:${pin.modules && pin.modules.sha256}`;
+  const key = `gwpin2:${pin.tag}:${pin.modules && pin.modules.sha256}`;   // 前缀是算法版本：收哪些文件的规则改了就换，仓库里存的旧结果自动作废
   if (vfile && fs.existsSync(vfile)) {
     const v = JSON.parse(fs.readFileSync(vfile, "utf8"));
     if (v.key === key && v.target === target) {
@@ -816,8 +816,16 @@ if (cmd === "gwpin") {
       gw[n] = e; queue.push(n);
     }
   }
+  // glibc：claude 直接要的之外，glibc 自己还会按需 dlopen（libnss_*、libresolv…），--library-path 只给受保护的那份，
+  // 所以 glibc/lib 顶层所有 ELF 共享库（连软链的名字）都收进来，约 5 MB
   const glibc = {};
   for (const n of CLAUDE_GLIBC) glibc[n] = must("glibc/lib/" + n, "claude");
+  for (const r of files.keys()) {
+    const m = /^glibc\/lib\/([^/]+\.so(?:\.[\d.]+)?)$/.exec(r);
+    if (!m || glibc[m[1]]) continue;
+    const e = entry(r);
+    if (e && files.get(e.src).data.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) glibc[m[1]] = e;
+  }
   const text = JSON.stringify({ target, key, gw, glibc }, null, 1) + "\n";
   fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, text);
   if (vfile) { fs.mkdirSync(vdir, { recursive: true }); fs.writeFileSync(vfile, text); console.log(`  ⚠ 已更新 ${vfile}，记得提交`); }
