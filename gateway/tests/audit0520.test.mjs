@@ -223,21 +223,21 @@ test("02-005 新会话首条结束后，跟着它排的消息落盘时补上会�
 
 test("04-010 auth status 问不出结果：不当成未登录；有上次问出的就沿用并标旧", async () => {
   const login = await import("../gw/login.mjs");
-  const prev = PATHS.loader;
-  PATHS.loader = path.join(CFG.home, "no-such-loader");
+  const prev = PATHS.claudeLoader;
+  PATHS.claudeLoader = path.join(CFG.home, "no-such-loader");
   try {
     const v = await login.authStatus(true);
     assert.equal(v.unknown, true);
     assert.match(v.error, /ENOENT/);
-  } finally { PATHS.loader = prev; }
+  } finally { PATHS.claudeLoader = prev; }
 });
 
 test("04-010 复核 #2：退出码 0 但解析不出 loggedIn 也不算未登录；JSON 后面夹着警告照样认", async () => {
   const login = await import("../gw/login.mjs");
-  const prev = PATHS.loader, fake = path.join(CFG.home, "fake-auth.sh");
+  const prev = PATHS.claudeLoader, fake = path.join(CFG.home, "fake-auth.sh");
   const sh = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
   try {
-    PATHS.loader = fake;
+    PATHS.claudeLoader = fake;
     fs.writeFileSync(fake, `#!${sh}\nprintf %s "{\\"loggedIn\\": true, \\"authMethod\\": \\"claude.ai\\"}"\necho\necho "warning: } something"\nexit 0\n`, { mode: 0o700 });
     const ok = await login.authStatus(true);
     assert.equal(ok.loggedIn, true, JSON.stringify(ok));
@@ -249,7 +249,7 @@ test("04-010 复核 #2：退出码 0 但解析不出 loggedIn 也不算未登录
     const no = await login.authStatus(true);
     assert.equal(no.loggedIn, false);
     assert.equal(!!no.stale, false, "明说没登录就是确定的");
-  } finally { PATHS.loader = prev; fs.rmSync(fake, { force: true }); }
+  } finally { PATHS.claudeLoader = prev; fs.rmSync(fake, { force: true }); }
 });
 
 test("04-011 首次补算：since 所在小时里 since 之前的消息也补上，重补不重复", async () => {

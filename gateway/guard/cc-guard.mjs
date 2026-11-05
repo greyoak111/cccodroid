@@ -50,6 +50,8 @@ const PROMPT = [
   [/\.ccapp-userconf\b|ccapp-userconf\.json\b/, "the record of confirmed Claude Code config"],
   // 整个 files/app 都是：界面脚本、TOOLS.md（拼进系统提示）、建档规范（模型自己会去读）也在里面（群友破甲清单 V-12/V-13）
   [/(?:\/files|(?:~|\$\{?HOME\}?)\/\.\.)\/app(?=$|[\/\s"';|&)])/, "cccodroid gateway code"],
+  // 网关自己的运行库（files/gw，安全 4 第 2 层）：网关的 node 和库、它起 claude 用的 glibc。改了网关会拒绝起 claude、重启后按安装包还原，这里先拦
+  [/(?:\/files|(?:~|\$\{?HOME\}?)\/\.\.)\/gw(?:-stage)?(?=$|[\/\s"';|&)])/, "the gateway's own runtime"],
   [/\.cccodroid-env\.json\b/, "device facts in the system prompt"],
   // 不提文件名、经 claude 自己的命令改用户级配置：加 MCP 服务器、改设置（钩子 / disableAllHooks）、装插件（DeepSeek 复核 11-03 C-1）
   [/\bclaude\s+(?:mcp\s+(?:add|add-json|add-from-claude-desktop)|config\s+(?:set|add)|plugins?\s+(?:install|add|enable|marketplace))\b/, "Claude Code config via CLI"],

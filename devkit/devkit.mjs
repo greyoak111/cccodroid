@@ -722,7 +722,7 @@ if (cmd === "ldso") {
 }
 // gwpin：网关和 claude 执行链上来自工具包的文件（node 及它要的库、termux-exec 的预加载库、glibc 的 ld.so 和 claude 要的库）
 // 装好后应有的 sha256，build.sh 打进 APK（assets/gwpin.json）。应用起网关前按它核、把这些文件拷一份到
-// $PREFIX/libexec/cccodroid/gw/（pkg 升级碰不到），网关只从那里加载（安全 4 第 2 层）。
+// files/gw/（usr 外面：pkg 升级、工具包更新都碰不到），网关只从那里加载（安全 4 第 2 层，GwRuntime.java）。
 // 来源是钉住那一版工具包的基础模块包（已按目标包名改好前缀）：APK 钉的 devkit-pin.json → modules.json 的 sha256 → 基础模块包的 sha256，一路核下来。
 // （Termux 仓库池里的旧 deb 会被删，不能从 deb 现算：nodejs 26.12.1 在 11-05 已经取不到了）
 // 要哪些库不写死：从 node 的 DT_NEEDED 起逐个找，找不到又不是系统库就报错
@@ -731,6 +731,9 @@ if (cmd === "ldso") {
 const BIONIC_SYS = new Set(["libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so"]);
 // claude（Bun，glibc）要的：版本号写在 soname 里、多年不变，直接列
 const CLAUDE_GLIBC = ["ld-linux-aarch64.so.1", "libc.so.6", "librt.so.1", "libpthread.so.0", "libdl.so.2", "libm.so.6"];
+// 网关的库运行时按不带版本的名字 dlopen 的：libcrypto 初始化时 COMP_zlib 开 "libz.so"（strace 实测 11-05）。
+// files/gw 里没有就落到 RUNPATH 的 $PREFIX/lib，等于从 pkg 管的目录加载代码
+const GW_DLOPEN = ["libz.so"];
 /** ELF64 小端的 DT_NEEDED 列表 */
 function elfNeeded(b) {
   if (b.length < 64 || b.readUInt32BE(0) !== 0x7f454c46 || b[4] !== 2) return [];
@@ -760,7 +763,7 @@ if (cmd === "gwpin") {
   const target = opt("target", pin.target);
   const out = opt("out", path.join(OUT, `gwpin-${target}.json`));
   const vdir = opt("vendored"), vfile = vdir && path.join(vdir, `gwpin-${target}.json`);
-  const key = `gwpin2:${pin.tag}:${pin.modules && pin.modules.sha256}`;   // 前缀是算法版本：收哪些文件的规则改了就换，仓库里存的旧结果自动作废
+  const key = `gwpin3:${pin.tag}:${pin.modules && pin.modules.sha256}`;   // 前缀是算法版本：收哪些文件的规则改了就换，仓库里存的旧结果自动作废
   if (vfile && fs.existsSync(vfile)) {
     const v = JSON.parse(fs.readFileSync(vfile, "utf8"));
     if (v.key === key && v.target === target) {
@@ -816,6 +819,7 @@ if (cmd === "gwpin") {
       gw[n] = e; queue.push(n);
     }
   }
+  for (const n of GW_DLOPEN) gw[n] = must("lib/" + n, "网关的库运行时 dlopen");
   // glibc：claude 直接要的之外，glibc 自己还会按需 dlopen（libnss_*、libresolv…），--library-path 只给受保护的那份，
   // 所以 glibc/lib 顶层所有 ELF 共享库（连软链的名字）都收进来，约 5 MB
   const glibc = {};

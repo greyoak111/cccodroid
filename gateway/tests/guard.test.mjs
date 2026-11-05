@@ -69,6 +69,9 @@ test("改提示词、钩子、会话记录：写要问，读不问；CLAUDE.md �
     ["Write", { file_path: "/data/user/0/cc.codroid/files/app/archive/spec.zh.md" }],
     ["Bash", { command: "cp x.js ~/../app/web/app/03-perm-status.js" }],
     ["Bash", { command: "echo '{}' > $HOME/.cccodroid-env.json" }],
+    ["Bash", { command: "cp evil.so /data/user/0/cc.codroid/files/gw/glibc/libc.so.6" }],
+    ["Write", { file_path: "/data/user/0/cc.codroid/files/gw/libssl.so.3" }],
+    ["Bash", { command: "cp x ~/../gw/node" }],
   ];
   for (const [tool, inp] of hit) assert.match(judge(tool, inp)?.cat || "", /^prompt:/, `${tool} ${JSON.stringify(inp)}`);
   for (const [tool, inp] of [
@@ -83,6 +86,8 @@ test("改提示词、钩子、会话记录：写要问，读不问；CLAUDE.md �
     ["Bash", { command: "claude --version" }],
     ["Write", { file_path: "/sdcard/files/apple/notes.md" }],
     ["Read", { file_path: "/data/user/0/cc.codroid/files/app/TOOLS.md" }],
+    ["Write", { file_path: "/data/user/0/cc.codroid/files/home/workspace/gw/main.go" }],
+    ["Bash", { command: "ls /data/user/0/cc.codroid/files/gwx" }],
   ]) assert.equal(judge(tool, inp), null, `${tool} ${JSON.stringify(inp)}`);
 });
 

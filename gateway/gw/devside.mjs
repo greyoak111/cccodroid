@@ -31,7 +31,7 @@ const cmpVer = (a, b) => {
 function claudeVersionOf(bin) {
   return new Promise((ok) => {
     const pre = GLIBC_PRELOAD ? ["--preload", GLIBC_PRELOAD] : [];
-    execFile(PATHS.loader, ["--library-path", PATHS.glibcLib, ...pre, bin, "--version"], { timeout: 30000, env: glibcEnv() }, (e, out) => {
+    execFile(PATHS.claudeLoader, ["--library-path", PATHS.claudeLib, ...pre, bin, "--version"], { timeout: 30000, env: glibcEnv() }, (e, out) => {
       const m = String(out || "").match(/\d+\.\d+\.\d+/);
       ok(m ? m[0] : "");
     });

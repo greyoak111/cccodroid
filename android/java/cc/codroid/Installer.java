@@ -519,7 +519,7 @@ final class Installer {
     }
 
     /** 解一个 tar(.gz) 到 dir（叠加，不先清空），边解边算 tar 的 sha256；tarSha 非空时对不上就整个删掉 dir、抛错。返回实得的 sha256 */
-    private String extractInto(File dir, InputStream raw, long total, boolean gzip, String tarSha) throws IOException {
+    String extractInto(File dir, InputStream raw, long total, boolean gzip, String tarSha) throws IOException {
         Counting in = new Counting(new BufferedInputStream(raw, 1 << 20), total);
         MessageDigest md;
         try { md = MessageDigest.getInstance("SHA-256"); } catch (java.security.NoSuchAlgorithmException e) { throw new IOException(e); }

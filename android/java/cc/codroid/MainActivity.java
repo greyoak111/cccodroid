@@ -1894,18 +1894,20 @@ public class MainActivity extends Activity {
             boolean ok = Env.proveGateway() || !Env.portBusy();
             ui.post(() -> {
                 if (web == null) return;
-                if (ok) { web.loadUrl(Env.uiUrl()); return; }
+                if (ok && GatewayService.gwBlocked == null) { web.loadUrl(Env.uiUrl()); return; }
                 showSquatted();
             });
         }, "ui-prove").start();
     }
-    /** 端口被别的应用占着：界面换成一页说明，别让已经打开的页面继续把输入发过去（审查 10-29 第六份 中3） */
+    /** 端口被别的应用占着：界面换成一页说明，别让已经打开的页面继续把输入发过去（审查 10-29 第六份 中3）。
+     *  发行版网关运行库对不上、没起网关（GatewayService.gwBlocked）也用这一页 */
     private void showSquatted() {
         if (web == null) return;
         boolean dark = uiDark();
+        String why = GatewayService.gwBlocked;
         String html = "<meta name=viewport content=\"width=device-width\"><body style=\"font:16px/1.6 sans-serif;padding:32px;background:"
             + css(BrowserPane.pal(this, dark, "bg")) + ";color:" + css(BrowserPane.pal(this, dark, "fg")) + "\">"
-            + android.text.TextUtils.htmlEncode(Tr.f("端口 {0} 被别的应用占着，网关起不来。重启手机，或卸载最近装的可疑应用", Env.PORT)) + "</body>";
+            + android.text.TextUtils.htmlEncode(why != null ? why : Tr.f("端口 {0} 被别的应用占着，网关起不来。重启手机，或卸载最近装的可疑应用", Env.PORT)).replace("\n", "<br>") + "</body>";
         web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
         squatShown = true;
     }

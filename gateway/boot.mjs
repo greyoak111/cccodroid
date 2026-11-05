@@ -25,6 +25,17 @@ if ("CCAPP_CHILD_LD_PRELOAD" in process.env) {
   if (pre) process.env.LD_PRELOAD = pre; else delete process.env.LD_PRELOAD;
   delete process.env.CCAPP_CHILD_LD_PRELOAD;
 }
+// 网关自己用 files/gw 那份 node 和库（安全 4 第 2 层，GwRuntime.java）；子进程（钩子、MCP、组件、终端里的 node）照旧用 $PREFIX 的
+if ("CCAPP_CHILD_LD_LIBRARY_PATH" in process.env) {
+  const lp = process.env.CCAPP_CHILD_LD_LIBRARY_PATH;
+  if (lp) process.env.LD_LIBRARY_PATH = lp; else delete process.env.LD_LIBRARY_PATH;
+  delete process.env.CCAPP_CHILD_LD_LIBRARY_PATH;
+}
+if (process.env.CCAPP_CHILD_NODE) {
+  process.execPath = process.env.CCAPP_CHILD_NODE;
+  if (process.env.TERMUX_EXEC__PROC_SELF_EXE) process.env.TERMUX_EXEC__PROC_SELF_EXE = process.execPath;
+  delete process.env.CCAPP_CHILD_NODE;
+}
 
 const sha = (b) => crypto.createHash("sha256").update(b).digest("hex");
 let list = null;

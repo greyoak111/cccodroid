@@ -1,6 +1,6 @@
 {
  "target": "cc.codroid",
- "key": "gwpin2:devkit-2026.10.28:5a0521833f73bd7b8e5fa423ce4f7d96180afbacff9fa9710313bd87fcc64fcd",
+ "key": "gwpin3:devkit-2026.10.28:5a0521833f73bd7b8e5fa423ce4f7d96180afbacff9fa9710313bd87fcc64fcd",
  "gw": {
   "node": {
    "src": "bin/node",
@@ -49,6 +49,10 @@
   "libicudata.so.78": {
    "src": "lib/libicudata.so.78.3",
    "sha256": "bac9e83922f7a64236bc0efffd9743c2dded119290310b313148531dd8dc288b"
+  },
+  "libz.so": {
+   "src": "lib/libz.so.1.3.2",
+   "sha256": "d4906678656668bc6987ea4ee2805e845e2a1db2cb5ff23f4843e05686c0c69e"
   }
  },
  "glibc": {

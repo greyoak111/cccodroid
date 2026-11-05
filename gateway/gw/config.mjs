@@ -33,6 +33,10 @@ export const NO_BRIDGE = !!PREFIX || process.env.CCAPP_NO_BRIDGE === "1";
 export const PATHS = {
   loader: process.env.CCAPP_LOADER || path.join(CFG.runtime, "glibc", "lib", "ld-linux-aarch64.so.1"),
   glibcLib: process.env.CCAPP_GLIBC_LIB || path.join(CFG.runtime, "glibc", "lib"),
+  // 网关起 claude 用自己那份 glibc（files/gw/glibc，安全 4 第 2 层，GwRuntime.java；起之前 gwpin.mjs 按钉子再核）。
+  // 只给起 claude 的地方用：写进持久脚本的路径（custom.mjs 等）仍用上面两个，那些脚本在终端里跑、要跟着工具包走
+  claudeLoader: process.env.CCAPP_GW_LOADER || process.env.CCAPP_LOADER || path.join(CFG.runtime, "glibc", "lib", "ld-linux-aarch64.so.1"),
+  claudeLib: process.env.CCAPP_GW_GLIBC_LIB || process.env.CCAPP_GLIBC_LIB || path.join(CFG.runtime, "glibc", "lib"),
   claude: process.env.CCAPP_CLAUDE || path.join(CFG.runtime, "claude"),
   // cccodroid：给 claude 预加载的小库，把被安卓 seccomp 拦下的调用改成返回 ENOSYS
   // （Android 14 拦 epoll_pwait2，claude 不挂它一启动就被 SIGSYS 打死）

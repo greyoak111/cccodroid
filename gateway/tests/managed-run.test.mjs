@@ -36,9 +36,9 @@ fs.writeFileSync(providerFile, JSON.stringify({ active: "custom-managed-test", p
   "custom-managed-test": { label: "Fake bridge", baseUrl: endpoint, apiKey: "fixture-only", authStyle: "bearer", defaultModel: "fixture-model", fallbackModels: [{ id: "fixture-model" }] },
   "custom-managed-other": { label: "Other fixture provider", baseUrl: "https://other-fixture.example.invalid", apiKey: "fixture-other-only", authStyle: "bearer", defaultModel: "fixture-model", fallbackModels: [{ id: "fixture-model" }] },
 } }));
-const previousPaths = { claude: PATHS.claude, loader: PATHS.loader };
+const previousPaths = { claude: PATHS.claude, loader: PATHS.loader, claudeLoader: PATHS.claudeLoader };
 PATHS.claude = process.execPath;
-PATHS.loader = cli;
+PATHS.loader = PATHS.claudeLoader = cli;
 const { startRun } = await import("../gw/run.mjs");
 const { abortRun } = await import("../gw/queue.mjs");
 const { RUNS } = await import("../gw/runs.mjs");

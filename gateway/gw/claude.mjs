@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { APP } from "./appfiles.mjs";
 import { sealArgv, sealEnv, sealed } from "./edition.mjs";
 import { claudeSeal } from "./claudeseal.mjs";
+import { gwRuntimeBlocked } from "./gwpin.mjs";
 
 // 敏感操作再确认：PreToolUse 钩子（guard/cc-guard.mjs），碰密钥 / 读屏点按 / 往外分享时让 claude 停下来问，全部放行也一样。
 // 不设全局关闭开关：整层关掉就等于没有；旧设置里存过 guard:false 也不再认。要放行就在确认卡片上逐次「允许」。
@@ -342,7 +343,7 @@ const EXTRA_ENV_DENY = /^(ANTHROPIC_(BASE_URL|API_KEY|AUTH_TOKEN)|LD_\w*|DYLD_\w
 /** claude 是 glibc 程序，必须经 loader 启动 */
 export function claudeArgv(extra) {
   const pre = GLIBC_PRELOAD ? ["--preload", GLIBC_PRELOAD] : [];
-  return ["--library-path", PATHS.glibcLib, ...pre, PATHS.claude, ...extra];
+  return ["--library-path", PATHS.claudeLib, ...pre, PATHS.claude, ...extra];
 }
 
 /** seccomp 监督器：cccodroid 在 APK 原生库目录（libccenosysrun.so，Env.java 经 CCAPP_ENOSYS_RUN 交来），开发端在 files/devbin */
@@ -360,7 +361,7 @@ export function claudeCmd(extra) {
   // 发行版：开会话的一律加封口（--setting-sources "" 等，见 edition.mjs）。所有起 claude 的地方都经这里，别处不许自己拼
   const argv = claudeArgv(sealArgv(extra));
   const er = SETTINGS.staticCompat !== false ? enosysRun() : "";
-  return er ? [er, ["-f", PATHS.loader, ...argv]] : [PATHS.loader, argv];
+  return er ? [er, ["-f", PATHS.claudeLoader, ...argv]] : [PATHS.claudeLoader, argv];
 }
 
 /** 连 claude 带它拉起的整棵进程树一起杀。
@@ -546,6 +547,8 @@ export function termKeyFile(p = PROVIDER) {
 /** 起 claude 之前核程序本身（claudeseal.mjs）：对不上返回给人看的原因，能起返回 ""。
  *  开会话以外的路也要核：mcp list、doctor、登录、补档、回退文件、扩展命令都会执行它（审查 11-05 第 16 组 1） */
 export async function claudeBlocked() {
+  const gw = gwRuntimeBlocked();
+  if (gw) return gw;
   const s = await claudeSeal().catch((e) => ({ ok: false, why: e.message }));
   if (s.ok !== false) return "";
   return s.pending ? tz("这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。") : tz("Claude Code 程序核验没过，这次没有运行：{why}", { why: String(s.why || "") });

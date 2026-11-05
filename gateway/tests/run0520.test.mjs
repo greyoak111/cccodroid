@@ -26,9 +26,9 @@ function script(steps, code = 0) {
   const body = steps.map((s) => s.sleep ? `${SLEEP} ${s.sleep}` : `printf '%s\\n' ${JSON.stringify(JSON.stringify(s)).replace(/\$/g, "\\$")}`).join("\n");
   fs.writeFileSync(cli, `#!${sh}\n${body}\nexit ${code}\n`, { mode: 0o700 });
 }
-const previousPaths = { claude: PATHS.claude, loader: PATHS.loader };
+const previousPaths = { claude: PATHS.claude, loader: PATHS.loader, claudeLoader: PATHS.claudeLoader };
 PATHS.claude = process.execPath;
-PATHS.loader = cli;
+PATHS.loader = PATHS.claudeLoader = cli;
 const { startRun } = await import("../gw/run.mjs");
 const { onPublish } = await import("../gw/bus.mjs");
 const events = [];

@@ -29,9 +29,9 @@ fs.mkdirSync(path.join(process.env.CCAPP_PREFIX, "bin"), { recursive: true });
 fs.writeFileSync(path.join(process.env.CCAPP_PREFIX, "bin", "magick"), `#!${sh}\n: > ${JSON.stringify(started)}\nwhile [ ! -e ${JSON.stringify(release)} ]; do sleep 0.05; done\nexit 1\n`, { mode: 0o700 });
 const big = path.join(root, "big.png");
 { const b = Buffer.alloc(4 << 20); b.writeUInt32BE(0x89504e47, 0); fs.writeFileSync(big, b); }
-const previousPaths = { claude: PATHS.claude, loader: PATHS.loader };
+const previousPaths = { claude: PATHS.claude, loader: PATHS.loader, claudeLoader: PATHS.claudeLoader };
 PATHS.claude = process.execPath;
-PATHS.loader = cli;
+PATHS.loader = PATHS.claudeLoader = cli;
 const { startRun } = await import("../gw/run.mjs");
 const { setPermMode, abortRun } = await import("../gw/queue.mjs");
 const { RUNS } = await import("../gw/runs.mjs");

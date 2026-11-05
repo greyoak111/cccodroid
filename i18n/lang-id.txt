@@ -2776,3 +2776,4 @@
 2776	cccodroid memeriksa skill ini sebelum diserahkan ke Claude Code. Saat memanggilnya dengan garis miring, tambahkan user: di depan namanya, misalnya /user:{name}.
 2777	Claude Code gagal pemeriksaan integritas, jadi tidak dijalankan: {why}
 2778	Versi Claude Code ini belum punya manifest resmi bertanda tangan, jadi giliran ini tidak dimulai. Sedang diverifikasi ulang secara daring — kirim lagi dalam satu-dua menit. Jika terus gagal, pasang ulang dari Pengaturan → Pembaruan.
+2779	Runtime milik gateway telah diubah, jadi Claude Code tidak dijalankan pada giliran ini. Gateway akan mulai ulang saat senggang dan memulihkannya dari paket; kirim lagi sebentar lagi.

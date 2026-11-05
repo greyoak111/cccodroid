@@ -256,13 +256,13 @@ test("网关引导 boot.mjs：核过 FILES 才起，静态 import 的模块按�
     fs.rmSync(root, { recursive: true, force: true });
     fs.mkdirSync(path.join(root, "gw"), { recursive: true });
     fs.writeFileSync(path.join(root, "gw", "a.mjs"), "export const v = 1;\n");
-    fs.writeFileSync(path.join(root, "server.mjs"), `import { v } from "./gw/a.mjs";${extra}\nconsole.log(JSON.stringify({ argv: process.argv.slice(1), v, no: process.env.NODE_OPTIONS || "", cno: process.env.CCAPP_NODE_OPTIONS || "" }));\n`);
+    fs.writeFileSync(path.join(root, "server.mjs"), `import { v } from "./gw/a.mjs";${extra}\nconsole.log(JSON.stringify({ argv: process.argv.slice(1), v, no: process.env.NODE_OPTIONS || "", cno: process.env.CCAPP_NODE_OPTIONS || "", ep: process.execPath, a0: process.argv[0], lp: process.env.LD_LIBRARY_PATH ?? null, left: Object.keys(process.env).filter((k) => /^CCAPP_CHILD_/.test(k)) }));\n`);
     const files = ["gw/a.mjs", "server.mjs"].map((r) => h(fs.readFileSync(path.join(root, r))) + " " + r).join("\n") + "\n";
     fs.writeFileSync(path.join(root, "FILES"), files);
     return h(files);
   };
-  const run = (fsha) => spawnSync(process.execPath, ["--input-type=module", "-e", boot, root, "8123"], { cwd: CFG.workspace, encoding: "utf8",
-    env: { ...process.env, CCAPP_FILES_SHA: fsha, CCAPP_NODE_OPTIONS: "--require=/x/execpath.cjs", NODE_OPTIONS: "" } });
+  const run = (fsha, extra = {}) => spawnSync(process.execPath, ["--input-type=module", "-e", boot, root, "8123"], { cwd: CFG.workspace, encoding: "utf8",
+    env: { ...process.env, CCAPP_FILES_SHA: fsha, CCAPP_NODE_OPTIONS: "--require=/x/execpath.cjs", NODE_OPTIONS: "", ...extra } });
   let fsha = setup();
   let r = run(fsha);
   assert.equal(r.status, 0, r.stderr);
@@ -271,6 +271,19 @@ test("网关引导 boot.mjs：核过 FILES 才起，静态 import 的模块按�
   assert.equal(o.v, 1);
   assert.equal(o.no, "--require=/x/execpath.cjs", "子进程用的 NODE_OPTIONS 由引导挂上");
   assert.equal(o.cno, "");
+  assert.equal(o.ep, process.execPath, "没有 CCAPP_CHILD_NODE：execPath 不动");
+  // 网关用 files/gw 那份运行库起（GatewayService）：子进程要的 LD_LIBRARY_PATH、node 由引导放回去
+  const gwEnv = { LD_LIBRARY_PATH: "/x/files/gw", CCAPP_CHILD_LD_LIBRARY_PATH: "", CCAPP_CHILD_NODE: "/x/usr/bin/node", TERMUX_EXEC__PROC_SELF_EXE: "/x/files/gw/node" };
+  r = run(fsha, gwEnv);
+  assert.equal(r.status, 0, r.stderr);
+  const g = JSON.parse(r.stdout.trim().split("\n").pop());
+  assert.equal(g.lp, null, "子进程不带网关的库目录");
+  assert.equal(g.ep, "/x/usr/bin/node", "子 node 用 $PREFIX 那个");
+  assert.equal(g.a0, "/x/usr/bin/node");
+  assert.deepEqual(g.left, [], "CCAPP_CHILD_* 用完删掉");
+  r = run(fsha, { ...gwEnv, CCAPP_CHILD_LD_LIBRARY_PATH: "/y/lib"});
+  const g2 = JSON.parse(r.stdout.trim().split("\n").pop());
+  assert.equal(g2.lp, "/y/lib", "原来有的照原样放回");
   assert.equal(run("0".repeat(64)).status, 3, "FILES 和应用交来的哈希对不上");
   assert.equal(run("").status, 3, "没交哈希也不起");
   // 核完之后模块被换（盘上的和清单不符）：不加载

@@ -41,7 +41,7 @@ async function loginStart(flag) {
   try { fs.unlinkSync(urlFile); } catch {}
   fs.writeFileSync(browser, '#!/system/bin/sh\nprintf "%s\\n" "$1" > "' + urlFile + '"\n', { mode: 0o700 });
   const env = { ...authEnv(), BROWSER: browser };
-  const child = spawn(PATHS.loader, claudeArgv(["auth", "login", flag]), { cwd: CFG.home, env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(PATHS.claudeLoader, claudeArgv(["auth", "login", flag]), { cwd: CFG.home, env, stdio: ["ignore", "pipe", "pipe"] });
   const L = LOGIN = { child, out: "", startedAt: Date.now(), done: false, ok: false, flag };
   const onData = (d) => { L.out += String(d); };
   child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
@@ -81,7 +81,7 @@ async function runAuth(args, timeoutMs = 20000) {
   const blocked = await claudeBlocked();
   if (blocked) return { code: -1, out: blocked };
   return new Promise((resolve) => {
-    const child = spawn(PATHS.loader, claudeArgv(["auth", ...args]), { cwd: CFG.home, env: authEnv(), stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(PATHS.claudeLoader, claudeArgv(["auth", ...args]), { cwd: CFG.home, env: authEnv(), stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
     child.stdout.on("data", (d) => (out += d)); child.stderr.on("data", (d) => (out += d));

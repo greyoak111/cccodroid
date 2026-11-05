@@ -167,8 +167,15 @@ public class GatewayService extends Service {
         super.onDestroy();
     }
 
-    /** 端口被别的应用占着时回调（MainActivity 把界面换成说明页） */
+    /** 端口被别的应用占着、或网关运行库对不上没起网关时回调（MainActivity 把界面换成说明页） */
     static volatile Runnable onSquat;
+    /** 发行版网关运行库对不上、没起网关时给人看的原因（MainActivity 说明页用）；网关起来了就是 null */
+    static volatile String gwBlocked;
+
+    /** 网关运行库凑不齐（GwRuntime.ensure 失败）：发行版不起网关 */
+    static final class GwUnavailable extends Exception { GwUnavailable(String m) { super(m); } }
+    private String gwLastErr;        // 同一个原因只记一次账本
+    private long gwFetchAt;          // 上次联网取运行库的时间：取回来还对不上时别每分钟下一遍 128 MB
 
     /** 守护循环：网关退出就重拉；连续快速崩溃时退避，别把电池耗光 */
     private void supervise() {
@@ -193,6 +200,16 @@ public class GatewayService extends Service {
                 int rc = proc.waitFor();
                 Env.resetBoot();             // 网关没了：上一次核身份的缓存作废，别在 3 秒内把签名请求交给接手端口的人
                 Log.w(TAG, "网关退出 rc=" + rc);
+            } catch (GwUnavailable e) {
+                Log.e(TAG, "网关运行库对不上，不起网关：" + e.getMessage());
+                gwBlocked = Tr.f("网关自己的运行库和安装包对不上，为了安全没有启动网关：{0}\n\n联网后会自动再试；一直不行请重装 cccodroid", e.getMessage());
+                Runnable cb = onSquat;
+                if (cb != null) cb.run();
+                if (stopping) break;
+                backoff = Math.min(Math.max(backoff, 15000) * 2, 300000);
+                update(Tr.t("网关运行库对不上，网关没有启动"));
+                sleep(backoff);
+                continue;
             } catch (Exception e) {
                 Log.e(TAG, "网关启动失败", e);
             }
@@ -226,7 +243,21 @@ public class GatewayService extends Service {
         // 它按 FILES 核 node 实际读到的每个模块的字节再执行（gateway/boot.mjs）
         String boot = AppFiles.assetText(this, "app/boot.mjs");
         if (boot == null) throw new java.io.IOException("安装包里没有 app/boot.mjs");
-        ProcessBuilder pb = new ProcessBuilder(env.cmd(env.bin("node").getPath(), "--input-type=module", "-e", boot, env.app.getPath(), String.valueOf(Env.PORT)));
+        // 网关自己的运行库（安全 4 第 2 层，见 GwRuntime）：按安装包钉的哈希核 files/gw，对不上的先从 $PREFIX 拷、再联网取。
+        // 凑不齐：发行版不起网关（$PREFIX 里的 node 和库同 uid 的进程都能换）；开发版退回 $PREFIX 的，记账本
+        GwRuntime gw = new GwRuntime(this, env);
+        boolean fetch = System.currentTimeMillis() - gwFetchAt > 30 * 60000L;
+        String gwErr = gw.ensure(fetch, this::update);
+        if (gwErr != null && fetch) gwFetchAt = System.currentTimeMillis();
+        if (gwErr != null && !gwErr.equals(gwLastErr)) Ledger.add(env, "verify", false, Tr.t("网关运行库：") + gwErr, null);
+        gwLastErr = gwErr;
+        if (gwErr != null && GwRuntime.sealed(this)) throw new GwUnavailable(gwErr);
+        if (gwErr != null) Log.w(TAG, "开发版：网关运行库凑不齐，退回 $PREFIX 的 node：" + gwErr);
+        boolean own = gwErr == null;
+        File node = own ? gw.node() : env.bin("node");
+        // --openssl-config：node 默认读 $PREFIX/etc/tls/openssl.cnf 的 nodejs_conf 段，那里能写 providers 让 libcrypto 去 dlopen 任意模块。
+        // 网关用不上它（根证书是 node 自带的），给一份空的；只管网关自己，子进程照旧
+        ProcessBuilder pb = new ProcessBuilder(env.cmd(node.getPath(), "--openssl-config=/dev/null", "--input-type=module", "-e", boot, env.app.getPath(), String.valueOf(Env.PORT)));
         env.apply(pb.environment());
         // NODE_OPTIONS 的 --require 也是从盘上读的：网关自己不挂（引导里做同样的事），交给引导转给它拉的子 node
         String nodeOpts = pb.environment().remove("NODE_OPTIONS");
@@ -238,7 +269,22 @@ public class GatewayService extends Service {
         pb.environment().put("CCAPP_CHILD_LD_PRELOAD", pre == null ? "" : pre);
         pb.environment().put("LD_PRELOAD", env.nlib("libccnodump.so") + (pre == null || pre.isEmpty() ? "" : ":" + pre));
         pb.environment().put("CCAPP_NODUMP", "1");
-        if (env.loader) pb.environment().put("TERMUX_EXEC__PROC_SELF_EXE", env.bin("node").getPath());   // 给 execpath.cjs
+        if (env.loader) pb.environment().put("TERMUX_EXEC__PROC_SELF_EXE", node.getPath());   // 引导据此把 process.execPath 从 linker64 改回来
+        if (own) {
+            // 网关进程按 files/gw 找库（LD_LIBRARY_PATH 先于 node 的 RUNPATH）；经加载器时 termux-exec 也换成 files/gw 那份。
+            // 子进程（claude 的钩子、MCP、终端、组件）照旧用 $PREFIX 的 node 和库：原值经 CCAPP_CHILD_* 交给引导放回去
+            pb.environment().put("LD_LIBRARY_PATH", gw.dir.getPath());
+            pb.environment().put("CCAPP_CHILD_LD_LIBRARY_PATH", "");
+            if (env.loader) {
+                String tx = new File(env.usr, "lib/libtermux-exec-linker-ld-preload.so").getPath();
+                pb.environment().put("LD_PRELOAD", pb.environment().get("LD_PRELOAD").replace(tx, new File(gw.dir, "libtermux-exec-linker-ld-preload.so").getPath()));
+            }
+            pb.environment().put("CCAPP_CHILD_NODE", env.bin("node").getPath());
+            // 网关起 claude 用这份 glibc（gateway/gw/config.mjs PATHS.claudeLoader / claudeLib），起之前按钉子再核一遍（gw/gwpin.mjs）
+            pb.environment().put("CCAPP_GW_GLIBC_LIB", gw.glibc.getPath());
+            pb.environment().put("CCAPP_GW_LOADER", env.loader ? env.nlib("libldlinux.so") : gw.loader().getPath());
+            pb.environment().put("CCAPP_GW_GLIBC_PIN", gw.glibcPin());
+        }
         // 篡改留痕：这次（或界面那边部署时）还原过的文件交给网关，它记日志、界面提示一次、下一轮告诉模型（gateway/gw/tamper.mjs）
         String restored = AppFiles.takeRestored();
         if (restored != null) pb.environment().put("CCAPP_TAMPERED", restored);
@@ -264,6 +310,7 @@ public class GatewayService extends Service {
         Env.spawnKey = ks.toString();
         Env.resetBoot();
         proc = pb.start();
+        gwBlocked = null;
         try (java.io.OutputStream o = proc.getOutputStream()) { o.write((ks + "\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII)); }
         catch (java.io.IOException e) { Log.w(TAG, "启动随机数没交过去：" + e.getMessage()); }
     }

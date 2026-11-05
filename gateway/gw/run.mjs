@@ -24,6 +24,7 @@ import { sessModel, sessProvider, setSessModel } from "./sessmodel.mjs";
 import { inlineImages, inlineImagesSync, wantsInline } from "./inlineimg.mjs";
 import { pathWatch, previewHint, settlePathNote, takePathNote } from "./pathnote.mjs";
 import { claudeSeal, sealStillValid } from "./claudeseal.mjs";
+import { gwRuntimeBlocked } from "./gwpin.mjs";
 import { tamperNote, tamperRecord } from "./tamper.mjs";
 import { SPOOF_NOTE, checkSession, integrityHint, integrityNote, neutralizeMarkers, sealSession } from "./integrity.mjs";
 import { recordExtra } from "./lineage-store.mjs";
@@ -406,6 +407,8 @@ export async function startRun(item) {
   for (const [f, chk] of [["ccapp-settings.json", settingsDiskCheck], ["ccapp-providers.json", providersDiskCheck]]) if (chk()) tamperRecord("runtime", [f]);
   // claude 程序本身：和版本目录里存的 Anthropic 签名清单对不上就不起（被改过字符串的二进制，见 claudeseal.mjs）
   if (!P.local) {
+    const gwBad = gwRuntimeBlocked();
+    if (gwBad) { emit({ type: "error", message: tr(LAST_LANG, gwBad) }); return endRun(run, { failed: true }); }
     const seal = await claudeSeal();
     if (seal.ok === false) {
       emit({ type: "error", message: tr(LAST_LANG, seal.pending ? "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。" : "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。") });
@@ -446,7 +449,7 @@ export async function startRun(item) {
   }
   const [cmd0, args0] = claudeCmd(argv);
   // 外面套着 seccomp 监督器时，claude 是监督器的子进程：监督器把它的 pid 从 fd 3 报上来（不可转储的 claude 在 /proc 里看不见，作证要用，见 privWitness）
-  const wrapped = cmd0 !== PATHS.loader;
+  const wrapped = cmd0 !== PATHS.claudeLoader;
   const child = spawn(cmd0, args0, {
     cwd,
     // CCAPP_RUN_ID / CCAPP_GW_PORT：建档命令 cc-archive 靠它们告诉网关「这是哪一轮」；CCAPP_GW_PID 给 leftover.mjs 认是不是本网关起的
