@@ -15,6 +15,7 @@ import { NEXT, readBody, sendJson } from "./http.mjs";
 import { BOOT, publish } from "./bus.mjs";
 import { execIntent, pickProvider, startRun } from "./run.mjs";
 import { cleanMergeFrom } from "./merge.mjs";
+import { LOCAL_CMD_RE } from "./modelcmd.mjs";
 import { tamperPending } from "./tamper.mjs";
 import { RATE_LIMITS } from "./stream.mjs";
 
@@ -353,7 +354,11 @@ export function enqueue(body) {
 }
 
 function tryInject(run, item) {
-  if (!run.inject || item.message.trim().startsWith("/")) return false;   // 斜杠命令得自己单跑一轮
+  if (!run.inject) return false;
+  // 斜杠命令：这一轮答完、只剩后台任务在跑时直接送进 claude（stdin 上照样认 /compact /context 这类，11-05 实测：
+  // 就地压缩、后台任务不受影响）。还在生成时照旧排队等这一轮结束；网关自己处理的（/model 等）得自己单跑一轮
+  const msg = item.message.trim();
+  if (msg.startsWith("/") && (!run.idle || LOCAL_CMD_RE.test(msg))) return false;
   const same = item.sessionId ? item.sessionId === run.sessionId : (item.follow === run.id || !item.follow);
   if (!same) return false;
   return run.inject(item);

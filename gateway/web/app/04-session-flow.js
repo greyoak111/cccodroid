@@ -652,6 +652,7 @@
         if (rv.av.empty) rv.av.remove();
         renderUser(ev.text, liveEl); tagRun(liveEl.lastElementChild, ev.runId);
         rv.av = AssistantView(liveEl, true); tagRun(rv.av.msgEl, ev.runId);
+        if (ev.text.trim().startsWith("/")) rv.av.msgEl.classList.add("sys");   // 后台任务在跑时插进去的命令，样式同单跑的命令
         rv.avDone = false;
         if (rv.idle) { rv.idle = false; rv.timer = RunTimer(Date.now()); }   // 空闲时发来的消息：算新的一轮
         rv.timer?.attach(rv.av);          // 计时算整轮的，跟着最新的气泡走

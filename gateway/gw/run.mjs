@@ -11,7 +11,7 @@ import { setLastInit } from "./caps.mjs";
 import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { END_HOOKS, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setPermMode, sidForItem } from "./queue.mjs";
-import { handleLocalCommand } from "./modelcmd.mjs";
+import { LOCAL_CMD_RE, handleLocalCommand } from "./modelcmd.mjs";
 import { LL, ensureLlama, localCustomActive } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "./usage.mjs";
 import { TASKS_HINT, contextWindowOf, toolsHint, translate } from "./stream.mjs";
@@ -207,7 +207,7 @@ export async function startRun(item) {
   publishState();
 
   const message = run.text;
-  const local = message.trim().match(/^\/(model|models|effort|autocompact)(?:\s+([\s\S]*))?$/);
+  const local = message.trim().match(LOCAL_CMD_RE);
   if (local) {
     log(`⌘ 本地命令 /${local[1]}`);   // 参数不记：诊断包说了不含消息内容（审查 v0.5.20 08-001）
     return handleLocalCommand(local[1], (local[2] || "").trim(),
@@ -494,6 +494,7 @@ export async function startRun(item) {
   writeUser(withNotes(message, [tamperN, ucN, integNote, arch?.note, pathNote, refN].filter(Boolean).join("\n\n"), imgs0));
   run.inputOpen = true;
   run.pendingInject = [];      // 已写进 stdin、还没被 claude 吃进去的插话
+  run.slashFlight = [];        // 空闲时送进去的斜杠命令（见 run.inject）：等它的 result
   run.bgTasks = 0;             // claude 报的后台任务数（见 feed）
   run.bgList = [];             // 后台任务明细：{ id, type, desc }（shell / 子代理 / monitor / 工作流），界面列出来、可单独停
   run.replays = 0;
@@ -518,6 +519,19 @@ export async function startRun(item) {
   run.paths = pathWatch();      // 本轮写过的文件、回复里有没有写全路径（收尾时核对，见 pathnote.mjs）
   run.inject = (item) => {
     if (!run.inputOpen || run.ended || run.aborted) return false;
+    if (item.message.trim().startsWith("/")) {
+      // 斜杠命令（只在这一轮答完、只剩后台任务时进来，见 queue.mjs 的 tryInject）。claude 回显不统一（11-05 实测）：
+      // /compact 回显「<local-command-stdout>…」，/cost /context 不回显，不认识的命令原样回显 —— 不能像普通插话那样靠回显算送达。
+      // 所以写进去就当场画出来、算新的一轮；回显来了吞掉，它的 result 出来就算办完
+      try { writeUser(item.message); } catch { return false; }
+      run.slashFlight.push(item);
+      run.idle = false; resultStale = true;
+      emit({ type: "inject", text: item.message, cid: item.cid, itemId: item.id });   // 先画消息（前端借它另起气泡、重新计时）
+      emit({ type: "run_busy", startedAt: Date.now() });
+      saveRunMark(); publishState();
+      log(`↪ 插话（命令） ${item.message.trim().slice(0, 40).replace(/\s+/g, " ")}`);
+      return true;
+    }
     // 插话里的档号也附上那一章的摘要（同步版：只查已有索引，等不起整理）
     let refI = "";
     if (!P.local) try { refI = refNoteSync(item.message, run.sessionId); } catch (e) { log("插话档号引用失败: " + e.message); }
@@ -655,7 +669,9 @@ export async function startRun(item) {
   };
   const onResult = (r) => {
     lastResult = r; resultStale = false;
-    run.meter.result(r, !isCmd);         // 斜杠命令不算一轮对话，但 /compact 这类真花了的 token 照记
+    // 空闲时送进去的斜杠命令：这个 result 就是它的（送进去前这一轮已经答完）。后台任务恰好同时回报的话会早一步认领，只影响计数
+    const slashDone = run.slashFlight.length ? run.slashFlight.shift() : null;
+    run.meter.result(r, !isCmd && !slashDone);   // 斜杠命令不算一轮对话，但 /compact 这类真花了的 token 照记
     // 接口账本每个 result 各记各的：同一进程后台回报、插话会出好几个 result，只在结束时记最后一个会少记（#102 04-008）
     noteTokens(run.provider, r.usage);
     // 定时任务的单次花费上限：后台回报 / 插话会在同一进程里接着花，每出一个 result 就核一次，超了当场停（#98 03-010）。
@@ -677,8 +693,17 @@ export async function startRun(item) {
     emit({ type: "run_idle", bg: run.bgTasks, at: Date.now() });
     publishState();
   };
-  const onReplay = () => {
+  const slashEcho = (ev) => {
+    const c = ev.message?.content;
+    const txt = (typeof c === "string" ? c : Array.isArray(c) ? c.filter((x) => x && x.type === "text").map((x) => x.text).join("\n") : "").trim();
+    if (/^<local-command-(?:stdout|stderr)>/.test(txt)) return true;
+    const i = run.slashFlight.findIndex((it) => it.message.trim() === txt);
+    return i >= 0;
+  };
+  const onReplay = (ev) => {
     // 第一条回显是本轮的原始消息；之后每条都是一条送达的插话（按写入顺序）
+    // 斜杠命令的回显（「<local-command-…」或命令原文）吞掉：它在送进去时已经画过了，也不占普通插话的位置
+    if (run.replays > 0 && slashEcho(ev)) return;
     const said = run.replays === 0 ? message : run.pendingInject[0] && run.pendingInject[0].message;
     if (said && usageIsPrompt(said)) usageAdd({ m: 1 }, run.sessionId);
     if (run.replays++ === 0) return;

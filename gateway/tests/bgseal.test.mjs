@@ -24,7 +24,7 @@ const sh = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
 const SLEEP = ["/system/bin/sleep", "/bin/sleep", "/usr/bin/sleep"].find((p) => fs.existsSync(p));
 if (!SLEEP) throw new Error("找不到 sleep，假 CLI 的等待会失效");
 function script(steps, code = 0) {
-  const body = steps.map((s) => s.sleep ? `${SLEEP} ${s.sleep}` : `printf '%s\\n' ${JSON.stringify(JSON.stringify(s)).replace(/\$/g, "\\$")}`).join("\n");
+  const body = steps.map((s) => s.raw ? s.raw : s.sleep ? `${SLEEP} ${s.sleep}` : `printf '%s\\n' ${JSON.stringify(JSON.stringify(s)).replace(/\$/g, "\\$")}`).join("\n");
   fs.writeFileSync(cli, `#!${sh}\n${body}\nexit ${code}\n`, { mode: 0o700 });
 }
 const previousPaths = { claude: PATHS.claude, loader: PATHS.loader, claudeLoader: PATHS.claudeLoader };
@@ -123,4 +123,92 @@ test("发过一次 stop_task、之后又起了新一轮：再空闲时不再按 
   assert.equal(run.inputOpen, true, "这次空闲是任务自己跑完的，不该 6 秒就关");
   abortRun(run);
   await until(() => endOf("rbg-sticky"));
+});
+
+// ── 斜杠命令插话（11-05）：答完了只剩后台任务时，/compact 这类直接送进 claude，不再等后台任务全结束 ──
+const stdinLog = path.join(root, "stdin.jsonl");
+const tapStdin = { raw: `exec 3<&0; cat <&3 > '${stdinLog}' &` };   // 录下网关写进 stdin 的（非交互 sh 的后台任务默认 stdin 是 /dev/null，要显式重定向）
+const echo = (t) => ({ type: "user", isReplay: true, message: { role: "user", content: [{ type: "text", text: t }] } });
+const userText = (l) => { const c = JSON.parse(l).message.content; return typeof c === "string" ? c : c.filter((x) => x.type === "text").map((x) => x.text).join(""); };
+
+test("斜杠命令：只剩后台任务时直接插进去，当场画出来；/compact 的回显吞掉，result 之后回到空闲", async () => {
+  const s = crypto.randomUUID();
+  script([tapStdin, init(s), echo("fixture"), bg(1, "server"), result(), { sleep: 2 },
+    { type: "system", subtype: "status", status: "compacting" },
+    init(s),
+    { type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "manual", pre_tokens: 5000, post_tokens: 800 } },
+    { type: "user", isReplay: true, message: { role: "user", content: "<local-command-stdout>Compacted </local-command-stdout>" } },
+    { ...result(), result: "" },
+    { sleep: 30 }]);
+  await startRun({ id: "rslash", message: "fixture", cwd: root });
+  const run = RUNS.get("rslash");
+  await until(() => run.idle && run.bgTasks === 1);
+  const it = enqueue({ message: "/compact", sessionId: s });
+  assert.equal(it.injected, true, "空闲时斜杠命令直接插进去");
+  assert.equal(QUEUE.includes(it), false);
+  assert.equal(run.idle, false, "送进去就算新的一轮");
+  const mine = () => events.filter((e) => e.runId === "rslash");
+  const iInj = mine().findIndex((e) => e.type === "inject" && e.text === "/compact");
+  assert.ok(iInj >= 0, "写进去就发 inject，不等回显");
+  assert.ok(mine().findIndex((e) => e.type === "run_busy") > iInj, "先画消息再报生成中");
+  await until(() => run.idle && mine().some((e) => e.type === "compacted"));
+  assert.ok(mine().findIndex((e) => e.type === "compacted") > iInj, "压缩结果画在命令下面");
+  assert.equal(mine().filter((e) => e.type === "inject").length, 1, "回显吞掉，不再画一遍");
+  assert.equal(run.slashFlight.length, 0);
+  assert.equal(run.pendingInject.length, 0);
+  assert.equal(run.inputOpen, true, "后台任务还在：输入留着");
+  await until(() => fs.existsSync(stdinLog) && fs.readFileSync(stdinLog, "utf8").split("\n").filter(Boolean).length >= 2);
+  const lines = fs.readFileSync(stdinLog, "utf8").split("\n").filter(Boolean);
+  assert.equal(userText(lines[1]), "/compact", "命令原样写进去，不带提醒和附注");
+  // 回到空闲后普通消息照旧能插
+  const it2 = enqueue({ message: "接着说", sessionId: s });
+  assert.equal(it2.injected, true);
+  abortRun(run);
+  await until(() => endOf("rslash"));
+});
+
+test("斜杠命令：还在生成时照旧排队；网关自己处理的命令（/model 等）空闲时也不插", async () => {
+  const s = crypto.randomUUID();
+  script([init(s), mainStart, { sleep: 30 }]);
+  await startRun({ id: "rslash-busy", message: "fixture", cwd: root });
+  const run = RUNS.get("rslash-busy");
+  await until(() => run.inputOpen && run.inject && run.sessionId === s && !run.idle);
+  const a = enqueue({ message: "/compact", sessionId: s, mode: "inject" });
+  assert.equal(!!a.injected, false, "生成中不插斜杠命令");
+  assert.ok(QUEUE.includes(a));
+  QUEUE.splice(QUEUE.indexOf(a), 1);
+  abortRun(run);
+  await until(() => endOf("rslash-busy"));
+
+  const s2 = crypto.randomUUID();
+  script([init(s2), bg(1, "server"), result(), { sleep: 30 }]);
+  await startRun({ id: "rslash-local", message: "fixture", cwd: root });
+  const run2 = RUNS.get("rslash-local");
+  await until(() => run2.idle && run2.bgTasks === 1);
+  for (const m of ["/model fixture-model", "/effort high", "/autocompact 50"]) {
+    const b = enqueue({ message: m, sessionId: s2 });
+    assert.equal(!!b.injected, false, m);
+    QUEUE.splice(QUEUE.indexOf(b), 1);
+  }
+  abortRun(run2);
+  await until(() => endOf("rslash-local"));
+});
+
+test("斜杠命令：不回显的（/cost /context）靠 result 收尾，之后普通插话的回显照常对上", async () => {
+  const s = crypto.randomUUID();
+  script([init(s), echo("fixture"), bg(1, "server"), result(), { sleep: 2 },
+    init(s), { type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text: "Total cost: $0" }] } }, result(),
+    { sleep: 2 },
+    init(s), echo("接着说"), result(),
+    { sleep: 30 }]);
+  await startRun({ id: "rslash-cost", message: "fixture", cwd: root });
+  const run = RUNS.get("rslash-cost");
+  await until(() => run.idle && run.bgTasks === 1);
+  assert.equal(enqueue({ message: "/cost", sessionId: s }).injected, true);
+  await until(() => run.idle && run.slashFlight.length === 0);
+  assert.ok(events.some((e) => e.runId === "rslash-cost" && e.type === "assistant_text" && /Total cost/.test(e.text)), "命令输出照常画出来：" + JSON.stringify(events.filter((e) => e.runId === "rslash-cost").map((e) => e.type + ":" + (e.text || "").slice(0, 20))));
+  assert.equal(enqueue({ message: "接着说", sessionId: s }).injected, true);
+  await until(() => run.pendingInject.length === 0 && events.some((e) => e.runId === "rslash-cost" && e.type === "inject" && e.text === "接着说"));
+  abortRun(run);
+  await until(() => endOf("rslash-cost"));
 });
