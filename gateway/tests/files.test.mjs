@@ -139,3 +139,17 @@ test("打开后原文件被改名：带着打开时的 mtime 保存要 409，不
   assert.equal(fs.readFileSync(moved, "utf8"), "old");
   fs.rmSync(file, { force: true }); fs.rmSync(moved, { force: true });
 });
+
+test("保存路径末尾的 /. 不能绕过密钥文件检查", async () => {
+  fs.mkdirSync(CFG.workspace, { recursive: true });
+  const file = path.join(CFG.workspace, "ccapp-providers.json");
+  fs.writeFileSync(file, "ORIGINAL");
+  const req = Readable.from([Buffer.from("PWNED")]);
+  req.method = "POST"; req.headers = {};
+  const res = fakeRes();
+  const u = new URL(`http://x/api/file/save?path=${encodeURIComponent(file + "/.")}&force=1`);
+  await routeFiles(req, res, u, "/api/file/save");
+  assert.notEqual(res.code, 200, JSON.stringify(res.body));
+  assert.equal(fs.readFileSync(file, "utf8"), "ORIGINAL");
+  fs.rmSync(file, { force: true });
+});
