@@ -554,15 +554,21 @@ const billOf = (id) => {
 const KEEP_MS = 92 * 86400e3;   // 明细留三个月，更早的并进累计
 
 /** 按端点认平台。认不出的（含自定义）就只记 token */
-function billKind(v) {
-  const u = String(v.baseUrl || "");
-  if (/\/\/api\.deepseek\.com/.test(u)) return { kind: "deepseek" };
-  if (/\/\/api\.moonshot\.cn/.test(u)) return { kind: "kimi", host: "https://api.moonshot.cn", currency: "CNY" };
-  if (/\/\/api\.moonshot\.ai/.test(u)) return { kind: "kimi", host: "https://api.moonshot.ai", currency: "USD" };
-  if (/\/\/open\.bigmodel\.cn/.test(u)) return { kind: "glm", host: "https://open.bigmodel.cn" };
-  if (/\/\/api\.z\.ai/.test(u)) return { kind: "glm", host: "https://api.z.ai" };
-  if (/\/\/openrouter\.ai/.test(u)) return { kind: "openrouter", currency: "USD" };
-  return { kind: "none" };
+// 余额查询会把这家的密钥发到下面固定的官方主机：只认主机名完全一致的 https 地址。
+// 以前按网址子串认，api.deepseek.com.example.net 这种代理地址会被当成官方，密钥被发去官方主机（GHSA-4cfj）
+const BILL_HOSTS = {
+  "api.deepseek.com": { kind: "deepseek" },
+  "api.moonshot.cn": { kind: "kimi", host: "https://api.moonshot.cn", currency: "CNY" },
+  "api.moonshot.ai": { kind: "kimi", host: "https://api.moonshot.ai", currency: "USD" },
+  "open.bigmodel.cn": { kind: "glm", host: "https://open.bigmodel.cn" },
+  "api.z.ai": { kind: "glm", host: "https://api.z.ai" },
+  "openrouter.ai": { kind: "openrouter", currency: "USD" },
+};
+export function billKind(v) {
+  let u; try { u = new URL(String(v.baseUrl || "")); } catch { return { kind: "none" }; }
+  if (u.protocol !== "https:" || u.username || u.password) return { kind: "none" };
+  const hit = Object.hasOwn(BILL_HOSTS, u.hostname) ? BILL_HOSTS[u.hostname] : null;
+  return hit ? { ...hit } : { kind: "none" };
 }
 
 async function fetchJson(url, headers) {
