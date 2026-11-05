@@ -14,7 +14,9 @@ import { listHooks, saveHooks } from "../gw/extensions.mjs";
 import { tamperAck, tamperNote, tamperPending, tamperRecord } from "../gw/tamper.mjs";
 import { claudeSeal } from "../gw/claudeseal.mjs";
 
-const runHook = (cmd, tool, input) => execFileSync("/system/bin/sh", ["-c", cmd], { input: JSON.stringify({ tool_name: tool, tool_input: input }) }).toString();
+// CI 的 Linux 没有 /system/bin/sh（#113 同款）：测试本身也要能在非安卓环境跑
+const SH = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
+const runHook = (cmd, tool, input) => execFileSync(SH, ["-c", cmd], { input: JSON.stringify({ tool_name: tool, tool_input: input }) }).toString();
 
 test("guard 钩子内联：不读盘上的文件也能跑，判断和 cc-guard.mjs 一致", () => {
   const old = SETTINGS.guard;
