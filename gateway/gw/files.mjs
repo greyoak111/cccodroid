@@ -80,16 +80,24 @@ export function safeFilePath(p) {
 function safeWritePath(p) {
   if (!p || !path.isAbsolute(String(p))) return { error: "absolute path required", status: 400 };
   const full = String(p);
-  if (fs.existsSync(full)) return safeFilePath(full);
+  const name = path.basename(full);
+  // 末尾的 /. 或 /.. 不是「新建文件」：path.join(dir, ".") 会折回 dir，之前会把普通文件当目录，
+  // 让 SECRET_NAMES 去检查 "."，从而绕过对目标文件名的检查（审查 11-05）
+  if (!name || name === "." || name === "..") return { error: "bad path", status: 400 };
   let dir;
   try { dir = fs.realpathSync(path.dirname(full)); } catch (e) { return { error: "no such directory", status: 400 }; }
+  // 目标按「解析后的目录 + 文件名」重新算：full 里可能带 /./ 之类的段，不能拿原始字符串判断存在性
+  const dst = path.join(dir, name);
+  let st = null; try { st = fs.lstatSync(dst); } catch (e) { if (e.code !== "ENOENT") return { error: e.message, status: 400 }; }
+  if (st) return safeFilePath(dst);          // 已有文件走只读核验：非普通文件（FIFO/设备）与软链在这里拒绝
+  let ds; try { ds = fs.statSync(dir); } catch (e) { return { error: e.message, status: 400 }; }
+  if (!ds.isDirectory()) return { error: "not a directory", status: 400 };
   for (const root of inWorkspace(dir) ? [] : [CFG.home, CFG.runtime]) {
     let rr; try { rr = fs.realpathSync(root); } catch { rr = root; }
     if (dir === rr || dir.startsWith(rr + path.sep)) return { error: "forbidden", status: 403 };
   }
-  const name = path.basename(full);
-  if (SECRET_NAMES.has(name) || SECRET_RE.test(path.join(dir, name))) return { error: "forbidden", status: 403 };
-  return { file: path.join(dir, name), size: 0, mtime: 0, fresh: true };
+  if (SECRET_NAMES.has(name) || SECRET_RE.test(dst)) return { error: "forbidden", status: 403 };
+  return { file: dst, size: 0, mtime: 0, fresh: true };
 }
 
 /** 写文件但不跟最后一级软链（O_NOFOLLOW：是软链就报 ELOOP）。
