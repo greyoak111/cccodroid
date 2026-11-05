@@ -868,7 +868,8 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
     img.addEventListener("error", () => {
       const a = document.createElement("a");
       a.href = "#"; a.className = "missing-img"; a.textContent = path;
-      a.addEventListener("click", (e) => { e.preventDefault(); toast(t("读不到：{path}", { path }), true); });
+      // 命令输出里的路径常常是别的机器上的（SSH 连着的服务器、容器里），本机根本没有：说清楚，别像是应用坏了（群友 11-05）
+      a.addEventListener("click", (e) => { e.preventDefault(); toast(t("本机读不到 {path}：可能在远程机器上，或者已经被删掉", { path }), true); });
       wrap.replaceWith(a);
     });
     wrap.appendChild(img);

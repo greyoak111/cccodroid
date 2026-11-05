@@ -271,7 +271,10 @@
     const l = view.tasks;
     if (!l || !l.length) return "";
     const done = l.filter((x) => x.status === "completed").length, all = done === l.length;
-    if (all && view.tasksHide === tasksSig(l)) return "";
+    // 没在跑（停掉了、或这一轮结束时清单没做完）也能 ✕ 收起：不然留着一条永远做不完的清单（群友 11-05）。
+    // 收起记的是清单指纹，清单一变、或者这个会话又跑起来，就重新露出来
+    const closable = all || !srv.run;
+    if (closable && view.tasksHide === tasksSig(l)) return "";
     const cur = l.find((x) => x.status === "in_progress") || l.find((x) => x.status !== "completed");
     const pct = Math.round(done / l.length * 100);
     const head = `<div class="rs-row rs-thead" role="button" tabindex="0" aria-expanded="${tasksOpen}">
@@ -280,7 +283,7 @@
       <span class="rs-tbar"><i style="width:${pct}%"></i></span>
       <span class="rs-txt">${!tasksOpen && cur ? taskLabel(cur) : ""}</span>
       ${more ? `<span class="rs-meta">${t("另有 {n} 项", { n: more })}</span>` : ""}
-      ${all ? `<button class="rs-tx" aria-label="${t("关闭")}">${uiI("x")}</button>` : `<span class="rs-chev${tasksOpen ? " up" : ""}">${uiI("chevDown")}</span>`}</div>`;
+      ${all ? "" : `<span class="rs-chev${tasksOpen ? " up" : ""}">${uiI("chevDown")}</span>`}${closable ? `<button class="rs-tx" aria-label="${t("关闭")}">${uiI("x")}</button>` : ""}</div>`;
     const rows = !tasksOpen ? "" : `<div class="rs-tlist">${l.map((x) => `<div class="rs-trow ${esc(x.status)}">
       <span class="rs-tico">${uiI(x.status === "completed" ? "check" : x.status === "in_progress" ? "half" : "ring")}</span>
       <span class="rs-ttxt">${taskLabel(x)}</span>

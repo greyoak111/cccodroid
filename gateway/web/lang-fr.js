@@ -2780,4 +2780,5 @@ window.I18N_DICT["fr"] = {
   "Claude Code 程序核验没过，这次没有运行：{why}": "Claude Code n’a pas passé la vérification d’intégrité, il n’a donc pas été lancé : {why}",
   "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。": "Cette version de Claude Code n’a pas encore de manifeste officiel signé, ce tour n’a donc pas été lancé. Une nouvelle vérification en ligne est en cours : renvoyez dans une ou deux minutes. Si cela échoue toujours, réinstallez-la depuis Réglages → Mises à jour.",
   "网关自己的运行库被改过，这一轮没有启动 Claude Code。网关会在空闲时重启、按安装包还原，稍后再发送。": "Le runtime propre à la passerelle a été modifié : Claude Code n'a pas été lancé pour ce tour. La passerelle redémarrera dès qu'elle sera inactive et le restaurera depuis le paquet ; renvoyez dans un instant.",
+  "本机读不到 {path}：可能在远程机器上，或者已经被删掉": "Impossible de lire {path} sur cet appareil : il se trouve peut-être sur une machine distante, ou a été supprimé",
 };
