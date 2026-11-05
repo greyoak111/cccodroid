@@ -3,6 +3,7 @@ import "../gw/config.mjs";   // 放最前：没走 scripts/test.mjs（没有临�
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
+import net from "node:net";
 import { sseRepairer, startStreamFix, fixedBaseUrl, STREAMFIX } from "../gw/streamfix.mjs";
 
 const ev = (o) => `event: ${o.type}\ndata: ${JSON.stringify(o)}\n\n`;
@@ -154,4 +155,26 @@ test("非流式响应半路断（#102 04-007）：下游马上断，不等客户
     up.closeAllConnections(); up.close();
     STREAMFIX.server.closeAllConnections(); STREAMFIX.server.close();
   }
+});
+
+test("上游用 TCP RST 断开：补出的 message_delta/message_stop 仍送达", async () => {
+  const up = net.createServer((sock) => {
+    let got = false;
+    sock.on("data", () => {
+      if (got) return; got = true;
+      sock.write("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n" + START + textBlock(0, "说完了") + stop(0));
+      setTimeout(() => sock.resetAndDestroy(), 50);
+    });
+    sock.on("error", () => {});
+  });
+  await new Promise((r) => up.listen(0, "127.0.0.1", r));
+  STREAMFIX.server = null; STREAMFIX.port = 0;
+  startStreamFix();
+  while (!STREAMFIX.port) await new Promise((r) => setTimeout(r, 10));
+  try {
+    const base = fixedBaseUrl(`http://127.0.0.1:${up.address().port}`);
+    const r = await fetch(base + "/v1/messages", { method: "POST", body: "{}" });
+    const body = await r.text();
+    assert.deepEqual(types(body).slice(-2), ["message_delta", "message_stop"]);
+  } finally { up.close(); STREAMFIX.server.closeAllConnections(); STREAMFIX.server.close(); }
 });
