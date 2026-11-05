@@ -44,7 +44,10 @@ export function appGuard(root, { onRestart, expect, onBadList } = {}) {
       if (buf && sha(buf) === h) { snap.set(rel, { buf, mode: st.mode & 0o777 }); seen.set(rel, `${st.size}:${st.mtimeMs}:${st.ctimeMs}`); }
       // 起网关前应用刚核过，这里还对不上：核完到读进来的这一下被换了（DeepSeek 复核建议 9），要求重启让应用再还原一次
       else late.push(rel);
-    } catch {}
+    } catch {
+      // 读不到（被删、EACCES、I/O 错）同样要还原：漏进 snap 就永远不会被 check 补回
+      late.push(rel);
+    }
   }
 
   if (late.length) setImmediate(() => restart(`${late.slice(0, 5).join(", ")}（启动时就和安装包对不上）`));
