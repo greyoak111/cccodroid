@@ -15,9 +15,9 @@ const CHUNK = 1 << 20;
 const LINE_MAX = 256 << 20;
 /** 写满为止：fs.writeSync 写进一部分后再出错（比如满盘）会返回不足的正数而不是抛错，只写一次会把半截当成写完（#150-1）。
  *  剩下的再写一次，真出错就在那一次抛出来 */
-function writeAll(fd, b) {
+export function writeAll(fd, b, pos) {
   for (let off = 0; off < b.length; ) {
-    const k = fs.writeSync(fd, b, off, b.length - off);
+    const k = pos == null ? fs.writeSync(fd, b, off, b.length - off) : fs.writeSync(fd, b, off, b.length - off, pos + off);
     if (!(k > 0)) throw Object.assign(new Error("short write"), { code: "EIO" });
     off += k;
   }
