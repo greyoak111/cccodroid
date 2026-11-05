@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { spawn } from "node:child_process";
+import { writeAll } from "./bigfile.mjs";
 
 // ── 分段并行下载 ─────────────────────────────────────────────────────
 // 单个连接常被限速（实测 dl.cccodroid.net 单线 2.7 MB/s，4 路并行 14 MB/s）：服务器认 Range、文件又够大时，
@@ -52,7 +53,7 @@ export async function pget({ curl, url, file, total, n = 4, curlArgs = [], onPro
             const room = seg[1] - seg[0] + 1 - seg[2];
             const len = Math.min(b.length, room);
             try {
-              if (len > 0) { fs.writeSync(fd, b, 0, len, seg[0] + seg[2]); seg[2] += len; }
+              if (len > 0) { writeAll(fd, b.subarray(0, len), seg[0] + seg[2]); seg[2] += len; }
             } catch (er) {
               // 写盘失败（ENOSPC/EIO）不能从 data 回调冒出去：网关只接 unhandledRejection，这里会把整个进程带走（#121-2）
               fatal = true;

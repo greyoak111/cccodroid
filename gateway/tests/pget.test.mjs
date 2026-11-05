@@ -7,6 +7,7 @@ import path from "node:path";
 import http from "node:http";
 import crypto from "node:crypto";
 import { pget, ghProxy } from "../gw/pget.mjs";
+import { writeAll } from "../gw/bigfile.mjs";
 
 const CURL = path.join(process.env.CCAPP_PREFIX, "bin", "curl");
 const DIR = fs.mkdtempSync(path.join(process.env.CCAPP_TMP, "pget-"));
@@ -129,4 +130,16 @@ test("写盘失败：返回错误，别把网关带走（#121-2）", async (t) =
     const err = await pget({ curl: CURL, url: URL_, file: f, total: DATA.length });
     assert.match(err, /ENOSPC|写盘/);
   } finally { m.mock.restore(); }
+});
+
+test("writeAll 写满为止：底层短写不会把半截当成写完", () => {
+  const f = path.join(DIR, "short-write.bin");
+  const fd = fs.openSync(f, "w+");
+  const orig = fs.writeSync;
+  try {
+    fs.writeSync = (d, b, off, len, pos) => orig(d, b, off, Math.min(3, len), pos);
+    writeAll(fd, Buffer.from("0123456789"), 0);
+  } finally { fs.writeSync = orig; fs.closeSync(fd); }
+  assert.equal(fs.readFileSync(f, "utf8"), "0123456789");
+  fs.rmSync(f, { force: true });
 });
