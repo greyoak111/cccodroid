@@ -116,3 +116,12 @@ test("应用交来了清单哈希：FILES 读不到、或者被换了，不退�
   assert.equal(appGuard(root, { expect: good, onBadList: (w) => bad.push(w) }), null);
   assert.deepEqual(bad, ["FILES（和安装包对不上）", "FILES（读不到）"]);
 });
+
+test("启动时文件缺失：也要请求重启还原，不能静默跳过", async () => {
+  const root = mkRoot("apf-missing", FILES), why = [];
+  fs.rmSync(path.join(root, "TOOLS.md"));
+  appGuard(root, { onRestart: (w) => why.push(w) });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(why.length, 1, "缺失文件必须触发还原重启");
+  assert.ok(why[0].includes("TOOLS.md"));
+});
