@@ -23,7 +23,9 @@ import { execFileSync, spawnSync } from "node:child_process";
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const HOME = process.env.HOME;
 const REPO = "greyoak111/cccodroid";
-const F = "/data/user/0/li.dsh.claudecli/files", P = `${F}/toolchain/dshtc/prefix`;
+// 旧开发端（li.dsh.claudecli）的工具链目录在就用它；否则是 cccodroid 终端：aapt2 在 PATH，钥匙在 ~/.bldtools（和 build.sh 一致）
+const F = "/data/user/0/li.dsh.claudecli/files", P = `${F}/toolchain/dshtc/prefix`, OLD = fs.existsSync(P);
+const BLD = process.env.BLDTOOLS || (OLD ? `${F}/bldtools` : path.join(HOME, ".bldtools"));
 const MANI = path.join(ROOT, "android/AndroidManifest.xml");
 const WN = path.join(ROOT, "android/assets/whatsnew");
 const APK = path.join(ROOT, "dist/cccodroid.apk");
@@ -83,7 +85,7 @@ function fuseOk(files) {
   if (bad.length) throw new Error("FUSE 报的大小和实际内容不一致（等几秒再跑）：\n  " + bad.join("\n  "));
 }
 const badging = (apk = APK) => {
-  const out = sh("env", [`LD_LIBRARY_PATH=${P}/lib`, `${P}/bin/aapt2`, "dump", "badging", apk]);
+  const out = OLD ? sh("env", [`LD_LIBRARY_PATH=${P}/lib`, `${P}/bin/aapt2`, "dump", "badging", apk]) : sh("aapt2", ["dump", "badging", apk]);
   const m = out.match(/versionCode='(\d+)' versionName='([^']*)'/);
   return { code: +m[1], name: m[2], pkg: (out.match(/package: name='([^']+)'/) || [])[1], sdk: +((out.match(/targetSdkVersion:'(\d+)'/) || [])[1] || 0) };
 };
@@ -101,7 +103,7 @@ const S = {
     // sh() 会 trim，第一行开头的空格没了，不能按固定 3 个字符切路径
     const dirty = git("status", "--porcelain").split("\n").filter(Boolean).map((l) => l.replace(/^[ MADRCUT?!]{1,2} /, "")).filter((f) => !allowed(f));
     if (dirty.length) throw new Error("工作区还有别的没提交的改动，先提交或收起：\n  " + dirty.join("\n  "));
-    for (const f of [`${F}/bldtools/cccodroid-release.json`, `${F}/bldtools/gh-token-cccodroid`]) if (!fs.existsSync(f)) throw new Error(`缺 ${f}`);
+    for (const f of [`${BLD}/cccodroid-release.json`, `${BLD}/gh-token-cccodroid`]) if (!fs.existsSync(f)) throw new Error(`缺 ${f}`);
     run("node", [path.join(ROOT, "scripts/test.mjs")], { cwd: ROOT });      // 网关测试不过就不发
     console.log(`  当前 ${cur.name}（${cur.code}）→ ${VER}`);
   },

@@ -28,7 +28,7 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..")
 const HOME = process.env.HOME;
 const REPO = "greyoak111/cccodroid", MREPO = "greyoak111/cccodroid-components";
 const MARKET = process.env.MARKET || path.join(ROOT, "..", "cccodroid-components");
-const KEYFILE = process.env.INDEX_SIGNING_KEY_FILE || "/data/user/0/li.dsh.claudecli/files/bldtools/index-signing-ed25519.pem";
+const KEYFILE = process.env.INDEX_SIGNING_KEY_FILE || (fs.existsSync("/data/user/0/li.dsh.claudecli/files/bldtools") ? "/data/user/0/li.dsh.claudecli/files/bldtools" : (process.env.BLDTOOLS || process.env.HOME + "/.bldtools")) + "/index-signing-ed25519.pem";
 const TEST_WT = process.env.TEST_WT || path.join(HOME, ".work/cc-testwt");
 const CHROM_CACHE = process.env.CHROM_CACHE || path.join(HOME, ".work/chrom22/cache");
 const DL = "https://dl.cccodroid.net";

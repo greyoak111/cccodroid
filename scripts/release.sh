@@ -11,7 +11,9 @@
 # ─────────────────────────────────────────────────────────────────────
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TOKEN=${TOKEN:-/data/user/0/li.dsh.claudecli/files/bldtools/gh-token-cccodroid}
+OLDB=/data/user/0/li.dsh.claudecli/files/bldtools     # 旧开发端；不在就是 cccodroid 终端的 ~/.bldtools
+[ -d "$OLDB" ] || OLDB=${BLDTOOLS:-$HOME/.bldtools}
+TOKEN=${TOKEN:-$OLDB/gh-token-cccodroid}
 REPO=greyoak111/cccodroid
 APK="$ROOT/dist/cccodroid.apk"
 # 双方案：cccodroid-36.apk（targetSdk 36）同版本一起发；没打出来就只发 28 的（旧流程）

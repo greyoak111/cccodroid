@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 export const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const KEYFILE = process.env.INDEX_SIGNING_KEY_FILE || "/data/user/0/li.dsh.claudecli/files/bldtools/index-signing-ed25519.pem";
+const KEYFILE = process.env.INDEX_SIGNING_KEY_FILE || (fs.existsSync("/data/user/0/li.dsh.claudecli/files/bldtools") ? "/data/user/0/li.dsh.claudecli/files/bldtools" : (process.env.BLDTOOLS || process.env.HOME + "/.bldtools")) + "/index-signing-ed25519.pem";
 export const die = (s) => { console.error("✗ " + s); process.exit(1); };
 const git = (...a) => execFileSync("git", ["-c", "safe.directory=*", "-c", "user.name=greyoak111", "-c", "user.email=suny96636@gmail.com", "-C", ROOT, ...a], { encoding: "utf8" }).trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
