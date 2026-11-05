@@ -157,7 +157,12 @@ export function direction(a, b, r, names = {}) {
     const top = Object.entries(tally).sort((x, y) => y[1] - x[1]);
     // 两票各投一边（1:1）时不能按插入顺序取 after：注释说的是取开始得早的那个
     const win = top.length && (top.length === 1 || top[0][1] > top[1][1]) ? top[0][0] : null;
-    parent = win || (a.firstTs <= b.firstTs ? a.id : b.id);
+    // 真实分叉副本是从第 0 行原样复制的，父子 firstTs 往往相同；这时用 birthtime 兜底，
+    // 否则比较恒取 a，1:1 平票会把两个方向都判丢（#129 回归）
+    const earlier = a.firstTs !== b.firstTs ? (a.firstTs < b.firstTs ? a.id : b.id)
+      : a.birth && b.birth && a.birth !== b.birth ? (a.birth < b.birth ? a.id : b.id)
+      : (a.firstTs <= b.firstTs ? a.id : b.id);
+    parent = win || earlier;
   }
   return { parent, child: parent === a.id ? b.id : a.id, votes };
 }

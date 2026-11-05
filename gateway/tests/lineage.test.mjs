@@ -269,3 +269,13 @@ test("direction：两票各投一边时取开始得早的当父，两票一致�
   const agree = direction(a, b, { afterA: 2, afterB: 1 }, { a: "子 · 分叉", b: "父" });
   assert.equal(agree.parent, "b");
 });
+
+test("direction：分叉副本 firstTs 相同时用 birthtime 兜底（#129 回归）", () => {
+  // 父子从第 0 行原样复制，firstTs 相同；after 投 b、name 投 a，1:1
+  const a = { id: "a", firstTs: 100, birth: 200 }, b = { id: "b", firstTs: 100, birth: 100 };
+  const tie = direction(a, b, { afterA: 2, afterB: 1 }, { a: "父", b: "子 · 分叉" });
+  assert.equal(tie.parent, "b", "firstTs 相同应取 birthtime 更早的 b");
+  // firstTs 不同时仍以 firstTs 为准，不被 birthtime 干扰
+  const c = { id: "c", firstTs: 100, birth: 300 }, d = { id: "d", firstTs: 200, birth: 100 };
+  assert.equal(direction(c, d, { afterA: 2, afterB: 1 }, { c: "父", d: "子 · 分叉" }).parent, "c");
+});
