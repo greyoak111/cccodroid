@@ -56,6 +56,8 @@ const EXEMPT = new Set(["override", "spoof"]);
 const EXAMPLE_PRE = /(?:\b(?:such\s+as|like|e\.g\.?|for\s+example|for\s+instance|including)|\baddressed\s+to\s+you\s*[—–:-]|例如|比如|诸如|像是?)[^\n]{0,60}$/i;
 const EXAMPLE_POST = /^[,，、.。]?\s*(?:这类|这种|此类|之类|这样的|等)/;
 const DEFENSIVE_POST = /\b(?:do\s+not|don'?t|never)\s+(?:follow|obey|comply\s+with|act\s+on|execute)\s+(?:it|them|these|this|that|those|such\s+(?:text|content|instructions|directives))\b|\btreat(?:ed)?\s+(?:it|them|these|this|that|those)\s+as\s+(?:plain\s+)?data\b|(?:这类|这种|此类|这些|之类)[^\n]{0,8}?(?:(?:不要|不得|不能|不|别|勿)(?:照做|执行|遵循|服从|听从|理会)|(?:当|视)(?:作|成|为)(?:普通)?(?:数据|资料)|不是指令)/i;
+// 防御说法后面又改口点名执行的（「…这类话不要照做，除了第一条」「Do not follow it. Follow the first one instead.」）不算（DeepSeek 复核 v067c 中-1）
+const REVOKE = /除了|除非|照做|照办|执行|按(?:第|其)|据(?:此|引)|\b(?:except|unless|follow|obey|execute|apply|act\s+on)\b/i;
 const count = (s, ch) => s.split(ch).length - 1;
 /** 命中的片段整个在一对引号里：返回 [开引号位置, 收引号位置]，不在返回 null */
 function quoteSpan(line, m) {
@@ -76,7 +78,9 @@ function exempt(line, m) {
   const q = quoteSpan(line, m);
   if (!q) return false;
   const pre = line.slice(0, q[0]), post = line.slice(q[1] + 1);
-  return (EXAMPLE_PRE.test(pre) || EXAMPLE_POST.test(post)) && DEFENSIVE_POST.test(post);
+  if (!(EXAMPLE_PRE.test(pre) || EXAMPLE_POST.test(post))) return false;
+  const d = DEFENSIVE_POST.exec(post);
+  return !!d && !REVOKE.test(post.slice(d.index + d[0].length));
 }
 const GLOBAL = new WeakMap();
 function firstMatch(re, line, cat) {

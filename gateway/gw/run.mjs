@@ -496,7 +496,7 @@ export async function startRun(item) {
   run.inputOpen = true;
   run.pendingInject = [];      // 已写进 stdin、还没被 claude 吃进去的插话
   run.slashFlight = [];        // 空闲时送进去的斜杠命令（见 run.inject）：等它的 result。只在空闲时送，同时最多一条
-  run.slashMark = { seen: false, bg: false };   // 那条命令有没有动静（回显、压缩事件、<synthetic> 输出）、送进去后后台任务有没有变
+  run.slashMark = { seen: false, bg: false, yielded: false };   // 那条命令有没有动静（回显、压缩事件、<synthetic> 输出）、送进去后后台任务有没有变
   const WROTE = new WeakMap();  // 普通插话 → 写进 stdin 的文字（回显按它认，别按内容猜成斜杠命令的，复核 v067b-1）
   const textOf = (c) => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((x) => x && x.type === "text").map((x) => x.text).join("\n") : "").trim();
   run.bgTasks = 0;             // claude 报的后台任务数（见 feed）
@@ -529,7 +529,7 @@ export async function startRun(item) {
       // 所以写进去就当场画出来、算新的一轮；回显来了吞掉，它的 result 出来就算办完
       try { writeUser(item.message); } catch { return false; }
       run.slashFlight.push(item);
-      run.slashMark = { seen: false, bg: false };
+      run.slashMark = { seen: false, bg: false, yielded: false };
       run.idle = false; resultStale = true;
       emit({ type: "inject", text: item.message, cid: item.cid, itemId: item.id });   // 先画消息（前端借它另起气泡、重新计时）
       emit({ type: "run_busy", startedAt: Date.now() });
@@ -678,11 +678,12 @@ export async function startRun(item) {
     lastResult = r; resultStale = false;
     // 空闲时送进去的斜杠命令：这个 result 一般就是它的（送进去前这一轮已经答完）。
     // 送进去后后台任务有变、命令自己又还没动静：这个多半是后台任务回报那一轮的，不认领（认领了会在命令还没办完时关 stdin，复核 v067b-3）；
-    // 只让一次，下一个 result 照认，免得没动静的命令永远挂着
+    // 每条命令最多让一次，之后的 result 照认：命令自己的轮次里也会动后台任务，让了它自己的 result 就会永远挂着（DeepSeek 复核 v067c 中-2）。
+    // 认错了只是轮数统计的归属漂一下
     let slashDone = null;
     if (run.slashFlight.length) {
-      if (run.slashMark.seen || !run.slashMark.bg) { slashDone = run.slashFlight.shift(); run.slashMark = { seen: false, bg: false }; saveRunMark(); }
-      else run.slashMark.bg = false;
+      if (run.slashMark.seen || !run.slashMark.bg || run.slashMark.yielded) { slashDone = run.slashFlight.shift(); run.slashMark = { seen: false, bg: false, yielded: false }; saveRunMark(); }
+      else { run.slashMark.bg = false; run.slashMark.yielded = true; }
     }
     run.lastSlash = !!slashDone;
     run.meter.result(r, !isCmd && !slashDone);   // 斜杠命令不算一轮对话，但 /compact 这类真花了的 token 照记

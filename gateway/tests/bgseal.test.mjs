@@ -283,3 +283,20 @@ test("复核 v067b-2/5：命令在途时落盘挂起；没等到 result 进程�
   assert.ok(!endOf("rslash-lc").localCommand, JSON.stringify(endOf("rslash-lc")));
   assert.ok(!endOf("rslash-lc").failed);
 });
+
+test("复核 v067c 中-2：没动静的命令自己起又停了后台任务，最多让一次，不会永远挂着", async () => {
+  const s = crypto.randomUUID();
+  script([init(s), echo("fixture"), bg(1, "server"), result(), { sleep: 2 },
+    bg(2, "server"), result(),                 // 命令的轮次里又起了一个后台任务，然后答完（没回显、没输出）
+    { sleep: 1 }, bg(1, "server"), mainStart, result(),   // 那个后台任务跑完，回报一轮
+    { sleep: 30 }]);
+  await startRun({ id: "rslash-yield", message: "fixture", cwd: root });
+  const run = RUNS.get("rslash-yield");
+  await until(() => run.idle && run.bgTasks === 1);
+  assert.equal(enqueue({ message: "/mycmd", sessionId: s }).injected, true);
+  await until(() => run.bgTasks === 2);
+  await until(() => run.slashFlight.length === 0 && run.idle && run.bgTasks === 1, 8000);
+  assert.equal(run.inputOpen, true);
+  abortRun(run);
+  await until(() => endOf("rslash-yield"));
+});
