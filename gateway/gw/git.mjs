@@ -76,14 +76,26 @@ async function gitNeutral(cwd) {
 const RISKY_KEY = /^(filter\..+\.(clean|smudge|process)|core\.(sshcommand|gitproxy|askpass|hookspath|alternaterefscommand)|credential\.(.+\.)?helper|gpg\.(.+\.)?program|remote\..+\.(uploadpack|receivepack)|protocol\.(.+\.)?allow|include\.path|includeif\..+\.path)$/;
 const LFS_OK = new Set(["git-lfs clean -- %f", "git-lfs smudge -- %f", "git-lfs filter-process"]);
 async function gitRisks(root) {
-  const risks = [], c = await gitConfigList(root);
-  if (!c.ok) risks.push("git config: ?");
-  if (c.odd) risks.push(`git config: ${c.odd} odd entries`);
+  const risks = [], fp = [], c = await gitConfigList(root);
+  if (!c.ok) { risks.push("git config: ?"); fp.push("config:?"); }
+  if (c.odd) { risks.push(`git config: ${c.odd} odd entries`); fp.push(`config-odd:${c.odd}`); }
   for (const e of c.list) {
     if (e.scope !== "local" && e.scope !== "worktree") continue;
     if (!RISKY_KEY.test(e.key) || LFS_OK.has(e.value.trim())) continue;
     if (/^protocol\./.test(e.key) && /^(never|user)$/i.test(e.value.trim())) continue;
-    risks.push(`${JSON.stringify(e.raw).slice(1, -1)} = ${JSON.stringify(e.value.slice(0, 200)).slice(1, -1)}`);
+    // 指纹用完整值：界面上仍只展示前 200 字，但改 200 字之后的内容也必须重新确认（审查 11-05）
+    const shown = e.value.length > 200
+      ? `${JSON.stringify(e.value.slice(0, 200)).slice(1, -1)}…（共 ${e.value.length} 字符，sha256 ${crypto.createHash("sha256").update(e.value).digest("hex").slice(0, 12)}）`
+      : JSON.stringify(e.value).slice(1, -1);
+    risks.push(`${JSON.stringify(e.raw).slice(1, -1)} = ${shown}`);
+    fp.push(`cfg\0${e.key}\0${e.value}`);
+  }
+  // .git 可以是 gitfile：指向哪个 gitdir 也是风险的一部分（换到另一个同名钩子的 gitdir 不能沿用旧信任）
+  const gd = await git(root, ["rev-parse", "--absolute-git-dir"]);
+  if (!gd.code) {
+    let real = gd.out.trim();
+    try { real = fs.realpathSync(real); } catch {}
+    if (real) fp.push(`gitdir\0${real}`);
   }
   // 钩子：core.hooksPath 已算进上面；默认目录里非 .sample 的文件
   const hp = await git(root, ["rev-parse", "--git-path", "hooks"]);
@@ -91,16 +103,26 @@ async function gitRisks(root) {
     const dir = path.resolve(root, hp.out.trim());
     let names = [];
     try { names = fs.readdirSync(dir).filter((n) => !n.endsWith(".sample") && (() => { try { return fs.statSync(path.join(dir, n)).isFile(); } catch { return false; } })()); } catch {}
+    // 指纹覆盖全部钩子的内容 + 权限，且不再只取前 20 个（审查 11-05）
+    for (const n of names) {
+      let h = "";
+      try {
+        const p = path.join(dir, n), st = fs.statSync(p);
+        h = crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex") + ":" + (st.mode & 0o777).toString(8);
+      } catch (e) { h = "unreadable:" + (e.code || e.message); }
+      fp.push(`hook\0${n}\0${h}`);
+    }
     for (const n of names.slice(0, 20)) risks.push(`hook: ${n}`);
+    if (names.length > 20) risks.push(`hook: …（共 ${names.length} 个钩子）`);
   }
-  return risks;
+  return { risks, fp: fp.join("\n") };
 }
 /** 用户确认过的仓库：根目录 → 当时那份风险清单的指纹。清单一变（配置被改）就重新问 */
 const GIT_TRUST = new Map();
 async function gitGate(root, body) {
-  const risks = await gitRisks(root);
+  const { risks, fp: src } = await gitRisks(root);
   if (!risks.length) return null;
-  const fp = crypto.createHash("sha256").update(root + "\0" + risks.join("\n")).digest("hex").slice(0, 24);
+  const fp = crypto.createHash("sha256").update(root + "\0" + src).digest("hex").slice(0, 24);
   if (GIT_TRUST.get(root) === fp) return null;
   if (body && body.trust === fp) { GIT_TRUST.set(root, fp); log(`[git] 用户确认信任仓库配置 @ ${root}`); return null; }
   return { error: "untrusted", fp, risks, message: tz("这个仓库自己的配置会在这一步执行命令。只有信得过这个仓库时才继续。") };
