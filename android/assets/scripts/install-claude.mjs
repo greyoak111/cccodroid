@@ -77,13 +77,14 @@ function keepManifest(dir, raw) {
 if (CHANNEL === "--recheck") {
   let bad = 0;
   for (const d of (() => { try { return fs.readdirSync(DEST); } catch { return []; } })()) {
-    const dir = path.join(DEST, d), mark = path.join(dir, ".npm-only");
+    const dir = path.join(DEST, d), mark = path.join(dir, ".npm-only"), bad0 = path.join(dir, ".mismatch");
     if (!isVer(d) || !fs.existsSync(path.join(dir, "claude"))) continue;
-    if (!fs.existsSync(mark) && fs.existsSync(path.join(dir, "manifest.json.sig"))) continue;
+    // 上次对不上的（.mismatch）每次都再核：程序换回官方原样后要能放开，不然这一版永远起不来
+    if (!fs.existsSync(mark) && !fs.existsSync(bad0) && fs.existsSync(path.join(dir, "manifest.json.sig"))) continue;
     const m = officialManifest(d, true);
     if (!m) { say(`${d}：官方清单还拿不到，下次再核`); continue; }
     const got = sha(path.join(dir, "claude"));
-    if (got === m.sum) { fs.rmSync(mark, { force: true }); keepManifest(dir, m.raw); say(`✓ ${d}：与官方清单一致（${m.anchor}）`); }
+    if (got === m.sum) { fs.rmSync(mark, { force: true }); fs.rmSync(bad0, { force: true }); keepManifest(dir, m.raw); say(`✓ ${d}：与官方清单一致（${m.anchor}）`); }
     // 对不上也把官方清单存下：网关起 claude 前按它验，这一版就不再启动（DeepSeek 复核必修 3）
     else { bad++; fs.writeFileSync(path.join(dir, ".mismatch"), got + "\n"); keepManifest(dir, m.raw); say(`✗ ${d}：与官方清单不符（期望 ${m.sum.slice(0, 12)}…，实得 ${got.slice(0, 12)}…）`); }
   }

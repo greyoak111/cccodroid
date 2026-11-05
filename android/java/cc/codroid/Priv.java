@@ -621,6 +621,7 @@ final class Priv {
         for (int i = 0; i < 64 && cur > 1; i++) {
             int pp = ppid(cur);
             if (pp <= 0) return null;
+            // 网关经引导起时命令行里是 boot.mjs 的原文，原文里也有 "server.mjs"（GatewayService.spawnGateway）
             if (pp == me) return below > 0 && proc(cur, "cmdline").contains("server.mjs") ? envToken(below) : null;
             below = cur; cur = pp;
         }

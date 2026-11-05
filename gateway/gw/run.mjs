@@ -392,7 +392,7 @@ export async function startRun(item) {
   if (!P.local) {
     const seal = await claudeSeal();
     if (seal.ok === false) {
-      emit({ type: "error", message: tr(LAST_LANG, "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。") });
+      emit({ type: "error", message: tr(LAST_LANG, seal.pending ? "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。" : "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。") });
       return endRun(run, { failed: true });
     }
     if (run.aborted) { log("⏹ 核验 Claude Code 时停止"); return endRun(run, { durationMs: 0 }); }

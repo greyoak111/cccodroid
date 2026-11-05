@@ -2775,3 +2775,4 @@
 2775	Versi rilis tidak menjalankan hooks yang diatur di sini: hook bisa menjalankan perintah apa pun dan memasukkan apa saja ke percakapan, yang tidak bisa diperiksa cccodroid. Aturannya tetap ada di file dan tidak dihapus.
 2776	cccodroid memeriksa skill ini sebelum diserahkan ke Claude Code. Saat memanggilnya dengan garis miring, tambahkan user: di depan namanya, misalnya /user:{name}.
 2777	Claude Code gagal pemeriksaan integritas, jadi tidak dijalankan: {why}
+2778	Versi Claude Code ini belum punya manifest resmi bertanda tangan, jadi giliran ini tidak dimulai. Sedang diverifikasi ulang secara daring — kirim lagi dalam satu-dua menit. Jika terus gagal, pasang ulang dari Pengaturan → Pembaruan.

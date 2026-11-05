@@ -158,6 +158,10 @@ if (APP && typeof module.registerHooks === "function") {
       const rel = decodeURIComponent(url.slice(base.length).replace(/[?#].*$/, ""));
       const buf = APP.code(rel);
       if (!buf) { APP.restart(`${rel}（加载时和安装包对不上）`); throw new Error(`[应用文件] ${rel} 和安装包对不上，拒绝加载`); }
+      // 格式自己定，不往下调默认加载：下一层是 boot.mjs 的钩子，它按盘上现读的字节核，盘上被改了会直接退出；
+      // 这里有核过的那份就用它，盘上的等 check() 写回、或空闲时重启再还原，不打断正在跑的回话
+      const format = /\.mjs$/.test(rel) ? "module" : /\.cjs$/.test(rel) ? "commonjs" : /\.json$/.test(rel) ? "json" : null;
+      if (format) return { format, source: buf, shortCircuit: true };
       const r = next(url, ctx);
       return { ...r, source: buf, shortCircuit: true };
     },

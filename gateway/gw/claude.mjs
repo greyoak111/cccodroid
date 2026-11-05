@@ -529,7 +529,8 @@ export function termKeyFile(p = PROVIDER) {
  *  开会话以外的路也要核：mcp list、doctor、登录、补档、回退文件、扩展命令都会执行它（审查 11-05 第 16 组 1） */
 export async function claudeBlocked() {
   const s = await claudeSeal().catch((e) => ({ ok: false, why: e.message }));
-  return s.ok === false ? tz("Claude Code 程序核验没过，这次没有运行：{why}", { why: String(s.why || "") }) : "";
+  if (s.ok !== false) return "";
+  return s.pending ? tz("这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。") : tz("Claude Code 程序核验没过，这次没有运行：{why}", { why: String(s.why || "") });
 }
 
 export async function runClaude(args, { cwd, timeoutMs = 60000 } = {}) {

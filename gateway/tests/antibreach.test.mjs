@@ -13,6 +13,7 @@ import { SETTINGS } from "../gw/settings-store.mjs";
 import { listHooks, saveHooks } from "../gw/extensions.mjs";
 import { tamperAck, tamperNote, tamperPending, tamperRecord } from "../gw/tamper.mjs";
 import { claudeSeal } from "../gw/claudeseal.mjs";
+import { _setSealed } from "../gw/edition.mjs";
 
 // CI 的 Linux 没有 /system/bin/sh（#113 同款）：测试本身也要能在非安卓环境跑
 const SH = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
@@ -120,12 +121,18 @@ test("篡改留痕：界面待提示、点过就不提；模型只告诉一次",
   assert.equal(tamperRecord("runtime", []), null, "空的不记");
 });
 
-test("claude 程序核验：没存清单的核不了照常起；签名不对、不在安装目录、补核对不上、核过后清单被删都不起", async () => {
+test("claude 程序核验：没存清单的发行版不起（不算篡改）、开发版照常起；签名不对、不在安装目录、补核对不上、核过后清单被删都不起", async () => {
   const root = path.join(CFG.home, ".local", "share", "cccodroid", "claude");
   const dir = path.join(root, "2.1.999"), bin = path.join(dir, "claude");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(bin, "ELF fake");
-  assert.equal((await claudeSeal(bin, { force: true })).ok, null);
+  tamperAck(); tamperNote();
+  const p0 = await claudeSeal(bin, { force: true });
+  assert.equal(p0.ok, false); assert.equal(p0.pending, true); assert.equal(p0.why, "no signed manifest");
+  assert.equal(tamperPending().length, 0, "没清单只是还没补核，不记成篡改");
+  _setSealed(false);
+  fs.writeFileSync(bin, "ELF fake.");          // 换个大小，免得用上次的结论
+  try { assert.equal((await claudeSeal(bin, { force: true })).ok, null, "开发版没清单照常起"); } finally { _setSealed(true); }
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ version: "2.1.999", platforms: { "linux-arm64": { checksum: "0".repeat(64) } } }));
   fs.writeFileSync(path.join(dir, "manifest.json.sig"), "-----BEGIN PGP SIGNATURE-----\n\nAAAA\n-----END PGP SIGNATURE-----\n");
   const r = await claudeSeal(bin, { force: true });
@@ -238,5 +245,42 @@ test("部署布局下的加载钩子：后来才 import 的网关模块被换过
   assert.equal(o.r2, 2);
   assert.equal(o.r3, "refused", "安装包里没有的不加载");
   assert.match(o.why, /evil\.mjs/, "并要求重启还原");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("网关引导 boot.mjs：核过 FILES 才起，静态 import 的模块按读到的字节核，对不上、清单里没有的退出码 3", () => {
+  const root = path.join(CFG.workspace, "bootroot");
+  const boot = fs.readFileSync(new URL("../boot.mjs", import.meta.url), "utf8");
+  const h = (b) => crypto.createHash("sha256").update(b).digest("hex");
+  const setup = (extra = "") => {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(path.join(root, "gw"), { recursive: true });
+    fs.writeFileSync(path.join(root, "gw", "a.mjs"), "export const v = 1;\n");
+    fs.writeFileSync(path.join(root, "server.mjs"), `import { v } from "./gw/a.mjs";${extra}\nconsole.log(JSON.stringify({ argv: process.argv.slice(1), v, no: process.env.NODE_OPTIONS || "", cno: process.env.CCAPP_NODE_OPTIONS || "" }));\n`);
+    const files = ["gw/a.mjs", "server.mjs"].map((r) => h(fs.readFileSync(path.join(root, r))) + " " + r).join("\n") + "\n";
+    fs.writeFileSync(path.join(root, "FILES"), files);
+    return h(files);
+  };
+  const run = (fsha) => spawnSync(process.execPath, ["--input-type=module", "-e", boot, root, "8123"], { cwd: CFG.workspace, encoding: "utf8",
+    env: { ...process.env, CCAPP_FILES_SHA: fsha, CCAPP_NODE_OPTIONS: "--require=/x/execpath.cjs", NODE_OPTIONS: "" } });
+  let fsha = setup();
+  let r = run(fsha);
+  assert.equal(r.status, 0, r.stderr);
+  const o = JSON.parse(r.stdout.trim().split("\n").pop());
+  assert.deepEqual(o.argv, [path.join(root, "server.mjs"), "8123"], "server.mjs 看到的参数和直接起时一样");
+  assert.equal(o.v, 1);
+  assert.equal(o.no, "--require=/x/execpath.cjs", "子进程用的 NODE_OPTIONS 由引导挂上");
+  assert.equal(o.cno, "");
+  assert.equal(run("0".repeat(64)).status, 3, "FILES 和应用交来的哈希对不上");
+  assert.equal(run("").status, 3, "没交哈希也不起");
+  // 核完之后模块被换（盘上的和清单不符）：不加载
+  fs.writeFileSync(path.join(root, "gw", "a.mjs"), "export const v = 666;\n");
+  r = run(fsha);
+  assert.equal(r.status, 3); assert.match(r.stderr, /gw\/a\.mjs/); assert.doesNotMatch(r.stdout, /666/);
+  // 清单里没有的模块
+  fsha = setup(`\nimport "./gw/evil.mjs";`);
+  fs.writeFileSync(path.join(root, "gw", "evil.mjs"), "console.log('pwned');\n");
+  r = run(fsha);
+  assert.equal(r.status, 3); assert.doesNotMatch(r.stdout, /pwned/);
   fs.rmSync(root, { recursive: true, force: true });
 });

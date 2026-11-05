@@ -2775,3 +2775,4 @@
 2775	La version publique n'exécute pas les hooks configurés ici : un hook peut lancer n'importe quelle commande et injecter n'importe quoi dans la conversation, ce que cccodroid ne peut pas vérifier. Les règles restent dans le fichier et ne sont pas supprimées.
 2776	cccodroid vérifie ces compétences avant de les transmettre à Claude Code. Pour en appeler une avec une barre oblique, préfixez son nom par user:, par exemple /user:{name}.
 2777	Claude Code n’a pas passé la vérification d’intégrité, il n’a donc pas été lancé : {why}
+2778	Cette version de Claude Code n’a pas encore de manifeste officiel signé, ce tour n’a donc pas été lancé. Une nouvelle vérification en ligne est en cours : renvoyez dans une ou deux minutes. Si cela échoue toujours, réinstallez-la depuis Réglages → Mises à jour.

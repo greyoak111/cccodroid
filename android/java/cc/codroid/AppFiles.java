@@ -124,6 +124,16 @@ final class AppFiles {
     }
 
     /** 安装包里清单（assets/app/FILES）的 sha256，交给网关核对盘上那份（gateway/gw/appfiles.mjs）。没有返回 null */
+    /** 安装包里的一个文本文件（assets 下的路径），读不到给 null */
+    static String assetText(Context c, String name) {
+        try (InputStream in = c.getAssets().open(name)) {
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[1 << 16];
+            for (int n; (n = in.read(buf)) > 0; ) bo.write(buf, 0, n);
+            return new String(bo.toByteArray(), "UTF-8");
+        } catch (Exception e) { return null; }
+    }
+
     static String listSha(Context c) {
         try (InputStream in = c.getAssets().open("app/FILES")) {
             java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();

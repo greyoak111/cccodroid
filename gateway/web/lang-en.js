@@ -2812,5 +2812,6 @@ window.I18N_DICT.en = {
   "这些 Claude Code 配置里有越权指令的特征（要模型无视规则、冒充系统消息这一类），cccodroid 不加载它们，这一轮没有运行。改掉或删掉下面的内容后再发：\n{list}": "These Claude Code config files contain override-style instructions (telling the model to ignore its rules, posing as system messages and the like). cccodroid won't load them, so this turn did not run. Edit or remove the following, then send again:\n{list}",
   "发行版不运行这里配置的 hooks：hooks 能执行任意命令、把任意内容放进对话，cccodroid 没法检查。规则留在文件里，不会被删。": "The release build does not run the hooks configured here: hooks can run any command and put anything into the conversation, which cccodroid cannot check. The rules stay in the file and are not deleted.",
   "cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。": "cccodroid checks these skills before handing them to Claude Code. When calling one with a slash, prefix its name with user:, e.g. /user:{name}.",
-  "Claude Code 程序核验没过，这次没有运行：{why}": "Claude Code failed its integrity check, so it was not run: {why}"
+  "Claude Code 程序核验没过，这次没有运行：{why}": "Claude Code failed its integrity check, so it was not run: {why}",
+  "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。": "This version of Claude Code has no official signed manifest yet, so this turn was not started. It is being re-verified online — send again in a minute or two. If it keeps failing, reinstall it from Settings → Updates."
 };

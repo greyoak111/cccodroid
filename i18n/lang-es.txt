@@ -2775,3 +2775,4 @@
 2775	La versión pública no ejecuta los hooks configurados aquí: un hook puede ejecutar cualquier comando y meter cualquier cosa en la conversación, y cccodroid no puede revisarlo. Las reglas se quedan en el archivo y no se borran.
 2776	cccodroid revisa estas habilidades antes de pasarlas a Claude Code. Para llamar a una con barra, antepón user: a su nombre, por ejemplo /user:{name}.
 2777	Claude Code no superó la verificación de integridad, así que no se ejecutó: {why}
+2778	Esta versión de Claude Code aún no tiene el manifiesto oficial firmado, así que este turno no se inició. Se está volviendo a verificar en línea: envía de nuevo en un par de minutos. Si sigue fallando, reinstálala desde Ajustes → Actualizaciones.

@@ -222,9 +222,15 @@ public class GatewayService extends Service {
             }
         }
         AppFiles.markSeen(this);
-        File server = new File(env.app, "server.mjs");
-        ProcessBuilder pb = new ProcessBuilder(env.cmd(env.bin("node").getPath(), server.getPath(), String.valueOf(Env.PORT)));
+        // 不让 node 按路径去读 server.mjs：核完到它读进来之间能被换掉（安全 5）。引导 boot.mjs 从安装包里取原文经 -e 交过去，
+        // 它按 FILES 核 node 实际读到的每个模块的字节再执行（gateway/boot.mjs）
+        String boot = AppFiles.assetText(this, "app/boot.mjs");
+        if (boot == null) throw new java.io.IOException("安装包里没有 app/boot.mjs");
+        ProcessBuilder pb = new ProcessBuilder(env.cmd(env.bin("node").getPath(), "--input-type=module", "-e", boot, env.app.getPath(), String.valueOf(Env.PORT)));
         env.apply(pb.environment());
+        // NODE_OPTIONS 的 --require 也是从盘上读的：网关自己不挂（引导里做同样的事），交给引导转给它拉的子 node
+        String nodeOpts = pb.environment().remove("NODE_OPTIONS");
+        if (nodeOpts != null) pb.environment().put("CCAPP_NODE_OPTIONS", nodeOpts);
         if (env.loader) pb.environment().put("TERMUX_EXEC__PROC_SELF_EXE", env.bin("node").getPath());   // 给 execpath.cjs
         // 篡改留痕：这次（或界面那边部署时）还原过的文件交给网关，它记日志、界面提示一次、下一轮告诉模型（gateway/gw/tamper.mjs）
         String restored = AppFiles.takeRestored();
@@ -270,6 +276,13 @@ public class GatewayService extends Service {
         return Env.proveGateway();
     }
 
+    /** /proc/<pid>/cmdline（\0 分隔）是不是本应用的网关：现在经引导起（node --input-type=module -e <boot.mjs> <files/app> <端口>），
+     *  升级前留下的旧网关是 node <files/app>/server.mjs <端口> */
+    static boolean isGatewayCmd(String cmd, String app) {
+        if (cmd.contains(app + "/server.mjs")) return true;
+        return cmd.contains("\0--input-type=module\0-e\0") && cmd.endsWith("\0" + app + "\0" + Env.PORT + "\0");
+    }
+
     /** 端口有人占着、又证明不了自己。本应用自己的残留网关（旧版没有 /__proof，或令牌换过）就杀掉、返回 false 照常起；
      *  杀不着的是别的应用 —— 不起网关，也不往那儿交任何东西 */
     private boolean squatted() {
@@ -282,7 +295,7 @@ public class GatewayService extends Service {
             try {
                 if (android.system.Os.stat(d.getPath()).st_uid != me) continue;
                 String cmd = new String(java.nio.file.Files.readAllBytes(new File(d, "cmdline").toPath()), java.nio.charset.StandardCharsets.UTF_8);
-                if (!cmd.contains(new File(env.app, "server.mjs").getPath())) continue;   // 只认本应用的网关脚本，用户自己的 server.mjs 不碰
+                if (!isGatewayCmd(cmd, env.app.getPath())) continue;   // 只认本应用的网关，用户自己的 server.mjs 不碰
                 Log.w(TAG, "端口上是本应用的残留网关 pid=" + name + "，杀掉重起");
                 android.os.Process.sendSignal(Integer.parseInt(name), 9);
                 killed++;

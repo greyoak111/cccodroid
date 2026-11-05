@@ -2778,4 +2778,5 @@ window.I18N_DICT["zh-Hant"] = {
   "发行版不运行这里配置的 hooks：hooks 能执行任意命令、把任意内容放进对话，cccodroid 没法检查。规则留在文件里，不会被删。": "發行版不執行這裡設定的 hooks：hooks 能執行任意指令、把任意內容放進對話，cccodroid 沒辦法檢查。規則留在檔案裡，不會被刪。",
   "cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。": "cccodroid 檢查過這些技能再交給 Claude Code，用斜線呼叫時名字前面帶 user:，例如 /user:{name}。",
   "Claude Code 程序核验没过，这次没有运行：{why}": "Claude Code 程式核驗沒過，這次沒有執行：{why}",
+  "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。": "這個版本的 Claude Code 還沒有官方簽章清單，這一輪沒有啟動。正在連網補核，過一兩分鐘再傳送；一直不行就到 設定 → 更新 裡重新安裝。",
 };

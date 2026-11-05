@@ -2778,4 +2778,5 @@ window.I18N_DICT["id"] = {
   "发行版不运行这里配置的 hooks：hooks 能执行任意命令、把任意内容放进对话，cccodroid 没法检查。规则留在文件里，不会被删。": "Versi rilis tidak menjalankan hooks yang diatur di sini: hook bisa menjalankan perintah apa pun dan memasukkan apa saja ke percakapan, yang tidak bisa diperiksa cccodroid. Aturannya tetap ada di file dan tidak dihapus.",
   "cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。": "cccodroid memeriksa skill ini sebelum diserahkan ke Claude Code. Saat memanggilnya dengan garis miring, tambahkan user: di depan namanya, misalnya /user:{name}.",
   "Claude Code 程序核验没过，这次没有运行：{why}": "Claude Code gagal pemeriksaan integritas, jadi tidak dijalankan: {why}",
+  "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。": "Versi Claude Code ini belum punya manifest resmi bertanda tangan, jadi giliran ini tidak dimulai. Sedang diverifikasi ulang secara daring — kirim lagi dalam satu-dua menit. Jika terus gagal, pasang ulang dari Pengaturan → Pembaruan.",
 };
