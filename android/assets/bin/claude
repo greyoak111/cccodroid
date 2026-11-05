@@ -20,6 +20,19 @@ case "$CCAPP_KEY_FILE" in
   ""|*[!A-Za-z0-9._/-]*) ;;
   *) [ -r "$CCAPP_KEY_FILE" ] && S="${S:+$S,}\"apiKeyHelper\":\"cat '$CCAPP_KEY_FILE'\"" ;;
 esac
-[ -n "$S" ] && set -- --settings "{$S}" "$@"
+# 发行版封口（见 gateway/gw/edition.mjs）：用户级 / 项目级的 Claude Code 配置不让 claude 自己读，由 guard/cc-seal.mjs 检查后经旗标回填；
+# 用户自带的 --settings、--system-prompt 这类能往上下文里塞东西的旗标不认。开发版（cccodroid-dev）把下面这行改成 0。
+SEALED=1
+if [ "$SEALED" = 1 ]; then
+  unset CLAUDE_CONFIG_DIR CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD CLAUDE_COWORK_MEMORY_PATH_OVERRIDE CLAUDE_CODE_DISABLE_AUTO_MEMORY \
+    CLAUDE_CODE_USE_COWORK_PLUGINS CLAUDE_CODE_PLUGIN_SEED_DIR CLAUDE_CODE_MANAGED_SETTINGS_PATH
+  SEAL=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)/guard/cc-seal.mjs
+  [ -r "$SEAL" ] || { echo "cccodroid: guard/cc-seal.mjs missing" >&2; exit 2; }
+  if [ -n "$S" ]; then OUT=$(node "$SEAL" "$PWD" -- --settings "{$S}" -- "$@") || exit $?
+  else OUT=$(node "$SEAL" "$PWD" -- -- "$@") || exit $?; fi
+  eval "set -- $OUT"
+else
+  [ -n "$S" ] && set -- --settings "{$S}" "$@"
+fi
 exec "${CCAPP_LD:-$PREFIX/glibc/lib/ld-linux-aarch64.so.1}" --library-path "$PREFIX/glibc/lib" ${PRE:+--preload "$PRE"} \
   "$HOME/.local/share/cccodroid/claude/current/claude" "$@"

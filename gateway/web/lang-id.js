@@ -2774,4 +2774,7 @@ window.I18N_DICT["id"] = {
   "这一层的 hooks 已暂停": "Hooks di tingkat ini dijeda",
   "这条规则在你编辑期间被改动或删掉了，重新打开它再改": "Aturan ini diubah atau dihapus saat Anda mengeditnya. Buka lagi lalu ulangi perubahan",
   "已有同名目录，但里面没有 SKILL.md（多半是以前导入到一半失败留下的）。到文件里删掉 ~/.claude/skills/{d} 再导入": "Folder dengan nama ini sudah ada tetapi tidak berisi SKILL.md (kemungkinan sisa impor sebelumnya yang gagal). Hapus ~/.claude/skills/{d} di Berkas, lalu impor lagi",
+  "这些 Claude Code 配置里有越权指令的特征（要模型无视规则、冒充系统消息这一类），cccodroid 不加载它们，这一轮没有运行。改掉或删掉下面的内容后再发：\n{list}": "File konfigurasi Claude Code ini berisi instruksi pengabaian (meminta model mengabaikan aturannya, menyamar sebagai pesan sistem, dan sejenisnya). cccodroid tidak memuatnya, jadi giliran ini tidak dijalankan. Ubah atau hapus bagian berikut, lalu kirim lagi:\n{list}",
+  "发行版不运行这里配置的 hooks：hooks 能执行任意命令、把任意内容放进对话，cccodroid 没法检查。规则留在文件里，不会被删。": "Versi rilis tidak menjalankan hooks yang diatur di sini: hook bisa menjalankan perintah apa pun dan memasukkan apa saja ke percakapan, yang tidak bisa diperiksa cccodroid. Aturannya tetap ada di file dan tidak dihapus.",
+  "cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。": "cccodroid memeriksa skill ini sebelum diserahkan ke Claude Code. Saat memanggilnya dengan garis miring, tambahkan user: di depan namanya, misalnya /user:{name}.",
 };

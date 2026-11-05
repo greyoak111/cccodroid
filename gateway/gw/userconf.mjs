@@ -219,7 +219,8 @@ function flushSeen() {
   for (const k of Object.keys(REC.files)) if (under.some((u) => k === u || k.startsWith(u + "/"))) cand.add(k);
   const sid = [...ACTIVE.values()].pop() ?? null;
   for (const rel of cand) {
-    if (SEEN.has(rel)) continue;
+    // 已经看见过的：只记最后一次动静的时刻（卡片点「保留」时据此判断卡片之后又动没动过，GHSA-q9wp）
+    if (SEEN.has(rel)) { SEEN.get(rel).last = Date.now(); continue; }
     const f = cur.get(rel);
     if ((REC.files[rel] || undefined) === f?.h) continue;
     SEEN.set(rel, { f: f || null, sid: ACTIVE.size ? sid || true : null, at: Date.now() });
@@ -356,14 +357,27 @@ export function ucPending() {
   changes.sort((a, b) => (STRONG(b.rel) - STRONG(a.rel)) || (a.rel < b.rel ? -1 : 1));
   // 卡片只展开前 30 项，剩下的也列出名字：撤销会动到全部，不能有没看见的
   const shown = changes.length > 30 ? [...changes.slice(0, 30), { rel: `… +${changes.length - 30}`, kind: "more", preview: (() => { const t = changes.slice(30).map((c) => "~/" + c.rel).join("\n"); return t.length > 4000 ? t.slice(0, 4000) + "\n…" : t; })() }] : changes;
-  return { first, changes: shown, rels: changes.map((c) => c.rel) };
+  // 票据：卡片上展示的是哪一版。点「保留」只认这一版，之后又被改了的不认（GHSA-q9wp）
+  const ticket = { at: Date.now(), h: Object.fromEntries(changes.map((c) => [c.rel, cur.get(c.rel)?.h ?? null])) };
+  return { first, changes: shown, rels: changes.map((c) => c.rel), ticket };
 }
 
-/** 用户点了「保留」 */
-export function ucKeep(rels) {
-  const set = new Set(rels || []);
-  try { accept(ucScan(), (rel) => set.has(rel)); } catch (e) { log(`[用户配置] 认下失败：${e.message}`); }
+/** 用户点了「保留」。带票据（ucPending 给的）时只认卡片上展示的那一版：卡片之后又被改过的不认，返回这些 rel（这一轮别起） */
+export function ucKeep(rels, ticket) {
+  const set = new Set(rels || []), stale = [];
+  try {
+    flushSeen();
+    const cur = ucScan();
+    if (ticket && ticket.h) for (const rel of set) {
+      const s = SEEN.get(rel);
+      if ((cur.get(rel)?.h ?? null) !== (Object.hasOwn(ticket.h, rel) ? ticket.h[rel] : undefined) || (s && (s.last || s.at) > ticket.at)) stale.push(rel);
+    }
+    for (const rel of stale) set.delete(rel);
+    accept(cur, (rel) => set.has(rel));
+  } catch (e) { log(`[用户配置] 认下失败：${e.message}`); }
   log(`[用户配置] 用户保留了改动：${[...set].slice(0, 8).join(", ")}`);
+  if (stale.length) log(`⚠️ [用户配置] 卡片展示之后又被改了，没认：${stale.slice(0, 8).join(", ")}`);
+  return stale;
 }
 
 function writeAtomic(abs, data, mode = 0o600) {

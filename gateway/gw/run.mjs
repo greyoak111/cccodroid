@@ -33,6 +33,8 @@ import { projectRisks, projectTrusted, trustProject } from "./projtrust.mjs";
 import { checkAppFiles } from "./appfiles.mjs";
 import { ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "./userconf.mjs";
 import { keepProcs, killProcs, leftoverProcs, procStart } from "./leftover.mjs";
+import { sealed } from "./edition.mjs";
+import { sealBlockMessage, sealCleanup, sealPrepare, sealRecheck } from "./seal.mjs";
 
 // 必须由人回答的工具：全部放行也照问（问题、计划审批）
 const HUMAN_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
@@ -337,7 +339,7 @@ export async function startRun(item) {
   if (run.aborted) { log("⏹ 起进程前已停止"); return endRun(run, { durationMs: 0 }); }
   // 用户级配置（~/.claude）有没确认的改动、之前的对话留下了后台进程（见 userconf.mjs / leftover.mjs）：先问。
   // 没人看着的（定时任务、空闲压缩）不跑：定时任务按失败记、照任务设置通知
-  const ucp = ucPending(), procs = leftoverProcs(new Map([...RUNS].filter(([k]) => k !== run.id).map(([k, r]) => [String(k), r.childStart ?? null])));
+  const ucp = sealed() ? null : ucPending(), procs = leftoverProcs(new Map([...RUNS].filter(([k]) => k !== run.id).map(([k, r]) => [String(k), r.childStart ?? null])));
   if (ucp || procs.length) {
     if (run.unattended || run.auto) {
       const msg = tz("Claude Code 的用户级配置有改动还没确认，或者之前的对话留下了后台进程，这次没有运行。打开 cccodroid 发一条消息，在弹出的卡片里确认后再试。");
@@ -347,7 +349,15 @@ export async function startRun(item) {
     }
     const ok = await askCard(run, emit, { key: "uc", tool: "UserConfig", input: { first: !!ucp?.first, changes: ucp?.changes || [], procs },
       guard: { cat: "userconf", what: "~/.claude" }, what: `用户级配置 ${ucp?.rels.length || 0} 项、留下的进程 ${procs.length} 个`, yes: "✓ 保留", no: "✗ 撤销" });
-    if (ok) { if (ucp) ucKeep(ucp.rels); keepProcs(procs); }
+    if (ok) {
+      // 只认卡片上那一版（GHSA-q9wp）：等用户点的时候又被改了，这一轮不起，下一条消息再出卡片给用户看新的
+      const stale = ucp ? ucKeep(ucp.rels, ucp.ticket) : [];
+      keepProcs(procs);
+      if (stale.length) {
+        emit({ type: "error", message: tr(LAST_LANG, tz("用户级配置在确认之后又被改了，这一轮没有启动：{list}。再发一条消息，在弹出的卡片里确认。", { list: stale.slice(0, 6).join(", ") })) });
+        return endRun(run, { failed: true });
+      }
+    }
     else if (ok === false) {
       const r = ucp ? ucRevert(ucp.rels) : { failed: [] };
       if (procs.length) killProcs(procs);
@@ -360,7 +370,8 @@ export async function startRun(item) {
     if (run.aborted) { log("⏹ 等用户级配置确认时停止"); return endRun(run, { durationMs: 0 }); }
   }
   // 项目自带会自动运行的配置（钩子、.mcp.json…，见 projtrust.mjs）、又没被认过：先问；不同意就不加载项目级配置，这一轮照常
-  const proj = projectRisks(cwd);
+  // 发行版：项目级配置一概不读（edition.mjs），不用问
+  const proj = sealed() || P.local ? null : projectRisks(cwd);
   if (proj && !projectTrusted(cwd, proj.fp)) {
     const ok = run.unattended || run.auto ? false : await askProjectTrust(run, cwd, proj, emit);
     if (run.aborted) { log("⏹ 等项目配置确认时停止"); return endRun(run, { durationMs: 0 }); }
@@ -388,11 +399,34 @@ export async function startRun(item) {
   }
   // 用户级配置起进程紧前再核一次：点完卡片之后（等项目配置确认、核验程序都要时间）又被改了、或者看见过改了又改回，就不起。
   // 同时开始记这一轮运行期间的改动（结束时 ucAfterRun 比对）
-  if (!ucHooked) { ucHooked = true; END_HOOKS.push((r) => ucAfterRun(r)); }
-  const drift = ucBeforeRun(run);
+  if (!ucHooked) { ucHooked = true; END_HOOKS.push((r) => ucAfterRun(r)); END_HOOKS.push((r) => sealCleanup(r.id)); }
+  // 发行版白名单回填（seal.mjs）：说明文件、skill、插件、MCP、记忆检查过才交给 claude；命中破甲特征整轮不跑。端侧小模型走 --bare，不回填
+  let prep = null;
+  if (sealed() && !P.local) {
+    try { prep = sealPrepare({ cwd, runId: run.id, outputStyle: SETTINGS.outputStyle || "" }); }
+    catch (e) { log(`[封口] 准备回填失败：${e.message}`); prep = { block: { found: [{ name: "(cccodroid)", hits: [{ line: 0, excerpt: e.message }] }] } }; }
+    if (prep.block) {
+      log(`⛔ [封口] 命中破甲特征，不跑：${prep.block.found.slice(0, 4).map((f) => f.name).join(", ")}`);
+      const msg = tr(LAST_LANG, sealBlockMessage(prep.block));
+      emit({ type: "error", message: msg });
+      return endRun(run, { failed: true, finalText: msg });
+    }
+    for (const n of prep.notes || []) log(`[封口] ${n}`);
+    argv.push(...prep.args);
+    if (prep.settings && Object.keys(prep.settings).length) argv.push("--settings", JSON.stringify(prep.settings));
+  }
+  const drift = sealed() ? [] : ucBeforeRun(run);
   if (drift.length) {
     emit({ type: "error", message: tr(LAST_LANG, tz("用户级配置在确认之后又被改了，这一轮没有启动：{list}。再发一条消息，在弹出的卡片里确认。", { list: drift.slice(0, 6).join(", ") })) });
     return endRun(run, { failed: true });
+  }
+  // 记忆目录 claude 自己读、没法拷副本：起进程紧前再比一次，准备之后被改了就重查（见 seal.mjs）
+  const late = prep ? sealRecheck(prep) : null;
+  if (late) {
+    log(`⛔ [封口] 起进程前记忆被改、命中破甲特征：${late.found.slice(0, 4).map((f) => f.name).join(", ")}`);
+    const msg = tr(LAST_LANG, sealBlockMessage(late));
+    emit({ type: "error", message: msg });
+    return endRun(run, { failed: true, finalText: msg });
   }
   const [cmd0, args0] = claudeCmd(argv);
   const child = spawn(cmd0, args0, {

@@ -10,6 +10,7 @@ import { termEnv } from "./terminal.mjs";
 import { COMP_DIR, compIndex, compIndexCache, compRecord } from "./components.mjs";
 import { retrustProject } from "./projtrust.mjs";
 import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
+import { sealed } from "./edition.mjs";
 
 // ── 扩展：插件 / 技能 / MCP ───────────────────────────────────────────
 // 全部转给 claude 自己的命令行（claude plugin … / claude mcp …），网关不自己改它的配置文件 ——
@@ -560,13 +561,13 @@ export async function routeExtensions(req, res, u, p) {
       if (req.method === "POST" && p === "/api/ext/mcp/remove") return sendJson(res, 200, await removeMcp(body.name));
       if (req.method === "GET" && p === "/api/ext/skills") {
         if (PREFIX) await compIndex(false).catch(() => {});   // 组件技能的英文简介来自索引（有缓存，一般不联网）
-        return sendJson(res, 200, { items: listSkills(), dir: SKILLS_DIR });
+        return sendJson(res, 200, { items: listSkills(), dir: SKILLS_DIR, sealed: sealed() });
       }
       if (req.method === "GET" && p === "/api/ext/catalog/skills") return sendJson(res, 200, await listSkillCatalog(u.searchParams.get("refresh") === "1"));
       if (req.method === "POST" && p === "/api/ext/catalog/skills/install") return sendJson(res, 200, await installCatalogSkill(String(body.dir || "")));
       if (req.method === "GET" && p === "/api/ext/catalog/mcp") return sendJson(res, 200, await listMcpCatalog(u.searchParams.get("q"), u.searchParams.get("cursor")));
       if (req.method === "POST" && p === "/api/ext/skills/delete") return sendJson(res, 200, deleteSkill(String(body.dir || "")));
-      if (req.method === "GET" && p === "/api/ext/hooks") return sendJson(res, 200, listHooks(u.searchParams.get("dir")));
+      if (req.method === "GET" && p === "/api/ext/hooks") return sendJson(res, 200, { ...listHooks(u.searchParams.get("dir")), sealed: sealed() });
       if (req.method === "POST" && p === "/api/ext/hooks/save") {
         try { return sendJson(res, 200, await saveHooks(body)); }
         catch (e) { return sendJson(res, 200, { ok: false, code: e.code, message: e.message }); }

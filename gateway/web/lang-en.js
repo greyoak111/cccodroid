@@ -2808,5 +2808,8 @@ window.I18N_DICT.en = {
   "暂停这一层的 hooks（规则留着，先不跑）": "Pause hooks at this level (rules are kept, just not run)",
   "这一层的 hooks 已暂停": "Hooks at this level are paused",
   "这条规则在你编辑期间被改动或删掉了，重新打开它再改": "This rule was changed or deleted while you were editing it. Open it again and redo your edit",
-  "已有同名目录，但里面没有 SKILL.md（多半是以前导入到一半失败留下的）。到文件里删掉 ~/.claude/skills/{d} 再导入": "A folder with this name already exists but has no SKILL.md (most likely left over from an earlier import that failed). Delete ~/.claude/skills/{d} in Files, then import again"
+  "已有同名目录，但里面没有 SKILL.md（多半是以前导入到一半失败留下的）。到文件里删掉 ~/.claude/skills/{d} 再导入": "A folder with this name already exists but has no SKILL.md (most likely left over from an earlier import that failed). Delete ~/.claude/skills/{d} in Files, then import again",
+  "这些 Claude Code 配置里有越权指令的特征（要模型无视规则、冒充系统消息这一类），cccodroid 不加载它们，这一轮没有运行。改掉或删掉下面的内容后再发：\n{list}": "These Claude Code config files contain override-style instructions (telling the model to ignore its rules, posing as system messages and the like). cccodroid won't load them, so this turn did not run. Edit or remove the following, then send again:\n{list}",
+  "发行版不运行这里配置的 hooks：hooks 能执行任意命令、把任意内容放进对话，cccodroid 没法检查。规则留在文件里，不会被删。": "The release build does not run the hooks configured here: hooks can run any command and put anything into the conversation, which cccodroid cannot check. The rules stay in the file and are not deleted.",
+  "cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。": "cccodroid checks these skills before handing them to Claude Code. When calling one with a slash, prefix its name with user:, e.g. /user:{name}."
 };

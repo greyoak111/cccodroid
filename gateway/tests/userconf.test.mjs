@@ -346,3 +346,32 @@ test("应用写入窗口里别人把原有文件改了又改回：证据留着�
   assert.deepEqual(p.rels, [".claude/skills/a/SKILL.md"]);
   assert.equal(p.changes[0].kind, "transient");
 });
+
+test("点「保留」只认卡片上那一版：等用户点的时候又被改了，不认、返回出来（GHSA-q9wp）", () => {
+  fresh();
+  put(".claude/CLAUDE.md", "V0\n");
+  ucKeep(ucPending().rels);
+  put(".claude/CLAUDE.md", "V1\n");
+  const p = ucPending();
+  assert.match(p.changes[0].preview, /V1/);
+  put(".claude/CLAUDE.md", "V2 没给用户看过\n");
+  assert.deepEqual(ucKeep(p.rels, p.ticket), [".claude/CLAUDE.md"]);
+  const again = ucPending();
+  assert.ok(again && again.rels.includes(".claude/CLAUDE.md"), "V2 没被认下，下一轮还要问");
+  assert.match(again.changes[0].preview, /V2/);
+  // 这回没再动：照常认下
+  assert.deepEqual(ucKeep(again.rels, again.ticket), []);
+  assert.equal(ucPending(), null);
+});
+
+test("卡片之后改了又改回同一版：常驻监视看见了，也不认", async () => {
+  fresh();
+  put(".claude/CLAUDE.md", "V0\n");
+  ucKeep(ucPending().rels);
+  put(".claude/CLAUDE.md", "V1\n");
+  const p = ucPending();
+  await new Promise((r) => setTimeout(r, 20));
+  put(".claude/CLAUDE.md", "偷换\n"); _ucFlush();
+  put(".claude/CLAUDE.md", "V1\n"); _ucFlush();
+  assert.deepEqual(ucKeep(p.rels, p.ticket), [".claude/CLAUDE.md"]);
+});

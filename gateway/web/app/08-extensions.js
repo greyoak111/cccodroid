@@ -592,7 +592,8 @@
       return;
     }
     $("ext-s-count").textContent = (r.items || []).length;
-    $("ext-skills").innerHTML = (r.items || []).map((s) => extItem(esc(s.name), "",
+    // 发行版：skill 经检查后以插件「user」交给 Claude Code，斜杠调用时名字带 user: 前缀（见 gw/seal.mjs）
+    $("ext-skills").innerHTML = (r.sealed && (r.items || []).length ? `<div class="tiny">${esc(t("cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。", { name: r.items[0].name }))}</div>` : "") + (r.items || []).map((s) => extItem(esc(s.name), "",
       `<button data-x="skill-rm" data-id="${esc(s.dir)}">${t("删除")}</button>`,
       `<div class="tiny ext-desc">${esc(!isZh() && s.descEn ? s.descEn : s.description)}</div>`, [s.component ? "comp" : s.official ? "official" : "user"])).join("")
       || `<div class="tiny">${t("~/.claude/skills 里还没有技能。插件也可能自带技能。")}</div>`;
@@ -699,7 +700,8 @@
       project: t("写在项目的 .claude/settings.json，只在这个项目生效；项目进了 git 的话会跟着仓库走。"),
       local: t("写在项目的 .claude/settings.local.json，只在这个项目、这台设备上生效。"),
     };
-    $("hook-bar").innerHTML = `<div class="tiny">${esc(SCD[HK.scope])}
+    // 发行版不跑这里配的钩子（见 gw/edition.mjs、seal.mjs）：配置照样能看能改，只是不加载
+    $("hook-bar").innerHTML = (d.sealed ? `<div class="tiny warn">${esc(t("发行版不运行这里配置的 hooks：hooks 能执行任意命令、把任意内容放进对话，cccodroid 没法检查。规则留在文件里，不会被删。"))}</div>` : "") + `<div class="tiny">${esc(SCD[HK.scope])}
         ${sc && sc.file ? `<a href="#" data-hk="open-file">${t("打开配置文件")}</a>` : ""}</div>
       <label class="tiny hk-pause"><input type="checkbox" data-hk="pause"${sc && sc.disableAll ? " checked" : ""}> ${t("暂停这一层的 hooks（规则留着，先不跑）")}</label>`;
     if (!sc || sc.error && !sc.badJson) { $("ext-hooks").innerHTML = `<div class="tiny warn">${esc((sc && sc.error) || "")}</div>`; return; }

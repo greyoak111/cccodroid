@@ -2771,3 +2771,6 @@
 2771	Les hooks de ce niveau sont suspendus
 2772	Cette règle a été modifiée ou supprimée pendant votre édition. Rouvrez-la puis refaites la modification
 2773	Un dossier de ce nom existe déjà mais ne contient pas de SKILL.md (sans doute le reste d'une importation précédente qui a échoué). Supprimez ~/.claude/skills/{d} dans Fichiers, puis réimportez
+2774	Ces fichiers de configuration Claude Code contiennent des instructions de contournement (demander au modèle d'ignorer ses règles, se faire passer pour un message système…). cccodroid ne les charge pas, ce tour n'a donc pas été exécuté. Modifiez ou supprimez ce qui suit, puis renvoyez :\n{list}
+2775	La version publique n'exécute pas les hooks configurés ici : un hook peut lancer n'importe quelle commande et injecter n'importe quoi dans la conversation, ce que cccodroid ne peut pas vérifier. Les règles restent dans le fichier et ne sont pas supprimées.
+2776	cccodroid vérifie ces compétences avant de les transmettre à Claude Code. Pour en appeler une avec une barre oblique, préfixez son nom par user:, par exemple /user:{name}.

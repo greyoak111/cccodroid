@@ -2771,3 +2771,6 @@
 2771	Hooks di tingkat ini dijeda
 2772	Aturan ini diubah atau dihapus saat Anda mengeditnya. Buka lagi lalu ulangi perubahan
 2773	Folder dengan nama ini sudah ada tetapi tidak berisi SKILL.md (kemungkinan sisa impor sebelumnya yang gagal). Hapus ~/.claude/skills/{d} di Berkas, lalu impor lagi
+2774	File konfigurasi Claude Code ini berisi instruksi pengabaian (meminta model mengabaikan aturannya, menyamar sebagai pesan sistem, dan sejenisnya). cccodroid tidak memuatnya, jadi giliran ini tidak dijalankan. Ubah atau hapus bagian berikut, lalu kirim lagi:\n{list}
+2775	Versi rilis tidak menjalankan hooks yang diatur di sini: hook bisa menjalankan perintah apa pun dan memasukkan apa saja ke percakapan, yang tidak bisa diperiksa cccodroid. Aturannya tetap ada di file dan tidak dihapus.
+2776	cccodroid memeriksa skill ini sebelum diserahkan ke Claude Code. Saat memanggilnya dengan garis miring, tambahkan user: di depan namanya, misalnya /user:{name}.

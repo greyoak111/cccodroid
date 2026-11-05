@@ -2774,4 +2774,7 @@ window.I18N_DICT["fr"] = {
   "这一层的 hooks 已暂停": "Les hooks de ce niveau sont suspendus",
   "这条规则在你编辑期间被改动或删掉了，重新打开它再改": "Cette règle a été modifiée ou supprimée pendant votre édition. Rouvrez-la puis refaites la modification",
   "已有同名目录，但里面没有 SKILL.md（多半是以前导入到一半失败留下的）。到文件里删掉 ~/.claude/skills/{d} 再导入": "Un dossier de ce nom existe déjà mais ne contient pas de SKILL.md (sans doute le reste d'une importation précédente qui a échoué). Supprimez ~/.claude/skills/{d} dans Fichiers, puis réimportez",
+  "这些 Claude Code 配置里有越权指令的特征（要模型无视规则、冒充系统消息这一类），cccodroid 不加载它们，这一轮没有运行。改掉或删掉下面的内容后再发：\n{list}": "Ces fichiers de configuration Claude Code contiennent des instructions de contournement (demander au modèle d'ignorer ses règles, se faire passer pour un message système…). cccodroid ne les charge pas, ce tour n'a donc pas été exécuté. Modifiez ou supprimez ce qui suit, puis renvoyez :\n{list}",
+  "发行版不运行这里配置的 hooks：hooks 能执行任意命令、把任意内容放进对话，cccodroid 没法检查。规则留在文件里，不会被删。": "La version publique n'exécute pas les hooks configurés ici : un hook peut lancer n'importe quelle commande et injecter n'importe quoi dans la conversation, ce que cccodroid ne peut pas vérifier. Les règles restent dans le fichier et ne sont pas supprimées.",
+  "cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。": "cccodroid vérifie ces compétences avant de les transmettre à Claude Code. Pour en appeler une avec une barre oblique, préfixez son nom par user:, par exemple /user:{name}.",
 };

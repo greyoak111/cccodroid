@@ -10,16 +10,21 @@ import { fixedBaseUrl } from "./streamfix.mjs";
 import { archiveHooks } from "./archive-core.mjs";
 import { fileURLToPath } from "node:url";
 import { APP } from "./appfiles.mjs";
+import { sealArgv, sealEnv } from "./edition.mjs";
 
 // 敏感操作再确认：PreToolUse 钩子（guard/cc-guard.mjs），碰密钥 / 读屏点按 / 往外分享时让 claude 停下来问，全部放行也一样。
 // 不设全局关闭开关：整层关掉就等于没有；旧设置里存过 guard:false 也不再认。要放行就在确认卡片上逐次「允许」。
 // 钩子不读盘上的文件：部署出来的网关用启动时核过、存在内存里的那份源码（appfiles.mjs），整段经 node -e 跑，
 // 跑着的时候盘上那份被改了也换不掉正在挂的这一层。开发时（没有 FILES）照旧现读仓库里的。
 const GUARD_CLI = fileURLToPath(new URL("../guard/cc-guard.mjs", import.meta.url));
+const BREACH_SRC = fileURLToPath(new URL("./breach.mjs", import.meta.url));
 export function guardSource() {
   let src = APP ? APP.text("guard/cc-guard.mjs") : null;
   if (src == null) try { src = fs.readFileSync(GUARD_CLI, "utf8"); } catch { return null; }
-  return src.replace(/^#!.*\n/, "") + "\nrunHook();\n";
+  // 破甲特征检查拼在前面（guard 拦往配置 / 记忆里写破甲内容，见 cc-guard.mjs breachWrite）。同样用核过的那份；去掉 export 才能当脚本跑
+  let br = APP ? APP.text("gw/breach.mjs") : null;
+  if (br == null) try { br = fs.readFileSync(BREACH_SRC, "utf8"); } catch { br = ""; }
+  return br.replace(/^export /gm, "") + "\n" + src.replace(/^#!.*\n/, "") + "\nrunHook();\n";
 }
 export function guardHooks() {
   const src = guardSource();
@@ -235,6 +240,7 @@ export function claudeEnv(o = {}) {
   };
 
   for (const k of ["LD_LIBRARY_PATH", "ANTHROPIC_BASE_URL"]) if (!env[k]) delete env[k];
+  sealEnv(env);   // 发行版：能让 claude 另找配置 / 记忆目录的变量清掉（见 edition.mjs）
   // 网关令牌文件的位置不交给 claude：Bash 里 cat "$CCAPP_TOKEN_FILE" 不带 .gateway-token 字样，再确认钩子认不出（11-03 审查 L-6）
   delete env.CCAPP_TOKEN_FILE;
   // 自定义接口（第三方调用）垫一层流式补尾：回答说完了上游却没收尾，claude 会整段撤回重答（见 streamfix.mjs）
@@ -345,7 +351,8 @@ export function enosysRun() {
 }
 /** 拉起 claude 的 [程序, 参数]：开着「静态程序兼容」就外面套一层监督器（跟进模式） */
 export function claudeCmd(extra) {
-  const argv = claudeArgv(extra);
+  // 发行版：开会话的一律加封口（--setting-sources "" 等，见 edition.mjs）。所有起 claude 的地方都经这里，别处不许自己拼
+  const argv = claudeArgv(sealArgv(extra));
   const er = SETTINGS.staticCompat !== false ? enosysRun() : "";
   return er ? [er, ["-f", PATHS.loader, ...argv]] : [PATHS.loader, argv];
 }
