@@ -119,3 +119,10 @@ test("/model 等清单时同一家里型号被会话面板改了：旧命令不�
   assert.equal(sessModel(sid).model, "b3", "后来在面板选的型号要留着");
   await post("/api/providers/delete", { id: b.id });
 });
+
+test("账本数组里的 null/畸形元素在加载时被清掉，不会让记账崩溃", async () => {
+  const { _billForTest: B } = await import("../gw/providers.mjs");
+  const j = B.billShape({ p: { tok: [null, ["x"], [1, 2, 3, 4]], spends: [null, [1, 2], ["a", 2]] } });
+  assert.deepEqual(j.p.tok, [[1, 2, 3, 4]]);
+  assert.deepEqual(j.p.spends, [[1, 2]]);
+});
