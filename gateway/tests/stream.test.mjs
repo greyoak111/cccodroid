@@ -52,6 +52,16 @@ for (const [name, discards] of [
   });
 }
 
+test("本地命令的 <synthetic> 正文在已流过增量后仍然发出（插话命令的输出不能丢）", () => {
+  const evs = [
+    { type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "前面正常回答" } } },
+    { type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text: "/cost 的结果" }] } },
+  ];
+  const r = replay(evs);
+  const texts = r.out.filter((e) => e.type === "assistant_text").map((e) => e.text);
+  assert.deepEqual(texts, ["/cost 的结果"]);
+});
+
 test("带工具的多次请求：工具卡照常发出，不误删", () => {
   const r = replay(load("stream-tool-call.jsonl"));
   assert.equal(r.out.filter((e) => e.type === "tool_use").length, 1);

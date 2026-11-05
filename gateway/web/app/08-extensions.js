@@ -673,8 +673,15 @@
   const hkScopeData = () => HK.data && HK.data.scopes.find((s) => s.scope === HK.scope);
   const hkFlat = (sc) => {
     const out = [];
-    for (const [ev, groups] of Object.entries((sc && sc.hooks) || {}))
-      (groups || []).forEach((g, gi) => (g.hooks || []).forEach((h, hi) => out.push({ ev, gi, hi, matcher: g.matcher || "", h })));
+    const hooks = sc && sc.hooks;
+    if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return out;
+    for (const [ev, groups] of Object.entries(hooks)) {
+      if (!Array.isArray(groups)) continue;                       // 合法 JSON 但形状不对：整个 Hooks 区不能因此崩掉
+      groups.forEach((g, gi) => {
+        if (!g || typeof g !== "object" || !Array.isArray(g.hooks)) return;
+        for (let hi = 0; hi < g.hooks.length; hi++) out.push({ ev, gi, hi, matcher: typeof g.matcher === "string" ? g.matcher : "", h: g.hooks[hi] });
+      });
+    }
     return out;
   };
 
@@ -687,7 +694,7 @@
   }
 
   function renderHooks() {
-    const d = HK.data; if (!d) return;
+    const d = HK.data; if (!d || !Array.isArray(d.scopes)) return;
     const total = d.scopes.reduce((a, s) => a + hkFlat(s).length, 0);
     $("ext-h-count").textContent = total;
     const proj = String(d.dir || "").split("/").pop() || d.dir;

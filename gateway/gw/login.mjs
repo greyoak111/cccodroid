@@ -82,26 +82,39 @@ async function runAuth(args, timeoutMs = 20000) {
   if (blocked) return { code: -1, out: blocked };
   return new Promise((resolve) => {
     const child = spawn(PATHS.claudeLoader, claudeArgv(["auth", ...args]), { cwd: CFG.home, env: authEnv(), stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
+    let out = "", stdout = "";
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
-    child.stdout.on("data", (d) => (out += d)); child.stderr.on("data", (d) => (out += d));
+    child.stdout.on("data", (d) => { out += d; stdout += d; }); child.stderr.on("data", (d) => (out += d));
     const t = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, timeoutMs);
-    child.on("close", (code) => { clearTimeout(t); resolve({ code, out }); });
-    child.on("error", (e) => { clearTimeout(t); resolve({ code: -1, out: e.message }); });
+    child.on("close", (code) => { clearTimeout(t); resolve({ code, out, stdout }); });
+    child.on("error", (e) => { clearTimeout(t); resolve({ code: -1, out: e.message, stdout: "" }); });
   });
 }
 export let AUTH_CACHE = null;
 let AUTH_GOOD = null;   // 最后一次问出结果的状态
+/** 从 claude auth status 的 stdout 里找状态对象：优先「带 boolean loggedIn」的那一段，
+ *  并从后往前找 —— 前面夹的 JSON 警告不能被当成 status（审查 11-05）。 */
+function statusJson(text) {
+  const s = String(text || ""), cands = [];
+  const push = (v) => { if (v && typeof v === "object" && !Array.isArray(v)) cands.push(v); };
+  try { push(JSON.parse(s.trim())); } catch {}
+  for (const line of s.split("\n").reverse()) {
+    const t = line.trim();
+    if (!t.includes("{")) continue;
+    try { push(JSON.parse(t)); } catch {}
+  }
+  // 兜底：整段里从第一个 { 到后面某个 } 逐个试（状态 JSON 被别的话包住时）
+  const at = s.indexOf("{");
+  for (let e = s.lastIndexOf("}"), n = 0; at >= 0 && e > at && n < 50; e = s.lastIndexOf("}", e - 1), n++) {
+    try { push(JSON.parse(s.slice(at, e + 1))); } catch {}
+  }
+  return cands.find((x) => typeof x.loggedIn === "boolean") || cands[0] || null;
+}
 export async function authStatus(force) {
   if (!force && AUTH_CACHE && Date.now() - AUTH_CACHE.at < 30000) return AUTH_CACHE.v;
   const r = await runAuth(["status"]);
-  let j = {};
-  // JSON 前后可能夹着别的输出（警告之类，里面也可能有花括号）：从第一个 { 起，结尾从后往前逐个 } 试
-  const at = r.out.indexOf("{");
-  for (let e = r.out.lastIndexOf("}"), n = 0; at >= 0 && e > at && n < 50; e = r.out.lastIndexOf("}", e - 1), n++) {
-    try { j = JSON.parse(r.out.slice(at, e + 1)); break; } catch {}
-  }
-  if (!j || typeof j !== "object") j = {};
+  // 状态 JSON 走 stdout；stderr 只用于没解析出 loggedIn 时的「未登录」判断和错误提示
+  let j = statusJson(r.stdout) || statusJson(r.out) || {};
   // 只转出界面要显示的几项；令牌之类的东西它本来也不报
   // 问不出结果（claude 起不来、超时、输出解析不了）：不能当成「未登录」—— 有上次问出的就沿用并标明是旧的，
   // 没有就标「不知道」，把原因带给界面（#102 04-010）

@@ -101,8 +101,10 @@ const LOGIN_MODELS = [
 // 原生厂商的模型不带档位信息时就用这一套 —— 以前回落成 DeepSeek 的三档，medium/xhigh 凭空消失。
 const CLAUDE_EFFORT = ["low", "medium", "high", "xhigh", "max"];
 export function effortLevelsOf(model, p = PROVIDER) {
-  return (model && model.effort && model.effort.supported_levels) ||
-         (p.nativeModels ? CLAUDE_EFFORT : ["low", "high", "max"]);
+  // 清单可能来自用户可改的 ccapp-providers.json：supported_levels 不是数组时不能原样返回，
+  // 否则调用方的 .includes/.join 会抛 TypeError（审查 11-05）
+  const lv = model && model.effort && model.effort.supported_levels;
+  return Array.isArray(lv) ? lv : (p.nativeModels ? CLAUDE_EFFORT : ["low", "high", "max"]);
 }
 
 // 从 result.modelUsage 学到的真实窗口（按模型 id 记，落盘）—— 官方账户拿不到 /models，只能这样补
@@ -330,9 +332,9 @@ export function modelsCached(p = PROVIDER) {
 /** 厂商的 /models 多是 OpenAI 形状：不报窗口，还混着向量、语音、画图模型。
  *  自动发现去掉明显不能对话的；用户显式内嵌的清单不凭名字过滤。窗口按同名补，不知道就留 0。 */
 function mergeKnown(list, known, configured = false) {
-  const byId = new Map((known || []).map((m) => [m.id, m]));
+  const byId = new Map((known || []).filter((m) => m && typeof m.id === "string").map((m) => [m.id, m]));
   return list
-    .filter((m) => configured || !/embed|rerank|tts|asr|whisper|speech|audio|wanx|cogview|cogvideo|image-|moderation/i.test(m.id))
+    .filter((m) => m && typeof m.id === "string" && (configured || !/embed|rerank|tts|asr|whisper|speech|audio|wanx|cogview|cogvideo|image-|moderation/i.test(m.id)))
     .map((m) => {
       const k = byId.get(m.id);
       if (!k) return m;

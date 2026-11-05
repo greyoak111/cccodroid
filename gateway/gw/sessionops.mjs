@@ -12,7 +12,7 @@ import { forgetChild, recordPrimary } from "./lineage-store.mjs";
 import { lineageForget } from "./lineage.mjs";
 import { checkSession, neutralizeMarkers, resealAfterEdit, sealSession, isInjected } from "./integrity.mjs";
 import { ucPending } from "./userconf.mjs";
-import { forEachLine, lineWriter, zipEntries, zipExtract, zipToFile } from "./bigfile.mjs";
+import { forEachLine, lineWriter, writeAll, zipEntries, zipExtract, zipToFile } from "./bigfile.mjs";
 import { archiveDb, archiveImport, saveArchive } from "./archive-store.mjs";
 
 // ── 会话管理：回收站 / 导出 / 导入 ─────────────────────────────────────
@@ -255,6 +255,8 @@ export async function rewindFiles(sid, userUuid, dryRun) {
       }
     });
     child.stderr.on("data", (d) => { err += d; });
+    // spawn 失败（loader 缺失/EACCES/ENOMEM）只发 error：不接就是未捕获异常，整个网关退出
+    child.on("error", (e) => finish({ ok: false, error: e.code || e.message }));
     child.stdin.on("error", () => {});
     child.on("close", () => { exited = true; if (sf) resealAfterEdit(sid, sf, dirty); finish({ ok: false, error: err.trim().slice(-300) || "claude exited" }); });
     child.stdin.write(JSON.stringify({ type: "control_request", request_id: "rw-" + Date.now(), request: { subtype: "rewind_files", user_message_id: userUuid, dry_run: !!dryRun } }) + "\n");
@@ -328,7 +330,7 @@ export function rewindFixup(sessionFile, sid, uuid, files) {
       // 建完上级再按真实路径判一次（中途换成软链的），最后一段不跟软链
       if (!rewindTargetOk(want)) { failed++; continue; }
       const fd = fs.openSync(want, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o644);
-      try { fs.writeSync(fd, data); } finally { fs.closeSync(fd); }
+      try { writeAll(fd, data); } finally { fs.closeSync(fd); }
       fixed++;
     } catch (e) { failed++; log(`回退补救失败 ${want}: ${e.message}`); }
   }

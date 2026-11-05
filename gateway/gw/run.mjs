@@ -791,15 +791,9 @@ export async function startRun(item) {
     if (/error|Error|failed|ENOENT|EACCES/.test(s)) log(`[claude!] ${s.trim().slice(0, 300)}`);
   });
 
-  const finish = (code, signal) => {
-    if (buf.trim()) feed(buf.trim());
-    buf = "";
-    run.meter.close();                   // 中断 / 被杀也走这里：子代理记录最后扫一遍
-    try { run.agents?.close(); } catch (e) { log("子代理收尾出错: " + e.message); }
-    // claude 已经退出，这时的记录就是下一轮的基准；提醒这一轮已经交出去（正常答完）才清掉标记
-    try { sealSession(run.sessionId, sfile(), { clear: !!integNote && !run.aborted && !!lastResult && !lastResult.is_error }); } catch (e) { log(`[封签] ${e.message}`); }
-    run.inputOpen = false;
-    run.perms.clear();                // 卡片随 run_end 一起作废（前端按 run_end 收起）
+  // 收尾时把没送达的插话/斜杠命令退回队列。抽成函数，强制收尾路径（queue.abortRun）也要用，
+  // 否则 5 秒兜底直接 endRun 会把已经写进 stdin 的消息静默丢掉（审查 11-05）
+  const requeuePending = () => {
     if (run.pendingInject.length) {
       log(`插话 ${run.pendingInject.length} 条没来得及送达，退回队首`);
       QUEUE.unshift(...run.pendingInject.map((it) => ({ ...it, injected: false, held: !!((run.aborted && !run.retired) || run.laneHeld) })));
@@ -811,6 +805,19 @@ export async function startRun(item) {
       QUEUE.unshift(...run.slashFlight.map((it) => ({ ...it, injected: false, held: true })));
       run.slashFlight = [];
     }
+  };
+  run.requeuePending = requeuePending;
+
+  const finish = (code, signal) => {
+    if (buf.trim()) feed(buf.trim());
+    buf = "";
+    run.meter.close();                   // 中断 / 被杀也走这里：子代理记录最后扫一遍
+    try { run.agents?.close(); } catch (e) { log("子代理收尾出错: " + e.message); }
+    // claude 已经退出，这时的记录就是下一轮的基准；提醒这一轮已经交出去（正常答完）才清掉标记
+    try { sealSession(run.sessionId, sfile(), { clear: !!integNote && !run.aborted && !!lastResult && !lastResult.is_error }); } catch (e) { log(`[封签] ${e.message}`); }
+    run.inputOpen = false;
+    run.perms.clear();                // 卡片随 run_end 一起作废（前端按 run_end 收起）
+    requeuePending();
     const ms = Date.now() - t0;
     // 定时任务已经花掉的（崩了、没出 result 也一样）：按 0 记会让它当作没花钱再重试（DeepSeek 复核 #1）
     const spent = () => (run.sched && run.costSeen ? { costRaw: run.costSeen } : {});

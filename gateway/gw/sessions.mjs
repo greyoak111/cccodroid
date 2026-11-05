@@ -64,11 +64,11 @@ export function peekSession(file) {
 }
 function peekSessionRaw(file) {
   let title = "", cwd = "", firstMsg = "", created = 0;
+  let fd = null;
   try {
-    const fd = fs.openSync(file, "r");
+    fd = fs.openSync(file, "r");
     const buf = Buffer.alloc(196608);
     const n = fs.readSync(fd, buf, 0, buf.length, 0);
-    fs.closeSync(fd);
     for (const line of buf.toString("utf8", 0, n).split("\n")) {
       if (!line.trim()) continue;
       let ev; try { ev = JSON.parse(line); } catch { continue; }
@@ -88,7 +88,10 @@ function peekSessionRaw(file) {
       if (text && ev.type === "user" && !isInjected(text)) { firstMsg = text; break; }
       if (text && !firstMsg && !isInjected(text)) firstMsg = text;
     }
-  } catch {}
+  } catch {} finally {
+    // read 抛错（比如路径是目录 → EISDIR）时也要关 fd；以前关闭在 try 里，列表每刷一次漏一个
+    if (fd != null) try { fs.closeSync(fd); } catch {}
+  }
   title = firstMsg.replace(/\s+/g, " ").trim().slice(0, 90);
   return { title: title || "(无标题)", cwd, created };
 }
@@ -103,7 +106,8 @@ export function listSessions(limit = 150) {
   for (const d of dirs) {
     const dir = path.join(PATHS.projects, d.name);
     let files = [];
-    try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")); } catch { continue; }
+    // 只认普通文件：以 .jsonl 结尾的目录以前会被当成会话，peek 每次读它都漏一个 fd，最终 EMFILE
+    try { files = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile() && d.name.endsWith(".jsonl")).map((d) => d.name); } catch { continue; }
     for (const f of files) {
       const full = path.join(dir, f);
       let st;
@@ -219,7 +223,7 @@ async function searchSessionsNow(q) {
   for (const d of dirs) {
     const dir = path.join(PATHS.projects, d.name);
     let names = [];
-    try { names = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")); } catch { continue; }
+    try { names = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile() && d.name.endsWith(".jsonl")).map((d) => d.name); } catch { continue; }
     for (const f of names) {
       const full = path.join(dir, f);
       try { const st = fs.statSync(full); files.push({ id: f.slice(0, -6), file: full, mtime: st.mtimeMs, size: st.size }); } catch {}

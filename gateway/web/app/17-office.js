@@ -290,7 +290,14 @@
     }
     if (!still() || VW.pdf) { doc.loadingTask.destroy(); return; }
     VW.pdf = doc;
-    const p1 = await doc.getPage(1);
+    let p1;
+    try { p1 = await doc.getPage(1); }
+    catch (e) {
+      // getPage(1) 也可能被拒（页树损坏、/Count 0）；以前在 try 外，会让查看器永远停在「读取中…」
+      if (still()) $("vw-body").innerHTML = `<div class="vw-empty">${t("PDF 打不开：{msg}", { msg: esc(e.message || String(e)) })}</div>`;
+      return;
+    }
+    if (!still()) return;
     const vp = p1.getViewport({ scale: 1 });
     VW.pdfRatio = vp.height / vp.width;
     $("vw-body").innerHTML = `<div class="vw-pdf"><div class="vw-pages"></div></div><div class="vw-pageno tiny"></div>`;

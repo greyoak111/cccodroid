@@ -641,6 +641,13 @@ function compCancel(id) {
   if (["configuring", "fetching-models"].includes(job.phase)) return { ok: false, message: "busy" };
   job.cancelled = true;
   if (job.child) killTree(job.child);
+  // 取消发生在 verifying：tar 已把整棵解包树写到 .staging/<id>，正常清理只在成功路径里，
+  // 失败路径会把整棵（chromium 约 1GB）留在私有目录且没有入口再删（审查 11-05）。
+  // 等子进程真正死掉、写操作停下来再删，避免边解边删。
+  if (/^[a-z0-9][a-z0-9-]*$/.test(id)) setTimeout(() => {
+    if (job.finished) return;
+    try { fs.rmSync(path.join(COMP_DIR, ".staging", id), { recursive: true, force: true }); } catch {}
+  }, 1500).unref();
   return { ok: true };
 }
 

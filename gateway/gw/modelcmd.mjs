@@ -86,7 +86,7 @@ export async function handleLocalCommand(name, arg, reply, sid, stopped = () => 
       const lines = models.map((m) => {
         const on = m.id === curId ? "**▸** " : "　　";
         const img = (m.input_modalities || []).includes("image") ? " · 支持图片" : "";
-        const eff = (m.effort?.supported_levels || []).join(" / ");
+        const eff = (Array.isArray(m.effort?.supported_levels) ? m.effort.supported_levels : []).join(" / ");
         return `${on}\`${m.id}\` — ${m.name || ""}\n　　上下文 ${Math.round((m.context_window || 0) / 1024)}k${img} · effort ${eff}`;
       }).join("\n\n");
       return reply(

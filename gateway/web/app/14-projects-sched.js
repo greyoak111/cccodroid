@@ -9,7 +9,8 @@
     if (!id || id === globalProv()) return Promise.resolve(MODELS);
     if (PJ.pm[id]) return Promise.resolve(PJ.pm[id]);
     const g = PJ.pmGen;
-    return api("/api/models?browse=" + encodeURIComponent(id)).then((r) => { if (r.providers) state.provList = r.providers; const ms = r.models || []; if (g === PJ.pmGen) PJ.pm[id] = ms; return ms; }).catch(() => []);
+    return api("/api/models?browse=" + encodeURIComponent(id)).then((r) => { if (r.providers) state.provList = r.providers; const ms = r.models || []; if (g === PJ.pmGen) PJ.pm[id] = ms; return ms; })
+      .catch(() => { if (g === PJ.pmGen) PJ.pm[id] = []; return []; });   // 失败也记终态，别让「没缓存 → 再拉 → 回执重画」无限循环
   }
   const usableProvs = () => (state.provList || []).filter((p) => p.usable && !p.hidden);
   const provChoices = (follow, cur) => [["", follow], ...usableProvs().map((p) => [p.id, provLabel(p.id)]),
@@ -69,12 +70,12 @@
     const p = d.project;
     setOv(p.name); setPageSub("projects", p.path);
     // 拉回来是空清单（端侧模型删光了）也算拉过：以前按「空 = 没拉过」判断，回执重画又拉，一直循环（#143-2）
-    if (!MODELS.length && !PJ.mLoaded) api("/api/models").then((r) => { MODELS = r.models || []; PJ.mLoaded = true; PJ.effLevels = r.effortLevels || []; if (PJ.cur === id) renderProject(box); }).catch(() => {});
+    if (!MODELS.length && !PJ.mLoaded) api("/api/models").then((r) => { MODELS = r.models || []; PJ.mLoaded = true; PJ.effLevels = r.effortLevels || []; if (PJ.cur === id && curPage === "projects") renderProject(box); }).catch(() => {});
     const opt = (v, l, cur) => `<option value="${esc(v)}"${v === (cur || "") ? " selected" : ""}>${esc(l)}</option>`;
     const follow = t("跟随全局");
     // 项目指定了别家：型号清单换成那家的（没拉过先拉，拉回来重画）
     const pms = p.provider && p.provider !== globalProv() ? PJ.pm[p.provider] : MODELS;
-    if (!pms) provModelsOf(p.provider).then(() => { if (PJ.cur === id) renderProject(box); });
+    if (!pms) provModelsOf(p.provider).then(() => { if (PJ.cur === id && curPage === "projects") renderProject(box); });
     const PMS = pms || [];
     const provSel = `<select data-def="provider">${provChoices(follow, p.provider).map(([v, l]) => opt(v, l, p.provider)).join("")}</select>`;
     const modelSel = `<select data-def="model">${opt("", follow, p.model)}${PMS.map((m) => opt(m.id, prettyModel(m.id), p.model)).join("")}${p.model && !PMS.some((m) => m.id === p.model) ? opt(p.model, prettyModel(p.model), p.model) : ""}</select>`;
