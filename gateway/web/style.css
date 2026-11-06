@@ -1305,6 +1305,11 @@ html[dir="rtl"] .field select{background-position:12px 50%,17px 50%}   /* 从右
 .vw-mded .cm-md-img.bad{display:none}
 .vw-mded .cm-md-img-ext{display:block;margin:6px 0;padding:6px 10px;border:1px dashed var(--line);border-radius:6px;color:var(--fg2,var(--fg));font-size:12.5px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vw-mded .cm-line.cm-md-table,.vw-mded .cm-line.cm-md-html{font-family:var(--mono);font-size:.84em;color:var(--fg2)}
+/* 光标不在表格上：第一行换成排好的表格，其余行收起；长文字在格里换行（同帮助页），宽了就横着滑 */
+.vw-mded .cm-md-tbl{margin:4px 0;font-size:.92em;line-height:1.5}
+.vw-mded .cm-md-tbl th,.vw-mded .cm-md-tbl td{white-space:normal;min-width:4em}
+.vw-mded .cm-md-tbl code{background:var(--bg3);border-radius:5px;padding:1px 4px;font-family:var(--mono);font-size:.9em}
+.vw-mded .cm-line.cm-md-table-hid{line-height:0;font-size:0;padding-block:0}
 /* 查找替换面板 */
 .vw-mded .cm-panels{background:var(--bg2);color:var(--fg);border-color:var(--line)}
 .vw-mded .cm-panels-top{border-bottom:1px solid var(--line)}
