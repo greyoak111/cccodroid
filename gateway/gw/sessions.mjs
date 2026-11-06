@@ -282,13 +282,14 @@ export async function routeSessions(req, res, u, p) {
   // ── 会话管理：批量进回收站 / 回收站 / 导出 / 导入 ──
   if (req.method === "POST" && p === "/api/sessions/trash") {
     const b = JSON.parse((await readBody(req)) || "{}");
-    const done = [], failed = [];
+    // busy：正在生成没删；failed：已经不在了（别处删了、已在回收站）或删的时候出错——界面分开说（#176-2）
+    const done = [], failed = [], busy = [];
     for (const id of [].concat(b.ids || [])) {
-      if (runOfSession(id)) { failed.push(id); continue; }
+      if (runOfSession(id)) { busy.push(id); failed.push(id); continue; }
       try { (trashSession(String(id)).ok ? done : failed).push(id); } catch { failed.push(id); }
     }
     if (done.length) log(`${done.length} 个会话进回收站`);
-    return sendJson(res, 200, { ok: true, done, failed });
+    return sendJson(res, 200, { ok: true, done, failed, busy });
   }
   if (req.method === "GET" && p === "/api/trash") {
     return sendJson(res, 200, { items: listTrash(), keepDays: TRASH_KEEP_DAYS });

@@ -2786,4 +2786,6 @@ window.I18N_DICT["id"] = {
   "有个新对话在等你确认 · 侧栏「没建会话的新对话」里查看": "Percakapan baru menunggu konfirmasi Anda · lihat \"Percakapan baru belum tersimpan\" di bilah samping",
   "没建会话的新对话": "Percakapan baru belum tersimpan",
   "还有 {n} 条没建会话的消息也停下了，处理完这条接着显示下一条。": "{n} pesan lain yang belum tersimpan juga berhenti; berikutnya muncul setelah yang ini ditangani.",
+  "{n} 个已删除，{m} 个已经不在了（别处删了或已在回收站）": "{n} dihapus, {m} sudah tidak ada (dihapus di tempat lain atau sudah di tempat sampah)",
+  "{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了": "{n} dihapus, {m} masih membuat respons dan tidak dihapus, {k} sudah tidak ada",
 };

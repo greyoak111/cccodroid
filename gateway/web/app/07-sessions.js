@@ -146,6 +146,7 @@
       if (top && top.key === g.key) top.list.push(s); else groups.push({ ...g, list: [s] });
     }
     if (misc.length) groups.push({ key: "misc", label: t("杂项"), list: misc });
+    sess.misc = misc.map((x) => x.id);   // 「全部移到回收站」只动这一组看得见的（筛到某个项目时不连带别的项目，#176-1）
     let html = "";
     for (const g of groups) {
       const folded = sessFolded(g.key);
@@ -158,7 +159,8 @@
   // 杂项一键进回收站：在跑的跳过；回收站里照常保留几天，可恢复
   async function clearMisc() {
     const busy = new Set(srv.runs.map((r) => r.sessionId).filter(Boolean));
-    const list = state.sessions.filter((s) => s.misc && !s.pinned && !busy.has(s.id));
+    const mine = new Set(sess.misc || []);
+    const list = state.sessions.filter((s) => mine.has(s.id) && s.misc && !s.pinned && !busy.has(s.id));
     if (!list.length || !confirm(t("把杂项里的 {n} 个会话移进回收站？", { n: list.length }))) return;
     let n = 0;
     for (const s of list) { try { await api(`/api/session/${encodeURIComponent(s.id)}`, { method: "DELETE" }); n++; } catch {} }
@@ -193,7 +195,7 @@
     $("btn-sess-select").classList.toggle("hidden", sess.mode === "trash");
     if (sess.mode === "select") {
       const vis = sess.visible || state.sessions.map((x) => x.id);
-      const n = sess.sel.size, all = vis.length && vis.every((id) => sess.sel.has(id));
+      const n = selShown().length, all = vis.length && vis.every((id) => sess.sel.has(id));
       bar.innerHTML = `<button class="btn ghost sm" data-b="all">${all ? t("全不选") : t("全选")}</button>
         <span class="tiny">${t("已选 {n} 个", { n })}</span>
         <button class="btn sm" data-b="export" ${n ? "" : "disabled"}>${t("导出所选")}</button>
@@ -212,6 +214,12 @@
         <button class="btn ghost sm" data-b="back">${t("返回会话")}</button>`;
     }
     bar.classList.toggle("hidden", sess.mode === "list");
+  }
+
+  /** 批量导出 / 删除只作用于眼前看得见的已选项：换了筛选、搜索词，或刷新后会话已不在了，之前勾的不跟着算（#176-2） */
+  function selShown() {
+    const vis = new Set(sess.visible || state.sessions.map((x) => x.id));
+    return [...sess.sel].filter((id) => vis.has(id));
   }
 
   function renderTrash(box) {
@@ -292,7 +300,7 @@
     if (act === "export") {
       if (!confirm(t("会话记录可能含有你贴过的密钥、令牌或文件内容。导出的压缩包请只发给你信任的地方。继续？"))) return;
       let r;
-      try { r = await post("/api/sessions/export", { ids: [...sess.sel] }); }
+      try { r = await post("/api/sessions/export", { ids: selShown() }); }
       catch (err) { return toast(t("导出失败：{msg}", { msg: err.message }), true); }
       if (!r.ok) return toast(t("导出失败：{msg}", { msg: r.message || "" }), true);
       // 导出包在网关这边；交给用户选：「保存到」（系统文件面板，挑哪都行）或「分享」（网盘、聊天、另一台设备）
@@ -306,12 +314,18 @@
       .then((j) => { if (!j.ok) toast(j.message || t("分享失败"), true); }).catch((err) => toast(err.message, true));
     if (act === "done") { sess.mode = "list"; sess.exported = null; return renderSessions(); }
     if (act === "trash") {
-      if (!confirm(t("把选中的 {n} 个会话移进回收站？{d} 天内可以恢复。", { n: sess.sel.size, d: sess.keepDays }))) return;
-      const r = await post("/api/sessions/trash", { ids: [...sess.sel] }).catch((err) => ({ done: [], failed: [], err }));
+      const ids = selShown();
+      if (!confirm(t("把选中的 {n} 个会话移进回收站？{d} 天内可以恢复。", { n: ids.length, d: sess.keepDays }))) return;
+      const r = await post("/api/sessions/trash", { ids }).catch((err) => ({ done: [], failed: [], err }));
       // 请求本身失败：什么都没删，别说「已移进回收站」，也别清掉选择（审查 B-02）
       if (r.err) return toast(t("删除失败：{msg}", { msg: r.err.message }), true);
       if (r.done.includes(view.sessionId)) newConversation();
-      toast(r.failed.length ? t("{n} 个已删除，{m} 个正在生成没删", { n: r.done.length, m: r.failed.length }) : t("已移进回收站"), !!r.failed.length);
+      // 正在生成的和已经不在了的分开说（旧网关没有 busy，按原来的说法）
+      const nBusy = r.busy ? r.busy.length : r.failed.length, nGone = r.failed.length - nBusy;
+      toast(!r.failed.length ? t("已移进回收站")
+        : !nGone ? t("{n} 个已删除，{m} 个正在生成没删", { n: r.done.length, m: nBusy })
+        : !nBusy ? t("{n} 个已删除，{m} 个已经不在了（别处删了或已在回收站）", { n: r.done.length, m: nGone })
+        : t("{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了", { n: r.done.length, m: nBusy, k: nGone }), true);
       sess.mode = "list"; sess.sel.clear(); loadSessions();
       return;
     }

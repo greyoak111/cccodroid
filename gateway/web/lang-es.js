@@ -2786,4 +2786,6 @@ window.I18N_DICT["es"] = {
   "有个新对话在等你确认 · 侧栏「没建会话的新对话」里查看": "Un chat nuevo espera tu confirmación · míralo en «Chats nuevos sin guardar» en la barra lateral",
   "没建会话的新对话": "Chats nuevos sin guardar",
   "还有 {n} 条没建会话的消息也停下了，处理完这条接着显示下一条。": "Otros {n} mensajes sin guardar también se detuvieron; el siguiente aparece cuando resuelvas este.",
+  "{n} 个已删除，{m} 个已经不在了（别处删了或已在回收站）": "{n} eliminadas, {m} ya no existen (eliminadas en otro sitio o ya en la papelera)",
+  "{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了": "{n} eliminadas, {m} aún generando y sin eliminar, {k} ya no existen",
 };

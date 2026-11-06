@@ -2783,3 +2783,5 @@
 2783	Un chat nuevo espera tu confirmación · míralo en «Chats nuevos sin guardar» en la barra lateral
 2784	Chats nuevos sin guardar
 2785	Otros {n} mensajes sin guardar también se detuvieron; el siguiente aparece cuando resuelvas este.
+2786	{n} eliminadas, {m} ya no existen (eliminadas en otro sitio o ya en la papelera)
+2787	{n} eliminadas, {m} aún generando y sin eliminar, {k} ya no existen
