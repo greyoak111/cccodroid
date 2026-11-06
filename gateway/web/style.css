@@ -188,6 +188,14 @@ pre code{background:none;border:0;padding:0;font-size:12.5px;line-height:1.6}
 }
 .code-wrap.has-lang>pre{border-top-left-radius:0;border-top-right-radius:0;border-top:1px dashed var(--line)}
 .code-wrap.has-lang>.copy-btn{top:3px}
+/* 行号列：横向滚动时贴住左边（sticky），选中文字时不带上它；左内边距挪给行号列，免得一滚动就跳 12px */
+pre.ln{display:flex;padding-inline-start:0}
+pre.ln>code{flex:none}
+.code-ln{
+  position:sticky;inset-inline-start:0;flex:none;margin-inline-end:10px;padding:0 8px 0 12px;
+  border-inline-end:1px solid var(--line);background:var(--code-bg);color:var(--fg3);
+  font:12.5px/1.6 var(--mono);text-align:end;white-space:pre;user-select:none;-webkit-user-select:none;
+}
 /* 语法高亮（highlight.js 的 token 类，按我们自己的深浅两套色） */
 .hljs-comment,.hljs-quote,.hljs-meta{color:var(--fg3);font-style:italic}
 .hljs-keyword,.hljs-selector-tag,.hljs-built_in,.hljs-literal,.hljs-doctag{color:#d98d6f}
