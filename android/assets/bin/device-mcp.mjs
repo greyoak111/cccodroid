@@ -21,7 +21,10 @@ function app(req, timeoutMs = 20000) {
   });
 }
 
-const node = { type: "integer", description: "Element number from the latest screen_read" };
+const node = { type: "integer", description: "Element number from the latest screen (screen_read, or the screen returned by the previous action)" };
+// 动作做完等界面静下来、带回新屏幕（A11y.withScreen）
+const read = { type: "boolean", description: "Return the new screen after the action (default true). Set false only when you will not look at the result." };
+const AFTER = " Waits until the UI settles, then returns the new screen in the same format as screen_read; its numbers replace the old ones.";
 const TOOLS = {
   device_status: {
     description: "Battery, charging, network (wifi/cellular, VPN, metered), screen on, free storage, device model and Android version, whether cccodroid is in the foreground.",
@@ -79,25 +82,25 @@ const TOOLS = {
     annotations: { readOnlyHint: true },
   },
   screen_read: {
-    description: "Read the UI of the app currently on screen through the accessibility service: one line per element with [number], type, text, (description), #view-id, @centerX,centerY and flags (click, edit, password, scroll, checked…). Password fields are listed but never show their content or description. Use the numbers with screen_tap / screen_type / screen_swipe. Numbers change after every screen_read. Prefer this over screenshot; take a screenshot when the layout or images matter.",
+    description: "Read the UI of the app currently on screen through the accessibility service: one line per element with [number], type, text, (description), #view-id, @centerX,centerY and flags (click, edit, password, scroll, checked…). Password fields are listed but never show their content or description. Use the numbers with screen_tap / screen_type / screen_swipe. Numbers change after every screen_read; screen_tap / screen_swipe / screen_type / screen_key also return the new screen, so you usually don't need to call this again after an action. Prefer this over screenshot; take a screenshot when the layout or images matter.",
     inputSchema: { type: "object", properties: { all: { type: "boolean", description: "Include layout-only elements too (default false)" } } },
     annotations: { readOnlyHint: true },
   },
   screen_tap: {
-    description: "Tap an element by number (falls back to its clickable parent), or tap screen coordinates. long=true for a long press.",
-    inputSchema: { type: "object", properties: { node, x: { type: "integer" }, y: { type: "integer" }, long: { type: "boolean" } } },
+    description: "Tap an element by number (falls back to its clickable parent), or tap screen coordinates. long=true for a long press." + AFTER,
+    inputSchema: { type: "object", properties: { node, x: { type: "integer" }, y: { type: "integer" }, long: { type: "boolean" }, read } },
   },
   screen_swipe: {
-    description: "Scroll a scrollable element (node + direction forward/backward), or swipe between two points (x1,y1 → x2,y2).",
-    inputSchema: { type: "object", properties: { node, direction: { type: "string", enum: ["forward", "backward"] }, x1: { type: "integer" }, y1: { type: "integer" }, x2: { type: "integer" }, y2: { type: "integer" }, duration_ms: { type: "integer" } } },
+    description: "Scroll a scrollable element (node + direction forward/backward), or swipe between two points (x1,y1 → x2,y2)." + AFTER,
+    inputSchema: { type: "object", properties: { node, direction: { type: "string", enum: ["forward", "backward"] }, x1: { type: "integer" }, y1: { type: "integer" }, x2: { type: "integer" }, y2: { type: "integer" }, duration_ms: { type: "integer" }, read } },
   },
   screen_type: {
-    description: "Set the text of an input field (node with the edit flag, or the focused field). append=true keeps existing text (not allowed on password fields); submit=true presses enter afterwards.",
-    inputSchema: { type: "object", properties: { node, text: { type: "string" }, append: { type: "boolean" }, submit: { type: "boolean" } }, required: ["text"] },
+    description: "Set the text of an input field (node with the edit flag, or the focused field). append=true keeps existing text (not allowed on password fields); submit=true presses enter afterwards." + AFTER,
+    inputSchema: { type: "object", properties: { node, text: { type: "string" }, append: { type: "boolean" }, submit: { type: "boolean" }, read }, required: ["text"] },
   },
   screen_key: {
-    description: "System navigation: back, home, recents, notifications, quick_settings, lock_screen.",
-    inputSchema: { type: "object", properties: { key: { type: "string", enum: ["back", "home", "recents", "notifications", "quick_settings", "lock_screen"] } }, required: ["key"] },
+    description: "System navigation: back, home, recents, notifications, quick_settings, lock_screen." + AFTER,
+    inputSchema: { type: "object", properties: { key: { type: "string", enum: ["back", "home", "recents", "notifications", "quick_settings", "lock_screen"] }, read }, required: ["key"] },
   },
   screenshot: {
     description: "Take a screenshot of the current screen (JPEG, long side scaled to 1280 px). Returns the image and the saved file path. Coordinates for screen_tap are in full-resolution pixels (see size).",
@@ -122,9 +125,15 @@ async function callTool(name, args) {
   // 这边先超时报错、那边随后点了允许，就成了「报错了却做了」。屏幕工具以前只给 30 秒，首次原生确认必然丢（#123-4）
   const ask = name === "clipboard_read" || name === "clipboard_write" || name === "open" || name.startsWith("screen") || name === "screenshot";
   const r = await app({ op: "dev", tool: name, args: args || {} }, ask ? 70000 : 20000);
+  if (!r.ok && typeof r.tree === "string") {
+    // 动作没做成（多半编号过期）也带着新屏幕回来：直接从里面重选，不用再 screen_read
+    const tree = r.tree; delete r.tree; delete r.ok;
+    const msg = r.message || "failed"; delete r.message;
+    return { isError: true, content: [{ type: "text", text: msg + "\nCurrent screen (numbers below are valid now):\n" + JSON.stringify(r) + "\n" + tree }] };
+  }
   if (!r.ok) return { isError: true, content: [{ type: "text", text: r.message || "failed" }] };
   delete r.ok;
-  if (name === "screen_read") {
+  if (typeof r.tree === "string") {
     const tree = r.tree || ""; delete r.tree;
     return { content: [{ type: "text", text: JSON.stringify(r) + "\n" + tree }] };
   }

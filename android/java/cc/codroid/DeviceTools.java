@@ -153,10 +153,17 @@ final class DeviceTools {
                 case "share_file": return shareFile(c, a);
                 case "app_list": return appList(c, a);
                 case "screen_read": return A11y.read(a.optBoolean("all", false));
-                case "screen_tap": return A11y.tap(a);
-                case "screen_swipe": return A11y.swipe(a);
-                case "screen_type": return A11y.type(a);
-                case "screen_key": return A11y.key(a);
+                case "screen_tap": case "screen_swipe": case "screen_type": case "screen_key": {
+                    // 做完默认等界面静下来、带上新屏幕（read=false 不带）：省掉模型「做完再读一次」那一回合
+                    boolean rd = a.optBoolean("read", true);
+                    int before = rd ? A11y.arm() : 0;
+                    JSONObject res;
+                    try {
+                        res = tool.equals("screen_tap") ? A11y.tap(a) : tool.equals("screen_swipe") ? A11y.swipe(a)
+                            : tool.equals("screen_type") ? A11y.type(a) : A11y.key(a);
+                    } catch (Throwable t) { if (rd) A11y.disarm(); throw t; }
+                    return rd ? A11y.withScreen(res, before) : res;
+                }
                 case "screenshot": return A11y.screenshot(c);
             }
             return fail(tool);

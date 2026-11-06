@@ -1,6 +1,7 @@
 package cc.codroid;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.accessibilityservice.GestureDescription;
 import android.content.ComponentName;
 import android.content.Context;
@@ -33,7 +34,8 @@ import org.json.JSONObject;
  * （Shizuku 激活时顺手拿到的 WRITE_SECURE_SETTINGS），空闲 N 分钟后 disableSelf() 自己关掉。
  *
  * 节点编号：screen_read 把当前界面里有意义的节点按顺序编号缓存起来，后面的点按 / 输入按编号找；
- * 下一次 screen_read 换一批编号。
+ * 下一次 screen_read 换一批编号。点按 / 滑动 / 输入 / 按键做完会等界面静下来、顺手读一次新屏幕一起交回（settle），
+ * 模型不用再单独 screen_read 一回合。等的那一小会儿才临时多订内容变化事件，平时照旧只订窗口切换。
  */
 public class A11y extends AccessibilityService {
     static final String TAG = "cccodroid";
@@ -41,6 +43,8 @@ public class A11y extends AccessibilityService {
     private static final Object LOCK = new Object();
     private static final List<AccessibilityNodeInfo> nodes = new ArrayList<>();
     private static volatile long lastUse;
+    private static volatile long lastEvt;
+    private static volatile int evts;
     private final Handler h = new Handler(Looper.getMainLooper());
 
     static ComponentName component(Context c) { return new ComponentName(c, A11y.class); }
@@ -60,7 +64,7 @@ public class A11y extends AccessibilityService {
     }
 
     @Override public void onDestroy() { self = null; super.onDestroy(); }
-    @Override public void onAccessibilityEvent(AccessibilityEvent e) { }
+    @Override public void onAccessibilityEvent(AccessibilityEvent e) { lastEvt = android.os.SystemClock.uptimeMillis(); evts++; }
     @Override public void onInterrupt() { }
 
     static void touch() { lastUse = System.currentTimeMillis(); }
@@ -203,6 +207,53 @@ public class A11y extends AccessibilityService {
             AccessibilityNodeInfo n = nodes.get(id);
             return n.refresh() ? n : null;
         }
+    }
+
+    // ── 动作后等界面静下来 ────────────────────────────────────────────────
+    // 首个事件最多等 800ms（没来 = 界面没动），之后静默 250ms 算稳，总共最多 2.5 秒。
+    // notificationTimeout 平时是 1000（系统攒一秒才推一次），等的时候临时压到 50，不然首个事件就要晚一秒
+    static final int EVT_SETTLE = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED | AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+        | AccessibilityEvent.TYPE_WINDOWS_CHANGED | AccessibilityEvent.TYPE_VIEW_SCROLLED;
+
+    /** 动作前调用：临时多订事件。返回动作前的事件计数，交给 settle */
+    static int arm() {
+        A11y s = self;
+        if (s != null) try {
+            AccessibilityServiceInfo i = s.getServiceInfo();
+            if (i != null) { i.eventTypes = EVT_SETTLE; i.notificationTimeout = 50; s.setServiceInfo(i); }
+        } catch (Throwable t) { Log.w(TAG, "settle arm", t); }
+        return evts;
+    }
+
+    static void disarm() {
+        A11y s = self;
+        if (s != null) try {
+            AccessibilityServiceInfo i = s.getServiceInfo();
+            if (i != null) { i.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED; i.notificationTimeout = 1000; s.setServiceInfo(i); }
+        } catch (Throwable t) { Log.w(TAG, "settle disarm", t); }
+    }
+
+    /** 等界面静下来；返回等了多少毫秒 */
+    static long settle(int before) {
+        long t0 = android.os.SystemClock.uptimeMillis();
+        try {
+            while (evts == before && android.os.SystemClock.uptimeMillis() - t0 < 800) Thread.sleep(20);
+            if (evts != before)
+                while (android.os.SystemClock.uptimeMillis() - lastEvt < 250 && android.os.SystemClock.uptimeMillis() - t0 < 2500) Thread.sleep(20);
+        } catch (InterruptedException ignored) {
+        } finally { disarm(); }
+        return android.os.SystemClock.uptimeMillis() - t0;
+    }
+
+    /** 动作结果后面接上新屏幕。动作没做成也读（多半是编号过期了，新屏幕正好拿来重选），只是不等 */
+    static JSONObject withScreen(JSONObject res, int before) throws Exception {
+        boolean done = res.optBoolean("ok");
+        if (done) res.put("settle_ms", settle(before)); else disarm();
+        JSONObject sc;
+        try { sc = read(false); } catch (Throwable t) { return res; }
+        if (!sc.optBoolean("ok")) return res.put("screen_error", sc.optString("message"));
+        for (String k : new String[] { "package", "window", "screen", "count", "tree" }) if (sc.has(k)) res.put(k, sc.get(k));
+        return res;
     }
 
     // ── 动作 ─────────────────────────────────────────────────────────────
