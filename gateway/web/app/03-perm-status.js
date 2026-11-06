@@ -296,17 +296,18 @@
   // 任务清单：折叠时一行（进度 + 正在做的那项），点开看全部；全部完成可 ✕ 收起
   let tasksOpen = localStorage.getItem("cc.tasksOpen") === "1";
   let bgOpen = localStorage.getItem("cc.bgOpen") === "1";
-  const tasksSig = (l) => l.map((x) => x.id + ":" + x.status).join(",");
+  // 收起记的是这份清单有哪些项（编号集合），不含进度：同一份清单接着做不再冒出来，换了一份（增删了项）才重新露出来。
+  // 旧版记的是「编号:状态」，照样认
+  const tasksSig = (l) => "ids:" + l.map((x) => x.id).join(",");
+  const tasksSigOld = (l) => l.map((x) => x.id + ":" + x.status).join(",");
   const taskLabel = (x) => esc(x.status === "in_progress" && x.active ? x.active : x.subject);
   // more：清单收起时被一并收起的目标 / 后台任务条数，标在清单那一行末尾
   function tasksHtml(more) {
     const l = view.tasks;
     if (!l || !l.length) return "";
     const done = l.filter((x) => x.status === "completed").length, all = done === l.length;
-    // 没在跑（停掉了、或这一轮结束时清单没做完）也能 ✕ 收起：不然留着一条永远做不完的清单（群友 11-05）。
-    // 收起记的是清单指纹，清单一变、或者这个会话又跑起来，就重新露出来
-    const closable = all || !srv.run;
-    if (closable && view.tasksHide === tasksSig(l)) return "";
+    // 什么时候都能 ✕ 收起：没做完的、会话又跑起来的也一样（群友 11-05；以前在跑时不给 ✕，继续会话后清单冒出来就叉不掉了）
+    if (view.tasksHide && (view.tasksHide === tasksSig(l) || view.tasksHide === tasksSigOld(l))) return "";
     const cur = l.find((x) => x.status === "in_progress") || l.find((x) => x.status !== "completed");
     const pct = Math.round(done / l.length * 100);
     const head = `<div class="rs-row rs-thead" role="button" tabindex="0" aria-expanded="${tasksOpen}">
@@ -315,7 +316,7 @@
       <span class="rs-tbar"><i style="width:${pct}%"></i></span>
       <span class="rs-txt">${!tasksOpen && cur ? taskLabel(cur) : ""}</span>
       ${more ? `<span class="rs-meta">${t("另有 {n} 项", { n: more })}</span>` : ""}
-      ${all ? "" : `<span class="rs-chev${tasksOpen ? " up" : ""}">${uiI("chevDown")}</span>`}${closable ? `<button class="rs-tx" aria-label="${t("关闭")}">${uiI("x")}</button>` : ""}</div>`;
+      ${all ? "" : `<span class="rs-chev${tasksOpen ? " up" : ""}">${uiI("chevDown")}</span>`}<button class="rs-tx" aria-label="${t("关闭")}">${uiI("x")}</button></div>`;
     const rows = !tasksOpen ? "" : `<div class="rs-tlist">${l.map((x) => `<div class="rs-trow ${esc(x.status)}">
       <span class="rs-tico">${uiI(x.status === "completed" ? "check" : x.status === "in_progress" ? "half" : "ring")}</span>
       <span class="rs-ttxt">${taskLabel(x)}</span>

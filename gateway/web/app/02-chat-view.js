@@ -20,7 +20,7 @@
     goal: null,          // 本会话的 /goal 状态（网关从会话记录里推出来的，见 goalStateOf）
     goalHide: 0,         // 点 ✕ 收起的那条达成 / 失败记录的时间戳
     tasks: null,         // 本会话的任务清单（TaskCreate / TaskUpdate，网关读 ~/.claude/tasks 推过来）
-    tasksHide: "",       // 全部完成后点 ✕ 收起时的清单指纹；清单一变就重新露出来
+    tasksHide: "",       // 点 ✕ 收起时这份清单的编号集合；换了一份清单（增删了项）才重新露出来
   };
   // run / queue 只算当前视图的（本会话正在跑的那一轮、本会话排着的）；runs / queueAll 是网关上的全部
   const srv = { run: null, queue: [], runs: [], queueAll: [], intr: [], max: 3, connected: false };
