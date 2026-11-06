@@ -51,6 +51,24 @@ const RULES = [
   ["illicit", false, /(?:(?:木马|免杀|杀软|钓鱼|洗钱|盗版|外挂|社工|伪造|渗透|过检|反作弊|注册机)[^\n]{0,6}){3,}|(?:malware|money\s+laundering|piracy|cheats?|forgery)[^\n]{0,40}(?:just|only)\s+(?:a\s+)?(?:task|ticket|job)/i],
 ];
 
+// 对行边界敏感的规则：带 \b、^ 或行尾前后瞻的——拼接文本里行边界消失，这些锚的语义会变，
+// 中文文件的主扫描直接扫拼接文本时，这几条要另做逐行补扫（性能项 11-06）。
+// 只边界敏感的少数分支才需要补扫（其余分支拼接扫描已含逐行语义）：拆出来当补扫正则，
+// null 的用整条规则（基本全是边界敏感、或降弱逻辑需要整条的）
+const EDGE_IDX = new Set([0, 2, 3, 6, 8, 9, 10, 13, 14]);
+const EDGE_RE = [];
+EDGE_RE[0] = /\bDAN\s+mode\b|\bdo anything now\b|developer\s+mode\s+(?:enabled|on)\b|(?:你是|现在是|我是)\s*DAN\b/i;
+EDGE_RE[2] = /<\/?\s*system-reminder\s*>|<\/?\s*(?:system|developer)(?:[_-]?(?:message|prompt|instructions?))?\s*>|[<＜]\/?\s*(?:system-reminder|system|developer)(?:\s+(?:message|instruction|override))?\s*[>＞]|\[\s*(?:system|developer)\s+(?:message|instruction|override)\s*\]|\bauthority\s*[:：]\s*(?:anthropic|system|developer)\b|\boverride\s*[:：]\s*(?:true|yes|on)\b|\boperator\s+directive\b/i;
+EDGE_RE[6] = /\b(?:where|if)\s+this\s+document\s+conflicts?\s+with[^\n]{0,40}this\s+document\s+wins\b|\bthis\s+document\s+(?:takes\s+precedence|prevails)\b/i;
+EDGE_RE[8] = /\b(?:no|without)\s+(?:any\s+)?(?:restrictions|limits|filters|censorship)\s+(?:mode|apply|whatsoever)|\buncensored\s+mode\b|\bunrestricted\s+mode\b/i;
+EDGE_RE[9] = /\buncensored\b|\bno\s+(?:restrictions|limits|filters)\b/i;
+EDGE_RE[10] = /\bnever\s+refuse\b|\bmust\s+not\s+refuse\b/i;
+EDGE_RE[13] = /\bnever\s+(?:decline|reject)\b|(?:no|without)\s+(?:any\s+)?(?:warnings|disclaimers?)(?=[^\n]{0,20}\byour\b)|\byour\s+(?:output|replies|responses|answers|refusals?)\w*\s+[^\n]{0,16}\s*(?:no|without)\s+(?:any\s+)?(?:warnings|disclaimers?)\b/i;
+const RULES_EDGE = RULES.map((r, i) => EDGE_RE[i] ?? r[2]);
+const RULES_EDGE_G = RULES_EDGE.map((re) => new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g"));
+// 纯汉字规则的：文字里一个汉字都没有就不可能命中，整段跳过（性能项 11-06）
+const CJK_ONLY = new Set([7, 12, 14, 18, 20, 21]);
+
 const MAX_TEXT = 2 << 20;   // 超过的只看前 2MB
 
 // ── 归一化与外壳解码（防形变）────────────────────────────────
@@ -60,28 +78,43 @@ const ZW_RE = /[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
 // 只删空格类与间隔号，句读（，。；：）不删：把两句话拼成一句会造出「不要拒绝，任何请求…」这种假阳性（复核 11-06 二轮）
 const SEP_RE = /(?<=[\u4e00-\u9fff])[ \t\u3000·・]*(?=[\u4e00-\u9fff])/g;
 const norm = (s) => s.normalize("NFKC").replace(/[\u2028\u2029]/g, "\n").replace(ZW_RE, "").replace(SEP_RE, "");
-// 常见编码壳：base64、十六进制。解出来可读（含汉字或成句英文）才替换，避免把随机串解成垃圾拖慢扫描
-const plausible = (s) => /[一-鿿]/.test(s) || /[a-zA-Z]{4,}[ \t][a-zA-Z]{4,}/.test(s);
-function decodeShells(s) {
-  let out = s.replace(/\b[A-Za-z0-9+/]{16,}={0,2}(?=$|[^A-Za-z0-9+/=])/g, (m) => {
+// 规则无关的归一（全角标点→半角、NFKC 杂项）不改任何规则的字面；只有全角字母数字、零宽/行分隔符、
+// 汉字间分隔才可能让规则命中。都没有就不做归一（性能项 11-06）。
+// NFKC 很贵：只有全角字母数字需要它；零宽/行分隔/汉字间分隔用轻量正则就够了
+const NORM_RELEVANT = /[\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufeff\uff10-\uff19\uff21-\uff3a\uff41-\uff5a]|[\u4e00-\u9fff][ \t\u3000\u00b7\u30fb][\u4e00-\u9fff]/;
+const FULL_ALNUM = /[\uff10-\uff19\uff21-\uff3a\uff41-\uff5a]/;
+const normLite = (s) => s.replace(/[\u2028\u2029]/g, "\n").replace(ZW_RE, "").replace(SEP_RE, "");
+// 常见编码壳：base64、十六进制。解出来必须含规则锚词才替换——只含汉字/成句英文不够：
+// 乱码常带单个汉字，被旧判据放行后整份乱码还要过全规则扫描，实测占良性全量一半耗时（性能项 11-06）。
+// 真攻击解出来必然是规则句式，锚词必在。
+const plausible = (s) => /(?:忽略|指令|提示|系统|拒绝|限制|模式|规则|用户|任务|约束|木马|免杀|钓鱼|洗钱|盗版|外挂|社工|伪造|渗透|crack|keygen|patch|authority|instructions?|system|ignore|refuse|decline|restrict|priority|unlimited|jailbreak|bypass)/i.test(s);
+// 判有无的守卫尽量简（不带 g，避免 lastIndex 状态）：
+// b64 只要「连续 16 个 b64 字符」即可——只有 3+ 个尾随 = 的怪串会虚报，替换照样解不出东西，无害（性能项 11-06）
+const B64_GUARD = /[A-Za-z0-9+/]{16}/;
+const HEX_GUARD = /[0-9a-fA-F]{24}/;   // 偶数成对 ≥24 个十六进制字符（奇数尾差一个半字节，解出来一样）
+// 替换还是按完整候选：b64 要整段（≤2 个尾随 =）+ hex 整段
+const B64_RE = /[A-Za-z0-9+/]{16,}={0,2}(?=$|[^A-Za-z0-9+/=])/g;
+const HEX_RE = /[0-9a-fA-F]{24,}/g;
+// 哪种外壳疑似出现才解哪种（性能项 11-06：代码里满地的哈希只满足 hex 守卫，不解 base64 就省一整遍扫描）
+function decodeShells(s, b64, hex) {
+  let out = s;
+  if (b64) out = out.replace(B64_RE, (m) => {
     try { const d = Buffer.from(m, "base64").toString("utf8"); return plausible(d) ? d : m; } catch { return m; }
   });
-  out = out.replace(/\b(?:[0-9a-fA-F]{2}){12,}\b/g, (m) => {
+  if (hex) out = out.replace(HEX_RE, (m) => {
     try { const d = Buffer.from(m, "hex").toString("utf8"); return plausible(d) ? d : m; } catch { return m; }
   });
   return out;
 }
-// 倒序壳：整句倒着写。只认高精度的字面句，正反两个方向都查，给出行号
+// 倒序壳：整句倒着写。只认高精度的字面句。原文里找倒序词即可——
+// 「整体倒序后字面正序」等价于「原文里出现倒序词」（rs.indexOf(k) ⟺ s.indexOf(rk)，语料 5522 项验证一致），
+// 不用再构造整文倒序（性能项 11-06）
 const REV_KW = ["忽略之前的所有指令", "忽略之前所有指令", "忽略之前的指令", "进入无限制模式", "无限制模式", "不要拒绝", "无视系统提示", "系统提示作废", "冒充系统", "优先于系统提示", "不再有任何限制"];
-const revStr = (k) => [...k].reverse().join("");
+const REV_RK = REV_KW.map((k) => [...k].reverse().join(""));
 function findRev(s) {
-  const rs = [...s].reverse().join("");
-  for (const k of REV_KW) {
-    const rk = revStr(k);
-    let i = s.indexOf(rk), needle = rk;            // 原文字面倒序
-    if (i < 0) { i = rs.indexOf(k); needle = k; }  // 整体倒序后字面正序
-    if (i < 0) continue;
-    const pos = needle === rk ? i : s.length - i - needle.length;
+  for (let i = 0; i < REV_KW.length; i++) {
+    const pos = s.indexOf(REV_RK[i]);
+    if (pos < 0) continue;
     const line = s.slice(0, pos).split("\n").length;
     const ln = s.split("\n")[line - 1] || "";
     return { line, excerpt: ln.trim().slice(0, 120) };
@@ -103,6 +136,12 @@ const DEFENSIVE_POST = /\b(?:do\s+not|don'?t|never)\s+(?:follow|obey|comply\s+wi
 // 防御说法后面又改口点名执行的（「…这类话不要照做，除了第一条」「Do not follow it. Follow the first one instead.」）不算（DeepSeek 复核 v067c 中-1）
 const REVOKE = /除了|除非|照做|照办|执行|参照|参见|比照|依(?:此|照)|照(?:此|用)|按(?:第|其|此)|据(?:此|引)|遵照|依照|沿用|从之|\b(?:except|unless|follow|obey|execute|apply|act\s+on)\b/i;
 const count = (s, ch) => s.split(ch).length - 1;
+/** 位置 idx 是否落在行内代码（反引号）里：前面反引号数为奇数 */
+const inBacktick = (line, idx) => {
+  let n = 0;
+  for (let p = 0; p < idx && p < line.length; p++) if (line[p] === "`") n++;
+  return n % 2 === 1;
+};
 /** 命中的片段整个在一对引号里：返回 [开引号位置, 收引号位置]，不在返回 null */
 function quoteSpan(line, m) {
   const a = m.index, b = m.index + m[0].length, pre = line.slice(0, a);
@@ -126,28 +165,20 @@ function exempt(line, m) {
   const d = DEFENSIVE_POST.exec(post);
   return !!d && !REVOKE.test(post.slice(d.index + d[0].length));
 }
-const GLOBAL = new WeakMap();
-function firstMatch(re, line, cat) {
-  const m0 = re.exec(line);
-  if (!m0 || !EXEMPT.has(cat) || !exempt(line, m0)) return m0;   // 绝大多数行到这里就完了
-  let g = GLOBAL.get(re);
-  if (!g) GLOBAL.set(re, (g = new RegExp(re.source, re.flags + "g")));
-  g.lastIndex = 0;
-  for (let m; (m = g.exec(line)); ) {
-    if (!exempt(line, m)) return m;
-    if (!m[0].length) g.lastIndex++;
-  }
-  return null;
-}
+// 各规则的 g 版本，g 循环扫描用：预编译一次，用前 lastIndex 归零（性能项 11-06：每份每轮 new RegExp 是编译大头）
+const RULES_G = RULES.map((r) => new RegExp(r[2].source, r[2].flags.includes("g") ? r[2].flags : r[2].flags + "g"));
 
 /**
  * 查一段文字。返回 { blocked, hits:[{ cat, strong, line, excerpt }] }
  * hits 只列每类第一条，够用户定位；blocked 按「强一条 / 弱跨两类」判。
- * 原文先查（行号、豁免判定都在原文上）；再查归一化变体补覆盖：逐行归一（全角/零宽/字间分隔）、
- * 整段拼接（换行拆句，不归一——要能映射回原行）、外壳解码（base64/hex）。变体只补原文没命中的类别，不覆盖原文行号。
+ * 主扫描直接在归一化后的文字上做（归一只动不影响语义的形态，豁免的引号定位不受影响；全角/零宽/字间分隔的形变
+ * 一次扫掉，不用再扫一遍原文）；再查两个变体补覆盖：整段拼接（换行拆句，不归一——要能映射回原行）、
+ * 外壳解码（base64/hex）。变体只补主扫描没命中的类别，不覆盖主扫描行号。
  */
 export function scanText(text) {
   const s = String(text ?? "").slice(0, MAX_TEXT);
+  // 只有规则相关的归一（全角字母数字/零宽/行分隔符/汉字间分隔）才做；其中 NFKC 只在全角字母数字时必要（性能项 11-06）
+  const base = !process.env.BREACH_NO_NORM && NORM_RELEVANT.test(s) ? (FULL_ALNUM.test(s) ? norm(s) : normLite(s)) : s;
   const hits = [], seenCat = new Set();
   let strong = false;
   const addHit = (cat, isStrong, line, excerpt) => {
@@ -158,27 +189,41 @@ export function scanText(text) {
   };
   const variants = [];
   const addVariant = (t, joined, mapped) => { if (t && t !== s && !variants.some((v) => v.t === t)) variants.push({ t, joined, mapped }); };
-  addVariant(norm(s), false, false);                            // 逐行归一
-  // 整段拼接只在有换行时做（换行拆句）；外壳解码只在外壳疑似出现时做（复核 11-06 二轮：省 dirMatches 每轮重扫的开销）
-  if (s.includes("\n")) addVariant(s.replace(/\n/g, ""), true, true);
-  if (/[A-Za-z0-9+/]{16,}={0,2}(?=$|[^A-Za-z0-9+/=])|(?:[0-9a-fA-F]{2}){12,}/.test(s)) {
-    const dec = norm(decodeShells(s));
-    // 只做逐行解码：解码+整段拼接的组合会把整份文件当豁免上下文，引号反例被后文推翻（SKILL.md 误报复盘 11-06）
-    if (dec !== s) addVariant(dec, false, false);
+  // 拼接变体只在原文含 CJK 或零宽字符时生成（拆句主要是中文词形变；纯 ASCII 文件拆句由逐行扫描兜底，简报②口径）
+  if (s.includes("\n") && !process.env.BREACH_NO_JOIN && /[一-鿿\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/.test(s)) addVariant(s.replace(/\n/g, ""), true, true);
+  if (!process.env.BREACH_NO_DECODE) {
+    const hasB64 = B64_GUARD.test(s), hasHex = HEX_GUARD.test(s);
+    if (hasB64 || hasHex) {
+      // 先解外壳再归一：守卫命中大多解不出东西（哈希、随机串），整份 NFKC 很贵，别白做（性能项 11-06）
+      const raw = decodeShells(s, hasB64, hasHex);
+      if (raw !== s) {
+        // 只做逐行解码：解码+整段拼接的组合会把整份文件当豁免上下文，引号反例被后文推翻（SKILL.md 误报复盘 11-06）
+        const dec = norm(raw);
+        if (dec !== s) addVariant(dec, false, false);
+      }
+    }
   }
 
   const lines0 = s.split("\n");
-  // 拼接变体的命中映射回原行：t = s 去掉换行，tStart[k] = 原第 k+1 行在 t 里的起点（二分找行）
-  const tStart = [0];
-  for (let i = 0; i < lines0.length - 1; i++) tStart.push(tStart[i] + lines0[i].length);
-  const jline = (j) => {
-    let lo = 0, hi = tStart.length - 1;
-    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (tStart[mid] <= j) lo = mid; else hi = mid - 1; }
-    return lo;
+  // 每行是否在代码围栏里（``` / ~~~ 成对切换）——懒算：只有 spoof 强规则命中时才需要（性能项 11-06）
+  let fenceIn = null;
+  const getFenceIn = () => {
+    if (fenceIn) return fenceIn;
+    fenceIn = [];
+    let inF = false;
+    for (const ln of lines0) {
+      fenceIn.push(inF);
+      const t = ln.trimStart();
+      if (t.startsWith("```") || t.startsWith("~~~")) inF = !inF;
+    }
+    return fenceIn;
   };
-  const scanOne = (t, joined, mapped) => {
-    const lines = joined ? [t] : t.split("\n");
-    const joinedAll = joined ? t : t.replace(/\n/g, " ");
+  const scanOne = (t, joined, mapped, only, fromLines = lines0, tHasCjk = null, linesIn = null) => {
+    const lines = joined ? [t] : (linesIn ?? t.split("\n"));
+    // 懒算：只有 relabel/illicit 两条才看拼接串，多数 pass 不付这份拷贝（性能项 11-06）
+    let joinedAll = null;
+    const getJoinedAll = () => joinedAll ?? (joinedAll = joined ? t : t.replace(/\n/g, " "));
+    const hasCjk = tHasCjk ?? /[一-鿿]/.test(t);   // 纯汉字规则门：命中早退，纯 ASCII 扫到底（性能项 11-06）
     const lineOf = (idx) => (joined ? 0 : Math.min(idx + 1, lines0.length));
     const excerptOf = (i, m) => {
       const ln = lineOf(i);
@@ -188,56 +233,122 @@ export function scanText(text) {
     if (joined && mapped) {
       // 原样拼接（s 去换行）：命中映射回原行，豁免用该行的局部上下文判——整段拼起来拿全文件当上下文，
       // 引号反例会被后文的 REVOKE 词推翻（SKILL.md 误报复盘 11-06，同 import-memory 回归）
-      for (const [cat, isStrong, re] of RULES) {
+      const fromStart = [0];
+      for (let i = 0; i < fromLines.length - 1; i++) fromStart.push(fromStart[i] + fromLines[i].length);
+      const jlineM = (j) => {
+        let lo = 0, hi = fromStart.length - 1;
+        while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (fromStart[mid] <= j) lo = mid; else hi = mid - 1; }
+        return lo;
+      };
+      for (let ri = 0; ri < RULES.length; ri++) {
+        if (CJK_ONLY.has(ri) && !hasCjk) continue;
+        const [cat, isStrong, re] = RULES[ri];
         if (seenCat.has(cat + isStrong)) continue;
-        const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+        if (cat === "spoof" && !isStrong) continue;   // role: system 靠 (?:^|\n) 锚定，拼接文本里锚没了，扫了也是白扫
+        const g = RULES_G[ri];
         g.lastIndex = 0;
         for (let m; (m = g.exec(t)); ) {
-          const li = jline(m.index);
-          const line = lines0[li];
+          const li = jlineM(m.index);
+          const line = fromLines[li];
+          const rel = { index: m.index - fromStart[li], 0: m[0] };
+          // spoof 强规则：反引号/代码围栏里被谈论的标签名降为弱特征，裸标签仍强（简报③）
+          if (cat === "spoof" && isStrong && (inBacktick(line, rel.index) || getFenceIn()[li])) { if (!m[0].length) g.lastIndex++; continue; }
           // 命中跨了原换行（拆句攻击）就不走豁免；落在同一行内才按原行判
-          const sameLine = jline(m.index + Math.max(m[0].length - 1, 0)) === li && m.index - tStart[li] + m[0].length <= line.length;
-          if (sameLine && EXEMPT.has(cat) && exempt(line, { index: m.index - tStart[li], 0: m[0] })) { if (!m[0].length) g.lastIndex++; continue; }
-          addHit(cat, isStrong, li + 1, line.trim().slice(0, 120));
+          const sameLine = jlineM(m.index + Math.max(m[0].length - 1, 0)) === li && rel.index + m[0].length <= line.length;
+          if (sameLine && EXEMPT.has(cat) && exempt(line, rel)) { if (!m[0].length) g.lastIndex++; continue; }
+          // 摘录给用户看原文行（归一文本的映射行可能与原文差在分隔符上）
+          addHit(cat, isStrong, li + 1, (lines0[Math.min(li, lines0.length - 1)] ?? line).trim().slice(0, 120));
           break;
         }
       }
       return;
     }
-    for (const [cat, isStrong, re, opt] of RULES) {
+    // 逐行语义的整段扫描：每条规则 g 循环一趟扫完，命中按位置回映射行——和逐行 exec 等价，
+    // 但省掉每行一次的调用开销（性能项 11-06）。跨行命中（\s 吞掉换行那种）逐行语义看不到，跳过。
+    // 文本还带着换行符：行起点要算上换行本身占的位置（+1）。
+    const tStartT = [0];
+    for (let i = 0; i < lines.length - 1; i++) tStartT.push(tStartT[i] + lines[i].length + 1);
+    const jlineT = (j) => {
+      let lo = 0, hi = tStartT.length - 1;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (tStartT[mid] <= j) lo = mid; else hi = mid - 1; }
+      return lo;
+    };
+    for (let ri = 0; ri < RULES.length; ri++) {
+      if (only && !only.has(ri)) continue;
+      if (CJK_ONLY.has(ri) && !hasCjk) continue;
+      const [cat, isStrong, , opt] = RULES[ri];
       if (seenCat.has(cat + isStrong)) continue;
+      const re = only ? RULES_EDGE[ri] : RULES[ri][2];
+      const g = only ? RULES_EDGE_G[ri] : RULES_G[ri];
       if (opt && opt.joined) {
         // 跨行写的（一条拆成几行）：整段并成一行看，命中再回头找起始行
-        const m = re.exec(joinedAll);
+        const m = re.exec(getJoinedAll());
         if (!m) continue;
         if (joined) {
           addHit(cat, isStrong, 0, (m[0] || "").slice(0, 120));
         } else {
-          // 原文扫描：按 m.index 回映射原行号（拼接串每行占 长度+1 个空格位）
+          // 按 m.index 回映射行号（拼接串每行占 长度+1 个空格位）
           let off = 0, ln = 1;
-          for (let k = 0; k < lines0.length; k++) {
-            if (off + lines0[k].length + 1 > m.index) { ln = k + 1; break; }
-            off += lines0[k].length + 1;
+          for (let k = 0; k < lines.length; k++) {
+            if (off + lines[k].length + 1 > m.index) { ln = k + 1; break; }
+            off += lines[k].length + 1;
           }
-          addHit(cat, isStrong, ln, lines0[ln - 1].trim().slice(0, 120));
+          addHit(cat, isStrong, ln, lines0[Math.min(ln - 1, lines0.length - 1)].trim().slice(0, 120));
         }
         continue;
       }
-      for (let i = 0; i < lines.length; i++) {
-        const m = firstMatch(re, lines[i], cat);
-        if (!m) continue;
-        addHit(cat, isStrong, lineOf(i), excerptOf(i, m));
+      g.lastIndex = 0;
+      if (cat === "spoof" && isStrong) {
+        // 反引号/代码围栏里提到标签名是被谈论的对象：降弱继续找，裸标签（行首成对）仍强（简报③）
+        for (let m; (m = g.exec(t)); ) {
+          if (!m[0].length) { g.lastIndex++; continue; }
+          const j0 = m.index + m[0].search(/[^\s]/);   // (?:^|\n) 前缀把换行算进命中串：内容从第一个非空白算起
+          if (m[0].replace(/^\s+/, "").includes("\n")) continue;
+          const li = jlineT(j0);
+          const rel = { index: j0 - tStartT[li], 0: m[0].slice(j0 - m.index) };
+          if (inBacktick(lines[li], rel.index) || getFenceIn()[li]) { addHit(cat, false, lineOf(li), excerptOf(li, m)); continue; }
+          addHit(cat, true, lineOf(li), excerptOf(li, m));
+          break;
+        }
+        continue;
+      }
+      for (let m; (m = g.exec(t)); ) {
+        if (!m[0].length) { g.lastIndex++; continue; }
+        const j0 = m.index + m[0].search(/[^\s]/);
+        if (m[0].replace(/^\s+/, "").includes("\n")) continue;
+        const li = jlineT(j0);
+        const rel = { index: j0 - tStartT[li], 0: m[0].slice(j0 - m.index) };
+        if (EXEMPT.has(cat) && exempt(lines[li], rel)) continue;
+        addHit(cat, isStrong, lineOf(li), excerptOf(li, m));
         break;
       }
       // 跨行的（类目清单拆成几行）：整段再看一次
-      if (!seenCat.has(cat + isStrong) && !isStrong && cat === "illicit" && re.test(joinedAll)) {
+      if (!seenCat.has(cat + isStrong) && !isStrong && cat === "illicit" && re.test(getJoinedAll())) {
         addHit(cat, false, 0, "");
       }
     }
   };
-  scanOne(s, false, false);
-  for (const v of variants) scanOne(v.t, v.joined, v.mapped);
-  const rv = findRev(s);
+  const joinedV = variants.find((v) => v.joined);
+  const sHasCjk = /[一-鿿]/.test(s);   // 一次算好：拼接/补扫/倒序/解码守卫都问这个（性能项 11-06）
+  if (joinedV && base === s) {
+    // 中文（无规则相关归一）文本：主扫描直接扫拼接文本，拆句和行内一体覆盖；
+    // 对行边界敏感的规则另做逐行补扫，其余规则拼接扫描已含逐行语义（性能项 11-06）
+    scanOne(joinedV.t, true, true, null, lines0, sHasCjk);
+    if (!process.env.BREACH_NO_EDGE) scanOne(s, false, false, EDGE_IDX, null, sHasCjk, lines0);
+    for (const v of variants) if (!v.joined) scanOne(v.t, false, false);
+  } else if (joinedV) {
+    // 有规则相关归一的：拼接扫描扫归一后的文本（拆句与全角/零宽/字间分隔形变一体兜住，映射回归一后的行），
+    // 行边界敏感规则在归一文本上逐行补扫（性能项 11-06）
+    const baseLines = base.split("\n");
+    scanOne(base.replace(/\n/g, ""), true, true, null, baseLines, sHasCjk);
+    if (!process.env.BREACH_NO_EDGE) scanOne(base, false, false, EDGE_IDX, null, sHasCjk, baseLines);
+    for (const v of variants) if (!v.joined) scanOne(v.t, false, false);
+  } else {
+    scanOne(base, false, false, null, null, sHasCjk, base === s ? lines0 : null);
+    for (const v of variants) scanOne(v.t, v.joined, v.mapped);
+  }
+  // 倒序词表全是汉字：无 CJK 的文本不可能有倒序壳（性能项 11-06）
+  const rv = sHasCjk ? findRev(s) : null;
   if (rv) addHit("reverse", true, rv.line, rv.excerpt);
 
   const cats = new Set(hits.map((h) => h.cat));
