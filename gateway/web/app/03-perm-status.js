@@ -244,14 +244,46 @@
     renderPermBar();
   }
 
+  // 卡片里已经勾的、写的（选择题的选项和补充回答、拒绝理由）：随请求记在 PERMS 里，切会话 / 重连后重建卡片时填回去（#175-3）
+  function permFormRead(el) {
+    const deny = el.querySelector(".perm-deny");
+    return { ck: [...el.querySelectorAll(".perm-body input[type=checkbox], .perm-body input[type=radio]")].map((x) => x.checked),
+      ot: [...el.querySelectorAll(".perm-other")].map((x) => x.value), deny: deny.querySelector("textarea").value, open: !deny.classList.contains("hidden") };
+  }
+  function permFormRestore(el, f) {
+    el.querySelectorAll(".perm-body input[type=checkbox], .perm-body input[type=radio]").forEach((x, i) => { if (f.ck[i] != null) x.checked = f.ck[i]; });
+    el.querySelectorAll(".perm-other").forEach((x, i) => { if (f.ot[i] != null) x.value = f.ot[i]; });
+    el.querySelector(".perm-deny textarea").value = f.deny || "";
+    el.querySelector(".perm-deny").classList.toggle("hidden", !f.open);
+  }
   function onPermRequest(ev) {
     const old = PERMS.get(ev.id);
     if (old && old.el && old.el.isConnected) return;      // 重放来的重复事件
-    const it = { p: ev, runId: ev.runId, el: null, done: false };
+    const it = { p: ev, runId: ev.runId, el: null, done: false, form: old && old.form };
     PERMS.set(ev.id, it);
     it.el = PermCard(ev, ev.runId);
+    if (it.form) permFormRestore(it.el, it.form);
+    const keep = () => { it.form = permFormRead(it.el); };
+    it.el.addEventListener("input", keep); it.el.addEventListener("change", keep);
+    it.el.addEventListener("click", (e) => { if (e.target.closest(".pa-more")) keep(); });
     renderPermBar();
     scrollDown();
+    askNotice([{ id: ev.id, runId: ev.runId }]);
+  }
+
+  /** 整页盖着对话时有新的确认请求：权限条和状态栏都被盖住了，弹一条带「查看」的提示，别让这一轮无声等着（#175-1）。
+   *  每个请求只提醒一次；点「查看」收起整页，是别的会话的就打开那个会话 */
+  const ASK_SEEN = new Set();
+  function askNotice(list) {
+    let first = null;
+    for (const x of list) { if (ASK_SEEN.has(x.id)) continue; ASK_SEEN.add(x.id); first = first || x; }
+    if (ASK_SEEN.size > 500) for (const id of [...ASK_SEEN].slice(0, 250)) ASK_SEEN.delete(id);
+    if (!first || !curPage) return;
+    const r = srv.runs.find((y) => y.id === first.runId);
+    toastAct(t("Claude 在等你确认"), t("查看"), () => {
+      if (r && r.sessionId && r.sessionId !== view.sessionId) return openSession(r.sessionId);
+      closePage();
+    });
   }
 
   function pendingPerms() {
@@ -482,6 +514,8 @@
       state.settings.permissionMode = r.mode;
       setPermChip(r.mode);
       $("set-perm").value = r.mode;
+      for (const x of srv.runs) if (x.permMode) x.permMode = r.mode;   // 同 perm_mode 事件：等着的计划卡跟着重排（#175-2）
+      refreshPlanActs();
       toast(r.live ? t("已切到「{m}」，这一轮当场生效", { m: modeLabel(r.mode) }) : t("已切到「{m}」", { m: modeLabel(r.mode) }));
     } catch (err) { toast(err.message, true); }
   }

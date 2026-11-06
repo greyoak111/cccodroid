@@ -695,6 +695,10 @@
         state.settings.permissionMode = ev.mode;
         setPermChip(ev.mode);
         if ($("set-perm")) $("set-perm").value = ev.mode;
+        // 网关把在跑的每一轮都当场切到了这个模式（gw/queue.mjs setPermMode）：手里的快照跟着改，
+        // 等着的计划卡按新模式重排按钮，别让旧按钮把刚切的模式改回去（#175-2）
+        for (const r of srv.runs) if (r.permMode) r.permMode = ev.mode;
+        refreshPlanActs();
         return;
       case "perm_request": if (runViews.has(ev.runId)) onPermRequest(ev); return;
       case "perm_resolved": return permDone(ev.id, ev.behavior, ev);
@@ -891,6 +895,7 @@
     const elsewhere = srv.runs.filter((r) => r !== srv.run && r.perms && r.perms.length);
     // 还没建会话的（启动前的确认卡）不在会话列表里，指到侧栏的草稿入口——点了会把它们认回新对话页（#171/#172）
     if (elsewhere.length) setStatus(elsewhere.every((r) => !r.sessionId) ? t("有个新对话在等你确认 · 侧栏「没建会话的新对话」里查看") : t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
+    askNotice(srv.runs.flatMap((r) => (r.perms || []).map((p) => ({ id: p.id, runId: r.id }))));
     const live = srv.runs.map((r) => (r.sessionId || "") + (r.perms && r.perms.length ? "!" : "") + (r.idle ? "~" : "")).join(",") + "|" + srv.intr.map((e) => e.sessionId || "").join(",")
       + "|" + srv.queueAll.filter((q) => !q.sessionId).map((q) => q.id).join(",") + "|" + (view.sessionId || "");
     if (live !== srv.liveKey) { srv.liveKey = live; renderSessions(); }
