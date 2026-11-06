@@ -780,7 +780,7 @@
     // 没建会话、停在启动前确认卡上的那一轮（#171）：发它的草稿页切走后 cid 对不上，哪页都认不出来，卡片也就没人看得见。
     // 空白的新对话页把它认回来，卡片随整轮重放画出来（同 queuedInView 对恢复排队消息的兜底）
     let adopted = false;
-    if (!sid && !keepRuns.size && !keepCids.size) for (const r of srv.runs) if (!r.sessionId && r.perms?.length) { view.runIds.add(r.id); adopted = true; }
+    if (!sid && !keepRuns.size && !keepCids.size) for (const r of ev.runs || (ev.run ? [ev.run] : [])) if (!r.sessionId && r.perms?.length) { view.runIds.add(r.id); adopted = true; }
     pickViewRun();
     renderSessions();
     if (sid) loadOlder(true);
