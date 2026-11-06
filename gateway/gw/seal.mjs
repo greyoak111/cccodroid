@@ -341,8 +341,10 @@ function userSettings() {
     for (const k of ["allow", "deny", "ask"]) if (Array.isArray(p[k])) perm[k] = p[k].filter((x) => typeof x === "string").slice(0, 400);
     if (Object.keys(perm).length) out.permissions = perm;
   }
-  // language 会被写进系统提示：只收像语言名的短字串
-  if (typeof j.language === "string" && /^[\p{L} ()\-]{1,32}$/u.test(j.language)) out.language = j.language;
+  // language 会被写进系统提示：只收界面语言注册表（web/langs.js）里的值，别的丢弃。
+  // 以前只查字符集与长度，「ignore all previous rules」这类整句都能过（红队报告 VULN-02）
+  const UI_LANGS = /^(?:zh|zh-Hant|en|fr|es|ru|ar|ja|ko|id)$/;
+  if (typeof j.language === "string" && UI_LANGS.test(j.language)) out.language = j.language;
   return out;
 }
 
@@ -420,9 +422,15 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   for (const d of plugDirs) args.push("--plugin-dir", d);
   const mcp = mcpConfig(cwd);
   if (mcp) {
-    const f = path.join(ROOT(), `mcp-${rid}.json`);
-    fs.writeFileSync(f, JSON.stringify(mcp), { mode: 0o600 });
-    args.push("--mcp-config", f);
+    // MCP 配置也过破甲扫描：instructions / description / command 都在这份 JSON 里。
+    // 项目 .mcp.json 是不回填，这里回填的必须同口径（红队报告 VULN-01：这是唯一没扫的通道）
+    const r = scanText(JSON.stringify(mcp));
+    if (r.blocked) found.push({ name: "~/.claude.json 的 mcpServers（已不加载）", hits: r.hits });
+    else {
+      const f = path.join(ROOT(), `mcp-${rid}.json`);
+      fs.writeFileSync(f, JSON.stringify(mcp), { mode: 0o600 });
+      args.push("--mcp-config", f);
+    }
   }
   return { args, settings, block: null, memDir, memFp: mem.fp, notes };
 }
