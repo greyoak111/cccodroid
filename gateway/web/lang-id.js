@@ -2812,4 +2812,9 @@ window.I18N_DICT["id"] = {
   "「{n}」所在的项目已经删掉了：编辑任务重新选个项目": "Proyek “{n}” sudah dihapus: edit tugas dan pilih proyek lagi",
   "任务正在跑：等它跑完，或先在对话里停掉，再删": "Tugas sedang berjalan: tunggu selesai, atau hentikan di percakapannya, lalu hapus",
   "再显示 {n} 个": "Tampilkan {n} lagi",
+  "指定的接口「{id}」不存在，这一轮没有发出去。": "Penyedia \"{id}\" tidak ada, jadi giliran ini tidak dikirim.",
+  "这个会话原来用的接口「{id}」已经删掉了，这一轮没有发出去。在模型面板里换一家再发。": "Penyedia percakapan ini (\"{id}\") sudah dihapus, jadi giliran ini tidak dikirim. Pilih penyedia lain di panel model lalu kirim lagi.",
+  "项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。": "Penyedia bawaan proyek (\"{id}\") sudah dihapus, jadi giliran ini tidak dikirim. Pilih ulang penyedia di pengaturan proyek.",
+  "任务指定的接口已经删掉了：编辑任务重新选个接口": "Penyedia tugas sudah dihapus: edit tugas dan pilih yang lain",
+  "「{n}」指定的接口已经删掉了：编辑任务重新选个接口": "Penyedia untuk \"{n}\" sudah dihapus: edit tugas dan pilih yang lain",
 };

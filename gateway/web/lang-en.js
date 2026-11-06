@@ -2846,5 +2846,10 @@ window.I18N_DICT.en = {
   "任务所在的项目已经删掉了：编辑任务重新选个项目": "The task's project was deleted: edit the task and pick a project again",
   "「{n}」所在的项目已经删掉了：编辑任务重新选个项目": "The project of “{n}” was deleted: edit the task and pick a project again",
   "任务正在跑：等它跑完，或先在对话里停掉，再删": "The task is running: wait for it to finish, or stop it in its conversation, then delete",
-  "再显示 {n} 个": "Show {n} more"
+  "再显示 {n} 个": "Show {n} more",
+  "指定的接口「{id}」不存在，这一轮没有发出去。": "The endpoint \"{id}\" doesn't exist, so this turn was not sent.",
+  "这个会话原来用的接口「{id}」已经删掉了，这一轮没有发出去。在模型面板里换一家再发。": "This conversation's endpoint \"{id}\" has been deleted, so this turn was not sent. Pick another endpoint in the model panel and send again.",
+  "项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。": "The project's default endpoint \"{id}\" has been deleted, so this turn was not sent. Choose an endpoint again in the project settings.",
+  "任务指定的接口已经删掉了：编辑任务重新选个接口": "The task's endpoint has been deleted: edit the task and choose another",
+  "「{n}」指定的接口已经删掉了：编辑任务重新选个接口": "The endpoint for \"{n}\" has been deleted: edit the task and choose another"
 };

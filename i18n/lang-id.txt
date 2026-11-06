@@ -2809,3 +2809,8 @@
 2809	Proyek “{n}” sudah dihapus: edit tugas dan pilih proyek lagi
 2810	Tugas sedang berjalan: tunggu selesai, atau hentikan di percakapannya, lalu hapus
 2811	Tampilkan {n} lagi
+2812	Penyedia "{id}" tidak ada, jadi giliran ini tidak dikirim.
+2813	Penyedia percakapan ini ("{id}") sudah dihapus, jadi giliran ini tidak dikirim. Pilih penyedia lain di panel model lalu kirim lagi.
+2814	Penyedia bawaan proyek ("{id}") sudah dihapus, jadi giliran ini tidak dikirim. Pilih ulang penyedia di pengaturan proyek.
+2815	Penyedia tugas sudah dihapus: edit tugas dan pilih yang lain
+2816	Penyedia untuk "{n}" sudah dihapus: edit tugas dan pilih yang lain

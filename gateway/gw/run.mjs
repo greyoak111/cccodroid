@@ -20,7 +20,7 @@ import { autoTitle } from "./autotitle.mjs";
 import { SUBAGENT_HINT, agentBook, takeAgentNote, onShared, privateAgentsBase } from "./agents.mjs";
 import { findSessionFile, peekSession } from "./sessions.mjs";
 import { projectById, projectDefaults, projectOfDir } from "./projects.mjs";
-import { sessModel, sessProvider, setSessModel } from "./sessmodel.mjs";
+import { sessLostProvider, sessModel, sessProvider, setSessModel } from "./sessmodel.mjs";
 import { inlineImages, inlineImagesSync, wantsInline } from "./inlineimg.mjs";
 import { pathWatch, previewHint, settlePathNote, takePathNote } from "./pathnote.mjs";
 import { claudeSeal, sealStillValid } from "./claudeseal.mjs";
@@ -187,6 +187,20 @@ function exitHint(code, signal) {
 // 跟这次为什么失败无关，反而让人去怀疑模型（日志里照留）
 const exitDetail = (stderr) => String(stderr || "").split("\n").filter((l) => !/^\[claude-code:unrecognized_model\]/.test(l.trim())).join("\n").trim().slice(0, 1200);
 
+/** 这一轮本该用的那家已经不在了：返回说明（不在就不跑），否则 ""。
+ *  pickProvider 找不到指定的那家会一路退到全局默认——全局可能是订阅账户，会话内容、交给它的材料就换了一家发出去。
+ *  顺序同 pickProvider：定时任务指定的 → 新会话首条带来的 → 会话钉的 → 项目默认 */
+export function lostProvider(item, sid0, pdef0) {
+  const gone = (id) => typeof id === "string" && id && !providerById(id);
+  if (item.provider) return gone(item.provider) ? tz("指定的接口「{id}」不存在，这一轮没有发出去。", { id: item.provider }) : "";
+  if (item.pin && item.pin.provider) return gone(item.pin.provider) ? tz("指定的接口「{id}」不存在，这一轮没有发出去。", { id: item.pin.provider }) : "";
+  const s = sessLostProvider(sid0);
+  if (s) return tz("这个会话原来用的接口「{id}」已经删掉了，这一轮没有发出去。在模型面板里换一家再发。", { id: s });
+  if (sessModel(sid0)) return "";
+  if (pdef0 && gone(pdef0.provider)) return tz("项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。", { id: pdef0.provider });
+  return "";
+}
+
 export async function startRun(item) {
   const { sid0, pdef0, P } = pickProvider(item);
   const KEY = keyOf(P);
@@ -230,6 +244,12 @@ export async function startRun(item) {
       (text, cmd) => endRun(run, { localCommand: cmd || local[1], resultText: text, durationMs: 0, costUsd: 0 }), run.sessionId, () => run.aborted);
   }
 
+  const lost = lostProvider(item, sid0, pdef0);
+  if (lost) {
+    log(`⛔ 这一轮要用的接口不在了，没有启动（不退回全局默认）`);
+    emit({ type: "error", message: tr(LAST_LANG, lost) });
+    return endRun(run, { failed: true });
+  }
   if (!KEY && !P.login) {
     emit({ type: "error", message: tr(LAST_LANG, tz("未配置 API 密钥。请在设置里填入 {name} 的密钥。", { name: P.label || P.id })) });
     return endRun(run, { failed: true });

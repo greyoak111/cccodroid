@@ -2809,3 +2809,8 @@
 2809	El proyecto de «{n}» se eliminó: edita la tarea y elige un proyecto
 2810	La tarea se está ejecutando: espera a que termine o detenla en su conversación y luego elimínala
 2811	Mostrar {n} más
+2812	El endpoint «{id}» no existe, así que este turno no se envió.
+2813	El endpoint de esta conversación («{id}») se eliminó, así que este turno no se envió. Elige otro en el panel de modelos y vuelve a enviar.
+2814	El endpoint predeterminado del proyecto («{id}») se eliminó, así que este turno no se envió. Vuelve a elegir uno en los ajustes del proyecto.
+2815	El endpoint de la tarea se eliminó: edita la tarea y elige otro
+2816	El endpoint de «{n}» se eliminó: edita la tarea y elige otro

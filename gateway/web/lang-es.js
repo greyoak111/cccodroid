@@ -2812,4 +2812,9 @@ window.I18N_DICT["es"] = {
   "「{n}」所在的项目已经删掉了：编辑任务重新选个项目": "El proyecto de «{n}» se eliminó: edita la tarea y elige un proyecto",
   "任务正在跑：等它跑完，或先在对话里停掉，再删": "La tarea se está ejecutando: espera a que termine o detenla en su conversación y luego elimínala",
   "再显示 {n} 个": "Mostrar {n} más",
+  "指定的接口「{id}」不存在，这一轮没有发出去。": "El endpoint «{id}» no existe, así que este turno no se envió.",
+  "这个会话原来用的接口「{id}」已经删掉了，这一轮没有发出去。在模型面板里换一家再发。": "El endpoint de esta conversación («{id}») se eliminó, así que este turno no se envió. Elige otro en el panel de modelos y vuelve a enviar.",
+  "项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。": "El endpoint predeterminado del proyecto («{id}») se eliminó, así que este turno no se envió. Vuelve a elegir uno en los ajustes del proyecto.",
+  "任务指定的接口已经删掉了：编辑任务重新选个接口": "El endpoint de la tarea se eliminó: edita la tarea y elige otro",
+  "「{n}」指定的接口已经删掉了：编辑任务重新选个接口": "El endpoint de «{n}» se eliminó: edita la tarea y elige otro",
 };

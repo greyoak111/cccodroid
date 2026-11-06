@@ -19,7 +19,7 @@ import { projectById } from "./projects.mjs";
 import { isLoginMode } from "./models.mjs";
 import { pickProvider } from "./run.mjs";
 import { privCall } from "./usage.mjs";
-import { usdCny } from "./providers.mjs";
+import { providerById, usdCny } from "./providers.mjs";
 
 // node 在安卓上可能没拿到时区（TZ 没设就是 UTC）：「每天 09:00」必须按本地时间算
 // 按系统设置取的就要跟着系统变：出差、手动改时区后，每天 09:00 要按新时区的 09:00（#107 06-012）。tick 里隔几分钟再问一次
@@ -214,6 +214,13 @@ async function fire(t, { reason = "due", attempt = 0, trial = false } = {}) {
 }
 async function fireNow(t, { reason, attempt, trial }) {
   const skip = (msg) => { log(`⏭ 定时任务「${t.name}」跳过：${msg}`); if (!trial) addRun({ taskId: t.id, at: Date.now(), st: "skip", msg }); };
+  // 指定的接口删了：不悄悄换成全局默认那家跑（全局可能是订阅账户，任务内容不该换家发出去）。
+  // 放在最前：回落到订阅后下面「订阅账户默认关闭」会先挡住，可报的原因不对，打开了订阅也就挡不住了
+  if (t.provider && !providerById(t.provider)) {
+    skip(tz("任务指定的接口已经删掉了：编辑任务重新选个接口"));
+    if (!trial) note(t, tz("定时任务已跳过"), tz("「{n}」指定的接口已经删掉了：编辑任务重新选个接口", { n: t.name }), null, false);
+    return;
+  }
   if (!trial) {
     if (t.until?.kind === "date" && t.until.date && Date.now() > new Date(t.until.date + "T23:59:59").getTime()) { t.on = false; refreshNext(t); save(); return skip(tz("已过有效期，任务已关")); }
     if (t.skipNext && reason === "due" && (!t.skipAt || t.skipAt === t.nextAt)) { t.skipNext = false; t.skipAt = 0; save(); return skip(tz("按设置跳过这一次")); }

@@ -2809,3 +2809,8 @@
 2809	Le projet de « {n} » a été supprimé : modifiez la tâche et choisissez un projet
 2810	La tâche est en cours : attendez la fin ou arrêtez-la dans sa conversation, puis supprimez-la
 2811	Afficher {n} de plus
+2812	Le point de terminaison « {id} » n'existe pas : ce tour n'a pas été envoyé.
+2813	Le point de terminaison de cette conversation (« {id} ») a été supprimé : ce tour n'a pas été envoyé. Choisissez-en un autre dans le panneau des modèles, puis renvoyez.
+2814	Le point de terminaison par défaut du projet (« {id} ») a été supprimé : ce tour n'a pas été envoyé. Choisissez-en un dans les réglages du projet.
+2815	Le point de terminaison de la tâche a été supprimé : modifiez la tâche et choisissez-en un autre
+2816	Le point de terminaison de « {n} » a été supprimé : modifiez la tâche et choisissez-en un autre

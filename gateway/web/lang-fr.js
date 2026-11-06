@@ -2812,4 +2812,9 @@ window.I18N_DICT["fr"] = {
   "「{n}」所在的项目已经删掉了：编辑任务重新选个项目": "Le projet de « {n} » a été supprimé : modifiez la tâche et choisissez un projet",
   "任务正在跑：等它跑完，或先在对话里停掉，再删": "La tâche est en cours : attendez la fin ou arrêtez-la dans sa conversation, puis supprimez-la",
   "再显示 {n} 个": "Afficher {n} de plus",
+  "指定的接口「{id}」不存在，这一轮没有发出去。": "Le point de terminaison « {id} » n'existe pas : ce tour n'a pas été envoyé.",
+  "这个会话原来用的接口「{id}」已经删掉了，这一轮没有发出去。在模型面板里换一家再发。": "Le point de terminaison de cette conversation (« {id} ») a été supprimé : ce tour n'a pas été envoyé. Choisissez-en un autre dans le panneau des modèles, puis renvoyez.",
+  "项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。": "Le point de terminaison par défaut du projet (« {id} ») a été supprimé : ce tour n'a pas été envoyé. Choisissez-en un dans les réglages du projet.",
+  "任务指定的接口已经删掉了：编辑任务重新选个接口": "Le point de terminaison de la tâche a été supprimé : modifiez la tâche et choisissez-en un autre",
+  "「{n}」指定的接口已经删掉了：编辑任务重新选个接口": "Le point de terminaison de « {n} » a été supprimé : modifiez la tâche et choisissez-en un autre",
 };
