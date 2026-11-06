@@ -2780,4 +2780,6 @@
 2780	No se puede leer {path} en este dispositivo: puede estar en una máquina remota o haberse eliminado
 2781	Este turno no llegó a empezar: la tarjeta de confirmación previa al inicio quedó sin respuesta durante {n} minutos y se detuvo (enviado {when}).
 2782	Claude no recibió este mensaje. Toca «Reenviar» para devolverlo al cuadro de texto.
-2783	Un chat nuevo espera tu confirmación · toca «Nuevo chat» para verlo
+2783	Un chat nuevo espera tu confirmación · míralo en «Chats nuevos sin guardar» en la barra lateral
+2784	Chats nuevos sin guardar
+2785	Otros {n} mensajes sin guardar también se detuvieron; el siguiente aparece cuando resuelvas este.

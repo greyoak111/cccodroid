@@ -2783,5 +2783,7 @@ window.I18N_DICT["es"] = {
   "本机读不到 {path}：可能在远程机器上，或者已经被删掉": "No se puede leer {path} en este dispositivo: puede estar en una máquina remota o haberse eliminado",
   "这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。": "Este turno no llegó a empezar: la tarjeta de confirmación previa al inicio quedó sin respuesta durante {n} minutos y se detuvo (enviado {when}).",
   "Claude 没收到这条消息。点「重发」把它放回输入框。": "Claude no recibió este mensaje. Toca «Reenviar» para devolverlo al cuadro de texto.",
-  "有个新对话在等你确认 · 点「新对话」查看": "Un chat nuevo espera tu confirmación · toca «Nuevo chat» para verlo",
+  "有个新对话在等你确认 · 侧栏「没建会话的新对话」里查看": "Un chat nuevo espera tu confirmación · míralo en «Chats nuevos sin guardar» en la barra lateral",
+  "没建会话的新对话": "Chats nuevos sin guardar",
+  "还有 {n} 条没建会话的消息也停下了，处理完这条接着显示下一条。": "Otros {n} mensajes sin guardar también se detuvieron; el siguiente aparece cuando resuelvas este.",
 };

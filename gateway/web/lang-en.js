@@ -2818,5 +2818,7 @@ window.I18N_DICT.en = {
   "本机读不到 {path}：可能在远程机器上，或者已经被删掉": "Can't read {path} on this device: it may be on a remote machine, or it was deleted",
   "这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。": "This turn never started: the confirmation card before launch went unanswered for {n} minutes, so it was stopped (sent {when}).",
   "Claude 没收到这条消息。点「重发」把它放回输入框。": "Claude didn't receive this message. Tap \"Resend\" to put it back in the input box.",
-  "有个新对话在等你确认 · 点「新对话」查看": "A new chat is waiting for your confirmation · tap \"New chat\" to see it"
+  "有个新对话在等你确认 · 侧栏「没建会话的新对话」里查看": "A new chat is waiting for your confirmation · see \"Unsaved new chats\" in the sidebar",
+  "没建会话的新对话": "Unsaved new chats",
+  "还有 {n} 条没建会话的消息也停下了，处理完这条接着显示下一条。": "{n} more unsaved messages also stopped; the next one shows after you handle this one."
 };

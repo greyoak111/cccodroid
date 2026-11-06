@@ -526,6 +526,9 @@ html:not([data-skin="goucheng"][data-theme="light"]) #gp-row{display:none}
 .sr-dot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--ok);animation:sr-pulse 1.4s infinite}
 .sr-dot.ask{background:var(--warn)}
 .sr-dot.intr{background:var(--warn);animation:none}
+.sr-dot.idle{animation:none;opacity:.55}
+/* 没建会话的草稿入口（#172）：数量靠右 */
+.sr-drafts em{font-style:normal;font-size:11px;color:var(--fg3)}
 @keyframes sr-pulse{50%{opacity:.3}}
 .sr-all{display:block;margin:6px 12px 0;padding:4px 0;border:0;background:none;color:var(--fg3);font:inherit;font-size:12.5px;cursor:pointer}
 .sr-all:hover{color:var(--accent)}

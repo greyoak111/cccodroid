@@ -60,6 +60,14 @@
 
   /** 「在跑」的会话数：侧栏角标和会话页同一口径——有会话号的轮次，生成中、只剩后台任务、等确认都算。
    *  还没建会话的不算（会话列表里也没有它，算上就对不上，#171） */
+  /** 没建会话的草稿里、当前页看不到的（#171/#172）：在跑的（含停在确认卡上的）、跟不上任何在跑轮次的排队消息、
+   *  待重发的中断记录。会话列表里没有它们，侧栏顶上给一个入口，点了全部认回新对话页 */
+  function draftsElsewhere() {
+    const runs = srv.runs.filter((r) => !r.sessionId && !runInView(r));
+    const queue = (srv.queueAll || []).filter((q) => !q.sessionId && !queuedInView(q) && !(q.follow && srv.runs.some((r) => r.id === q.follow)));   // 跟着还在跑的轮次的：随那一轮出现，不单算
+    const intr = view.sessionId ? (srv.intr || []).filter((e) => !e.sessionId) : [];
+    return { n: runs.length + queue.length + intr.length, ask: runs.some((r) => r.perms && r.perms.length), live: runs.length > 0, intr: intr.length > 0 };
+  }
   function liveSessCount() { return new Set(srv.runs.map((r) => r.sessionId).filter(Boolean)).size; }
   function renderSessions() {
     renderSideRecent();

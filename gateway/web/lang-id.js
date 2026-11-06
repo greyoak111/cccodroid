@@ -2783,5 +2783,7 @@ window.I18N_DICT["id"] = {
   "本机读不到 {path}：可能在远程机器上，或者已经被删掉": "Tidak bisa membaca {path} di perangkat ini: mungkin ada di mesin jarak jauh, atau sudah dihapus",
   "这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。": "Giliran ini tidak dimulai: kartu konfirmasi sebelum peluncuran tidak dijawab selama {n} menit, jadi dihentikan (dikirim {when}).",
   "Claude 没收到这条消息。点「重发」把它放回输入框。": "Claude tidak menerima pesan ini. Ketuk \"Kirim ulang\" untuk mengembalikannya ke kotak input.",
-  "有个新对话在等你确认 · 点「新对话」查看": "Percakapan baru menunggu konfirmasi Anda · ketuk \"Percakapan baru\" untuk melihatnya",
+  "有个新对话在等你确认 · 侧栏「没建会话的新对话」里查看": "Percakapan baru menunggu konfirmasi Anda · lihat \"Percakapan baru belum tersimpan\" di bilah samping",
+  "没建会话的新对话": "Percakapan baru belum tersimpan",
+  "还有 {n} 条没建会话的消息也停下了，处理完这条接着显示下一条。": "{n} pesan lain yang belum tersimpan juga berhenti; berikutnya muncul setelah yang ini ditangani.",
 };

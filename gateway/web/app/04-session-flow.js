@@ -746,6 +746,10 @@
       return;
     }
     if (ev.uiTag) uiTag = ev.uiTag;
+    // 认领没建会话的草稿（#171/#172）：只在首次连接（重载、重开 App）或点了侧栏「没建会话的新对话」时做；
+    // 平常点「新对话」是一张白纸，不把别的草稿拽进来
+    const adoptDrafts = helloCount === 1 || view.adoptDrafts;
+    view.adoptDrafts = false;
     applyState(ev);
     if (ev.resume) { calmStatus(t("已连接")); return; }
     beginReplay();
@@ -777,10 +781,10 @@
     if (!sid && keepProj) { view.projectId = keepProj; paintProjChip(); }
     if (!sid) view.pendingMerge = keepMerge || null;
     view.runIds = keepRuns; view.cids = keepCids;
-    // 没建会话、停在启动前确认卡上的那一轮（#171）：发它的草稿页切走后 cid 对不上，哪页都认不出来，卡片也就没人看得见。
-    // 空白的新对话页把它认回来，卡片随整轮重放画出来（同 queuedInView 对恢复排队消息的兜底）
+    // 没建会话的轮次（停在启动前确认卡上、或刚起还没拿到会话号）：发它的草稿页切走后 cid 对不上，哪页都认不出来。
+    // 认领时全部接回新对话页（不只 latestRun 那一条，#172-1），卡片和过程随整轮重放画出来
     let adopted = false;
-    if (!sid && !keepRuns.size && !keepCids.size) for (const r of ev.runs || (ev.run ? [ev.run] : [])) if (!r.sessionId && r.perms?.length) { view.runIds.add(r.id); adopted = true; }
+    if (!sid && adoptDrafts) for (const r of ev.runs || (ev.run ? [ev.run] : [])) if (!r.sessionId) { view.runIds.add(r.id); adopted = true; }
     pickViewRun();
     renderSessions();
     if (sid) loadOlder(true);
@@ -882,9 +886,10 @@
     else if (srv.runs.some((r) => !r.idle)) setStatus(t("另有 {n} 个会话在生成", { n: srv.runs.filter((r) => !r.idle).length }), "ok");
     // 别的会话在等你确认：当前视图看不到它的卡片，状态栏和会话列表里提醒
     const elsewhere = srv.runs.filter((r) => r !== srv.run && r.perms && r.perms.length);
-    // 还没建会话的（启动前的确认卡）不在会话列表里，指到新对话页——那里会把它认回来（#171）
-    if (elsewhere.length) setStatus(elsewhere.every((r) => !r.sessionId) ? t("有个新对话在等你确认 · 点「新对话」查看") : t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
-    const live = srv.runs.map((r) => (r.sessionId || "") + (r.perms && r.perms.length ? "!" : "") + (r.idle ? "~" : "")).join(",") + "|" + srv.intr.map((e) => e.sessionId || "").join(",");
+    // 还没建会话的（启动前的确认卡）不在会话列表里，指到侧栏的草稿入口——点了会把它们认回新对话页（#171/#172）
+    if (elsewhere.length) setStatus(elsewhere.every((r) => !r.sessionId) ? t("有个新对话在等你确认 · 侧栏「没建会话的新对话」里查看") : t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
+    const live = srv.runs.map((r) => (r.sessionId || "") + (r.perms && r.perms.length ? "!" : "") + (r.idle ? "~" : "")).join(",") + "|" + srv.intr.map((e) => e.sessionId || "").join(",")
+      + "|" + srv.queueAll.filter((q) => !q.sessionId).map((q) => q.id).join(",") + "|" + (view.sessionId || "");
     if (live !== srv.liveKey) { srv.liveKey = live; renderSessions(); }
     renderPermBar();                 // 放最后：有待确认项时状态栏要显示「等你确认」
     renderInterrupted(s.interrupted);
@@ -900,10 +905,12 @@
     const it = srv.run ? null : all.filter((e) => (e.sessionId ? e.sessionId === view.sessionId : !view.sessionId)).pop();
     if (!it) { el?.remove(); return; }
     const others = new Set(all.map((e) => e.sessionId).filter((s) => s && s !== it.sessionId)).size;
-    if (el && el.dataset.id === it.id && el.dataset.n === String(others) && el.parentNode === liveEl) return;
+    // 没建会话的一次只挂一张（最新的），处理掉再出下一张：说一声后面还有几条（#172-3）
+    const drafts = it.sessionId ? 0 : all.filter((e) => !e.sessionId && e !== it).length;
+    if (el && el.dataset.id === it.id && el.dataset.n === others + "/" + drafts && el.parentNode === liveEl) return;
     el?.remove();
     const b = mkMsg("sys", t("已中断"), liveEl);
-    el = b.closest(".msg"); el.id = "intr-card"; el.dataset.id = it.id; el.dataset.n = String(others);
+    el = b.closest(".msg"); el.id = "intr-card"; el.dataset.id = it.id; el.dataset.n = others + "/" + drafts;
     const when = new Date(it.startedAt || it.at).toLocaleString();
     // why: card —— 启动前的确认卡没人答、超时停下的（#171）：claude 根本没起，有会话也只能「重发」，不能「继续」
     const card = it.why === "card", cont = !!it.sessionId && !card;
@@ -914,6 +921,7 @@
         : it.sessionId ? t("已经做完的部分都在会话里。点「继续」让 Claude 从断开的地方接着做。")
         : t("会话还没来得及建立，Claude 没收到这条消息。点「重发」把它放回输入框。"))}</p>
       ${others ? `<p class="perm-sub">${esc(t("另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。", { n: others }))}</p>` : ""}
+      ${drafts ? `<p class="perm-sub">${esc(t("还有 {n} 条没建会话的消息也停下了，处理完这条接着显示下一条。", { n: drafts }))}</p>` : ""}
       <div class="perm-acts"><button class="primary" data-a="go">${esc(cont ? t("继续") : t("重发"))}</button>
       <button data-a="no">${esc(t("忽略"))}</button></div>`);
     b.querySelector(".perm-acts").addEventListener("click", async (e) => {
@@ -937,8 +945,9 @@
   }
   function queuedInView(q) {
     if (q.sessionId) return q.sessionId === view.sessionId;
-    // 网关重启恢复的、还没建会话的那条：界面重载后 runIds/cids 都清了，认不出是哪页的，放到新对话页（审查 B28）
-    if (q.intr && !view.sessionId) return true;
+    // 网关重启恢复的、还没建会话的那条：界面重载后 runIds/cids 都清了，认不出是哪页的，放到新对话页（审查 B28）。
+    // 跟着的那一轮已经结束（确认卡超时、被停掉）的也一样：不然它留在队列里，哪页都看不见、撤不回（#172-2）
+    if (!view.sessionId && (q.intr || !(q.follow && srv.runs.some((r) => r.id === q.follow)))) return true;
     return view.runIds.has(q.id) || (!!q.follow && view.runIds.has(q.follow)) || (!!q.cid && view.cids.has(q.cid));
   }
   function pickViewRun() {

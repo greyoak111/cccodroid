@@ -2780,4 +2780,6 @@
 2780	Tidak bisa membaca {path} di perangkat ini: mungkin ada di mesin jarak jauh, atau sudah dihapus
 2781	Giliran ini tidak dimulai: kartu konfirmasi sebelum peluncuran tidak dijawab selama {n} menit, jadi dihentikan (dikirim {when}).
 2782	Claude tidak menerima pesan ini. Ketuk "Kirim ulang" untuk mengembalikannya ke kotak input.
-2783	Percakapan baru menunggu konfirmasi Anda · ketuk "Percakapan baru" untuk melihatnya
+2783	Percakapan baru menunggu konfirmasi Anda · lihat "Percakapan baru belum tersimpan" di bilah samping
+2784	Percakapan baru belum tersimpan
+2785	{n} pesan lain yang belum tersimpan juga berhenti; berikutnya muncul setelah yang ini ditangani.
