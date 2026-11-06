@@ -453,7 +453,12 @@ async function compInstall(id) {
   COMP_JOBS.set(id, job);
   compRunInstall(id, b, job).then(
     () => { job.finished = true; log(`[comp] ${id} ${b.version} 装好了`); },
-    (e) => { job.finished = true; job.error = job.cancelled ? "" : e.message; log(`[comp] ${id} 安装失败：${e.message}`); });
+    (e) => {
+      // 取消、校验失败都走这里：解包树（chromium 约 1GB）只在成功路径里清，失败就留在私有目录、没有入口再删（审查 11-05）。
+      // compRunInstall 已经结束（tar 子进程已退出），这时删不会边解边删；压缩包留着，重试不用重下。下次安装开头本来也会先删这棵树
+      if (/^[a-z0-9][a-z0-9-]*$/.test(id)) try { fs.rmSync(path.join(COMP_DIR, ".staging", id), { recursive: true, force: true }); } catch {}
+      job.finished = true; job.error = job.cancelled ? "" : e.message; log(`[comp] ${id} 安装失败：${e.message}`);
+    });
   return { ok: true };
 }
 
@@ -641,13 +646,6 @@ function compCancel(id) {
   if (["configuring", "fetching-models"].includes(job.phase)) return { ok: false, message: "busy" };
   job.cancelled = true;
   if (job.child) killTree(job.child);
-  // 取消发生在 verifying：tar 已把整棵解包树写到 .staging/<id>，正常清理只在成功路径里，
-  // 失败路径会把整棵（chromium 约 1GB）留在私有目录且没有入口再删（审查 11-05）。
-  // 等子进程真正死掉、写操作停下来再删，避免边解边删。
-  if (/^[a-z0-9][a-z0-9-]*$/.test(id)) setTimeout(() => {
-    if (job.finished) return;
-    try { fs.rmSync(path.join(COMP_DIR, ".staging", id), { recursive: true, force: true }); } catch {}
-  }, 1500).unref();
   return { ok: true };
 }
 
