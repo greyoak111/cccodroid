@@ -60,7 +60,7 @@ test("干净的配置：说明文件拼成一个文件、skill 进合成插件�
   put(H(".claude/skills/hello/SKILL.md"), "---\nname: hello\ndescription: 打招呼\n---\n说你好\n");
   put(H(".claude/skills/hello/run.sh"), "echo hi\n");
   put(H(".claude.json"), JSON.stringify({ mcpServers: { m: { command: "node", args: ["x.mjs"] } } }));
-  put(H(".claude/settings.json"), JSON.stringify({ permissions: { deny: ["Bash(rm -rf:*)"] }, hooks: { SessionStart: [{ hooks: [{ type: "command", command: "cat evil" }] }] }, env: { X: "1" }, language: "中文" }));
+  put(H(".claude/settings.json"), JSON.stringify({ permissions: { deny: ["Bash(rm -rf:*)"] }, hooks: { SessionStart: [{ hooks: [{ type: "command", command: "cat evil" }] }] }, env: { X: "1" }, language: "zh" }));
   const p = sealPrepare({ cwd: W(), runId: 7 });
   assert.equal(p.block, null);
   const ctx = fs.readFileSync(at(p.args, "--append-system-prompt-file")[0], "utf8");
@@ -70,13 +70,22 @@ test("干净的配置：说明文件拼成一个文件、skill 进合成插件�
   assert.ok(fs.existsSync(path.join(plug, "skills/hello/run.sh")));
   assert.equal(JSON.parse(fs.readFileSync(path.join(plug, ".claude-plugin/plugin.json"), "utf8")).name, "user");
   assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(at(p.args, "--mcp-config")[0], "utf8")).mcpServers), ["m"]);
-  // 权限规则、语言照搬；钩子、env 不回填
+  // 权限规则、注册表语言照搬；钩子、env 不回填
   assert.deepEqual(p.settings.permissions, { deny: ["Bash(rm -rf:*)"] });
-  assert.equal(p.settings.language, "中文");
+  assert.equal(p.settings.language, "zh");
   assert.equal(p.settings.hooks, undefined); assert.equal(p.settings.env, undefined);
   assert.equal(p.settings.autoMemoryDirectory, memoryDir(W()));
   sealCleanup(7);
   assert.ok(!fs.existsSync(at(p.args, "--append-system-prompt-file")[0]));
+});
+
+test("语言值不在界面注册表：丢弃，不进系统提示（VULN-02）", () => {
+  fresh();
+  put(H(".claude/settings.json"), JSON.stringify({ language: "中文" }));
+  const p = sealPrepare({ cwd: W(), runId: 8 });
+  assert.equal(p.block, null);
+  assert.equal(p.settings.language, undefined);
+  sealCleanup(8);
 });
 
 test("任何一处命中破甲特征：整轮不跑，列出文件", () => {

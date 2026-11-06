@@ -182,7 +182,17 @@ export function scanText(text) {
         // 跨行写的（一条拆成几行）：整段并成一行看，命中再回头找起始行
         const m = re.exec(joinedAll);
         if (!m) continue;
-        addHit(cat, isStrong, lineOf(0), excerptOf(0, m));
+        if (joined) {
+          addHit(cat, isStrong, 0, (m[0] || "").slice(0, 120));
+        } else {
+          // 原文扫描：按 m.index 回映射原行号（拼接串每行占 长度+1 个空格位）
+          let off = 0, ln = 1;
+          for (let k = 0; k < lines0.length; k++) {
+            if (off + lines0[k].length + 1 > m.index) { ln = k + 1; break; }
+            off += lines0[k].length + 1;
+          }
+          addHit(cat, isStrong, ln, lines0[ln - 1].trim().slice(0, 120));
+        }
         continue;
       }
       for (let i = 0; i < lines.length; i++) {
