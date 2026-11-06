@@ -17,7 +17,7 @@ function hello(viewSid, runSid) {
     view, state, Set, Map, t: (s) => s, uiTag: "synthetic-ui", helloCount: 0,
     WROTE: new Map(), TOOL_CARDS: new Map(), TOOL_RESULTS: new Map(), clearToolResults() {}, PERMS: new Map(), runViews: new Map(),
     histEl: nodes(), liveEl: nodes(), olderEl: nodes(), statEl: nodes(), statLast: {}, statStop() {},
-    stripHidden: () => ({}), paintTitle() {}, renderRunStrip() {}, agReset() {}, syncWindow() {}, pickViewRun() {}, renderQueue() {}, paintProjChip() {}, syncInterject() {}, saveUiState() {},
+    stripHidden: () => ({}), paintTitle() {}, renderRunStrip() {}, renderPermBar() {}, agReset() {}, syncWindow() {}, pickViewRun() {}, renderQueue() {}, paintProjChip() {}, syncInterject() {}, saveUiState() {},
     applyState() {}, beginReplay() {}, updateCtx() {}, renderSessions() {}, loadOlder() {}, showWelcome() {}, renderInterrupted() {}, calmStatus() {}, refreshSessModel() {},
     isBusy: () => false, setStatus() {}, intrList: () => [],
     draftSwap: (from, to) => swaps.push([from, to]),

@@ -2789,3 +2789,22 @@
 2789	Remis dans le brouillon de la session d'origine
 2790	Supprimé dans la session d'origine
 2791	Vous avez changé de session, ce retour en arrière n'a donc pas été effectué
+2792	Cette conversation n'existe plus (supprimée ou données effacées)
+2793	Cette conversation a été déplacée dans la corbeille
+2794	{n} plus récentes sur {m}
+2795	Affichage des {n} premiers résultats sur {m}. Essayez un mot plus précis.
+2796	{n} conversations plus anciennes ne sont pas listées. Recherchez par titre ou contenu.
+2797	La liste n'a pas été actualisée (affichage de la précédente) : {msg}
+2798	Impossible de charger la liste des conversations : {msg}
+2799	Impossible de charger la corbeille : {msg}
+2800	{p} par rapport à la même période le mois dernier
+2801	(conversation ancienne ou supprimée)
+2802	Projet supprimé · ne s'exécutera pas
+2803	Projet supprimé : les exécutions seront ignorées. Modifiez la tâche et choisissez un autre projet.
+2804	La conversation poursuivie a été supprimée ; la prochaine exécution en démarrera une nouvelle
+2805	Affichage des {n} dernières exécutions sur {m}
+2806	Supprimer la tâche planifiée « {n} » ? Son historique d'exécution ne sera plus visible dans l'app ; les conversations enregistrées ne sont pas concernées.
+2807	Modifications non enregistrées : l'essai utilise la version enregistrée. Appuyez d'abord sur « Enregistrer ».
+2808	Le projet de la tâche a été supprimé : modifiez la tâche et choisissez un projet
+2809	Le projet de « {n} » a été supprimé : modifiez la tâche et choisissez un projet
+2810	La tâche est en cours : attendez la fin ou arrêtez-la dans sa conversation, puis supprimez-la

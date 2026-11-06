@@ -7,7 +7,7 @@ import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
 import { NAMES, PEEK_CACHE, PINS, findSessionFile, peekSession, saveNames, savePins } from "./sessions.mjs";
 import { claudeBlocked, claudeCmd, claudeEnv, killTree } from "./claude.mjs";
 import { sealed } from "./edition.mjs";
-import { LAST_SESSION, forgetSession, runOfSession } from "./runs.mjs";
+import { LAST_SESSION, TRASH_HOOKS, forgetSession, runOfSession } from "./runs.mjs";
 import { forgetChild, recordPrimary } from "./lineage-store.mjs";
 import { lineageForget } from "./lineage.mjs";
 import { checkSession, neutralizeMarkers, resealAfterEdit, sealSession, isInjected } from "./integrity.mjs";
@@ -357,8 +357,11 @@ export function trashSession(id) {
   delete NAMES[id]; saveNames();
   // 删的正好是「最近跑过的那条」：别让前端下次打开时又指回去（会显示「找不到这个会话」而不是欢迎页）
   if (LAST_SESSION && LAST_SESSION.id === id) forgetSession();
+  for (const f of TRASH_HOOKS) { try { f(id); } catch (e) { log(`回收后续处理出错：${e.message}`); } }
   return { ok: true };
 }
+/** 会话号在不在回收站里：打开失败时界面据此说「在回收站，可恢复」而不是悄悄开新对话（#173） */
+export function inTrash(id) { return SID_RE.test(String(id || "")) && fs.existsSync(path.join(TRASH_DIR, id, id + ".jsonl")); }
 
 export function listTrash() {
   let ids = [];

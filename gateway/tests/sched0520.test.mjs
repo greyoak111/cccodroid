@@ -54,8 +54,15 @@ test("会话钉了官方账户、项目默认 API：没许可就跳过，许可�
   drop(t, it2);
 });
 
+// 接着的会话得真有记录文件：会话不在了的任务开跑前会放下 lastSid、新开一个（#173-3）
+const realSid = () => {
+  const sid = crypto.randomUUID(), d = path.join(CFG.home, ".claude", "projects", "-sched-real");
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, sid + ".jsonl"), JSON.stringify({ type: "user", sessionId: sid, uuid: crypto.randomUUID(), message: { role: "user", content: "hi" } }) + "\n");
+  return sid;
+};
 test("入队后会话被改钉到官方账户：开跑前再核一次，拦下", async () => {
-  const sid = crypto.randomUUID();
+  const sid = realSid();
   S.DB.allowLogin = false;
   const t = mk("s0520-b", sid);
   const it = await S.fire(t, { reason: "due" });

@@ -287,6 +287,7 @@
     const hit = g.nodes.filter((x) => x.id.startsWith(s));
     if (!hit.length) return toast(t("没找到档号 {r} 对应的会话", { r: ref }), true);
     if (hit.length > 1) { openPage("lineage"); return toast(t("有 {n} 个会话的号都以 {s} 开头，在图上挑一个", { n: hit.length, s })); }
+    if (hit[0].trashed) return goneNotice(hit[0].id, true);   // 进了回收站：给恢复，别打开到 404 再误报「没找到这一章」（#173-6）
     const c = (hit[0].chapters || [])[n - 1];
     if (!c && n !== 1) return toast(t("{r}：没有这一章", { r: ref }), true);
     openSession(hit[0].id, null, n === 1 ? "start" : c.anchor || "");

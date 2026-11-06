@@ -11,9 +11,9 @@ import { CFG, LIVE, log, tz } from "./config.mjs";
 import { dec, NEXT, readBody, sendJson } from "./http.mjs";
 import { END_HOOKS, QUEUE, START_GUARDS, enqueue } from "./queue.mjs";
 import { capList } from "./settings-store.mjs";
-import { RUNS } from "./runs.mjs";
+import { RUNS, TRASH_HOOKS } from "./runs.mjs";
 import { publish } from "./bus.mjs";
-import { NAMES, saveNames } from "./sessions.mjs";
+import { NAMES, findSessionFile, saveNames } from "./sessions.mjs";
 import { trashSession } from "./sessionops.mjs";
 import { projectById } from "./projects.mjs";
 import { isLoginMode } from "./models.mjs";
@@ -248,6 +248,18 @@ async function fireNow(t, { reason, attempt, trial }) {
   // 排队那 30 秒里被删 / 被关、而别的对话又正好在醒来前结束：循环条件直接为假，循环里那道检查没走到（审查 B16）。入队前再看一眼
   if (!trial && (byId(t.id) !== t || (reason === "due" && !t.on))) return skip(tz("排队时任务被关掉或删了"));
   const p = t.projectId ? projectById(t.projectId) : null;
+  // 项目删了：不悄悄退回工作区跑（「可以改项目目录里的文件」到了工作区就是能改工作区，#178-7）
+  if (t.projectId && !p) {
+    skip(tz("任务所在的项目已经删掉了：编辑任务重新选个项目"));
+    if (!trial) note(t, tz("定时任务已跳过"), tz("「{n}」所在的项目已经删掉了：编辑任务重新选个项目", { n: t.name }), null, false);
+    return;
+  }
+  // 接着同一个对话、可那个对话已经删了：--resume 必失败（每次到点都失败、重试也一样，#173-3）。
+  // 放下它，这次新开一个；任务详情里标出来
+  if (!trial && t.session === "same" && t.lastSid && !findSessionFile(t.lastSid)) {
+    log(`⏰ 定时任务「${t.name}」接着的对话 ${t.lastSid} 已不在，这次新开一个`);
+    t.lostSid = t.lastSid; t.lastSid = null; save();
+  }
   const perm = t.perm === "proj" ? { permissionMode: "acceptEdits" }
     : t.perm === "custom" ? { permissionMode: "default", allowedTools: capList(String(t.tools || "").split(/[,，\n]/).map((x) => x.trim()).filter(Boolean), 200, 512, 8192) }
     : { permissionMode: "default", disallowedTools: ["Edit", "Write", "MultiEdit", "NotebookEdit"] };
@@ -309,6 +321,13 @@ START_GUARDS.push((q) => {
   return false;
 });
 
+// 会话进了回收站：接着它的任务放下 lastSid，详情里标「原来的对话已删除」，下一次新开（#173-3）
+TRASH_HOOKS.push((id) => {
+  let n = 0;
+  for (const t of DB.tasks) if (t.lastSid === id) { t.lostSid = id; t.lastSid = null; n++; }
+  if (n) { save(); publish({ type: "sched", op: "edit" }); }
+});
+
 // 一轮结束：记运行记录、改会话名、通知、重试
 END_HOOKS.push((run, f) => {
   if (!run.sched) return;
@@ -333,22 +352,25 @@ END_HOOKS.push((run, f) => {
     // 试跑是新对话：用带时间的名字，也不写回任务的 lastSid（#119-4）
     NAMES[sid] = t.session === "same" && !ctx.trial ? t.name : `${t.name} · ${stamp}`; saveNames();
     if (!DB.sids.includes(sid)) DB.sids.push(sid);
-    if (t.session === "same" && !ctx.trial) t.lastSid = sid;
+    if (t.session === "same" && !ctx.trial) { t.lastSid = sid; delete t.lostSid; }
   }
   if (ctx.trial) { note(t, tz("试跑完成"), msg, sid, st === "ok"); return; }
   // 这次成功了：之前失败排的 2 分钟重试作废，别再重复跑一遍（手动/计划成功都算）
   if (st === "ok") cancelRetry(t.id);
   spend(ctx.startedAt, cost);   // 每日预算的独立日桶（#119-3）
-  addRun({ taskId: t.id, at: ctx.startedAt, st, msg: msg.slice(0, 300), full: text.slice(0, 2000), cost, dur, sid, attempt: ctx.attempt });
+  // 不存成对话：这次的会话随后进回收站。运行记录和通知就别再指向它了（点了只会 404，#173-1）；完整结果看 full（#173-2）。
+  // 接着同一个对话的不回收：下一次还要接着它，回收了就 --resume 失败（#173-3）
+  const drop = !!sid && t.saveSession === false && st === "ok" && t.session !== "same";
+  addRun({ taskId: t.id, at: ctx.startedAt, st, msg: msg.slice(0, 300), full: text.slice(0, 2000), cost, dur, sid: drop ? null : sid, attempt: ctx.attempt });
   t.runsDone = (t.runsDone || 0) + 1;
   if (t.until?.kind === "count" && t.runsDone >= (+t.until.count || 1)) t.on = false;
   if (t.freq?.kind === "once") t.on = false;
   refreshNext(t); save();
-  if (sid && t.saveSession === false && st === "ok") { try { trashSession(sid); } catch {} }
+  if (drop) { try { trashSession(sid); } catch {} }
   // 通知：每次 / 只在失败时 / 只在有发现时（回复不是那句固定的话）/ 不通知
   const found = !t.quiet || text.replace(/[\s。.!！]/g, "") !== String(t.quiet).replace(/[\s。.!！]/g, "");
   const want = t.notify === "none" ? false : t.notify === "fail" ? st !== "ok" : t.notify === "found" ? (st !== "ok" || found) : true;
-  if (want) note(t, st === "ok" ? tz("定时任务完成：{n}", { n: t.name }) : tz("定时任务没成：{n}", { n: t.name }), msg, sid, st === "ok");
+  if (want) note(t, st === "ok" ? tz("定时任务完成：{n}", { n: t.name }) : tz("定时任务没成：{n}", { n: t.name }), msg, drop ? null : sid, st === "ok");
   // 超了花费上限不重试：重试就是再花一遍（#98 03-010）
   if (st === "err" && !over && ctx.attempt < (+t.retry || 0)) {
     clearTimeout(RETRY.get(t.id));
@@ -499,7 +521,11 @@ export async function routeSched(req, res, u, p) {
   const t = byId(dec(m[1]));
   if (!t) return sendJson(res, 404, { error: tz("任务不存在") });
   const sub = m[2] || "";
-  if (!sub && req.method === "GET") return sendJson(res, 200, { task: summary(t), runs: RUNLOG.filter((r) => r.taskId === t.id).slice(-100).reverse().map(({ full, ...r }) => r), running: runningNow().some((x) => x.taskId === t.id) });
+  if (!sub && req.method === "GET") {
+    const mine = RUNLOG.filter((r) => r.taskId === t.id);
+    // runsTotal：界面只拿到最近 100 次，据此说「只列出最近 100 次」（#178-3）
+    return sendJson(res, 200, { task: summary(t), runs: mine.slice(-100).reverse().map(({ full, ...r }) => (r.sid ? r : { ...r, full })), runsTotal: mine.length, running: runningNow().some((x) => x.taskId === t.id) });
+  }
   if (!sub && req.method === "PATCH") {
     const b = await body();
     try { clean(b, {}); } catch (e) { return sendJson(res, 400, { error: e.message }); }
@@ -510,6 +536,8 @@ export async function routeSched(req, res, u, p) {
     return sendJson(res, 200, { ok: true, task: summary(t) });
   }
   if (!sub && req.method === "DELETE") {
+    // 正在跑：删了的话这一次的记录、命名、通知、不存对话的回收都没人做了（#178-8）
+    if (runningNow().some((x) => x.taskId === t.id)) return sendJson(res, 409, { error: tz("任务正在跑：等它跑完，或先在对话里停掉，再删") });
     cancelRetry(t.id);
     DB.tasks = DB.tasks.filter((x) => x.id !== t.id); DB.missed = DB.missed.filter((x) => x.taskId !== t.id); save();
     log(`⏰ 删除定时任务「${t.name}」`);

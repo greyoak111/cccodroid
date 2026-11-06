@@ -166,21 +166,36 @@
     statStop();
     statEl.textContent = statLast[view.sessionId] || "";   // 正在跑的话，补发的 run_start 会接着转成实时
     pickViewRun();                     // 换了会话：「本会话在不在跑」要重新算
+    renderRunStrip(); renderPermBar(); // 后台任务条、权限条也按新算出来的这一轮重画：网关不可达时 hello 迟迟不来，不能一直挂着上一个会话的（#178-2）
     renderQueue();                     // 排队条也换成这个会话的：不然看着是 A 的，点清除却删 B 的（审查 #51 第2项）
     paintProjChip();
     syncInterject();
     saveUiState();
   }
 
+  /** 按会话号去打开、那个会话却不在了：在回收站的给「恢复」，彻底没了的说清楚——不再悄悄变成空白新对话（#173）。
+   *  任务运行记录、完成提示、原生通知、用量榜、档号、书签、项目详情都走 openSession，在这里统一兜住 */
+  function goneNotice(id, trashed) {
+    if (!trashed) return toast(t("这个会话已经不在了（删掉了或清过数据）"), true);
+    toastAct(t("这个会话在回收站里"), t("恢复"), () => restoreAndOpen(id));
+  }
+  async function restoreAndOpen(id) {
+    const r = await post("/api/trash/restore", { ids: [id] }).catch((e) => ({ failed: [{ error: e.message }] }));
+    if (r && r.failed && r.failed.length) return toast(t("恢复失败：{msg}", { msg: r.failed[0].error === "exists" ? t("同名会话已存在") : r.failed[0].error }), true);
+    toast(t("已恢复")); loadSessions(); lineageDirty();
+    openSession(id);
+  }
   /** 打开某个会话（null = 新会话）。重连事件流：网关会把正在跑的那一轮从头重放过来。
-   *  anchor：落在某一章开头（脉络里点站 / 章标题；压缩消息的 uuid，第一章是 "start"） */
-  function openSession(id, jumpQ, anchor) {
+   *  anchor：落在某一章开头（脉络里点站 / 章标题；压缩消息的 uuid，第一章是 "start"）
+   *  opts.keepPage：不收起整页（网关那边删了正开着的会话，人可能正在项目页里） */
+  function openSession(id, jumpQ, anchor, opts = {}) {
+    view.userOpen = id || null;   // 用户点开的（不是启动时按记着的会话号接回的）：打不开要说一声
     if (id !== view.sessionId) saveLastRead();   // 切走前记下读到哪（在底部就作废）
     if ((id || null) !== view.sessionId) {
       draftSwap(view.sessionId, id);   // 输入框、附件栏换成这个会话自己的
       OV.closeAll();                   // 型号面板、回退确认这类浮层是上一个会话的：开着就会把选择写进新会话（#174-2）
     }
-    closePage();
+    if (!opts.keepPage) closePage();
     resetView(id);
     if (!id) showWelcome();   // 新会话当场画首屏，不等重连回来——中间空着那一下就是闪
     view.jumpQ = id && jumpQ ? jumpQ : "";   // 从搜索结果点进来：历史加载完后跳到命中的那条
@@ -293,7 +308,8 @@
     if (anchor) { q.set("anchor", aObj ? aObj.uuid : anchor); if (aObj && aObj.off > 0) q.set("off", String(aObj.off)); }
     if (initial) loadMarks();
     // 重连续不上（resume=false）时接着原来那一段读：以前 initial 分支吃掉了 after，读回的是最新一页（审查 #48 S08-02 / #49 P2-5）
-    if (resume != null) q.set("after", String(resume));
+    // 首屏要目标进度和任务清单：resetView 刚把它们清掉，重连续读那一页不带的话进度条和清单就没了（#178-1）
+    if (resume != null) { q.set("after", String(resume)); q.set("meta", "1"); }
     else if (!initial) q.set("before", String(before));
     const sent = Date.now();
     const ex = fwd ? windowExclude() : liveExclude();
@@ -305,7 +321,8 @@
       if (gen !== view.gen) return;
       view.loading = false;
       olderEl.textContent = t("加载更早的消息");
-      if (anchor && e.status === 404) {
+      // 只有「会话在、那个位置没了」才退回最新；会话本身不在了走下面（以前先误报「没找到这一章」再重试一遍，#173-6）
+      if (anchor && e.status === 404 && (!e.body || e.body.error === "anchor not found")) {
         // 那一章 / 书签的位置找不到了（记录被改写过、回退截掉了）：退回最新；「上次读到」找不到就悄悄打开到最新
         if (!aObj || !aObj.quiet) toast(aObj ? t("没找到书签的位置，已打开到最新") : t("没找到这一章的位置，已打开到最新"), true);
         return loadOlder(true);
@@ -315,7 +332,11 @@
         view.sessionId = null;
         view.title = ""; paintTitle(); renderSessions();   // 标题、侧栏高亮也别还挂着那个会话（审查 #48 S08-04）
         saveUiState();
+        // 中断记录指着的会话没了：那张「继续」卡在这里点下去会在空会话里续，上下文全丢——收掉，回欢迎页（#173-5）
+        $("intr-card")?.remove();
         if (!liveEl.childElementCount) showWelcome();
+        if (view.userOpen === id) goneNotice(id, !!(e.body && e.body.trashed));
+        view.userOpen = null;
       } else toast(t("读取历史失败：{msg}", { msg: e.message }), true);
       return;
     }
@@ -626,6 +647,16 @@
       case "state": return applyState(ev);
       case "tamper": return showTamper(ev.tamper);
       case "archive": return loadSessions();   // 建档 / 归入杂项：标题、档号、分组跟着变
+      // 会话进了回收站（网关那边删的：项目连目录删、定时任务不存对话、别的窗口）：正开着它就退回新对话，
+      // 别让下一条消息带着它的会话号去 --resume 失败（#173-4）。整页不收，人可能正在项目页里
+      case "session_gone":
+        PJ.detail = null;
+        loadSessions();
+        if (ev.id && ev.id === view.sessionId) {
+          openSession(null, null, null, { keepPage: true });
+          toastAct(t("这个会话已移进回收站"), t("恢复"), () => restoreAndOpen(ev.id));
+        }
+        return;
       case "sched": case "sched_note": return onSchedEvent(ev);
       case "sync": return endReplay();
       case "run_start": {

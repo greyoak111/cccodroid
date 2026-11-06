@@ -2789,3 +2789,22 @@
 2789	Devuelto al borrador de la sesión original
 2790	Eliminado en la sesión original
 2791	Cambiaste de sesión, así que no se hizo este retroceso
+2792	Esta conversación ya no existe (eliminada o datos borrados)
+2793	Esta conversación se movió a la papelera
+2794	Últimas {n} de {m}
+2795	Se muestran las primeras {n} de {m} coincidencias. Prueba con una palabra más específica.
+2796	No se listan {n} conversaciones más antiguas. Búscalas por título o contenido.
+2797	No se pudo actualizar la lista (se muestra la anterior): {msg}
+2798	No se pudo cargar la lista de conversaciones: {msg}
+2799	No se pudo cargar la papelera: {msg}
+2800	{p} frente al mismo periodo del mes pasado
+2801	(conversación antigua o eliminada)
+2802	Proyecto eliminado · no se ejecutará
+2803	Proyecto eliminado: las ejecuciones se omitirán. Edita la tarea y vuelve a elegir un proyecto.
+2804	La conversación que continuaba se eliminó; la próxima ejecución empezará una nueva
+2805	Se muestran las últimas {n} de {m} ejecuciones
+2806	¿Eliminar la tarea programada «{n}»? Su historial de ejecuciones dejará de verse en la app; las conversaciones guardadas no se ven afectadas.
+2807	Los cambios no están guardados: la prueba usa la versión guardada. Pulsa «Guardar» primero.
+2808	El proyecto de la tarea se eliminó: edita la tarea y elige un proyecto
+2809	El proyecto de «{n}» se eliminó: edita la tarea y elige un proyecto
+2810	La tarea se está ejecutando: espera a que termine o detenla en su conversación y luego elimínala

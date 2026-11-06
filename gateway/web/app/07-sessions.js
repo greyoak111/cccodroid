@@ -6,10 +6,16 @@
       const r = await api("/api/sessions");
       if (!ok()) return true;
       state.sessions = r.sessions || [];
+      state.sessTotal = r.total || state.sessions.length;
+      state.sessErr = "";
       if (sess.q.trim()) resessSearch(); else renderSessions();
       lineageDirty();
       return true;
-    } catch (e) { return e; }
+    } catch (e) {
+      // 读失败和「真的没有」分开：空着的说没读到、给重试；有旧列表的标出没刷新上（#178-4）
+      if (ok()) { state.sessErr = e.message || String(e); renderSessions(); }
+      return e;
+    }
   }
 
   // 会话页三种视图：普通列表 / 多选（导出、批量删除）/ 回收站
@@ -81,7 +87,7 @@
     const q = sess.q.trim();
     if (!q && !state.sessions.length) {
       sess.visible = [];
-      box.innerHTML = '<div class="tiny">' + t("还没有历史会话。") + '</div>';
+      box.innerHTML = state.sessErr ? sessErrRow() : '<div class="tiny">' + t("还没有历史会话。") + '</div>';
       return;
     }
     // 空闲（答完了、只剩后台任务在跑）的不算「生成中」，单独标出来
@@ -103,7 +109,9 @@
     $("sess-flt-wrap").classList.toggle("hidden", $("sess-flt").children.length < 2);
     const keep = FLT[sess.flt][1];
     const nLive = state.sessions.filter(isLive).length;
-    setPageSub("sessions", t("{n} 个", { n: state.sessions.length }) + (nLive ? " · " + t("{n} 个在跑", { n: nLive }) : ""));
+    // 网关只给最近 150 个（加置顶）：数字和列表范围对得上，说清还有更早的（#178-3）
+    const more = Math.max(0, (state.sessTotal || 0) - state.sessions.length);
+    setPageSub("sessions", (more ? t("最近 {n} 个，共 {m} 个", { n: state.sessions.length, m: state.sessTotal }) : t("{n} 个", { n: state.sessions.length })) + (nLive ? " · " + t("{n} 个在跑", { n: nLive }) : ""));
     // 一行一个：标题 + 等宽的时间/大小；点整行打开，「⋯」里是置顶、改名、导出、删除（和侧栏长按同一份菜单）
     const item = (s) => {
       const st = askSids.has(s.id) ? `<span class="badge warn">${t("等你确认")}</span>` : liveSids.has(s.id) ? `<span class="badge cur">${t("生成中")}</span>` : idleSids.has(s.id) ? `<span class="badge">${t("后台任务在跑")}</span>` : intrSids.has(s.id) ? `<span class="badge warn">${t("已中断")}</span>` : "";
@@ -129,7 +137,8 @@
       const list = (sess.hits || state.sessions.filter((s) => s.title.toLowerCase().includes(q.toLowerCase()))).filter((h) => keep(state.sessions.find((x) => x.id === h.id) || h));
       sess.visible = list.map((x) => x.id); renderSessBar();
       box.innerHTML = (sess.hits ? "" : `<div class="tiny">${t("正在搜索对话内容…")}</div>`)
-        + (list.length ? list.map(item).join("") : sess.hits ? `<div class="tiny">${t("没有找到包含「{q}」的会话。", { q: esc(q) })}</div>` : "");
+        + (list.length ? list.map(item).join("") : sess.hits ? `<div class="tiny">${t("没有找到包含「{q}」的会话。", { q: esc(q) })}</div>` : "")
+        + (sess.hits && sess.hitsTotal > sess.hits.length ? `<div class="tiny">${t("只显示前 {n} 个，一共命中 {m} 个，换个更具体的词试试", { n: sess.hits.length, m: sess.hitsTotal })}</div>` : "");
       return;
     }
     // 分组：置顶在最前，其余按时间；每组标题可点击折叠，收起时仍露出当前会话
@@ -153,7 +162,8 @@
       html += `<div class="sess-grp ${g.key === "pin" ? "pin" : ""} ${folded ? "folded" : ""}" data-g="${esc(g.key)}"><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>${esc(g.label)} · ${g.list.length}${g.key === "misc" && !picking ? `<button class="grp-act" data-misc-clear>${esc(t("全部移到回收站"))}</button>` : ""}</div>`;
       html += (folded ? g.list.filter((s) => s.id === view.sessionId) : g.list).map(item).join("");
     }
-    box.innerHTML = html;
+    if (more) html += `<div class="tiny">${t("更早的 {n} 个没列出来，搜索标题或内容能找到", { n: more })}</div>`;
+    box.innerHTML = (state.sessErr ? sessErrRow(true) : "") + html;
   }
 
   // 杂项一键进回收站：在跑的跳过；回收站里照常保留几天，可恢复
@@ -181,7 +191,7 @@
     sessQT = setTimeout(async () => {
       try {
         const r = await api("/api/sessions/search?q=" + encodeURIComponent(q));
-        if (n === sessQN && sess.q.trim() === q) { sess.hits = r.results || []; renderSessions(); }
+        if (n === sessQN && sess.q.trim() === q) { sess.hits = r.results || []; sess.hitsTotal = r.total || sess.hits.length; renderSessions(); }
       } catch (err) { if (n === sessQN) { sess.hits = []; renderSessions(); toast(err.message, true); } }
     }, 300);
   });
@@ -216,6 +226,12 @@
     bar.classList.toggle("hidden", sess.mode === "list");
   }
 
+  /** 会话列表没读到：说原因、给重试；stale = 下面还留着上次的列表 */
+  function sessErrRow(stale) {
+    return `<div class="tiny err">${esc(stale ? t("列表没刷新上（下面是上次的）：{msg}", { msg: state.sessErr }) : t("会话列表没读到：{msg}", { msg: state.sessErr }))}
+      <button class="btn ghost sm" data-sess-retry>${esc(t("重试"))}</button></div>`;
+  }
+
   /** 批量导出 / 删除只作用于眼前看得见的已选项：换了筛选、搜索词，或刷新后会话已不在了，之前勾的不跟着算（#176-2） */
   function selShown() {
     const vis = new Set(sess.visible || state.sessions.map((x) => x.id));
@@ -223,8 +239,10 @@
   }
 
   function renderTrash(box) {
-    if (!sess.trash.length) { box.innerHTML = '<div class="tiny">' + t("回收站是空的。") + '</div>'; return; }
-    box.innerHTML = sess.trash.map((m) => `
+    // 没读到和真的空分开说（#178-5）
+    const err = sess.trashErr ? `<div class="tiny err">${esc(t("回收站没读到：{msg}", { msg: sess.trashErr }))} <button class="btn ghost sm" data-sess-retry>${esc(t("重试"))}</button></div>` : "";
+    if (!sess.trash.length) { box.innerHTML = err || '<div class="tiny">' + t("回收站是空的。") + '</div>'; return; }
+    box.innerHTML = err + sess.trash.map((m) => `
       <div class="item" data-id="${esc(m.id)}">
         <div class="it-title">${esc(m.title || m.id)}</div>
         <div class="it-meta">
@@ -238,12 +256,15 @@
       </div>`).join("");
   }
 
+  /** 成功返回 true，失败返回错误（同 loadSessions，「刷新列表」在回收站里刷的是回收站） */
   async function loadTrash() {
+    let ret = true;
     try {
       const r = await api("/api/trash");
-      sess.trash = r.items || []; sess.keepDays = r.keepDays || 30;
-    } catch (e) { toast(e.message, true); }
+      sess.trash = r.items || []; sess.keepDays = r.keepDays || 30; sess.trashErr = "";
+    } catch (e) { sess.trashErr = e.message || String(e); ret = e; }
     renderSessions();
+    return ret;
   }
 
   $("btn-sess-select").addEventListener("click", () => {
@@ -338,6 +359,7 @@
 
   $("session-list").addEventListener("click", async (e) => {
     if (e.target.closest("[data-misc-clear]")) return clearMisc();
+    if (e.target.closest("[data-sess-retry]")) return sess.mode === "trash" ? loadTrash() : loadSessions();
     const grp = e.target.closest(".sess-grp[data-g]");
     if (grp) {
       const k = grp.dataset.g;

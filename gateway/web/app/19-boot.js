@@ -70,7 +70,7 @@
   $("btn-close-drawer").addEventListener("click", () => { if (window.CCLayout && CCLayout.docked()) CCLayout.collapse(); closeDrawer(true); });
   drawerEl.addEventListener("click", (e) => { if (e.target === drawerEl) closeDrawer(); });
   // 刷新失败要说失败（审查 B-OBSERVED-1）
-  $("btn-refresh-sessions").addEventListener("click", async () => { const r = await loadSessions(); r === true ? toast(t("已刷新")) : toast(t("刷新失败：{msg}", { msg: r.message }), true); });
+  $("btn-refresh-sessions").addEventListener("click", async () => { const r = sess.mode === "trash" ? await loadTrash() : await loadSessions(); r === true ? toast(t("已刷新")) : toast(t("刷新失败：{msg}", { msg: r.message }), true); });
   $("btn-close-session").addEventListener("click", () => {
     closeDrawer();
     newConversation(t("已断开，下一条消息开新会话"));

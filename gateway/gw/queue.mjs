@@ -10,7 +10,7 @@ import { isLoginMode } from "./models.mjs";
 import { findSessionFile } from "./sessions.mjs";
 import { killTree, safeModePerm } from "./claude.mjs";
 import { goalCheck, tasksCheck } from "./goal.mjs";
-import { LAST_SESSION, RUNS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
+import { LAST_SESSION, RUNS, TRASH_HOOKS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { BOOT, publish } from "./bus.mjs";
 import { execIntent, pickProvider, startRun } from "./run.mjs";
@@ -115,8 +115,9 @@ export function saveRunMark() {
 // 旧版本存的是单条对象，读的时候包成列表
 const INTR_MAX = 20;
 const intrList = (v) => (Array.isArray(v) ? v : v ? [v] : []).filter((e) => e && typeof e === "object" && e.id).slice(-INTR_MAX);
+// 读的时候顺手丢掉会话已经不在了的（老版本回收时没清）：没建会话的照留
 export let INTERRUPTED = (() => {
-  try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))); } catch {}
+  try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))).filter((e) => { try { return !e.sessionId || !!findSessionFile(e.sessionId); } catch { return true; } }); } catch {}
   return [];
 })();
 export function setInterrupted(list) {
@@ -134,6 +135,13 @@ export function clearInterrupted(sid) {
   const left = INTERRUPTED.filter((e) => (e.sessionId || "") !== (sid || ""));
   if (left.length !== INTERRUPTED.length) setInterrupted(left);
 }
+// 会话进了回收站：它的中断记录没用了（不然启动时还会拿它当目标会话打开、挂一张「继续」卡，#173-5）；
+// 正开着它的界面收到 session_gone 自己退回新对话（服务端删的：项目连目录删、定时任务不存对话、别的窗口，#173-4）
+TRASH_HOOKS.push((id) => {
+  clearInterrupted(id);
+  publish({ type: "session_gone", id });
+  publishState();
+});
 /** 启动时调一次：上一任留下的标记 → 中断记录 + 挂起的队列 */
 export function recoverRunMark() {
   let m;

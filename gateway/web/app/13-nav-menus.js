@@ -370,7 +370,7 @@
             + (shut ? "" : l.map(row).join("") + (k === "older" && more ? `<button class="sr-all" data-all>${esc(t("全部对话"))}</button>` : ""));
         }).join("")
         + `<div class="sr-hint">${esc(t("长按会话：置顶、重命名、导出、删除"))}</div>`
-      : `<div class="sr-empty">${esc(t("还没有历史会话。"))}</div>`);
+      : `<div class="sr-empty">${esc(state.sessErr ? t("会话列表没读到：{msg}", { msg: state.sessErr }) : t("还没有历史会话。"))}</div>`);
   }
   $("side-scroll").addEventListener("scroll", (e) => e.target.classList.toggle("scrolled", e.target.scrollTop > 2), { passive: true });
   $("side-recent").addEventListener("click", (e) => {

@@ -3523,3 +3523,4 @@ html[data-motion="on"] .lin-prof .mo-ghost .mo-st,html[data-motion="on"] .lin-pr
 #bridge-config-panel .bc-pending{color:var(--fg2);font-weight:500}
 html[data-skin="goucheng"] #bridge-config-panel .bc-card{box-shadow:4px 4px 0 var(--gc-hard)}
 @media (max-width:420px){#bridge-config-panel .bc-card{padding:18px}#bridge-config-panel h2{font-size:19px}#bridge-config-panel .bc-summary > div{gap:10px}}
+.sc-full{margin-top:6px;font-size:13px;white-space:normal;overflow-wrap:anywhere}
