@@ -42,6 +42,9 @@ public class A11y extends AccessibilityService {
     static volatile A11y self;
     private static final Object LOCK = new Object();
     private static final List<AccessibilityNodeInfo> nodes = new ArrayList<>();
+    // 每个编号读屏那一刻长什么样（类名 + 文字 + 描述 + 资源名）。列表回收时同一个节点对象会换上别的内容，
+    // refresh() 照样成功、编号照样有效，但已经不是模型看到的那个元素了：动作前比一下，对不上就不动手
+    private static final List<String> sigs = new ArrayList<>();
     private static volatile long lastUse;
     private static volatile long lastEvt;
     private static volatile int evts;
@@ -58,7 +61,7 @@ public class A11y extends AccessibilityService {
 
     @Override public boolean onUnbind(android.content.Intent i) {
         self = null;
-        synchronized (LOCK) { nodes.clear(); }
+        synchronized (LOCK) { nodes.clear(); sigs.clear(); }
         Log.i(TAG, "无障碍服务已断开");
         return super.onUnbind(i);
     }
@@ -139,7 +142,7 @@ public class A11y extends AccessibilityService {
             if (w.isActive() && w.getTitle() != null) { r.put("window", w.getTitle().toString()); break; }
         StringBuilder out = new StringBuilder();
         synchronized (LOCK) {
-            nodes.clear();
+            nodes.clear(); sigs.clear();
             walk(root, 0, all, out);
         }
         // 网页（WebView / 浏览器）在无障碍刚打开时还没生成内容树，只露出一个空壳：等一下再读一次
@@ -147,7 +150,7 @@ public class A11y extends AccessibilityService {
             Thread.sleep(800);
             root.refresh();
             out.setLength(0);
-            synchronized (LOCK) { nodes.clear(); walk(root, 0, all, out); }
+            synchronized (LOCK) { nodes.clear(); sigs.clear(); walk(root, 0, all, out); }
         }
         Rect sc = new Rect(); root.getBoundsInScreen(sc);
         r.put("screen", sc.width() + "x" + sc.height());
@@ -172,6 +175,7 @@ public class A11y extends AccessibilityService {
         if (useful) {
             int id = nodes.size();
             nodes.add(n);
+            sigs.add(sig(n));
             Rect b = new Rect(); n.getBoundsInScreen(b);
             for (int i = Math.min(depth, 12); i > 0; i--) out.append("  ");
             out.append('[').append(id).append("] ");
@@ -196,16 +200,33 @@ public class A11y extends AccessibilityService {
         for (int i = 0; i < n.getChildCount(); i++) walk(n.getChild(i), nextDepth, all, out);
     }
 
+    /** 编号的指纹：模型从屏幕树里认这个元素靠的那几样。输入框的文字会随输入变，不算；密码框的内容本来就不读 */
+    private static String sig(AccessibilityNodeInfo n) {
+        boolean pw = n.isPassword();
+        CharSequence t = pw || n.isEditable() ? null : n.getText(), d = pw ? null : n.getContentDescription();
+        return n.getClassName() + "\u0001" + t + "\u0001" + d + "\u0001" + n.getViewIdResourceName();
+    }
+
     private static String clip(CharSequence c) {
-        String s = c.toString().replace('\n', ' ');
+        // 控制字符（应用里偶尔混着 \u0000、方向控制符之类）不交给模型，换成空格
+        String s = c.toString().replaceAll("[\\p{Cc}\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]", " ");
         return s.length() > 160 ? s.substring(0, 160) + "…" : s;
     }
 
+    /** 上一次 node() 为什么没给出节点：编号已经不在 / 元素换了内容 */
+    private static String miss = "";
+
     private static AccessibilityNodeInfo node(int id) {
         synchronized (LOCK) {
+            miss = Tr.t("找不到这个编号的元素：界面变了，先重新 screen_read");
             if (id < 0 || id >= nodes.size()) return null;
             AccessibilityNodeInfo n = nodes.get(id);
-            return n.refresh() ? n : null;
+            if (!n.refresh()) return null;
+            if (!sig(n).equals(sigs.get(id))) {
+                miss = Tr.t("这个编号上的元素已经换了内容（列表滚动或刷新过），没有动手：按新屏幕重新选");
+                return null;
+            }
+            return n;
         }
     }
 
@@ -262,7 +283,7 @@ public class A11y extends AccessibilityService {
         boolean lng = a.optBoolean("long", false);
         if (a.has("node")) {
             AccessibilityNodeInfo n = node(a.getInt("node"));
-            if (n == null) return fail(Tr.t("找不到这个编号的元素：界面变了，先重新 screen_read"));
+            if (n == null) return fail(miss);
             int act = lng ? AccessibilityNodeInfo.ACTION_LONG_CLICK : AccessibilityNodeInfo.ACTION_CLICK;
             // 文字本身不可点时，往上找第一个可点的父节点（列表项常见）
             for (AccessibilityNodeInfo p = n; p != null; p = p.getParent())
@@ -279,7 +300,7 @@ public class A11y extends AccessibilityService {
         touch();
         if (a.has("node")) {
             AccessibilityNodeInfo n = node(a.getInt("node"));
-            if (n == null) return fail(Tr.t("找不到这个编号的元素：界面变了，先重新 screen_read"));
+            if (n == null) return fail(miss);
             boolean back = "backward".equals(a.optString("direction", "forward"));
             int act = back ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD;
             for (AccessibilityNodeInfo p = n; p != null; p = p.getParent())
@@ -293,7 +314,7 @@ public class A11y extends AccessibilityService {
     static JSONObject type(JSONObject a) throws Exception {
         touch();
         AccessibilityNodeInfo n = null;
-        if (a.has("node")) n = node(a.getInt("node"));
+        if (a.has("node")) { n = node(a.getInt("node")); if (n == null) return fail(miss); }
         else {
             AccessibilityNodeInfo root = self.getRootInActiveWindow();
             if (root != null) n = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
