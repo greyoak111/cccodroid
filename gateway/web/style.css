@@ -1200,7 +1200,7 @@ html[dir="rtl"] .field select{background-position:12px 50%,17px 50%}   /* 从右
 .bubble > .run-phase{display:inline-block;margin-left:10px;vertical-align:middle}
 .bubble > .dots{display:inline-block;vertical-align:middle}
 .run-phase.slow{color:var(--warn)}
-.run-phase.bad{color:var(--err)}
+.run-phase.bad{color:var(--err);white-space:normal;overflow-wrap:anywhere}
 .bill{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
 .bill-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .bill-big{margin:4px 0 2px}

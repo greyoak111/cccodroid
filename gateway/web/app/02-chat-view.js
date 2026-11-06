@@ -369,6 +369,11 @@
 
   function summarizeTool(name, input) {
     if (!input) return "";
+    // Bash 带了说明（模型写的「停止抓包并统计目的地址」）：标题用说明，命令本身展开卡片在参数里看（群反馈 11-06）
+    if ((name === "Bash" || name === "PowerShell") && typeof input.description === "string" && input.description.trim()) {
+      const d = input.description.trim();
+      return d.length > 90 ? d.slice(0, 90) + "…" : d;
+    }
     const v = input.command || input.file_path || input.path || input.pattern ||
               input.url || input.prompt || input.description || input.skill || "";
     const s = typeof v === "string" ? v : JSON.stringify(v);
@@ -404,7 +409,7 @@
     card.className = "tool";
     card.innerHTML =
       `<div class="tool-head"><span class="chev">▶</span><span class="tool-name">${esc(name)}</span>` +
-      `<span class="tool-arg">${esc(summarizeTool(name, input))}</span>` +
+      `<span class="tool-arg"${input && typeof input.command === "string" ? ` title="${esc(input.command.slice(0, 500))}"` : ""}>${esc(summarizeTool(name, input))}</span>` +
       (input && /^\//.test(input.file_path || input.notebook_path || "") ? `<a class="fpath tool-open" href="#" data-path="${esc(input.file_path || input.notebook_path)}" title="${t("在查看器中打开")}">↗</a>` : "") +
       `<span class="tool-state ${live ? "run" : "ok"}">${live ? t("运行中") : "—"}</span></div>` +
       `<div class="tool-body"></div>`;

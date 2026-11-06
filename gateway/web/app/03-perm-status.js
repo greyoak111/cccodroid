@@ -673,7 +673,11 @@
       switch (phEv.phase) {
         case "connect": return t("连接中") + sec;
         case "wait":    return t("已连上，等待输出") + sec;
-        case "retry":   return t("连接出错，第 {a}/{m} 次重试", { a: phEv.attempt || 1, m: phEv.max || "?" });
+        // 出错原因第一次重试就写出来（手机上看不到悬停提示），不用等十次都失败（群反馈 11-06）
+        case "retry": {
+          const why = [phEv.status, phEv.error].filter(Boolean).join(" · ");
+          return t("连接出错，第 {a}/{m} 次重试", { a: phEv.attempt || 1, m: phEv.max || "?" }) + (why ? "：" + (why.length > 120 ? why.slice(0, 120) + "…" : why) : "");
+        }
         case "think":   return t("思考中") + sec;
         // 官方接口默认把工具参数攒成大块才下发（不像 DeepSeek 逐字流），字数常常一下跳到底就不动了；
         // 后面跟上这一步的用时，不动的时候也看得出没卡住
