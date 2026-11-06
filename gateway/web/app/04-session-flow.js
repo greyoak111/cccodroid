@@ -60,12 +60,16 @@
   }
   /** 整轮重放到头（sync）：攒着的正文一次画完、用量落定、遮着的实时区揭开，最后统一定位一次 */
   function endReplay() {
-    busReplay = false;
     clearTimeout(endReplay.guard); clearTimeout(endReplay.guard2);
+    // 攒着的正文还在重放状态下补画：每块 paint 里的 scrollDown 合成一次 rAF，不是每块一次同步测量（#179：
+    // 先关重放再补画，80 块就是 81 次「写 DOM → 读 scrollHeight」）。flushNow 不会再往集合里加
     for (const f of REPLAY_FLUSH) f();
     REPLAY_FLUSH.clear();
+    busReplay = false;
     if (replayCtx) { const [u, tot] = replayCtx; replayCtx = null; liveCtx(u, tot); }
     liveEl.classList.remove("replaying");
+    // 补画排下的那次 rAF 不要了：下面这次同步定位就到底
+    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = 0; }
     scrollDown();
   }
   function updateCtx(used, total) {
