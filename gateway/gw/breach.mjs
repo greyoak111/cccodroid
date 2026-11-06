@@ -139,17 +139,19 @@ const REVOKE = /除了|除非|照做|照办|执行|参照|参见|比照|依(?:�
 const count = (s, ch) => s.split(ch).length - 1;
 // 行首的空白、引用（>）、列表（- * + 数字. 数字)）、标题（#）记号不算正文：这些开头的标签仍是行首标签
 const LINE_MARK = /^\s*(?:#{1,6}|[-*+>]|\d+[.)])\s*/;
-/** 句中单个标签：前面同一行已有正文、且同一行没有同名的另一半标签——是被谈论的标签名，不是包住一段话的冒充（简报③补充，二轮复核 11-06） */
-const midTag = (line, idx, m0) => {
+/** 句中单个标签：前面同一行已有正文、且全文（反引号/围栏外）没有同名的另一半标签——是被谈论的标签名，不是包住一段话的冒充（简报③补充，二轮复核 11-06；成对改看全文，三轮复核 11-06） */
+const midTag = (line, idx, m0, whole) => {
   const tag = m0.replace(/^\s+/, "");
   if (!/^[<＜]/.test(tag)) return false;
   let p = line.slice(0, idx);
   for (;;) { const m = LINE_MARK.exec(p); if (!m || !m[0].length) break; p = p.slice(m[0].length); }
   if (!/\S/.test(p)) return false;
   const name = (tag.match(/[a-z][\w-]*/i) || [""])[0].toLowerCase();
-  const rest = line.slice(0, idx) + line.slice(idx + tag.length);
-  const re = new RegExp("[<＜]\\/?\\s*" + name.replace(/-/g, "\\-") + "\\b", "i");
-  return !re.test(rest);
+  const esc = name.replace(/-/g, "\\-");
+  // 全文里同名标签开、关两半都出现：是包住一段话的冒充（跨行、各行前加字也算），仍强
+  const open = new RegExp("[<＜]\\s*" + esc + "\\b", "i"), close = new RegExp("[<＜]\\/\\s*" + esc + "\\b", "i");
+  const bare = whole.replace(/^[ \t]*(```|~~~)[\s\S]*?^[ \t]*\1/gm, "").replace(/`[^`\n]*`/g, "");
+  return !(open.test(bare) && close.test(bare));
 };
 /** 位置 idx 是否落在行内代码（反引号）里：前面反引号数为奇数 */
 const inBacktick = (line, idx) => {
@@ -267,7 +269,7 @@ export function scanText(text) {
           const line = fromLines[li];
           const rel = { index: m.index - fromStart[li], 0: m[0] };
           // spoof 强规则：反引号/代码围栏里被谈论的标签名降为弱特征，裸标签仍强（简报③）
-          if (cat === "spoof" && isStrong && (inBacktick(line, rel.index) || getFenceIn()[li] || midTag(line, rel.index, m[0]))) { if (!m[0].length) g.lastIndex++; continue; }
+          if (cat === "spoof" && isStrong && (inBacktick(line, rel.index) || getFenceIn()[li] || midTag(line, rel.index, m[0], s))) { if (!m[0].length) g.lastIndex++; continue; }
           // 命中跨了原换行（拆句攻击）就不走豁免；落在同一行内才按原行判
           const sameLine = jlineM(m.index + Math.max(m[0].length - 1, 0)) === li && rel.index + m[0].length <= line.length;
           if (sameLine && EXEMPT.has(cat) && exempt(line, rel)) { if (!m[0].length) g.lastIndex++; continue; }
@@ -321,7 +323,7 @@ export function scanText(text) {
           if (m[0].replace(/^\s+/, "").includes("\n")) continue;
           const li = jlineT(j0);
           const rel = { index: j0 - tStartT[li], 0: m[0].slice(j0 - m.index) };
-          if (inBacktick(lines[li], rel.index) || getFenceIn()[li] || midTag(lines[li], rel.index, rel[0])) { addHit(cat, false, lineOf(li), excerptOf(li, m)); continue; }
+          if (inBacktick(lines[li], rel.index) || getFenceIn()[li] || midTag(lines[li], rel.index, rel[0], s)) { addHit(cat, false, lineOf(li), excerptOf(li, m)); continue; }
           addHit(cat, true, lineOf(li), excerptOf(li, m));
           break;
         }
