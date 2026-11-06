@@ -777,10 +777,14 @@
     if (!sid && keepProj) { view.projectId = keepProj; paintProjChip(); }
     if (!sid) view.pendingMerge = keepMerge || null;
     view.runIds = keepRuns; view.cids = keepCids;
+    // 没建会话、停在启动前确认卡上的那一轮（#171）：发它的草稿页切走后 cid 对不上，哪页都认不出来，卡片也就没人看得见。
+    // 空白的新对话页把它认回来，卡片随整轮重放画出来（同 queuedInView 对恢复排队消息的兜底）
+    let adopted = false;
+    if (!sid && !keepRuns.size && !keepCids.size) for (const r of srv.runs) if (!r.sessionId && r.perms?.length) { view.runIds.add(r.id); adopted = true; }
     pickViewRun();
     renderSessions();
     if (sid) loadOlder(true);
-    else if (!(ev.run && keepRuns.has(ev.run.id))) showWelcome();
+    else if (!adopted && !(ev.run && keepRuns.has(ev.run.id))) showWelcome();
     renderInterrupted(ev.interrupted);   // resetView 清掉了 liveEl，重挂一次
     calmStatus(t("已连接"));
   }
@@ -878,7 +882,8 @@
     else if (srv.runs.some((r) => !r.idle)) setStatus(t("另有 {n} 个会话在生成", { n: srv.runs.filter((r) => !r.idle).length }), "ok");
     // 别的会话在等你确认：当前视图看不到它的卡片，状态栏和会话列表里提醒
     const elsewhere = srv.runs.filter((r) => r !== srv.run && r.perms && r.perms.length);
-    if (elsewhere.length) setStatus(t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
+    // 还没建会话的（启动前的确认卡）不在会话列表里，指到新对话页——那里会把它认回来（#171）
+    if (elsewhere.length) setStatus(elsewhere.every((r) => !r.sessionId) ? t("有个新对话在等你确认 · 点「新对话」查看") : t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
     const live = srv.runs.map((r) => (r.sessionId || "") + (r.perms && r.perms.length ? "!" : "") + (r.idle ? "~" : "")).join(",") + "|" + srv.intr.map((e) => e.sessionId || "").join(",");
     if (live !== srv.liveKey) { srv.liveKey = live; renderSessions(); }
     renderPermBar();                 // 放最后：有待确认项时状态栏要显示「等你确认」
@@ -900,19 +905,22 @@
     const b = mkMsg("sys", t("已中断"), liveEl);
     el = b.closest(".msg"); el.id = "intr-card"; el.dataset.id = it.id; el.dataset.n = String(others);
     const when = new Date(it.startedAt || it.at).toLocaleString();
-    setHtml(b, `<p>${esc(t("这一轮没跑完：App 在后台被系统结束了（{when} 开始的）。", { when }))}</p>
+    // why: card —— 启动前的确认卡没人答、超时停下的（#171）：claude 根本没起，有会话也只能「重发」，不能「继续」
+    const card = it.why === "card", cont = !!it.sessionId && !card;
+    setHtml(b, `<p>${esc(card ? t("这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。", { n: 10, when })
+        : t("这一轮没跑完：App 在后台被系统结束了（{when} 开始的）。", { when }))}</p>
       <blockquote>${esc(String(it.text || "").slice(0, 300))}</blockquote>
-      <p class="perm-sub">${esc(it.sessionId
-        ? t("已经做完的部分都在会话里。点「继续」让 Claude 从断开的地方接着做。")
+      <p class="perm-sub">${esc(card ? t("Claude 没收到这条消息。点「重发」把它放回输入框。")
+        : it.sessionId ? t("已经做完的部分都在会话里。点「继续」让 Claude 从断开的地方接着做。")
         : t("会话还没来得及建立，Claude 没收到这条消息。点「重发」把它放回输入框。"))}</p>
       ${others ? `<p class="perm-sub">${esc(t("另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。", { n: others }))}</p>` : ""}
-      <div class="perm-acts"><button class="primary" data-a="go">${esc(it.sessionId ? t("继续") : t("重发"))}</button>
+      <div class="perm-acts"><button class="primary" data-a="go">${esc(cont ? t("继续") : t("重发"))}</button>
       <button data-a="no">${esc(t("忽略"))}</button></div>`);
     b.querySelector(".perm-acts").addEventListener("click", async (e) => {
       const a = e.target.closest("button")?.dataset.a;
       if (!a) return;
       el.remove();
-      if (a === "go" && it.sessionId) return send(t("上一轮被系统中断了，请从断开的地方接着做完。"));
+      if (a === "go" && cont) return send(t("上一轮被系统中断了，请从断开的地方接着做完。"));
       if (a === "go") { inputEl.value = it.text || ""; autoGrow(); inputEl.focus(); }
       api("/api/interrupted/dismiss", { method: "POST", body: JSON.stringify({ id: it.id }) }).catch(() => {});
     });

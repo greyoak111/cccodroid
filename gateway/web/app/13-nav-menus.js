@@ -110,7 +110,7 @@
     const nav = $("side-nav"); if (!nav) return;
     const pins = navPins(), more = localStorage.getItem("cc.navMore") === "1";
     const ico = (k) => `<svg viewBox="0 0 24 24">${PAGES[k].icon}</svg>`;
-    const live = srv.runs.filter((x) => !x.idle).length;
+    const live = liveSessCount();
     const badge = (k) => k === "sessions" && live ? `<span class="nav-badge"><i></i>${esc(t("{n} 个在跑", { n: live }))}</span>` : "";
     const item = (k) => `<button class="nav-item${curPage === k || (!curPage && !setOpen && k === "sessions") ? " on" : ""}" data-page="${k}">${ico(k)}<span>${esc(t(PAGES[k].name))}</span>${badge(k)}</button>`;
     let h = pins.map(item).join("");

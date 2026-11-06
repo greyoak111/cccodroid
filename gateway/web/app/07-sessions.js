@@ -58,6 +58,9 @@
     return out + esc(text.slice(i));
   }
 
+  /** 「在跑」的会话数：侧栏角标和会话页同一口径——有会话号的轮次，生成中、只剩后台任务、等确认都算。
+   *  还没建会话的不算（会话列表里也没有它，算上就对不上，#171） */
+  function liveSessCount() { return new Set(srv.runs.map((r) => r.sessionId).filter(Boolean)).size; }
   function renderSessions() {
     renderSideRecent();
     renderSideNav();
@@ -80,7 +83,7 @@
     const intrSids = new Set((srv.intr || []).map((e) => e.sessionId).filter(Boolean));
     const picking = sess.mode === "select";
     // 筛选条（照设计稿）：全部 / 在跑 / 置顶 / 当前项目；项目功能上线后换成按项目分
-    const isLive = (s) => liveSids.has(s.id) || idleSids.has(s.id) || askSids.has(s.id);
+    const isLive = (s) => liveSids.has(s.id) || idleSids.has(s.id) || askSids.has(s.id);   // 侧栏的「N 个在跑」也按这个数（liveSessCount）
     const sids = schedSids();
     const FLT = { all: [t("全部"), () => true], live: [t("在跑"), isLive], pin: [t("置顶"), (s) => s.pinned] };
     if (PJ.list.length) { FLT.none = [t("不在项目里"), (s) => !pjOfCwd(s.cwd)]; for (const p of PJ.list) FLT["p:" + p.id] = [p.name, (s) => { const q = pjOfCwd(s.cwd); return !!q && q.id === p.id; }]; }

@@ -2781,4 +2781,7 @@ window.I18N_DICT["es"] = {
   "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。": "Esta versión de Claude Code aún no tiene el manifiesto oficial firmado, así que este turno no se inició. Se está volviendo a verificar en línea: envía de nuevo en un par de minutos. Si sigue fallando, reinstálala desde Ajustes → Actualizaciones.",
   "网关自己的运行库被改过，这一轮没有启动 Claude Code。网关会在空闲时重启、按安装包还原，稍后再发送。": "El entorno propio de la pasarela fue modificado, así que Claude Code no se inició en este turno. La pasarela se reiniciará cuando esté inactiva y lo restaurará desde el paquete; vuelve a enviar en un momento.",
   "本机读不到 {path}：可能在远程机器上，或者已经被删掉": "No se puede leer {path} en este dispositivo: puede estar en una máquina remota o haberse eliminado",
+  "这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。": "Este turno no llegó a empezar: la tarjeta de confirmación previa al inicio quedó sin respuesta durante {n} minutos y se detuvo (enviado {when}).",
+  "Claude 没收到这条消息。点「重发」把它放回输入框。": "Claude no recibió este mensaje. Toca «Reenviar» para devolverlo al cuadro de texto.",
+  "有个新对话在等你确认 · 点「新对话」查看": "Un chat nuevo espera tu confirmación · toca «Nuevo chat» para verlo",
 };

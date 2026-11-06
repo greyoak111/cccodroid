@@ -2778,3 +2778,6 @@
 2778	Versi Claude Code ini belum punya manifest resmi bertanda tangan, jadi giliran ini tidak dimulai. Sedang diverifikasi ulang secara daring — kirim lagi dalam satu-dua menit. Jika terus gagal, pasang ulang dari Pengaturan → Pembaruan.
 2779	Runtime milik gateway telah diubah, jadi Claude Code tidak dijalankan pada giliran ini. Gateway akan mulai ulang saat senggang dan memulihkannya dari paket; kirim lagi sebentar lagi.
 2780	Tidak bisa membaca {path} di perangkat ini: mungkin ada di mesin jarak jauh, atau sudah dihapus
+2781	Giliran ini tidak dimulai: kartu konfirmasi sebelum peluncuran tidak dijawab selama {n} menit, jadi dihentikan (dikirim {when}).
+2782	Claude tidak menerima pesan ini. Ketuk "Kirim ulang" untuk mengembalikannya ke kotak input.
+2783	Percakapan baru menunggu konfirmasi Anda · ketuk "Percakapan baru" untuk melihatnya

@@ -10,7 +10,7 @@ import { tasksCheck } from "./goal.mjs";
 import { setLastInit } from "./caps.mjs";
 import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { END_HOOKS, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setPermMode, sidForItem } from "./queue.mjs";
+import { END_HOOKS, INTERRUPTED, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setInterrupted, setPermMode, sidForItem } from "./queue.mjs";
 import { LOCAL_CMD_RE, handleLocalCommand } from "./modelcmd.mjs";
 import { LL, ensureLlama, localCustomActive } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "./usage.mjs";
@@ -126,14 +126,29 @@ export function execIntent(item, ctx) {
   return { sid0, pdef0, P, model, effort };
 }
 
+/** 起进程前的确认卡多久没人答就停下（#171）：没人答时这一轮一直占着 RUNS，挡住「重启网关」，切走的新对话还找不回来。
+ *  测试里改小 */
+export const CARD = { timeout: 10 * 60e3 };
 /** 起进程前要用户点头的卡片（项目配置、用户级配置）：借用敏感操作卡（guard），答复走同一个 /api/perm/answer。
- *  允许 → true；拒绝 → false（「拒绝并停止」同时停掉这一轮）；这期间点了停止 → null */
-function askCard(run, emit, { key, tool, input, guard, what, yes, no }) {
+ *  允许 → true；拒绝 → false（「拒绝并停止」同时停掉这一轮）；这期间点了停止、或超时 → null。
+ *  超时：按停止收尾，记一条中断记录（why: card），界面在那个会话（没建会话的在新对话页）给「重发」 */
+export function askCard(run, emit, { key, tool, input, guard, what, yes, no }) {
   return new Promise((resolve) => {
     const id = `ccapp-${key}-` + run.id;
     const p = { id, tool, input, suggestions: [], at: Date.now(), runId: run.id, sessionId: run.sessionId || null, guard };
+    const timer = setTimeout(() => {
+      if (!run.perms?.has(id)) return;
+      log(`⏹ ${what}：${Math.round(CARD.timeout / 60e3)} 分钟没人确认，这一轮停下`);
+      holdLane(run); run.aborted = true;
+      setInterrupted([...INTERRUPTED.filter((e) => e.id !== run.id),
+        { id: run.id, sessionId: run.sessionId || null, text: String(run.text || "").slice(0, 4000), startedAt: run.startedAt, at: Date.now(), why: "card" }]);
+      emit({ type: "perm_resolved", id, behavior: "cancel" });
+      done(null);
+    }, CARD.timeout);
+    timer.unref?.();
     const done = (v) => {
       if (!run.perms?.delete(id)) return;
+      clearTimeout(timer);
       run.readyAbort = null; run.answerPerm = null;
       publishState();
       resolve(v);

@@ -2815,5 +2815,8 @@ window.I18N_DICT.en = {
   "Claude Code 程序核验没过，这次没有运行：{why}": "Claude Code failed its integrity check, so it was not run: {why}",
   "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。": "This version of Claude Code has no official signed manifest yet, so this turn was not started. It is being re-verified online — send again in a minute or two. If it keeps failing, reinstall it from Settings → Updates.",
   "网关自己的运行库被改过，这一轮没有启动 Claude Code。网关会在空闲时重启、按安装包还原，稍后再发送。": "The gateway's own runtime was modified, so Claude Code wasn't started this turn. The gateway will restart when idle and restore it from the package; send again in a moment.",
-  "本机读不到 {path}：可能在远程机器上，或者已经被删掉": "Can't read {path} on this device: it may be on a remote machine, or it was deleted"
+  "本机读不到 {path}：可能在远程机器上，或者已经被删掉": "Can't read {path} on this device: it may be on a remote machine, or it was deleted",
+  "这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。": "This turn never started: the confirmation card before launch went unanswered for {n} minutes, so it was stopped (sent {when}).",
+  "Claude 没收到这条消息。点「重发」把它放回输入框。": "Claude didn't receive this message. Tap \"Resend\" to put it back in the input box.",
+  "有个新对话在等你确认 · 点「新对话」查看": "A new chat is waiting for your confirmation · tap \"New chat\" to see it"
 };
