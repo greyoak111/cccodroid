@@ -2811,4 +2811,5 @@ window.I18N_DICT["id"] = {
   "任务所在的项目已经删掉了：编辑任务重新选个项目": "Proyek tugas ini sudah dihapus: edit tugas dan pilih proyek lagi",
   "「{n}」所在的项目已经删掉了：编辑任务重新选个项目": "Proyek “{n}” sudah dihapus: edit tugas dan pilih proyek lagi",
   "任务正在跑：等它跑完，或先在对话里停掉，再删": "Tugas sedang berjalan: tunggu selesai, atau hentikan di percakapannya, lalu hapus",
+  "再显示 {n} 个": "Tampilkan {n} lagi",
 };

@@ -2808,3 +2808,4 @@
 2808	Le projet de la tâche a été supprimé : modifiez la tâche et choisissez un projet
 2809	Le projet de « {n} » a été supprimé : modifiez la tâche et choisissez un projet
 2810	La tâche est en cours : attendez la fin ou arrêtez-la dans sa conversation, puis supprimez-la
+2811	Afficher {n} de plus

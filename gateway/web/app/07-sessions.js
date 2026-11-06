@@ -3,7 +3,8 @@
   async function loadSessions() {
     const ok = latest("sessions");
     try {
-      const r = await api("/api/sessions");
+      const lim = state.sessLimit || 150;   // 点过「再显示」就一直按加大后的数拉，刷新不缩回去
+      const r = await api(lim > 150 ? "/api/sessions?limit=" + lim : "/api/sessions");
       if (!ok()) return true;
       state.sessions = r.sessions || [];
       state.sessTotal = r.total || state.sessions.length;
@@ -162,7 +163,8 @@
       html += `<div class="sess-grp ${g.key === "pin" ? "pin" : ""} ${folded ? "folded" : ""}" data-g="${esc(g.key)}"><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>${esc(g.label)} · ${g.list.length}${g.key === "misc" && !picking ? `<button class="grp-act" data-misc-clear>${esc(t("全部移到回收站"))}</button>` : ""}</div>`;
       html += (folded ? g.list.filter((s) => s.id === view.sessionId) : g.list).map(item).join("");
     }
-    if (more) html += `<div class="tiny">${t("更早的 {n} 个没列出来，搜索标题或内容能找到", { n: more })}</div>`;
+    if (more) html += `<div class="tiny">${t("更早的 {n} 个没列出来，搜索标题或内容能找到", { n: more })}
+      <button class="btn ghost sm" data-sess-more>${esc(t("再显示 {n} 个", { n: Math.min(150, more) }))}</button></div>`;
     box.innerHTML = (state.sessErr ? sessErrRow(true) : "") + html;
   }
 
@@ -360,6 +362,7 @@
   $("session-list").addEventListener("click", async (e) => {
     if (e.target.closest("[data-misc-clear]")) return clearMisc();
     if (e.target.closest("[data-sess-retry]")) return sess.mode === "trash" ? loadTrash() : loadSessions();
+    if (e.target.closest("[data-sess-more]")) { state.sessLimit = (state.sessLimit || 150) + 150; return loadSessions(); }
     const grp = e.target.closest(".sess-grp[data-g]");
     if (grp) {
       const k = grp.dataset.g;

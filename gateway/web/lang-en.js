@@ -2845,5 +2845,6 @@ window.I18N_DICT.en = {
   "改动还没保存：试跑跑的是已保存的版本，先点「保存」再试跑": "Changes aren't saved: a trial run uses the saved version. Tap “Save” first, then try.",
   "任务所在的项目已经删掉了：编辑任务重新选个项目": "The task's project was deleted: edit the task and pick a project again",
   "「{n}」所在的项目已经删掉了：编辑任务重新选个项目": "The project of “{n}” was deleted: edit the task and pick a project again",
-  "任务正在跑：等它跑完，或先在对话里停掉，再删": "The task is running: wait for it to finish, or stop it in its conversation, then delete"
+  "任务正在跑：等它跑完，或先在对话里停掉，再删": "The task is running: wait for it to finish, or stop it in its conversation, then delete",
+  "再显示 {n} 个": "Show {n} more"
 };

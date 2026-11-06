@@ -118,3 +118,17 @@ test("项目删了：任务到点跳过并说明，不退回工作区跑（#178-
   assert.equal(r.status, 409);
   unqueue(it2);
 });
+
+test("会话列表默认最近 150 个，limit 逐次加大能看到更早的；limit 夹在 150–5000（#178-3 后续）", async () => {
+  for (let i = 0; i < 160; i++) session();
+  const get = async (q) => (await fetch(url(srvH, "/api/sessions" + q))).json();
+  const plain = (r) => r.sessions.filter((s) => !s.pinned).length;
+  const d = await get("");
+  assert.ok(d.total >= 160);
+  assert.equal(plain(d), 150, "默认只给最近 150 个");
+  assert.equal(plain(await get("?limit=10")), 150, "太小按 150");
+  const all = await get("?limit=" + (d.total + 50));
+  assert.equal(all.sessions.length, all.total, "够大就全给");
+  assert.equal(plain(await get("?limit=300")), Math.min(300, d.total));
+  assert.equal(plain(await get("?limit=abc")), 150);
+});

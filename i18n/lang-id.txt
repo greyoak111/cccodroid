@@ -2808,3 +2808,4 @@
 2808	Proyek tugas ini sudah dihapus: edit tugas dan pilih proyek lagi
 2809	Proyek “{n}” sudah dihapus: edit tugas dan pilih proyek lagi
 2810	Tugas sedang berjalan: tunggu selesai, atau hentikan di percakapannya, lalu hapus
+2811	Tampilkan {n} lagi

@@ -2811,4 +2811,5 @@ window.I18N_DICT["es"] = {
   "任务所在的项目已经删掉了：编辑任务重新选个项目": "El proyecto de la tarea se eliminó: edita la tarea y elige un proyecto",
   "「{n}」所在的项目已经删掉了：编辑任务重新选个项目": "El proyecto de «{n}» se eliminó: edita la tarea y elige un proyecto",
   "任务正在跑：等它跑完，或先在对话里停掉，再删": "La tarea se está ejecutando: espera a que termine o detenla en su conversación y luego elimínala",
+  "再显示 {n} 个": "Mostrar {n} más",
 };

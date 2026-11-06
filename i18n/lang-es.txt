@@ -2808,3 +2808,4 @@
 2808	El proyecto de la tarea se eliminó: edita la tarea y elige un proyecto
 2809	El proyecto de «{n}» se eliminó: edita la tarea y elige un proyecto
 2810	La tarea se está ejecutando: espera a que termine o detenla en su conversación y luego elimínala
+2811	Mostrar {n} más

@@ -278,8 +278,9 @@ export async function routeSessions(req, res, u, p) {
     return sendJson(res, 200, await searchSessions(String(u.searchParams.get("q") || "")));
   }
   if (req.method === "GET" && p === "/api/sessions") {
-    const list = listSessions();
-    // total：磁盘上一共多少个。列表只给最近 150 个（加置顶），界面据此说「最近 N 个，共 M 个」（#178-3）
+    // limit：界面点「再显示」逐次加 150；首次列表每个文件要读开头取标题，所以默认只给最近 150 个
+    const list = listSessions(Math.min(5000, Math.max(150, parseInt(u.searchParams.get("limit"), 10) || 150)));
+    // total：磁盘上一共多少个。列表只给最近 limit 个（加置顶），界面据此说「最近 N 个，共 M 个」（#178-3）
     return sendJson(res, 200, { sessions: list, workspace: CFG.workspace, count: list.length, total: list.total ?? list.length });
   }
   // ── 会话管理：批量进回收站 / 回收站 / 导出 / 导入 ──

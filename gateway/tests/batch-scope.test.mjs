@@ -47,3 +47,19 @@ test("批量回收：正在生成的进 busy，已经不在的只进 failed", as
   assert.deepEqual(r.failed, [gone]);
   assert.deepEqual(r.busy, []);
 });
+
+test("点过「再显示」：之后的刷新都按加大后的数拉，不缩回 150", async () => {
+  const urls = [];
+  const box = {
+    state: { sessions: [], sessLimit: 0 }, sess: { q: "" },
+    latest: () => () => true, api: async (u) => { urls.push(u); return { sessions: [], total: 0 }; },
+    renderSessions() {}, resessSearch() {}, lineageDirty() {},
+  };
+  vm.runInNewContext(take("  async function loadSessions()", "  // 会话页三种视图") + "\nglobalThis.f = loadSessions;", box);
+  await box.f();
+  box.state.sessLimit = 300;
+  await box.f();
+  assert.deepEqual(urls, ["/api/sessions", "/api/sessions?limit=300"]);
+  assert.match(src, /data-sess-more[\s\S]*?\{ n: Math\.min\(150, more\) \}/, "列表底部有「再显示」");
+  assert.match(src, /closest\("\[data-sess-more\]"\)\) \{ state\.sessLimit = \(state\.sessLimit \|\| 150\) \+ 150; return loadSessions\(\); \}/);
+});
