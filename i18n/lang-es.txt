@@ -2778,3 +2778,5 @@
 2778	Esta versión de Claude Code aún no tiene el manifiesto oficial firmado, así que este turno no se inició. Se está volviendo a verificar en línea: envía de nuevo en un par de minutos. Si sigue fallando, reinstálala desde Ajustes → Actualizaciones.
 2779	El entorno propio de la pasarela fue modificado, así que Claude Code no se inició en este turno. La pasarela se reiniciará cuando esté inactiva y lo restaurará desde el paquete; vuelve a enviar en un momento.
 2780	No se puede leer {path} en este dispositivo: puede estar en una máquina remota o haberse eliminado
+2781	No se pudo guardar la configuración, así que el modo no cambió
+2782	En «Cada pocas horas», la hora de inicio debe ser anterior a la de fin. Para cruzar la medianoche, divídela en dos tareas

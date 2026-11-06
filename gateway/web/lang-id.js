@@ -2781,4 +2781,6 @@ window.I18N_DICT["id"] = {
   "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。": "Versi Claude Code ini belum punya manifest resmi bertanda tangan, jadi giliran ini tidak dimulai. Sedang diverifikasi ulang secara daring — kirim lagi dalam satu-dua menit. Jika terus gagal, pasang ulang dari Pengaturan → Pembaruan.",
   "网关自己的运行库被改过，这一轮没有启动 Claude Code。网关会在空闲时重启、按安装包还原，稍后再发送。": "Runtime milik gateway telah diubah, jadi Claude Code tidak dijalankan pada giliran ini. Gateway akan mulai ulang saat senggang dan memulihkannya dari paket; kirim lagi sebentar lagi.",
   "本机读不到 {path}：可能在远程机器上，或者已经被删掉": "Tidak bisa membaca {path} di perangkat ini: mungkin ada di mesin jarak jauh, atau sudah dihapus",
+  "设置写盘失败，模式没有切换": "Gagal menyimpan pengaturan, jadi mode tidak diganti",
+  "「每隔几小时」的开始时间要早于结束时间；跨午夜请拆成两个任务": "Untuk “Setiap beberapa jam”, waktu mulai harus lebih awal dari waktu selesai. Untuk melewati tengah malam, pecah menjadi dua tugas",
 };

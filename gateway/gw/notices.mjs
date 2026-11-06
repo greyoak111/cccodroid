@@ -86,7 +86,9 @@ export async function refreshNotices(force = false) {
 const pick = (o, lang) => (o && typeof o === "object" ? o[lang] || o.zh || o.en || "" : String(o || ""));
 
 function active(lang) {
-  const today = new Date().toISOString().slice(0, 10);
+  // 用本机时区的日期：toISOString() 是 UTC，东八区在 0–8 点会把当天的通知判成还没到
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   return (data?.notices || []).filter((n) => n && n.id
     && (!n.from || n.from <= today) && (!n.until || n.until >= today)
     && (!n.minVer || !appVer || cmpVer(appVer, n.minVer) >= 0)

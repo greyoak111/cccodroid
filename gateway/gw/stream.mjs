@@ -170,6 +170,9 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
         flags.pendText = 0; flags.pendThink = 0;
       }
       if (e?.type === "message_start") {
+        // 每条消息单独记「是否已逐字推过」：同一条进程里会有多轮 assistant（后台回报、插话、斜杠命令），
+        // 沿用上一条的 true 会把下一条没有增量的正文吞掉（审查 11-05）
+        if (flags) { flags.gotDelta = false; flags.gotThinkDelta = false; }
         if (!ev.parent_tool_use_id && !ev.isSidechain) {
           if (flags) flags.promptUsage = { ...e.message?.usage };
           contextUsage(e.message?.usage, flags, sse);
@@ -235,8 +238,9 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
         // 界面拿 result 画命令卡片，这里再发就重复了（以前 /context 显示两次）
         if (c.type === "text" && flags?.isCmd && ev.message?.model === "<synthetic>") continue;
         if (c.type === "text" && c.text) {
-          // 逐字增量发过就不重复整段；没发过（增量没到）才补完整文本
-          if (!flags || !flags.gotDelta) sse({ type: "assistant_text", text: c.text });
+          // 逐字增量发过就不重复整段；没发过（增量没到）才补完整文本。
+          // 本地命令的合成消息没有增量，且本轮前面正常回答时 gotDelta 已是 true，必须无条件发（审查 11-05）
+          if (!flags || !flags.gotDelta || ev.message?.model === "<synthetic>") sse({ type: "assistant_text", text: c.text });
         } else if (c.type === "thinking" && c.thinking) {
           // 同理：思考也逐字发过了。以前这里无条件再发整段，思考块里每段都重复两遍
           if (!flags || !flags.gotThinkDelta) sse({ type: "thinking", text: c.thinking });

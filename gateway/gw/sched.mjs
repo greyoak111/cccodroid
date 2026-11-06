@@ -204,11 +204,17 @@ function runningNow() {
   const alive = new Set();
   for (const x of [...QUEUE, ...RUNS.values()]) if (x.sched && x.sched.key) alive.add(x.sched.key);
   for (const k of [...RUNNING.keys()]) if (!alive.has(k)) RUNNING.delete(k);
-  return [...RUNNING.values()];
+  const out = [...RUNNING.values()];
+  // 正在 30 分钟排队窗口里的也要算「在跑」：否则界面看不到、手动「立刻跑一次」也不会 409（审查 11-05）
+  for (const id of WAITING) if (!out.some((x) => x.taskId === id)) out.push({ taskId: id, startedAt: Date.now(), waiting: true });
+  return out;
 }
 const WAITING = new Set();   // 到点了、正排队等别的对话跑完的任务 id：计时别把它当成「没排上 / 时间已过」（审查 B17）
 async function fire(t, { reason = "due", attempt = 0, trial = false } = {}) {
   if (trial) return fireNow(t, { reason, attempt, trial });
+  // 同一个任务已经有一个到点等待者时不再叠一个：排期间隔 ≤30 分钟时，每个新计划时刻都会进 fireNow 的忙等，
+  // 阻塞结束后同一任务会被连续执行多次（审查 11-05）
+  if (WAITING.has(t.id)) { log(`⏭ 定时任务「${t.name}」已在排队，跳过这次重复入队`); return null; }
   WAITING.add(t.id);
   try { return await fireNow(t, { reason, attempt, trial }); } finally { WAITING.delete(t.id); }
 }
@@ -216,7 +222,7 @@ async function fireNow(t, { reason, attempt, trial }) {
   const skip = (msg) => { log(`⏭ 定时任务「${t.name}」跳过：${msg}`); if (!trial) addRun({ taskId: t.id, at: Date.now(), st: "skip", msg }); };
   if (!trial) {
     if (t.until?.kind === "date" && t.until.date && Date.now() > new Date(t.until.date + "T23:59:59").getTime()) { t.on = false; refreshNext(t); save(); return skip(tz("已过有效期，任务已关")); }
-    if (t.skipNext && reason === "due" && (!t.skipAt || t.skipAt === t.nextAt)) { t.skipNext = false; t.skipAt = 0; save(); return skip(tz("按设置跳过这一次")); }
+    if (t.skipNext && reason === "due" && (!t.skipAt || t.skipAt <= t.nextAt)) { t.skipNext = false; t.skipAt = 0; save(); return skip(tz("按设置跳过这一次")); }
     if (usesLogin(t) && !DB.allowLogin) {
       skip(tz("用订阅账户跑定时任务默认关闭"));
       note(t, tz("定时任务已跳过"), tz("「{n}」要用订阅账户跑：到定时任务页底部「订阅账户」里打开（无人值守使用以 Anthropic 条款为准），或给任务换一个用 API Key 的接口", { n: t.name }), null, false);
@@ -380,10 +386,10 @@ function tick() {
       const when = t.nextAt;
       if (t.missed === "run") {
         // 「跳过下一次」指的正是这次错过的计划：消费掉标记，别让再下一次 due 被跳
-        if (t.skipNext && (!t.skipAt || t.skipAt === when)) { t.skipNext = false; t.skipAt = 0; addRun({ taskId: t.id, at: when, st: "skip", msg: tz("按设置跳过这一次") }); }
+        if (t.skipNext && (!t.skipAt || t.skipAt <= when)) { t.skipNext = false; t.skipAt = 0; addRun({ taskId: t.id, at: when, st: "skip", msg: tz("按设置跳过这一次") }); }
         else fire(t, { reason: "missed" });
       }
-      else if (t.missed === "skip") { if (t.skipNext && (!t.skipAt || t.skipAt === when)) { t.skipNext = false; t.skipAt = 0; } addRun({ taskId: t.id, at: when, st: "skip", msg: tz("错过了（当时应用没在跑），按设置跳过") }); }
+      else if (t.missed === "skip") { if (t.skipNext && (!t.skipAt || t.skipAt <= when)) { t.skipNext = false; t.skipAt = 0; } addRun({ taskId: t.id, at: when, st: "skip", msg: tz("错过了（当时应用没在跑），按设置跳过") }); }
       else if (!DB.missed.some((m) => m.taskId === t.id && m.at === when)) { DB.missed.push({ taskId: t.id, at: when }); publish({ type: "sched", op: "missed" }); }
       log(`⏰ 定时任务「${t.name}」错过 ${new Date(when).toLocaleString()}（${t.missed || "ask"}）`);
     } else fire(t, { reason: "due" });
@@ -409,6 +415,11 @@ function clean(b, old = {}) {
     if (+f.hours >= 1 && +f.hours <= 24) o.hours = +f.hours;
     if (/^\d{1,2}:\d{2}$/.test(f.from || "")) o.from = f.from;
     if (/^\d{1,2}:\d{2}$/.test(f.to || "")) o.to = f.to;
+    if (f.kind === "every" && o.from && o.to) {
+      const [a, b] = hm(o.from), [c, d] = hm(o.to);
+      // 22:00–02:00 这种跨午夜窗口在 nextAt 的每日循环里永远不命中：保存时就拒绝，别存下一个永不跑的任务
+      if (a * 60 + b > c * 60 + d) throw new Error(tz("「每隔几小时」的开始时间要早于结束时间；跨午夜请拆成两个任务"));
+    }
     if (/^\d{4}-\d{2}-\d{2}$/.test(f.date || "")) o.date = f.date;
     if (typeof f.cron === "string") { parseCron(f.cron); o.cron = f.cron.trim(); }
     t.freq = o;
@@ -537,4 +548,4 @@ export async function routeSched(req, res, u, p) {
   }
   return NEXT;
 }
-export const _schedForTest = { fire, tick, DB, runlog: () => RUNLOG, running: () => runningNow(), costToday, hasRetry: (id) => RETRY.has(id) };   // 只给测试用
+export const _schedForTest = { fire, tick, clean, DB, runlog: () => RUNLOG, running: () => runningNow(), costToday, hasRetry: (id) => RETRY.has(id) };   // 只给测试用

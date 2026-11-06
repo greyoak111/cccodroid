@@ -17,7 +17,7 @@
   const sess = { mode: "list", sel: new Set(), trash: [], keepDays: 30, q: "", hits: null, fold: loadSessFold(), flt: "all" };
   function loadSessFold() {
     let f = {};
-    try { f = JSON.parse(localStorage.getItem("cc.sessFold") || "{}") || {}; } catch {}
+    try { const v = JSON.parse(localStorage.getItem("cc.sessFold") || "{}"); if (v && typeof v === "object" && !Array.isArray(v)) f = v; } catch {}
     if (!("pin" in f) && localStorage.getItem("cc.pinFold") === "1") f.pin = true;   // 旧版只记了置顶组
     return f;
   }
@@ -116,7 +116,7 @@
       // 标题先在本地筛，内容命中等网关回来再补上
       // 命中的会话不在本地这 150 条里时，拿命中结果自带的字段去筛，别绕过当前的置顶 / 项目筛选（审查 B-05）
       const list = (sess.hits || state.sessions.filter((s) => s.title.toLowerCase().includes(q.toLowerCase()))).filter((h) => keep(state.sessions.find((x) => x.id === h.id) || h));
-      sess.visible = list.map((x) => x.id); renderSessBar();
+      sess.visible = list.map((x) => x.id); pruneSel(); renderSessBar();
       box.innerHTML = (sess.hits ? "" : `<div class="tiny">${t("正在搜索对话内容…")}</div>`)
         + (list.length ? list.map(item).join("") : sess.hits ? `<div class="tiny">${t("没有找到包含「{q}」的会话。", { q: esc(q) })}</div>` : "");
       return;
@@ -124,7 +124,6 @@
     // 分组：置顶在最前，其余按时间；每组标题可点击折叠，收起时仍露出当前会话
     const groups = [];
     const shown = state.sessions.filter(keep);
-    sess.visible = shown.map((x) => x.id); renderSessBar();    // 「全选」只选眼前这些（筛选 / 搜索之外的不算，审查 B-01）
     const pins = shown.filter((s) => s.pinned);
     if (pins.length) groups.push({ key: "pin", label: t("置顶"), list: pins });
     // 杂项（测试、试模型这类用完即弃的）收在最后一组，组名右边可一键全移进回收站
@@ -135,6 +134,12 @@
       if (top && top.key === g.key) top.list.push(s); else groups.push({ ...g, list: [s] });
     }
     if (misc.length) groups.push({ key: "misc", label: t("杂项"), list: misc });
+    // 「全选」只选真正画出来的条目：折叠分组里看不见的不算（审查 11-05）
+    const rendered = groups.flatMap((g) => sessFolded(g.key) ? g.list.filter((s) => s.id === view.sessionId) : g.list);
+    sess.visible = rendered.map((x) => x.id);
+    sess.miscIds = misc.map((s) => s.id);
+    pruneSel();
+    renderSessBar();
     let html = "";
     for (const g of groups) {
       const folded = sessFolded(g.key);
@@ -144,14 +149,22 @@
     box.innerHTML = html;
   }
 
+  /** 选中的会话必须仍在当前可见集合里：筛选/折叠/刷新后把看不见的剪掉 */
+  function pruneSel() {
+    const vis = new Set(sess.visible || []);
+    for (const id of [...sess.sel]) if (!vis.has(id)) sess.sel.delete(id);
+  }
+
   // 杂项一键进回收站：在跑的跳过；回收站里照常保留几天，可恢复
   async function clearMisc() {
     const busy = new Set(srv.runs.map((r) => r.sessionId).filter(Boolean));
-    const list = state.sessions.filter((s) => s.misc && !s.pinned && !busy.has(s.id));
+    // 只动当前筛选下、这一组里列出来的杂项，不要波及别的项目/搜索词之外的会话
+    const list = state.sessions.filter((s) => s.misc && !s.pinned && !busy.has(s.id) && (sess.miscIds || []).includes(s.id));
     if (!list.length || !confirm(t("把杂项里的 {n} 个会话移进回收站？", { n: list.length }))) return;
+    const done = new Set();
     let n = 0;
-    for (const s of list) { try { await api(`/api/session/${encodeURIComponent(s.id)}`, { method: "DELETE" }); n++; } catch {} }
-    if (list.some((s) => s.id === view.sessionId)) newConversation();
+    for (const s of list) { try { await api(`/api/session/${encodeURIComponent(s.id)}`, { method: "DELETE" }); n++; done.add(s.id); } catch {} }
+    if (done.has(view.sessionId)) newConversation();
     loadSessions();
     toast(t("已移进回收站 {n} 个（{d} 天内可恢复）", { n, d: sess.keepDays }));
   }

@@ -288,6 +288,23 @@ if (PREFIX) PRESETS.local = {
 // 这样旧配置里抄死的 label/baseUrl 不会把目录更新挡住。自定义条目则整条都是用户的。
 const USER_FIELDS = ["apiKey", "apiKeyEnv", "endpoint", "defaultModel", "fastModel", "extraEnv", "inlineImages"];
 
+/** 配置文件里的模型清单也要过一遍形状：它和自定义厂商一样是用户可以手改/分享进来的。
+ *  坏条目（null、缺 id、effort.supported_levels 不是数组）会让 /model、/effort 和每轮启动抛 TypeError（审查 11-05）。 */
+const cleanModel = (m) => {
+  if (!m || typeof m !== "object") return null;
+  const id = typeof m.id === "string" ? m.id.trim().slice(0, 200) : "";
+  if (!id) return null;
+  const out = { ...m, id, name: typeof m.name === "string" ? m.name.slice(0, 200) : id };
+  const lv = out.effort && out.effort.supported_levels;
+  if (out.effort && typeof out.effort === "object" && Array.isArray(lv))
+    out.effort = { ...out.effort, supported_levels: lv.filter((x) => typeof x === "string").slice(0, 32) };
+  else delete out.effort;
+  for (const k of ["context_window", "max_output_tokens"]) if (!Number.isFinite(out[k]) || out[k] < 0) delete out[k];
+  if (!Array.isArray(out.input_modalities)) delete out.input_modalities;
+  return out;
+};
+const cleanModels = (a) => Array.isArray(a) ? a.slice(0, 500).map(cleanModel).filter(Boolean) : [];
+
 /** 合成一条生效配置：目录 + 用户字段 + 所选线路 */
 function composeProvider(id, raw) {
   const pre = PRESETS[id];
@@ -297,13 +314,15 @@ function composeProvider(id, raw) {
     for (const k of USER_FIELDS) if (raw && raw[k] != null && raw[k] !== "") v[k] = raw[k];
     if (pre.local) v.apiKey = LLAMA_KEY;    // 旧配置里存的占位 "local" 不算数
     // 旧配置里自己攒的模型清单（带真实窗口）比目录里的全，留着
-    if (raw && Array.isArray(raw.fallbackModels) && raw.fallbackModels.length) v.fallbackModels = raw.fallbackModels;
+    if (raw && Array.isArray(raw.fallbackModels) && raw.fallbackModels.length) v.fallbackModels = cleanModels(raw.fallbackModels);
   } else {
     v = { group: "custom", authStyle: "bearer", modelsAuth: "bearer", ...raw, custom: true };
     // 这几个是内置条目才有的身份标志，自定义条目（能分享导入）自己写了也不认：
     // explicit:false 会让密钥回落到 DeepSeek 那把、送去它的地址；local/login 会关掉地址修正和防护提示（11-04 报告）
     for (const k of ["id", "explicit", "login", "local", "nativeModels"]) delete v[k];
   }
+  // 自定义条目整条来自 raw，fallbackModels 也要清洗
+  if (Array.isArray(v.fallbackModels)) v.fallbackModels = cleanModels(v.fallbackModels);
   if (v.endpoints && v.endpoints.length) {
     const ep = v.endpoints.find((e) => e.id === v.endpoint) || v.endpoints[0];
     v.endpoint = ep.id;

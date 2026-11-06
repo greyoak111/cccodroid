@@ -446,7 +446,11 @@ export async function routeLocal(req, res, u, p) {
   if (req.method === "GET" && p === "/api/local") return sendJson(res, 200, llamaInfo());
   if (req.method === "POST" && p === "/api/local") {
     const b = JSON.parse((await readBody(req)) || "{}");
-    if (b.mode === "chat" || b.mode === "custom") { SETTINGS.localMode = b.mode; saveSettings(); }
+    if (b.mode === "chat" || b.mode === "custom") {
+      const prev = SETTINGS.localMode;
+      SETTINGS.localMode = b.mode;
+      if (!saveSettings()) { SETTINGS.localMode = prev; return sendJson(res, 500, { error: tz("设置写盘失败，模式没有切换") }); }
+    }
     if (b.stop) llamaStop("用户停止");
     return sendJson(res, 200, llamaInfo());
   }

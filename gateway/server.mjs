@@ -152,7 +152,8 @@ if (PREFIX) {
   try {
     const gc = path.join(CFG.home, ".gitconfig");
     const cur = fs.existsSync(gc) ? fs.readFileSync(gc, "utf8") : "";
-    if (!/directory\s*=\s*\*/.test(cur)) fs.appendFileSync(gc, "[safe]\n\tdirectory = *\n");
+    // 文件末尾没有换行时先补一个：否则 [safe] 会粘到最后一行，safe.directory 根本设不上（审查 11-05）
+    if (!/directory\s*=\s*\*/.test(cur)) fs.appendFileSync(gc, (cur && !cur.endsWith("\n") ? "\n" : "") + "[safe]\n\tdirectory = *\n");
   } catch {}
 }
 try { fs.mkdirSync(CFG.home, { recursive: true }); } catch {}
