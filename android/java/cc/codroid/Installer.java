@@ -115,10 +115,15 @@ final class Installer {
         java.util.ArrayDeque<String> left = new java.util.ArrayDeque<>(cands.subList(1, cands.size()));
         java.util.Set<String> tried = new java.util.HashSet<>();
         tried.add(url);
+        boolean noRange = false;   // 来源不认 Range 后退回单线：本次下载只回退一次，避免删段→重建→再删的死循环
         for (int attempt = 1; ; ) {
             for (; size <= 0 || part.length() < size || seg.isFile(); attempt++) {
-                try { if (size >= 2 * MIN_SEG && (seg.isFile() || rangeOk(url))) fetchSegmented(url, part, seg, size); else { fetchRange(url, part, size); if (size <= 0) break; } }
+                try { if (size >= 2 * MIN_SEG && !noRange && (seg.isFile() || rangeOk(url))) fetchSegmented(url, part, seg, size); else { fetchRange(url, part, size); if (size <= 0) break; } }
                 catch (IOException e) {
+                    // 残留 .part.seg 但来源不认 Range（回 200）：fetchSegmented 每段都要求 206，会永远失败。
+                    // 删掉分段状态，退回单线 fetchRange，别让更新永久卡住（审查 11-05）
+                    String em = String.valueOf(e.getMessage());
+                    if (!noRange && seg.isFile() && em.startsWith("HTTP ") && !em.startsWith("HTTP 206")) { noRange = true; seg.delete(); part.delete(); continue; }
                     String next = left.peek();
                     if (next != null && attempt < 12) {      // 出一次错就换下一个，换下来的排到队尾，轮着来
                         ui.step("  " + Tr.f("{0} 下载不顺（{1}），改从 {2} 续传…", host(url), e.getMessage(), host(next)));

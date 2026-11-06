@@ -437,17 +437,19 @@ function customWrapper(id, p, appDir, libs, opts) {
 
 // description 一律写成带引号的 YAML 字符串：说明里有「用途: 转换」这种冒号，裸写就是不合法的 YAML（#135）
 function customSkill(rec) {
+  const one = (v, n = 500) => String(v == null ? "" : v).replace(/[\r\n\u0000-\u001f\u007f]+/g, " ").trim().slice(0, n);
+  const name = one(rec.name, 80), desc = one(rec.desc, 500), source = one(rec.source, 300);
   const kindZh = { glibc: "glibc 程序（Linux 发行版那种），经本应用的 glibc 加载器启动", bionic: "安卓原生程序（bionic）", static: "静态链接程序", script: "脚本" };
   const lines = rec.entries.map((e) => `- \`${e.cmd}\` → \`${path.join(rec.dir, "app", e.rel)}\`：${kindZh[e.kind] || e.kind}${e.gpu ? "，经 gpu-driver-glibc 的 lgpu-run 用 GPU（Vulkan / Turnip）" : ""}${e.patchelf ? "，已用 patchelf 改了解释器和 RUNPATH" : ""}`);
   return `---
 name: custom-${rec.id}
-description: ${JSON.stringify(`用户自己导入的程序「${rec.name.replace(/\n/g, " ")}」${rec.desc ? "：" + rec.desc.replace(/\n/g, " ") : ""}（cccodroid 自定义组件）。命令：${rec.entries.map((e) => e.cmd).join("、")}。用户提到它或要用这些命令时使用。`)}
+description: ${JSON.stringify(`用户自己导入的程序「${name}」${desc ? "：" + desc : ""}（cccodroid 自定义组件）。命令：${rec.entries.map((e) => e.cmd).join("、")}。用户提到它或要用这些命令时使用。`)}
 ---
 
-# ${rec.name}（自定义组件）
+# ${name}（自定义组件）
 
-用户在扩展页「自定义组件」里自己导入的 Linux arm64 程序（来源：\`${rec.source}\`）。**没经过 cccodroid 验证**，能不能用以实际运行为准。
-${rec.desc ? "\n用户的说明：" + rec.desc + "\n" : ""}
+用户在扩展页「自定义组件」里自己导入的 Linux arm64 程序（来源：\`${source}\`）。**没经过 cccodroid 验证**，能不能用以实际运行为准。
+${desc ? "\n用户的说明：" + desc + "\n" : ""}
 ## 运行链路
 
 ${lines.join("\n")}

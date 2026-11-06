@@ -7,6 +7,7 @@ import { claudeEnv, readLedger } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { devPrivStatus } from "./devside.mjs";
 import { isInjected } from "./integrity.mjs";
+import { readSmallFile } from "./saferead.mjs";
 
 // ── 本应用耗电统计（设置页「耗电」卡）──────────────────────────────────────────
 // 应用身份能直接量的只有自己进程的 CPU 时间（/proc/<pid>/stat，同 uid 的进程才看得见）；
@@ -20,11 +21,17 @@ import { isInjected } from "./integrity.mjs";
 //     （0.3.13 起）c 读缓存的输入 token（i 的一部分，算缓存命中）、mt 各模型的 token（i+o）、st 各会话的 token（i+o，用量页「最费的对话」）
 const USAGE_FILE = path.join(CFG.home, "ccapp-usage.json");
 const USAGE = { v: 1, since: Date.now(), imported: null, off: false, hours: {} };
-try { Object.assign(USAGE, JSON.parse(fs.readFileSync(USAGE_FILE, "utf8"))); } catch {}
+let USAGE_UNREADABLE = false, USAGE_WARNED = false;
+try {
+  const raw = readSmallFile(USAGE_FILE, 8 << 20);
+  if (raw != null) Object.assign(USAGE, JSON.parse(raw));
+  else { try { fs.lstatSync(USAGE_FILE); USAGE_UNREADABLE = true; } catch {} }   // 文件在但读不了：别用默认值把它覆盖掉
+} catch {}
 let usageTimer = null;
 function usageSave(now) {
   clearTimeout(usageTimer);
   const write = () => {
+    if (USAGE_UNREADABLE) { if (!USAGE_WARNED) { USAGE_WARNED = true; log("使用统计文件读不了，暂停写盘，避免覆盖原文件"); } return; }
     const tmp = USAGE_FILE + ".tmp";
     try { fs.writeFileSync(tmp, JSON.stringify(USAGE)); fs.renameSync(tmp, USAGE_FILE); } catch (e) { log("使用统计写盘失败：" + e.message); }
   };
@@ -230,7 +237,7 @@ function usageImport(extraOnly) {
 const ENERGY_FILE = path.join(CFG.home, ".cache", "ccapp-energy.json");
 const ENERGY_STEP = 5 * 60e3, ENERGY_HOUR = 3600e3;
 const energy = { v: 1, last: null, hours: {}, days: {}, levels: [], sys: null };
-try { Object.assign(energy, JSON.parse(fs.readFileSync(ENERGY_FILE, "utf8"))); } catch {}
+try { const raw = readSmallFile(ENERGY_FILE, 8 << 20); if (raw != null) Object.assign(energy, JSON.parse(raw)); } catch {}
 const MY_UID = process.getuid();
 const CLK_TCK = 100;   // 安卓内核一律 100
 

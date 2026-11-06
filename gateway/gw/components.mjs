@@ -384,16 +384,19 @@ export function compBaseDeps(id, sha, rec) {
  *  后装的那个跳过了已存在的文件、记录里没有它们 —— 所以删之前先看别的组件要不要用：要用的留下、记到它名下，
  *  不然卸一个，另一个就悄悄坏了 */
 function compRemoveFiles(id, rec) {
+  // 记录文件同 uid 可改：卸载/升级只认普通相对路径，别让 ../ 把前缀外的文件删了
+  const safeRel = (r) => typeof r === "string" && r && !r.startsWith("/") && !r.split("/").includes("..");
+  const files = (rec.files || []).filter(safeRel);
   const others = [];
   for (const [oid, orec] of compRecords()) if (oid !== id) others.push({ id: oid, rec: orec, needs: compNeeds(oid, orec), gained: [] });
   // 工具包升级后新底座 / 模块可能接管了同名路径，旧记录还写着它：底座认领的一律不删（审查 B23）
-  const base = baseOwnedPaths(new Set(rec.files || []));
+  const base = baseOwnedPaths(new Set(files));
   let baseKept = 0;
   const dirs = new Set();
   // Python 运行时在旁边的 __pycache__ 里生成 .pyc（不在组件清单里）：删 .py 时一并删掉，不然卸载后留下几十 MB
   const pyc = new Map();
   const pycOf = (d) => { if (!pyc.has(d)) { let l = []; try { l = fs.readdirSync(path.join(PREFIX, d)); } catch {} pyc.set(d, l); } return pyc.get(d); };
-  for (const r of rec.files || []) {
+  for (const r of files) {
     const keeper = others.find((o) => o.needs.has(r));
     if (keeper) { keeper.gained.push(r); continue; }
     if (base.has(r)) { baseKept++; continue; }

@@ -21,6 +21,8 @@ const sealed = new Set();          // 这个进程里核过的版本目录
 // 部署出来的那份（files/app，有 FILES 清单）才核；仓库里直接跑的开发布局不核。
 // 不 import appfiles.mjs：终端里的 bin/claude 经 guard/cc-seal.mjs 也要核，那边不该再起一份文件守护
 const DEPLOYED = fs.existsSync(path.join(HERE, "FILES"));
+// 发行版布局（应用里的 files/app）：FILES 被删时不能退化成「开发布局、不核」
+const APP_LAYOUT = /[\\/]files[\\/]app$/.test(HERE);
 let askRecheck = null;
 /** 定时补核那边挂进来（devside.mjs）：没清单时叫它尽快去取 */
 export const onSealUnknown = (fn) => { askRecheck = fn; };
@@ -45,7 +47,8 @@ function sha256(f) {
  * 发行版没有签名清单时是 { ok: false, why, pending: true }：不算篡改，补核取到清单后自动放行
  */
 export async function claudeSeal(bin0 = PATHS.claude, { force = false, home = CFG.home } = {}) {
-  if (!DEPLOYED && !force) return { ok: null, why: "dev" };   // 开发布局（仓库里直接跑）不核
+  // 发行版不能因为可写的 FILES 被删就退化成「开发布局、不核」：终端新起的进程会直接放行
+  if (!DEPLOYED && !force) return editionSealed() && APP_LAYOUT ? { ok: false, why: "FILES missing" } : { ok: null, why: "dev" };
   let bin;
   try { bin = fs.realpathSync(bin0); } catch { return { ok: null, why: "missing" }; }
   const dir = path.dirname(bin), mf = path.join(dir, "manifest.json"), sf = mf + ".sig";

@@ -6,13 +6,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { CFG, log } from "./config.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
+import { readSmallFile } from "./saferead.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-ui.json");
 export const UI_KEYS = ["topbar", "navPins", "accent", "msgActs", "extImg", "gcPaper"];
 const MAX = 16 * 1024;
 
 export function readUi() {
-  try { const j = JSON.parse(fs.readFileSync(FILE, "utf8")); if (j && typeof j === "object" && !Array.isArray(j)) return j; } catch {}
+  try { const raw = readSmallFile(FILE, 64 << 10); if (raw != null) { const j = JSON.parse(raw); if (j && typeof j === "object" && !Array.isArray(j)) return j; } } catch {}
   return {};
 }
 export function patchUi(patch) {

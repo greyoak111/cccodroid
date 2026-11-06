@@ -11,6 +11,7 @@ import { COMP_DIR, compIndex, compIndexCache, compRecord } from "./components.mj
 import { retrustProject } from "./projtrust.mjs";
 import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 import { sealed } from "./edition.mjs";
+import { readHeadFile, readSmallFile } from "./saferead.mjs";
 
 // ── 扩展：插件 / 技能 / MCP ───────────────────────────────────────────
 // 全部转给 claude 自己的命令行（claude plugin … / claude mcp …），网关不自己改它的配置文件 ——
@@ -190,8 +191,9 @@ function hookSettingsFile(scope, dir) {
   return path.join(d, ".claude", scope === "local" ? "settings.local.json" : "settings.json");
 }
 function readSettingsFile(file) {
-  let txt;
-  try { txt = fs.readFileSync(file, "utf8"); } catch (e) { if (e.code === "ENOENT") return { j: {}, exists: false }; return { error: e.message, exists: true }; }
+  // FIFO/设备/软链不能裸读：会同步阻塞或无限读（审查 11-05）
+  const txt = readSmallFile(file, 1 << 20);
+  if (txt == null) { try { fs.lstatSync(file); return { error: "unreadable or not a regular file", exists: true }; } catch { return { j: {}, exists: false }; } }
   if (!txt.trim()) return { j: {}, exists: true };
   try {
     const j = JSON.parse(txt);
@@ -201,7 +203,7 @@ function readSettingsFile(file) {
 }
 const pausedFile = (file) => file + ".ccapp-paused";
 function readPaused(file) {
-  try { const h = JSON.parse(fs.readFileSync(pausedFile(file), "utf8")); return h && typeof h === "object" && !Array.isArray(h) ? h : null; } catch { return null; }
+  try { const raw = readSmallFile(pausedFile(file), 1 << 20); if (raw == null) return null; const h = JSON.parse(raw); return h && typeof h === "object" && !Array.isArray(h) ? h : null; } catch { return null; }
 }
 export function listHooks(dir) {
   const scopes = [];
@@ -254,7 +256,11 @@ export function saveHooks({ scope, dir, hooks, disableAll }) {
     const want = clean !== undefined ? clean : (paused || j.hooks || {});
     const ucb = scope === "user" ? ucAppBegin() : null;
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    if (r.exists) { try { fs.copyFileSync(file, file + ".bak"); } catch {} }
+    if (r.exists) { try {
+      const bakTmp = file + ".bak.tmp-" + process.pid;
+      fs.copyFileSync(file, bakTmp);
+      fs.renameSync(bakTmp, file + ".bak");   // rename 替换软链本身，不会跟着链接写到别处
+    } catch {} }
     const put = (dst, obj) => { const tmp = dst + ".tmp-" + process.pid; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + "\n"); fs.renameSync(tmp, dst); };
     if (pause) { put(pausedFile(file), want); delete j.hooks; }      // 先把规则存好，再从生效的配置里拿掉
     else if (Object.keys(want).length) j.hooks = want; else delete j.hooks;
@@ -352,7 +358,7 @@ function fmField(md, k) {
 }
 export function skillMeta(dir) {
   try {
-    const s = fs.readFileSync(path.join(dir, "SKILL.md"), "utf8").slice(0, 4000);
+    const s = readHeadFile(path.join(dir, "SKILL.md"), 4000); if (s == null) return null;
     return { name: fmField(s, "name"), description: fmField(s, "description").slice(0, 300) };
   } catch { return null; }
 }
@@ -403,7 +409,7 @@ async function skillCatalog(force) {
   }));
   return (skillCat = { at: Date.now(), sha: tree.sha, items });
 }
-const skillSource = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(SKILLS_DIR, dir, ".cc-source.json"), "utf8")); } catch { return null; } };
+const skillSource = (dir) => { try { const raw = readSmallFile(path.join(SKILLS_DIR, dir, ".cc-source.json"), 64 << 10); return raw == null ? null : JSON.parse(raw); } catch { return null; } };
 async function listSkillCatalog(force) {
   try {
     const c = await skillCatalog(force);

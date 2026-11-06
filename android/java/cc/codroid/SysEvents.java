@@ -39,6 +39,7 @@ public class SysEvents extends BroadcastReceiver {
     }
 
     @Override public void onReceive(Context c, Intent i) {
+        Tr.init(c);   // 开机广播先到：不初始化会把语言缓存成系统语言，后面整个进程都改不回来（0.6.6 报告 #6）
         String a = i.getAction();
         if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(a)) {
             Installer.deleteTree(new java.io.File(c.getFilesDir(), "updates"));
@@ -56,6 +57,9 @@ public class SysEvents extends BroadcastReceiver {
                 // 有的 ROM 开机时不让起前台服务（ForegroundServiceStartNotAllowedException）：别让广播接收器崩掉
                 try { c.startForegroundService(new Intent(c, GatewayService.class).setAction(GatewayService.ACTION_BOOT).putExtra(MainActivity.IK, MainActivity.intentKey(c))); }
                 catch (RuntimeException e) { android.util.Log.w("cccodroid", "开机起网关被拒：" + e); }
+        } else if (android.app.AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED.equals(a)) {
+            // 用户刚授权/撤销「闹钟和提醒」：重新登记，别让已有任务停在旧的精确/非精确状态（审查 11-05）
+            SchedAlarm.reschedule(c);
         }
     }
 }

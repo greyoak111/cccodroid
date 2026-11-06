@@ -515,12 +515,17 @@ public class MainActivity extends Activity {
     // ── 分享进来的东西：文件拷进工作区的 uploads/（和网页上传同一处、同样的命名），文字插进输入框 ──
     private void receiveShare(Intent i) {
         java.util.ArrayList<android.net.Uri> uris = new java.util.ArrayList<>();
+        // 别的应用可以递任意 Parcelable/null：逐个确认是 Uri 再收，别让调用点的强制转换把进程带走
         if (Intent.ACTION_SEND_MULTIPLE.equals(i.getAction())) {
-            java.util.ArrayList<android.net.Uri> l = i.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
-            if (l != null) uris.addAll(l);
+            try {
+                java.util.ArrayList<android.net.Uri> l = i.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                if (l != null) for (android.net.Uri u : l) if (u != null) uris.add(u);
+            } catch (Throwable ignored) {}
         } else {
-            android.net.Uri u = i.getParcelableExtra(Intent.EXTRA_STREAM);
-            if (u != null) uris.add(u);
+            try {
+                android.os.Parcelable p = i.getParcelableExtra(Intent.EXTRA_STREAM);
+                if (p instanceof android.net.Uri) uris.add((android.net.Uri) p);
+            } catch (Throwable ignored) {}
         }
         // 有的应用分享的是带格式的 CharSequence（Spanned），getStringExtra 会拿到 null（11-04 报告 A4）
         CharSequence cs0 = i.getCharSequenceExtra(Intent.EXTRA_TEXT);
@@ -547,6 +552,7 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {}
         if (from != null) android.widget.Toast.makeText(this, Tr.f("收到来自「{0}」的分享，发之前看一眼", from), android.widget.Toast.LENGTH_LONG).show();
         new Thread(() -> {
+          try {
             java.io.File dir = new java.io.File(env.workspace(), "uploads");
             dir.mkdirs();
             int n = 0;
@@ -587,6 +593,7 @@ public class MainActivity extends Activity {
             }
             // 分享文件时 EXTRA_TEXT 常是标题之类的附带说明，只有单纯分享文字时才插进去
             if (n == 0 && uris.isEmpty() && text != null) toPage("ccapp-insert", text);
+          } catch (Throwable t) { android.util.Log.w("cccodroid", "分享处理失败", t); }
         }, "share-in").start();
     }
     /** 收别的应用递来的流：单个最多 4 GB；60 秒没来新数据就关掉输入流（阻塞的 read 随之返回）、算失败；
@@ -737,6 +744,7 @@ public class MainActivity extends Activity {
         });
     }
     private String displayName(android.net.Uri u) {
+        if (u == null) return "shared.bin";
         try (android.database.Cursor c = getContentResolver().query(u, new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
             if (c != null && c.moveToFirst() && c.getString(0) != null) return c.getString(0);
         } catch (Exception ignored) {}
@@ -958,6 +966,7 @@ public class MainActivity extends Activity {
     }
 
     private long sizeOf(Uri u) {
+        if (u == null) return -1;
         if ("file".equals(u.getScheme())) return new File(u.getPath()).length();
         try (android.database.Cursor c = getContentResolver().query(u, new String[]{android.provider.OpenableColumns.SIZE}, null, null, null)) {
             if (c != null && c.moveToFirst() && !c.isNull(0)) return c.getLong(0);
@@ -2008,16 +2017,32 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             boolean ok = false;
             String msg;
-            try (InputStream in = new java.io.FileInputStream(from); OutputStream out = getContentResolver().openOutputStream(dst, "w")) {
-                if (out == null) throw new java.io.IOException(Tr.t("openOutputStream 返回 null"));
-                byte[] buf = new byte[1 << 16];
-                for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+            // 目标可能正是源文件（用户在选择器里选了同一个文件）：先只读打开目标，比较 dev/ino，
+            // 同一个就拒绝；否则 openOutputStream("w") 会先把源截成 0 字节（审查 11-05）
+            try (android.os.ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(dst, "r")) {
+                if (pfd != null) {
+                    android.system.StructStat a = android.system.Os.fstat(pfd.getFileDescriptor()), b = android.system.Os.stat(from.getPath());
+                    if (a.st_dev == b.st_dev && a.st_ino == b.st_ino) { ui.post(() -> savedJs(false, "same")); return; }
+                }
+            } catch (Exception ignore) {}
+            java.io.File tmp = new java.io.File(getCacheDir(), "save-as-" + System.nanoTime() + ".tmp");
+            try {
+                // 先复制到临时文件：中途失败也不会把源/目标写成半截
+                try (InputStream in = new java.io.FileInputStream(from); OutputStream o = new java.io.FileOutputStream(tmp)) {
+                    byte[] buf = new byte[1 << 16];
+                    for (int n; (n = in.read(buf)) > 0; ) o.write(buf, 0, n);
+                }
+                try (InputStream in = new java.io.FileInputStream(tmp); OutputStream out = getContentResolver().openOutputStream(dst, "w")) {
+                    if (out == null) throw new java.io.IOException(Tr.t("openOutputStream 返回 null"));
+                    byte[] buf = new byte[1 << 16];
+                    for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+                }
                 ok = true;
                 msg = from.getName();
             } catch (Exception e) {
                 msg = String.valueOf(e.getMessage());
                 try { android.provider.DocumentsContract.deleteDocument(getContentResolver(), dst); } catch (Exception ignore) {}
-            }
+            } finally { try { tmp.delete(); } catch (Exception ignore) {} }
             final boolean fok = ok; final String fmsg = msg;
             ui.post(() -> savedJs(fok, fmsg));
         }, "save-as").start();

@@ -33,14 +33,15 @@ test("读响应体有上限：声明超长、实际超长都断开；正常的�
   await assert.rejects(fetchText(await fetch(u("/stream")), 4 << 20), /too large/);
 });
 
-test("回退补救：应用私有目录里只许写工作区，别处（/sdcard 项目）照常（L6）", async () => {
+test("回退补救：只许写工作区或会话记录过的项目目录（L6）", async () => {
   const { rewindTargetOk } = await import("../gw/sessionops.mjs");
   fs.mkdirSync(CFG.workspace, { recursive: true });
   assert.equal(rewindTargetOk(path.join(CFG.workspace, "proj", "a.js")), true);
   assert.equal(rewindTargetOk(path.join(CFG.home, ".bashrc")), false);
   assert.equal(rewindTargetOk(path.join(CFG.home, ".claude", "settings.json")), false);
   assert.equal(rewindTargetOk(CFG.workspace), false, "工作区本身不是文件");
-  assert.equal(rewindTargetOk("/sdcard/Documents/proj/a.js"), true);
+  assert.equal(rewindTargetOk("/sdcard/Documents/proj/a.js"), false, "没记录过 cwd 的外部路径不许");
+  assert.equal(rewindTargetOk("/sdcard/Documents/proj/a.js", ["/sdcard/Documents/proj"]), true);
   assert.equal(rewindTargetOk("relative/a.js"), false);
   // 11-03 审查 M-7：files 之外的私有数据（shared_prefs、databases…）也不许
   assert.equal(rewindTargetOk(path.join(path.dirname(path.dirname(CFG.home)), "shared_prefs", "consent.xml")), false);

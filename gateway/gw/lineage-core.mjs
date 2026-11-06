@@ -48,6 +48,8 @@ export async function scanSession(file, prev) {
     let r = prev && prev.id === id && st.size >= prev.off && prev.head === head ? prev : emptyRecord(id);
     if (r === prev) r = { ...prev, uu: prev.uu.slice(), ts: prev.ts.slice(), compacts: prev.compacts.map((c) => ({ ...c })), refs: (prev.refs || []).map((x) => ({ ...x })) };
     r.head = head; r.size = st.size; r.birth = st.birthtimeMs || r.birth || 0;
+    // 引用去重表：以前每个匹配都 r.refs.find 线性扫，伪造一条含几万个引用的记录就是 O(n²)（审查 11-05）
+    const refMap = new Map((r.refs || []).map((x) => [x.id, x]));
     let pos = r.off, rest = Buffer.alloc(0);
     // 每读 1MB 让一下事件循环：大会话首次建索引要读几百 MB，一口气读完网关会冻住好几秒（审查 v0.5.3 B1）
     const CH = 1 << 20;
@@ -107,9 +109,10 @@ export async function scanSession(file, prev) {
       for (const b of Array.isArray(e.message?.content) ? e.message.content : []) {
         if (b?.type !== "tool_use") continue;
         for (const m of JSON.stringify(b.input || {}).matchAll(REF)) {
-          const x = r.refs.find((y) => y.id === m[1]);
+          const x = refMap.get(m[1]);
           if (m[1] === id) continue;
-          if (x) x.n++; else r.refs.push({ id: m[1], at: e.uuid, ts, turn: r.turns, n: 1 });
+          if (x) x.n++;
+          else if (r.refs.length < 256) { const y = { id: m[1], at: e.uuid, ts, turn: r.turns, n: 1 }; refMap.set(m[1], y); r.refs.push(y); }
         }
       }
     }

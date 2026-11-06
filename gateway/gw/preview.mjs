@@ -187,7 +187,13 @@ function previewServe(req, res) {
   head["content-length"] = r.size ? end - start + 1 : 0;
   res.writeHead(code, head);
   if (req.method === "HEAD" || !r.size) return res.end();
-  const st = fs.createReadStream(r.file, { start, end });
+  // 按 fd 出流，不按路径重开：safeFilePath 核完到 createReadStream 之间被换成软链，会读到被 pathBlocked 挡的文件
+  let fd;
+  try { fd = fs.openSync(r.file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW); }
+  catch { try { res.destroy(); } catch {} return; }
+  try { const st0 = fs.fstatSync(fd); if (!st0.isFile() || st0.size !== r.size) throw new Error("changed"); }
+  catch { try { fs.closeSync(fd); } catch {} try { res.destroy(); } catch {} return; }
+  const st = fs.createReadStream(r.file, { fd, start, end });
   st.on("error", () => { try { res.destroy(); } catch {} });
   res.on("close", () => { if (!res.writableFinished) st.destroy(); });     // 客户端中途断开就关源（#148-1）
   st.pipe(res);

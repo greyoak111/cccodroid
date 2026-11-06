@@ -59,6 +59,13 @@ export function appGuard(root, { onRestart, expect, onBadList } = {}) {
   }
 
   /** 小目录核一遍：被改的写回，多出来的删掉。返回动过的文件 */
+  /** 写回/删除前确认父目录真实路径还在 root 里：SNAP_DIR 被换成软链时，fs 会跟着链写到别处（审查 11-05） */
+  const parentInside = (f) => {
+    try {
+      const base = fs.realpathSync(root), real = fs.realpathSync(path.dirname(f));
+      return real === base || real.startsWith(base + path.sep);
+    } catch { return false; }
+  };
   function check() {
     const fixed = [];
     for (const [rel, s] of snap) {
@@ -69,6 +76,7 @@ export function appGuard(root, { onRestart, expect, onBadList } = {}) {
       if (st && st.isFile() && st.size === s.buf.length) {
         try { if (fs.readFileSync(f).equals(s.buf)) { seen.set(rel, k); continue; } } catch {}
       }
+      if (!parentInside(f)) { restart(`${rel}（上级目录被换成软链）`); continue; }
       try {
         try { fs.rmSync(f, { recursive: true, force: true }); } catch {}
         fs.mkdirSync(path.dirname(f), { recursive: true });
@@ -80,7 +88,11 @@ export function appGuard(root, { onRestart, expect, onBadList } = {}) {
     }
     // 多出来的：bin、pre 在 PATH 里，scripts、archive、guard 也只该有安装包里的那些
     for (const d of SNAP_DIRS) {
-      let ents; try { ents = fs.readdirSync(path.join(root, d)); } catch { continue; }
+      const dir = path.join(root, d);
+      // 目录本身是软链/不普通：不 readdir、更不按里面的条目删除，交给应用重启时按安装包还原
+      try { const dst = fs.lstatSync(dir); if (dst.isSymbolicLink() || !dst.isDirectory()) { restart(`${d}（目录被换成软链）`); continue; } } catch { continue; }
+      if (!parentInside(path.join(dir, "x"))) { restart(`${d}（目录被换成软链）`); continue; }
+      let ents; try { ents = fs.readdirSync(dir); } catch { continue; }
       for (const n of ents) {
         const rel = d + n;
         if (want.has(rel) || dirs.has(rel)) continue;
@@ -154,7 +166,11 @@ if (APP && typeof module.registerHooks === "function") {
   const base = pathToFileURL(HERE + path.sep).href;
   module.registerHooks({
     load(url, ctx, next) {
-      if (!url.startsWith(base)) return next(url, ctx);
+      // 软链解析后可能变成安装目录外的 file: URL：不能放行，否则等于跳过清单核对（审查 11-05）
+      if (!url.startsWith(base)) {
+        if (url.startsWith("file:")) { APP.restart(`${url}（安装包外的文件）`); throw new Error(`[应用文件] ${url} 不在安装目录里`); }
+        return next(url, ctx);
+      }
       const rel = decodeURIComponent(url.slice(base.length).replace(/[?#].*$/, ""));
       const buf = APP.code(rel);
       if (!buf) { APP.restart(`${rel}（加载时和安装包对不上）`); throw new Error(`[应用文件] ${rel} 和安装包对不上，拒绝加载`); }

@@ -16,6 +16,7 @@ import crypto from "node:crypto";
 import { CFG, log, tz } from "./config.mjs";
 import { sealed } from "./edition.mjs";
 import { scanText, describe } from "./breach.mjs";
+import { readSmallFile } from "./saferead.mjs";
 
 const MAX_TEXT = 256 << 10;            // 单个说明文件上限（超过的不回填，记一笔）
 const MAX_CTX = 1 << 20;               // 拼出来的说明总长
@@ -28,12 +29,9 @@ const sha = (b) => crypto.createHash("sha256").update(b).digest("hex");
 const home = () => CFG.home;
 const userClaude = () => path.join(home(), ".claude");
 
-/** 普通文件、不太大才读；读不了 / 太大返回 null */
-function readSmall(f, max = MAX_TEXT) {
-  let st; try { st = fs.statSync(f); } catch { return null; }
-  if (!st.isFile() || st.size > max) return null;
-  try { return fs.readFileSync(f, "utf8"); } catch { return null; }
-}
+/** 普通文件、不太大才读；读不了 / 太大 / 软链返回 null。
+ *  用 O_NOFOLLOW：仓库里的 CLAUDE.md / rules 可以是软链，不能让它指到凭据文件（审查 11-05） */
+function readSmall(f, max = MAX_TEXT) { return readSmallFile(f, max); }
 const realOr = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
 
 /** cwd 往上到根的各级目录（根在前） */
@@ -65,16 +63,24 @@ const LABEL = {
   project: "project instructions, checked into the codebase",
   local: "user's private project instructions, not checked in",
 };
-/** @path 引用（代码块外）：相对引用它的文件，~/ 是 home */
+// @ 引用只展开说明文件，且不碰凭据/密钥路径：项目 CLAUDE.md 是不可信输入，
+// 以前它可以写 @~/ccapp-providers.json 把 API Key 读进系统提示发给模型厂商（审查 11-05）
+const IMPORT_EXT = /\.(?:md|markdown|txt)$/i;
+const SECRET_PATH = /(?:^|\/)(?:\.credentials\.json|\.gateway-token|ccapp-(?:providers|config|seed)[\w.-]*\.json|id_(?:rsa|ed25519|ecdsa|dsa)|[^/]+\.(?:pem|key)|\.netrc|hosts\.ya?ml|\.npmrc|\.pypirc|\.env(?:\.[\w-]+)?)$/i;
+const SECRET_DIR = /(?:^|\/)\.(?:ssh|gnupg|aws)(?:\/|$)|(?:^|\/)\.config\/gh(?:\/|$)/i;
+/** @path 引用（代码块外）：相对引用它的文件，~/ 是 home。只收 .md/.txt，拒绝凭据/密钥路径 */
 function imports(text, base) {
   const out = [];
   let fence = false;
   for (const line of text.split("\n")) {
     if (/^\s*(```|~~~)/.test(line)) { fence = !fence; continue; }
     if (fence) continue;
-    for (const m of line.matchAll(/(?:^|\s)@((?:~\/|\.{1,2}\/|\/)?[\w.\-\/]+\.\w+)/g)) {
+    for (const m of line.matchAll(/(?:^|\s)@((?:~\/|\.{1,2}\/|\/)?[\w.\-\/]+\.(?:md|markdown|txt))/gi)) {
       const r = m[1];
-      out.push(r.startsWith("~/") ? path.join(home(), r.slice(2)) : path.resolve(base, r));
+      if (!IMPORT_EXT.test(r) || SECRET_PATH.test(r) || SECRET_DIR.test(r)) continue;
+      const p = r.startsWith("~/") ? path.join(home(), r.slice(2)) : path.resolve(base, r);
+      if (SECRET_PATH.test(p) || SECRET_DIR.test(p)) continue;
+      out.push(p);
     }
   }
   return out;
@@ -111,8 +117,10 @@ function renderContext(items) {
   if (!items.length) return "";
   let s = "Codebase and user instructions are shown below. Be sure to adhere to these instructions. " +
     "IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.\n";
+  // 路径里的换行/控制符会变成系统提示里的独立一行；文件名是仓库可以带的，不能让它绕过正文扫描（审查 11-05）
+  const label = (p) => String(p).replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").slice(0, 500);
   for (const it of items) {
-    const head = `\nContents of ${it.file} (${LABEL[it.kind]}${it.from ? `, imported from ${it.from}` : ""}):\n\n`;
+    const head = `\nContents of ${label(it.file)} (${LABEL[it.kind]}${it.from ? `, imported from ${label(it.from)}` : ""}):\n\n`;
     if (s.length + head.length + it.text.length > MAX_CTX) { log(`[封口] 说明文件合计超过 ${MAX_CTX >> 10}KB，${it.file} 起没回填`); break; }
     s += head + it.text.trimEnd() + "\n";
   }
@@ -156,8 +164,8 @@ function userPluginFiles(cwd) {
 /** 已启用的扩展页插件（user 范围）：[{ id, dir }] */
 function enabledPlugins() {
   let set = {}, inst = {};
-  try { set = JSON.parse(fs.readFileSync(path.join(userClaude(), "settings.json"), "utf8")).enabledPlugins || {}; } catch {}
-  try { inst = JSON.parse(fs.readFileSync(path.join(userClaude(), "plugins", "installed_plugins.json"), "utf8")).plugins || {}; } catch {}
+  try { set = JSON.parse(readSmallFile(path.join(userClaude(), "settings.json"), 4 << 20) || "{}").enabledPlugins || {}; } catch {}
+  try { inst = JSON.parse(readSmallFile(path.join(userClaude(), "plugins", "installed_plugins.json"), 8 << 20) || "{}").plugins || {}; } catch {}
   const cache = realOr(path.join(userClaude(), "plugins", "cache"));
   const out = [];
   for (const [id, on] of Object.entries(set)) {
@@ -201,13 +209,74 @@ function cleanManifest(buf) {
  * 按清单拷成一个插件目录（私有、按指纹复用）。拷的时候查文字（.md 一类）；命中返回 { found }。
  * 复用前核对每个文字文件的哈希，副本被动过就重拷。
  */
+/** 复用目录里每个文件都按「当前源文件」重算并核对，文字文件还要重新过破甲扫描：
+ *  不能只信副本自带的 .ccapp-ok —— 它就在可写目录里，改它就能让新增的 skill/hook 蒙混过关（审查 11-05）。 */
+function expectedBytes(rel, f, manifest) {
+  try {
+    if (rel === ".claude-plugin/plugin.json" && manifest) return Buffer.from(manifest);
+    let buf = readSmallFile(f.src, 64 << 20, "");
+    if (buf == null) return null;
+    if (rel === ".claude-plugin/plugin.json") buf = cleanManifest(buf);
+    return buf;
+  } catch { return null; }
+}
+function dirMatches(dir, files, manifest) {
+  const want = new Map();
+  for (const [rel, f] of files) {
+    const b = expectedBytes(rel, f, manifest);
+    if (!b) return false;
+    if (isText(rel)) {
+      if (b.length > (2 << 20)) return false;                       // 大文本不扫描就不复用，走重建时会被 toolarge 拦下
+      const r = scanText(b.toString("utf8"));
+      if (r.blocked) return false;
+    }
+    want.set(rel, sha(b));
+  }
+  if (manifest) want.set(".claude-plugin/plugin.json", sha(Buffer.from(manifest)));
+  const seen = new Set();
+  const walk = (d, rel0) => {
+    let ents; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return false; }
+    for (const e of ents) {
+      const r = rel0 ? rel0 + "/" + e.name : e.name;
+      if (!rel0 && e.name === ".ccapp-ok") continue;
+      if (e.isSymbolicLink()) return false;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { if (!walk(p, r)) return false; continue; }
+      if (!e.isFile()) return false;
+      const h = want.get(r);
+      if (!h) return false;
+      try { const b = readSmallFile(p, 64 << 20, ""); if (b == null || sha(b) !== h) return false; } catch { return false; }
+      seen.add(r);
+    }
+    return true;
+  };
+  return walk(dir, "") && seen.size === want.size;
+}
+const VERIFIED = new Map();   // 本进程里已经完整核对过的副本：目录 + 源/副本 stat 签名
+const srcSig = (f) => { try { const s = fs.statSync(f); return `${s.size}:${s.mtimeMs}:${s.ctimeMs}:${s.ino}`; } catch { return "-"; } };
+const copySig = (f) => { try { const s = fs.lstatSync(f); return s.isFile() ? `${s.size}:${s.mtimeMs}:${s.ctimeMs}:${s.ino}` : "bad"; } catch { return "-"; } };
+function fileSig(dir, files, manifest) {
+  const parts = [];
+  for (const [rel, f] of files) parts.push(rel, srcSig(f.src), copySig(path.join(dir, rel)));
+  if (manifest) parts.push(".claude-plugin/plugin.json", copySig(path.join(dir, ".claude-plugin/plugin.json")));
+  return parts.join("\0");
+}
 function materialize(name, files, manifest) {
   const fp = sha(name + "\0" + JSON.stringify([...files].map(([r, f]) => [r, f.size, f.mtime]).sort()) + "\0" + (manifest || ""));
   const dir = path.join(ROOT(), "plug-" + name.replace(/[^\w.-]/g, "_") + "-" + fp.slice(0, 16));
   const okFile = path.join(dir, ".ccapp-ok");
   try {
-    const ok = JSON.parse(fs.readFileSync(okFile, "utf8"));
-    if (ok.fp === fp && Object.entries(ok.text).every(([r, h]) => { try { return sha(fs.readFileSync(path.join(dir, r))) === h; } catch { return false; } })) { touch(dir); return { dir }; }
+    const okRaw = readSmallFile(okFile, 1 << 20);
+    if (okRaw == null) throw new Error("no cache");
+    const ok = JSON.parse(okRaw);
+    if (ok.fp === fp) {
+      const sig = fileSig(dir, files, manifest);
+      if (VERIFIED.get(dir) === sig || dirMatches(dir, files, manifest)) {
+        VERIFIED.set(dir, sig);
+        touch(dir);
+        return { dir };
+      }
+    }
   } catch {}
   const tmp = dir + ".tmp-" + process.pid;
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -220,7 +289,10 @@ function materialize(name, files, manifest) {
       try { fs.linkSync(f.src, d); } catch { try { fs.copyFileSync(f.src, d); fs.chmodSync(d, (f.mode | 0o600) & 0o700); } catch {} }
       continue;
     }
-    let buf; try { buf = fs.readFileSync(f.src); } catch { continue; }
+    let buf; try { buf = readSmallFile(f.src, 64 << 20, ""); } catch { buf = null; }
+    if (buf == null) continue;
+    // 扫描只看前 2MB，但副本写的是全文：超过扫描上限的文本直接拒绝，别只扫开头就放行（审查 11-05）
+    if (buf.length > (2 << 20)) { found.push({ name: f.src, hits: [{ cat: "toolarge", strong: true, line: 0, excerpt: "" }] }); continue; }
     if (rel === ".claude-plugin/plugin.json") { buf = cleanManifest(buf); if (!buf) continue; }
     const r = scanText(buf.toString("utf8"));
     if (r.blocked) found.push({ name: f.src, hits: r.hits });
@@ -236,12 +308,13 @@ function materialize(name, files, manifest) {
   fs.writeFileSync(path.join(tmp, ".ccapp-ok"), JSON.stringify({ fp, text }), { mode: 0o600 });
   fs.rmSync(dir, { recursive: true, force: true });
   fs.renameSync(tmp, dir);
+  VERIFIED.set(dir, fileSig(dir, files, manifest));
   return { dir };
 }
 
 // ── MCP、设置 ──
 function mcpConfig(cwd) {
-  let j = {}; try { j = JSON.parse(fs.readFileSync(path.join(home(), ".claude.json"), "utf8")); } catch {}
+  let j = {}; try { j = JSON.parse(readSmallFile(path.join(home(), ".claude.json"), 32 << 20) || "{}"); } catch {}
   const servers = { ...(j.mcpServers || {}) };
   const proj = (j.projects || {})[realOr(cwd)] || (j.projects || {})[cwd];
   Object.assign(servers, proj?.mcpServers || {});
@@ -250,7 +323,7 @@ function mcpConfig(cwd) {
 // 用户设置里照搬的：权限规则 + 不会让东西跑起来、也不进上下文的几个键
 const KEEP_KEYS = ["includeCoAuthoredBy", "includeGitInstructions", "cleanupPeriodDays", "alwaysThinkingEnabled", "respectGitignore", "attribution"];
 function userSettings() {
-  let j = {}; try { j = JSON.parse(fs.readFileSync(path.join(userClaude(), "settings.json"), "utf8")); } catch {}
+  let j = {}; try { j = JSON.parse(readSmallFile(path.join(userClaude(), "settings.json"), 4 << 20) || "{}"); } catch {}
   const out = {};
   for (const k of KEEP_KEYS) if (j[k] !== undefined) out[k] = j[k];
   const p = j.permissions;
@@ -273,7 +346,7 @@ export function scanMemory(dir) {
   for (const f of mdUnder(dir, 2)) {
     let st; try { st = fs.statSync(f); } catch { continue; }
     if (!st.isFile()) continue;
-    const t = st.size > MAX_TEXT * 4 ? null : (() => { try { return fs.readFileSync(f, "utf8"); } catch { return null; } })();
+    const t = st.size > MAX_TEXT * 4 ? null : readSmallFile(f, MAX_TEXT * 4);
     if (t == null) { found.push({ name: f, hits: [{ cat: "toolarge", strong: true, line: 0, excerpt: "" }] }); continue; }
     parts.push(f + "\0" + sha(t));
     const r = scanText(t);
@@ -290,7 +363,10 @@ export function scanMemory(dir) {
 export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   if (!sealed()) return { args: [], settings: null, block: null };
   const args = [], settings = userSettings(), notes = [];
+  // 缓存根不能是软链：被换成指向 /sdcard 的链接后，别的应用也能改插件副本
+  try { const st = fs.lstatSync(ROOT()); if (st.isSymbolicLink() || !st.isDirectory()) fs.rmSync(ROOT(), { recursive: true, force: true }); } catch {}
   fs.mkdirSync(ROOT(), { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(ROOT(), 0o700); } catch {}
   prune();
   const found = [];
 
@@ -323,8 +399,9 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
 
   if (found.length) return { args: [], settings: null, block: { found }, memDir, memFp: mem.fp, notes };
 
+  const rid = String(runId).replace(/[^\w.-]/g, "_") + "-" + crypto.randomBytes(4).toString("hex");
   if (ctx.items.length) {
-    const f = path.join(ROOT(), `ctx-${String(runId).replace(/[^\w.-]/g, "_")}.md`);
+    const f = path.join(ROOT(), `ctx-${rid}.md`);
     fs.writeFileSync(f, renderContext(ctx.items), { mode: 0o600 });
     args.push("--append-system-prompt-file", f);
   }
@@ -332,7 +409,7 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   for (const d of plugDirs) args.push("--plugin-dir", d);
   const mcp = mcpConfig(cwd);
   if (mcp) {
-    const f = path.join(ROOT(), `mcp-${String(runId).replace(/[^\w.-]/g, "_")}.json`);
+    const f = path.join(ROOT(), `mcp-${rid}.json`);
     fs.writeFileSync(f, JSON.stringify(mcp), { mode: 0o600 });
     args.push("--mcp-config", f);
   }
@@ -368,7 +445,8 @@ function touch(dir) { try { const t = new Date(); fs.utimesSync(dir, t, t); } ca
 /** 一轮结束：删掉这一轮的临时文件 */
 export function sealCleanup(runId) {
   const id = String(runId).replace(/[^\w.-]/g, "_");
-  for (const f of [`ctx-${id}.md`, `mcp-${id}.json`]) try { fs.rmSync(path.join(ROOT(), f), { force: true }); } catch {}
+  // 文件名带随机后缀（防同 uid 预先占名/换成软链），按前缀清这一轮的
+  try { for (const n of fs.readdirSync(ROOT())) if (n === `ctx-${id}.md` || n === `mcp-${id}.json` || n.startsWith(`ctx-${id}-`) || n.startsWith(`mcp-${id}-`)) fs.rmSync(path.join(ROOT(), n), { force: true }); } catch {}
 }
 
 /** 给用户看的拒跑说明 */

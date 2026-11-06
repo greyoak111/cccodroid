@@ -34,7 +34,8 @@ export function digestSummary(text) {
   const k = s.search(/\bSummary:\s*\n/);
   if (k >= 0) s = s.slice(k).replace(/^Summary:\s*/, "");
   if (s.length <= SUM_HEAD + SUM_TAIL) return s.trim();
-  const cw = s.search(/\n\s*\d+\.\s*(Current Work|当前工作)/i);
+  // 空白只能在同一行内：\s* 跨行时，一长串换行会让正则平方级回溯，补档点一下就把网关冻住（审查 11-05）
+  const cw = s.search(/\n[ \t\u3000]{0,8}\d+\.[ \t\u3000]*(Current Work|当前工作)/i);
   const tail = cw >= 0 ? s.slice(cw, cw + SUM_TAIL) : s.slice(-SUM_TAIL);
   return (s.slice(0, SUM_HEAD) + "\n…\n" + tail).trim();
 }

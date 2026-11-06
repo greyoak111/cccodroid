@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { CFG, PATHS, PERM_MODES, log } from "./config.mjs";
+import { readHeadFile, readSmallFile } from "./saferead.mjs";
 
 // ── 设置（模型 / 权限模式 / 目录 …）──────────────────────────────────
 export const SETTINGS = {
@@ -58,7 +59,7 @@ const hashOf = (s) => crypto.createHash("sha256").update(s).digest("hex");
 function loadSettings() {
   let had = false;
   try {
-    const raw = fs.readFileSync(PATHS.settings, "utf8");
+    const raw = readSmallFile(PATHS.settings, 4 << 20);
     DISK_H = hashOf(raw);
     Object.assign(SETTINGS, JSON.parse(raw));
     had = true;
@@ -115,7 +116,7 @@ loadSettings();
 /** 网关跑着时设置以内存为准、只有网关写盘：盘上那份和最后读写的对不上，就是别人改的 —— 写回去，返回 true（调用方记留痕） */
 export function settingsDiskCheck() {
   if (DISK_H == null) return false;
-  let raw; try { raw = fs.readFileSync(PATHS.settings, "utf8"); } catch { raw = null; }
+  const raw = readSmallFile(PATHS.settings, 4 << 20);
   if (raw != null && hashOf(raw) === DISK_H) return false;
   return saveSettings();
 }
@@ -134,7 +135,7 @@ export function outputStyles() {
     for (const f of files) {
       let name = f.slice(0, -3), desc = "";
       try {
-        const head = fs.readFileSync(path.join(dir, f), "utf8").slice(0, 2000);
+        const head = readHeadFile(path.join(dir, f), 2000);
         const fm = head.match(/^---\n([\s\S]*?)\n---/);
         if (fm) {
           name = (fm[1].match(/^name:[ \t]*(.+)$/m) || [, name])[1].trim();

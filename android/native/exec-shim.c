@@ -96,7 +96,8 @@ enum { K_OTHER, K_BIONIC, K_GLIBC, K_LDSO, K_SCRIPT };
 
 /* 看文件头：ELF 取 PT_INTERP，脚本取 #! 行（写进 line） */
 static int kind(const char *path, char *line, size_t cap) {
-    int fd = (int)sc(NR_openat, AT_FDCWD, (long)path, 0x80000 /* O_CLOEXEC */, 0);
+    // O_NONBLOCK：目标是 FIFO 时普通 open 会等写端，exec 直接挂死；非普通文件会在下面的 pread 处返回 ESPIPE
+    int fd = (int)sc(NR_openat, AT_FDCWD, (long)path, 0x80800 /* O_CLOEXEC|O_NONBLOCK */, 0);
     if (fd < 0) return K_OTHER;
     unsigned char h[64];
     int k = K_OTHER;

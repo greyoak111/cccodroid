@@ -221,7 +221,16 @@ public final class Docs extends DocumentsProvider {
 
     @Override
     public ParcelFileDescriptor openDocument(String docId, String mode, CancellationSignal signal) throws FileNotFoundException {
-        ParcelFileDescriptor pfd = ParcelFileDescriptor.open(fileOf(docId), ParcelFileDescriptor.parseMode(mode));
+        File target = fileOf(docId);
+        // 写模式会在 open 时截断：硬链接文件有多个名字，截断前先拒绝（以前的检查在 open 之后，已经清空了）
+        if (mode != null && mode.contains("w") && !mode.contains("a")) {
+            try {
+                android.system.StructStat st = android.system.Os.stat(target.getPath());
+                if (android.system.OsConstants.S_ISREG(st.st_mode) && st.st_nlink > 1) throw new FileNotFoundException("硬链接文件不能写");
+            } catch (FileNotFoundException e) { throw e; }
+            catch (Exception ignore) {}
+        }
+        ParcelFileDescriptor pfd = ParcelFileDescriptor.open(target, ParcelFileDescriptor.parseMode(mode));
         // fileOf 查过真实路径，但查完到打开之间文件可能被换成指向作用域外的软链（审查 v0.5.7 L8）：
         // 打开以后按 fd 反查它实际是哪个文件，不在作用域里就关掉不给。根目录也按 fd 取，两边写法一致
         try {
@@ -271,7 +280,9 @@ public final class Docs extends DocumentsProvider {
     @Override
     public void deleteDocument(String docId) throws FileNotFoundException {
         File f = fileOf(docId);
-        if (f.equals(home)) throw new FileNotFoundException("不能删根");
+        // 用规范路径判根：docId 里的 "."/".." 会让未规范化的 File 不等于 home，从而递归删掉整个工作区
+        try { if (f.getCanonicalFile().equals(home.getCanonicalFile())) throw new FileNotFoundException("不能删根"); }
+        catch (java.io.IOException e) { throw new FileNotFoundException("不能删根"); }
         // 链接只删它本身，别顺着删到链接指向的地方（可能在作用域外）
         // 删不掉要报出去（审查 #105 06-003）：以前不看返回值，删失败也当成功。删了一半的照样通知刷新，让文件管理器看到剩下的
         boolean ok = isSymlink(f) ? f.delete() || !exists(f) : deleteTree(f);
@@ -305,7 +316,8 @@ public final class Docs extends DocumentsProvider {
     public String renameDocument(String docId, String displayName) throws FileNotFoundException {
         File f = fileOf(docId);
         File to = checked(new File(f.getParentFile(), safeName(displayName)));
-        if (f.equals(home)) throw new FileNotFoundException("改名失败");
+        try { if (f.getCanonicalFile().equals(home.getCanonicalFile())) throw new FileNotFoundException("改名失败"); }
+        catch (java.io.IOException e) { throw new FileNotFoundException("改名失败"); }
         if (to.equals(f)) return idOf(f);
         // 不覆盖同名：以前直接 renameTo，改成已有文件的名字就把那个文件顶掉了（审查 v0.5.20 06-001）。
         // Files.move 不带 REPLACE_EXISTING：目标在就报错；链接按链接本身挪

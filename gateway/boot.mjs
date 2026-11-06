@@ -50,7 +50,17 @@ let refused = false;
 const base = pathToFileURL(root.replace(/\/+$/, "") + "/").href;
 module.registerHooks({
   load(url, ctx, next) {
-    if (!url.startsWith(base)) return next(url, ctx);
+    if (!url.startsWith(base)) {
+      // 应用代码只允许从 files/app 里加载：软链被 Node 解析成外部真实路径后，前缀判断会放行。
+      // 内置模块是 node: 开头，不在这里；file: 的外部模块一律拒绝（审查 11-05）
+      if (url.startsWith("file:")) {
+        process.stderr.write(`⚠️ [应用文件] ${url} 不在安装目录里，拒绝加载\n`);
+        refused = true;
+        setImmediate(() => process.exit(3));
+        throw new Error(`[应用文件] ${url} 不在安装目录里`);
+      }
+      return next(url, ctx);
+    }
     const rel = decodeURIComponent(url.slice(base.length).replace(/[?#].*$/, ""));
     const h = want.get(rel);
     const r = h ? next(url, ctx) : null;

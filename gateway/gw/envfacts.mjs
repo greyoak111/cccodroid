@@ -9,6 +9,7 @@ import { COMP_DIR, compRecord, devkitIdentity } from "./components.mjs";
 import { modInstalled, modulesInfo } from "./modules.mjs";
 import { reconcileFacts } from "./reconcile.mjs";
 import { deviceFacts } from "./device.mjs";
+import { readSmallFile } from "./saferead.mjs";
 
 // ── 本机实况：TOOLS.md 是打包时在测试机上测的，这里补上「这台设备上实际怎样」 ──
 // 自检（cccodroid-selftest）在本机跑一遍，失败项和 INFO（比如有没有硬件编码器）接在 TOOLS.md 后面；
@@ -16,7 +17,7 @@ import { deviceFacts } from "./device.mjs";
 export const ENV_FACTS = PREFIX ? path.join(CFG.home, ".cccodroid-env.json") : "";
 export function envFactsKey() {
   const dk = devkitIdentity() || {};
-  let tag = ""; try { tag = fs.readFileSync(path.join(HERE, "TAG"), "utf8").trim(); } catch {}
+  let tag = ""; try { tag = (readSmallFile(path.join(HERE, "TAG"), 64) || "").trim(); } catch {}
   // 模块化工具包：装 / 卸模块后也要重测（自检按已装模块跑）
   const mj = modulesInfo(), mods = mj ? (mj.modules || []).filter((m) => modInstalled(mj, m.id)).map((m) => m.id).join(",") : "";
   return `${dk.sha256 || dk.tag || "?"}|${tag}${mods ? "|" + mods : ""}`;
@@ -61,7 +62,7 @@ function envFactsRun() {
 // 空闲（没有 claude 在跑）且结果过期时才跑：启动 2 分钟后看一次，之后每 5 分钟
 function envFactsTick() {
   if (RUNS.size || envFactsJob) return;
-  let cur = null; try { cur = JSON.parse(fs.readFileSync(ENV_FACTS, "utf8")); } catch {}
+  let cur = null; try { const raw = readSmallFile(ENV_FACTS, 256 << 10); cur = raw == null ? null : JSON.parse(raw); } catch {}
   if (!cur || cur.key !== envFactsKey()) envFactsRun();
 }
 if (PREFIX) { setTimeout(envFactsTick, 2 * 60e3).unref?.(); setInterval(envFactsTick, 5 * 60e3).unref?.(); }
@@ -100,7 +101,7 @@ export function envFacts() {
   } catch {}
   // pkg 装的包（只列用户点名装的，依赖不列）
   try {
-    const db = JSON.parse(fs.readFileSync(path.join(path.dirname(PREFIX), "pkg", "installed.json"), "utf8")).pkgs || {};
+    const db = JSON.parse(readSmallFile(path.join(path.dirname(PREFIX), "pkg", "installed.json"), 8 << 20) || "{}").pkgs || {};
     const have = new Set(fs.readdirSync(path.join(PREFIX, "var/lib/dpkg/info")).filter((f) => f.endsWith(".list")).map((f) => f.slice(0, -5)));
     const mine = Object.entries(db).filter(([, r]) => !r.auto);
     const ok = mine.filter(([n]) => have.has(n)).map(([n, r]) => `${word(n)} ${word(r.version)}`), lost = mine.filter(([n]) => !have.has(n)).map(([n]) => word(n));
@@ -109,7 +110,7 @@ export function envFacts() {
   } catch {}
   out.push(...reconcileFacts());
   // 这份 JSON 在 home 下、拼进系统提示（群友破甲清单 V-14）：只认自检写的几个字段，逐条压成单行、限长，别让它带进成段的文字
-  let r = null; try { r = JSON.parse(fs.readFileSync(ENV_FACTS, "utf8")); } catch {}
+  let r = null; try { const raw = readSmallFile(ENV_FACTS, 256 << 10); r = raw == null ? null : JSON.parse(raw); } catch {}
   if (r && typeof r === "object") r = { key: String(r.key || ""), pass: Number(r.pass) | 0,
     fail: (Array.isArray(r.fail) ? r.fail : []).slice(0, 12).map((x) => line(x)), info: (Array.isArray(r.info) ? r.info : []).slice(0, 8).map((x) => line(x)) };   // 别直接 map(line)：下标会被当成长度上限（#150-2）
   else r = null;

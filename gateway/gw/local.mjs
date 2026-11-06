@@ -10,6 +10,7 @@ import { RUNS } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
 import { compIndex, compIndexCache, compRun, sha256File } from "./components.mjs";
+import { readSmallFile } from "./saferead.mjs";
 import { runEmit } from "./queue.mjs";
 import { privCall } from "./usage.mjs";
 import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
@@ -28,8 +29,12 @@ const LOCAL_MODE_FILE = path.join(CFG.home, ".cccodroid", "local-mode.json");
 
 /** 自定义模式的配置：{ have, ok, cfg } 或 { have, ok:false, err }。每次现读，改完下一条消息就生效 */
 function localCustom() {
-  let raw;
-  try { raw = fs.readFileSync(LOCAL_MODE_FILE, "utf8"); } catch { return { have: false, ok: false, path: LOCAL_MODE_FILE }; }
+  // FIFO/设备/软链不能裸读：会同步阻塞或无限读（审查 11-05）
+  const raw = readSmallFile(LOCAL_MODE_FILE, 64 << 10);
+  if (raw == null) {
+    try { fs.lstatSync(LOCAL_MODE_FILE); return { have: true, ok: false, err: tz("local-mode.json 不是普通文件"), path: LOCAL_MODE_FILE }; }
+    catch { return { have: false, ok: false, path: LOCAL_MODE_FILE }; }
+  }
   const bad = (err) => ({ have: true, ok: false, err, path: LOCAL_MODE_FILE });
   let j; try { j = JSON.parse(raw); } catch (e) { return bad("JSON: " + e.message); }
   if (!j || typeof j !== "object" || Array.isArray(j)) return bad(tz("顶层要是一个对象"));
@@ -41,7 +46,9 @@ function localCustom() {
     return bad(tz("llamaArgs 要是文本数组（最多 40 项）"));
   if (j.ctx != null && !(Number.isInteger(j.ctx) && j.ctx >= 512 && j.ctx <= 262144)) return bad(tz("ctx 要是 512 到 262144 之间的整数"));
   // 这几个由网关管，用户改了就接不上
-  const owned = (j.llamaArgs || []).find((x) => ["-m", "--model", "--host", "--port", "-np", "--parallel"].includes(x));
+  // 按参数名归一化（支持 --opt=value），并且把能改鉴权/监听地址的也挡住
+  const OWNED = new Set(["-m", "--model", "--host", "--port", "-np", "--parallel", "--api-key", "--api-key-file"]);
+  const owned = (j.llamaArgs || []).find((x) => OWNED.has(String(x).split("=")[0]));
   if (owned) return bad(tz("llamaArgs 里不能改 {k}（由网关管）", { k: owned }));
   return { have: true, ok: true, path: LOCAL_MODE_FILE,
     cfg: { label: j.label || tz("自定义"), tools: j.tools || "", systemPrompt: j.systemPrompt || "", llamaArgs: j.llamaArgs || [], ctx: j.ctx || 0 } };

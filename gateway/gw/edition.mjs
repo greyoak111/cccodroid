@@ -22,10 +22,16 @@ const WITH_VALUE = new Set(["--model", "--resume", "-r", "--settings", "--settin
   "--permission-prompt-tool", "--append-subagent-system-prompt", "--fallback-model", "--max-turns", "--debug"]);
 
 function subcommand(argv) {
+  // 管理子命令（mcp / plugin / config…）只认跳过了已知带值全局旗标后遇到的第一个位置参数。
+  // `-p mcp`、未知旗标（如 --debug-file mcp）、`-- mcp` 都不能再被当成管理命令：以前会整层跳过封口（审查 11-05）。
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--") return argv[i + 1] || "";
-    if (a.startsWith("-")) { if (WITH_VALUE.has(a)) i++; continue; }
+    if (a === "--") return "";
+    if (a.startsWith("-")) {
+      const name = a.split("=")[0];
+      if (WITH_VALUE.has(name)) { if (!a.includes("=")) i++; continue; }   // --settings JSON / --settings=JSON
+      return "";                                  // 未知旗标/-p：按开会话封口，宁严勿松
+    }
     return a;
   }
   return "";
@@ -54,8 +60,11 @@ export function mergeSettings(list) {
 export function sealArgv(argv) {
   if (!SEALED || MGMT.has(subcommand(argv))) return argv;
   const out = [], settings = [];
+  let afterDD = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    if (a === "--") { afterDD = true; out.push(a); continue; }
+    if (afterDD) { out.push(a); continue; }          // `--` 之后是位置参数，不能当旗标处理/合并
     if (a === "--setting-sources") { i++; continue; }
     if (a.startsWith("--setting-sources=")) continue;
     if (a === "--settings" || a.startsWith("--settings=")) {
@@ -68,8 +77,11 @@ export function sealArgv(argv) {
     if (a === "--strict-mcp-config") continue;
     out.push(a);
   }
-  out.push("--setting-sources", "", "--strict-mcp-config");
-  if (settings.length) out.push("--settings", JSON.stringify(mergeSettings(settings)));
+  // 封口旗标必须插在第一个 `--` 之前，否则 claude 会把它们当位置参数（审查 11-05）
+  const at = out.indexOf("--");
+  const pos = at >= 0 ? at : out.length;
+  out.splice(pos, 0, "--setting-sources", "", "--strict-mcp-config");
+  if (settings.length) out.splice(pos + 3, 0, "--settings", JSON.stringify(mergeSettings(settings)));
   return out;
 }
 

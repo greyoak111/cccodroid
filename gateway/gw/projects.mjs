@@ -207,7 +207,11 @@ export async function routeProjects(req, res, u, p) {
     }
     if (PROJECTS.some((x) => real(x.path) === real(dir))) return sendJson(res, 409, { error: tz("这个目录已经是一个项目了") });
     const instr = String(b.instr || "").trim();
-    if (instr && !fs.existsSync(path.join(dir, "CLAUDE.md"))) fs.writeFileSync(path.join(dir, "CLAUDE.md"), instr + "\n");
+    const claudeMd = path.join(dir, "CLAUDE.md");
+    let claudeMdMissing = false;
+    try { fs.lstatSync(claudeMd); } catch (e) { claudeMdMissing = e.code === "ENOENT"; }
+    // 悬空软链 existsSync 也是 false，但写下去会跟链在项目外创建文件：只认 lstat 真不存在
+    if (instr && claudeMdMissing) fs.writeFileSync(claudeMd, instr + "\n", { flag: "wx" });
     const proj = { id: newId(), name, path: real(dir), color: PROJ_COLORS[PROJECTS.length % PROJ_COLORS.length], model: "", effort: "", perm: "", created: Date.now() };
     PROJECTS.push(proj); save();
     log(`📁 新项目「${name}」 ${proj.path}`);

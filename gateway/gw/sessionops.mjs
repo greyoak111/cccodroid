@@ -281,11 +281,31 @@ function realOf(p) {
   }
 }
 const inside = (p, root) => p === root || p.startsWith(root + path.sep);
-export function rewindTargetOk(want) {
+/** 会话记录里出现过的 cwd（老记录/导入包都可能有；用来限定回退补救能碰的目录）。
+ *  只读前 500 行（forEachLine 返回 false 会提前停），避免在超大记录上多扫一遍。
+ *  500 行之后才出现的 cwd 不会进 roots，那种项目的回退会被跳过（宁可少修，不写错地方）。 */
+function sessionRoots(sessionFile) {
+  const roots = new Set();
+  let n = 0;
+  try {
+    forEachLine(sessionFile, (l) => {
+      if (n++ >= 500) return false;
+      if (!l.includes('"cwd"')) return;
+      try { const e = JSON.parse(l); if (typeof e.cwd === "string" && path.isAbsolute(e.cwd)) roots.add(realOf(e.cwd)); } catch {}
+    });
+  } catch {}
+  return [...roots];
+}
+export function rewindTargetOk(want, roots = []) {
   if (typeof want !== "string" || !path.isAbsolute(want)) return false;
   // 私有目录按整个 App 数据目录算（files 之外还有 shared_prefs、databases、app_webview…，11-03 审查 M-7）
-  const r = realOf(want), priv = realOf(path.dirname(path.dirname(CFG.home))), ws = realOf(CFG.workspace);
-  return !inside(r, priv) || (inside(r, ws) && r !== ws);
+  const r = realOf(want), ws = realOf(CFG.workspace), priv = realOf(path.dirname(path.dirname(CFG.home)));
+  // 只允许工作区或这条会话自己记录过的项目目录：以前「不在私有目录内就放行」，
+  // 导入的恶意会话能把 /sdcard 下的任意文件写/删掉（审查 11-05）
+  if (r === ws) return false;
+  if (inside(r, ws)) return true;
+  if (inside(r, priv)) return false;   // .claude、shared_prefs 等私有数据，即使会话 cwd=home 也不许
+  return roots.some((root) => { if (typeof root !== "string" || !root) return false; const rr = realOf(root); return rr !== ws && inside(r, rr); });
 }
 export function rewindFixup(sessionFile, sid, uuid, files) {
   const snaps = [];   // [{ id, backups }]，同一条消息的快照更新合并进去
@@ -307,6 +327,7 @@ export function rewindFixup(sessionFile, sid, uuid, files) {
   if (at < 0) return { fixed: 0, failed: 0 };
   const absOf = (k, b) => b && b.realParentDir ? path.join(b.realParentDir, path.basename(k)) : path.resolve(CFG.workspace, k);
   const hist = path.join(CFG.home, ".claude", "file-history", sid);
+  const roots = sessionRoots(sessionFile);
   let fixed = 0, failed = 0;
   for (const want of files || []) {
     let entry;
@@ -314,7 +335,7 @@ export function rewindFixup(sessionFile, sid, uuid, files) {
       for (const [k, b] of Object.entries(snaps[i].backups)) if (absOf(k, b) === want) { entry = b; break; }
     }
     if (entry === undefined) continue;                 // 快照里查不到：不碰
-    if (!rewindTargetOk(want)) { failed++; log(`回退补救跳过 ${want}：在应用私有目录里、又不在工作区`); continue; }
+    if (!rewindTargetOk(want, roots)) { failed++; log(`回退补救跳过 ${want}：不在工作区或这条会话的项目目录里`); continue; }
     // 备份文件名只许是 file-history 目录里的一个文件，不许带路径跳出去
     if (entry.backupFileName && (typeof entry.backupFileName !== "string" || entry.backupFileName !== path.basename(entry.backupFileName) || entry.backupFileName.startsWith("."))) { failed++; continue; }
     try {
@@ -328,7 +349,7 @@ export function rewindFixup(sessionFile, sid, uuid, files) {
       if (curr && curr.equals(data)) continue;
       fs.mkdirSync(path.dirname(want), { recursive: true });
       // 建完上级再按真实路径判一次（中途换成软链的），最后一段不跟软链
-      if (!rewindTargetOk(want)) { failed++; continue; }
+      if (!rewindTargetOk(want, roots)) { failed++; continue; }
       const fd = fs.openSync(want, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o644);
       try { writeAll(fd, data); } finally { fs.closeSync(fd); }
       fixed++;

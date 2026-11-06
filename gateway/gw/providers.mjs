@@ -7,6 +7,7 @@ import { SETTINGS, saveSettings } from "./settings-store.mjs";
 import { dropModelCache, normalizeModels } from "./models.mjs";
 import { RUNS } from "./runs.mjs";
 import { NEXT, fetchText, readBody, sendJson } from "./http.mjs";
+import { readSmallFile } from "./saferead.mjs";
 
 // ── 厂商配置（不写死任何一家）─────────────────────────────────────────
 // 端点 / 认证风格 / 模型清单来源 全部来自 ccapp-providers.json。
@@ -344,7 +345,8 @@ let PROV_DISK_H = null;    // 盘上那份最后读写时的样子（见 provide
 const provHash = (s) => crypto.createHash("sha256").update(s).digest("hex");
 function loadProviders() {
   try {
-    const raw = fs.readFileSync(PROVIDERS_FILE, "utf8");
+    const raw = readSmallFile(PROVIDERS_FILE, 4 << 20);
+    if (raw == null) throw new Error("providers unreadable");
     PROV_DISK_H = provHash(raw);
     const j = JSON.parse(raw);
     if (j && typeof j === "object") PROVIDERS_RAW = { ...j, providers: bare((j.providers && typeof j.providers === "object") ? j.providers : {}) };
@@ -380,7 +382,7 @@ function saveProvidersRaw() {
  *  网关没跑时改的，启动时照常读进来 */
 export function providersDiskCheck() {
   if (PROV_DISK_H == null) return false;
-  let raw; try { raw = fs.readFileSync(PROVIDERS_FILE, "utf8"); } catch { raw = null; }
+  const raw = readSmallFile(PROVIDERS_FILE, 4 << 20);
   if (raw != null && provHash(raw) === PROV_DISK_H) return false;
   try { saveProvidersRaw(); return true; } catch (e) { log(`[厂商配置] 写回失败：${e.message}`); return false; }
 }
@@ -560,7 +562,8 @@ function billShape(j) {
   }
   return j;
 }
-let BILL = (() => { try { return billShape(JSON.parse(fs.readFileSync(BILL_FILE, "utf8"))); } catch { return {}; } })();
+// 账本用无原型对象：provider id 为 __proto__ 时不能把 since/spends/tok 写到 Object.prototype
+let BILL = (() => { const out = Object.create(null); try { const raw = readSmallFile(BILL_FILE, 8 << 20); if (raw != null) Object.assign(out, billShape(JSON.parse(raw))); } catch {} return out; })();
 let billSaveT = null;
 const saveBill = () => { clearTimeout(billSaveT); billSaveT = setTimeout(() => {
   // 直接写目标文件会先截断：写一半被杀/满盘就把整个账本毁了，下次启动只能当空账本。先写临时文件再 rename。

@@ -70,6 +70,7 @@ final class Updater {
         volatile long done, total;
         // 下载需要的东西
         volatile String url, alt, alt2, sha, base, tarSha;
+        volatile boolean silentFail;   // 上次静默安装失败过：下次用户点安装改走系统确认
         volatile long size, need;
         volatile File file;
         // 模块化工具包（0.3.9 起）：modules.json 原文、它的 sha256、要装的模块。file 指向落盘的 modules.json（全部块下完才写，等于「已下好」的记号）
@@ -87,6 +88,7 @@ final class Updater {
     private Updater(Context c) {
         ctx = c;
         env = new Env(c);
+        app.silentFail = prefs().getBoolean("appSilentFail", false);
         NotificationChannel ch = new NotificationChannel(CH, Tr.t("更新"), NotificationManager.IMPORTANCE_DEFAULT);
         ch.setDescription(Tr.t("新版本已下载、等你点一下安装"));
         c.getSystemService(NotificationManager.class).createNotificationChannel(ch);
@@ -866,6 +868,7 @@ final class Updater {
 
     private void download(Item it, boolean user) {
         String via = null;
+        if (it == app) { it.silentFail = false; prefs().edit().remove("appSilentFail").apply(); }   // 新版本重新尝试静默安装
         it.set("downloading", "");
         it.done = 0; it.total = it.size;
         try {
@@ -991,8 +994,10 @@ final class Updater {
             return;
         }
         app.set("installing", "");
+        // 上次静默安装已经失败过：这次用户点「安装」就走系统确认，别再回到同一条失败路
+        boolean forceSystem = app.silentFail;
         // 有 Shizuku 就静默装（进程会被系统替换掉，服务由 MY_PACKAGE_REPLACED 拉起）；否则走系统安装确认
-        if (Priv.granted() && !gatewayBusy()) {
+        if (!forceSystem && Priv.granted() && !gatewayBusy()) {
             // 装的时候先停网关：旧网关和它的运行期文件核对不跟安装、新版重铺 files/app 搅在一起（更新链复盘 U-08）。
             // 装上了本进程就没了，服务由 MY_PACKAGE_REPLACED 拉起；没装上马上放开
             GatewayService.pause(true);
@@ -1001,7 +1006,7 @@ final class Updater {
             finally { GatewayService.pause(false); }
             Log.i(TAG, "pm install → " + out);     // 走到这里多半说明没装上（装上的话本进程已经没了）
             if (sdkTooOld(out) && "28".equals(wantFlavor())) { markOnly36(out.trim()); return; }
-            if (!out.contains("Success")) app.set("ready", Tr.f("静默安装失败（{0}），点安装走系统确认", out));
+            if (!out.contains("Success")) { app.silentFail = true; prefs().edit().putBoolean("appSilentFail", true).apply(); app.set("ready", Tr.f("静默安装失败（{0}），点安装走系统确认", out)); }
             return;
         }
         // 走系统安装确认：装完系统把我们整个杀掉，界面不会自己回来 —— 记一笔，SysEvents 收到 MY_PACKAGE_REPLACED 时把界面拉起来

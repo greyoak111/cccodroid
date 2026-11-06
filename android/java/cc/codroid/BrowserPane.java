@@ -359,11 +359,14 @@ public class BrowserPane extends LinearLayout {
         fileCb = null;
     }
 
-    /** 网关目录里随包带的前端文件（Eruda、选取脚本） */
+    /** 随 APK 带的前端文件（Eruda、选取脚本）：从 assets 读，不读可写的 files/app，
+     *  否则同 uid 篡改会让脚本注入到用户正在浏览的任意站点（审查 11-05） */
     private String readWeb(String rel) {
-        try {
-            java.io.File f = new java.io.File(act.getFilesDir(), "app/web/" + rel);
-            return new String(java.nio.file.Files.readAllBytes(f.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+        try (java.io.InputStream in = act.getAssets().open("app/web/" + rel)) {
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            byte[] b = new byte[16384];
+            for (int n; (n = in.read(b)) > 0; ) bo.write(b, 0, n);
+            return new String(bo.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
         } catch (Exception e) { Log.w(TAG, rel + ": " + e); return null; }
     }
     /** 选取模式：不给网页开任何原生接口，由这边隔一会儿去网页里取结果（window.__ccPicked），取到就交给对话界面 */

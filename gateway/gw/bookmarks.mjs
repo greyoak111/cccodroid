@@ -11,13 +11,14 @@ import { NEXT, readBody, sendJson } from "./http.mjs";
 import { findSessionFile, peekSession } from "./sessions.mjs";
 import { SID_RE, listTrash } from "./sessionops.mjs";
 import { findLineOffset, transcriptItems } from "./transcript.mjs";
+import { readSmallFile } from "./saferead.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-bookmarks.json");
 const PER_SESSION = 50, TOTAL = 2000;
 const UUID_RE = /^[0-9a-f-]{8,64}$/i;
 
 let BM = [];
-try { const j = JSON.parse(fs.readFileSync(FILE, "utf8")); if (Array.isArray(j)) BM = j.filter((b) => b && b.id && b.sid && b.uuid); } catch {}
+try { const raw = readSmallFile(FILE, 4 << 20); const j = raw == null ? null : JSON.parse(raw); if (Array.isArray(j)) BM = j.filter((b) => b && b.id && b.sid && b.uuid); } catch {}
 function save() {
   try { fs.writeFileSync(FILE + ".tmp", JSON.stringify(BM)); fs.renameSync(FILE + ".tmp", FILE); }
   catch (e) { log("书签保存失败: " + e.message); }

@@ -32,20 +32,28 @@ public class SchedAlarm extends BroadcastReceiver {
     /** at：毫秒时间戳，0 = 没有要跑的，取消闹钟 */
     static synchronized void set(Context c, long at) {
         if (at == lastAt) return;
-        lastAt = at;
         AlarmManager am = c.getSystemService(AlarmManager.class);
         if (am == null) return;
         PendingIntent p = pi(c);
-        if (at <= 0) { am.cancel(p); Log.i(TAG, "定时任务闹钟：已取消"); return; }
+        if (at <= 0) {
+            try { am.cancel(p); lastAt = at; Log.i(TAG, "定时任务闹钟：已取消"); }
+            catch (Exception e) { lastAt = -1; Log.w(TAG, "定时任务闹钟取消失败", e); }
+            return;
+        }
         try {
             boolean exact = Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms();
             if (exact) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, p);
             else { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, p); askExact(c); }
+            lastAt = at;   // 登记成功后才记账：一次异常后同一时刻还能重试（审查 11-05）
             Log.i(TAG, "定时任务闹钟：" + new java.util.Date(at) + (exact ? "（精确）" : "（非精确）"));
         } catch (Exception e) {
+            lastAt = -1;
             Log.w(TAG, "定时任务闹钟设置失败", e);
         }
     }
+
+    /** 精确闹钟授权/撤销后重新登记：系统会把已经登记的精确闹钟取消掉，光等下次 nextAt 变化任务就漏了 */
+    static synchronized void reschedule(Context c) { lastAt = -1; fromFile(c); }
 
     /** 只问一次：发通知，点了去「闹钟和提醒」里给本应用开 */
     private static void askExact(Context c) {
