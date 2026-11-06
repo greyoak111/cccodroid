@@ -2786,3 +2786,6 @@
 2786	{n} supprimées, {m} n'existent plus (supprimées ailleurs ou déjà dans la corbeille)
 2787	{n} supprimées, {m} encore en génération et non supprimées, {k} n'existent plus
 2788	Installation en cours. Analysez le suivant une fois terminée.
+2789	Remis dans le brouillon de la session d'origine
+2790	Supprimé dans la session d'origine
+2791	Vous avez changé de session, ce retour en arrière n'a donc pas été effectué

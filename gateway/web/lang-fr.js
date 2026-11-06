@@ -2789,4 +2789,7 @@ window.I18N_DICT["fr"] = {
   "{n} 个已删除，{m} 个已经不在了（别处删了或已在回收站）": "{n} supprimées, {m} n'existent plus (supprimées ailleurs ou déjà dans la corbeille)",
   "{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了": "{n} supprimées, {m} encore en génération et non supprimées, {k} n'existent plus",
   "正在安装，装完再分析下一个": "Installation en cours. Analysez le suivant une fois terminée.",
+  "已放回原来那个会话的草稿": "Remis dans le brouillon de la session d'origine",
+  "已在原来那个会话里删除": "Supprimé dans la session d'origine",
+  "已切换会话，这次回退没有执行": "Vous avez changé de session, ce retour en arrière n'a donc pas été effectué",
 };

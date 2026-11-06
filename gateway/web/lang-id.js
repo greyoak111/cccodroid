@@ -2789,4 +2789,7 @@ window.I18N_DICT["id"] = {
   "{n} 个已删除，{m} 个已经不在了（别处删了或已在回收站）": "{n} dihapus, {m} sudah tidak ada (dihapus di tempat lain atau sudah di tempat sampah)",
   "{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了": "{n} dihapus, {m} masih membuat respons dan tidak dihapus, {k} sudah tidak ada",
   "正在安装，装完再分析下一个": "Sedang memasang. Analisis yang berikutnya setelah selesai.",
+  "已放回原来那个会话的草稿": "Dikembalikan ke draf sesi asal",
+  "已在原来那个会话里删除": "Dihapus di sesi asal",
+  "已切换会话，这次回退没有执行": "Anda berpindah sesi, jadi pemutaran balik ini tidak dijalankan",
 };

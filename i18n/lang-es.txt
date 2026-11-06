@@ -2786,3 +2786,6 @@
 2786	{n} eliminadas, {m} ya no existen (eliminadas en otro sitio o ya en la papelera)
 2787	{n} eliminadas, {m} aún generando y sin eliminar, {k} ya no existen
 2788	Instalando. Analiza el siguiente cuando termine.
+2789	Devuelto al borrador de la sesión original
+2790	Eliminado en la sesión original
+2791	Cambiaste de sesión, así que no se hizo este retroceso

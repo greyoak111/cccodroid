@@ -2823,5 +2823,8 @@ window.I18N_DICT.en = {
   "还有 {n} 条没建会话的消息也停下了，处理完这条接着显示下一条。": "{n} more unsaved messages also stopped; the next one shows after you handle this one.",
   "{n} 个已删除，{m} 个已经不在了（别处删了或已在回收站）": "{n} deleted, {m} no longer exist (deleted elsewhere or already in the trash)",
   "{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了": "{n} deleted, {m} still generating and not deleted, {k} no longer exist",
-  "正在安装，装完再分析下一个": "Installing. Analyze the next one after it finishes."
+  "正在安装，装完再分析下一个": "Installing. Analyze the next one after it finishes.",
+  "已放回原来那个会话的草稿": "Put back into the original session's draft",
+  "已在原来那个会话里删除": "Deleted in the original session",
+  "已切换会话，这次回退没有执行": "You switched sessions, so this rewind was not carried out"
 };

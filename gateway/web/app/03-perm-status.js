@@ -537,19 +537,21 @@
         body: JSON.stringify({ userText: userTextOf.get(turn), after, which, uuid: turn.dataset.uuid || "",
           replyUuid: which === "user" ? "" : (msgEl.querySelector("[data-uuid]")?.dataset.uuid || ""), offs }),
       });
-      if (gen === view.gen && r.moved) {
+      // 回执到时已经切走（或重连重画过）：眼前的节点不是那个会话的，什么都别改，只说删好了（#174-3）
+      const here = gen === view.gen;
+      if (here && r.moved) {
         const mv = (x) => (x == null || x === "" ? x : r.moved[Number(x)] ?? Number(x));
         view.next = view.next == null ? null : mv(view.next) < r.size ? mv(view.next) : null;
         if (view.cursor != null) view.cursor = mv(view.cursor);
         for (const p of pages) { if (p.dataset.from !== undefined) p.dataset.from = mv(p.dataset.from); if (p.dataset.to !== undefined) p.dataset.to = mv(p.dataset.to); }
       }
-      if (which === "user") {
+      if (here && which === "user") {
         // 它后面那几条回复（到下一条提问为止）成了没有提问的回复：标上，之后不许单独删
         const all = [...chatEl.querySelectorAll(".msg")];
         for (const m of all.slice(all.indexOf(msgEl) + 1)) { if (m.classList.contains("user")) break; if (m.classList.contains("bot")) m.dataset.orphan = "1"; }
         userTextOf.delete(msgEl); msgEl.remove();
-      } else msgEl.remove();
-      toastAct(t("已删除"), t("撤销"), async () => {
+      } else if (here) msgEl.remove();
+      toastAct(here ? t("已删除") : t("已在原来那个会话里删除"), t("撤销"), async () => {
         try {
           await api("/api/session/" + encodeURIComponent(sid) + "/undodel", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ undo: r.undo }) });
           if (view.sessionId === sid) openSession(sid);
@@ -575,8 +577,10 @@
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ userText: userTextOf.get(prev), after, uuid: prev.dataset.uuid || "" }),
       });
-      openSession(r.id);
       loadSessions();
+      // 等回执的工夫切到了别的会话：别把人从那边拉走，给个入口（#174-4）。按会话号认：重连也会让 gen 变
+      if (view.sessionId !== sid) return toastAct(t("已分叉：保留了前 {n} 轮，接着聊就行", { n: r.kept }), t("打开"), () => openSession(r.id));
+      openSession(r.id);
       toast(t("已分叉：保留了前 {n} 轮，接着聊就行", { n: r.kept }));
     } catch (e) { toast(e.message, true); }
   }
@@ -597,11 +601,19 @@
     toast(t("正在查这之后改过哪些文件…"));
     let d;
     try { d = await post({ dryRun: true }); } catch (e) { return toast(e.message, true); }
+    // 试算回来时已经切到别的会话：确认框列的是原来那个会话的文件，不弹在这边（#174-4）
+    if (view.sessionId !== sid) return toast(t("已切换会话，这次回退没有执行"));
     const choice = await rewindDialog(d);
     if (!choice) return;
     try {
       const r = await post({ conversation: choice === "both" });
       const n = r.files && r.files.canRewind && r.files.files ? r.files.files.length : 0;
+      if (choice === "both" && view.sessionId !== sid) {
+        // 回执到之前切走了：不把人拉过去，也不往别的输入框里填原文
+        loadSessions();
+        if (r.fork && !r.fork.fresh) return toastAct(t("对话回到了这条消息之前，原会话还在"), t("打开"), () => openSession(r.fork.id));
+        return toast(t("对话回到了这条消息之前，原会话还在"));
+      }
       if (choice === "both") {
         if (r.fork && r.fork.fresh) newConversation(); else { openSession(r.fork.id); loadSessions(); }
         // 原文只回填到这次打开的目标：300ms 里用户已经切到别的会话，就记进目标会话的草稿，不覆盖眼前那个会话的输入框（#153-2）。

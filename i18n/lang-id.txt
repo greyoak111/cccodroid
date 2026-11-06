@@ -2786,3 +2786,6 @@
 2786	{n} dihapus, {m} sudah tidak ada (dihapus di tempat lain atau sudah di tempat sampah)
 2787	{n} dihapus, {m} masih membuat respons dan tidak dihapus, {k} sudah tidak ada
 2788	Sedang memasang. Analisis yang berikutnya setelah selesai.
+2789	Dikembalikan ke draf sesi asal
+2790	Dihapus di sesi asal
+2791	Anda berpindah sesi, jadi pemutaran balik ini tidak dijalankan

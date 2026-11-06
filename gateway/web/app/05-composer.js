@@ -62,6 +62,9 @@
     view.cids.add(cid);
     lastSendAt = Date.now();   // 点下就记：run_start 可能比 POST 回执先到，等回执再记的话双击那一下会被当成「停止」（审查 v0.5.4 F1 残余）
     const sentAtt = fromInput ? state.attachments : [];
+    // 这条是从哪个会话的输入框发的：没发出去时正文和附件要回到那里，不能塞进切过去的会话（#174-1）
+    const ep0 = draftEpoch, key0 = view.sessionId || "";
+    const mine = () => draftEpoch === ep0 || (view.sessionId || "") === draftOwner(ep0, key0);
     if (fromInput) { inputEl.value = ""; autoGrow(); clearAttachments(); }
     syncInterject();
     const gen = view.gen;
@@ -111,8 +114,14 @@
         if (sentAtt.length) { state.attachments = sentAtt; renderAttachments(); }
         syncInterject();
         toast(e.message || t("发送失败"), true);
+      } else if (fromInput && !mine()) {
+        // 已经切到别的会话：直接放回发起那个会话的草稿，回去就能看到；不给「找回」，免得点了塞进眼前这个
+        draftPutAway(draftOwner(ep0, key0), typed, sentAtt);
+        toast(t("没发出去：{msg}", { msg: e.message || t("发送失败") }) + " · " + t("已放回原来那个会话的草稿"), true);
       } else if (fromInput) {
         toastAct(t("没发出去：{msg}", { msg: e.message || t("发送失败") }), t("找回"), () => {
+          // 提示条还在、人已经切走了：照样放回原会话的草稿
+          if (!mine()) { draftPutAway(draftOwner(ep0, key0), typed, sentAtt); return toast(t("已放回原来那个会话的草稿")); }
           inputEl.value = inputEl.value.trim() ? inputEl.value.replace(/\s*$/, "\n\n") + typed : typed;
           for (const a of sentAtt) if (!state.attachments.some((x) => x.path === a.path)) state.attachments.push(a);
           renderAttachments(); autoGrow(); inputEl.focus();
@@ -442,6 +451,15 @@
   const DRAFT_ALIAS = new Map();   // 换草稿的代次 → 这一代的空草稿后来成了哪个会话
   function draftAdopt(sid) { if (sid) DRAFT_ALIAS.set(draftEpoch, sid); }
   const draftOwner = (ep, key) => key || DRAFT_ALIAS.get(ep) || "";
+  /** 不在眼前的会话的草稿里追加正文 / 附件（发送失败找回、迟到的上传和截屏都往这里放） */
+  function draftPutAway(k, text, att) {
+    const all = draftsRead(), d = all[k] || { text: "", att: [] };
+    if (text) d.text = typeof d.text === "string" && d.text.trim() ? d.text.replace(/\s*$/, "\n\n") + text : text;
+    d.att = [...(Array.isArray(d.att) ? d.att : [])];
+    for (const a of att || []) if (!d.att.some((x) => x && x.path === a.path)) d.att.push(a);
+    d.at = Date.now(); all[k] = d;
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
+  }
   /** 输入框有字或附件栏里有东西，就算有话要发 */
   function hasDraft() { return !!inputEl.value.trim() || state.attachments.length > 0; }
 
@@ -467,9 +485,7 @@
         done.push(j);
         if (insert && mine()) state.attachments.push(j);
         else if (insert) {
-          const k = draftOwner(ep0, key0), all = draftsRead(), d = all[k] || { text: "", att: [] };
-          d.att = [...(Array.isArray(d.att) ? d.att : []), j]; d.at = Date.now(); all[k] = d;
-          try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
+          draftPutAway(draftOwner(ep0, key0), "", [j]);
           away++;
         }
       } catch (e) {
@@ -494,9 +510,7 @@
     // 选择器里挑的大文件要在后台拷一阵：拷完时已经切到别的会话了，落回打开选择器那个会话的草稿（#105 06-014，同 uploadFiles）
     const fk = from ? draftOwner(from.ep, from.key) : "";
     if (from && from.ep !== draftEpoch && (view.sessionId || "") !== fk) {
-      const all = draftsRead(), d = all[fk] || { text: "", att: [] };
-      d.att = [...(Array.isArray(d.att) ? d.att : []), a]; d.at = Date.now(); all[fk] = d;
-      try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
+      draftPutAway(fk, "", [a]);
       return toast(t("{n} 个文件已附加到刚才那个会话的草稿", { n: 1 }));
     }
     state.attachments.push(a);

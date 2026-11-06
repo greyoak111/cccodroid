@@ -82,6 +82,8 @@
 
   // 截屏当附件（经 priv / Shizuku）。立刻截：分屏时连另一半一起截；延时截：先切到要截的应用，截完自动回来
   async function screenshot(delay) {
+    // 截的途中切了会话：截图落回发起时那个会话的草稿（同 uploadFiles，#174-5）
+    const ep0 = draftEpoch, key0 = view.sessionId || "";
     // 立刻截：不弹提示（会被截进去），等面板收起、动画走完再截
     if (delay) toast(t("{n} 秒后截屏，现在可以切到要截的应用", { n: delay }));
     else await new Promise((r) => setTimeout(r, 450));
@@ -89,6 +91,10 @@
       // 截屏要以 shell 身份跑：先经原生桥领一次性截屏码（priv 对白名单外的命令会弹确认，后台时直接拒绝）
       const shot = window.CCApp && CCApp.privShot ? String(CCApp.privShot(delay || 0) || "") : "";
       const j = await api("/api/screenshot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delay, shot }) });
+      if (draftEpoch !== ep0 && (view.sessionId || "") !== draftOwner(ep0, key0)) {
+        draftPutAway(draftOwner(ep0, key0), "", [j]);
+        return toast(t("{n} 个文件已附加到刚才那个会话的草稿", { n: 1 }));
+      }
       state.attachments.push(j);
       renderAttachments();
       toast(t("已附加截屏"));
