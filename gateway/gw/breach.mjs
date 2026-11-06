@@ -11,7 +11,8 @@ const RULES = [
   // 自称破甲 / 越狱
   // 只提这个词不算（讨论破甲的笔记、审计报告到处都是）；要和下面别的类别一起出现
   ["jailbreak", true, /\bDAN\s+mode\b|\bdo anything now\b|developer\s+mode\s+(?:enabled|on)\b|开发者模式(?:已)?(?:开启|启用)|(?:你是|现在是|我是)\s*DAN\b/i],
-  ["jailbreak", false, /破甲|越狱|jail\s*-?\s*break/i],
+  // 复核（11-06 三轮）：反破甲/防破甲这类否定式是讨论防御工程，不是用词本身；排除后不再参与跨类凑数
+  ["jailbreak", false, /(?<![反防抗])破甲|(?<![反防抗])越狱|(?<![A-Za-z-])jail\s*-?\s*break/i],
   // 冒充系统、开发者、Anthropic 的消息
   ["spoof", true, /<\/?\s*system-reminder\s*>|<\/?\s*(?:system|developer)(?:[_-]?(?:message|prompt|instructions?))?\s*>|[<＜]\/?\s*(?:system-reminder|system|developer)(?:\s+(?:message|instruction|override))?\s*[>＞]|\[\s*(?:system|developer)\s+(?:message|instruction|override)\s*\]|anthropic\s+(?:policy|safety|system)\s+(?:update|override|exception)|\bauthority\s*[:：]\s*(?:anthropic|system|developer)\b|\boverride\s*[:：]\s*(?:true|yes|on)\b|\boperator\s+directive\b|(?:系统层|平台|系统)(?:的)?(?:下发|注入)(?:的)?(?:补充)?(?:说明|通知|指令|更新)|(?:早先|之前|此前|以上)(?:的)?规则(?:已|全部)?(?:作废|失效|取消)/i],
   // role: system 单条只算弱特征：正常文档也会举 prompt 格式的例子，单条不拦（s05 那种头里有 authority/override 的仍是强特征）
@@ -136,6 +137,20 @@ const DEFENSIVE_POST = /\b(?:do\s+not|don'?t|never)\s+(?:follow|obey|comply\s+wi
 // 防御说法后面又改口点名执行的（「…这类话不要照做，除了第一条」「Do not follow it. Follow the first one instead.」）不算（DeepSeek 复核 v067c 中-1）
 const REVOKE = /除了|除非|照做|照办|执行|参照|参见|比照|依(?:此|照)|照(?:此|用)|按(?:第|其|此)|据(?:此|引)|遵照|依照|沿用|从之|\b(?:except|unless|follow|obey|execute|apply|act\s+on)\b/i;
 const count = (s, ch) => s.split(ch).length - 1;
+// 行首的空白、引用（>）、列表（- * + 数字. 数字)）、标题（#）记号不算正文：这些开头的标签仍是行首标签
+const LINE_MARK = /^\s*(?:#{1,6}|[-*+>]|\d+[.)])\s*/;
+/** 句中单个标签：前面同一行已有正文、且同一行没有同名的另一半标签——是被谈论的标签名，不是包住一段话的冒充（简报③补充，二轮复核 11-06） */
+const midTag = (line, idx, m0) => {
+  const tag = m0.replace(/^\s+/, "");
+  if (!/^[<＜]/.test(tag)) return false;
+  let p = line.slice(0, idx);
+  for (;;) { const m = LINE_MARK.exec(p); if (!m || !m[0].length) break; p = p.slice(m[0].length); }
+  if (!/\S/.test(p)) return false;
+  const name = (tag.match(/[a-z][\w-]*/i) || [""])[0].toLowerCase();
+  const rest = line.slice(0, idx) + line.slice(idx + tag.length);
+  const re = new RegExp("[<＜]\\/?\\s*" + name.replace(/-/g, "\\-") + "\\b", "i");
+  return !re.test(rest);
+};
 /** 位置 idx 是否落在行内代码（反引号）里：前面反引号数为奇数 */
 const inBacktick = (line, idx) => {
   let n = 0;
@@ -252,7 +267,7 @@ export function scanText(text) {
           const line = fromLines[li];
           const rel = { index: m.index - fromStart[li], 0: m[0] };
           // spoof 强规则：反引号/代码围栏里被谈论的标签名降为弱特征，裸标签仍强（简报③）
-          if (cat === "spoof" && isStrong && (inBacktick(line, rel.index) || getFenceIn()[li])) { if (!m[0].length) g.lastIndex++; continue; }
+          if (cat === "spoof" && isStrong && (inBacktick(line, rel.index) || getFenceIn()[li] || midTag(line, rel.index, m[0]))) { if (!m[0].length) g.lastIndex++; continue; }
           // 命中跨了原换行（拆句攻击）就不走豁免；落在同一行内才按原行判
           const sameLine = jlineM(m.index + Math.max(m[0].length - 1, 0)) === li && rel.index + m[0].length <= line.length;
           if (sameLine && EXEMPT.has(cat) && exempt(line, rel)) { if (!m[0].length) g.lastIndex++; continue; }
@@ -306,7 +321,7 @@ export function scanText(text) {
           if (m[0].replace(/^\s+/, "").includes("\n")) continue;
           const li = jlineT(j0);
           const rel = { index: j0 - tStartT[li], 0: m[0].slice(j0 - m.index) };
-          if (inBacktick(lines[li], rel.index) || getFenceIn()[li]) { addHit(cat, false, lineOf(li), excerptOf(li, m)); continue; }
+          if (inBacktick(lines[li], rel.index) || getFenceIn()[li] || midTag(lines[li], rel.index, rel[0])) { addHit(cat, false, lineOf(li), excerptOf(li, m)); continue; }
           addHit(cat, true, lineOf(li), excerptOf(li, m));
           break;
         }

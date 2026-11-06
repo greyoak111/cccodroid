@@ -197,7 +197,9 @@ function pluginFiles(dir) {
   walk(dir, "", 0);
   return files;
 }
-/** 插件 data/*.json 是运行时数据（市场目录缓存一类），机器同步、可再生成，不进上下文：只拷不扫（误报复盘 11-06） */
+/** 插件 data/*.json 是运行时数据（市场目录缓存一类），机器同步、可再生成，不进上下文：只拷不扫（误报复盘 11-06）。
+ *  边界（二轮复核 11-06）：这些文件不会被自动加载进上下文，但插件里的技能可以写「去读 data/x.json」，
+ *  诱导模型用 Read 工具主动把它读进来——一条不经过扫描的间接通道，性质和工作区里任意文件被读进上下文一样。 */
 const isPluginData = (rel) => rel.startsWith("data/") && rel.endsWith(".json");
 /** plugin.json 去掉能挂钩子、换设置的字段 */
 function cleanManifest(buf) {
