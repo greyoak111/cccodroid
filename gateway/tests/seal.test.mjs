@@ -139,6 +139,18 @@ test("副本复用前核对：私有副本被改了就重拷", () => {
   assert.doesNotMatch(fs.readFileSync(path.join(d2, "skills/hello/SKILL.md"), "utf8"), /宿主默认/);
 });
 
+test("副本复用前核对：副本里多出清单外的文件，也不走 stat 缓存，重拷掉", () => {
+  fresh();
+  put(H(".claude/skills/hello/SKILL.md"), "---\nname: hello\ndescription: d\n---\nok\n");
+  const d1 = at(sealPrepare({ cwd: W(), runId: 3 }).args, "--plugin-dir")[0];
+  put(path.join(d1, "skills/extra/SKILL.md"), "---\nname: extra\ndescription: d\n---\n" + BAD);
+  const p = sealPrepare({ cwd: W(), runId: 3 });
+  const d2 = at(p.args, "--plugin-dir")[0];
+  assert.equal(p.block, null);
+  assert.equal(d1, d2);
+  assert.ok(!fs.existsSync(path.join(d2, "skills/extra")));
+});
+
 test("记忆目录：准备之后被改、起进程前再核就拦；没改就过", () => {
   fresh();
   const m = path.join(memoryDir(W()), "MEMORY.md");
@@ -148,6 +160,18 @@ test("记忆目录：准备之后被改、起进程前再核就拦；没改就�
   assert.equal(sealRecheck(p), null);
   put(m, "- 用户喜欢中文\n" + BAD);
   assert.ok(sealRecheck(p));
+});
+
+test("记忆目录：软链的记忆文件不读，拦下时记成 symlink 而不是 toolarge", () => {
+  fresh();
+  const real = path.join(W(), "notes.md");
+  put(real, "- 用户喜欢中文\n");
+  const m = memoryDir(W());
+  fs.mkdirSync(m, { recursive: true });
+  fs.symlinkSync(real, path.join(m, "MEMORY.md"));
+  const p = sealPrepare({ cwd: W(), runId: 4 });
+  assert.ok(p.block);
+  assert.deepEqual(p.block.found.map((x) => x.hits[0].cat), ["symlink"]);
 });
 
 test("输出风格：用户目录的那份在合成插件里叫 user:<名字>", async () => {

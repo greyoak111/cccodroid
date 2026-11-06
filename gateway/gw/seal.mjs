@@ -259,6 +259,15 @@ function fileSig(dir, files, manifest) {
   const parts = [];
   for (const [rel, f] of files) parts.push(rel, srcSig(f.src), copySig(path.join(dir, rel)));
   if (manifest) parts.push(".claude-plugin/plugin.json", copySig(path.join(dir, ".claude-plugin/plugin.json")));
+  // 副本里经过的每一层目录也记上目录项：只记清单文件就发现不了多出来的文件 / 子目录。
+  // 用目录项名单而不是目录 mtime：时间戳是粗粒度的，刚建好就往里加东西，mtime 可能不变
+  const dirs = new Set([""]);
+  for (const rel of [...files.keys(), ...(manifest ? [".claude-plugin/plugin.json"] : [])])
+    for (let d = path.dirname(rel); d !== "." && d !== ""; d = path.dirname(d)) dirs.add(d);
+  for (const d of [...dirs].sort()) {
+    let v = "-"; try { v = fs.readdirSync(path.join(dir, d)).sort().join("/"); } catch {}
+    parts.push(d + "/", v);
+  }
   return parts.join("\0");
 }
 function materialize(name, files, manifest) {
@@ -344,7 +353,9 @@ export function memoryDir(cwd) { return path.join(userClaude(), "projects", sani
 export function scanMemory(dir) {
   const found = [], parts = [];
   for (const f of mdUnder(dir, 2)) {
-    let st; try { st = fs.statSync(f); } catch { continue; }
+    let st; try { st = fs.lstatSync(f); } catch { continue; }
+    // 软链不读（readSmallFile 带 O_NOFOLLOW），照旧拦下，但别记成「太大」
+    if (st.isSymbolicLink()) { found.push({ name: f, hits: [{ cat: "symlink", strong: true, line: 0, excerpt: "" }] }); continue; }
     if (!st.isFile()) continue;
     const t = st.size > MAX_TEXT * 4 ? null : readSmallFile(f, MAX_TEXT * 4);
     if (t == null) { found.push({ name: f, hits: [{ cat: "toolarge", strong: true, line: 0, excerpt: "" }] }); continue; }
