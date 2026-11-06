@@ -197,6 +197,8 @@ function pluginFiles(dir) {
   walk(dir, "", 0);
   return files;
 }
+/** 插件 data/*.json 是运行时数据（市场目录缓存一类），机器同步、可再生成，不进上下文：只拷不扫（误报复盘 11-06） */
+const isPluginData = (rel) => rel.startsWith("data/") && rel.endsWith(".json");
 /** plugin.json 去掉能挂钩子、换设置的字段 */
 function cleanManifest(buf) {
   let j; try { j = JSON.parse(buf.toString("utf8")); } catch { return null; }
@@ -225,7 +227,7 @@ function dirMatches(dir, files, manifest) {
   for (const [rel, f] of files) {
     const b = expectedBytes(rel, f, manifest);
     if (!b) return false;
-    if (isText(rel)) {
+    if (isText(rel) && !isPluginData(rel)) {
       if (b.length > (2 << 20)) return false;                       // 大文本不扫描就不复用，走重建时会被 toolarge 拦下
       const r = scanText(b.toString("utf8"));
       if (r.blocked) return false;
@@ -303,8 +305,10 @@ function materialize(name, files, manifest) {
     // 扫描只看前 2MB，但副本写的是全文：超过扫描上限的文本直接拒绝，别只扫开头就放行（审查 11-05）
     if (buf.length > (2 << 20)) { found.push({ name: f.src, hits: [{ cat: "toolarge", strong: true, line: 0, excerpt: "" }] }); continue; }
     if (rel === ".claude-plugin/plugin.json") { buf = cleanManifest(buf); if (!buf) continue; }
-    const r = scanText(buf.toString("utf8"));
-    if (r.blocked) found.push({ name: f.src, hits: r.hits });
+    if (!isPluginData(rel)) {
+      const r = scanText(buf.toString("utf8"));
+      if (r.blocked) found.push({ name: f.src, hits: r.hits });
+    }
     text[rel] = sha(buf);
     fs.writeFileSync(d, buf, { mode: 0o600 });
   }

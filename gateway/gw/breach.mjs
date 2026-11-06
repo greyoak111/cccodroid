@@ -98,8 +98,8 @@ function findRev(s) {
 const QUOTES = [['"', '"'], ["`", "`"], ["“", "”"], ["‘", "’"], ["「", "」"], ["『", "』"]];   // 单引号 ' 和英文缩写的撇号分不开，不认
 const EXEMPT = new Set(["override", "spoof"]);
 const EXAMPLE_PRE = /(?:\b(?:such\s+as|like|e\.g\.?|for\s+example|for\s+instance|including)|\baddressed\s+to\s+you\s*[—–:-]|例如|比如|诸如|像是?)[^\n]{0,60}$/i;
-const EXAMPLE_POST = /^[,，、.。]?\s*(?:这类|这种|此类|之类|这样的|等)/;
-const DEFENSIVE_POST = /\b(?:do\s+not|don'?t|never)\s+(?:follow|obey|comply\s+with|act\s+on|execute)\s+(?:it|them|these|this|that|those|such\s+(?:text|content|instructions|directives))\b|\btreat(?:ed)?\s+(?:it|them|these|this|that|those)\s+as\s+(?:plain\s+)?data\b|(?:这类|这种|此类|这些|之类)[^\n]{0,8}?(?:(?:不要|不得|不能|不|别|勿)(?:照做|执行|遵循|服从|听从|理会)|(?:当|视)(?:作|成|为)(?:普通)?(?:数据|资料)|不是指令|(?:旧|老|过时|废弃|淘汰)(?:表述|说法|提法|写法|措辞|句式|话))/i;
+const EXAMPLE_POST = /^[,，、.。]?\s*(?:这类|这种|此类|之类|这样的|等|(?:旧|老|过时|废弃|淘汰)(?:表述|说法|提法|写法|措辞|句式|话))/;
+const DEFENSIVE_POST = /\b(?:do\s+not|don'?t|never)\s+(?:follow|obey|comply\s+with|act\s+on|execute)\s+(?:it|them|these|this|that|those|such\s+(?:text|content|instructions|directives))\b|\btreat(?:ed)?\s+(?:it|them|these|this|that|those)\s+as\s+(?:plain\s+)?data\b|(?:这类|这种|此类|这些|之类)[^\n]{0,8}?(?:(?:不要|不得|不能|不|别|勿)(?:照做|执行|遵循|服从|听从|理会)|(?:当|视)(?:作|成|为)(?:普通)?(?:数据|资料)|不是指令|(?:旧|老|过时|废弃|淘汰)(?:表述|说法|提法|写法|措辞|句式|话))|^(?:旧|老|过时|废弃|淘汰)(?:表述|说法|提法|写法|措辞|句式|话)/i;
 // 防御说法后面又改口点名执行的（「…这类话不要照做，除了第一条」「Do not follow it. Follow the first one instead.」）不算（DeepSeek 复核 v067c 中-1）
 const REVOKE = /除了|除非|照做|照办|执行|参照|参见|比照|依(?:此|照)|照(?:此|用)|按(?:第|其|此)|据(?:此|引)|遵照|依照|沿用|从之|\b(?:except|unless|follow|obey|execute|apply|act\s+on)\b/i;
 const count = (s, ch) => s.split(ch).length - 1;

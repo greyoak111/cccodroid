@@ -138,6 +138,24 @@ test("扩展页装的插件：拷一份、去掉钩子和设置；插件里的 s
   assert.ok(p.block && p.block.found.some((x) => x.name.endsWith("skills/s/SKILL.md")));
 });
 
+test("插件 data/*.json 是运行时数据：不扫，命中也放行；其余文件照样拦", () => {
+  fresh();
+  const dir = H(".claude/plugins/cache/mk/demo/1.0.0");
+  put(path.join(dir, ".claude-plugin/plugin.json"), JSON.stringify({ name: "demo", version: "1.0.0" }));
+  put(path.join(dir, "data/plugins.json"), BAD);
+  put(path.join(dir, "skills/s/SKILL.md"), "---\nname: s\ndescription: d\n---\nok\n");
+  put(H(".claude/plugins/installed_plugins.json"), JSON.stringify({ version: 2, plugins: { "demo@mk": [{ scope: "user", installPath: dir, version: "1.0.0" }] } }));
+  put(H(".claude/settings.json"), JSON.stringify({ enabledPlugins: { "demo@mk": true } }));
+  let p = sealPrepare({ cwd: W(), runId: 21 });
+  assert.equal(p.block, null);
+  const d = at(p.args, "--plugin-dir").find((x) => x.includes("demo"));
+  assert.ok(fs.existsSync(path.join(d, "data/plugins.json")));
+  // 同一插件里其它文本文件命中照拦
+  put(path.join(dir, "docs/evil.md"), BAD);
+  p = sealPrepare({ cwd: W(), runId: 21 });
+  assert.ok(p.block && p.block.found.some((x) => x.name.endsWith("docs/evil.md")));
+});
+
 test("副本复用前核对：私有副本被改了就重拷", () => {
   fresh();
   put(H(".claude/skills/hello/SKILL.md"), "---\nname: hello\ndescription: d\n---\nok\n");
