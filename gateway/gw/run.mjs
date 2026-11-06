@@ -27,6 +27,7 @@ import { claudeSeal, sealStillValid } from "./claudeseal.mjs";
 import { gwRuntimeBlocked } from "./gwpin.mjs";
 import { tamperNote, tamperRecord } from "./tamper.mjs";
 import { SPOOF_NOTE, checkSession, integrityHint, integrityNote, neutralizeMarkers, sealSession } from "./integrity.mjs";
+import { ruleblockHint } from "./ruleblock.mjs";
 import { recordExtra } from "./lineage-store.mjs";
 import { refNote, refNoteSync } from "./merge.mjs";
 import { ensureManagedBridge } from "./managed-bridge.mjs";
@@ -351,10 +352,10 @@ export async function startRun(item) {
     : `You are ${model}, a small open model running locally on the user's Android device through llama.cpp (not Claude). Reply in the user's language; keep answers short.`;
   // 建档（脉络）：常驻规则 + 这一轮该不该先建档（见 archive.mjs）
   const arch = P.local ? null : await archiveHint(run.sessionId).catch(() => null);
-  const appendPrompt = [P.local ? localHint : toolsHint(), !P.nativeModels && !P.local ? TASKS_HINT : "", P.local ? "" : previewHint(cwd), P.local ? "" : integrityHint(), arch?.rule].filter(Boolean).join("\n\n");
+  const appendPrompt = [P.local ? localHint : toolsHint(), !P.nativeModels && !P.local ? TASKS_HINT : "", P.local ? "" : previewHint(cwd), P.local ? "" : integrityHint(), P.local ? "" : ruleblockHint(), arch?.rule].filter(Boolean).join("\n\n");
   if (appendPrompt) argv.push("--append-system-prompt", appendPrompt);
   // 子代理（连孙代理）统一的联络规矩：用 agentId 发消息、summary 写事由、长内容落文件只发路径（见 agents.mjs）
-  if (!P.local && !message.trim().startsWith("/")) argv.push("--append-subagent-system-prompt", SUBAGENT_HINT + "\n\n" + integrityHint());
+  if (!P.local && !message.trim().startsWith("/")) argv.push("--append-subagent-system-prompt", SUBAGENT_HINT + "\n\n" + integrityHint() + "\n\n" + ruleblockHint());
   // claude 没有 --output-style 参数（传了直接 unknown option，整条消息失败）；它是 settings 里的 outputStyle。
   // 密钥读取器也在这里（见 settingsArgs）
   argv.push(...settingsArgs(P));
