@@ -2,6 +2,12 @@
 
 English | [中文](#中文)
 
+## Maintainer
+
+- Security maintainer: greyoak111 (SUN,XIFENG)
+- greyoak111 is this maintainer's GitHub account.
+- To report a security problem, use the private channel under [Reporting a vulnerability](#reporting-a-vulnerability) below.
+
 ## Reporting a vulnerability
 
 **Please don't report security problems in public issues, Discussions or the QQ group.** Report them privately instead:
@@ -90,6 +96,12 @@ Testing tip: use a spare install or a separate test gateway, never the data you 
 ---
 
 ## 中文
+
+## 维护者
+
+- 安全维护者：greyoak111（SUN,XIFENG）
+- greyoak111 是这位维护者的 GitHub 账号。
+- 报告安全问题：走下面[怎么报告](#怎么报告)里的私密渠道。
 
 ## 怎么报告
 
