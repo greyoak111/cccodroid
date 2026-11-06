@@ -130,11 +130,16 @@ test("自定义组件：解压按实际写入量封顶、只读目录删得掉�
   // 登记的大小能造假：不看包里说多少，只看分区实际少了多少
   const out = path.join(base, "x"); fs.mkdirSync(out);
   const t0 = Date.now();
-  const r = await C.runCapped("sh", ["-c", `i=0; while [ $i -lt 400 ]; do head -c 1048576 /dev/zero > ${out}/f$i; i=$((i+1)); done`], out, 16 << 20);
+  // sh、head 用绝对路径：runCapped 用的是终端那套 PATH（假 PREFIX/bin、/system/bin），Linux CI 上两样都找不到，
+  // 起不来报 ENOENT 而不是 TOOBIG（CI 11-05）
+  const SH = ["/system/bin/sh", "/bin/sh"].find((p) => fs.existsSync(p));
+  const HEAD = ["/system/bin/head", "/bin/head", "/usr/bin/head"].find((p) => fs.existsSync(p));
+  assert.ok(SH && HEAD, "前提：找得到 sh 和 head");
+  const r = await C.runCapped(SH, ["-c", `i=0; while [ $i -lt 400 ]; do ${HEAD} -c 1048576 /dev/zero > ${out}/f$i; i=$((i+1)); done`], out, 16 << 20);
   assert.equal(r.code, "TOOBIG", "写过上限要被杀掉");
   assert.ok(r.used > 16 << 20 && Date.now() - t0 < 30000);
   assert.ok(fs.readdirSync(out).length < 400, "杀掉之后不再接着写");
-  const ok = await C.runCapped("sh", ["-c", `head -c 1024 /dev/zero > ${out}/small`], out, 16 << 20);
+  const ok = await C.runCapped(SH, ["-c", `${HEAD} -c 1024 /dev/zero > ${out}/small`], out, 16 << 20);
   assert.equal(ok.code, 0, "没超的照常");
   // 只读目录：普通 rmSync 删不动，rmTree 要删掉
   const ro = path.join(base, "ro"), deep = path.join(ro, "a", "b");

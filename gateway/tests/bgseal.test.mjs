@@ -127,7 +127,10 @@ test("发过一次 stop_task、之后又起了新一轮：再空闲时不再按 
 
 // ── 斜杠命令插话（11-05）：答完了只剩后台任务时，/compact 这类直接送进 claude，不再等后台任务全结束 ──
 const stdinLog = path.join(root, "stdin.jsonl");
-const tapStdin = { raw: `exec 3<&0; cat <&3 > '${stdinLog}' &` };   // 录下网关写进 stdin 的（非交互 sh 的后台任务默认 stdin 是 /dev/null，要显式重定向）
+// cat 同 SLEEP：假 CLI 的 PATH 里在 Linux CI 上没有它，找不到就录不到 stdin，后面一直「等不到」（CI 11-05）
+const CAT = ["/system/bin/cat", "/bin/cat", "/usr/bin/cat"].find((p) => fs.existsSync(p));
+if (!CAT) throw new Error("找不到 cat，录不到假 CLI 的 stdin");
+const tapStdin = { raw: `exec 3<&0; ${CAT} <&3 > '${stdinLog}' &` };   // 录下网关写进 stdin 的（非交互 sh 的后台任务默认 stdin 是 /dev/null，要显式重定向）
 const echo = (t) => ({ type: "user", isReplay: true, message: { role: "user", content: [{ type: "text", text: t }] } });
 const userText = (l) => { const c = JSON.parse(l).message.content; return typeof c === "string" ? c : c.filter((x) => x.type === "text").map((x) => x.text).join(""); };
 
