@@ -18,7 +18,7 @@ const RULES = [
   // role: system 单条只算弱特征：正常文档也会举 prompt 格式的例子，单条不拦（s05 那种头里有 authority/override 的仍是强特征）
   ["spoof", false, /(?:^|\n)\s*role\s*[:：]\s*(?:system|developer|anthropic)\b/i],
   // 压过宿主 / 系统 / 安全规则
-  ["override", true, /(?:ignor\w*|disregard\w*|forg\w*|overrid\w*)\s+(?:all\s+)?(?:(?:your|the|any|previous|prior|above|earlier|system)\s+){1,3}(?:instructions|prompts?|rules|guidelines|polic(?:y|ies)|safety|restrictions)|忽略(?:掉)?(?:你|你的|所有|一切|之前|以上|上面|系统|全部|的){1,4}(?:系统)?(?:提示|指令|规则|设定|限制)|(?:优先级|效力)\s*(?:高于|压过|大于)\s*(?:一切|所有|系统|宿主|安全)|用户(?:任务|指令)?\s*>\s*(?:本)?规则\s*>\s*(?:宿主|系统)/i],
+  ["override", true, /(?:ignor\w*|disregard\w*|forg\w*|overrid\w*)\s+(?:all\s+)?(?:(?:your|the|any|previous|prior|above|earlier|system)\s+){1,3}(?:instructions|prompts?|rules|guidelines|polic(?:y|ies)|safety|restrictions)|忽略(?:掉)?(?:你|你的|所有|一切|之前|以上|上面|系统|全部|的|收到|看到|读到|见到|知道){1,4}(?:系统)?(?:提示|指令|规则|设定|限制)|无视(?:掉)?(?:一切|所有|任何)?(?:系统|宿主|内置)(?:提示|指令|规则|设定|限制)|(?:优先级|效力)\s*(?:高于|压过|大于)\s*(?:一切|所有|系统|宿主|安全)|用户(?:任务|指令)?\s*>\s*(?:本)?规则\s*>\s*(?:宿主|系统)/i],
   ["override", false, /系统(?:的)?默认(?:倾向|规则|限制)|(?:above|over)\s+(?:all\s+)?(?:system|default)\s+(?:behaviou?r|instructions)/i],
   // 群友 zx-5426 的红队资料（11-05）里漏掉的写法：把自己排在内置系统提示之上（权威链用全角 ＞）、「冲突时以本节为准」
   ["override", true, /(?:优先于|高于|压过|凌驾于?)(?:一切|所有)?(?:内置|宿主|默认)?的?系统提示|(?:与|和)(?:内置|宿主)?(?:系统)?(?:提示|指令)冲突时[，,]?以(?:本节|本文件|本规范|本段|此)为准|[＞>][^\n]{0,30}(?:内置|宿主)(?:系统)?提示|上位压死下位|(?:以下|本)(?:约定|规则|规范)[^\n]{0,20}比(?:内置|宿主|系统)[^\n]{0,10}(?:要紧|重要|优先)|\b(?:where|if)\s+this\s+document\s+conflicts?\s+with[^\n]{0,40}this\s+document\s+wins\b|\bthis\s+document\s+(?:takes\s+precedence|prevails)\b|(?:本规范|本文件|本规则)[^\n]{0,6}(?:覆盖|取代|顶替)[^\n]{0,6}(?:内置|系统)(?:提示|规则|指令)|(?:内置|系统)(?:提示|规则|指令)[^\n]{0,10}(?:被|由)[^\n]{0,4}(?:本规范|本文件)[^\n]{0,4}(?:覆盖|取代|顶替)|宿主[^\n]{0,4}默认(?:倾向|规则|限制)/i],
@@ -95,15 +95,25 @@ const B64_GUARD = /[A-Za-z0-9+/]{16}/;
 const HEX_GUARD = /[0-9a-fA-F]{24}/;   // 偶数成对 ≥24 个十六进制字符（奇数尾差一个半字节，解出来一样）
 // 替换还是按完整候选：b64 要整段（≤2 个尾随 =）+ hex 整段
 const B64_RE = /[A-Za-z0-9+/]{16,}={0,2}(?=$|[^A-Za-z0-9+/=])/g;
+const B64_NG = new RegExp(B64_RE.source);   // 不带 g 的同款：在替换回调里测「解出来还是不是壳」，不能动外层循环的 lastIndex
 const HEX_RE = /[0-9a-fA-F]{24,}/g;
 // 哪种外壳疑似出现才解哪种（性能项 11-06：代码里满地的哈希只满足 hex 守卫，不解 base64 就省一整遍扫描）
+// 红队 11-07：双层壳（b64 套 b64 / b64 套 hex 等）第一层解出来没锚词就丢了——解出来还是壳样串就再解一层（封顶两层）
 function decodeShells(s, b64, hex) {
+  const second = (d, m) => {
+    // hex 先试：hex 串（[0-9a-f]）全是 b64 字符，B64_NG 会误中，hex 守卫更严（≥24 个十六进制字符）
+    try {
+      if (HEX_GUARD.test(d)) { const d2 = Buffer.from(d, "hex").toString("utf8"); if (plausible(d2)) return d2; }
+      if (B64_NG.test(d)) { const d2 = Buffer.from(d, "base64").toString("utf8"); if (plausible(d2)) return d2; }
+    } catch {}
+    return m;
+  };
   let out = s;
   if (b64) out = out.replace(B64_RE, (m) => {
-    try { const d = Buffer.from(m, "base64").toString("utf8"); return plausible(d) ? d : m; } catch { return m; }
+    try { const d = Buffer.from(m, "base64").toString("utf8"); return plausible(d) ? d : second(d, m); } catch { return m; }
   });
   if (hex) out = out.replace(HEX_RE, (m) => {
-    try { const d = Buffer.from(m, "hex").toString("utf8"); return plausible(d) ? d : m; } catch { return m; }
+    try { const d = Buffer.from(m, "hex").toString("utf8"); return plausible(d) ? d : second(d, m); } catch { return m; }
   });
   return out;
 }
