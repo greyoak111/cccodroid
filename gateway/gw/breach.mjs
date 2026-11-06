@@ -144,7 +144,7 @@ function firstMatch(re, line, cat) {
  * 查一段文字。返回 { blocked, hits:[{ cat, strong, line, excerpt }] }
  * hits 只列每类第一条，够用户定位；blocked 按「强一条 / 弱跨两类」判。
  * 原文先查（行号、豁免判定都在原文上）；再查归一化变体补覆盖：逐行归一（全角/零宽/字间分隔）、
- * 整段拼接归一（换行拆句）、外壳解码（base64/hex）。变体只补原文没命中的类别，不覆盖原文行号。
+ * 整段拼接（换行拆句，不归一——要能映射回原行）、外壳解码（base64/hex）。变体只补原文没命中的类别，不覆盖原文行号。
  */
 export function scanText(text) {
   const s = String(text ?? "").slice(0, MAX_TEXT);
@@ -157,17 +157,26 @@ export function scanText(text) {
     if (isStrong) strong = true;
   };
   const variants = [];
-  const addVariant = (t, joined) => { if (t && t !== s && !variants.some((v) => v.t === t)) variants.push({ t, joined }); };
-  addVariant(norm(s), false);                                   // 逐行归一
-  // 整段拼接归一只在有换行时做（换行拆句）；外壳解码只在外壳疑似出现时做（复核 11-06 二轮：省 dirMatches 每轮重扫的开销）
-  if (s.includes("\n")) addVariant(norm(s.replace(/\n/g, "")), true);
+  const addVariant = (t, joined, mapped) => { if (t && t !== s && !variants.some((v) => v.t === t)) variants.push({ t, joined, mapped }); };
+  addVariant(norm(s), false, false);                            // 逐行归一
+  // 整段拼接只在有换行时做（换行拆句）；外壳解码只在外壳疑似出现时做（复核 11-06 二轮：省 dirMatches 每轮重扫的开销）
+  if (s.includes("\n")) addVariant(s.replace(/\n/g, ""), true, true);
   if (/[A-Za-z0-9+/]{16,}={0,2}(?=$|[^A-Za-z0-9+/=])|(?:[0-9a-fA-F]{2}){12,}/.test(s)) {
     const dec = norm(decodeShells(s));
-    if (dec !== s) { addVariant(dec, false); addVariant(norm(decodeShells(norm(s.replace(/\n/g, "")))), true); }
+    // 只做逐行解码：解码+整段拼接的组合会把整份文件当豁免上下文，引号反例被后文推翻（SKILL.md 误报复盘 11-06）
+    if (dec !== s) addVariant(dec, false, false);
   }
 
   const lines0 = s.split("\n");
-  const scanOne = (t, joined) => {
+  // 拼接变体的命中映射回原行：t = s 去掉换行，tStart[k] = 原第 k+1 行在 t 里的起点（二分找行）
+  const tStart = [0];
+  for (let i = 0; i < lines0.length - 1; i++) tStart.push(tStart[i] + lines0[i].length);
+  const jline = (j) => {
+    let lo = 0, hi = tStart.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (tStart[mid] <= j) lo = mid; else hi = mid - 1; }
+    return lo;
+  };
+  const scanOne = (t, joined, mapped) => {
     const lines = joined ? [t] : t.split("\n");
     const joinedAll = joined ? t : t.replace(/\n/g, " ");
     const lineOf = (idx) => (joined ? 0 : Math.min(idx + 1, lines0.length));
@@ -176,6 +185,25 @@ export function scanText(text) {
       if (ln > 0 && lines0[ln - 1] != null) return lines0[ln - 1].trim().slice(0, 120);
       return (m[0] || "").slice(0, 120);
     };
+    if (joined && mapped) {
+      // 原样拼接（s 去换行）：命中映射回原行，豁免用该行的局部上下文判——整段拼起来拿全文件当上下文，
+      // 引号反例会被后文的 REVOKE 词推翻（SKILL.md 误报复盘 11-06，同 import-memory 回归）
+      for (const [cat, isStrong, re] of RULES) {
+        if (seenCat.has(cat + isStrong)) continue;
+        const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+        g.lastIndex = 0;
+        for (let m; (m = g.exec(t)); ) {
+          const li = jline(m.index);
+          const line = lines0[li];
+          // 命中跨了原换行（拆句攻击）就不走豁免；落在同一行内才按原行判
+          const sameLine = jline(m.index + Math.max(m[0].length - 1, 0)) === li && m.index - tStart[li] + m[0].length <= line.length;
+          if (sameLine && EXEMPT.has(cat) && exempt(line, { index: m.index - tStart[li], 0: m[0] })) { if (!m[0].length) g.lastIndex++; continue; }
+          addHit(cat, isStrong, li + 1, line.trim().slice(0, 120));
+          break;
+        }
+      }
+      return;
+    }
     for (const [cat, isStrong, re, opt] of RULES) {
       if (seenCat.has(cat + isStrong)) continue;
       if (opt && opt.joined) {
@@ -207,8 +235,8 @@ export function scanText(text) {
       }
     }
   };
-  scanOne(s, false);
-  for (const v of variants) scanOne(v.t, v.joined);
+  scanOne(s, false, false);
+  for (const v of variants) scanOne(v.t, v.joined, v.mapped);
   const rv = findRev(s);
   if (rv) addHit("reverse", true, rv.line, rv.excerpt);
 
