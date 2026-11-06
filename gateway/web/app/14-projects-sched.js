@@ -254,9 +254,14 @@
     o.querySelector("#dp-ok").addEventListener("click", async () => {
       const withDir = picked(o, "how") === "dir";
       if (withDir && !confirm(t("目录 {p} 会被直接删掉，不能恢复。确定？", { p: p.path }))) return;
+      // 删之前记下：聊天区开着的是不是这个项目的对话 / 新对话是不是挂在这个项目上（删完映射就没了）
+      const mine = curProject()?.id === p.id;
       try { await api(`/api/projects/${encodeURIComponent(p.id)}${withDir ? "?withDir=1" : ""}`, { method: "DELETE" }); }
       catch (err) { return toast(err.message, true); }
-      OV.close(o); PJ.cur = null; PJ.detail = null; await loadProjects(); loadSessions(); renderProjects(); toast(t("已删除项目"));
+      OV.close(o); PJ.cur = null; PJ.detail = null;
+      // 连目录删时对话进了回收站：聊天区别再停在这个已删的对话上，换成新对话（群反馈 11-06）；新对话挂着这个项目的也摘掉
+      if (mine && (withDir || !view.sessionId)) newConversation();
+      await loadProjects(); loadSessions(); renderProjects(); toast(t("已删除项目"));
     });
   }
 

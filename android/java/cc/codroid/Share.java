@@ -150,11 +150,18 @@ public final class Share extends ContentProvider {
         return m == null ? "application/octet-stream" : m;
     }
 
+    /** 分享面板按类型筛目标应用：text/markdown、text/x-python 这类冷门文本类型，有的应用（实测 QQ 的「发送给好友」）不接，
+     *  只剩收藏 / 发到电脑。文本统一按 text/plain 报（html、csv 各家都认，保留）；接收方按文件名认格式，内容不变 */
+    static String sendMime(String mime) {
+        if (mime == null || mime.isEmpty()) return "application/octet-stream";
+        return mime.startsWith("text/") && !mime.equals("text/html") && !mime.equals("text/csv") ? "text/plain" : mime;
+    }
+
     /** 弹系统分享面板 */
     static JSONObject send(Context c, File f, String mime) throws Exception {
         Uri u = uriFor(c, f);
         if (u == null || !f.isFile()) return new JSONObject().put("ok", false).put("message", Tr.t("这个文件不能分享：") + f);
-        Intent send = new Intent(Intent.ACTION_SEND).setType(mime)
+        Intent send = new Intent(Intent.ACTION_SEND).setType(sendMime(mime))
             .putExtra(Intent.EXTRA_STREAM, u).putExtra(Intent.EXTRA_SUBJECT, f.getName())
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         send.setClipData(android.content.ClipData.newRawUri(f.getName(), u));

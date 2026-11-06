@@ -360,7 +360,7 @@ final class DeviceTools {
         if (u == null) return fail(Tr.t("这个文件不能分享：") + f);
         String mime = a.optString("mime", "");
         if (mime.isEmpty()) mime = Share.mimeOf(f);
-        Intent send = new Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, u)
+        Intent send = new Intent(Intent.ACTION_SEND).setType(Share.sendMime(mime)).putExtra(Intent.EXTRA_STREAM, u)
             .putExtra(Intent.EXTRA_SUBJECT, f.getName()).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         send.setClipData(ClipData.newRawUri(f.getName(), u));
         return launch(c, Intent.createChooser(send, f.getName()).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), f.getName());
