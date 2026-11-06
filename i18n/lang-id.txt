@@ -2785,3 +2785,4 @@
 2785	{n} pesan lain yang belum tersimpan juga berhenti; berikutnya muncul setelah yang ini ditangani.
 2786	{n} dihapus, {m} sudah tidak ada (dihapus di tempat lain atau sudah di tempat sampah)
 2787	{n} dihapus, {m} masih membuat respons dan tidak dihapus, {k} sudah tidak ada
+2788	Sedang memasang. Analisis yang berikutnya setelah selesai.

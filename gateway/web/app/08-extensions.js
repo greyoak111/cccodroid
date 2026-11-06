@@ -179,13 +179,22 @@
       <div class="st-leg"><span><b class="sw" style="background:#c96442"></b>${t("工具包")} <span class="num">${GB(a)}</span></span><span><b class="sw" style="background:#2f6aa8"></b>${t("组件")} <span class="num">${GB(b)}</span></span>${ext.free != null ? `<span class="muted">${t("剩余")} <span class="num">${GB(ext.free)}</span></span>` : ""}</div>`;
   }
   // 组件节头的「检查更新」：强制重拉组件索引
-  $("comp-check").addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); loadComponents(true).then(() => toast(t("已检查组件更新"))); });
+  // 只在这次真查成了才说「已检查」：清单取不到报原因，被后来的刷新顶掉就不吭声（#177-10）
+  $("comp-check").addEventListener("click", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    loadComponents(true).then((st) => {
+      if (st === "stale") return;
+      if (st && st.err) return toast(t("组件清单取不到：{msg}", { msg: st.err }), true);
+      toast(t("已检查组件更新"));
+    });
+  });
   async function loadComponents(refresh) {
     const request = ++compLoad;
     clearTimeout(compTimer);
     const r = await api("/api/components" + (refresh ? "?refresh=" + (refresh === true ? 1 : refresh) : "")).catch((e) => ({ supported: true, items: [], indexError: e.message }));
     // 完成后的刷新比卸载中的轮询新；旧响应不能把已恢复的卡片盖回去。
-    if (request !== compLoad) return;
+    if (request !== compLoad) return "stale";
+    const outcome = { err: r.indexError || "" };
     $("comp-field").classList.toggle("hidden", !r.supported);
     if (!r.supported) return loadGhField();
     const box = $("comp-list");
@@ -283,11 +292,23 @@
       compTimer = setTimeout(loadComponents, 1000);
     // 先显示的是上回存下的列表、网关还在后台拉新索引：两秒后再要一次，拉完自然停
     else if (r.refreshing && pageOn("ext"))
-      compTimer = setTimeout(loadComponents, 2000);
+      compTimer = setTimeout(loadComponents, 2000);    return outcome;
   }
 
   // ── 自定义组件：用户自己导入 Linux arm64 程序。选文件 → 网关分析（ELF 类型、缺的库）→ 勾要用的命令 → 安装（补库、写入口和技能）──
-  const cust = { rep: null, busy: false };
+  const cust = { rep: null, busy: false, installing: false };
+  // 分析结果记在本机：刷新、重开应用后接回向导，网关那边暂存的还能装、能取消（网关一小时后自己清，#177-4）
+  const CUST_KEY = "cc.custStage", CUST_TTL = 55 * 60e3;
+  function custSave() {
+    try { if (cust.rep) localStorage.setItem(CUST_KEY, JSON.stringify({ at: Date.now(), rep: cust.rep })); else localStorage.removeItem(CUST_KEY); } catch {}
+  }
+  function custRestore() {
+    if (cust.rep || cust.busy) return;
+    try {
+      const j = JSON.parse(localStorage.getItem(CUST_KEY) || "null");
+      if (j && j.rep && Date.now() - j.at < CUST_TTL) { cust.rep = j.rep; renderCustomWiz(); } else localStorage.removeItem(CUST_KEY);
+    } catch {}
+  }
   const cpost = (p, body) => api(p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
   const KIND = () => ({ glibc: t("Linux 程序（glibc）"), bionic: t("安卓原生程序"), static: t("静态程序"), script: t("脚本"),
     musl: "musl", unsupported: t("跑不了") });
@@ -295,6 +316,7 @@
     const r = await api("/api/custom").catch(() => ({ supported: false }));
     $("custom-field").classList.toggle("hidden", !r.supported);
     if (!r.supported) return;
+    custRestore();
     $("custom-count").textContent = (r.items || []).length || "";
     $("custom-list").innerHTML = (r.items || []).map((c) => {
       const cmds = c.entries.map((e) => "<code>" + esc(e.cmd) + "</code>" + (e.ok ? "" : ' <span class="warn">' + t("入口丢了") + "</span>") +
@@ -310,7 +332,11 @@
   }
   async function customAnalyze(file, pathStr) {
     if (cust.busy) return;
+    // 正在装上一份：装完的回执会收起向导，这时开始新的一份会被它一起清掉（#177-5）
+    if (cust.installing) return toast(t("正在安装，装完再分析下一个"), true);
     cust.busy = true;
+    // 上一份分析了没装：先让网关丢掉它的暂存，别占着磁盘等一小时
+    if (cust.rep) { cpost("/api/custom/discard", { stage: cust.rep.stage }).catch(() => {}); cust.rep = null; custSave(); }
     const wiz = $("custom-wiz");
     wiz.innerHTML = '<div class="tiny">' + (file ? t("正在上传并分析 {name}…", { name: esc(file.name) }) : t("正在分析…")) + "</div>";
     try {
@@ -318,7 +344,7 @@
         ? await fetch("/api/custom/upload?name=" + encodeURIComponent(file.name || "program"), { method: "POST", body: file }).then((x) => x.json())
         : await cpost("/api/custom/analyze", { path: pathStr });
       if (!r.ok) { wiz.innerHTML = '<div class="tiny err">' + esc(r.message || "") + "</div>"; return; }
-      cust.rep = r; renderCustomWiz();
+      cust.rep = r; custSave(); renderCustomWiz();
     } catch (e) { wiz.innerHTML = '<div class="tiny err">' + esc(e.message) + "</div>"; }
     finally { cust.busy = false; }
   }
@@ -357,7 +383,7 @@
   $("custom-field").addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-cu]"); if (!b || b.disabled) return;
     const a = b.dataset.cu;
-    if (a === "discard") { if (cust.rep) cpost("/api/custom/discard", { stage: cust.rep.stage }).catch(() => {}); cust.rep = null; return renderCustomWiz(); }
+    if (a === "discard") { if (cust.installing) return; if (cust.rep) cpost("/api/custom/discard", { stage: cust.rep.stage }).catch(() => {}); cust.rep = null; custSave(); return renderCustomWiz(); }
     if (a === "install") {
       const r = cust.rep, entries = [];
       for (const d of document.querySelectorAll("#custom-wiz .cu-prog")) {
@@ -367,10 +393,11 @@
       }
       if (!entries.length) return toast(t("至少选一个要用的命令"), true);
       b.disabled = true; b.textContent = r.fixable.length ? t("正在补库并安装…") : t("正在安装…");
+      cust.installing = true;
       const x = await cpost("/api/custom/install", { stage: r.stage, id: $("cu-id").value.trim(), name: $("cu-name").value.trim(), desc: $("cu-desc").value.trim(), entries })
-        .catch((err) => ({ ok: false, message: err.message }));
+        .catch((err) => ({ ok: false, message: err.message })).finally(() => { cust.installing = false; });
       if (!x.ok) { b.disabled = false; b.textContent = t("安装"); return toast(t("失败：{msg}", { msg: x.message || "" }), true); }
-      cust.rep = null; renderCustomWiz();
+      if (cust.rep === r) { cust.rep = null; custSave(); renderCustomWiz(); }
       toast(x.unresolved && x.unresolved.length ? t("已安装，但还缺 {n} 个库", { n: x.unresolved.length }) : t("已安装，Claude 和终端里都能用了"), !!(x.unresolved && x.unresolved.length));
       return loadCustom();
     }

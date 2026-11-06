@@ -2785,3 +2785,4 @@
 2785	{n} autres messages non enregistrés se sont aussi arrêtés ; le suivant s'affiche une fois celui-ci traité.
 2786	{n} supprimées, {m} n'existent plus (supprimées ailleurs ou déjà dans la corbeille)
 2787	{n} supprimées, {m} encore en génération et non supprimées, {k} n'existent plus
+2788	Installation en cours. Analysez le suivant une fois terminée.

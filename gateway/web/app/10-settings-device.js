@@ -351,7 +351,10 @@
     $("ntf-actions").classList.toggle("hidden", !off);
   }
   for (const k of ["done", "ask"])
-    $("ntf-" + k).addEventListener("change", (e) => post("/api/app/notify_set", { [k]: e.target.checked }).then(loadNotify).catch(() => {}));
+    // 没存上：说出来，并按网关的真实状态把开关拨回去（#177-7）
+    $("ntf-" + k).addEventListener("change", (e) => post("/api/app/notify_set", { [k]: e.target.checked })
+      .then((j) => { if (j && j.ok === false) throw new Error(j.message || t("保存失败")); })
+      .then(loadNotify, (err) => { toast(t("保存失败：{msg}", { msg: err.message || "" }), true); loadNotify(); }));
   $("ntf-sys").addEventListener("click", () => post("/api/app/notify_settings").catch(() => {}));
 
   // ── 设备工具（只有 cccodroid：DeviceTools.java + A11y.java，经 device-mcp.mjs 给 Claude）──

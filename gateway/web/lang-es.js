@@ -2788,4 +2788,5 @@ window.I18N_DICT["es"] = {
   "还有 {n} 条没建会话的消息也停下了，处理完这条接着显示下一条。": "Otros {n} mensajes sin guardar también se detuvieron; el siguiente aparece cuando resuelvas este.",
   "{n} 个已删除，{m} 个已经不在了（别处删了或已在回收站）": "{n} eliminadas, {m} ya no existen (eliminadas en otro sitio o ya en la papelera)",
   "{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了": "{n} eliminadas, {m} aún generando y sin eliminar, {k} ya no existen",
+  "正在安装，装完再分析下一个": "Instalando. Analiza el siguiente cuando termine.",
 };

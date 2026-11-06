@@ -153,7 +153,9 @@
       if (act === "copy") { copyText(cmdText); return toast(t("已复制")); }
     };
     box.querySelectorAll('input[name="lm"]').forEach((r) => r.addEventListener("change", async () => {
-      await post("/api/local", { mode: r.value }).catch((e2) => toast(e2.message, true));
+      // 失败只报错，单选按网关的真实状态重画；不能接着说「已切换」（#177-8）
+      const j = await post("/api/local", { mode: r.value }).catch((e2) => ({ ok: false, message: e2.message }));
+      if (j && j.ok === false) { toast(j.message || t("保存失败"), true); return renderLocalCard(box, p); }
       toast(t("已切换（下一条消息生效）"));
     }));
   }

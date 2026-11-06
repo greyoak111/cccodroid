@@ -5,6 +5,7 @@
   const termEl = $("term");
   const TERM = {
     list: [], cur: null, inst: new Map(), loaded: null, ctrl: false, alt: false,
+    gen: 0,   // 每收起一次面板加一：打开途中被收起的那次，迟到的回执不再建终端、不再连输出流（#177-1）
     font: Number(localStorage.getItem("cc.term.font")) || 13,
   };
 
@@ -45,15 +46,20 @@
   // 宽屏下窗格已经开着、被别的盖住：再点入口要把它提到最上面（审查 UI05-001）
   const raisePane = (id) => window.CCLayout && CCLayout.raise(id);
   // 首次加载 xterm 时连点两下顶栏入口：两次都拿到空列表、各建一个终端（审查 UI05-004）
+  // 收起后再打开：上一次已经作废，重新开一次（closeTerm 清掉了 TERM.opening）
   function openTerm() {
     if (TERM.opening) { MO.cancel(termEl); termEl.classList.remove("hidden"); raisePane("term"); return TERM.opening; }
-    return (TERM.opening = openTerm0().finally(() => { TERM.opening = null; }));
+    const p = openTerm0().finally(() => { if (TERM.opening === p) TERM.opening = null; });
+    return (TERM.opening = p);
   }
   async function openTerm0() {
     MO.cancel(termEl); termEl.classList.remove("hidden"); raisePane("term");
-    try { await loadXterm(); } catch (e) { toast(t("终端组件加载失败：{msg}", { msg: e.message }), true); return; }
+    const g = TERM.gen;
+    try { await loadXterm(); } catch (e) { if (g === TERM.gen) toast(t("终端组件加载失败：{msg}", { msg: e.message }), true); return; }
+    if (g !== TERM.gen) return;
     let r;
-    try { r = await api("/api/term/list"); } catch (e) { toast(t("终端打不开：{msg}", { msg: e.message }), true); return; }
+    try { r = await api("/api/term/list"); } catch (e) { if (g === TERM.gen) toast(t("终端打不开：{msg}", { msg: e.message }), true); return; }
+    if (g !== TERM.gen) return;
     if (!r.available) { toast(t("找不到伪终端程序（ptyhost / python3）"), true); return; }
     const srv = r.terms || [];
     // 本界面开着、网关却不认识了（网关重启过）：标成已退出，留着看最后的输出
@@ -61,13 +67,14 @@
     // 已退出的：本界面开过的留着，别处留下的不显示
     TERM.list = srv.filter((x) => x.alive || TERM.inst.has(x.id));
     const live = TERM.list.filter((x) => x.alive);
-    if (!live.length) return newTerm();
+    if (!live.length) return newTerm({ gen: g });
     if (!TERM.list.some((x) => x.id === TERM.cur)) TERM.cur = live[live.length - 1].id;
     renderTermTabs();
     showTerm(TERM.cur);
   }
 
   function closeTerm() {
+    TERM.gen++; TERM.opening = null;
     $("term-textview").classList.add("hidden");
     MO.hide(termEl, MO.paneOut());
     TERM.inst.get(TERM.cur)?.xt.blur();
@@ -95,6 +102,8 @@
     try { r = await api("/api/term/new", { method: "POST", body: JSON.stringify({ cols, rows, ...(opts.login ? { login: opts.login } : {}), ...(opts.cwd ? { cwd: opts.cwd } : {}) }) }); }
     catch (e) { toast(t("新建终端失败：{msg}", { msg: e.message }), true); return; }
     TERM.list.push(r.term);
+    // 建的途中面板被收起了：终端已经在网关那边，留在标签里，下次打开时再连（不给藏着的面板挂输出流、抢焦点）
+    if (opts.gen != null && opts.gen !== TERM.gen) return;
     TERM.cur = r.term.id;
     renderTermTabs();
     showTerm(r.term.id);
