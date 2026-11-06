@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { scanText } from "./breach.mjs";
 import { CFG, HERE, PREFIX } from "./config.mjs";
 import { SETTINGS } from "./settings-store.mjs";
 import { isLoginMode, learnWindow } from "./models.mjs";
@@ -109,6 +110,11 @@ function contextUsage(u, flags, sse) {
   sse({ type: "usage", contextTokens: n, outputTokens: u.output_tokens || 0 });
 }
 
+/** 钩子注入的文本是否命中破甲特征（红队 11-07 通道 C）：命中返回文本（中止这一轮、原文亮给用户），不命中返回 "" */
+export function hookBlocked(ev) {
+  const text = hookContext(ev);
+  return text && scanText(text).blocked ? text : "";
+}
 /** 钩子输出里会进模型上下文的那段：JSON 的 additionalContext；SessionStart / UserPromptSubmit 正常退出时纯文本的 stdout 也算 */
 export function hookContext(ev) {
   const out = String(ev.stdout ?? ev.output ?? "").trim();

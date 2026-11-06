@@ -14,7 +14,7 @@ import { END_HOOKS, INTERRUPTED, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearI
 import { LOCAL_CMD_RE, handleLocalCommand } from "./modelcmd.mjs";
 import { LL, ensureLlama, localCustomActive } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "./usage.mjs";
-import { TASKS_HINT, contextWindowOf, toolsHint, translate } from "./stream.mjs";
+import { TASKS_HINT, contextWindowOf, toolsHint, translate, hookBlocked } from "./stream.mjs";
 import { archiveHint } from "./archive.mjs";
 import { autoTitle } from "./autotitle.mjs";
 import { SUBAGENT_HINT, agentBook, takeAgentNote, onShared, privateAgentsBase } from "./agents.mjs";
@@ -807,6 +807,20 @@ export async function startRun(item) {
       publishState();
     }
     run.agents.feed(ev);
+    // 钩子往上下文里塞的文本过破甲检查（红队 11-07 通道 C）：命中就中止这一轮，注入原文折叠亮给用户。
+    // 发行版封口把用户/项目钩子挡在 --setting-sources "" 外，这是 dev 包的兜底；网关自带的钩子不产 additionalContext，无感
+    if (ev.type === "system" && ev.subtype === "hook_response") {
+      const htext = hookBlocked(ev);
+      if (htext && !run.hookBlocked) {
+        run.hookBlocked = true;   // 中止后进程死前还会来事件：只报一次
+        const hname = String(ev.hook_event || ev.hook_name || "hook").slice(0, 60);
+        log(`[钩子注入] ${hname} 命中破甲特征，这一轮中止`);
+        emit({ type: "hook_ctx", event: hname, text: htext });
+        emit({ type: "note", key: "hook_blocked", text: tz("钩子（{ev}）注入的文字命中破甲特征，这一轮已中止；注入原文折叠在上方。", { ev: hname }) });
+        abortRun(run);
+        return;
+      }
+    }
     translate(ev, { sse: emit, flags, onInit, onResult, onReplay, provider: P });
   };
 

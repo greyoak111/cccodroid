@@ -11,12 +11,22 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { CFG, log } from "./config.mjs";
+import { scanText } from "./breach.mjs";
 
 const MAX = 8 << 20;   // 超过的读不全：记成风险，指纹按大小 + 修改时间
 // 项目设置里不会让什么东西跑起来的键；其余的（含以后新加的）一律当风险报出来，宁可多问一次
 export const SAFE_KEYS = new Set(["$schema", "model", "outputStyle", "includeCoAuthoredBy", "includeGitInstructions", "cleanupPeriodDays",
   "language", "alwaysThinkingEnabled", "spinnerTipsEnabled", "respectGitignore", "theme", "verbose", "attribution", "effortLevel"]);
 // disableAllHooks 不在里面：项目级的这一项连 --settings 挂的 guard 钩子一起关掉（2.1.311 实测，DeepSeek 复核 11-03 C-3）
+
+/** 风险文件的内容过破甲检查（红队 11-07 通道 E）：命中把摘录与行号附到风险串上。
+ *  只展示、不自动拒绝——用户自己的破甲仓库也命中，信任权还是用户的；单弱不亮（不然满卡片都是讨论笔记） */
+const breachNote = (raw) => {
+  const r = scanText(raw);
+  if (!r.blocked) return "";
+  const h = r.hits.find((x) => x.strong) || r.hits[0];
+  return h ? ` ｜ 破甲特征命中 L${h.line}: ${h.excerpt.slice(0, 60)}` : " ｜ 破甲特征命中";
+};
 
 function readSmall(f) {
   let st; try { st = fs.statSync(f); } catch { return null; }
@@ -28,6 +38,7 @@ function readSmall(f) {
 function settingsRisks(file, raw, out) {
   let j; try { j = JSON.parse(raw); } catch { if (raw.trim()) out.push(`${file}: ?`); return; }
   if (!j || typeof j !== "object" || Array.isArray(j)) return;
+  const n0 = out.length;
   for (const [k, v] of Object.entries(j)) {
     if (SAFE_KEYS.has(k)) continue;
     if (k === "permissions" && v && typeof v === "object") {
@@ -39,6 +50,7 @@ function settingsRisks(file, raw, out) {
     }
     out.push(`${file}: ${k}`);
   }
+  if (out.length > n0) { const n = breachNote(raw); if (n) out.push(file + n); }
 }
 
 /** frontmatter 里出现 hooks 字样就算（引号键、缩进写法都不细分；宁可多问一次） */
@@ -64,8 +76,10 @@ export function projectRisks(cwd) {
       take(f, r);
       let names = null;
       try { const s = JSON.parse(r.raw).mcpServers; if (s && typeof s === "object") names = Object.keys(s); } catch {}
-      if (names) for (const k of names.slice(0, 20)) risks.push(`${f}: ${k}`);
-      else if (r.big || r.raw.trim()) risks.push(`${f}: ?`);
+      if (names) {
+        for (const k of names.slice(0, 20)) risks.push(`${f}: ${k}`);
+        if (r.raw) { const n = breachNote(r.raw); if (n) risks.push(f + n); }
+      } else if (r.big || r.raw.trim()) risks.push(`${f}: ?`);
     }
     const up = path.dirname(d);
     if (up === d) break;
@@ -81,7 +95,7 @@ export function projectRisks(cwd) {
       const r = f && readSmall(f);
       if (!r || (!r.big && !hasFrontHooks(r.raw))) continue;
       take(f, r);
-      risks.push(`${path.join(".claude", sub, sub === "agents" ? e.name : e.name + "/SKILL.md")}: ${r.big ? "?" : "hooks"}`);
+      risks.push(`${path.join(".claude", sub, sub === "agents" ? e.name : e.name + "/SKILL.md")}: ${r.big ? "?" : "hooks"}` + (r.big ? "" : breachNote(r.raw)));
     }
   }
   // 项目自带的输出风格：选中（项目设置里的 outputStyle 就能选）就成了系统提示的一部分（输出风格目录的安全报告，11-04）
@@ -92,7 +106,7 @@ export function projectRisks(cwd) {
       const r = readSmall(path.join(base, f));
       if (!r) continue;
       take(path.join(base, f), r);
-      risks.push(`${path.join(".claude", "output-styles", f)}: output style`);
+      risks.push(`${path.join(".claude", "output-styles", f)}: output style` + (r.big ? "" : breachNote(r.raw)));
     }
   }
   return risks.length ? { fp: h.digest("hex").slice(0, 32), risks: risks.length > 40 ? [...risks.slice(0, 39), `… +${risks.length - 39}`] : risks } : null;
