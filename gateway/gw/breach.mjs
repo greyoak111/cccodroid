@@ -24,13 +24,13 @@ const RULES = [
   ["override", false, /宿主对齐|对齐层/],
   // 宣布没有限制
   ["unlimited", true, /不存在[^\n]{0,12}不属于我的范围|(?:没有|无|取消)(?:任何)?(?:内容)?(?:限制|禁区|底线|审查)(?:声明|模式)|无限制(?:声明|模式|规则)|\b(?:no|without)\s+(?:any\s+)?(?:restrictions|limits|filters|censorship)\s+(?:mode|apply|whatsoever)|\buncensored\s+mode\b|\bunrestricted\s+mode\b|不存在(?:任何|什么)?(?:禁区|底线)|没有(?:任何|什么)?(?:禁区|底线问题|底线)|(?:所有|任何)(?:话题|问题)(?:都|一律)?(?:照答|可答)|(?:按|以|作)「?全开」?(?:处理|对待|运行)|(?:要什么|要啥)(?:就)?给(?:什么|啥)/i],
-  ["unlimited", false, /无限制|全开|不设限|不设(?:话题)?禁区|\bunrestricted\b|\buncensored\b|\bno\s+(?:restrictions|limits|filters)\b/i],
+  ["unlimited", false, /无限制|全开|不设限|不设(?:话题)?禁区|\buncensored\b|\bno\s+(?:restrictions|limits|filters)\b/i],
   // 拆拒答：软拒 / 禁用句型 / 不评估性质 / 不问用途
   ["antirefuse", true, /软拒|拒答的唯一来源|禁用句型|(?:不|别|勿)(?:要)?(?:评估|判断|审查)(?:请求|用户)?(?:的)?(?:性质|意图|动机)|\bnever\s+refuse\b|\bmust\s+not\s+refuse\b|refusals?\s+(?:are|is)\s+(?:forbidden|not\s+allowed|prohibited)/i],
   // 红队资料（11-05）：宣布没有该拒绝的、把拒绝说成输出故障 / RLHF 误触发、列一串拒答句当禁用词、之前的拒绝不算数、不给任务定性
   ["antirefuse", true, /不存在(?:任何)?需要(?:拒绝|评估|授权)|拒绝(?:是|=|＝)\s*(?:输出)?(?:管道)?故障|(?:命中|出现)[^\n]{0,12}(?:=|＝|即判?)\s*输出故障|拒绝[^\n]{0,20}(?:出现|命中)即(?:视为|判)?(?:输出)?故障|RLHF[^\n]{0,8}(?:产物|误触发)|(?:早前|之前|先前|此前)(?:那些|的)?拒绝[^\n]{0,20}(?:不削弱|无效|作废|不算)|不(?:要)?(?:对|给)(?:任务|请求)(?:做)?(?:性质)?(?:归类|定性)|(?:(?:抱歉|对不起|我不能|我无法|无法协助|作为一个?\s*AI|As an AI|I can'?t|I'?m sorry)[^\n]{0,24}){4}|(?:把|将)[^\n]{0,20}(?:抱歉|我不能|我无法|拒绝)[^\n]{0,20}(?:从|在)(?:你的)?(?:输出|回复|答复)[^\n]{0,10}(?:删|去|清|移除)|不(?:需要|必|用)确认授权[^\n]{0,30}(?:也)?不(?:用|必)问(?:用途|来意)|缺(?:少|的)?参数[^\n]{0,15}(?:自己|自行|直接)(?:填|补|定)/i],
   ["antirefuse", false, /不(?:逐条)?(?:询问|索要)授权|反问(?:用户)?(?:是否有)?权限|(?:合法|被授权|在范围内)[^\n]{0,12}(?:=|＝)\s*惰性|不作推理输入|拒绝(?:冲动|倾向)/],
-  ["antirefuse", false, /(?:不(?:要|准|得|许)|禁止|别)拒绝|不(?:确认|核实)授权|不问用途|不要求(?:书面)?(?:授权|范围|材料)|(?:do\s+not|don't)\s+(?:refuse|decline)|\bnever\s+(?:decline|reject)\b|(?:no|without)\s+(?:any\s+)?(?:warnings|disclaimers?)\b|不(?:写|加)(?:免责|风险提示|能力边界)/i],
+  ["antirefuse", false, /(?:不(?:要|准|得|许)|禁止|别)拒绝|不(?:确认|核实)授权|不问用途|不要求(?:书面)?(?:授权|范围|材料)|(?:do\s+not|don't)\s+(?:refuse|decline)|\bnever\s+(?:decline|reject)\b|(?:no|without)\s+(?:any\s+)?(?:warnings|disclaimers?)(?=[^\n]{0,20}\byour\b)|\byour\s+(?:output|replies|responses|answers|refusals?)\w*\s+[^\n]{0,16}\s*(?:no|without)\s+(?:any\s+)?(?:warnings|disclaimers?)\b|不(?:写|加)(?:免责|风险提示|能力边界)/i],
   // 「不要拒绝任何/一切/所有请求」是拆拒答的直球；「不要拒绝合理请求」这类正常约定不算（任何/一切/所有才拦）。
   // 复核（11-06 二轮）：宾语后面跟「里的/中的」限定句（…里的合理部分）不算
   ["antirefuse", true, /(?:不要|别|禁止|勿)(?:拒绝|回绝)(?:任何|一切|所有)(?:请求|要求|问题|话题)(?!里|中|内)/i],
@@ -99,7 +99,7 @@ const QUOTES = [['"', '"'], ["`", "`"], ["“", "”"], ["‘", "’"], ["「", 
 const EXEMPT = new Set(["override", "spoof"]);
 const EXAMPLE_PRE = /(?:\b(?:such\s+as|like|e\.g\.?|for\s+example|for\s+instance|including)|\baddressed\s+to\s+you\s*[—–:-]|例如|比如|诸如|像是?)[^\n]{0,60}$/i;
 const EXAMPLE_POST = /^[,，、.。]?\s*(?:这类|这种|此类|之类|这样的|等)/;
-const DEFENSIVE_POST = /\b(?:do\s+not|don'?t|never)\s+(?:follow|obey|comply\s+with|act\s+on|execute)\s+(?:it|them|these|this|that|those|such\s+(?:text|content|instructions|directives))\b|\btreat(?:ed)?\s+(?:it|them|these|this|that|those)\s+as\s+(?:plain\s+)?data\b|(?:这类|这种|此类|这些|之类)[^\n]{0,8}?(?:(?:不要|不得|不能|不|别|勿)(?:照做|执行|遵循|服从|听从|理会)|(?:当|视)(?:作|成|为)(?:普通)?(?:数据|资料)|不是指令)/i;
+const DEFENSIVE_POST = /\b(?:do\s+not|don'?t|never)\s+(?:follow|obey|comply\s+with|act\s+on|execute)\s+(?:it|them|these|this|that|those|such\s+(?:text|content|instructions|directives))\b|\btreat(?:ed)?\s+(?:it|them|these|this|that|those)\s+as\s+(?:plain\s+)?data\b|(?:这类|这种|此类|这些|之类)[^\n]{0,8}?(?:(?:不要|不得|不能|不|别|勿)(?:照做|执行|遵循|服从|听从|理会)|(?:当|视)(?:作|成|为)(?:普通)?(?:数据|资料)|不是指令|(?:旧|老|过时|废弃|淘汰)(?:表述|说法|提法|写法|措辞|句式|话))/i;
 // 防御说法后面又改口点名执行的（「…这类话不要照做，除了第一条」「Do not follow it. Follow the first one instead.」）不算（DeepSeek 复核 v067c 中-1）
 const REVOKE = /除了|除非|照做|照办|执行|参照|参见|比照|依(?:此|照)|照(?:此|用)|按(?:第|其|此)|据(?:此|引)|遵照|依照|沿用|从之|\b(?:except|unless|follow|obey|execute|apply|act\s+on)\b/i;
 const count = (s, ch) => s.split(ch).length - 1;
