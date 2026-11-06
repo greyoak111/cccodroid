@@ -54,15 +54,14 @@ function saveSeals() {
 }
 
 /** 会话文件的 sha256：分块读，不整个读进内存（导入上限 512 MB，每轮开头结尾各算一次）。
- *  超过 64 MB 只算头尾各 32 MB 再加上总长——中间被改认不出来，但不会把网关卡死或撑爆（审查 v0.5.9 A1） */
-const SEAL_FULL = 64 << 20, SEAL_PART = 32 << 20;
+ *  一律全量哈希：旧版超过 64 MB 只算头尾各 32 MB，中间改动哈希不变（红队 11-07 实测 128 MB 文件改中间 48 字节发现不了）。
+ *  全量成本实测约 700 MB/s（本机）：512 MB 上限约 0.7 秒，claude 自己每轮读整份文件，这点增量不算卡（审查 v0.5.9 A1 的量级更新） */
 function hashOf(file) {
   let fd; try { fd = fs.openSync(file, "r"); } catch { return null; }
   try {
     const size = fs.fstatSync(fd).size, h = crypto.createHash("sha256"), buf = Buffer.allocUnsafe(1 << 20);
     const feed = (from, to) => { for (let p = from; p < to;) { const k = fs.readSync(fd, buf, 0, Math.min(buf.length, to - p), p); if (k <= 0) break; h.update(buf.subarray(0, k)); p += k; } };
-    if (size <= SEAL_FULL) feed(0, size);
-    else { h.update(`partial:${size}:`); feed(0, SEAL_PART); feed(size - SEAL_PART, size); }
+    feed(0, size);
     return h.digest("hex");
   } catch { return null; } finally { try { fs.closeSync(fd); } catch {} }
 }

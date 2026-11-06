@@ -60,6 +60,14 @@ test("claude 子进程不继承 CLASSPATH / TEXINPUTS", () => {
   assert.ok(!re.test("LANG"));
 });
 
+test("extraEnv 拒单补证书注入与登录令牌（红队 11-07 探针 18→15）", () => {
+  const src = fs.readFileSync(path.join(GW, "gw/claude.mjs"), "utf8");
+  const re = new RegExp(/const EXTRA_ENV_DENY = (\/.*\/);/.exec(src)[1].slice(1, -1));
+  for (const k of ["REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "CLAUDE_CODE_OAUTH_TOKEN"]) assert.ok(re.test(k), k);
+  // 设计放行的照旧
+  for (const k of ["API_TIMEOUT_MS", "CLAUDE_CODE_MAX_RETRIES", "TZ", "HTTP_PROXY"]) assert.ok(!re.test(k), k);
+});
+
 test("各网关模块单独导入都不崩（不靠 server.mjs 的导入顺序）", async () => {
   for (const m of ["providers", "settings", "models", "queue", "run", "claude"]) {
     const r = await new Promise((done) => execFile(process.execPath, ["-e", `import(${JSON.stringify(path.join(GW, "gw", m + ".mjs"))}).then(()=>process.exit(0),e=>{console.error(e.message);process.exit(1)})`], { env: process.env, timeout: 60000 }, (e, out, err) => done({ code: e ? e.code : 0, err })));

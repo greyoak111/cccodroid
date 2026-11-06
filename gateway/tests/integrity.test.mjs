@@ -56,6 +56,22 @@ test("封签：没记录的旧会话不打扰；两轮之间被追加、被改�
   assert.equal(checkSession(c.sid, c.file), "edited", "截短");
 });
 
+test("封签大文件：中间等长改动也认得出（红队 11-07：旧版 128 MB 只哈希头尾，改中间 48 字节哈希不变）", async () => {
+  const { sealSession, checkSession } = await import("../gw/integrity.mjs");
+  const { CFG } = await import("../gw/config.mjs");
+  const f = fs.mkdtempSync(path.join(CFG.home, "seal-big-")) + "/s.jsonl";
+  fs.writeFileSync(f, "{\"a\":1}\n");
+  fs.truncateSync(f, 128 << 20);   // 128 MB（稀疏），旧版头尾各 32 MB 之外的改动看不见
+  const sid = "big-seal-test";
+  sealSession(sid, f);
+  assert.equal(checkSession(sid, f), null, "封完没动过");
+  const fd = fs.openSync(f, "r+");
+  fs.writeSync(fd, Buffer.from("x".repeat(48)), 0, 48, (64 << 20) + 100);   // 正中间 48 字节，等长
+  fs.closeSync(fd);
+  assert.equal(checkSession(sid, f), "edited", "中间被改必须认得出");
+  fs.unlinkSync(f);
+});
+
 test("网关自己删消息、撤销、分叉：干净的不报；原本被外部改过的，分叉和删完都还带着标记", async () => {
   const { sealSession, checkSession } = await import("../gw/integrity.mjs");
   const { deleteMessage, undoDelete, forkSession } = await import("../gw/sessionops.mjs");
