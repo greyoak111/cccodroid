@@ -334,6 +334,7 @@ final class Env {
         e.put("CCAPP_CLAUDE_PRELOAD", nlib("libccenosys.so"));
         e.put("CCAPP_ENOSYS_RUN", nlib("libccenosysrun.so"));
         e.put("CCAPP_PTYHOST", nlib("libccptyhost.so"));
+        e.put("CCAPP_7ZZ", nlib("libcc7zz.so"));          // 随包的 7-Zip（文件管理器的压缩包、终端里的 7z / 7zz），见 third_party/7zip
         // glibc 程序（claude）--preload 的完整列表：再加 libccnodump.so —— 带 CCAPP_NODUMP=1 起的（网关起的发行版 claude）设不可转储，
         // 别的进程不认这个变量、什么也不做（安全 4 第 3 层，android/native/nodump.c）。经加载器时 applyLoader 再插一个 exec-shim
         e.put("CCAPP_GLIBC_PRELOAD", nlib("libccenosys.so") + ":" + nlib("libccnodump.so"));

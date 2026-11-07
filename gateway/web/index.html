@@ -869,10 +869,13 @@
   <div class="fs-tools">
         <label class="searchbox fs-sb"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="fs-search" type="search" placeholder="过滤当前目录…" data-i18n-attr="placeholder" autocomplete="off"></label>
         <label class="fs-chk"><input type="checkbox" id="fs-hidden"> <span data-i18n>隐藏项</span></label>
+        <button id="fs-multi" class="btn ghost sm" aria-pressed="false" data-i18n>多选</button>
         <button id="fs-pick" class="btn ghost sm" data-i18n>选文件…</button>
   </div>
 
   <div id="fs-roots" class="chips fs-roots"></div>
+
+  <div id="fs-arcbar" class="fs-arcbar hidden"></div>
 
   <div id="fs-body">
     <div id="fs-preview" class="fs-preview hidden"></div>
@@ -881,6 +884,8 @@
 
   <div class="fs-foot">
     <span id="fs-count" class="tiny"></span>
+    <span id="fs-job" class="fs-job hidden"></span>
+        <button id="fs-act" class="btn sm hidden"></button>
         <button id="fs-insert" class="btn sm" data-i18n>插入到输入框</button>
   </div>
 </div>

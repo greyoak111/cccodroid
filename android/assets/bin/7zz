@@ -1,0 +1,3 @@
+#!/system/bin/sh
+# 随包的 7-Zip（APK 原生库目录里的 libcc7zz.so，应用 uid 改不了；见 third_party/7zip）。7z 与 7zz 是同一个程序
+exec "${CCAPP_7ZZ:-${CCAPP_NATIVE_LIB:-/nonexistent}/libcc7zz.so}" "$@"

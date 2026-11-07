@@ -2979,3 +2979,56 @@
 2979	No se puede conectar con el endpoint: revisa la red o si la URL del endpoint está mal.
 2980	Ábrelo en la aplicación cccodroid
 2981	El archivo comprimido tiene demasiados archivos ({n}, como máximo {max}); no se importó nada
+2982	Solo se muestran los primeros {n}; usa el filtro
+2983	Extraer selección ({n})
+2984	Comprimir ({n})
+2985	Archivo comprimido: toca «Abrir archivo» para ver su contenido o extráelo directamente
+2986	Abrir archivo
+2987	Extraer…
+2988	Codificación de nombres
+2989	Si los nombres salen ilegibles, prueba otra codificación
+2990	{n} entradas
+2991	Cifrado
+2992	Extraer todo…
+2993	Cerrar archivo
+2994	Esta versión no incluye 7-Zip y no puede abrir este tipo de archivo
+2995	No se pudo abrir el archivo: {msg}
+2996	{size} comprimido
+2997	Enlace simbólico (no se extrae)
+2998	Extrayendo…
+2999	Contraseña incorrecta
+3000	Demasiado grande para la vista previa; extráelo primero
+3001	No hay suficiente espacio de almacenamiento
+3002	Error al extraer: {msg}
+3003	Introduce la contraseña
+3004	Contraseña incorrecta, inténtalo de nuevo
+3005	Aceptar
+3006	{n} elementos seleccionados
+3007	Extraer {what}
+3008	Extraer en
+3009	Carpeta actual
+3010	Contraseña (vacía si no está cifrado)
+3011	Los archivos existentes con el mismo nombre nunca se sobrescriben; los nuevos se renombran a «nombre (2)». Los enlaces simbólicos no se extraen.
+3012	Extraer
+3013	Escribe una ruta completa (que empiece por /)
+3014	Comprimir «{name}»
+3015	Comprimir {n} elementos
+3016	Nombre del archivo
+3017	Formato
+3018	Nivel de compresión
+3019	Solo almacenar
+3020	Más rápido
+3021	Normal
+3022	Mínimo tamaño (lento)
+3023	Contraseña (opcional, zip / 7z)
+3024	Cifrar también los nombres (7z)
+3025	El zip cifrado usa AES-256 y algunas herramientas antiguas no lo abren; omite la contraseña para máxima compatibilidad. Las carpetas de credenciales como .ssh se excluyen.
+3026	Comprimir
+3027	No se puede extraer ni comprimir en esta ubicación
+3028	Esta versión no incluye 7-Zip
+3029	El archivo no puede guardarse dentro de una carpeta que se está comprimiendo
+3030	Extrayendo
+3031	Comprimiendo
+3032	Extraído en {path}
+3033	Comprimido en {path}
+3034	Seleccionar

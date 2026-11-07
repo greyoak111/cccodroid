@@ -2979,3 +2979,56 @@
 2979	Tidak bisa menjangkau endpoint: periksa jaringan, atau apakah URL endpoint salah.
 2980	Buka ini di aplikasi cccodroid
 2981	Arsip berisi terlalu banyak berkas ({n}, maksimal {max}); tidak ada yang diimpor
+2982	Hanya {n} pertama yang ditampilkan; gunakan filter
+2983	Ekstrak pilihan ({n})
+2984	Kompres ({n})
+2985	Arsip: ketuk “Buka arsip” untuk melihat isinya, atau langsung ekstrak
+2986	Buka arsip
+2987	Ekstrak…
+2988	Encoding nama file
+2989	Jika nama rusak, coba encoding lain
+2990	{n} entri
+2991	Terenkripsi
+2992	Ekstrak semua…
+2993	Tutup arsip
+2994	Versi ini tidak menyertakan 7-Zip, jadi tidak bisa membuka arsip jenis ini
+2995	Tidak bisa membuka arsip: {msg}
+2996	{size} terkompresi
+2997	Tautan simbolik (tidak diekstrak)
+2998	Mengekstrak…
+2999	Kata sandi salah
+3000	Terlalu besar untuk pratinjau; ekstrak dulu
+3001	Ruang penyimpanan tidak cukup
+3002	Gagal mengekstrak: {msg}
+3003	Masukkan kata sandi
+3004	Kata sandi salah, coba lagi
+3005	OK
+3006	{n} item terpilih
+3007	Ekstrak {what}
+3008	Ekstrak ke
+3009	Folder saat ini
+3010	Kata sandi (kosongkan jika tidak terenkripsi)
+3011	File yang sudah ada dengan nama sama tidak ditimpa; yang baru diganti nama menjadi “nama (2)”. Tautan simbolik tidak diekstrak.
+3012	Ekstrak
+3013	Tulis path lengkap (diawali /)
+3014	Kompres “{name}”
+3015	Kompres {n} item
+3016	Nama arsip
+3017	Format
+3018	Tingkat kompresi
+3019	Simpan saja
+3020	Tercepat
+3021	Normal
+3022	Terkecil (lambat)
+3023	Kata sandi (opsional, zip / 7z)
+3024	Enkripsi juga nama file (7z)
+3025	Zip terenkripsi memakai AES-256, yang mungkin tidak bisa dibuka alat lama; jangan pakai kata sandi demi kompatibilitas. Folder kredensial seperti .ssh tidak dimasukkan.
+3026	Kompres
+3027	Tidak bisa mengekstrak atau mengompres ke lokasi ini
+3028	Versi ini tidak menyertakan 7-Zip
+3029	Arsip tidak bisa disimpan di dalam folder yang sedang dikompres
+3030	Mengekstrak
+3031	Mengompres
+3032	Diekstrak ke {path}
+3033	Dikompres menjadi {path}
+3034	Pilih

@@ -2979,3 +2979,56 @@
 2979	Impossible de joindre le point d’accès : vérifiez le réseau ou l’URL.
 2980	Ouvrez ceci dans l'application cccodroid
 2981	L'archive contient trop de fichiers ({n}, {max} au maximum) ; rien n'a été importé
+2982	Seuls les {n} premiers sont affichés ; utilisez le filtre
+2983	Extraire la sélection ({n})
+2984	Compresser ({n})
+2985	Archive : touchez « Ouvrir l’archive » pour parcourir son contenu, ou extrayez-la directement
+2986	Ouvrir l’archive
+2987	Extraire…
+2988	Encodage des noms
+2989	Si les noms sont illisibles, essayez un autre encodage
+2990	{n} éléments
+2991	Chiffré
+2992	Tout extraire…
+2993	Fermer l’archive
+2994	Cette version n’inclut pas 7-Zip et ne peut pas ouvrir ce type d’archive
+2995	Impossible d’ouvrir l’archive : {msg}
+2996	{size} compressé
+2997	Lien symbolique (non extrait)
+2998	Extraction…
+2999	Mot de passe incorrect
+3000	Trop volumineux pour l’aperçu ; extrayez-le d’abord
+3001	Espace de stockage insuffisant
+3002	Échec de l’extraction : {msg}
+3003	Saisir le mot de passe
+3004	Mot de passe incorrect, réessayez
+3005	OK
+3006	{n} éléments sélectionnés
+3007	Extraire {what}
+3008	Extraire vers
+3009	Dossier actuel
+3010	Mot de passe (vide si non chiffré)
+3011	Les fichiers existants du même nom ne sont jamais écrasés ; les nouveaux sont renommés « nom (2) ». Les liens symboliques ne sont pas extraits.
+3012	Extraire
+3013	Saisissez un chemin complet (commençant par /)
+3014	Compresser « {name} »
+3015	Compresser {n} éléments
+3016	Nom de l’archive
+3017	Format
+3018	Niveau de compression
+3019	Stockage seul
+3020	Le plus rapide
+3021	Normal
+3022	Taille minimale (lent)
+3023	Mot de passe (facultatif, zip / 7z)
+3024	Chiffrer aussi les noms (7z)
+3025	Le zip chiffré utilise AES-256, que certains anciens outils ne savent pas ouvrir ; sans mot de passe pour une compatibilité maximale. Les dossiers d’identifiants comme .ssh sont exclus.
+3026	Compresser
+3027	Impossible d’extraire ou de compresser à cet emplacement
+3028	Cette version n’inclut pas 7-Zip
+3029	L’archive ne peut pas être enregistrée dans un dossier en cours de compression
+3030	Extraction
+3031	Compression
+3032	Extrait vers {path}
+3033	Compressé dans {path}
+3034	Sélection

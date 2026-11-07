@@ -14,6 +14,10 @@ Bundled third-party components:
   - GNU C Library 2.44 dynamic loader (LGPL-2.1-or-later), shipped as
     lib/arm64-v8a/libldlinux.so — third_party/glibc/COPYING.LIB; source and
     build recipe links in third_party/glibc/README.md
+  - 7-Zip 26.06 by Igor Pavlov (GNU LGPL-2.1-or-later, parts BSD; RAR decoding
+    under the unRAR license restriction), built from unmodified upstream source
+    and shipped as lib/arm64-v8a/libcc7zz.so — third_party/7zip/ (License.txt,
+    copying.txt, unRarLicense.txt; source and build recipe in README.md)
 
 The developer toolkit (devkit) released alongside this project consists of
 unmodified Termux packages (path prefix rewritten in place), each distributed

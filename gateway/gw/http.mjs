@@ -36,6 +36,8 @@ const EXT_KIND = {
   docx:  [".docx", ".docm", ".dotx"],
   sheet: [".xlsx", ".xlsm", ".xlsb", ".xls", ".ods"],
   office: [".pptx", ".ppt", ".ppsx", ".pps", ".potx", ".odp", ".doc", ".dot", ".odt", ".rtf", ".wps", ".dps", ".et", ".key", ".pages", ".numbers"],
+  archive: [".zip", ".7z", ".rar", ".tar", ".gz", ".tgz", ".bz2", ".tbz", ".tbz2", ".xz", ".txz", ".zst", ".tzst", ".lzma", ".lz", ".lz4", ".cab", ".iso",
+            ".jar", ".apk", ".apks", ".xapk", ".aab", ".epub", ".cbz", ".cbr", ".cpio", ".rpm", ".deb", ".arj", ".lzh", ".wim", ".dmg", ".z", ".001", ".whl", ".zipx"],
   text:  [".txt", ".md", ".log", ".csv", ".json", ".yaml", ".yml", ".xml", ".html", ".htm", ".js", ".mjs",
           ".css", ".c", ".h", ".cpp", ".py", ".sh", ".java", ".kt", ".rs", ".go", ".ts", ".sql",
           ".toml", ".ini", ".conf", ".cfg", ".properties", ".gradle", ".kts", ".tsx", ".jsx", ".cjs",

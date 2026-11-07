@@ -67,6 +67,8 @@ cp "$A/assets/TOOLS.md" "$A/assets/app/"     # 给 claude 的工具说明（网�
 mkdir -p "$A/assets/app/licenses"; cp "$ROOT/NOTICE" "$ROOT/LICENSE" "$A/assets/app/licenses/"; cp "$ROOT/third_party/shizuku/LICENSE" "$A/assets/app/licenses/Shizuku-API-LICENSE"
 # glibc 的 ld.so 以 libldlinux.so 进了 lib/：LGPL 要求随包带上许可原文和取源码的途径
 cp "$ROOT/third_party/glibc/COPYING.LIB" "$A/assets/app/licenses/glibc-COPYING.LIB"; cp "$ROOT/third_party/glibc/README.md" "$A/assets/app/licenses/glibc-README.md"
+# 7-Zip 以 libcc7zz.so 进了 lib/：LGPL 与 unRAR 许可原文、取源码的途径随包带上
+for f in License.txt copying.txt unRarLicense.txt README.md; do cp "$ROOT/third_party/7zip/$f" "$A/assets/app/licenses/7zip-$f"; done
 # 工具包下载地址（Release 目录，按序尝试）。测试时可用 DEVKIT_BASES="http://… https://…" 覆盖
 if [ -n "$DEVKIT_BASES" ]; then echo "$DEVKIT_BASES" | tr " " "\n" > "$A/assets/devkit-sources.txt"
 else cp "$ROOT/devkit-sources.txt" "$A/assets/devkit-sources.txt"; fi
@@ -100,6 +102,9 @@ $CC_ANDROID -DBIONIC -O2 -shared -fPIC -fno-stack-protector -Wl,-z,noexecstack -
 $CC_ANDROID -O2 -shared -fPIC -nostdlib -fno-stack-protector -Wl,-z,noexecstack -Wl,--hash-style=both \
   -o "$NL/libccnodump.so" "$A/native/nodump.c"
 cp "$A/native/execpath.cjs" "$A/assets/app/lib/"
+# 7-Zip（压缩包浏览、解压、压缩）：成品存在仓库里，由 scripts/build-7zz.sh 从上游源码编出；核过哈希再进 APK
+( cd "$A/prebuilt" && [ "$(sha256sum libcc7zz.so | cut -c1-64)" = "$(cat libcc7zz.so.sha256)" ] ) || { echo "✗ android/prebuilt/libcc7zz.so 和记下的哈希对不上：重跑 sh scripts/build-7zz.sh"; exit 1; }
+cp "$A/prebuilt/libcc7zz.so" "$NL/"
 TAG=$(cat "$A/assets/app/server.mjs" "$A/assets/app/boot.mjs" "$A/assets/app/gw/"* "$A/assets/app/archive/"* "$A/assets/app/guard/"* "$A/assets/app/TOOLS.md" $(find "$A/assets/app/web" -type f | sort) "$A/assets/app/scripts/"* "$A/assets/app/bin/"* "$A/assets/app/pre/"* "$A/assets/app/lib/"* "$NL/"libcc*.so | md5sum | cut -c1-12)
 echo "$TAG" > "$A/assets/app/TAG"
 echo "  tag $TAG"

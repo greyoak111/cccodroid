@@ -677,7 +677,7 @@ a.weblink{overflow-wrap:anywhere}
 
 /* 模型与思考强度的快速切换（点输入栏下的模型名） */
 #model-chip{cursor:pointer}
-#model-pick,#ccv-pick{position:fixed;inset:0;z-index:56;background:var(--scrim);display:flex;align-items:flex-end}
+#model-pick,#ccv-pick,#arc-dlg{position:fixed;inset:0;z-index:56;background:var(--scrim);display:flex;align-items:flex-end}
 .mp-panel{max-height:min(80%,620px);display:flex;flex-direction:column;max-width:720px;margin:0 auto}
 .mp-head{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 6px}
 .mp-x{background:none;border:0;color:var(--fg3);font-size:16px;padding:6px 10px}
@@ -2537,7 +2537,7 @@ html:not(.dock-l) .drawer-panel{border-start-end-radius:var(--g4);border-end-end
    之前 z 56 低于窗格的 70，宽屏开着终端时卡片被窗格切掉一截 */
 #set-ov{z-index:80}
 /* Claude Code 版本选单是从设置里开的，得压在设置卡片（80）之上；原先 56，打开了却被设置挡在下面，像是选不了 */
-#ccv-pick{z-index:90}
+#ccv-pick,#arc-dlg{z-index:90}
 .pj-card{-webkit-touch-callout:none;user-select:none;-webkit-user-select:none}
 
 /* ── 字体（自带，不受系统字体主题影响）──────────────────────────────
@@ -3565,3 +3565,21 @@ html[data-theme="light"]{--fg3:#6f6a60}
 #hint-row #model-chip .chip::after,#hint-row #perm-chip::after,#hint-row #draft-chip::after{content:"";position:absolute;left:-4px;right:-4px;top:50%;height:48px;margin-top:-24px}
 /* 200-12-10 RTL 下上下文进度条的双色文字分界要跟着从右往左，和填充方向一致 */
 html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270deg,#111 var(--p,0%),var(--fg) var(--p,0%))}
+/* 压缩包（06-files.js）：包内顶栏、多选勾、页脚进度、对话框 */
+.fs-arcbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:7px}
+.fs-arcbar .tiny{flex:1;min-width:0;margin:0}
+.fs-arcbar .btn{width:auto;margin:0;flex:0 0 auto}
+.fs-arcbar select{background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:4px 6px;font-size:12.5px}
+.fs-crumbs .crumb .ui-i{width:14px;height:14px;vertical-align:-2px;margin-inline-end:3px}
+.fs-chkmark{flex:0 0 18px;height:18px;border:1.5px solid var(--fg3);border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;line-height:1}
+.fs-item.picked .fs-chkmark{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+#fs-multi.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.fs-job{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.fs-job .tiny{margin:0;flex:0 0 auto}
+.arc-form{padding-bottom:calc(var(--safe-b, 0px) + 12px)}
+.arc-form .field{margin:8px 0}
+.arc-form .field input,.arc-form .field select{width:100%;box-sizing:border-box}
+.arc-quick{gap:8px;margin:-2px 0 6px}
+.arc-quick .btn,.arc-acts .btn{width:auto;margin:0}
+.arc-acts{justify-content:flex-end;gap:8px;margin-top:12px}
+.arc-hn{margin:2px 0 6px}

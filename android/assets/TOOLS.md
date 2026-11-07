@@ -27,7 +27,7 @@
 - **Java / 安卓构建**：openjdk-21（java、javac、jar、keytool），aapt2、d8、apksigner。没有自带 `android.jar`（Android SDK 平台包需用户自行下载，许可不允许随包分发）—— 但 `aapt2 link` 可以拿设备自带的 `/system/framework/framework-res.apk` 顶替（`-I` 参数），资源链接能正常完成。
 - **版本控制与网络**：git（https / ssh）、curl、openssl、ssh、ssh-keygen。
 - **音视频**：ffmpeg / ffprobe 9（x264、x265、vpx、aom、opus、mp3 等编解码器）。**硬件编码**用 `-c:v h264_mediacodec`（或 `hevc_mediacodec`），配 `-pix_fmt nv12`，比 libx264 快约 3 倍；个别机型没有硬件编码器，就退回 libx264。
-- **命令行工具**：rg、fd、bat、delta、hx（+ `hx-grammar` 装语法）、jq、yq、sqlite3、typst、duckdb、magick（ImageMagick）、man、file、tar、xz、zstd、zip / unzip。交互式 bash 里 tab 补全可用。
+- **命令行工具**：rg、fd、bat、delta、hx（+ `hx-grammar` 装语法）、jq、yq、sqlite3、typst、duckdb、magick（ImageMagick）、man、file、tar、xz、zstd、zip / unzip、`7z`（7-Zip，随应用自带，读写 7z / zip / tar.*，能解 rar / iso / cab 等几十种）。交互式 bash 里 tab 补全可用。
 - **Claude Code** 本身：终端里 `claude` 命令可用，用的是打开终端时应用里选的那家接口、型号和密钥（密钥经 apiKeyHelper 从私有文件读，不在环境变量里）。换了接口要新开一个终端。
 
 ## 系统权限：priv

@@ -10,6 +10,7 @@
     docx: DOC + '<path d="M9 12l1 5 2-3.5 2 3.5 1-5"/>',
     sheet: DOC + '<path d="M9 12h6v6H9zM9 15h6M12 12v6"/>',
     office: DOC + '<path d="M9 13h6v4H9z"/>',
+    archive: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M12 3.5v2M12 7.5v2M12 11.5v2"/><rect x="10.3" y="14.5" width="3.4" height="3.6" rx=".6"/>',
     other: '<path d="M4 8l8-4.5L20 8v8l-8 4.5L4 16z"/><path d="M4 8l8 4.5L20 8M12 12.5V20"/>',
   };
   const kindIcon = (k) => `<svg class="ui-i k-${KIND_SVG[k] ? k : "other"}" viewBox="0 0 24 24" aria-hidden="true">${KIND_SVG[k] || KIND_SVG.other}</svg>`;
@@ -47,7 +48,9 @@
         path: r.path, parent: r.parent, entries: r.entries || [], roots: r.roots || [],
         truncated: !!r.truncated, qRemote: false,
       });
+      state.fs.arc = null;
       if (!keepSel) state.fs.sel = null;
+      if (state.fs.multi) state.fs.multi.clear();
       // 刷新时保留搜索词：关闭查看器、重命名之后的自动刷新不该把过滤清掉（196 查看器域第 4 条）
       if (!keepQ) { $("fs-search").value = state.fs.q = ""; }
       renderFs();
@@ -87,16 +90,21 @@
   }
 
   function renderFs() {
-    $("fs-crumbs").innerHTML = crumbs(state.fs.path || "");
+    const arc = state.fs.arc;
+    $("fs-crumbs").innerHTML = arc ? arcCrumbs(arc) : crumbs(state.fs.path || "");
+    renderArcBar();
     $("fs-roots").innerHTML = (state.fs.roots || [])
       .map((r) => `<span class="chip" data-p="${esc(r)}">${esc(r.replace(/^\/sdcard/, "~"))}</span>`).join("");
 
     const list = fsVisible();
-    $("fs-count").textContent = t("{n} 项 · {path}", { n: list.length, path: state.fs.path || "" }) +
-      (state.fs.truncated ? " · " + t("只显示了前 1000 项") : "");
+    $("fs-count").textContent = arc
+      ? t("{n} 项 · {path}", { n: list.length, path: arc.name + (arc.dir ? " / " + arc.dir : "") }) + (arc.truncated ? " · " + t("只列出前 {n} 项，用过滤找", { n: list.length }) : "")
+      : t("{n} 项 · {path}", { n: list.length, path: state.fs.path || "" }) + (state.fs.truncated ? " · " + t("只显示了前 1000 项") : "");
+    const multi = state.fs.multi;
     $("fs-list").innerHTML = list.length ? list.map((e, i) => `
-      <div class="item fs-item ${state.fs.sel === e.name ? "active" : ""}" data-i="${i}" tabindex="0" role="button">
+      <div class="item fs-item ${state.fs.sel === e.name ? "active" : ""} ${multi && multi.has(e.name) ? "picked" : ""}" data-i="${i}" tabindex="0" role="button"${multi ? ` aria-pressed="${multi.has(e.name)}"` : ""}>
         <div class="fs-row">
+          ${multi ? `<span class="fs-chkmark" aria-hidden="true">${multi.has(e.name) ? "✓" : ""}</span>` : ""}
           <span class="fs-ico">${kindIcon(e.kind)}</span>
           <span class="it-title">${esc(e.name)}${e.dir ? "/" : ""}</span>
           <span class="fs-meta">${e.dir ? "" : fmtSize(e.size)}</span>
@@ -104,7 +112,7 @@
       </div>`).join("") : '<div class="tiny">' + (state.fs.q ? t("没有匹配项") : t("（空目录）")) + '</div>';
 
     // 图片直接出缩略图，别的类型给一行摘要
-    if (list.some((e) => e.kind === "image")) {
+    if (!arc && list.some((e) => e.kind === "image")) {
       $("fs-list").querySelectorAll(".fs-item").forEach((el) => {
         const e = list[Number(el.dataset.i)];
         if (e.kind !== "image") return;
@@ -119,16 +127,30 @@
 
     $("fs-list").querySelectorAll(".fs-item").forEach((el) => {
       const e = list[Number(el.dataset.i)];
-      el.addEventListener("click", () => (e.dir ? fsLoad(state.fs.path.replace(/\/$/, "") + "/" + e.name) : fsSelect(e)));
+      el.addEventListener("click", () => {
+        if (state.fs.multi) { state.fs.multi.has(e.name) ? state.fs.multi.delete(e.name) : state.fs.multi.add(e.name); return renderFs(); }
+        if (arc) return e.dir ? arcLoad(arcJoin(arc.dir, e.name)) : fsSelect(e);
+        e.dir ? fsLoad(state.fs.path.replace(/\/$/, "") + "/" + e.name) : fsSelect(e);
+      });
       // 键盘也能用：Tab 到条目，回车 / 空格同点击（审查 #49 P2-11）
       el.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); el.click(); } });
+      if (arc) return;
       if (!e.dir) el.addEventListener("dblclick", () => { insertFile(e); });
       el.addEventListener("contextmenu", (ev) => { ev.preventDefault(); fsRename(e); });   // 长按 = 重命名
     });
 
-    $("fs-insert").disabled = !state.fs.sel;
+    $("fs-insert").disabled = !state.fs.sel || !!arc;
+    $("fs-insert").classList.toggle("hidden", !!multi || !!arc);
+    $("fs-multi").classList.toggle("on", !!multi);
+    $("fs-multi").setAttribute("aria-pressed", String(!!multi));
+    const act = $("fs-act");
+    act.classList.toggle("hidden", !multi);
+    if (multi) {
+      act.textContent = arc ? t("解压选中（{n}）", { n: multi.size }) : t("压缩（{n}）", { n: multi.size });
+      act.disabled = !multi.size;
+    }
     renderFsPreview();
-    fsGitDots();
+    if (!arc) fsGitDots();
   }
 
   const fullPathOf = (e) => state.fs.path.replace(/\/$/, "") + "/" + e.name;
@@ -152,6 +174,7 @@
     if (!state.fs.sel) { box.classList.add("hidden"); box.innerHTML = ""; return; }
     const e = state.fs.entries.find((x) => x.name === state.fs.sel);
     if (!e) { box.classList.add("hidden"); return; }
+    if (state.fs.arc) return arcPreviewPane(box, e);
     const full = fullPathOf(e);
     box.classList.remove("hidden");
 
@@ -175,6 +198,8 @@
         body = `<pre class="fs-pre">${esc(txt.slice(0, 12000))}${txt.length > 12000 ? "\n" + t("…（已截断）") : ""}</pre>`;
       } catch (err) { body = '<div class="tiny">' + t("读取失败") + (err && err.message ? "：" + esc(err.message) : "") + '</div>'; }
       if (seq !== fsPrevSeq) return;
+    } else if (e.kind === "archive") {
+      body = `<div class="tiny">${t("压缩包：点「打开压缩包」浏览里面的文件，或直接解压")}</div>`;
     } else {
       body = `<div class="tiny">${esc(e.kind)} · ${fmtSize(e.size)} · ${t("无可内嵌预览")}</div>`;
     }
@@ -183,7 +208,8 @@
       `<div class="fs-prev-head">
          <span class="mono">${esc(e.name)}</span>
          <span class="tiny">${fmtSize(e.size)}</span>
-         <button class="btn sm" data-a="open">${e.kind === "text" ? t("打开 / 编辑") : t("打开")}</button>
+         ${e.kind === "archive" ? `<button class="btn sm" data-a="arc">${t("打开压缩包")}</button><button class="btn ghost sm" data-a="unpack">${t("解压…")}</button>`
+           : `<button class="btn sm" data-a="open">${e.kind === "text" ? t("打开 / 编辑") : t("打开")}</button>`}
          <button class="btn ghost sm" data-a="insert">${t("插入 @路径")}</button>
          <button class="btn ghost sm" data-a="rename">${t("重命名")}</button>
          <a class="btn ghost sm" href="${fileUrl(full, true)}" download>⤓</a>
@@ -192,6 +218,8 @@
     box.querySelector('[data-a="insert"]')?.addEventListener("click", () => insertFile(e));
     box.querySelector('[data-a="rename"]')?.addEventListener("click", () => fsRename(e));
     box.querySelector('[data-a="open"]')?.addEventListener("click", () => openViewer(full, e.kind, e.size));
+    box.querySelector('[data-a="arc"]')?.addEventListener("click", () => arcOpen(full));
+    box.querySelector('[data-a="unpack"]')?.addEventListener("click", () => arcExtractDlg({ path: full, entries: null }));
     box.querySelector("img")?.addEventListener("click", () => openViewer(full, e.kind, e.size));
   }
 
@@ -245,9 +273,10 @@
   $("fs-mkdir").addEventListener("click", () => fsCreate(true));
 
   $("fs-close").addEventListener("click", closeFiles);
-  $("fs-reload").addEventListener("click", () => { fsDotsAt = 0; fsLoad(state.fs.path, { keepSel: true, keepQ: true }); });
+  $("fs-reload").addEventListener("click", () => { if (state.fs.arc) return arcLoad(state.fs.arc.dir, { keepSel: true }); fsDotsAt = 0; fsLoad(state.fs.path, { keepSel: true, keepQ: true }); });
   $("fs-git").addEventListener("click", () => openGit(state.fs.path));
   $("fs-up").addEventListener("click", () => {
+    if (state.fs.arc) return arcUp();
     if (state.fs.parent && state.fs.parent !== state.fs.path) fsLoad(state.fs.parent);
   });
   $("fs-hidden").addEventListener("change", (e) => { state.fs.hidden = e.target.checked; fsLoad(state.fs.path); });
@@ -262,6 +291,239 @@
   });
   $("fs-crumbs").addEventListener("click", (e) => {
     const c = e.target.closest(".crumb");
-    if (c) fsLoad(c.dataset.p);
+    if (!c) return;
+    if (c.dataset.ad != null) return arcLoad(c.dataset.ad);
+    fsLoad(c.dataset.p);
   });
 
+  // ── 压缩包：浏览 / 预览 / 解压 / 压缩（gw/archiver.mjs；7-Zip 随 APK 走） ──
+  // 进了压缩包，文件面板就切成「包内」模式：面包屑、上级、过滤、多选照用，条目来自 /api/arc/list。
+  // 密码只留在 state.fs.arc 里（这个面板开着的这一会儿），不存本地
+  const arcJoin = (d, n) => (d ? d + "/" + n : n);
+  const arcStem = (name) => name.replace(/\.(tar\.(gz|bz2|xz|zst|lzma)|t[gbx]z|tbz2|tzst|[^.]{1,6})$/i, "").replace(/\.part0*1$/i, "") || name;
+  const dirOf = (p) => p.replace(/\/[^/]*$/, "") || "/";
+  const arcPost = (p, body) => api("/api/arc/" + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  function arcCrumbs(arc) {
+    const parts = arc.dir ? arc.dir.split("/") : [];
+    const html = [`<span class="crumb" data-p="${esc(dirOf(arc.path))}">…</span>`, `<span class="crumb ${parts.length ? "" : "cur"}" data-ad="">${kindIcon("archive")}${esc(arc.name)}</span>`];
+    let acc = "";
+    parts.forEach((seg, i) => { acc = arcJoin(acc, seg); html.push(`<span class="crumb ${i === parts.length - 1 ? "cur" : ""}" data-ad="${esc(acc)}">${esc(seg)}</span>`); });
+    return html.join('<span class="sep">/</span>');
+  }
+
+  function renderArcBar() {
+    const bar = $("fs-arcbar"), arc = state.fs.arc;
+    bar.classList.toggle("hidden", !arc);
+    if (!arc) { bar.innerHTML = ""; return; }
+    const i = arc.info;
+    const encSel = i.kind === "zip" && i.legacy
+      ? `<select class="fs-arcenc" aria-label="${esc(t("文件名编码"))}" title="${esc(t("文件名乱码就换一个编码"))}">${(arc.encodings || ["auto"]).map((x) =>
+          `<option value="${esc(x)}" ${x === (arc.enc === "auto" ? i.encoding : arc.enc) ? "selected" : ""}>${esc(x === "auto" ? t("自动") : x.toUpperCase())}</option>`).join("")}</select>` : "";
+    bar.innerHTML = `<span class="tiny">${esc(i.type || i.kind)} · ${t("{n} 个条目", { n: i.total })} · ${fmtSize(i.bytes)}${i.encrypted ? " · " + t("已加密") : ""}</span>
+      ${encSel}
+      <button class="btn sm" data-a="all">${t("全部解压…")}</button>
+      <button class="btn ghost sm" data-a="exit">${t("退出压缩包")}</button>`;
+    bar.querySelector('[data-a="all"]').addEventListener("click", () => arcExtractDlg({ path: arc.path, entries: null }));
+    bar.querySelector('[data-a="exit"]').addEventListener("click", arcExit);
+    bar.querySelector(".fs-arcenc")?.addEventListener("change", (ev) => { arc.enc = ev.target.value; arcLoad(arc.dir); });
+  }
+
+  /** 打开一个压缩包（要密码就先问） */
+  async function arcOpen(path) {
+    state.fs.sel = null;
+    state.fs.arc = { path, name: path.split("/").pop(), dir: "", enc: "auto", password: "", info: null };
+    await arcLoad("");
+  }
+  async function arcLoad(dir, { keepSel = false } = {}) {
+    const arc = state.fs.arc;
+    if (!arc) return;
+    const ok = latest("fs");
+    let r;
+    try {
+      if (!arc.encodings) arc.encodings = (await api("/api/arc/info").catch(() => ({}))).encodings;
+      r = await arcPost("list", { path: arc.path, dir, enc: arc.enc, password: arc.password || undefined });
+    } catch (e) {
+      if (!ok()) return;
+      if (!arc.info) { state.fs.arc = null; renderFs(); }
+      return toast(e.status === 501 ? t("这个版本没带 7-Zip，打不开这种压缩包") : t("打不开压缩包：{msg}", { msg: e.message }), true);
+    }
+    if (!ok() || state.fs.arc !== arc) return;
+    if (r.needPassword) {
+      const pw = await arcAskPassword(arc.name, r.wrongPassword && arc.password);
+      if (pw == null) { if (!arc.info) { state.fs.arc = null; renderFs(); } return; }
+      arc.password = pw;
+      return arcLoad(dir, { keepSel });
+    }
+    Object.assign(arc, { dir: r.dir, info: r, truncated: r.truncated });
+    state.fs.entries = r.entries;
+    if (!keepSel) state.fs.sel = null;
+    if (state.fs.multi) state.fs.multi.clear();
+    $("fs-search").value = state.fs.q = "";
+    renderFs();
+  }
+  function arcUp() {
+    const arc = state.fs.arc;
+    if (arc.dir) return arcLoad(arc.dir.includes("/") ? arc.dir.replace(/\/[^/]*$/, "") : "");
+    arcExit();
+  }
+  async function arcExit() {
+    const p = state.fs.arc && state.fs.arc.path;
+    state.fs.arc = null;
+    await fsLoad(dirOf(p || state.fs.path || "/"));
+    if (p) { state.fs.sel = p.split("/").pop(); renderFs(); }
+  }
+
+  /** 包内选中一个文件：解到缓存，用查看器打开 */
+  function arcPreviewPane(box, e) {
+    const arc = state.fs.arc, entry = arcJoin(arc.dir, e.name);
+    box.classList.remove("hidden");
+    const when = e.mtime ? new Date(e.mtime).toLocaleString() : "";
+    box.innerHTML = `<div class="fs-prev-head">
+        <span class="mono">${esc(e.name)}</span>
+        <span class="tiny">${fmtSize(e.size)}</span>
+        ${e.link ? "" : `<button class="btn sm" data-a="open">${t("打开")}</button>`}
+        <button class="btn ghost sm" data-a="unpack">${t("解压…")}</button>
+      </div>
+      <div class="fs-prev-body"><div class="tiny">${[e.packed ? t("压缩后 {size}", { size: fmtSize(e.packed) }) : "", when, e.enc ? t("已加密") : "", e.link ? t("软链接（不解出）") : ""].filter(Boolean).map(esc).join(" · ")}</div></div>`;
+    box.querySelector('[data-a="unpack"]').addEventListener("click", () => arcExtractDlg({ path: arc.path, entries: [entry] }));
+    box.querySelector('[data-a="open"]')?.addEventListener("click", async (ev) => {
+      const b = ev.currentTarget; b.disabled = true; b.textContent = t("解出中…");
+      try {
+        const r = await arcPost("preview", { path: arc.path, entry, enc: arc.enc, password: arc.password || undefined });
+        if (r.needPassword) {
+          const pw = await arcAskPassword(arc.name, r.wrongPassword);
+          if (pw != null) { arc.password = pw; renderFsPreview(); }
+          return;
+        }
+        openViewer(r.path, r.kind === "archive" ? "other" : r.kind, r.size);
+      } catch (err) {
+        toast(err.status === 401 ? t("密码不对") : err.status === 413 ? t("文件太大，没法直接预览，请解压出来再看") : err.status === 507 ? t("存储空间不够") : t("解出失败：{msg}", { msg: err.message }), true);
+      } finally { if (b.isConnected) { b.disabled = false; b.textContent = t("打开"); } }
+    });
+  }
+
+  // ── 对话框：密码、解压到哪、压缩设置（同一个底部面板样式） ──
+  function arcDialog(title, inner, okText) {
+    return new Promise((resolve) => {
+      const m = document.createElement("div");
+      m.id = "arc-dlg";
+      m.innerHTML = `<form class="sheet-panel mp-panel arc-form">
+        <div class="mp-head"><b>${esc(title)}</b><button class="mp-x" type="button" aria-label="${esc(t("关闭"))}">${uiI("x")}</button></div>
+        ${inner}
+        <div class="row-actions arc-acts"><button type="button" class="btn ghost sm" data-a="cancel">${esc(t("取消"))}</button><button type="submit" class="btn sm">${esc(okText)}</button></div></form>`;
+      let done = false;
+      const close = (v) => { if (done) return; done = true; resolve(v); OV.close(m); };
+      m.addEventListener("click", (e) => { if (e.target === m || e.target.closest(".mp-x") || e.target.closest('[data-a="cancel"]')) close(null); });
+      const f = m.querySelector("form");
+      f.addEventListener("submit", (e) => { e.preventDefault(); close(Object.fromEntries(new FormData(f))); });
+      OV.open(m, { kind: "modal", keep: true, cover: true, onClose: () => { if (!done) { done = true; resolve(null); } } });
+      f.querySelector('select[name="format"]')?.dispatchEvent(new Event("change", { bubbles: true }));   // 按默认格式藏掉用不上的栏
+      setTimeout(() => f.querySelector("input:not([type=hidden]):not([type=checkbox])")?.focus(), 60);
+    });
+  }
+  async function arcAskPassword(name, wrong) {
+    const v = await arcDialog(t("输入密码"), `<div class="tiny mp-note">${esc(name)}${wrong ? " · " + esc(t("密码不对，再试一次")) : ""}</div>
+      <div class="field"><input name="pw" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></div>`, t("确定"));
+    return v ? v.pw : null;
+  }
+
+  /** 解压：目标默认「压缩包所在目录 / 包名」，可改成别处；已有同名的不覆盖，新来的改名 */
+  async function arcExtractDlg({ path, entries }) {
+    const arc = state.fs.arc && state.fs.arc.path === path ? state.fs.arc : null;
+    const base = dirOf(path), stem = arcStem(path.split("/").pop());
+    const what = entries ? (entries.length === 1 ? entries[0].split("/").pop() : t("选中的 {n} 项", { n: entries.length })) : t("全部");
+    const v = await arcDialog(t("解压 {what}", { what }), `
+      <div class="field"><label>${esc(t("解压到"))}</label><input name="dest" type="text" class="mono" value="${esc(base.replace(/\/$/, "") + "/" + stem)}" autocapitalize="off" spellcheck="false"></div>
+      <div class="row-actions arc-quick"><button type="button" class="btn ghost sm" data-d="${esc(base.replace(/\/$/, "") + "/" + stem)}">./${esc(stem)}/</button><button type="button" class="btn ghost sm" data-d="${esc(base)}">${esc(t("当前目录"))}</button></div>
+      ${arc ? "" : `<div class="field"><label>${esc(t("密码（没加密就留空）"))}</label><input name="pw" type="password" autocomplete="off"></div>`}
+      <div class="tiny mp-note">${esc(t("目标里已有同名的文件不会被覆盖，新解出来的会改名为「名字 (2)」。软链接不解出。"))}</div>`, t("解压"));
+    if (!v) return;
+    const dest = String(v.dest || "").trim().replace(/\/+$/, "") || "/";
+    if (!dest.startsWith("/")) return toast(t("要写完整路径（以 / 开头）"), true);
+    arcRunJob("extract", { path, dest, entries: entries || undefined, enc: arc ? arc.enc : "auto", password: (arc ? arc.password : v.pw) || undefined }, dest);
+  }
+  document.addEventListener("click", (e) => {   // 对话框里的快捷目标
+    const b = e.target.closest("#arc-dlg [data-d]");
+    if (b) b.closest("form").querySelector('[name="dest"]').value = b.dataset.d;
+  });
+
+  const ARC_FORMATS = [["zip", ".zip"], ["7z", ".7z"], ["tar.gz", ".tar.gz"], ["tar.xz", ".tar.xz"], ["tar.bz2", ".tar.bz2"], ["tar", ".tar"]];
+  async function arcCreateDlg(names) {
+    const dir = state.fs.path.replace(/\/$/, "");
+    const def = names.length === 1 ? names[0].replace(/\.[^.]{1,6}$/, "") || names[0] : (dir.split("/").pop() || "archive");
+    const fmt0 = localStorage.getItem("cc.arc.fmt") || "zip";
+    const v = await arcDialog(names.length === 1 ? t("压缩「{name}」", { name: names[0] }) : t("压缩 {n} 项", { n: names.length }), `
+      <div class="field"><label>${esc(t("压缩包名称"))}</label><input name="name" type="text" value="${esc(def)}" autocapitalize="off" spellcheck="false"></div>
+      <div class="field"><label>${esc(t("格式"))}</label><select name="format">${ARC_FORMATS.map(([f, ext]) => `<option value="${f}" ${f === fmt0 ? "selected" : ""}>${ext}</option>`).join("")}</select></div>
+      <div class="field"><label>${esc(t("压缩级别"))}</label><select name="level">
+        <option value="0">${esc(t("仅存储"))}</option><option value="1">${esc(t("最快"))}</option><option value="5" selected>${esc(t("标准"))}</option><option value="9">${esc(t("最小体积（慢）"))}</option></select></div>
+      <div class="field arc-pw"><label>${esc(t("密码（可选，zip / 7z）"))}</label><input name="password" type="password" autocomplete="new-password"></div>
+      <label class="fs-chk arc-hn"><input type="checkbox" name="encryptNames" value="1"> <span>${esc(t("连文件名一起加密（7z）"))}</span></label>
+      <div class="tiny mp-note">${esc(t("zip 加密用 AES-256；老的解压软件可能打不开，要通用就别设密码。.ssh 这类凭据目录不会打进去。"))}</div>`, t("压缩"));
+    if (!v) return;
+    const ext = (ARC_FORMATS.find(([f]) => f === v.format) || ARC_FORMATS[0])[1];
+    let name = String(v.name || "").trim();
+    if (!name || badName(name)) return toast(t("名称里不能有 /"), true);
+    if (!name.toLowerCase().endsWith(ext)) name += ext;
+    try { localStorage.setItem("cc.arc.fmt", v.format); } catch {}
+    const tar = v.format.startsWith("tar");
+    arcRunJob("create", { items: names.map((n) => dir + "/" + n), dest: dir + "/" + name, format: v.format, level: +v.level,
+      password: tar ? undefined : v.password || undefined, encryptNames: v.format === "7z" && !!v.encryptNames }, dir + "/" + name);
+  }
+  // 格式换成 tar.* 时密码那栏没用，藏起来
+  document.addEventListener("change", (e) => {
+    const s = e.target.closest('#arc-dlg select[name="format"]');
+    if (!s) return;
+    const f = s.closest("form");
+    f.querySelector(".arc-pw").classList.toggle("hidden", s.value.startsWith("tar"));
+    f.querySelector(".arc-hn").classList.toggle("hidden", s.value !== "7z");
+  });
+
+  /** 后台任务（解压 / 压缩）：页脚显示进度，可取消；做完刷新当前目录 */
+  async function arcRunJob(kind, body, dest) {
+    let j;
+    try { j = await arcPost(kind, body); }
+    catch (e) {
+      return toast(e.status === 409 ? t("已经有同名的文件或文件夹") : e.status === 403 ? t("不能解压或压缩到这个位置") : e.status === 501 ? t("这个版本没带 7-Zip")
+        : (e.body && e.body.error) === "dest inside source" ? t("压缩包不能放进要压缩的文件夹里") : t("操作失败：{msg}", { msg: e.message }), true);
+    }
+    const box = $("fs-job");
+    const label = kind === "extract" ? t("解压中") : t("压缩中");
+    box.classList.remove("hidden");
+    box.innerHTML = `<span class="tiny fs-job-t">${esc(label)}…</span><button class="btn ghost sm" type="button">${esc(t("取消"))}</button>`;
+    box.querySelector("button").onclick = () => arcPost("cancel", { id: j.id }).catch(() => {});
+    while (j.state === "running") {
+      await new Promise((r) => setTimeout(r, 600));
+      try { j = await api("/api/arc/job?id=" + encodeURIComponent(j.id)); } catch { break; }
+      const tx = box.querySelector(".fs-job-t");
+      if (tx) tx.textContent = `${label} ${j.pct || 0}%`;
+    }
+    box.classList.add("hidden"); box.innerHTML = "";
+    if (j.state === "done") {
+      toast(kind === "extract" ? t("已解压到 {path}", { path: dest }) : t("已压缩为 {path}", { path: dest }));
+      if (state.fs.multi) { state.fs.multi = null; }
+      if (!state.fs.arc && !filesEl.classList.contains("hidden")) await fsLoad(state.fs.path, { keepSel: true });
+      else renderFs();
+    } else if (j.state === "cancelled") toast(t("已取消"));
+    else if (j.wrongPassword) {
+      if (kind === "extract") {
+        const pw = await arcAskPassword(body.path.split("/").pop(), !!body.password);
+        if (pw != null) { if (state.fs.arc && state.fs.arc.path === body.path) state.fs.arc.password = pw; arcRunJob(kind, { ...body, password: pw }, dest); }
+      } else toast(t("密码不对"), true);
+    } else toast(j.code === "ENOSPC" ? t("存储空间不够") : t("操作失败：{msg}", { msg: j.error || "?" }), true);
+  }
+
+  // 多选：普通目录里压缩选中的，包里解压选中的
+  $("fs-multi").addEventListener("click", () => {
+    state.fs.multi = state.fs.multi ? null : new Set();
+    state.fs.sel = null;
+    renderFs();
+  });
+  $("fs-act").addEventListener("click", () => {
+    const m = state.fs.multi;
+    if (!m || !m.size) return;
+    const names = [...m];
+    if (state.fs.arc) arcExtractDlg({ path: state.fs.arc.path, entries: names.map((n) => arcJoin(state.fs.arc.dir, n)) });
+    else arcCreateDlg(names);
+  });
