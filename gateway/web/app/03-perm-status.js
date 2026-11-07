@@ -244,14 +244,46 @@
     renderPermBar();
   }
 
+  // 卡片里已经勾的、写的（选择题的选项和补充回答、拒绝理由）：随请求记在 PERMS 里，切会话 / 重连后重建卡片时填回去（#175-3）
+  function permFormRead(el) {
+    const deny = el.querySelector(".perm-deny");
+    return { ck: [...el.querySelectorAll(".perm-body input[type=checkbox], .perm-body input[type=radio]")].map((x) => x.checked),
+      ot: [...el.querySelectorAll(".perm-other")].map((x) => x.value), deny: deny.querySelector("textarea").value, open: !deny.classList.contains("hidden") };
+  }
+  function permFormRestore(el, f) {
+    el.querySelectorAll(".perm-body input[type=checkbox], .perm-body input[type=radio]").forEach((x, i) => { if (f.ck[i] != null) x.checked = f.ck[i]; });
+    el.querySelectorAll(".perm-other").forEach((x, i) => { if (f.ot[i] != null) x.value = f.ot[i]; });
+    el.querySelector(".perm-deny textarea").value = f.deny || "";
+    el.querySelector(".perm-deny").classList.toggle("hidden", !f.open);
+  }
   function onPermRequest(ev) {
     const old = PERMS.get(ev.id);
     if (old && old.el && old.el.isConnected) return;      // 重放来的重复事件
-    const it = { p: ev, runId: ev.runId, el: null, done: false };
+    const it = { p: ev, runId: ev.runId, el: null, done: false, form: old && old.form };
     PERMS.set(ev.id, it);
     it.el = PermCard(ev, ev.runId);
+    if (it.form) permFormRestore(it.el, it.form);
+    const keep = () => { it.form = permFormRead(it.el); };
+    it.el.addEventListener("input", keep); it.el.addEventListener("change", keep);
+    it.el.addEventListener("click", (e) => { if (e.target.closest(".pa-more")) keep(); });
     renderPermBar();
     scrollDown();
+    askNotice([{ id: ev.id, runId: ev.runId }]);
+  }
+
+  /** 整页盖着对话时有新的确认请求：权限条和状态栏都被盖住了，弹一条带「查看」的提示，别让这一轮无声等着（#175-1）。
+   *  每个请求只提醒一次；点「查看」收起整页，是别的会话的就打开那个会话 */
+  const ASK_SEEN = new Set();
+  function askNotice(list) {
+    let first = null;
+    for (const x of list) { if (ASK_SEEN.has(x.id)) continue; ASK_SEEN.add(x.id); first = first || x; }
+    if (ASK_SEEN.size > 500) for (const id of [...ASK_SEEN].slice(0, 250)) ASK_SEEN.delete(id);
+    if (!first || !curPage) return;
+    const r = srv.runs.find((y) => y.id === first.runId);
+    toastAct(t("Claude 在等你确认"), t("查看"), () => {
+      if (r && r.sessionId && r.sessionId !== view.sessionId) return openSession(r.sessionId);
+      closePage();
+    });
   }
 
   function pendingPerms() {
@@ -264,17 +296,18 @@
   // 任务清单：折叠时一行（进度 + 正在做的那项），点开看全部；全部完成可 ✕ 收起
   let tasksOpen = localStorage.getItem("cc.tasksOpen") === "1";
   let bgOpen = localStorage.getItem("cc.bgOpen") === "1";
-  const tasksSig = (l) => l.map((x) => x.id + ":" + x.status).join(",");
+  // 收起记的是这份清单有哪些项（编号集合），不含进度：同一份清单接着做不再冒出来，换了一份（增删了项）才重新露出来。
+  // 旧版记的是「编号:状态」，照样认
+  const tasksSig = (l) => "ids:" + l.map((x) => x.id).join(",");
+  const tasksSigOld = (l) => l.map((x) => x.id + ":" + x.status).join(",");
   const taskLabel = (x) => esc(x.status === "in_progress" && x.active ? x.active : x.subject);
   // more：清单收起时被一并收起的目标 / 后台任务条数，标在清单那一行末尾
   function tasksHtml(more) {
     const l = view.tasks;
     if (!l || !l.length) return "";
     const done = l.filter((x) => x.status === "completed").length, all = done === l.length;
-    // 没在跑（停掉了、或这一轮结束时清单没做完）也能 ✕ 收起：不然留着一条永远做不完的清单（群友 11-05）。
-    // 收起记的是清单指纹，清单一变、或者这个会话又跑起来，就重新露出来
-    const closable = all || !srv.run;
-    if (closable && view.tasksHide === tasksSig(l)) return "";
+    // 什么时候都能 ✕ 收起：没做完的、会话又跑起来的也一样（群友 11-05；以前在跑时不给 ✕，继续会话后清单冒出来就叉不掉了）
+    if (view.tasksHide && (view.tasksHide === tasksSig(l) || view.tasksHide === tasksSigOld(l))) return "";
     const cur = l.find((x) => x.status === "in_progress") || l.find((x) => x.status !== "completed");
     const pct = Math.round(done / l.length * 100);
     const head = `<div class="rs-row rs-thead" role="button" tabindex="0" aria-expanded="${tasksOpen}">
@@ -283,7 +316,7 @@
       <span class="rs-tbar"><i style="width:${pct}%"></i></span>
       <span class="rs-txt">${!tasksOpen && cur ? taskLabel(cur) : ""}</span>
       ${more ? `<span class="rs-meta">${t("另有 {n} 项", { n: more })}</span>` : ""}
-      ${all ? "" : `<span class="rs-chev${tasksOpen ? " up" : ""}">${uiI("chevDown")}</span>`}${closable ? `<button class="rs-tx" aria-label="${t("关闭")}">${uiI("x")}</button>` : ""}</div>`;
+      ${all ? "" : `<span class="rs-chev${tasksOpen ? " up" : ""}">${uiI("chevDown")}</span>`}<button class="rs-tx" aria-label="${t("关闭")}">${uiI("x")}</button></div>`;
     const rows = !tasksOpen ? "" : `<div class="rs-tlist">${l.map((x) => `<div class="rs-trow ${esc(x.status)}">
       <span class="rs-tico">${uiI(x.status === "completed" ? "check" : x.status === "in_progress" ? "half" : "ring")}</span>
       <span class="rs-ttxt">${taskLabel(x)}</span>
@@ -482,6 +515,8 @@
       state.settings.permissionMode = r.mode;
       setPermChip(r.mode);
       $("set-perm").value = r.mode;
+      for (const x of srv.runs) if (x.permMode) x.permMode = r.mode;   // 同 perm_mode 事件：等着的计划卡跟着重排（#175-2）
+      refreshPlanActs();
       toast(r.live ? t("已切到「{m}」，这一轮当场生效", { m: modeLabel(r.mode) }) : t("已切到「{m}」", { m: modeLabel(r.mode) }));
     } catch (err) { toast(err.message, true); }
   }
@@ -537,19 +572,21 @@
         body: JSON.stringify({ userText: userTextOf.get(turn), after, which, uuid: turn.dataset.uuid || "",
           replyUuid: which === "user" ? "" : (msgEl.querySelector("[data-uuid]")?.dataset.uuid || ""), offs }),
       });
-      if (gen === view.gen && r.moved) {
+      // 回执到时已经切走（或重连重画过）：眼前的节点不是那个会话的，什么都别改，只说删好了（#174-3）
+      const here = gen === view.gen;
+      if (here && r.moved) {
         const mv = (x) => (x == null || x === "" ? x : r.moved[Number(x)] ?? Number(x));
         view.next = view.next == null ? null : mv(view.next) < r.size ? mv(view.next) : null;
         if (view.cursor != null) view.cursor = mv(view.cursor);
         for (const p of pages) { if (p.dataset.from !== undefined) p.dataset.from = mv(p.dataset.from); if (p.dataset.to !== undefined) p.dataset.to = mv(p.dataset.to); }
       }
-      if (which === "user") {
+      if (here && which === "user") {
         // 它后面那几条回复（到下一条提问为止）成了没有提问的回复：标上，之后不许单独删
         const all = [...chatEl.querySelectorAll(".msg")];
         for (const m of all.slice(all.indexOf(msgEl) + 1)) { if (m.classList.contains("user")) break; if (m.classList.contains("bot")) m.dataset.orphan = "1"; }
         userTextOf.delete(msgEl); msgEl.remove();
-      } else msgEl.remove();
-      toastAct(t("已删除"), t("撤销"), async () => {
+      } else if (here) msgEl.remove();
+      toastAct(here ? t("已删除") : t("已在原来那个会话里删除"), t("撤销"), async () => {
         try {
           await api("/api/session/" + encodeURIComponent(sid) + "/undodel", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ undo: r.undo }) });
           if (view.sessionId === sid) openSession(sid);
@@ -575,8 +612,10 @@
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ userText: userTextOf.get(prev), after, uuid: prev.dataset.uuid || "" }),
       });
-      openSession(r.id);
       loadSessions();
+      // 等回执的工夫切到了别的会话：别把人从那边拉走，给个入口（#174-4）。按会话号认：重连也会让 gen 变
+      if (view.sessionId !== sid) return toastAct(t("已分叉：保留了前 {n} 轮，接着聊就行", { n: r.kept }), t("打开"), () => openSession(r.id));
+      openSession(r.id);
       toast(t("已分叉：保留了前 {n} 轮，接着聊就行", { n: r.kept }));
     } catch (e) { toast(e.message, true); }
   }
@@ -597,11 +636,19 @@
     toast(t("正在查这之后改过哪些文件…"));
     let d;
     try { d = await post({ dryRun: true }); } catch (e) { return toast(e.message, true); }
+    // 试算回来时已经切到别的会话：确认框列的是原来那个会话的文件，不弹在这边（#174-4）
+    if (view.sessionId !== sid) return toast(t("已切换会话，这次回退没有执行"));
     const choice = await rewindDialog(d);
     if (!choice) return;
     try {
       const r = await post({ conversation: choice === "both" });
       const n = r.files && r.files.canRewind && r.files.files ? r.files.files.length : 0;
+      if (choice === "both" && view.sessionId !== sid) {
+        // 回执到之前切走了：不把人拉过去，也不往别的输入框里填原文
+        loadSessions();
+        if (r.fork && !r.fork.fresh) return toastAct(t("对话回到了这条消息之前，原会话还在"), t("打开"), () => openSession(r.fork.id));
+        return toast(t("对话回到了这条消息之前，原会话还在"));
+      }
       if (choice === "both") {
         if (r.fork && r.fork.fresh) newConversation(); else { openSession(r.fork.id); loadSessions(); }
         // 原文只回填到这次打开的目标：300ms 里用户已经切到别的会话，就记进目标会话的草稿，不覆盖眼前那个会话的输入框（#153-2）。
@@ -673,7 +720,11 @@
       switch (phEv.phase) {
         case "connect": return t("连接中") + sec;
         case "wait":    return t("已连上，等待输出") + sec;
-        case "retry":   return t("连接出错，第 {a}/{m} 次重试", { a: phEv.attempt || 1, m: phEv.max || "?" });
+        // 出错原因第一次重试就写出来（手机上看不到悬停提示），不用等十次都失败（群反馈 11-06）
+        case "retry": {
+          const why = [phEv.status, phEv.error].filter(Boolean).join(" · ");
+          return t("连接出错，第 {a}/{m} 次重试", { a: phEv.attempt || 1, m: phEv.max || "?" }) + (why ? "：" + (why.length > 120 ? why.slice(0, 120) + "…" : why) : "");
+        }
         case "think":   return t("思考中") + sec;
         // 官方接口默认把工具参数攒成大块才下发（不像 DeepSeek 逐字流），字数常常一下跳到底就不动了；
         // 后面跟上这一步的用时，不动的时候也看得出没卡住

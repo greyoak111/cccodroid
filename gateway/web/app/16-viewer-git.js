@@ -79,11 +79,13 @@
 
   // ── 同步栏：当前分支 → 上游，抓取 / 拉取 / 推送 ──
   // 拉取只做快进；分叉了就停下说清楚，可以交给 Claude 合并。推送第一次会顺便建立上游关联
-  let gitBusy = "";
+  // 在忙的同步按仓库记：A 的推送还在跑时打开 B，B 的按钮照常可用，A 的回执也只落在 A 上（#177-2）
+  const GIT_BUSY = new Map();   // dir → fetch / pull / push
   function gitSyncBar() {
     const s = GIT.status, bar = $("git-sync");
     if (!s) { bar.classList.add("hidden"); return; }
     bar.classList.remove("hidden");
+    const gitBusy = GIT_BUSY.get(GIT.dir) || "";
     const busy = (a) => gitBusy === a ? " …" : "";
     const dis = gitBusy ? "disabled" : "";
     bar.innerHTML = `<span class="gsy-br" data-a="branches" title="${esc(t("切换或新建分支"))}">⎇ ${gbdi(s.branch || "?")}</span>
@@ -97,24 +99,29 @@
     const b = e.target.closest("[data-a]"); if (!b || b.disabled) return;
     const a = b.dataset.a;
     if (a === "branches") { GIT.tab = "branches"; GIT.view = null; GIT.file = ""; return gitRender(); }
-    if (gitBusy) return;
+    const dir = GIT.dir, root = GIT.root;
+    if (GIT_BUSY.has(dir)) return;
     if (a === "push" && GIT.status && !GIT.status.upstream && !confirm(t("第一次推送 {b}：会在远端建一个同名分支并关联起来。继续？", { b: GIT.status.branch }))) return;
-    gitBusy = a; gitSyncBar();
+    GIT_BUSY.set(dir, a); gitSyncBar();
+    // 回执到的时候面板已经换了仓库：提示前面带上原仓库名，别让人以为是眼前这个
+    const tag = (m) => GIT.dir === dir ? m : (root || dir).split("/").pop() + ": " + m;
     try {
       const r = await gpost(a);
-      toast(r.message || t("完成"));
+      toast(tag(r.message || t("完成")));
     } catch (err) {
-      const m = err.message || "";
-      // 分叉：交给 Claude 合并（它会先说明打算怎么做，冲突时会停下来问）
+      const m = tag(err.message || "");
+      // 分叉：交给 Claude 合并（它会先说明打算怎么做，冲突时会停下来问）。仓库用发起时的，不读当前面板
       if (a === "pull" && err.body && err.body.code === "diverged") {
         if (confirm(m + "\n\n" + t("让 Claude 帮你把远端的提交合并进来？"))) {
-          const root = GIT.root; closeGit();
-          send(t("{root} 的当前分支和远端分叉了。请先 git fetch，说明两边各有哪些提交，然后把远端的提交合并进来（能变基就变基，有冲突先停下来问我），最后告诉我结果，不要推送。", { root }));
-          gitBusy = ""; return;
+          GIT_BUSY.delete(dir);
+          if (GIT.dir === dir) closeGit();
+          send(t("{root} 的当前分支和远端分叉了。请先 git fetch，说明两边各有哪些提交，然后把远端的提交合并进来（能变基就变基，有冲突先停下来问我），最后告诉我结果，不要推送。", { root: root || dir }));
+          return;
         }
       } else toast(m, true);
     }
-    gitBusy = "";
+    GIT_BUSY.delete(dir);
+    if (GIT.dir !== dir) return;
     GIT.known = null;
     gitLoad();
   });
@@ -406,7 +413,7 @@
     closeViewerPdf();
     vwDropEd();
     vwHtmlStop();
-    Object.assign(VW, { path, kind: kind || "other", size: size || 0, text: "", mtime: 0, dirty: false, zoom: 1, git: null, gitInfo: "", wb: null, sheets: null, ready: false });
+    Object.assign(VW, { path, kind: kind || "other", size: size || 0, text: "", mtime: 0, dirty: false, zoom: 1, git: null, gitInfo: "", gitMarks: null, plainMd: false, wb: null, sheets: null, ready: false });
     // 换了文档就换代：上一个文档还在途的读取、转换、保存回执一律作废（审查 C-001、04-F04、04-F05）
     VW.gen = (VW.gen || 0) + 1;
     vwActs([]);    // 上一个文档的「保存」先撤掉：读取中点它会把空正文存进新文件（私下反馈 10-29）
@@ -651,6 +658,7 @@
   async function vwGitCheck() {
     const p = VW.path;
     VW.git = null;
+    VW.gitMarks = null;   // 先清：下面哪条路提前走了，都不能留着上一个文件的行号标记（#177-6）
     let s;
     try { s = await api("/api/git/status?dir=" + encodeURIComponent(p)); } catch { return; }
     if (p !== VW.path || !s || s.notRepo || s.error) return;
@@ -817,22 +825,26 @@
     vwHtmlStop();
     VW.mode = "html";
     vwRenderActs();
-    const p = VW.path;
+    const p = VW.path, n = VW.pvSeq = (VW.pvSeq || 0) + 1;
+    // 只认最近这一次：中途切了源码再点预览，先发的那次迟到了也不再挂定时器、不写正文（#177-3）
+    const stale = () => n !== VW.pvSeq || p !== VW.path || VW.mode !== "html";
     $("vw-body").innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
     let r;
     try { r = await post("/api/preview", { path: p }); }
-    catch (e) { if (p === VW.path) $("vw-body").innerHTML = `<div class="vw-empty">${t("预览打不开")}: ${esc(e.message)}</div>`; return; }
-    if (p !== VW.path || VW.mode !== "html") return;
+    catch (e) { if (!stale()) $("vw-body").innerHTML = `<div class="vw-empty">${t("预览打不开")}: ${esc(e.message)}</div>`; return; }
+    if (stale()) return;
     VW.pv = { url: r.url, mtime: r.mtime, net: !!r.net, cap: new URL(r.url).pathname.split("/")[1], blocked: 0 };
     pvNative();
     vwRenderActs();
     $("vw-body").innerHTML = `<iframe class="vw-html" src="${esc(pvSrc())}" sandbox="allow-scripts allow-same-origin allow-modals allow-downloads allow-pointer-lock" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>`;
     // Claude 一边改、你一边看：每 1.5 秒看一眼修改时间，变了就重新载入
-    VW.pvTimer = setInterval(async () => {
+    const h = VW.pvTimer = setInterval(async () => {
+      if (n !== VW.pvSeq) return clearInterval(h);   // 已经不是当前这次预览：只停自己，别拆后来的
       if (viewerEl.classList.contains("hidden") || VW.mode !== "html" || VW.path !== p) return vwHtmlStop();
       if (document.hidden) return;
       if (VW.pv && !VW.pv.net) pvBlockedCheck();
       let s; try { s = await api("/api/file/stat?path=" + encodeURIComponent(p)); } catch { return; }
+      if (n !== VW.pvSeq) return;
       if (VW.pv && s && s.mtime && s.mtime !== VW.pv.mtime) { VW.pv.mtime = s.mtime; VW.size = s.size; $("vw-info").textContent = fmtSize(s.size); vwHtmlReload(); }
     }, 1500);
   }
@@ -875,6 +887,7 @@
   }
   // 不再显示预览：iframe 一并拆掉（藏起来的页面脚本还在跑），壳里的「只许连本机」也撤掉
   function vwHtmlStop() {
+    VW.pvSeq = (VW.pvSeq || 0) + 1;
     clearInterval(VW.pvTimer); VW.pvTimer = 0; VW.pv = null;
     $("vw-body").querySelector(".vw-html")?.remove();
     pvNative();
@@ -1017,8 +1030,9 @@
     body.innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
     let m;
     try { m = await loadMdEdit(); } catch (e) {
+      if (VW.path !== path || VW.mode !== "edit") return;
       toast(t("编辑器加载失败，改用纯文本：{msg}", { msg: e.message || String(e) }), true);
-      VW.plainMd = true;
+      VW.plainMd = true;   // 只管这一个文件：换个文件（openViewer）就再试一次加载（#177-9）
       return vwRenderText("edit");
     }
     if (VW.path !== path || VW.mode !== "edit" || VW.ed) return;

@@ -20,7 +20,7 @@
     goal: null,          // 本会话的 /goal 状态（网关从会话记录里推出来的，见 goalStateOf）
     goalHide: 0,         // 点 ✕ 收起的那条达成 / 失败记录的时间戳
     tasks: null,         // 本会话的任务清单（TaskCreate / TaskUpdate，网关读 ~/.claude/tasks 推过来）
-    tasksHide: "",       // 全部完成后点 ✕ 收起时的清单指纹；清单一变就重新露出来
+    tasksHide: "",       // 点 ✕ 收起时这份清单的编号集合；换了一份清单（增删了项）才重新露出来
   };
   // run / queue 只算当前视图的（本会话正在跑的那一轮、本会话排着的）；runs / queueAll 是网关上的全部
   const srv = { run: null, queue: [], runs: [], queueAll: [], intr: [], max: 3, connected: false };
@@ -369,6 +369,11 @@
 
   function summarizeTool(name, input) {
     if (!input) return "";
+    // Bash 带了说明（模型写的「停止抓包并统计目的地址」）：标题用说明，命令本身展开卡片在参数里看（群反馈 11-06）
+    if ((name === "Bash" || name === "PowerShell") && typeof input.description === "string" && input.description.trim()) {
+      const d = input.description.trim();
+      return d.length > 90 ? d.slice(0, 90) + "…" : d;
+    }
     const v = input.command || input.file_path || input.path || input.pattern ||
               input.url || input.prompt || input.description || input.skill || "";
     const s = typeof v === "string" ? v : JSON.stringify(v);
@@ -404,7 +409,7 @@
     card.className = "tool";
     card.innerHTML =
       `<div class="tool-head"><span class="chev">▶</span><span class="tool-name">${esc(name)}</span>` +
-      `<span class="tool-arg">${esc(summarizeTool(name, input))}</span>` +
+      `<span class="tool-arg"${input && typeof input.command === "string" ? ` title="${esc(input.command.slice(0, 500))}"` : ""}>${esc(summarizeTool(name, input))}</span>` +
       (input && /^\//.test(input.file_path || input.notebook_path || "") ? `<a class="fpath tool-open" href="#" data-path="${esc(input.file_path || input.notebook_path)}" title="${t("在查看器中打开")}">↗</a>` : "") +
       `<span class="tool-state ${live ? "run" : "ok"}">${live ? t("运行中") : "—"}</span></div>` +
       `<div class="tool-body"></div>`;

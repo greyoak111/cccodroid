@@ -9,6 +9,9 @@ export const SESSIONS = new Map();   // 内存里记录本次运行见过的会�
 export const RUNS = new Map();
 export const runList = () => [...RUNS.values()];
 export const latestRun = () => { let r = null; for (const x of RUNS.values()) if (!r || x.startedAt >= r.startedAt) r = x; return r; };
+/** 会话进了回收站之后要做的事（sessionops.trashSession 调）：清中断记录、通知界面、定时任务放下 lastSid…
+ *  放在这里而不是 sessionops：queue / sched 都已经引用这个模块，不会绕成循环引用（#173） */
+export const TRASH_HOOKS = [];
 export const runOfSession = (sid) => (sid && runList().find((r) => r.sessionId === sid)) || null;
 // 同时跑几轮：每个 claude 进程要占几百 MB 内存，开多大由用户自己把握
 export const MAX_PARALLEL_CAP = 16;

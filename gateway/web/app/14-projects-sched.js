@@ -88,7 +88,7 @@
         `<button class="btn sm pj-primary" data-a="chat">${pi("plus")}${esc(t("新对话"))}</button>${kebabBtn("pmenu")}`, true) +
       `<div class="mono muted pj-dpath">${esc(p.path)}${p.exists === false ? ` · <span class="pj-gone">${esc(t("目录不在了"))}</span>` : ""}</div>` +
       `<div class="pj-sec"><span class="grow">${esc(t("对话"))}（${d.sessions.length}）</span></div>
-      <div class="panel">${d.sessions.length ? d.sessions.slice(0, 30).map((s) => `<div class="row pj-row" data-sid="${esc(s.id)}"><div class="grow"><div class="t1">${schedSids().has(s.id) ? pi("clock", "pj-ic") : ""}${esc(s.title)}</div><div class="muted pj-sub">${esc(relTime(s.mtime))}</div></div></div>`).join("") : emptyRow(t("还没有对话"))}</div>
+      <div class="panel">${d.sessions.length ? d.sessions.slice(0, 30).map((s) => `<div class="row pj-row" data-sid="${esc(s.id)}"><div class="grow"><div class="t1">${schedSids().has(s.id) ? pi("clock", "pj-ic") : ""}${esc(s.title)}</div><div class="muted pj-sub">${esc(relTime(s.mtime))}</div></div></div>`).join("") : emptyRow(t("还没有对话"))}${d.sessions.length > 30 ? `<div class="row muted pj-sub">${esc(t("还有 {n} 个", { n: d.sessions.length - 30 }))}</div>` : ""}</div>
       <div class="pj-sec"><span class="grow">${esc(t("指令 · CLAUDE.md"))}</span><span class="muted pj-note">${esc(t("每次对话自动带上"))}</span></div>
       ${d.instrErr ? `<div class="muted pj-gone">${esc(t("指令读取失败：{msg}。为免盖掉原文，这里先不让改。", { msg: d.instrErr }))}</div>` : ""}
       <textarea class="pj-field pj-instr" data-pid="${esc(id)}"${d.instrErr ? " readonly" : ""} placeholder="${esc(t("这个项目是什么、怎么构建、有什么规矩…"))}">${esc(d.instr || "")}</textarea>
@@ -294,7 +294,7 @@
     popMenu(anchor, [{ head: t("移到项目（会话记录跟着挪到项目目录）") }, { label: t("不放进项目"), icon: cur ? "" : PI.check, fn: () => mv(null) },
       ...PJ.list.map((p) => ({ label: p.name, icon: cur && cur.id === p.id ? PI.check : PI.folder, fn: () => mv(p.id) }))]);
     async function mv(pid) {
-      try { await jsend(`/api/sessions/${encodeURIComponent(id)}/move`, { projectId: pid }); toast(pid ? t("已移到「{n}」", { n: pjById(pid).name }) : t("已移出项目")); loadSessions(); loadProjects(); }
+      try { await jsend(`/api/sessions/${encodeURIComponent(id)}/move`, { projectId: pid }); toast(pid ? t("已移到「{n}」", { n: pjById(pid).name }) : t("已移出项目")); PJ.detail = null; if (curPage === "projects" && PJ.cur) renderProjects(); loadSessions(); loadProjects(); }
       catch (err) { toast(err.message, true); }
     }
   }
@@ -319,7 +319,7 @@
     const row = (x) => {
       const p = x.projectId && pjById(x.projectId);
       const last = running.has(x.id) ? `<span class="pill acc">${esc(t("在跑"))}</span>` : x.last ? `<span class="pill ${x.last.st === "ok" ? "ok" : x.last.st === "err" ? "err" : ""}">${x.last.st === "ok" ? pi("check") : x.last.st === "err" ? pi("x") : ""}${esc(whenText(x.last.at))}</span>` : `<span class="pill">${esc(t("没跑过"))}</span>`;
-      const lk = blocked.has(x.id) ? `<span class="pill err">${esc(t("订阅账户 · 不会跑"))}</span>` : "";
+      const lk = blocked.has(x.id) ? `<span class="pill err">${esc(t("订阅账户 · 不会跑"))}</span>` : x.projectId && !p && PJ.list.length ? `<span class="pill err">${esc(t("项目已删除 · 不会跑"))}</span>` : "";
       return `<div class="row pj-row" data-task="${esc(x.id)}"><div class="grow"><div class="t1">${esc(x.name)}</div>
         <div class="muted pj-sub">${esc(freqText(x.freq))}${p ? " · " + pjMark(p) : ""} · ${esc(x.on ? (x.nextAt ? t("下次 {w}", { w: whenText(x.nextAt) }) : t("不会再跑")) : t("已关"))}</div></div>${lk}${last}${swHtml(x.on, `data-sw="${esc(x.id)}" aria-label="${esc(t("开关"))}"`)}</div>`;
     };
@@ -357,8 +357,10 @@
     const pauseNow = x.skipNext ? "skip" : x.pausedUntil > Date.now() ? "until" : "none";
     const yes = (b) => b ? t("是") : t("否");
     const kv = [
-      [t("在哪"), p ? pjMark(p) : esc(t("工作区"))],
-      [t("会话"), esc(x.session === "same" ? t("接着同一个对话（带着上次的上下文）") : t("每次新开一个对话"))],
+      // 项目删了不能显示成「工作区」：任务到点会跳过，要重新选项目（#178-7）
+      [t("在哪"), p ? pjMark(p) : x.projectId ? `<span class="pj-gone">${esc(t("项目已删除：到点会跳过，编辑任务重新选个项目"))}</span>` : esc(t("工作区"))],
+      [t("会话"), esc(x.session === "same" ? t("接着同一个对话（带着上次的上下文）") : t("每次新开一个对话"))
+        + (x.session === "same" && x.lostSid ? ` <span class="pj-gone">${esc(t("原来接着的对话已经删了，下次新开一个"))}</span>` : "")],
       [t("型号"), esc([x.model ? prettyModel(x.model) : t("跟随项目 / 全局"), x.effort].filter(Boolean).join(" · "))],
       [t("权限"), esc((x.perm === "proj" ? t("可以改项目目录里的文件") : x.perm === "custom" ? t("只允许：{l}", { l: x.tools || "—" }) : t("只读")) + t("；要问你的操作一律当作拒绝"))],
       [t("条件"), esc([x.cond && x.cond.wifi ? t("只在 Wi-Fi 下") : "", x.cond && x.cond.charging ? t("只在充电时") : "", x.cond && x.cond.battery ? t("电量低于 {p}% 跳过", { p: x.cond.battery }) : ""].filter(Boolean).join(" · ") || t("连着网就跑"))],
@@ -379,7 +381,7 @@
       <div class="pj-sec"><span class="grow">${esc(t("怎么跑"))}</span></div>
       <div class="panel sc-kvp"><dl class="sc-kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl></div>
       <div class="pj-sec"><span class="grow">${esc(t("运行记录"))}</span>${segOf("rflt", [["all", t("全部")], ["bad", t("没成的")]], SC.rflt)}<button class="btn sm" data-a="run"${d.running ? " disabled" : ""}>${pi("play")}${esc(d.running ? t("在跑…") : t("立刻跑一次"))}</button></div>
-      <div class="panel">${runs.length ? runs.map((r) => `<div class="row pj-row"${r.sid && !r.trial ? ` data-sid="${esc(r.sid)}"` : ""}>${stIcon(r.st)}<div class="grow"><div class="t1">${esc(r.msg || "—")}</div><div class="muted pj-sub">${esc([whenText(r.at), r.dur ? durText(r.dur) : "", r.st !== "skip" ? costText(r.cost || 0) : "", r.trial ? t("试跑") : "", r.attempt ? t("第 {n} 次重试", { n: r.attempt }) : ""].filter(Boolean).join(" · "))}</div></div>${r.sid ? pi("chev", "pj-go") : ""}</div>`).join("") : emptyRow(t("还没跑过"))}</div>`;
+      <div class="panel">${runs.length ? runs.map((r, i) => `<div class="row pj-row"${r.sid && !r.trial ? ` data-sid="${esc(r.sid)}"` : r.full ? ` data-full="${i}"` : ""}>${stIcon(r.st)}<div class="grow"><div class="t1">${esc(r.msg || "—")}</div><div class="muted pj-sub">${esc([whenText(r.at), r.dur ? durText(r.dur) : "", r.st !== "skip" ? costText(r.cost || 0) : "", r.trial ? t("试跑") : "", r.attempt ? t("第 {n} 次重试", { n: r.attempt }) : ""].filter(Boolean).join(" · "))}</div></div>${r.sid ? pi("chev", "pj-go") : ""}</div>`).join("") : emptyRow(t("还没跑过"))}${d.runsTotal > (d.runs || []).length ? `<div class="row muted pj-sub">${esc(t("只列出最近 {n} 次，一共跑过 {m} 次", { n: (d.runs || []).length, m: d.runsTotal }))}</div>` : ""}</div>`;
   }
   $("tab-sched").addEventListener("click", async (e) => {
     if (e.target.closest("input.sw")) return;       // 开关走 change
@@ -398,6 +400,17 @@
     const ms = e.target.closest("[data-missed]");
     if (ms) { try { await jsend("/api/sched/missed", { taskId: ms.dataset.id, at: +ms.dataset.at, act: ms.dataset.missed }); toast(ms.dataset.missed === "run" ? t("已开始补跑") : t("这次就算了")); } catch (err) { toast(err.message, true); } return loadSched(); }
     const sid = e.target.closest("[data-sid]"); if (sid) return goSession(sid.dataset.sid);
+    // 没存成对话的那几次：结果只在运行记录里，点开看全文（#173-2）
+    const fr = e.target.closest("[data-full]");
+    if (fr && !e.target.closest(".sc-full")) {
+      const old = fr.querySelector(".sc-full");
+      if (old) return old.remove();
+      const r = ((SC.detail && SC.detail.runs) || []).filter((x) => SC.rflt === "all" || x.st !== "ok")[+fr.dataset.full];
+      if (!r || !r.full) return;
+      const div = document.createElement("div"); div.className = "sc-full"; div.innerHTML = renderMd(r.full);
+      fr.querySelector(".grow").appendChild(div);
+      return;
+    }
     const tk = e.target.closest("[data-task]"); if (tk && !SC.cur) { SC.cur = tk.dataset.task; SC.detail = null; renderSched(); $("page-body").scrollTop = 0; return; }
     const d = SC.detail; if (!d || d.task.id !== SC.cur) return;
     if (a === "edit") return taskDlg(d.task);
@@ -448,10 +461,10 @@
       { label: t("立刻跑一次"), icon: PI.play, fn: () => runTaskNow(x) },
       { label: t("编辑"), icon: PI.edit, fn: () => taskDlg(x) },
       { label: t("复制一份"), icon: PI.copy, fn: () => taskDlg({ ...x, id: null, name: x.name + " " + t("（副本）") }) },
-      { label: t("导出 JSON（复制到剪贴板）"), icon: SM.export, fn: () => { const { id, last, runs, nextAt, lastFiredAt, runsDone, created, lastSid, ...rest } = x; copyText(JSON.stringify(rest, null, 2)); toast(t("已复制")); } },
+      { label: t("导出 JSON（复制到剪贴板）"), icon: SM.export, fn: () => { const { id, last, runs, nextAt, lastFiredAt, runsDone, created, lastSid, lostSid, ...rest } = x; copyText(JSON.stringify(rest, null, 2)); toast(t("已复制")); } },
       "hr",
       { label: t("删除"), icon: PI.trash, danger: true, fn: async () => {
-        if (!confirm(t("删除定时任务「{n}」？运行记录留着，存下的对话不受影响。", { n: x.name }))) return;
+        if (!confirm(t("删除定时任务「{n}」？它的运行记录在界面上就看不到了，存下的对话不受影响。", { n: x.name }))) return;
         try { await api("/api/sched/" + encodeURIComponent(x.id), { method: "DELETE" }); SC.cur = null; SC.detail = null; await loadSched(); renderSched(); toast(t("已删除")); } catch (err) { toast(err.message, true); }
       } },
     ]);
@@ -563,7 +576,14 @@
         if (curPage !== "sched") openPage("sched"); else renderSched();
       } catch (err) { btn.disabled = false; toast(err.message, true); }
     });
-    q("#t-try")?.addEventListener("click", () => runTaskNow(x, true));
+    // 试跑按网关里已保存的任务跑：改了没保存就先说清，别拿旧配置的结果冒充新改的（#178-6）
+    let touched = false;
+    for (const ev of ["input", "change", "pick"]) o.addEventListener(ev, (e) => { if (e.type === "pick" || e.isTrusted) touched = true; });
+    o.addEventListener("click", (e) => { if (e.target.closest("[data-day]")) touched = true; });
+    q("#t-try")?.addEventListener("click", () => {
+      if (touched) return toast(t("改动还没保存：试跑跑的是已保存的版本，先点「保存」再试跑"), true);
+      runTaskNow(x, true);
+    });
     // 换接口：型号下拉换成那家的清单（旧型号名是给原来那家的，清掉）
     let fmN = 0, fmPid = "";
     // 这个任务真用哪家：接口留空（跟随）时和网关一样先看所选项目指定的那家，再落到全局（#143-1：以前空接口一律当全局，列出的是全局那家的型号）
@@ -626,7 +646,7 @@
     closeDrawer();
     renderSideNav();
     refreshStatus();
-    if (name === "sessions") loadSessions();
+    if (name === "sessions") { loadSessions(); if (sess.mode === "trash") loadTrash(); }   // 回收站视图重进也要重读，别接着画上回的（#178-5）
     if (name === "caps") loadCaps();
     if (name === "ext") loadExt();
     if (SUBNAVS[name]) paintSubnav(name);

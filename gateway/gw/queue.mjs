@@ -10,10 +10,10 @@ import { isLoginMode } from "./models.mjs";
 import { findSessionFile } from "./sessions.mjs";
 import { killTree, safeModePerm } from "./claude.mjs";
 import { goalCheck, tasksCheck } from "./goal.mjs";
-import { LAST_SESSION, RUNS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
+import { LAST_SESSION, RUNS, TRASH_HOOKS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { BOOT, publish } from "./bus.mjs";
-import { execIntent, pickProvider, startRun } from "./run.mjs";
+import { execIntent, lostProvider, pickProvider, startRun } from "./run.mjs";
 import { cleanMergeFrom } from "./merge.mjs";
 import { LOCAL_CMD_RE } from "./modelcmd.mjs";
 import { tamperPending } from "./tamper.mjs";
@@ -115,8 +115,9 @@ export function saveRunMark() {
 // 旧版本存的是单条对象，读的时候包成列表
 const INTR_MAX = 20;
 const intrList = (v) => (Array.isArray(v) ? v : v ? [v] : []).filter((e) => e && typeof e === "object" && e.id).slice(-INTR_MAX);
+// 读的时候顺手丢掉会话已经不在了的（老版本回收时没清）：没建会话的照留
 export let INTERRUPTED = (() => {
-  try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))); } catch {}
+  try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))).filter((e) => { try { return !e.sessionId || !!findSessionFile(e.sessionId); } catch { return true; } }); } catch {}
   return [];
 })();
 export function setInterrupted(list) {
@@ -134,6 +135,13 @@ export function clearInterrupted(sid) {
   const left = INTERRUPTED.filter((e) => (e.sessionId || "") !== (sid || ""));
   if (left.length !== INTERRUPTED.length) setInterrupted(left);
 }
+// 会话进了回收站：它的中断记录没用了（不然启动时还会拿它当目标会话打开、挂一张「继续」卡，#173-5）；
+// 正开着它的界面收到 session_gone 自己退回新对话（服务端删的：项目连目录删、定时任务不存对话、别的窗口，#173-4）
+TRASH_HOOKS.push((id) => {
+  clearInterrupted(id);
+  publish({ type: "session_gone", id });
+  publishState();
+});
 /** 启动时调一次：上一任留下的标记 → 中断记录 + 挂起的队列 */
 export function recoverRunMark() {
   let m;
@@ -383,8 +391,12 @@ export async function routeQueue(req, res, u, p) {
     try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
     if (!String(b.message || "").trim()) return sendJson(res, 400, { error: "empty message" });
     // 看这条消息要用的那家（新会话首条选的 / 会话钉的 / 全局的），不是只看全局
-    const bp = pickProvider({ sessionId: b.sessionId ? String(b.sessionId) : null, follow: b.follow || null, projectId: b.projectId ? String(b.projectId) : null,
-      pin: !b.sessionId && b.pin && typeof b.pin.provider === "string" ? { provider: b.pin.provider } : null }).P;
+    const q0 = { sessionId: b.sessionId ? String(b.sessionId) : null, follow: b.follow || null, projectId: b.projectId ? String(b.projectId) : null,
+      pin: !b.sessionId && b.pin && typeof b.pin.provider === "string" ? { provider: b.pin.provider } : null };
+    const pk = pickProvider(q0), bp = pk.P;
+    // 要用的那家不在了（写错、删了）：当场拒，不悄悄换成全局默认那家发出去（起跑时 startRun 还会再挡一次）
+    const lost = lostProvider(q0, pk.sid0, pk.pdef0);
+    if (lost) return sendJson(res, 409, { error: "provider_gone", message: lost });
     if (!keyOf(bp) && !bp.login && !/^\/(model|models|effort|autocompact)\b/i.test(String(b.message).trim())) {
       return sendJson(res, 503, {
         error: "no_api_key",

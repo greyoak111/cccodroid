@@ -112,7 +112,7 @@
     const nav = $("side-nav"); if (!nav) return;
     const pins = navPins(), more = localStorage.getItem("cc.navMore") === "1";
     const ico = (k) => `<svg viewBox="0 0 24 24">${PAGES[k].icon}</svg>`;
-    const live = srv.runs.filter((x) => !x.idle).length;
+    const live = liveSessCount();
     const badge = (k) => k === "sessions" && live ? `<span class="nav-badge"><i></i>${esc(t("{n} 个在跑", { n: live }))}</span>` : "";
     const item = (k) => `<button class="nav-item${curPage === k || (!curPage && !setOpen && k === "sessions") ? " on" : ""}" data-page="${k}">${ico(k)}<span>${esc(t(PAGES[k].name))}</span>${badge(k)}</button>`;
     let h = pins.map(item).join("");
@@ -346,6 +346,9 @@
     const live = new Set(srv.runs.filter((x) => !x.idle).map((x) => x.sessionId).filter(Boolean));
     const ask = new Set(srv.runs.filter((x) => x.perms && x.perms.length).map((x) => x.sessionId).filter(Boolean));
     const intr = new Set((srv.intr || []).map((x) => x.sessionId).filter(Boolean));
+    // 只剩后台任务在跑的：会话页标「后台任务在跑」、算进「在跑」，侧栏也给个不闪的点，同一口径（#172-4）
+    const idle = new Set(srv.runs.filter((x) => x.idle).map((x) => x.sessionId).filter(Boolean));
+    const dr = draftsElsewhere();
     // 杂项不进侧栏，在「对话」整页最后一组；但正开着的、置顶的、在跑 / 等确认 / 中断了的照常列出——
     // 被 AI 归进杂项的会话，用户置顶了或正在跑，从侧栏消失只会让人找不着（群反馈：置顶的在跑会话点一下就不见了）
     const list = (state.sessions || []).filter((x) => !x.misc || x.pinned || x.id === view.sessionId || live.has(x.id) || ask.has(x.id) || intr.has(x.id));
@@ -358,8 +361,10 @@
     const cur = view.sessionId && list.find((x) => x.id === view.sessionId);
     if (cur && cur.title && cur.title !== view.title) view.title = cur.title;
     paintTitle();   // 顶栏状态行后面的档号 / 日期也跟着会话列表变
-    const row = (x) => `<button class="sr-item${x.id === view.sessionId ? " on" : ""}" data-sid="${esc(x.id)}" title="${esc(x.title)}">${ask.has(x.id) ? '<i class="sr-dot ask"></i>' : live.has(x.id) ? '<i class="sr-dot"></i>' : intr.has(x.id) ? `<i class="sr-dot intr" title="${esc(t("已中断"))}"></i>` : ""}<span>${esc(x.title)}</span></button>`;
-    box.innerHTML = list.length
+    const row = (x) => `<button class="sr-item${x.id === view.sessionId ? " on" : ""}" data-sid="${esc(x.id)}" title="${esc(x.title)}">${ask.has(x.id) ? '<i class="sr-dot ask"></i>' : live.has(x.id) ? '<i class="sr-dot"></i>' : intr.has(x.id) ? `<i class="sr-dot intr" title="${esc(t("已中断"))}"></i>` : idle.has(x.id) ? `<i class="sr-dot idle" title="${esc(t("后台任务在跑"))}"></i>` : ""}<span>${esc(x.title)}</span></button>`;
+    // 没建会话的草稿入口（#172）：停在确认卡上的、排着的、待重发的，会话列表里都没有，统一从这里进
+    const drafts = dr.n ? `<button class="sr-item sr-drafts" data-drafts>${dr.ask ? '<i class="sr-dot ask"></i>' : dr.live ? '<i class="sr-dot"></i>' : '<i class="sr-dot intr"></i>'}<span>${esc(t("没建会话的新对话"))}</span><em>${dr.n}</em></button>` : "";
+    box.innerHTML = drafts + (list.length
       ? groups.filter(([, l]) => l.length).map(([g, l, k]) => {
           // 分组可以收起：点标题切换，收起时标出有几个；记在本机
           const shut = folds().has(k);
@@ -367,7 +372,7 @@
             + (shut ? "" : l.map(row).join("") + (k === "older" && more ? `<button class="sr-all" data-all>${esc(t("全部对话"))}</button>` : ""));
         }).join("")
         + `<div class="sr-hint">${esc(t("长按会话：置顶、重命名、导出、删除"))}</div>`
-      : `<div class="sr-empty">${esc(t("还没有历史会话。"))}</div>`;
+      : `<div class="sr-empty">${esc(state.sessErr ? t("会话列表没读到：{msg}", { msg: state.sessErr }) : t("还没有历史会话。"))}</div>`);
   }
   $("side-scroll").addEventListener("scroll", (e) => e.target.classList.toggle("scrolled", e.target.scrollTop > 2), { passive: true });
   $("side-recent").addEventListener("click", (e) => {
@@ -381,6 +386,7 @@
       try { localStorage.setItem("cc.sideFold", JSON.stringify([...folds()])); } catch {}
       return renderSideRecent();
     }
+    if (e.target.closest("[data-drafts]")) { closeDrawer(); openSession(null); view.adoptDrafts = true; return; }   // 重连后的 hello 把它们全部认回新对话页
     const it = e.target.closest("[data-sid]"); if (!it) return;
     goSession(it.dataset.sid);
   });

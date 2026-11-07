@@ -10,7 +10,7 @@ import { tasksCheck } from "./goal.mjs";
 import { setLastInit } from "./caps.mjs";
 import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { END_HOOKS, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setPermMode, sidForItem } from "./queue.mjs";
+import { END_HOOKS, INTERRUPTED, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setInterrupted, setPermMode, sidForItem } from "./queue.mjs";
 import { LOCAL_CMD_RE, handleLocalCommand } from "./modelcmd.mjs";
 import { LL, ensureLlama, localCustomActive } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "./usage.mjs";
@@ -20,7 +20,7 @@ import { autoTitle } from "./autotitle.mjs";
 import { SUBAGENT_HINT, agentBook, takeAgentNote, onShared, privateAgentsBase } from "./agents.mjs";
 import { findSessionFile, peekSession } from "./sessions.mjs";
 import { projectById, projectDefaults, projectOfDir } from "./projects.mjs";
-import { sessModel, sessProvider, setSessModel } from "./sessmodel.mjs";
+import { sessLostProvider, sessModel, sessProvider, setSessModel } from "./sessmodel.mjs";
 import { inlineImages, inlineImagesSync, wantsInline } from "./inlineimg.mjs";
 import { pathWatch, previewHint, settlePathNote, takePathNote } from "./pathnote.mjs";
 import { claudeSeal, sealStillValid } from "./claudeseal.mjs";
@@ -126,14 +126,29 @@ export function execIntent(item, ctx) {
   return { sid0, pdef0, P, model, effort };
 }
 
+/** 起进程前的确认卡多久没人答就停下（#171）：没人答时这一轮一直占着 RUNS，挡住「重启网关」，切走的新对话还找不回来。
+ *  测试里改小 */
+export const CARD = { timeout: 10 * 60e3 };
 /** 起进程前要用户点头的卡片（项目配置、用户级配置）：借用敏感操作卡（guard），答复走同一个 /api/perm/answer。
- *  允许 → true；拒绝 → false（「拒绝并停止」同时停掉这一轮）；这期间点了停止 → null */
-function askCard(run, emit, { key, tool, input, guard, what, yes, no }) {
+ *  允许 → true；拒绝 → false（「拒绝并停止」同时停掉这一轮）；这期间点了停止、或超时 → null。
+ *  超时：按停止收尾，记一条中断记录（why: card），界面在那个会话（没建会话的在新对话页）给「重发」 */
+export function askCard(run, emit, { key, tool, input, guard, what, yes, no }) {
   return new Promise((resolve) => {
     const id = `ccapp-${key}-` + run.id;
     const p = { id, tool, input, suggestions: [], at: Date.now(), runId: run.id, sessionId: run.sessionId || null, guard };
+    const timer = setTimeout(() => {
+      if (!run.perms?.has(id)) return;
+      log(`⏹ ${what}：${Math.round(CARD.timeout / 60e3)} 分钟没人确认，这一轮停下`);
+      holdLane(run); run.aborted = true;
+      setInterrupted([...INTERRUPTED.filter((e) => e.id !== run.id),
+        { id: run.id, sessionId: run.sessionId || null, text: String(run.text || "").slice(0, 4000), startedAt: run.startedAt, at: Date.now(), why: "card" }]);
+      emit({ type: "perm_resolved", id, behavior: "cancel" });
+      done(null);
+    }, CARD.timeout);
+    timer.unref?.();
     const done = (v) => {
       if (!run.perms?.delete(id)) return;
+      clearTimeout(timer);
       run.readyAbort = null; run.answerPerm = null;
       publishState();
       resolve(v);
@@ -171,6 +186,20 @@ function exitHint(code, signal) {
 // 错误详情里不放 claude 的「[claude-code:unrecognized_model]」提示行：第三方型号名它都不认识，每次都有，
 // 跟这次为什么失败无关，反而让人去怀疑模型（日志里照留）
 const exitDetail = (stderr) => String(stderr || "").split("\n").filter((l) => !/^\[claude-code:unrecognized_model\]/.test(l.trim())).join("\n").trim().slice(0, 1200);
+
+/** 这一轮本该用的那家已经不在了：返回说明（不在就不跑），否则 ""。
+ *  pickProvider 找不到指定的那家会一路退到全局默认——全局可能是订阅账户，会话内容、交给它的材料就换了一家发出去。
+ *  顺序同 pickProvider：定时任务指定的 → 新会话首条带来的 → 会话钉的 → 项目默认 */
+export function lostProvider(item, sid0, pdef0) {
+  const gone = (id) => typeof id === "string" && id && !providerById(id);
+  if (item.provider) return gone(item.provider) ? tz("指定的接口「{id}」不存在，这一轮没有发出去。", { id: item.provider }) : "";
+  if (item.pin && item.pin.provider) return gone(item.pin.provider) ? tz("指定的接口「{id}」不存在，这一轮没有发出去。", { id: item.pin.provider }) : "";
+  const s = sessLostProvider(sid0);
+  if (s) return tz("这个会话原来用的接口「{id}」已经删掉了，这一轮没有发出去。在模型面板里换一家再发。", { id: s });
+  if (sessModel(sid0)) return "";
+  if (pdef0 && gone(pdef0.provider)) return tz("项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。", { id: pdef0.provider });
+  return "";
+}
 
 export async function startRun(item) {
   const { sid0, pdef0, P } = pickProvider(item);
@@ -215,6 +244,12 @@ export async function startRun(item) {
       (text, cmd) => endRun(run, { localCommand: cmd || local[1], resultText: text, durationMs: 0, costUsd: 0 }), run.sessionId, () => run.aborted);
   }
 
+  const lost = lostProvider(item, sid0, pdef0);
+  if (lost) {
+    log(`⛔ 这一轮要用的接口不在了，没有启动（不退回全局默认）`);
+    emit({ type: "error", message: tr(LAST_LANG, lost) });
+    return endRun(run, { failed: true });
+  }
   if (!KEY && !P.login) {
     emit({ type: "error", message: tr(LAST_LANG, tz("未配置 API 密钥。请在设置里填入 {name} 的密钥。", { name: P.label || P.id })) });
     return endRun(run, { failed: true });

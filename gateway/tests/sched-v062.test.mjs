@@ -70,9 +70,16 @@ test("排队后当天额度用完：开跑前复核拦下（#119-2）", async ()
   }
 });
 
+// 接着的会话得真有记录文件：会话不在了的任务开跑前会放下 lastSid、新开一个（#173-3）
+const realSid = () => {
+  const sid = crypto.randomUUID(), d = path.join(CFG.home, ".claude", "projects", "-sched-real");
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, sid + ".jsonl"), JSON.stringify({ type: "user", sessionId: sid, uuid: crypto.randomUUID(), message: { role: "user", content: "hi" } }) + "\n");
+  return sid;
+};
 test("试跑用新会话，不续正式 lastSid；结束钩子也不写回（#119-4）", async () => {
   S.DB.allowLogin = true;
-  const sid = crypto.randomUUID();
+  const sid = realSid();
   const t = mk({ lastSid: sid });
   try {
     const it = await S.fire(t, { reason: "manual", trial: true });

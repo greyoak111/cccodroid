@@ -188,6 +188,14 @@ pre code{background:none;border:0;padding:0;font-size:12.5px;line-height:1.6}
 }
 .code-wrap.has-lang>pre{border-top-left-radius:0;border-top-right-radius:0;border-top:1px dashed var(--line)}
 .code-wrap.has-lang>.copy-btn{top:3px}
+/* 行号列：横向滚动时贴住左边（sticky），选中文字时不带上它；左内边距挪给行号列，免得一滚动就跳 12px */
+pre.ln{display:flex;padding-inline-start:0}
+pre.ln>code{flex:none}
+.code-ln{
+  position:sticky;inset-inline-start:0;flex:none;margin-inline-end:10px;padding:0 8px 0 12px;
+  border-inline-end:1px solid var(--line);background:var(--code-bg);color:var(--fg3);
+  font:12.5px/1.6 var(--mono);text-align:end;white-space:pre;user-select:none;-webkit-user-select:none;
+}
 /* 语法高亮（highlight.js 的 token 类，按我们自己的深浅两套色） */
 .hljs-comment,.hljs-quote,.hljs-meta{color:var(--fg3);font-style:italic}
 .hljs-keyword,.hljs-selector-tag,.hljs-built_in,.hljs-literal,.hljs-doctag{color:#d98d6f}
@@ -518,6 +526,9 @@ html:not([data-skin="goucheng"][data-theme="light"]) #gp-row{display:none}
 .sr-dot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--ok);animation:sr-pulse 1.4s infinite}
 .sr-dot.ask{background:var(--warn)}
 .sr-dot.intr{background:var(--warn);animation:none}
+.sr-dot.idle{animation:none;opacity:.55}
+/* 没建会话的草稿入口（#172）：数量靠右 */
+.sr-drafts em{font-style:normal;font-size:11px;color:var(--fg3)}
 @keyframes sr-pulse{50%{opacity:.3}}
 .sr-all{display:block;margin:6px 12px 0;padding:4px 0;border:0;background:none;color:var(--fg3);font:inherit;font-size:12.5px;cursor:pointer}
 .sr-all:hover{color:var(--accent)}
@@ -1189,7 +1200,7 @@ html[dir="rtl"] .field select{background-position:12px 50%,17px 50%}   /* 从右
 .bubble > .run-phase{display:inline-block;margin-left:10px;vertical-align:middle}
 .bubble > .dots{display:inline-block;vertical-align:middle}
 .run-phase.slow{color:var(--warn)}
-.run-phase.bad{color:var(--err)}
+.run-phase.bad{color:var(--err);white-space:normal;overflow-wrap:anywhere}
 .bill{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
 .bill-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .bill-big{margin:4px 0 2px}
@@ -1294,6 +1305,11 @@ html[dir="rtl"] .field select{background-position:12px 50%,17px 50%}   /* 从右
 .vw-mded .cm-md-img.bad{display:none}
 .vw-mded .cm-md-img-ext{display:block;margin:6px 0;padding:6px 10px;border:1px dashed var(--line);border-radius:6px;color:var(--fg2,var(--fg));font-size:12.5px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vw-mded .cm-line.cm-md-table,.vw-mded .cm-line.cm-md-html{font-family:var(--mono);font-size:.84em;color:var(--fg2)}
+/* 光标不在表格上：第一行换成排好的表格，其余行收起；长文字在格里换行（同帮助页），宽了就横着滑 */
+.vw-mded .cm-md-tbl{margin:4px 0;font-size:.92em;line-height:1.5}
+.vw-mded .cm-md-tbl th,.vw-mded .cm-md-tbl td{white-space:normal;min-width:4em}
+.vw-mded .cm-md-tbl code{background:var(--bg3);border-radius:5px;padding:1px 4px;font-family:var(--mono);font-size:.9em}
+.vw-mded .cm-line.cm-md-table-hid{line-height:0;font-size:0;padding-block:0}
 /* 查找替换面板 */
 .vw-mded .cm-panels{background:var(--bg2);color:var(--fg);border-color:var(--line)}
 .vw-mded .cm-panels-top{border-bottom:1px solid var(--line)}
@@ -3512,3 +3528,4 @@ html[data-motion="on"] .lin-prof .mo-ghost .mo-st,html[data-motion="on"] .lin-pr
 #bridge-config-panel .bc-pending{color:var(--fg2);font-weight:500}
 html[data-skin="goucheng"] #bridge-config-panel .bc-card{box-shadow:4px 4px 0 var(--gc-hard)}
 @media (max-width:420px){#bridge-config-panel .bc-card{padding:18px}#bridge-config-panel h2{font-size:19px}#bridge-config-panel .bc-summary > div{gap:10px}}
+.sc-full{margin-top:6px;font-size:13px;white-space:normal;overflow-wrap:anywhere}

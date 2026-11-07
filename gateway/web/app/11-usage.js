@@ -35,7 +35,10 @@
   /** 一个月的全部数字：月报和下面的按钮都用它 */
   function usMonthStats(y, m) {
     const a = usMonth0(y, m), b = usMonth0(y, m + 1), today = usDay0(new Date());
-    const tot = usSum(a, b), prev = usSum(usMonth0(y, m - 1), a);
+    // 这个月还没过完：和上月同样天数比，不拿一两天去比整月（#178-9）
+    const partial = b > today && a <= today, p0 = usMonth0(y, m - 1);
+    const pEnd = partial ? new Date(Math.min(a.getTime(), usAddDays(p0, Math.round((today - a) / 86400e3) + 1).getTime())) : a;
+    const tot = usSum(a, b), prev = usSum(p0, pEnd);
     const cal = [];
     let streak = 0, best = 0, active = 0, top = null;
     for (const d = new Date(a); d < b; d.setDate(d.getDate() + 1)) {
@@ -46,7 +49,7 @@
     const peak = tot.hr.reduce((bi, v, i, arr) => (v > arr[bi] ? i : bi), 0);
     const models = Object.entries(tot.md).sort((p, q) => q[1] - p[1]);
     const days = Math.round((b - a) / 86400e3);
-    return { y, m, tot, prev, cal, active, best, top, peak, models, days };
+    return { y, m, tot, prev, partial, cal, active, best, top, peak, models, days };
   }
 
   // 月报的配色跟着当前外观走（原生 / 求索 × 深 / 浅）：取 style.css 的变量，透明度另算
@@ -111,7 +114,7 @@
     text(t("次对话"), P + nw + 20, y - 12, font(600, 44), FG);
     const dp = st.prev.m ? Math.round(((st.tot.m - st.prev.m) / st.prev.m) * 100) : null;
     y += 62;
-    text(dp == null ? t("和 Claude 一起度过的这个月") : t("比上月 {p}", { p: (dp >= 0 ? "+" : "") + dp + "%" }), P, y, font(500, 32), dp == null ? FG2 : dp >= 0 ? K.UP : K.DOWN);
+    text(dp == null ? t("和 Claude 一起度过的这个月") : (st.partial ? t("比上月同期 {p}", { p: (dp >= 0 ? "+" : "") + dp + "%" }) : t("比上月 {p}", { p: (dp >= 0 ? "+" : "") + dp + "%" })), P, y, font(500, 32), dp == null ? FG2 : dp >= 0 ? K.UP : K.DOWN);
     // 六格数字
     y += 50;
     const tiles = [
@@ -275,7 +278,7 @@
     // 最费的对话：本月按 token 排前 5
     const titleOf = (id) => ((state.sessions || []).find((x) => x.id === id) || {}).title;
     const top = Object.entries(month.st).sort((a, b) => b[1] - a[1]).slice(0, 5);
-    $("us-top").innerHTML = top.length ? top.map(([id, v], i) => `<div class="row" data-sid="${esc(id)}"><span class="rank num">${i + 1}</span><span class="grow t1">${esc(titleOf(id) || t("（已删除的会话）"))}</span><span class="num muted">${usTok(v)}</span></div>`).join("")
+    $("us-top").innerHTML = top.length ? top.map(([id, v], i) => `<div class="row" data-sid="${esc(id)}"><span class="rank num">${i + 1}</span><span class="grow t1">${esc(titleOf(id) || t("（较早或已删除的会话）"))}</span><span class="num muted">${usTok(v)}</span></div>`).join("")
       : `<div class="row"><span class="tiny">${esc(us.raw && !us.raw.imported ? t("正在从历史会话补算…") : t("这个月还没有记录"))}</span></div>`;
     // 耗电：今天
     const e = usDash.energy, b = e && e.bars && e.bars[e.bars.length - 1];

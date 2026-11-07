@@ -60,12 +60,16 @@
   }
   /** 整轮重放到头（sync）：攒着的正文一次画完、用量落定、遮着的实时区揭开，最后统一定位一次 */
   function endReplay() {
-    busReplay = false;
     clearTimeout(endReplay.guard); clearTimeout(endReplay.guard2);
+    // 攒着的正文还在重放状态下补画：每块 paint 里的 scrollDown 合成一次 rAF，不是每块一次同步测量（#179：
+    // 先关重放再补画，80 块就是 81 次「写 DOM → 读 scrollHeight」）。flushNow 不会再往集合里加
     for (const f of REPLAY_FLUSH) f();
     REPLAY_FLUSH.clear();
+    busReplay = false;
     if (replayCtx) { const [u, tot] = replayCtx; replayCtx = null; liveCtx(u, tot); }
     liveEl.classList.remove("replaying");
+    // 补画排下的那次 rAF 不要了：下面这次同步定位就到底
+    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = 0; }
     scrollDown();
   }
   function updateCtx(used, total) {
@@ -166,18 +170,36 @@
     statStop();
     statEl.textContent = statLast[view.sessionId] || "";   // 正在跑的话，补发的 run_start 会接着转成实时
     pickViewRun();                     // 换了会话：「本会话在不在跑」要重新算
+    renderRunStrip(); renderPermBar(); // 后台任务条、权限条也按新算出来的这一轮重画：网关不可达时 hello 迟迟不来，不能一直挂着上一个会话的（#178-2）
     renderQueue();                     // 排队条也换成这个会话的：不然看着是 A 的，点清除却删 B 的（审查 #51 第2项）
     paintProjChip();
     syncInterject();
     saveUiState();
   }
 
+  /** 按会话号去打开、那个会话却不在了：在回收站的给「恢复」，彻底没了的说清楚——不再悄悄变成空白新对话（#173）。
+   *  任务运行记录、完成提示、原生通知、用量榜、档号、书签、项目详情都走 openSession，在这里统一兜住 */
+  function goneNotice(id, trashed) {
+    if (!trashed) return toast(t("这个会话已经不在了（删掉了或清过数据）"), true);
+    toastAct(t("这个会话在回收站里"), t("恢复"), () => restoreAndOpen(id));
+  }
+  async function restoreAndOpen(id) {
+    const r = await post("/api/trash/restore", { ids: [id] }).catch((e) => ({ failed: [{ error: e.message }] }));
+    if (r && r.failed && r.failed.length) return toast(t("恢复失败：{msg}", { msg: r.failed[0].error === "exists" ? t("同名会话已存在") : r.failed[0].error }), true);
+    toast(t("已恢复")); loadSessions(); lineageDirty();
+    openSession(id);
+  }
   /** 打开某个会话（null = 新会话）。重连事件流：网关会把正在跑的那一轮从头重放过来。
-   *  anchor：落在某一章开头（脉络里点站 / 章标题；压缩消息的 uuid，第一章是 "start"） */
-  function openSession(id, jumpQ, anchor) {
+   *  anchor：落在某一章开头（脉络里点站 / 章标题；压缩消息的 uuid，第一章是 "start"）
+   *  opts.keepPage：不收起整页（网关那边删了正开着的会话，人可能正在项目页里） */
+  function openSession(id, jumpQ, anchor, opts = {}) {
+    view.userOpen = id || null;   // 用户点开的（不是启动时按记着的会话号接回的）：打不开要说一声
     if (id !== view.sessionId) saveLastRead();   // 切走前记下读到哪（在底部就作废）
-    if ((id || null) !== view.sessionId) draftSwap(view.sessionId, id);   // 输入框、附件栏换成这个会话自己的
-    closePage();
+    if ((id || null) !== view.sessionId) {
+      draftSwap(view.sessionId, id);   // 输入框、附件栏换成这个会话自己的
+      OV.closeAll();                   // 型号面板、回退确认这类浮层是上一个会话的：开着就会把选择写进新会话（#174-2）
+    }
+    if (!opts.keepPage) closePage();
     resetView(id);
     if (!id) showWelcome();   // 新会话当场画首屏，不等重连回来——中间空着那一下就是闪
     view.jumpQ = id && jumpQ ? jumpQ : "";   // 从搜索结果点进来：历史加载完后跳到命中的那条
@@ -290,7 +312,8 @@
     if (anchor) { q.set("anchor", aObj ? aObj.uuid : anchor); if (aObj && aObj.off > 0) q.set("off", String(aObj.off)); }
     if (initial) loadMarks();
     // 重连续不上（resume=false）时接着原来那一段读：以前 initial 分支吃掉了 after，读回的是最新一页（审查 #48 S08-02 / #49 P2-5）
-    if (resume != null) q.set("after", String(resume));
+    // 首屏要目标进度和任务清单：resetView 刚把它们清掉，重连续读那一页不带的话进度条和清单就没了（#178-1）
+    if (resume != null) { q.set("after", String(resume)); q.set("meta", "1"); }
     else if (!initial) q.set("before", String(before));
     const sent = Date.now();
     const ex = fwd ? windowExclude() : liveExclude();
@@ -302,7 +325,8 @@
       if (gen !== view.gen) return;
       view.loading = false;
       olderEl.textContent = t("加载更早的消息");
-      if (anchor && e.status === 404) {
+      // 只有「会话在、那个位置没了」才退回最新；会话本身不在了走下面（以前先误报「没找到这一章」再重试一遍，#173-6）
+      if (anchor && e.status === 404 && (!e.body || e.body.error === "anchor not found")) {
         // 那一章 / 书签的位置找不到了（记录被改写过、回退截掉了）：退回最新；「上次读到」找不到就悄悄打开到最新
         if (!aObj || !aObj.quiet) toast(aObj ? t("没找到书签的位置，已打开到最新") : t("没找到这一章的位置，已打开到最新"), true);
         return loadOlder(true);
@@ -312,7 +336,11 @@
         view.sessionId = null;
         view.title = ""; paintTitle(); renderSessions();   // 标题、侧栏高亮也别还挂着那个会话（审查 #48 S08-04）
         saveUiState();
+        // 中断记录指着的会话没了：那张「继续」卡在这里点下去会在空会话里续，上下文全丢——收掉，回欢迎页（#173-5）
+        $("intr-card")?.remove();
         if (!liveEl.childElementCount) showWelcome();
+        if (view.userOpen === id) goneNotice(id, !!(e.body && e.body.trashed));
+        view.userOpen = null;
       } else toast(t("读取历史失败：{msg}", { msg: e.message }), true);
       return;
     }
@@ -623,6 +651,16 @@
       case "state": return applyState(ev);
       case "tamper": return showTamper(ev.tamper);
       case "archive": return loadSessions();   // 建档 / 归入杂项：标题、档号、分组跟着变
+      // 会话进了回收站（网关那边删的：项目连目录删、定时任务不存对话、别的窗口）：正开着它就退回新对话，
+      // 别让下一条消息带着它的会话号去 --resume 失败（#173-4）。整页不收，人可能正在项目页里
+      case "session_gone":
+        PJ.detail = null;
+        loadSessions();
+        if (ev.id && ev.id === view.sessionId) {
+          openSession(null, null, null, { keepPage: true });
+          toastAct(t("这个会话已移进回收站"), t("恢复"), () => restoreAndOpen(ev.id));
+        }
+        return;
       case "sched": case "sched_note": return onSchedEvent(ev);
       case "sync": return endReplay();
       case "run_start": {
@@ -692,6 +730,10 @@
         state.settings.permissionMode = ev.mode;
         setPermChip(ev.mode);
         if ($("set-perm")) $("set-perm").value = ev.mode;
+        // 网关把在跑的每一轮都当场切到了这个模式（gw/queue.mjs setPermMode）：手里的快照跟着改，
+        // 等着的计划卡按新模式重排按钮，别让旧按钮把刚切的模式改回去（#175-2）
+        for (const r of srv.runs) if (r.permMode) r.permMode = ev.mode;
+        refreshPlanActs();
         return;
       case "perm_request": if (runViews.has(ev.runId)) onPermRequest(ev); return;
       case "perm_resolved": return permDone(ev.id, ev.behavior, ev);
@@ -746,6 +788,10 @@
       return;
     }
     if (ev.uiTag) uiTag = ev.uiTag;
+    // 认领没建会话的草稿（#171/#172）：只在首次连接（重载、重开 App）或点了侧栏「没建会话的新对话」时做；
+    // 平常点「新对话」是一张白纸，不把别的草稿拽进来
+    const adoptDrafts = helloCount === 1 || view.adoptDrafts;
+    view.adoptDrafts = false;
     applyState(ev);
     if (ev.resume) { calmStatus(t("已连接")); return; }
     beginReplay();
@@ -777,10 +823,14 @@
     if (!sid && keepProj) { view.projectId = keepProj; paintProjChip(); }
     if (!sid) view.pendingMerge = keepMerge || null;
     view.runIds = keepRuns; view.cids = keepCids;
+    // 没建会话的轮次（停在启动前确认卡上、或刚起还没拿到会话号）：发它的草稿页切走后 cid 对不上，哪页都认不出来。
+    // 认领时全部接回新对话页（不只 latestRun 那一条，#172-1），卡片和过程随整轮重放画出来
+    let adopted = false;
+    if (!sid && adoptDrafts) for (const r of ev.runs || (ev.run ? [ev.run] : [])) if (!r.sessionId) { view.runIds.add(r.id); adopted = true; }
     pickViewRun();
     renderSessions();
     if (sid) loadOlder(true);
-    else if (!(ev.run && keepRuns.has(ev.run.id))) showWelcome();
+    else if (!adopted && !(ev.run && keepRuns.has(ev.run.id))) showWelcome();
     renderInterrupted(ev.interrupted);   // resetView 清掉了 liveEl，重挂一次
     calmStatus(t("已连接"));
   }
@@ -878,8 +928,11 @@
     else if (srv.runs.some((r) => !r.idle)) setStatus(t("另有 {n} 个会话在生成", { n: srv.runs.filter((r) => !r.idle).length }), "ok");
     // 别的会话在等你确认：当前视图看不到它的卡片，状态栏和会话列表里提醒
     const elsewhere = srv.runs.filter((r) => r !== srv.run && r.perms && r.perms.length);
-    if (elsewhere.length) setStatus(t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
-    const live = srv.runs.map((r) => (r.sessionId || "") + (r.perms && r.perms.length ? "!" : "") + (r.idle ? "~" : "")).join(",") + "|" + srv.intr.map((e) => e.sessionId || "").join(",");
+    // 还没建会话的（启动前的确认卡）不在会话列表里，指到侧栏的草稿入口——点了会把它们认回新对话页（#171/#172）
+    if (elsewhere.length) setStatus(elsewhere.every((r) => !r.sessionId) ? t("有个新对话在等你确认 · 侧栏「没建会话的新对话」里查看") : t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
+    askNotice(srv.runs.flatMap((r) => (r.perms || []).map((p) => ({ id: p.id, runId: r.id }))));
+    const live = srv.runs.map((r) => (r.sessionId || "") + (r.perms && r.perms.length ? "!" : "") + (r.idle ? "~" : "")).join(",") + "|" + srv.intr.map((e) => e.sessionId || "").join(",")
+      + "|" + srv.queueAll.filter((q) => !q.sessionId).map((q) => q.id).join(",") + "|" + (view.sessionId || "");
     if (live !== srv.liveKey) { srv.liveKey = live; renderSessions(); }
     renderPermBar();                 // 放最后：有待确认项时状态栏要显示「等你确认」
     renderInterrupted(s.interrupted);
@@ -895,24 +948,30 @@
     const it = srv.run ? null : all.filter((e) => (e.sessionId ? e.sessionId === view.sessionId : !view.sessionId)).pop();
     if (!it) { el?.remove(); return; }
     const others = new Set(all.map((e) => e.sessionId).filter((s) => s && s !== it.sessionId)).size;
-    if (el && el.dataset.id === it.id && el.dataset.n === String(others) && el.parentNode === liveEl) return;
+    // 没建会话的一次只挂一张（最新的），处理掉再出下一张：说一声后面还有几条（#172-3）
+    const drafts = it.sessionId ? 0 : all.filter((e) => !e.sessionId && e !== it).length;
+    if (el && el.dataset.id === it.id && el.dataset.n === others + "/" + drafts && el.parentNode === liveEl) return;
     el?.remove();
     const b = mkMsg("sys", t("已中断"), liveEl);
-    el = b.closest(".msg"); el.id = "intr-card"; el.dataset.id = it.id; el.dataset.n = String(others);
+    el = b.closest(".msg"); el.id = "intr-card"; el.dataset.id = it.id; el.dataset.n = others + "/" + drafts;
     const when = new Date(it.startedAt || it.at).toLocaleString();
-    setHtml(b, `<p>${esc(t("这一轮没跑完：App 在后台被系统结束了（{when} 开始的）。", { when }))}</p>
+    // why: card —— 启动前的确认卡没人答、超时停下的（#171）：claude 根本没起，有会话也只能「重发」，不能「继续」
+    const card = it.why === "card", cont = !!it.sessionId && !card;
+    setHtml(b, `<p>${esc(card ? t("这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。", { n: 10, when })
+        : t("这一轮没跑完：App 在后台被系统结束了（{when} 开始的）。", { when }))}</p>
       <blockquote>${esc(String(it.text || "").slice(0, 300))}</blockquote>
-      <p class="perm-sub">${esc(it.sessionId
-        ? t("已经做完的部分都在会话里。点「继续」让 Claude 从断开的地方接着做。")
+      <p class="perm-sub">${esc(card ? t("Claude 没收到这条消息。点「重发」把它放回输入框。")
+        : it.sessionId ? t("已经做完的部分都在会话里。点「继续」让 Claude 从断开的地方接着做。")
         : t("会话还没来得及建立，Claude 没收到这条消息。点「重发」把它放回输入框。"))}</p>
       ${others ? `<p class="perm-sub">${esc(t("另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。", { n: others }))}</p>` : ""}
-      <div class="perm-acts"><button class="primary" data-a="go">${esc(it.sessionId ? t("继续") : t("重发"))}</button>
+      ${drafts ? `<p class="perm-sub">${esc(t("还有 {n} 条没建会话的消息也停下了，处理完这条接着显示下一条。", { n: drafts }))}</p>` : ""}
+      <div class="perm-acts"><button class="primary" data-a="go">${esc(cont ? t("继续") : t("重发"))}</button>
       <button data-a="no">${esc(t("忽略"))}</button></div>`);
     b.querySelector(".perm-acts").addEventListener("click", async (e) => {
       const a = e.target.closest("button")?.dataset.a;
       if (!a) return;
       el.remove();
-      if (a === "go" && it.sessionId) return send(t("上一轮被系统中断了，请从断开的地方接着做完。"));
+      if (a === "go" && cont) return send(t("上一轮被系统中断了，请从断开的地方接着做完。"));
       if (a === "go") { inputEl.value = it.text || ""; autoGrow(); inputEl.focus(); }
       api("/api/interrupted/dismiss", { method: "POST", body: JSON.stringify({ id: it.id }) }).catch(() => {});
     });
@@ -929,8 +988,9 @@
   }
   function queuedInView(q) {
     if (q.sessionId) return q.sessionId === view.sessionId;
-    // 网关重启恢复的、还没建会话的那条：界面重载后 runIds/cids 都清了，认不出是哪页的，放到新对话页（审查 B28）
-    if (q.intr && !view.sessionId) return true;
+    // 网关重启恢复的、还没建会话的那条：界面重载后 runIds/cids 都清了，认不出是哪页的，放到新对话页（审查 B28）。
+    // 跟着的那一轮已经结束（确认卡超时、被停掉）的也一样：不然它留在队列里，哪页都看不见、撤不回（#172-2）
+    if (!view.sessionId && (q.intr || !(q.follow && srv.runs.some((r) => r.id === q.follow)))) return true;
     return view.runIds.has(q.id) || (!!q.follow && view.runIds.has(q.follow)) || (!!q.cid && view.cids.has(q.cid));
   }
   function pickViewRun() {

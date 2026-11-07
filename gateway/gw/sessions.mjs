@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
-import { SID_RE, TRASH_KEEP_DAYS, exportSessions, deleteMessage, forkSession, importSessions, listTrash, locateUserTurn, purgeTrash, realWorkspace, restoreSession, rewindFiles, rewindFixup, trashSession, undoDelete } from "./sessionops.mjs";
+import { SID_RE, TRASH_KEEP_DAYS, inTrash, exportSessions, deleteMessage, forkSession, importSessions, listTrash, locateUserTurn, purgeTrash, realWorkspace, restoreSession, rewindFiles, rewindFixup, trashSession, undoDelete } from "./sessionops.mjs";
 import { goalStateOf, tasksOf } from "./goal.mjs";
 import { backfillAgents, readAgentIndex, settleAgentRecs } from "./agents.mjs";
 import { bodyToFile, forEachLine } from "./bigfile.mjs";
@@ -124,7 +124,7 @@ export function listSessions(limit = 150) {
 
   found.sort((a, b) => b.mtime - a.mtime);
   const shown = found.filter((s, i) => i < limit || PINS[s.id]);
-  return shown.map((s) => {
+  const out = shown.map((s) => {
     const meta = peekSession(s.file), ab = archiveBrief(s.id, s.size, lineageCached(s.id)?.compacts?.length || 0);
     return {
       id: s.id,
@@ -140,6 +140,8 @@ export function listSessions(limit = 150) {
       currentProject: meta.cwd === CFG.workspace || meta.cwd === realWorkspace(),
     };
   });
+  out.total = found.length;
+  return out;
 }
 
 // ── 会话内容搜索 ──
@@ -280,19 +282,22 @@ export async function routeSessions(req, res, u, p) {
     return sendJson(res, 200, await searchSessions(String(u.searchParams.get("q") || "")));
   }
   if (req.method === "GET" && p === "/api/sessions") {
-    const list = listSessions();
-    return sendJson(res, 200, { sessions: list, workspace: CFG.workspace, count: list.length });
+    // limit：界面点「再显示」逐次加 150；首次列表每个文件要读开头取标题，所以默认只给最近 150 个
+    const list = listSessions(Math.min(5000, Math.max(150, parseInt(u.searchParams.get("limit"), 10) || 150)));
+    // total：磁盘上一共多少个。列表只给最近 limit 个（加置顶），界面据此说「最近 N 个，共 M 个」（#178-3）
+    return sendJson(res, 200, { sessions: list, workspace: CFG.workspace, count: list.length, total: list.total ?? list.length });
   }
   // ── 会话管理：批量进回收站 / 回收站 / 导出 / 导入 ──
   if (req.method === "POST" && p === "/api/sessions/trash") {
     const b = JSON.parse((await readBody(req)) || "{}");
-    const done = [], failed = [];
+    // busy：正在生成没删；failed：已经不在了（别处删了、已在回收站）或删的时候出错——界面分开说（#176-2）
+    const done = [], failed = [], busy = [];
     for (const id of [].concat(b.ids || [])) {
-      if (runOfSession(id)) { failed.push(id); continue; }
+      if (runOfSession(id)) { busy.push(id); failed.push(id); continue; }
       try { (trashSession(String(id)).ok ? done : failed).push(id); } catch { failed.push(id); }
     }
     if (done.length) log(`${done.length} 个会话进回收站`);
-    return sendJson(res, 200, { ok: true, done, failed });
+    return sendJson(res, 200, { ok: true, done, failed, busy });
   }
   if (req.method === "GET" && p === "/api/trash") {
     return sendJson(res, 200, { items: listTrash(), keepDays: TRASH_KEEP_DAYS });
@@ -349,7 +354,8 @@ export async function routeSessions(req, res, u, p) {
     const found = findSessionFile(id);
 
     if (req.method === "GET" && !action) {
-      if (!found) return sendJson(res, 404, { error: "not found" });
+      // trashed：在回收站里（可恢复）。界面据此给「恢复」，而不是一律当成没了（#173）
+      if (!found) return sendJson(res, 404, { error: "not found", trashed: inTrash(id) });
       const meta = peekSession(found.file);
       const live = runOfSession(id);
       const limit = Math.min(200, Math.max(10, Number(u.searchParams.get("limit")) || 40));
@@ -387,6 +393,7 @@ export async function routeSessions(req, res, u, p) {
       // 有子代理记录的 Agent 卡打个标，前端据此给「查看过程」
       const subs = agentFilesOf(found.file);
       if (subs.size) for (const it of page.items) if (it.role === "tool_use" && subs.has(it.id)) it.sub = true;
+      const wantMeta = !u.searchParams.has("before") && (!u.searchParams.has("after") || u.searchParams.get("meta") === "1");
       return sendJson(res, 200, {
         id,
         title: sessionTitle(id, meta),
@@ -398,8 +405,9 @@ export async function routeSessions(req, res, u, p) {
         // 正向读的那一页本身不带用量：首屏（书签 / 上次读到 / 章节）另从尾部取最新的，翻页不取（#89）
         contextTokens: fwd === null ? page.contextTokens : u.searchParams.has("after") ? undefined : await latestContextTokens(found.file),
         liveRunId: live ? live.id : null,
-        goal: u.searchParams.has("before") || u.searchParams.has("after") ? undefined : goalStateOf(found.file),
-        tasks: u.searchParams.has("before") || u.searchParams.has("after") ? undefined : tasksOf(id),
+        // 翻页不带；重连续读的首屏（after + meta=1）要带，界面刚把它们清掉（#178-1）
+        goal: wantMeta ? goalStateOf(found.file) : undefined,
+        tasks: wantMeta ? tasksOf(id) : undefined,
       });
     }
 

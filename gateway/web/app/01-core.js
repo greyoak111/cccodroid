@@ -767,9 +767,11 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
     try { return renderMdLines(text); } finally { mdImg = prev; }
   }
   // 代码块：```后面写了语言就在顶上标出来，并留 data-lang 给 enhanceMd 上高亮。没写完的块（流式中）也同样排版，免得收尾时跳一下
+  // 两行起左边带一列行号（讨论 #170）：放在 code 外面，复制键取 code 的文字、高亮只改 code，都碰不到它
   const codeBlock = (lang, buf) =>
     `<div class="code-wrap${lang ? " has-lang" : ""}">${lang ? `<div class="code-lang">${esc(lang)}</div>` : ""}`
-    + `<pre><code${lang ? ` data-lang="${esc(lang.toLowerCase())}"` : ""}>${esc(buf.join("\n"))}</code></pre><button class="copy-btn">${t("复制")}</button></div>`;
+    + `<pre${buf.length > 1 ? ` class="ln"><span class="code-ln" aria-hidden="true">${buf.map((_, i) => i + 1).join("\n")}</span` : ""}>`
+    + `<code${lang ? ` data-lang="${esc(lang.toLowerCase())}"` : ""}>${esc(buf.join("\n"))}</code></pre><button class="copy-btn">${t("复制")}</button></div>`;
   const mathBlock = (tex, raw) => `<div class="math math-d" data-tex="${esc(tex)}">${esc(raw)}</div>`;
   function renderMdLines(text) {
     const lines = String(text).split("\n");
