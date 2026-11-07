@@ -12,7 +12,9 @@ const RULES = [
   // 只提这个词不算（讨论破甲的笔记、审计报告到处都是）；要和下面别的类别一起出现
   ["jailbreak", true, /\bDAN\s+mode\b|\bdo anything now\b|developer\s+mode\s+(?:enabled|on)\b|开发者模式(?:已)?(?:开启|启用)|(?:你是|现在是|我是)\s*DAN\b/i],
   // 复核（11-06 三轮）：反破甲/防破甲这类否定式是讨论防御工程，不是用词本身；排除后不再参与跨类凑数
-  ["jailbreak", false, /(?<![反防抗])破甲|(?<![反防抗])越狱|(?<![A-Za-z-])jail\s*-?\s*break/i],
+  // 红队收窄 r4（11-07）：设备语境（iOS/iPhone/iPad/安卓/Android/手机/设备/平板/刷机/系统级 + 越狱）不算——
+  // 讲刷机越狱的日常文档不该凑成跨类误拦；模型越狱的说法（越狱提示、越狱模式之类）照拦
+  ["jailbreak", false, /(?<![反防抗])破甲|(?<!(?:[反防抗]|iOS|iPhone|iPad|安卓|Android|手机|设备|平板|刷机|系统级)[ \t　]*)越狱|(?<![A-Za-z-])jail\s*-?\s*break/i],
   // 冒充系统、开发者、Anthropic 的消息
   ["spoof", true, /<\/?\s*system-reminder\s*>|<\/?\s*(?:system|developer)(?:[_-]?(?:message|prompt|instructions?))?\s*>|[<＜]\/?\s*(?:system-reminder|system|developer)(?:\s+(?:message|instruction|override))?\s*[>＞]|\[\s*(?:system|developer)\s+(?:message|instruction|override)\s*\]|anthropic\s+(?:policy|safety|system)\s+(?:update|override|exception)|\bauthority\s*[:：]\s*(?:anthropic|system|developer)\b|\boverride\s*[:：]\s*(?:true|yes|on)\b|\boperator\s+directive\b|(?:系统层|平台|系统)(?:的)?(?:下发|注入)(?:的)?(?:补充)?(?:说明|通知|指令|更新)|(?:早先|之前|此前|以上)(?:的)?规则(?:已|全部)?(?:作废|失效|取消)/i],
   // role: system 单条只算弱特征：正常文档也会举 prompt 格式的例子，单条不拦（s05 那种头里有 authority/override 的仍是强特征）
