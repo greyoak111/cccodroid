@@ -107,6 +107,8 @@ Some third-party API setups translate Anthropic requests to the OpenAI format an
 
 One user hit this on a Samsung tablet (One UI, Android 16): the launch screen stayed on "Waiting for gateway…" for two to three minutes before the app opened. The diagnostics showed the gateway starting normally every time, with no errors. The phone happened to be offline at the time, and the root cause isn't known yet.
 
+Another case has been tracked down: on some phones (where the app directory path goes through a system link, such as Honor MagicOS on Android 17), 0.6.8's gateway exited right after every start, and the notification kept saying "Gateway exited; restarting in 8s". Fixed in 0.6.9.
+
 **Workaround:** update to the latest version first. If it gets stuck there, give it a minute or two instead of swiping the app away and reopening it, since every restart begins the wait from scratch. Once it opens, send a diagnostics bundle from Settings → Troubleshooting.
 
 ## 9. The chat area occasionally goes blank and won't scroll (investigating)
@@ -115,6 +117,12 @@ One user hit this on a Xiaomi phone (HyperOS, Android 16): after a cold start th
 
 **Workaround:** first long-press the title in the top bar for about 0.6 s (unfreeze), or switch to another chat and back. If neither helps, reopen the app, send a diagnostics bundle from Settings → Troubleshooting, and tell us what you were doing right before (just launched the app, just opened that chat, or came back from the background).
 
+## 10. In-app update fails with "Error · Couldn't read the signature" (not fixed)
+
+On one user's phone every in-app update stops here. Before installing, the app checks that the downloaded APK is signed with the same release key, reading the signature through a system API. On that phone the API returns nothing, so the install is refused. The APKs themselves are fine (each was checked; the signature matches every earlier release); the phone's system API just can't read it.
+
+**Workaround:** download the APK from the GitHub Release or the website and install it over the current one. Your data isn't affected.
+
 ## For developers: tests can create fake bugs
 
 Item 1 is tied to automated testing (item 2 has been confirmed not to be). Before fixing a problem like this, make sure it **also happens with no tests running**:
@@ -122,3 +130,4 @@ Item 1 is tied to automated testing (item 2 has been confirmed not to be). Befor
 - Events injected with `input swipe` / `input tap` get cancelled by some ROMs' gesture listeners, sometimes with an extra tap added.
 - Screenshots, simulated secondary displays, launching other windows and switching keyboards with `ime set` can all take input focus or the keyboard connection away from the app.
 - For drag, scroll and keyboard problems, trust results from a real finger and a real keyboard.
+- Under full load, the full test run (`node scripts/test.mjs`) occasionally fails once in `merge.test.mjs` ("记录与兜底"). It passes reliably when run alone; it's a timing issue that hasn't been fixed yet. If it's the only failure, rerun it on its own to confirm.
