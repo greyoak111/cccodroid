@@ -230,7 +230,9 @@ Object.assign(S, {
     const apk = /targetSdk=(\d+)/.test(cur) && +cur.match(/targetSdk=(\d+)/)[1] >= 29 && fs.existsSync(APK36) ? APK36 : APK;
     const size = fs.statSync(apk).size;
     console.log(`  装 ${path.basename(apk)}`);
-    run("priv", [`cat '${apk}' | pm install -r -S ${size}`]);
+    // 安装包从本进程经标准输入交给 priv：priv 是 shell 身份（uid 2000），读不到应用私有目录里的文件（0.6.8 发版时 cat 报 Permission denied）
+    const fd = fs.openSync(apk, "r");
+    try { run("priv", [`pm install -r -S ${size}`], { stdio: [fd, "inherit", "inherit"] }); } finally { fs.closeSync(fd); }
     const v = sh("priv", ["dumpsys package cc.codroid | grep -m1 versionName"]);
     console.log("  已装：" + v.trim());
     // 装完把应用打开（和应用内更新一样）：刚装完系统可能还在做安装后扫描、头一次启动会被丢掉，起不来就再拉
