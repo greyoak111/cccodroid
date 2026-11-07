@@ -885,6 +885,8 @@ a.weblink{overflow-wrap:anywhere}
 .prov-card .sub{font-size:12px;color:var(--fg2);margin:10px 0 6px;font-weight:600}
 .prov-card .sub:first-child{margin-top:0}
 .prov-card input,.prov-card select{margin-bottom:8px}
+.prov-card textarea{width:100%;box-sizing:border-box;margin-bottom:8px;background:var(--bg);border:1px solid var(--line);border-radius:9px;color:var(--fg);padding:9px 11px;font:inherit;font-size:14px;outline:0;resize:vertical}
+.prov-card textarea:focus{border-color:var(--accent-dim)}
 .prov-card .row-actions{flex-wrap:wrap;margin:4px 0 0}
 .prov-card a{color:var(--tool)}
 .prov-state{font-size:13px;margin-bottom:8px;line-height:1.6}

@@ -18,7 +18,7 @@ const CACHE = new Map();   // 厂商 id → { list, at, sig }
 const SIGS = new WeakMap();
 function sigOf(p) {
   let s = SIGS.get(p);
-  if (s === undefined) { s = JSON.stringify([p.id, p.baseUrl, p.modelsUrl, p.modelsAuth, p.defaultModel, p.fastModel, p.contextWindow, p.fallbackModels]); SIGS.set(p, s); }
+  if (s === undefined) { s = JSON.stringify([p.id, p.baseUrl, p.modelsUrl, p.modelsAuth, p.defaultModel, p.fastModel, p.contextWindow, p.fallbackModels, p.extraModels]); SIGS.set(p, s); }
   return s;
 }
 
@@ -223,10 +223,28 @@ export function applyCatalog(list, cat, keys) {
  *  窗口用用户在接口设置里声明的 contextWindow（只给这两个型号补），没声明就是 0 = 不知道，不瞎编（#67） */
 export function withConfigured(list, p) {
   if (!p || !p.custom || p.local || p.login) return list;
-  const n = Number(p.contextWindow), cw = Number.isInteger(n) && n >= 1024 && n <= 16777216 ? n : 0;   // 手改配置文件塞的怪值不认
+  const n = Number(p.contextWindow), cw = okWindow(n) ? n : 0;   // 手改配置文件塞的怪值不认
   const ids = [...new Set([p.defaultModel, p.fastModel].filter((x) => typeof x === "string" && x))];
-  if (!list.length) return ids.map((id) => ({ id, context_window: cw, max_output_tokens: 0, input_modalities: ["text"], effort: null, configured: true }));
-  return cw ? list.map((m) => (ids.includes(m.id) && !m.context_window ? { ...m, context_window: cw, configured: true } : m)) : list;
+  const one = (id, w) => ({ id, context_window: w, max_output_tokens: 0, input_modalities: ["text"], effort: null, configured: true });
+  const out = !list.length ? ids.map((id) => one(id, cw))
+    : cw ? list.map((m) => (ids.includes(m.id) && !m.context_window ? { ...m, context_window: cw, configured: true } : m)) : list;
+  // 用户在接口卡里另加的型号（中转站清单拉不到、或清单里没有的）：接在后面，没写窗口的按这家声明的窗口算
+  const more = extraModelsOf(p).filter((e) => !out.some((m) => m.id === e.id));
+  return more.length ? [...out, ...more.map((e) => one(e.id, e.contextWindow || cw))] : out;
+}
+const okWindow = (n) => Number.isInteger(n) && n >= 1024 && n <= 16777216;
+export const MODEL_ID_RE = /^[\w.:/@+-]{1,128}$/;
+/** 接口卡里另加的型号：[{ id, contextWindow }]。配置能分享导入、也能手改，按形状过一遍，最多 64 个 */
+export function extraModelsOf(p) {
+  const seen = new Set(), out = [];
+  for (const e of Array.isArray(p && p.extraModels) ? p.extraModels : []) {
+    const id = e && typeof e.id === "string" ? e.id.trim() : "";
+    if (!MODEL_ID_RE.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, contextWindow: okWindow(Number(e.contextWindow)) ? Number(e.contextWindow) : 0 });
+    if (out.length >= 64) break;
+  }
+  return out;
 }
 
 // 先 withConfigured 再 withCatalog：用户在接口设置里明说的窗口优先于公共目录按名字猜的（#102 04-001）。

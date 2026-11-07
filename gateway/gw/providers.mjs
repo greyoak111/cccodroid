@@ -4,7 +4,7 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { CFG, PATHS, PREFIX, log, tz } from "./config.mjs";
 import { SETTINGS, saveSettings } from "./settings-store.mjs";
-import { dropModelCache, normalizeModels } from "./models.mjs";
+import { MODEL_ID_RE, dropModelCache, extraModelsOf, normalizeModels } from "./models.mjs";
 import { RUNS } from "./runs.mjs";
 import { NEXT, fetchText, readBody, sendJson } from "./http.mjs";
 import { readSmallFile } from "./saferead.mjs";
@@ -399,6 +399,7 @@ function providerView(id, v) {
     baseUrl: v.baseUrl || "", modelsUrl: v.modelsUrl || "", authStyle: v.authStyle || "bearer",
     endpoints: (v.endpoints || []).map((e) => ({ id: e.id, label: e.label, labelEn: e.labelEn || "" })), endpoint: v.endpoint || null,
     defaultModel: v.defaultModel || null, fastModel: v.fastModel || null, inlineImages: !!v.inlineImages, contextWindow: Number(v.contextWindow) || 0,
+    extraModels: v.custom ? extraModelsOf(v) : [],
     keyUrl: v.keyUrl || null, hint: v.hint || "", hintEn: v.hintEn || "",
     hasKey: !!key, keyTail: key ? key.slice(-4) : "",
     active: id === PROVIDER.id,
@@ -442,6 +443,18 @@ export function upsertProvider(id, b, prepare) {
       if (b.contextWindow === null || b.contextWindow === "" || n === 0) delete cur.contextWindow;
       else if (Number.isInteger(n) && n >= 1024 && n <= 16777216) cur.contextWindow = n;
       else return { error: "bad_context_window", message: tz("上下文窗口填 1024 到 16777216 之间的整数，也可以写 256k、1m") };
+    }
+    // 另加的型号（接口卡「更多模型」）：[{ id, contextWindow }]，空数组 = 清掉
+    if ("extraModels" in b) {
+      const list = Array.isArray(b.extraModels) ? b.extraModels : null;
+      if (!list || list.length > 64) return { error: "bad_extra_models", message: tz("更多模型最多 64 个") };
+      for (const e of list) {
+        const id = e && typeof e.id === "string" ? e.id.trim() : "", n = Number(e && e.contextWindow);
+        if (!MODEL_ID_RE.test(id)) return { error: "bad_extra_models", message: tz("模型名只能用字母、数字和 . _ - : / @ +，不超过 128 个字符：{id}", { id: String(e && e.id || "").slice(0, 40) }) };
+        if (e.contextWindow && !(Number.isInteger(n) && n >= 1024 && n <= 16777216)) return { error: "bad_context_window", message: tz("上下文窗口填 1024 到 16777216 之间的整数，也可以写 256k、1m") };
+      }
+      const clean = extraModelsOf({ extraModels: list });
+      if (clean.length) cur.extraModels = clean; else delete cur.extraModels;
     }
     if (!cur.label) cur.label = id;
     if (!/^https?:\/\//.test(cur.baseUrl || "")) return { error: "bad_baseUrl", message: tz("端点地址要以 http:// 或 https:// 开头") };
