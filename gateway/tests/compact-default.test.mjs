@@ -36,3 +36,12 @@ test("claudeEnv：没设就下发默认线；设了用设的；继承来的值�
   const q = P({ id: "custom-cdef-b" });                          // 窗口不知道
   assert.equal(claudeEnv({ model: "m-big", provider: q }).CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
 });
+
+test("不再带 DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT：带着它 claude 只等接口报超长，DeepSeek 的报错它认不出", () => {
+  const inh = process.env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT;
+  process.env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT = "1";     // 继承来的也不留
+  try {
+    for (const p of [P({ id: "custom-cdef-c", contextWindow: 1048576 }), P({ id: "custom-cdef-d" })])
+      assert.equal(claudeEnv({ model: "m-big", provider: p }).CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT, undefined, p.id);
+  } finally { if (inh === undefined) delete process.env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT; else process.env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT = inh; }
+});

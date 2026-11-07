@@ -306,11 +306,14 @@ export function claudeEnv(o = {}) {
     delete env.ANTHROPIC_SMALL_FAST_MODEL;
   }
 
-  // 第三方厂商：claude 不认识这些模型名，需放宽窗口识别，并把真实窗口告诉它。
+  // 第三方厂商：claude 不认识这些模型名，把真实窗口告诉它。
   // 不设窗口的话 claude 一律按 200k 算 —— 1M 的模型会被白白砍掉 80%，
   // 而且 /autocompact 也会被卡在 200k。值从 /models 动态取，不写死。
+  // 不再设 CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT（11-07）：2.1.311 起它的意思是「不按窗口压缩、等接口报超长」，
+  // DeepSeek 的超长报错 claude 认不出，于是永不压缩。不设它，MAX_CONTEXT_TOKENS 照认（实测 1M 型号按 1028576 算）；
+  // 不知道窗口的按假定的 200k 压（约 180k 触发），总比一路涨到撞窗口强。继承来的也擦掉
+  delete env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT;
   if (!p.nativeModels) {
-    env.CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT = "1";
     // 模型名不是 Claude 型号时，claude 默认不给清单工具（TaskCreate/TaskUpdate 一个都不挂），得显式打开；
     // 光打开还不够，第三方模型不会主动用 —— 配合 TASKS_HINT 提醒一句才用（DeepSeek 实测）
     if (!p.local) env.CLAUDE_CODE_ENABLE_TODO_TOOLS = "1";
