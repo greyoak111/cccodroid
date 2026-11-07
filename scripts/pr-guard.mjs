@@ -103,7 +103,8 @@ for (const l of diff.split("\n")) {
     // 译文里的代码会原样在界面里跑（拿得到网关令牌）：txt 的 @ 行、生成的 js 里不是字符串的值都要过 fnsafe 的白名单
     let fn = null;
     if (cur.endsWith(".txt")) { const m = /^\d+\t@(?!@)(.*)$/.exec(s); if (m) fn = m[1]; }
-    else { const m = /^ {2}"(?:[^"\\]|\\.)*": (.*),$/.exec(s); if (m && !/^"(?:[^"\\]|\\.)*"$/.test(m[1])) fn = m[1]; else if (!m && !/^(\/\/|window\.I18N_DICT|\};?$)/.test(s)) add("high", cur, here, "译文文件里不是词条的行"); }
+    // 最后一条词条后面没有逗号，也算词条（PR #168 误报）
+    else { const m = /^ {2}"(?:[^"\\]|\\.)*": (.*?),?$/.exec(s); if (m && !/^"(?:[^"\\]|\\.)*"$/.test(m[1])) fn = m[1]; else if (!m && !/^(\/\/|window\.I18N_DICT|\};?$)/.test(s)) add("high", cur, here, "译文文件里不是词条的行"); }
     if (fn != null) { const p = i18nFnProblem(fn); add(p ? "high" : "med", cur, here, p ? `译文里的代码不合规（${p}），会在界面里执行` : "译文里的代码（复数等），会在界面里执行"); }
     continue;
   }

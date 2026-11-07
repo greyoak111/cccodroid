@@ -80,6 +80,11 @@ test("译文里的代码：合规的 @ 行算中，塞进别的代码算高；�
   assert.equal(r.code, 1);
   r = scan(() => w("gateway/web/lang-ja.js", '  "a": "x",\nfetch("//x");\n'));
   assert.match(r.out, /不是词条的行/);
+  // 末尾追加词条：最后一条不带逗号，照样是词条；不带逗号的函数值照样过白名单
+  r = scan(() => w("gateway/web/lang-ja.js", 'window.I18N_DICT = window.I18N_DICT || {};\nwindow.I18N_DICT["ja"] = {\n  "a": "x",\n  "c": "y"\n};\n'));
+  assert.doesNotMatch(r.out, /不是词条的行|译文里的代码/);
+  r = scan(() => w("gateway/web/lang-ja.js", '  "a": "x",\n  "d": (v) => v.constructor.constructor("alert(1)")()\n};\n'));
+  assert.match(r.out, /译文里的代码不合规/);
 });
 
 test("mkdict：@ 行不合规就拒绝生成；现有的复数函数照常生成", () => {

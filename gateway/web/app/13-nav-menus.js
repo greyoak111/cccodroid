@@ -32,6 +32,8 @@
   function closeDrawer(force, fling) {
     if (!force && window.CCLayout && CCLayout.docked()) return;
     if (drawerEl.classList.contains("hidden") || drawerEl._moShut) return;
+    // 「自定常驻项」的勾选态只在这一次打开里有效：收起侧栏就退出，下次打开回到普通列表（群反馈 11-06）
+    if (navEdit) { navEdit = false; renderSideNav(); }
     const panel = drawerEl.querySelector(".drawer-panel");
     MO.cancel(drawerEl);
     if (!MO.on() || !panel || !panel.animate) { drawerEl.classList.add("hidden"); return; }
