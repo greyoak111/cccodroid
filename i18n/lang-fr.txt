@@ -2783,36 +2783,43 @@
 2783	Ce tour n'a pas démarré : la carte de confirmation avant le lancement est restée sans réponse pendant {n} minutes, il a donc été arrêté (envoyé {when}).
 2784	Claude n'a pas reçu ce message. Touchez « Renvoyer » pour le remettre dans la zone de saisie.
 2785	Une nouvelle discussion attend votre confirmation · voir « Nouvelles discussions non enregistrées » dans le panneau latéral
-2786	Nouvelles discussions non enregistrées
-2787	{n} autres messages non enregistrés se sont aussi arrêtés ; le suivant s'affiche une fois celui-ci traité.
-2788	{n} supprimées, {m} n'existent plus (supprimées ailleurs ou déjà dans la corbeille)
-2789	{n} supprimées, {m} encore en génération et non supprimées, {k} n'existent plus
-2790	Installation en cours. Analysez le suivant une fois terminée.
-2791	Remis dans le brouillon de la session d'origine
-2792	Supprimé dans la session d'origine
-2793	Vous avez changé de session, ce retour en arrière n'a donc pas été effectué
-2794	Cette conversation n'existe plus (supprimée ou données effacées)
-2795	Cette conversation a été déplacée dans la corbeille
-2796	{n} plus récentes sur {m}
-2797	Affichage des {n} premiers résultats sur {m}. Essayez un mot plus précis.
-2798	{n} conversations plus anciennes ne sont pas listées. Recherchez par titre ou contenu.
-2799	La liste n'a pas été actualisée (affichage de la précédente) : {msg}
-2800	Impossible de charger la liste des conversations : {msg}
-2801	Impossible de charger la corbeille : {msg}
-2802	{p} par rapport à la même période le mois dernier
-2803	(conversation ancienne ou supprimée)
-2804	Projet supprimé · ne s'exécutera pas
-2805	Projet supprimé : les exécutions seront ignorées. Modifiez la tâche et choisissez un autre projet.
-2806	La conversation poursuivie a été supprimée ; la prochaine exécution en démarrera une nouvelle
-2807	Affichage des {n} dernières exécutions sur {m}
-2808	Supprimer la tâche planifiée « {n} » ? Son historique d'exécution ne sera plus visible dans l'app ; les conversations enregistrées ne sont pas concernées.
-2809	Modifications non enregistrées : l'essai utilise la version enregistrée. Appuyez d'abord sur « Enregistrer ».
-2810	Le projet de la tâche a été supprimé : modifiez la tâche et choisissez un projet
-2811	Le projet de « {n} » a été supprimé : modifiez la tâche et choisissez un projet
-2812	La tâche est en cours : attendez la fin ou arrêtez-la dans sa conversation, puis supprimez-la
-2813	Afficher {n} de plus
-2814	Le point de terminaison « {id} » n'existe pas : ce tour n'a pas été envoyé.
-2815	Le point de terminaison de cette conversation (« {id} ») a été supprimé : ce tour n'a pas été envoyé. Choisissez-en un autre dans le panneau des modèles, puis renvoyez.
-2816	Le point de terminaison par défaut du projet (« {id} ») a été supprimé : ce tour n'a pas été envoyé. Choisissez-en un dans les réglages du projet.
-2817	Le point de terminaison de la tâche a été supprimé : modifiez la tâche et choisissez-en un autre
-2818	Le point de terminaison de « {n} » a été supprimé : modifiez la tâche et choisissez-en un autre
+2786	local-mode.json n'est pas un fichier ordinaire
+2787	Nouvelles discussions non enregistrées
+2788	{n} autres messages non enregistrés se sont aussi arrêtés ; le suivant s'affiche une fois celui-ci traité.
+2789	Non défini : par défaut {line} · {pct} % de la fenêtre
+2790	Autres modèles (facultatif, un par ligne ; fenêtre possible après une espace, ex. gpt-6.1-sol 1m)
+2791	Ligne {n} des autres modèles illisible : écrivez « modèle » ou « modèle fenêtre », fenêtre comme 256k ou 1m
+2792	Autres modèles : 64 au maximum
+2793	Le nom du modèle n'accepte que lettres, chiffres et . _ - : / @ +, 128 caractères au plus : {id}
+2794	{n} supprimées, {m} n'existent plus (supprimées ailleurs ou déjà dans la corbeille)
+2795	{n} supprimées, {m} encore en génération et non supprimées, {k} n'existent plus
+2796	Installation en cours. Analysez le suivant une fois terminée.
+2797	Remis dans le brouillon de la session d'origine
+2798	Supprimé dans la session d'origine
+2799	Vous avez changé de session, ce retour en arrière n'a donc pas été effectué
+2800	Cette conversation n'existe plus (supprimée ou données effacées)
+2801	Cette conversation a été déplacée dans la corbeille
+2802	{n} plus récentes sur {m}
+2803	Affichage des {n} premiers résultats sur {m}. Essayez un mot plus précis.
+2804	{n} conversations plus anciennes ne sont pas listées. Recherchez par titre ou contenu.
+2805	La liste n'a pas été actualisée (affichage de la précédente) : {msg}
+2806	Impossible de charger la liste des conversations : {msg}
+2807	Impossible de charger la corbeille : {msg}
+2808	{p} par rapport à la même période le mois dernier
+2809	(conversation ancienne ou supprimée)
+2810	Projet supprimé · ne s'exécutera pas
+2811	Projet supprimé : les exécutions seront ignorées. Modifiez la tâche et choisissez un autre projet.
+2812	La conversation poursuivie a été supprimée ; la prochaine exécution en démarrera une nouvelle
+2813	Affichage des {n} dernières exécutions sur {m}
+2814	Supprimer la tâche planifiée « {n} » ? Son historique d'exécution ne sera plus visible dans l'app ; les conversations enregistrées ne sont pas concernées.
+2815	Modifications non enregistrées : l'essai utilise la version enregistrée. Appuyez d'abord sur « Enregistrer ».
+2816	Le projet de la tâche a été supprimé : modifiez la tâche et choisissez un projet
+2817	Le projet de « {n} » a été supprimé : modifiez la tâche et choisissez un projet
+2818	La tâche est en cours : attendez la fin ou arrêtez-la dans sa conversation, puis supprimez-la
+2819	Afficher {n} de plus
+2820	Le point de terminaison « {id} » n'existe pas : ce tour n'a pas été envoyé.
+2821	Le point de terminaison de cette conversation (« {id} ») a été supprimé : ce tour n'a pas été envoyé. Choisissez-en un autre dans le panneau des modèles, puis renvoyez.
+2822	Le point de terminaison par défaut du projet (« {id} ») a été supprimé : ce tour n'a pas été envoyé. Choisissez-en un dans les réglages du projet.
+2823	Le point de terminaison de la tâche a été supprimé : modifiez la tâche et choisissez-en un autre
+2824	Le point de terminaison de « {n} » a été supprimé : modifiez la tâche et choisissez-en un autre
+2825	Le texte injecté par le hook ({ev}) correspond à un motif de contournement ; ce tour a été arrêté, le texte injecté est replié ci-dessus.

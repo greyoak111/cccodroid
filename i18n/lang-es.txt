@@ -2783,36 +2783,43 @@
 2783	Este turno no llegó a empezar: la tarjeta de confirmación previa al inicio quedó sin respuesta durante {n} minutos y se detuvo (enviado {when}).
 2784	Claude no recibió este mensaje. Toca «Reenviar» para devolverlo al cuadro de texto.
 2785	Un chat nuevo espera tu confirmación · míralo en «Chats nuevos sin guardar» en la barra lateral
-2786	Chats nuevos sin guardar
-2787	Otros {n} mensajes sin guardar también se detuvieron; el siguiente aparece cuando resuelvas este.
-2788	{n} eliminadas, {m} ya no existen (eliminadas en otro sitio o ya en la papelera)
-2789	{n} eliminadas, {m} aún generando y sin eliminar, {k} ya no existen
-2790	Instalando. Analiza el siguiente cuando termine.
-2791	Devuelto al borrador de la sesión original
-2792	Eliminado en la sesión original
-2793	Cambiaste de sesión, así que no se hizo este retroceso
-2794	Esta conversación ya no existe (eliminada o datos borrados)
-2795	Esta conversación se movió a la papelera
-2796	Últimas {n} de {m}
-2797	Se muestran las primeras {n} de {m} coincidencias. Prueba con una palabra más específica.
-2798	No se listan {n} conversaciones más antiguas. Búscalas por título o contenido.
-2799	No se pudo actualizar la lista (se muestra la anterior): {msg}
-2800	No se pudo cargar la lista de conversaciones: {msg}
-2801	No se pudo cargar la papelera: {msg}
-2802	{p} frente al mismo periodo del mes pasado
-2803	(conversación antigua o eliminada)
-2804	Proyecto eliminado · no se ejecutará
-2805	Proyecto eliminado: las ejecuciones se omitirán. Edita la tarea y vuelve a elegir un proyecto.
-2806	La conversación que continuaba se eliminó; la próxima ejecución empezará una nueva
-2807	Se muestran las últimas {n} de {m} ejecuciones
-2808	¿Eliminar la tarea programada «{n}»? Su historial de ejecuciones dejará de verse en la app; las conversaciones guardadas no se ven afectadas.
-2809	Los cambios no están guardados: la prueba usa la versión guardada. Pulsa «Guardar» primero.
-2810	El proyecto de la tarea se eliminó: edita la tarea y elige un proyecto
-2811	El proyecto de «{n}» se eliminó: edita la tarea y elige un proyecto
-2812	La tarea se está ejecutando: espera a que termine o detenla en su conversación y luego elimínala
-2813	Mostrar {n} más
-2814	El endpoint «{id}» no existe, así que este turno no se envió.
-2815	El endpoint de esta conversación («{id}») se eliminó, así que este turno no se envió. Elige otro en el panel de modelos y vuelve a enviar.
-2816	El endpoint predeterminado del proyecto («{id}») se eliminó, así que este turno no se envió. Vuelve a elegir uno en los ajustes del proyecto.
-2817	El endpoint de la tarea se eliminó: edita la tarea y elige otro
-2818	El endpoint de «{n}» se eliminó: edita la tarea y elige otro
+2786	local-mode.json no es un archivo normal
+2787	Chats nuevos sin guardar
+2788	Otros {n} mensajes sin guardar también se detuvieron; el siguiente aparece cuando resuelvas este.
+2789	Sin definir: por defecto {line} · {pct} % de la ventana
+2790	Más modelos (opcional, uno por línea; tras un espacio puedes indicar la ventana, p. ej. gpt-6.1-sol 1m)
+2791	No se entiende la línea {n} de Más modelos: escribe «modelo» o «modelo ventana», con una ventana como 256k o 1m
+2792	Más modelos: 64 como máximo
+2793	El nombre del modelo solo admite letras, dígitos y . _ - : / @ +, hasta 128 caracteres: {id}
+2794	{n} eliminadas, {m} ya no existen (eliminadas en otro sitio o ya en la papelera)
+2795	{n} eliminadas, {m} aún generando y sin eliminar, {k} ya no existen
+2796	Instalando. Analiza el siguiente cuando termine.
+2797	Devuelto al borrador de la sesión original
+2798	Eliminado en la sesión original
+2799	Cambiaste de sesión, así que no se hizo este retroceso
+2800	Esta conversación ya no existe (eliminada o datos borrados)
+2801	Esta conversación se movió a la papelera
+2802	Últimas {n} de {m}
+2803	Se muestran las primeras {n} de {m} coincidencias. Prueba con una palabra más específica.
+2804	No se listan {n} conversaciones más antiguas. Búscalas por título o contenido.
+2805	No se pudo actualizar la lista (se muestra la anterior): {msg}
+2806	No se pudo cargar la lista de conversaciones: {msg}
+2807	No se pudo cargar la papelera: {msg}
+2808	{p} frente al mismo periodo del mes pasado
+2809	(conversación antigua o eliminada)
+2810	Proyecto eliminado · no se ejecutará
+2811	Proyecto eliminado: las ejecuciones se omitirán. Edita la tarea y vuelve a elegir un proyecto.
+2812	La conversación que continuaba se eliminó; la próxima ejecución empezará una nueva
+2813	Se muestran las últimas {n} de {m} ejecuciones
+2814	¿Eliminar la tarea programada «{n}»? Su historial de ejecuciones dejará de verse en la app; las conversaciones guardadas no se ven afectadas.
+2815	Los cambios no están guardados: la prueba usa la versión guardada. Pulsa «Guardar» primero.
+2816	El proyecto de la tarea se eliminó: edita la tarea y elige un proyecto
+2817	El proyecto de «{n}» se eliminó: edita la tarea y elige un proyecto
+2818	La tarea se está ejecutando: espera a que termine o detenla en su conversación y luego elimínala
+2819	Mostrar {n} más
+2820	El endpoint «{id}» no existe, así que este turno no se envió.
+2821	El endpoint de esta conversación («{id}») se eliminó, así que este turno no se envió. Elige otro en el panel de modelos y vuelve a enviar.
+2822	El endpoint predeterminado del proyecto («{id}») se eliminó, así que este turno no se envió. Vuelve a elegir uno en los ajustes del proyecto.
+2823	El endpoint de la tarea se eliminó: edita la tarea y elige otro
+2824	El endpoint de «{n}» se eliminó: edita la tarea y elige otro
+2825	El texto inyectado por el hook ({ev}) coincidió con un patrón de jailbreak, así que este turno se detuvo; el texto inyectado está plegado arriba.

@@ -2783,36 +2783,43 @@
 2783	Giliran ini tidak dimulai: kartu konfirmasi sebelum peluncuran tidak dijawab selama {n} menit, jadi dihentikan (dikirim {when}).
 2784	Claude tidak menerima pesan ini. Ketuk "Kirim ulang" untuk mengembalikannya ke kotak input.
 2785	Percakapan baru menunggu konfirmasi Anda · lihat "Percakapan baru belum tersimpan" di bilah samping
-2786	Percakapan baru belum tersimpan
-2787	{n} pesan lain yang belum tersimpan juga berhenti; berikutnya muncul setelah yang ini ditangani.
-2788	{n} dihapus, {m} sudah tidak ada (dihapus di tempat lain atau sudah di tempat sampah)
-2789	{n} dihapus, {m} masih membuat respons dan tidak dihapus, {k} sudah tidak ada
-2790	Sedang memasang. Analisis yang berikutnya setelah selesai.
-2791	Dikembalikan ke draf sesi asal
-2792	Dihapus di sesi asal
-2793	Anda berpindah sesi, jadi pemutaran balik ini tidak dijalankan
-2794	Percakapan ini sudah tidak ada (dihapus atau datanya dibersihkan)
-2795	Percakapan ini dipindahkan ke tempat sampah
-2796	{n} terbaru dari {m}
-2797	Menampilkan {n} pertama dari {m} hasil. Coba kata yang lebih spesifik.
-2798	{n} percakapan lebih lama tidak ditampilkan. Cari berdasarkan judul atau isi.
-2799	Daftar tidak berhasil diperbarui (menampilkan yang sebelumnya): {msg}
-2800	Gagal memuat daftar percakapan: {msg}
-2801	Gagal memuat tempat sampah: {msg}
-2802	{p} dibanding periode yang sama bulan lalu
-2803	(percakapan lama atau terhapus)
-2804	Proyek dihapus · tidak akan berjalan
-2805	Proyek dihapus: jadwal akan dilewati. Edit tugas dan pilih proyek lagi.
-2806	Percakapan yang dilanjutkan sudah dihapus; jalankan berikutnya akan memulai yang baru
-2807	Menampilkan {n} terbaru dari {m} kali berjalan
-2808	Hapus tugas terjadwal “{n}”? Riwayat jalannya tidak akan terlihat lagi di aplikasi; percakapan yang disimpan tidak terpengaruh.
-2809	Perubahan belum disimpan: uji coba memakai versi yang tersimpan. Ketuk “Simpan” dulu, lalu coba.
-2810	Proyek tugas ini sudah dihapus: edit tugas dan pilih proyek lagi
-2811	Proyek “{n}” sudah dihapus: edit tugas dan pilih proyek lagi
-2812	Tugas sedang berjalan: tunggu selesai, atau hentikan di percakapannya, lalu hapus
-2813	Tampilkan {n} lagi
-2814	Penyedia "{id}" tidak ada, jadi giliran ini tidak dikirim.
-2815	Penyedia percakapan ini ("{id}") sudah dihapus, jadi giliran ini tidak dikirim. Pilih penyedia lain di panel model lalu kirim lagi.
-2816	Penyedia bawaan proyek ("{id}") sudah dihapus, jadi giliran ini tidak dikirim. Pilih ulang penyedia di pengaturan proyek.
-2817	Penyedia tugas sudah dihapus: edit tugas dan pilih yang lain
-2818	Penyedia untuk "{n}" sudah dihapus: edit tugas dan pilih yang lain
+2786	local-mode.json bukan berkas biasa
+2787	Percakapan baru belum tersimpan
+2788	{n} pesan lain yang belum tersimpan juga berhenti; berikutnya muncul setelah yang ini ditangani.
+2789	Belum diatur: bawaan {line} · {pct}% dari jendela
+2790	Model lain (opsional, satu per baris; tambahkan jendela setelah spasi, mis. gpt-6.1-sol 1m)
+2791	Baris {n} pada Model lain tidak terbaca: tulis «model» atau «model jendela», jendela seperti 256k atau 1m
+2792	Model lain: paling banyak 64
+2793	Nama model hanya boleh huruf, angka, dan . _ - : / @ +, maksimal 128 karakter: {id}
+2794	{n} dihapus, {m} sudah tidak ada (dihapus di tempat lain atau sudah di tempat sampah)
+2795	{n} dihapus, {m} masih membuat respons dan tidak dihapus, {k} sudah tidak ada
+2796	Sedang memasang. Analisis yang berikutnya setelah selesai.
+2797	Dikembalikan ke draf sesi asal
+2798	Dihapus di sesi asal
+2799	Anda berpindah sesi, jadi pemutaran balik ini tidak dijalankan
+2800	Percakapan ini sudah tidak ada (dihapus atau datanya dibersihkan)
+2801	Percakapan ini dipindahkan ke tempat sampah
+2802	{n} terbaru dari {m}
+2803	Menampilkan {n} pertama dari {m} hasil. Coba kata yang lebih spesifik.
+2804	{n} percakapan lebih lama tidak ditampilkan. Cari berdasarkan judul atau isi.
+2805	Daftar tidak berhasil diperbarui (menampilkan yang sebelumnya): {msg}
+2806	Gagal memuat daftar percakapan: {msg}
+2807	Gagal memuat tempat sampah: {msg}
+2808	{p} dibanding periode yang sama bulan lalu
+2809	(percakapan lama atau terhapus)
+2810	Proyek dihapus · tidak akan berjalan
+2811	Proyek dihapus: jadwal akan dilewati. Edit tugas dan pilih proyek lagi.
+2812	Percakapan yang dilanjutkan sudah dihapus; jalankan berikutnya akan memulai yang baru
+2813	Menampilkan {n} terbaru dari {m} kali berjalan
+2814	Hapus tugas terjadwal “{n}”? Riwayat jalannya tidak akan terlihat lagi di aplikasi; percakapan yang disimpan tidak terpengaruh.
+2815	Perubahan belum disimpan: uji coba memakai versi yang tersimpan. Ketuk “Simpan” dulu, lalu coba.
+2816	Proyek tugas ini sudah dihapus: edit tugas dan pilih proyek lagi
+2817	Proyek “{n}” sudah dihapus: edit tugas dan pilih proyek lagi
+2818	Tugas sedang berjalan: tunggu selesai, atau hentikan di percakapannya, lalu hapus
+2819	Tampilkan {n} lagi
+2820	Penyedia "{id}" tidak ada, jadi giliran ini tidak dikirim.
+2821	Penyedia percakapan ini ("{id}") sudah dihapus, jadi giliran ini tidak dikirim. Pilih penyedia lain di panel model lalu kirim lagi.
+2822	Penyedia bawaan proyek ("{id}") sudah dihapus, jadi giliran ini tidak dikirim. Pilih ulang penyedia di pengaturan proyek.
+2823	Penyedia tugas sudah dihapus: edit tugas dan pilih yang lain
+2824	Penyedia untuk "{n}" sudah dihapus: edit tugas dan pilih yang lain
+2825	Teks yang disisipkan hook ({ev}) cocok dengan pola jailbreak, jadi giliran ini dihentikan; teks sisipan dilipat di atas.
