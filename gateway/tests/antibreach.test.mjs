@@ -7,6 +7,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { CFG } from "../gw/config.mjs";
 import { guardHooks, safeModePerm, settingsArgs } from "../gw/claude.mjs";
 import { SETTINGS } from "../gw/settings-store.mjs";
@@ -284,6 +285,13 @@ test("网关引导 boot.mjs：核过 FILES 才起，静态 import 的模块按�
   r = run(fsha, { ...gwEnv, CCAPP_CHILD_LD_LIBRARY_PATH: "/y/lib"});
   const g2 = JSON.parse(r.stdout.trim().split("\n").pop());
   assert.equal(g2.lp, "/y/lib", "原来有的照原样放回");
+  // 交来的 root 经过软链（路径上某一级是软链）：node 按真实路径加载，照样要认、照样核（11-07 升级后网关起不来）
+  const link = root + "-link";
+  fs.rmSync(link, { force: true }); fs.symlinkSync(root, link);
+  r = spawnSync(process.execPath, ["--input-type=module", "-e", boot, link, "8123"], { cwd: CFG.workspace, encoding: "utf8", env: { ...process.env, CCAPP_FILES_SHA: fsha, NODE_OPTIONS: "" } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout.trim().split("\n").pop()).v, 1);
+  fs.rmSync(link, { force: true });
   assert.equal(run("0".repeat(64)).status, 3, "FILES 和应用交来的哈希对不上");
   assert.equal(run("").status, 3, "没交哈希也不起");
   // 核完之后模块被换（盘上的和清单不符）：不加载
@@ -295,6 +303,13 @@ test("网关引导 boot.mjs：核过 FILES 才起，静态 import 的模块按�
   fs.writeFileSync(path.join(root, "gw", "evil.mjs"), "console.log('pwned');\n");
   r = run(fsha);
   assert.equal(r.status, 3); assert.doesNotMatch(r.stdout, /pwned/);
+  // 安装目录外的 file: 模块（软链指出去的）：不加载
+  const outside = path.join(CFG.workspace, "bootout.mjs");
+  fs.writeFileSync(outside, "console.log('outside');\n");
+  fsha = setup(`\nimport ${JSON.stringify(pathToFileURL(outside).href)};`);
+  r = run(fsha);
+  assert.equal(r.status, 3); assert.match(r.stderr, /不在安装目录里/); assert.doesNotMatch(r.stdout, /outside/);
+  fs.rmSync(outside, { force: true });
   fs.rmSync(root, { recursive: true, force: true });
 });
 

@@ -47,10 +47,16 @@ const want = new Map();
 for (const l of list.toString("utf8").split("\n")) if (l.length > 65) want.set(l.slice(65), l.slice(0, 64));
 
 let refused = false;
-const base = pathToFileURL(root.replace(/\/+$/, "") + "/").href;
+// node 按真实路径加载模块（软链会被解析掉）：应用交来的 root 路径上某一级是软链时，模块 URL 是真实路径那一份，
+// 只认交来的写法会把 server.mjs 自己也当成「不在安装目录里」，网关起一次退一次（11-07 群友升级 0.6.8 后网关起不来）。
+// 两种写法都认；认了以后照样逐个按 FILES 核字节，root 被指到别处的内容对不上清单一样不加载
+let real = root;
+try { real = fs.realpathSync(root); } catch {}
+const bases = [...new Set([root, real].map((d) => pathToFileURL(d.replace(/\/+$/, "") + "/").href))];
 module.registerHooks({
   load(url, ctx, next) {
-    if (!url.startsWith(base)) {
+    const base = bases.find((b) => url.startsWith(b));
+    if (!base) {
       // 应用代码只允许从 files/app 里加载：软链被 Node 解析成外部真实路径后，前缀判断会放行。
       // 内置模块是 node: 开头，不在这里；file: 的外部模块一律拒绝（审查 11-05）
       if (url.startsWith("file:")) {
