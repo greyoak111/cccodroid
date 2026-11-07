@@ -2,7 +2,7 @@
 import "../gw/config.mjs";   // 放最前：没走 scripts/test.mjs（没有临时 home）就在这里拦下，下面一行都不跑
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyCatalog, buildCatalog, catalogKeys } from "../gw/models.mjs";
+import { applyCatalog, buildCatalog, catalogKeys, effortLevelsOf } from "../gw/models.mjs";
 
 // 同一 id 在不同厂商目录里窗口不一样：m2 有 200000/4000 两票，128000/0 一票
 const RAW = {
@@ -61,4 +61,10 @@ test("catalogKeys：配置里写死的排前面，域名按 api.<名>.<后缀> �
   assert.deepEqual(catalogKeys({ catalog: "custom", baseUrl: "https://api.opencode.ai/v1" }), ["custom", "opencode-go", "opencode"]);
   assert.deepEqual(catalogKeys({ baseUrl: "https://example.com/v1" }), ["example-go", "example"]);
   assert.deepEqual(catalogKeys({ baseUrl: "不是网址" }), []);
+});
+
+test("effortLevelsOf：supported_levels 不是数组时回退默认档位，不把对象丢给 .includes", () => {
+  assert.deepEqual(effortLevelsOf({ id: "m", effort: { supported_levels: { low: true } } }, { nativeModels: false }), ["low", "high", "max"]);
+  assert.deepEqual(effortLevelsOf({ id: "m", effort: { supported_levels: { low: true } } }, { nativeModels: true }), ["low", "medium", "high", "xhigh", "max"]);
+  assert.deepEqual(effortLevelsOf({ id: "m", effort: { supported_levels: ["low", "high"] } }, { nativeModels: false }), ["low", "high"]);
 });

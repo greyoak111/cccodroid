@@ -2781,4 +2781,6 @@ window.I18N_DICT["es"] = {
   "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。": "Esta versión de Claude Code aún no tiene el manifiesto oficial firmado, así que este turno no se inició. Se está volviendo a verificar en línea: envía de nuevo en un par de minutos. Si sigue fallando, reinstálala desde Ajustes → Actualizaciones.",
   "网关自己的运行库被改过，这一轮没有启动 Claude Code。网关会在空闲时重启、按安装包还原，稍后再发送。": "El entorno propio de la pasarela fue modificado, así que Claude Code no se inició en este turno. La pasarela se reiniciará cuando esté inactiva y lo restaurará desde el paquete; vuelve a enviar en un momento.",
   "本机读不到 {path}：可能在远程机器上，或者已经被删掉": "No se puede leer {path} en este dispositivo: puede estar en una máquina remota o haberse eliminado",
+  "设置写盘失败，模式没有切换": "No se pudo guardar la configuración, así que el modo no cambió",
+  "「每隔几小时」的开始时间要早于结束时间；跨午夜请拆成两个任务": "En «Cada pocas horas», la hora de inicio debe ser anterior a la de fin. Para cruzar la medianoche, divídela en dos tareas",
 };

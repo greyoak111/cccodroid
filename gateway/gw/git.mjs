@@ -100,20 +100,30 @@ async function gitRisks(root) {
   // 钩子：core.hooksPath 已算进上面；默认目录里非 .sample 的文件
   const hp = await git(root, ["rev-parse", "--git-path", "hooks"]);
   if (!hp.code) {
-    const dir = path.resolve(root, hp.out.trim());
-    let names = [];
-    try { names = fs.readdirSync(dir).filter((n) => !n.endsWith(".sample") && (() => { try { return fs.statSync(path.join(dir, n)).isFile(); } catch { return false; } })()); } catch {}
-    // 指纹覆盖全部钩子的内容 + 权限，且不再只取前 20 个（审查 11-05）
-    for (const n of names) {
-      let h = "";
-      try {
-        const p = path.join(dir, n), st = fs.statSync(p);
-        h = crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex") + ":" + (st.mode & 0o777).toString(8);
-      } catch (e) { h = "unreadable:" + (e.code || e.message); }
-      fp.push(`hook\0${n}\0${h}`);
+    const rel = hp.out.trim();
+    // core.hooksPath= 时 rev-parse 会回 "./"：不能把仓库根当钩子目录，否则会把顶层所有文件都读一遍
+    if (!rel || rel === "." || rel === "./") {
+      fp.push("hooks\0invalid");
+      risks.push("hook: core.hooksPath 指向仓库根");
+    } else {
+      const dir = path.resolve(root, rel);
+      let names = [];
+      try { names = fs.readdirSync(dir).filter((n) => !n.endsWith(".sample") && (() => { try { return fs.statSync(path.join(dir, n)).isFile(); } catch { return false; } })()); } catch {}
+      // 指纹覆盖全部钩子的内容 + 权限，且不再只取前 20 个（审查 11-05）。
+      // 大钩子只记大小/时间，不整读：钩子可由仓库自带，1GB 的文件能把网关读挂
+      for (const n of names) {
+        let h = "";
+        try {
+          const p = path.join(dir, n), st = fs.statSync(p);
+          h = st.size > (1 << 20)
+            ? `big:${st.size}:${st.mtimeMs}:${(st.mode & 0o777).toString(8)}`
+            : crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex") + ":" + (st.mode & 0o777).toString(8);
+        } catch (e) { h = "unreadable:" + (e.code || e.message); }
+        fp.push(`hook\0${n}\0${h}`);
+      }
+      for (const n of names.slice(0, 20)) risks.push(`hook: ${n}`);
+      if (names.length > 20) risks.push(`hook: …（共 ${names.length} 个钩子）`);
     }
-    for (const n of names.slice(0, 20)) risks.push(`hook: ${n}`);
-    if (names.length > 20) risks.push(`hook: …（共 ${names.length} 个钩子）`);
   }
   return { risks, fp: fp.join("\n") };
 }
@@ -164,9 +174,14 @@ async function gitNet(root, args) {
   const sc = await git(root, ["config", "core.sshCommand"]);
   const env = sc.out.trim() ? {} : { GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20" };
   return new Promise((resolve) => {
-    execFile("git", [...GIT_PRE, ...args],
-      { cwd: root, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", LC_ALL: "C.UTF-8", ...env }, timeout: 180000, maxBuffer: 4 << 20, encoding: "utf8" },
-      (err, out, errOut) => resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, out: out || "", err: (errOut || (err && err.killed ? "timeout" : err?.message) || "").trim() }));
+    // detached 让 git 当进程组长：超时 execFile 只杀 git，pre-push 钩子/ssh 还在同一个组里，
+    // 由下面按 -pid 整组杀掉；不 detached 的话钩子会继续写仓库、和用户重试撞在一起
+    const child = execFile("git", [...GIT_PRE, ...args],
+      { cwd: root, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", LC_ALL: "C.UTF-8", ...env }, timeout: 180000, maxBuffer: 4 << 20, encoding: "utf8", detached: true },
+      (err, out, errOut) => {
+        if (err && err.killed) { try { process.kill(-child.pid, "SIGKILL"); } catch {} }
+        resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, out: out || "", err: (errOut || (err && err.killed ? "timeout" : err?.message) || "").trim() });
+      });
   });
 }
 function gitNetHuman(err) {
@@ -263,9 +278,20 @@ async function gitStatus(root) {
     for (const rec of ns.out.split("\0")) { const m = rec.match(/^(\d+|-)\t(\d+|-)\t(.+)$/); if (m) map.set(m[3], [m[1], m[2]]); }
     for (const f of out.files) { const n = map.get(f.path); if (n) { f.add = n[0] === "-" ? null : +n[0]; f.del = n[1] === "-" ? null : +n[1]; } }
   }
-  for (const f of out.files) if (f.kind === "new" && f.add == null) {
+  // 未跟踪文件的行数只用于 +N 展示。给总读取量封顶，别让浏览一个含很多大文件的目录把事件循环同步卡死
+  // （审查 11-05：1000 个 2MB 文件 ≈ 2GB 同步读）
+  let readBudget = 8 << 20;
+  for (const f of out.files) if (f.kind === "new" && f.add == null && readBudget > 0) {
     // 只数普通文件、不跟软链：未跟踪的软链指向 /dev/zero 时 stat 报 0 字节，一读就读不完（11-03 审查 L-7）
-    try { const st = fs.lstatSync(path.join(root, f.path)); if (st.isFile() && st.size < 2 << 20) { const t = fs.readFileSync(path.join(root, f.path)); f.add = t.includes(0) ? null : (t.length ? t.toString("utf8").split("\n").length - (t[t.length - 1] === 10 ? 1 : 0) : 0); f.del = 0; f.binary = t.includes(0); } } catch {}
+    try {
+      const st = fs.lstatSync(path.join(root, f.path));
+      if (st.isFile() && st.size < 2 << 20 && st.size <= readBudget) {
+        readBudget -= st.size;
+        const t = fs.readFileSync(path.join(root, f.path));
+        f.add = t.includes(0) ? null : (t.length ? t.toString("utf8").split("\n").length - (t[t.length - 1] === 10 ? 1 : 0) : 0);
+        f.del = 0; f.binary = t.includes(0);
+      }
+    } catch {}
   }
   return out;
 }

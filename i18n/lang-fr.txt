@@ -2778,3 +2778,5 @@
 2778	Cette version de Claude Code n’a pas encore de manifeste officiel signé, ce tour n’a donc pas été lancé. Une nouvelle vérification en ligne est en cours : renvoyez dans une ou deux minutes. Si cela échoue toujours, réinstallez-la depuis Réglages → Mises à jour.
 2779	Le runtime propre à la passerelle a été modifié : Claude Code n'a pas été lancé pour ce tour. La passerelle redémarrera dès qu'elle sera inactive et le restaurera depuis le paquet ; renvoyez dans un instant.
 2780	Impossible de lire {path} sur cet appareil : il se trouve peut-être sur une machine distante, ou a été supprimé
+2781	Impossible d’enregistrer les réglages : le mode n’a pas été changé
+2782	Pour « Toutes les quelques heures », l’heure de début doit précéder l’heure de fin. Pour passer minuit, scindez-la en deux tâches

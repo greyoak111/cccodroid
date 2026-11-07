@@ -2,7 +2,7 @@
 import "../gw/config.mjs";   // 放最前：没走 scripts/test.mjs（没有临时 home）就在这里拦下，下面一行都不跑
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCron } from "../gw/sched.mjs";
+import { parseCron, _schedForTest } from "../gw/sched.mjs";
 
 test("超大范围夹到合法区间，不会空转卡死网关", () => {
   const t0 = Date.now();
@@ -18,4 +18,9 @@ test("星期 7 并进 0，1-7 不变成空集", () => {
 
 test("反向范围、越界值展开为空：报错，不存一个永远不跑的任务", () => {
   for (const e of ["5-3 * * * *", "0 25 * * *", "0 9 32 * *"]) assert.throws(() => parseCron(e), /bad cron/, e);
+});
+
+test("跨午夜的「每隔几小时」窗口保存时拒绝，不存一个永远不跑的任务", () => {
+  assert.throws(() => _schedForTest.clean({ name: "night", prompt: "x", freq: { kind: "every", hours: 2, from: "22:00", to: "02:00" } }, {}), /开始时间/);
+  assert.doesNotThrow(() => _schedForTest.clean({ name: "day", prompt: "x", freq: { kind: "every", hours: 2, from: "08:00", to: "22:00" } }, {}));
 });

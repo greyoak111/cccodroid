@@ -368,7 +368,10 @@ const sameFingerprints = (value, provider) => value.fingerprint === localFingerp
 function writeProviderState(value) {
   const file = providerStateFile(), temp = file + "." + crypto.randomBytes(6).toString("hex") + ".tmp";
   try {
+    // 先 fsync 再 rename：掉电时不会换上一个还没写进去的空映射（同 providers.mjs 的 saveProvidersRaw）
     fs.writeFileSync(temp, JSON.stringify(value), { flag: "wx", mode: 0o600 });
+    const fd = fs.openSync(temp, "r+");
+    try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.renameSync(temp, file);
   } finally { try { fs.unlinkSync(temp); } catch {} }
 }

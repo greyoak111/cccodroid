@@ -2778,3 +2778,5 @@
 2778	Versi Claude Code ini belum punya manifest resmi bertanda tangan, jadi giliran ini tidak dimulai. Sedang diverifikasi ulang secara daring — kirim lagi dalam satu-dua menit. Jika terus gagal, pasang ulang dari Pengaturan → Pembaruan.
 2779	Runtime milik gateway telah diubah, jadi Claude Code tidak dijalankan pada giliran ini. Gateway akan mulai ulang saat senggang dan memulihkannya dari paket; kirim lagi sebentar lagi.
 2780	Tidak bisa membaca {path} di perangkat ini: mungkin ada di mesin jarak jauh, atau sudah dihapus
+2781	Gagal menyimpan pengaturan, jadi mode tidak diganti
+2782	Untuk “Setiap beberapa jam”, waktu mulai harus lebih awal dari waktu selesai. Untuk melewati tengah malam, pecah menjadi dua tugas

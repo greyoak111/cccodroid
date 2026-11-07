@@ -153,8 +153,8 @@
       if (act === "copy") { copyText(cmdText); return toast(t("已复制")); }
     };
     box.querySelectorAll('input[name="lm"]').forEach((r) => r.addEventListener("change", async () => {
-      await post("/api/local", { mode: r.value }).catch((e2) => toast(e2.message, true));
-      toast(t("已切换（下一条消息生效）"));
+      try { await post("/api/local", { mode: r.value }); toast(t("已切换（下一条消息生效）")); }
+      catch (e2) { toast(e2.message, true); renderLocalCard(box, p); }   // 失败回滚 radio，别把错误 toast 盖成成功
     }));
   }
 
