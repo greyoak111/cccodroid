@@ -180,6 +180,7 @@ public class GatewayService extends Service {
     /** 守护循环：网关退出就重拉；连续快速崩溃时退避，别把电池耗光 */
     private void supervise() {
         long backoff = 1000;
+        String why = null;
         while (!stopping) {
             if (paused) { update(Tr.t("正在更新开发工具包…")); sleep(1000); continue; }
             if (!env.devkitReady()) { update(Tr.t("工具链未安装")); sleep(3000); continue; }
@@ -199,7 +200,8 @@ public class GatewayService extends Service {
                 update(Tr.t("运行中 · 127.0.0.1:") + Env.PORT);
                 int rc = proc.waitFor();
                 Env.resetBoot();             // 网关没了：上一次核身份的缓存作废，别在 3 秒内把签名请求交给接手端口的人
-                Log.w(TAG, "网关退出 rc=" + rc);
+                why = exitWhy(rc);
+                Log.w(TAG, "网关退出 rc=" + rc + (why != null ? "：" + why : ""));
             } catch (GwUnavailable e) {
                 Log.e(TAG, "网关运行库对不上，不起网关：" + e.getMessage());
                 gwBlocked = Tr.f("网关自己的运行库和安装包对不上，为了安全没有启动网关：{0}\n\n联网后会自动再试；一直不行请重装 cccodroid", e.getMessage());
@@ -215,7 +217,9 @@ public class GatewayService extends Service {
             }
             if (stopping) break;
             backoff = System.currentTimeMillis() - t0 > 60000 ? 1000 : Math.min(backoff * 2, 60000);
-            update(Tr.f("网关已退出，{0} 秒后重启", backoff / 1000));
+            // 反复退出时用户多半拿不到日志（界面停在「等待网关」页）：把这次退出的原因带进通知，截个图就能定位（11-07 升级后网关起不来）
+            update(why != null ? Tr.f("网关已退出：{0}，{1} 秒后重启", why, backoff / 1000) : Tr.f("网关已退出，{0} 秒后重启", backoff / 1000));
+            why = null;
             sleep(backoff);
         }
     }
@@ -306,6 +310,7 @@ public class GatewayService extends Service {
         // 一直追加会无限长：起网关前超过 8 MB 就挪成 .1（只留一份旧的 —— 审查 低16）
         if (gout.length() > (8L << 20)) { File old = new File(env.home, "gateway.out.1"); old.delete(); gout.renameTo(old); }
         pb.redirectOutput(ProcessBuilder.Redirect.appendTo(gout));
+        goutFrom = gout.length();
         // 先换上新的再起：网关读到 stdin 之前答不了话，核身份不会拿旧的去比
         Env.spawnKey = ks.toString();
         Env.resetBoot();
@@ -395,10 +400,33 @@ public class GatewayService extends Service {
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
             .setContentTitle("cccodroid")
             .setContentText(text)
+            .setStyle(new Notification.BigTextStyle().bigText(text))
             .setOngoing(true)
             .setContentIntent(open)
             .addAction(new Notification.Action.Builder(null, Tr.t("停止"), stop).build())
             .build();
+    }
+
+    private long goutFrom;           // 这次起网关前 gateway.out 的长度：退出时只看这一次写的
+
+    /** 这次网关为什么退出：gateway.out 里这一次写下的最后一条 ⚠️ 或报错行（去掉时间戳，截短）；找不到给退出码 */
+    private String exitWhy(int rc) {
+        File gout = new File(env.home, "gateway.out");
+        String last = null;
+        try (java.io.RandomAccessFile r = new java.io.RandomAccessFile(gout, "r")) {
+            long n = r.length(), from = Math.max(goutFrom, n - 16384);
+            if (n > from) {
+                byte[] b = new byte[(int) (n - from)];
+                r.seek(from); r.readFully(b);
+                String[] lines = new String(b, java.nio.charset.StandardCharsets.UTF_8).split("\n");
+                for (int i = lines.length - 1; i >= 0 && last == null; i--) {
+                    String l = lines[i].replaceFirst("^\\[[^\\]]*\\]\\s*", "").trim();
+                    if (l.startsWith("⚠️") || l.matches("^\\w*Error\\b.*") || l.contains("Error:")) last = l;
+                }
+            }
+        } catch (Exception ignored) {}
+        if (last == null) return rc == 0 ? null : Tr.f("退出码 {0}", rc);
+        return last.length() > 160 ? last.substring(0, 160) + "…" : last;
     }
 
     private static void sleep(long ms) { try { Thread.sleep(ms); } catch (InterruptedException ignored) {} }
