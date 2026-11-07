@@ -1996,6 +1996,7 @@ window.I18N_DICT["fr"] = {
   "用量逼近这条线时自动摘要历史。线放低更省、记得更少；放高记得多，但每轮更贵、更慢。": "L’historique est résumé automatiquement quand l’usage approche ce seuil. Plus bas : plus économique mais moins de mémoire ; plus haut : plus de mémoire mais chaque tour coûte plus et va moins vite.",
   "{line} · 窗口的 {pct}%": "{line} · {pct} % de la fenêtre",
   "没设，交给 claude 按窗口决定": "Non défini ; claude décide selon la fenêtre",
+  "没设：默认 {line} · 窗口的 {pct}%": "Non défini : par défaut {line} · {pct} % de la fenêtre",
   "拍照": "Prendre une photo",
   "长按：5 秒后截屏": "Appui long : capture dans 5 s",
   "展开工具": "Afficher les outils",

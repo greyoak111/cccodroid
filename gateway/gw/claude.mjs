@@ -5,7 +5,8 @@ import { spawn } from "node:child_process";
 import { CFG, GLIBC_PRELOAD, NO_BRIDGE, PATHS, PREFIX, glibcEnv, log, sleep, tz } from "./config.mjs";
 import { SETTINGS, outputStyles } from "./settings-store.mjs";
 import { PROVIDER, keyOf } from "./providers.mjs";
-import { cachedModels } from "./models.mjs";
+import { cachedModels, defaultCompactLine } from "./models.mjs";
+import { effectiveAutoCompact } from "./stream.mjs";
 import { fixedBaseUrl } from "./streamfix.mjs";
 import { archiveHooks } from "./archive-core.mjs";
 import { fileURLToPath } from "node:url";
@@ -323,6 +324,13 @@ export function claudeEnv(o = {}) {
   // 端侧小模型不传：窗口只有几万 token 时，claude 同时看到窗口和压缩线，每次发请求前都判定「已超线」先去压缩（实测）
   if (SETTINGS.autoCompactWindow && !p.local) {
     env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(SETTINGS.autoCompactWindow);
+  } else {
+    // 没设：第三方型号窗口已知就给默认线，否则 claude 不按阈值压（见 defaultCompactLine）。
+    // 继承来的值先擦掉：网关自己可能是从一个带着这个变量的 claude 会话里起的
+    delete env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+    // 用户在 ~/.claude/settings.json 里自己写了 autoCompactWindow（effectiveAutoCompact 认得）就不盖它：环境变量优先级更高
+    const d = !p.local && !effectiveAutoCompact() && defaultCompactLine(Number(info && info.context_window) || 0, p);
+    if (d) env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(d);
   }
   // 厂商文档要求的额外变量（如 GLM 的 API_TIMEOUT_MS）。只收字符串，且不许借道改密钥/端点，
   // 也不许碰「执行什么、加载什么」的变量：自定义厂商的配置能分享导入，带着 CLAUDE_CODE_SHELL(_PREFIX)、LD_PRELOAD、

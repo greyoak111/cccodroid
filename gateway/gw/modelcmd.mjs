@@ -1,7 +1,7 @@
 import { log } from "./config.mjs";
 import { SETTINGS, saveSettings } from "./settings-store.mjs";
 import { PROVIDER, providerById } from "./providers.mjs";
-import { effortLevelsOf, fetchModels, normEffort } from "./models.mjs";
+import { defaultCompactLine, effortLevelsOf, fetchModels, normEffort } from "./models.mjs";
 import { effectiveAutoCompact } from "./stream.mjs";
 import { effectiveModel, setSessModel } from "./sessmodel.mjs";
 
@@ -45,9 +45,9 @@ export async function handleLocalCommand(name, arg, reply, sid, stopped = () => 
     const win = Number(cur && cur.context_window) || 0;
     const fmt = (n) => (n >= 1e6 ? +(n / 1e6).toFixed(2) + "M" : Math.round(n / 1000) + "k");
     if (!arg) {
-      const v = effectiveAutoCompact();
+      const v = effectiveAutoCompact(), d = v ? null : defaultCompactLine(win, P);
       return reply(
-        `自动压缩线：**${v ? fmt(v) + " tokens" : "默认（由 claude 按模型窗口决定）"}**${win ? `　（当前模型窗口 ${fmt(win)}）` : ""}\n\n` +
+        `自动压缩线：**${v ? fmt(v) + " tokens" : d ? `默认 ${fmt(d)} tokens（第三方型号按窗口的八成）` : "默认（由 claude 按模型窗口决定）"}**${win ? `　（当前模型窗口 ${fmt(win)}）` : ""}\n\n` +
         "用法：`/autocompact 400k`、`/autocompact 1m`；恢复默认：`/autocompact off`。设置页「自动压缩」一栏是同一个值。",
         "autocompact"
       );

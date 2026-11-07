@@ -341,7 +341,7 @@
                     t("该厂商由 claude 自己决定模型，没有可切换的清单。要指定就改 <code>ccapp-providers.json</code> 的 <code>defaultModel</code>。");
       } else $("model-info").textContent = "";    // 上一家的能力说明别留着（审查 #52 D-03）
       // 设置页是全局默认：只按全局型号的窗口画，不借顶栏当前会话的 state.ctxTotal（#76）
-      acPaint(Number(r.contextWindow) || 0, r.autoCompactWindow);
+      acPaint(Number(r.contextWindow) || 0, r.autoCompactWindow, r.compactDefault);
       return true;
     } catch (e) {
       if (my !== modelsSeq) return null;
@@ -535,24 +535,26 @@
   });
   // ── 压缩线滑块（接口与型号页）：0–100 映射到 [20k, 模型窗口]；没设 = 交给 claude，滑块停在最右、虚线轨道 ──
   const AC_MIN = 20000;
-  let acWin = 0, acSet = 0, acForce = false;   // acForce：刚存过，焦点还在控件上也按存下的值回填（没存上就弹回去）
+  let acWin = 0, acSet = 0, acDef = 0, acForce = false;   // acDef：没设时网关给第三方型号的默认线（0 = 交给 claude）   // acForce：刚存过，焦点还在控件上也按存下的值回填（没存上就弹回去）
   function acStep() { return Math.max(1000, Math.ceil((acWin - AC_MIN) / 100 / 1000) * 1000); }
   function acTok(p) { return Math.min(acWin, Math.round((AC_MIN + (acWin - AC_MIN) * p / 100) / acStep()) * acStep()); }
   function acPos(v) { return Math.max(0, Math.min(100, (v - AC_MIN) / (acWin - AC_MIN) * 100)); }
   function acShow(v) {
-    const rg = $("ac-range"), pct = v ? acPos(v) : 100;
+    const rg = $("ac-range"), pct = v ? acPos(v) : acDef ? acPos(acDef) : 100;
     rg.style.setProperty("--p", pct + "%");
     $("ac-range").parentNode.classList.toggle("auto", !v);
-    $("ac-val").textContent = v ? t("{line} · 窗口的 {pct}%", { line: fmtTok(v), pct: Math.round(v / acWin * 100) }) : t("没设，交给 claude 按窗口决定");
+    $("ac-val").textContent = v ? t("{line} · 窗口的 {pct}%", { line: fmtTok(v), pct: Math.round(v / acWin * 100) })
+      : acDef ? t("没设：默认 {line} · 窗口的 {pct}%", { line: fmtTok(acDef), pct: Math.round(acDef / acWin * 100) })
+      : t("没设，交给 claude 按窗口决定");
     $("ac-auto").classList.toggle("hidden", !v);
   }
-  function acPaint(win, set) {
+  function acPaint(win, set, def) {
     const box = $("ac-slide");
-    acWin = Number(win) || 0; acSet = Number(set) || 0;
+    acWin = Number(win) || 0; acSet = Number(set) || 0; acDef = Number(def) || 0;
     box.classList.toggle("hidden", acWin <= AC_MIN);
     if (acWin <= AC_MIN) return;
     const rg = $("ac-range");
-    if (acForce || document.activeElement !== rg) rg.value = acSet ? acPos(acSet) : 100;
+    if (acForce || document.activeElement !== rg) rg.value = acSet ? acPos(acSet) : acDef ? acPos(acDef) : 100;
     acForce = false;
     $("ac-min").textContent = fmtTok(AC_MIN); $("ac-max").textContent = fmtTok(acWin);
     acShow(acSet);

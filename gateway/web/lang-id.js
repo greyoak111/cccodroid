@@ -1996,6 +1996,7 @@ window.I18N_DICT["id"] = {
   "用量逼近这条线时自动摘要历史。线放低更省、记得更少；放高记得多，但每轮更贵、更慢。": "Riwayat diringkas otomatis saat penggunaan mendekati batas ini. Batas rendah lebih hemat tetapi mengingat lebih sedikit; batas tinggi mengingat lebih banyak, tetapi setiap giliran lebih mahal dan lebih lambat.",
   "{line} · 窗口的 {pct}%": "{line} · {pct}% dari jendela",
   "没设，交给 claude 按窗口决定": "Belum diatur; claude menentukan sesuai jendela",
+  "没设：默认 {line} · 窗口的 {pct}%": "Belum diatur: bawaan {line} · {pct}% dari jendela",
   "拍照": "Ambil foto",
   "长按：5 秒后截屏": "Tekan lama: tangkapan layar setelah 5 detik",
   "展开工具": "Tampilkan alat",

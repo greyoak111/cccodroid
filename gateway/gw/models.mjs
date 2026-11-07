@@ -355,6 +355,17 @@ export function normEffort(model, want, p = PROVIDER) {
 }
 
 /** 压缩线 = min(设置的自动压缩窗口, 模型窗口)；第三方型号不知道窗口时 claude 按 200k 算 */
+/** 第三方型号没设压缩线时网关给的默认线（11-07 群友：deepseek-flash 涨到 1M 也不压缩）。
+ *  网关对第三方带着 CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT，claude 这时不按阈值压，
+ *  只等接口报「prompt is too long」；DeepSeek 报的是「maximum context length」，claude 认不出，于是一路涨到撞窗口，
+ *  撞上之后连手动 /compact 都发不出去（全文 + 32k 输出超窗口）。所以窗口已知时总给一条线：
+ *  窗口的八成，且至少给总结请求留 40k；claude 只认 100k–1M（大了按 1M、2.1.311 实测），够不着 100k 的窗口不给。
+ *  原生厂商（claude 认得模型）和端侧小模型不给，见 claudeEnv */
+export function defaultCompactLine(win, p) {
+  if (!p || p.nativeModels || p.local || !(win > 0)) return null;
+  const n = Math.floor(Math.min(win * 0.8, win - 40000, 1000000) / 1000) * 1000;
+  return n >= 100000 ? n : null;
+}
 export function compactLineOf(set, win, p) {
   if (!set) return null;
   const w = win > 0 ? win : (p && !p.nativeModels && !p.local ? 200000 : 0);
@@ -397,7 +408,9 @@ export async function routeModels(req, res, u, p) {
       autoCompactWindow: effectiveAutoCompact(),
       // 真正生效的压缩线：设得比模型窗口还大时，claude 按窗口来（不知道窗口的第三方型号按 200k 算），
       // 界面别把 528k 当成压缩线报（#67）。设置页的输入框仍显示 autoCompactWindow
-      compactLine: compactLineOf(effectiveAutoCompact(), Number(cur.context_window) || 0, pp),
+      compactLine: compactLineOf(effectiveAutoCompact(), Number(cur.context_window) || 0, pp) ?? defaultCompactLine(Number(cur.context_window) || 0, pp),
+      // 没设、由网关给了默认线（第三方型号）：设置页的滑块按它画，别再说「交给 claude」
+      compactDefault: effectiveAutoCompact() ? null : defaultCompactLine(Number(cur.context_window) || 0, pp),
     });
   }
   return NEXT;
