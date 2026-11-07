@@ -399,11 +399,17 @@ export function killTree(child) {
   }
 }
 
+/** 进程启动时刻（开机后的滴答，/proc/<pid>/stat 第 22 项）；读不到 null */
+function startTicks(pid, st) {
+  try { st ??= fs.readFileSync("/proc/" + pid + "/stat", "utf8"); return +st.slice(st.lastIndexOf(")") + 2).split(" ")[19]; } catch { return null; }
+}
+
 /** 网关启动时清掉上一任留下的孤儿（v0.2.0 设计 A3）。
  *  上一任网关被杀 / 崩溃时，它拉起的 claude 和 claude 另开进程组的子 shell 会被 init 收养（PPID=1），
  *  没人读它们的输出却还在干活：推提交、跑构建、占内存。新网关接不回它们，只能清掉。
  *  认法：本 uid、PPID=1，且环境里带 CCAPP_RUN=1（claudeEnv 打的标记，子孙都继承），
  *  或命令行就是我们的 claude（打标记之前的版本留下的）。连子孙一起、按进程组杀（同 killTree）。
+ *  环境里的 CCAPP_GW_PID（run.mjs）指向的网关还活着、且比它起得早的不收：那是活网关名下用 setsid 脱出去的，不是上一任留下的。
  *  只在 cccodroid 做：开发端换网关（gw-swap.sh）时上一任的运行还要接着用。 */
 export function reapOrphans() {
   if (!PREFIX) return;
@@ -418,7 +424,12 @@ export function reapOrphans() {
       if (+st.slice(st.lastIndexOf(")") + 2).split(" ")[1] !== 1) continue;
       const env = "\0" + fs.readFileSync("/proc/" + n + "/environ", "latin1");
       const cmd = fs.readFileSync("/proc/" + n + "/cmdline", "utf8");
-      if (env.includes("\0CCAPP_RUN=1\0") || cmd.includes(PATHS.claude)) victims.push([+n, cmd.replace(/\0/g, " ").trim().slice(0, 80)]);
+      if (!(env.includes("\0CCAPP_RUN=1\0") || cmd.includes(PATHS.claude))) continue;
+      // 起它的网关还活着（setsid 脱出去的后台任务，或者测试里另起的网关碰上了真网关的运行）：不是孤儿，不收。
+      // 那个 pid 若被别的进程复用，启动时刻会晚于它，照收
+      const gw = +(/\0CCAPP_GW_PID=(\d+)\0/.exec(env) || [])[1], t0 = gw && gw !== process.pid ? startTicks(gw) : null;
+      if (t0 != null && t0 <= startTicks(+n, st)) continue;
+      victims.push([+n, cmd.replace(/\0/g, " ").trim().slice(0, 80)]);
     } catch {}
   }
   for (const [pid, cmd] of victims) {
