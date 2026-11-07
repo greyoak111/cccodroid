@@ -228,7 +228,7 @@ export function withConfigured(list, p) {
   const one = (id, w) => ({ id, context_window: w, max_output_tokens: 0, input_modalities: ["text"], effort: null, configured: true });
   const out = !list.length ? ids.map((id) => one(id, cw))
     : cw ? list.map((m) => (ids.includes(m.id) && !m.context_window ? { ...m, context_window: cw, configured: true } : m)) : list;
-  // 用户在接口卡里另加的型号（中转站清单拉不到、或清单里没有的）：接在后面，没写窗口的按这家声明的窗口算
+  // 用户在接口卡里另加的型号（第三方端口清单拉不到、或清单里没有的）：接在后面，没写窗口的按这家声明的窗口算
   const more = extraModelsOf(p).filter((e) => !out.some((m) => m.id === e.id));
   return more.length ? [...out, ...more.map((e) => one(e.id, e.contextWindow || cw))] : out;
 }

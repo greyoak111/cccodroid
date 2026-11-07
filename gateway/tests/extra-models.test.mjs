@@ -1,4 +1,4 @@
-// 自定义接口另加型号（11-07 群友：中转站加好之后只有默认那一个型号，想再加几个）
+// 自定义接口另加型号（11-07 群友：第三方端口加好之后只有默认那一个型号，想再加几个）
 import "../gw/config.mjs";   // 放最前：没走 scripts/test.mjs（没有临时 home）就在这里拦下
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -25,7 +25,7 @@ test("配置能分享导入、也能手改：形状不对的丢掉，最多 64 �
 });
 
 test("接口卡保存：存进配置、清单里出现、选它时下发它的窗口；空数组清掉；坏名字拒收", async () => {
-  const r = upsertProvider("", { label: "中转", baseUrl: "http://127.0.0.1:1", defaultModel: "m-a", contextWindow: 1048576,
+  const r = upsertProvider("", { label: "第三方端口", baseUrl: "http://127.0.0.1:1", defaultModel: "m-a", contextWindow: 1048576,
     extraModels: [{ id: "m-b", contextWindow: 256000 }, { id: "m-c", contextWindow: 0 }] });
   assert.ok(r.ok, JSON.stringify(r));
   assert.deepEqual(r.provider.extraModels, [{ id: "m-b", contextWindow: 256000 }, { id: "m-c", contextWindow: 0 }]);

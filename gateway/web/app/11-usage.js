@@ -496,7 +496,7 @@
       const cw = $("cc-ctx").value.trim().replace(/[,_]/g, "").replace(/^0+(?:\.0+)?$/, ""), cm = /^(\d+(?:\.\d+)?)\s*([km]?)$/i.exec(cw);
       body.contextWindow = cw ? (cm ? Math.round(Number(cm[1]) * ({ k: 1e3, m: 1e6 }[cm[2].toLowerCase()] || 1)) : -1) : 0;
       if (cw && !(body.contextWindow >= 1024 && body.contextWindow <= 16777216)) return toast(t("上下文窗口填 1024 到 16777216 之间的整数，也可以写 256k、1m"), true);
-      // 更多模型：每行「模型名」或「模型名 窗口」；中转站清单拉不到、或清单里没有的型号从这里加
+      // 更多模型：每行「模型名」或「模型名 窗口」；第三方端口清单拉不到、或清单里没有的型号从这里加
       body.extraModels = [];
       const lines = $("cc-more").value.split("\n");
       for (let i = 0; i < lines.length; i++) {
