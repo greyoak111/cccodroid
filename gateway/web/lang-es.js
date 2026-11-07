@@ -2820,4 +2820,5 @@ window.I18N_DICT["es"] = {
   "项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。": "El endpoint predeterminado del proyecto («{id}») se eliminó, así que este turno no se envió. Vuelve a elegir uno en los ajustes del proyecto.",
   "任务指定的接口已经删掉了：编辑任务重新选个接口": "El endpoint de la tarea se eliminó: edita la tarea y elige otro",
   "「{n}」指定的接口已经删掉了：编辑任务重新选个接口": "El endpoint de «{n}» se eliminó: edita la tarea y elige otro",
+  "钩子（{ev}）注入的文字命中破甲特征，这一轮已中止；注入原文折叠在上方。": "El texto inyectado por el hook ({ev}) coincidió con un patrón de jailbreak, así que este turno se detuvo; el texto inyectado está plegado arriba.",
 };

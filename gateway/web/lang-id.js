@@ -2820,4 +2820,5 @@ window.I18N_DICT["id"] = {
   "项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。": "Penyedia bawaan proyek (\"{id}\") sudah dihapus, jadi giliran ini tidak dikirim. Pilih ulang penyedia di pengaturan proyek.",
   "任务指定的接口已经删掉了：编辑任务重新选个接口": "Penyedia tugas sudah dihapus: edit tugas dan pilih yang lain",
   "「{n}」指定的接口已经删掉了：编辑任务重新选个接口": "Penyedia untuk \"{n}\" sudah dihapus: edit tugas dan pilih yang lain",
+  "钩子（{ev}）注入的文字命中破甲特征，这一轮已中止；注入原文折叠在上方。": "Teks yang disisipkan hook ({ev}) cocok dengan pola jailbreak, jadi giliran ini dihentikan; teks sisipan dilipat di atas.",
 };

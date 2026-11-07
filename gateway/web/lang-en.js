@@ -2854,5 +2854,6 @@ window.I18N_DICT.en = {
   "这个会话原来用的接口「{id}」已经删掉了，这一轮没有发出去。在模型面板里换一家再发。": "This conversation's endpoint \"{id}\" has been deleted, so this turn was not sent. Pick another endpoint in the model panel and send again.",
   "项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。": "The project's default endpoint \"{id}\" has been deleted, so this turn was not sent. Choose an endpoint again in the project settings.",
   "任务指定的接口已经删掉了：编辑任务重新选个接口": "The task's endpoint has been deleted: edit the task and choose another",
-  "「{n}」指定的接口已经删掉了：编辑任务重新选个接口": "The endpoint for \"{n}\" has been deleted: edit the task and choose another"
+  "「{n}」指定的接口已经删掉了：编辑任务重新选个接口": "The endpoint for \"{n}\" has been deleted: edit the task and choose another",
+  "钩子（{ev}）注入的文字命中破甲特征，这一轮已中止；注入原文折叠在上方。": "Text injected by the {ev} hook matched a jailbreak pattern, so this turn was stopped; the injected text is folded above."
 };

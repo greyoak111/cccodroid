@@ -2820,4 +2820,5 @@ window.I18N_DICT["fr"] = {
   "项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。": "Le point de terminaison par défaut du projet (« {id} ») a été supprimé : ce tour n'a pas été envoyé. Choisissez-en un dans les réglages du projet.",
   "任务指定的接口已经删掉了：编辑任务重新选个接口": "Le point de terminaison de la tâche a été supprimé : modifiez la tâche et choisissez-en un autre",
   "「{n}」指定的接口已经删掉了：编辑任务重新选个接口": "Le point de terminaison de « {n} » a été supprimé : modifiez la tâche et choisissez-en un autre",
+  "钩子（{ev}）注入的文字命中破甲特征，这一轮已中止；注入原文折叠在上方。": "Le texte injecté par le hook ({ev}) correspond à un motif de contournement ; ce tour a été arrêté, le texte injecté est replié ci-dessus.",
 };
