@@ -2977,3 +2977,5 @@
 2977	El endpoint no encuentra este modelo o dirección: revisa el nombre del modelo y la URL del endpoint.
 2978	El proveedor tuvo un error o está saturado: inténtalo más tarde. Si sigue pasando, cambia de modelo o de endpoint.
 2979	No se puede conectar con el endpoint: revisa la red o si la URL del endpoint está mal.
+2980	Ábrelo en la aplicación cccodroid
+2981	El archivo comprimido tiene demasiados archivos ({n}, como máximo {max}); no se importó nada

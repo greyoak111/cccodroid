@@ -2977,3 +2977,5 @@
 2977	Endpoint tidak menemukan model atau alamat ini: periksa nama model dan URL endpoint.
 2978	Penyedia mengalami galat atau kelebihan beban: coba lagi nanti. Jika terus terjadi, ganti model atau endpoint.
 2979	Tidak bisa menjangkau endpoint: periksa jaringan, atau apakah URL endpoint salah.
+2980	Buka ini di aplikasi cccodroid
+2981	Arsip berisi terlalu banyak berkas ({n}, maksimal {max}); tidak ada yang diimpor

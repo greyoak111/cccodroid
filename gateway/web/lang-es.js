@@ -2980,4 +2980,6 @@ window.I18N_DICT["es"] = {
   "接口找不到这个模型或地址：检查模型名和接口地址。": "El endpoint no encuentra este modelo o dirección: revisa el nombre del modelo y la URL del endpoint.",
   "接口那边出错或者忙不过来：稍后再试。一直这样就换个模型或接口。": "El proveedor tuvo un error o está saturado: inténtalo más tarde. Si sigue pasando, cambia de modelo o de endpoint.",
   "连不上接口：检查网络，或者接口地址是不是写错了。": "No se puede conectar con el endpoint: revisa la red o si la URL del endpoint está mal.",
+  "请在 cccodroid 应用里打开": "Ábrelo en la aplicación cccodroid",
+  "压缩包里的文件太多（{n} 个，最多 {max} 个），没有导入": "El archivo comprimido tiene demasiados archivos ({n}, como máximo {max}); no se importó nada",
 };

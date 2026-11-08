@@ -2980,4 +2980,6 @@ window.I18N_DICT["fr"] = {
   "接口找不到这个模型或地址：检查模型名和接口地址。": "Le point d’accès ne trouve pas ce modèle ou cette adresse : vérifiez le nom du modèle et l’URL.",
   "接口那边出错或者忙不过来：稍后再试。一直这样就换个模型或接口。": "Le fournisseur a rencontré une erreur ou est surchargé : réessayez plus tard. Si cela persiste, changez de modèle ou de point d’accès.",
   "连不上接口：检查网络，或者接口地址是不是写错了。": "Impossible de joindre le point d’accès : vérifiez le réseau ou l’URL.",
+  "请在 cccodroid 应用里打开": "Ouvrez ceci dans l'application cccodroid",
+  "压缩包里的文件太多（{n} 个，最多 {max} 个），没有导入": "L'archive contient trop de fichiers ({n}, {max} au maximum) ; rien n'a été importé",
 };

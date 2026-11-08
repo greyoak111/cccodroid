@@ -2980,4 +2980,6 @@ window.I18N_DICT["id"] = {
   "接口找不到这个模型或地址：检查模型名和接口地址。": "Endpoint tidak menemukan model atau alamat ini: periksa nama model dan URL endpoint.",
   "接口那边出错或者忙不过来：稍后再试。一直这样就换个模型或接口。": "Penyedia mengalami galat atau kelebihan beban: coba lagi nanti. Jika terus terjadi, ganti model atau endpoint.",
   "连不上接口：检查网络，或者接口地址是不是写错了。": "Tidak bisa menjangkau endpoint: periksa jaringan, atau apakah URL endpoint salah.",
+  "请在 cccodroid 应用里打开": "Buka ini di aplikasi cccodroid",
+  "压缩包里的文件太多（{n} 个，最多 {max} 个），没有导入": "Arsip berisi terlalu banyak berkas ({n}, maksimal {max}); tidak ada yang diimpor",
 };

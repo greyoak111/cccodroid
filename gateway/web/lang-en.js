@@ -3014,5 +3014,7 @@ window.I18N_DICT.en = {
   "请求太频繁，或者用量到了上限：稍等一会儿再试。": "Too many requests, or a usage limit was reached: wait a bit and try again.",
   "接口找不到这个模型或地址：检查模型名和接口地址。": "The endpoint can't find this model or address: check the model name and endpoint URL.",
   "接口那边出错或者忙不过来：稍后再试。一直这样就换个模型或接口。": "The provider had an error or is overloaded: try again later. If it keeps happening, switch to another model or endpoint.",
-  "连不上接口：检查网络，或者接口地址是不是写错了。": "Can't reach the endpoint: check your network, or whether the endpoint URL is wrong."
+  "连不上接口：检查网络，或者接口地址是不是写错了。": "Can't reach the endpoint: check your network, or whether the endpoint URL is wrong.",
+  "请在 cccodroid 应用里打开": "Open this in the cccodroid app",
+  "压缩包里的文件太多（{n} 个，最多 {max} 个），没有导入": "The archive has too many files ({n}, at most {max}); nothing was imported"
 };

@@ -2977,3 +2977,5 @@
 2977	Le point d’accès ne trouve pas ce modèle ou cette adresse : vérifiez le nom du modèle et l’URL.
 2978	Le fournisseur a rencontré une erreur ou est surchargé : réessayez plus tard. Si cela persiste, changez de modèle ou de point d’accès.
 2979	Impossible de joindre le point d’accès : vérifiez le réseau ou l’URL.
+2980	Ouvrez ceci dans l'application cccodroid
+2981	L'archive contient trop de fichiers ({n}, {max} au maximum) ; rien n'a été importé
