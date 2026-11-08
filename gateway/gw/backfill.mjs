@@ -181,6 +181,8 @@ export async function ask(prompt, o = {}) {
     child.stdout.on("data", (d) => { out += d; });
     child.stderr.on("data", (d) => { err += d; });
     child.on("error", (e) => fin({ error: e.message }));
+    // claude 刚起就退出时，写提示可能撞上 EPIPE：没人接的 error 会被 crashguard 当成「上游管道断了」让整个网关退出（0.6.9 审计 P1-5，v4pro 复核）
+    child.stdin.on("error", () => {});
     child.on("close", () => {
       let j = null; try { j = JSON.parse(out.trim().split("\n").pop()); } catch {}
       if (!j) return fin({ error: (err || out).trim().slice(-300) || "no output" });
