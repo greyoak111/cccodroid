@@ -187,6 +187,20 @@ test("195-O.1/O.4：接口账本跟着运行中的计量记——没出 result �
   assert.deepEqual([t1[0] - t0[0], t1[1] - t0[1], t1[2] - t0[2]], [107, 35, 40]);
 });
 
+test("195-R.1：「继续」那轮没答出来 → 中断记录留着（卡片还在）；答出来了才撤", async () => {
+  const Q = await import("../gw/queue.mjs");
+  const sid = crypto.randomUUID();
+  Q.setInterrupted([{ id: "r1-intr", sessionId: sid, text: "x", startedAt: 1 }]);
+  script([init(sid)], 1);
+  await startRun({ id: "a0610-r1a", message: "fixture", cwd: root, sessionId: sid });
+  await until(() => endOf("a0610-r1a"));
+  assert.ok(Q.INTERRUPTED.some((e) => e.id === "r1-intr"), "没答出来：留着");
+  script([init(sid), result], 0);
+  await startRun({ id: "a0610-r1b", message: "fixture", cwd: root, sessionId: sid });
+  await until(() => endOf("a0610-r1b"));
+  assert.ok(!Q.INTERRUPTED.some((e) => e.id === "r1-intr"), "答出来了：撤掉");
+});
+
 // 放最后：它留下的后台 sleep 30 还活着时，后面的轮次会先弹「用户配置」确认卡
 test("195-T.1：claude 退出了、后台子孙还攥着输出管道 → 5 秒后自己收尾，不永远「生成中」", async () => {
   script([init(crypto.randomUUID()), result, { raw: `${SLEEP} 30 &` }], 0);

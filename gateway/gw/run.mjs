@@ -251,8 +251,9 @@ export async function startRun(item) {
   RUN_LANE.set(run.id, run.lane);
   if (RUN_LANE.size > 1000) for (const k of [...RUN_LANE.keys()].slice(0, 500)) if (!RUNS.has(k)) RUN_LANE.delete(k);
   runFlag(true);
-  // 在被中断的那个会话里又跑起来了（点了「继续」或者直接接着聊）：中断提示就不用再挂着了
-  clearInterrupted(run.sessionId);
+  // 在被中断的那个会话里又跑起来了（点了「继续」或者直接接着聊）：等这一轮真答出来再撤中断提示。
+  // 以前一开跑就撤，「继续」起不来、空完成时卡片已经没了，用户不知道没跑（0.6.9 审计 195-R.1）。跑着时界面本来就不显示这张卡
+  run.intrPending = !!run.sessionId && INTERRUPTED.some((e) => e.sessionId === run.sessionId);
   if (run.sessionId) { RUN_SESSIONS.set(run.id, run.sessionId); idleDisarm(run.sessionId); }
   const emit = (ev) => runEmit(run, ev);
   emit({ type: "run_start", text: run.text, sessionId: run.sessionId, follow: run.follow, cid: run.cid, startedAt: run.startedAt, ...(run.auto ? { auto: run.auto } : {}) });
@@ -780,6 +781,7 @@ export async function startRun(item) {
   };
   const onResult = (r) => {
     lastResult = r; resultStale = false;
+    if (run.intrPending && !r.is_error) { run.intrPending = false; clearInterrupted(run.sessionId); }
     // 空闲时送进去的斜杠命令：这个 result 一般就是它的（送进去前这一轮已经答完）。
     // 送进去后后台任务有变、命令自己又还没动静：这个多半是后台任务回报那一轮的，不认领（认领了会在命令还没办完时关 stdin，复核 v067b-3）；
     // 每条命令最多让一次，之后的 result 照认：命令自己的轮次里也会动后台任务，让了它自己的 result 就会永远挂着（DeepSeek 复核 v067c 中-2）。
