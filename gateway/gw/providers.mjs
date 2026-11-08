@@ -554,7 +554,7 @@ export async function fetchKeyed(url, opts = {}) {
 }
 
 /** 验密钥：有模型清单接口就拉清单（不花钱）；没有就发一条 max_tokens=1 的消息 */
-async function testProvider(id) {
+export async function testProvider(id) {
   const v = PROVIDERS_CFG.providers[id];
   if (!v) return { ok: false, message: tz("没有这家厂商") };
   if (v.login) return { ok: false, message: tz("账户登录不用测密钥，看登录状态即可") };
@@ -563,11 +563,15 @@ async function testProvider(id) {
   const auth = v.authStyle === "x-api-key"
     ? { "x-api-key": key, "anthropic-version": "2023-06-01" }
     : { Authorization: `Bearer ${key}`, "anthropic-version": "2023-06-01" };
+  // 拉清单用 modelsAuth，和平时拉清单（models.mjs fetchModels）同一套头：导入配置两者不同时以前会误报 401。
+  // modelsAuth:"none" 的清单不带密钥，拉到了也说明不了密钥对不对，改成试发（0.6.9 审计 195-U.5）
+  const mAuth = v.modelsAuth === "x-api-key" ? { "x-api-key": key, "anthropic-version": "2023-06-01" }
+    : v.modelsAuth === "none" ? null : { Authorization: `Bearer ${key}` };
   try {
-    let r, how;
-    if (v.modelsUrl && modelsUrlOk(v)) {
-      how = "模型清单";
-      r = await fetchKeyed(v.modelsUrl, { headers: auth, signal: AbortSignal.timeout(15000) });
+    let r, how, viaModels = false;
+    if (v.modelsUrl && mAuth && modelsUrlOk(v)) {
+      how = "模型清单"; viaModels = true;
+      r = await fetchKeyed(v.modelsUrl, { headers: mAuth, signal: AbortSignal.timeout(15000) });
     } else {
       how = "试发一条消息";
       r = await fetchKeyed(v.baseUrl.replace(/\/+$/, "") + "/v1/messages", {
@@ -577,8 +581,18 @@ async function testProvider(id) {
     }
     const text = await fetchText(r);
     if (r.ok) {
-      let n = 0; try { n = normalizeModels(JSON.parse(text)).length; } catch {}
-      return { ok: true, message: n ? tz("密钥有效（{how}，{n} 个模型）", { how, n }) : tz("密钥有效（{how}）", { how }) };
+      // 2xx 不等于有效：登录页 HTML、空体、200 包着的错误 JSON 以前都报「密钥有效」。要认得出是清单 / 是一条回复
+      let j = null; try { j = JSON.parse(text); } catch {}
+      const err = j && typeof j === "object" && (j.error || j.type === "error" || j.success === false) ? (j.error?.message || j.message || j.msg || (typeof j.error === "string" ? j.error : "")) : null;
+      const shaped = j && typeof j === "object" && !Array.isArray(j) && err === null && (viaModels
+        ? Array.isArray(j.data) || Array.isArray(j.models)
+        : j.type === "message" || Array.isArray(j.content));
+      if (shaped) {
+        const n = viaModels ? normalizeModels(j).length : 0;
+        return { ok: true, message: n ? tz("密钥有效（{how}，{n} 个模型）", { how, n }) : tz("密钥有效（{how}）", { how }) };
+      }
+      const what = err ? String(err).slice(0, 200) : (text.trim() ? text.trim().slice(0, 120) : tz("（空）"));
+      return { ok: false, status: r.status, message: tz("地址回了 {s}，但不是预期的格式，没法确认密钥有效：{what}", { s: r.status, what }) };
     }
     let msg = text.slice(0, 200);
     try { const j = JSON.parse(text); msg = j.error?.message || j.message || j.msg || msg; } catch {}

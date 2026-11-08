@@ -317,7 +317,7 @@ async function fetchModelsOf(p, force) {
       }
       const r = await fetchKeyed(p.modelsUrl, { headers, signal: AbortSignal.timeout(15000) });
       if (r.ok) {
-        const list = withCatalog(withConfigured(mergeKnown(normalizeModels(await fetchJsonCapped(r)), p.fallbackModels), p), p);
+        const list = withCatalog(withConfigured(mergeKnown(normalizeModels(await morePages(p.modelsUrl, headers, await fetchJsonCapped(r))), p.fallbackModels), p), p);
         if (list.length) {
           log(`[${p.id}] 模型清单：${list.map((m) => m.id).join(", ")}`);
           return keep(list);
@@ -330,6 +330,26 @@ async function fetchModelsOf(p, force) {
   }
   return keep(c && c.list ? c.list
     : withConfigured((p.fallbackModels || []).map((m) => ({ context_window: 0, max_output_tokens: 0, input_modalities: ["text"], effort: null, ...m })), p));
+}
+/** 分页的清单（Anthropic 官方 /v1/models 默认一页 20 个，带 has_more / last_id）：顺着 after_id 接着拉，最多 10 页。
+ *  不分页的厂商第一页里没有 has_more，原样返回；后面哪页出错就用已经拿到的（0.6.9 审计 195-U.7） */
+async function morePages(url, headers, j) {
+  if (!j || !Array.isArray(j.data)) return j;
+  const data = [...j.data];
+  let cur = j;
+  for (let i = 0; i < 9 && cur && cur.has_more === true && typeof cur.last_id === "string" && cur.last_id; i++) {
+    try {
+      const u = new URL(url);
+      u.searchParams.set("after_id", cur.last_id);
+      if (!u.searchParams.has("limit")) u.searchParams.set("limit", "1000");
+      const r = await fetchKeyed(u.href, { headers, signal: AbortSignal.timeout(15000) });
+      if (!r.ok) { try { await r.body?.cancel(); } catch {} break; }
+      cur = await fetchJsonCapped(r);
+      if (!cur || !Array.isArray(cur.data) || !cur.data.length) break;
+      data.push(...cur.data);
+    } catch (e) { log(`拉模型清单第 ${i + 2} 页出错: ${e.message}`); break; }
+  }
+  return { ...j, data };
 }
 /** data: 形式的内嵌清单 → 归一后的列表；不是 data: 或解不开就 null。只认 JSON，限 256 KB */
 export function inlineModels(url) {
