@@ -26,7 +26,7 @@
 
     // 纯界面命令：不惊动 claude
     if (typed === "/clear" || typed === "/new") {
-      if (fromInput) { inputEl.value = ""; autoGrow(); clearAttachments(); }
+      if (fromInput) { inputEl.value = ""; autoGrow(); clearAttachments(true); }
       newConversation(t("已清空上下文，开始新会话"));
       return;
     }
@@ -450,12 +450,22 @@
       el.querySelector(".att-x").addEventListener("click", () => removeAttachment(a));
     });
   }
-  function clearAttachments() {
+  // 别的应用分享进来、壳拷进 uploads/ 的文件：不要了就让壳删掉那份，发出去了就让壳从清单里划掉（0.6.9 审计 199-1-05）。
+  // 壳只认它自己拷的那些，别的路径（上传、@ 引用、大文件原路径）传过去也什么都不做
+  function shareDone(list, drop) {
+    const A = window.CCApp;
+    if (!A || typeof A.shareDone !== "function") return;
+    for (const a of list || []) if (a && typeof a.path === "string") try { A.shareDone(a.path, !!drop); } catch {}
+  }
+  /** drop：不是发出去，是丢掉（/clear 之类） */
+  function clearAttachments(drop) {
+    shareDone(state.attachments, drop);
     state.attachments = [];
     renderAttachments();
   }
   function removeAttachment(a) {
     state.attachments = state.attachments.filter((x) => x.path !== a.path);
+    shareDone([a], true);
     renderAttachments();
   }
   // ── 每个会话各有各的草稿（群友反馈：输入框里没发的字、附件，切会话会跟着带过去）──
@@ -473,7 +483,7 @@
     const d = all[k1];
     delete all[k1];
     const keys = Object.keys(all).sort((x, y) => (all[y].at || 0) - (all[x].at || 0));
-    for (const k of keys.slice(30)) delete all[k];
+    for (const k of keys.slice(30)) { shareDone(all[k].att, true); delete all[k]; }   // 挤出去的草稿就没了，它的分享文件一起删
     try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
     inputEl.value = d && typeof d.text === "string" ? d.text : "";
     state.attachments = d && Array.isArray(d.att) ? normAtts(d.att) : [];

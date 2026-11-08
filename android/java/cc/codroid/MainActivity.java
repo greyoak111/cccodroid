@@ -583,7 +583,54 @@ public class MainActivity extends Activity {
                 try { from = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0))); } catch (Exception ignored) {}
             }
         } catch (Exception ignored) {}
-        if (from != null) android.widget.Toast.makeText(this, Tr.f("收到来自「{0}」的分享，发之前看一眼", from), android.widget.Toast.LENGTH_LONG).show();
+        if (uris.isEmpty()) {
+            // 只有文字：放进输入框，发不发由用户定，不落盘，用不着再问
+            if (from != null) android.widget.Toast.makeText(this, Tr.f("收到来自「{0}」的分享，发之前看一眼", from), android.widget.Toast.LENGTH_LONG).show();
+            copyShares(uris, text);
+            return;
+        }
+        // 有文件：先问再拷。任何应用都能直接递文件进来，以前不问就写进工作区、也没人清（0.6.9 审计 199-1-05）。
+        // 过 guard：按钮一秒后才能点、被盖住时不收触摸，设备工具也替用户点不了
+        String who = from != null ? from : Tr.t("来源不明的应用");
+        android.app.AlertDialog d = new android.app.AlertDialog.Builder(this)
+            .setTitle(Tr.t("收下分享的文件？"))
+            .setMessage(Tr.f("「{0}」要放 {1} 个文件进工作区的 uploads/。收下后附在输入框里，发不发由你定；从附件栏移除时会删掉拷进来的这份。", who, uris.size()))
+            .setPositiveButton(Tr.t("收下"), (x, w) -> copyShares(uris, text))
+            .setNegativeButton(Tr.t("不收"), null)
+            .create();
+        guard(d, android.content.DialogInterface.BUTTON_POSITIVE);
+    }
+
+    // ── 分享拷进来的文件记一份清单：界面从附件栏移除（或草稿丢弃）时只删清单里的、uploads/ 下的，发出去的就从清单里划掉（199-1-05）──
+    private static final Object SHARE_LOCK = new Object();
+    private void shareMade(String path) {
+        synchronized (SHARE_LOCK) {
+            SharedPreferences sp = getSharedPreferences("share", MODE_PRIVATE);
+            java.util.LinkedHashSet<String> made = new java.util.LinkedHashSet<>(sp.getStringSet("made", java.util.Collections.emptySet()));
+            made.add(path);
+            // 只记最近的：清单不是什么都得删干净的账本，删不到的顶多留个文件
+            while (made.size() > 500) { java.util.Iterator<String> it = made.iterator(); it.next(); it.remove(); }
+            sp.edit().putStringSet("made", made).apply();
+        }
+    }
+    private void shareDone(String path, boolean drop) {
+        if (path == null) return;
+        synchronized (SHARE_LOCK) {
+            SharedPreferences sp = getSharedPreferences("share", MODE_PRIVATE);
+            java.util.HashSet<String> made = new java.util.HashSet<>(sp.getStringSet("made", java.util.Collections.emptySet()));
+            if (!made.remove(path)) return;
+            sp.edit().putStringSet("made", made).apply();
+        }
+        if (!drop) return;
+        try {
+            java.io.File f = new java.io.File(path), dir = new java.io.File(env.workspace(), "uploads");
+            // 只删 uploads/ 下面的普通文件：清单是自己记的，这里再核一遍位置，软链也不跟
+            if (dir.getCanonicalPath().equals(f.getParentFile().getCanonicalPath())
+                && java.nio.file.Files.isRegularFile(f.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) f.delete();
+        } catch (Exception ignored) {}
+    }
+
+    private void copyShares(java.util.ArrayList<android.net.Uri> uris, String text) {
         new Thread(() -> {
           try {
             java.io.File dir = new java.io.File(env.workspace(), "uploads");
@@ -618,6 +665,7 @@ public class MainActivity extends Activity {
                 try (InputStream in = in0; OutputStream o = new FileOutputStream(out)) {
                     copyIn(in, o, dir);
                     n++;
+                    shareMade(out.getPath());
                     toPage("ccapp-attach", out.getPath());
                 } catch (Exception e) {
                     out.delete();
@@ -1704,6 +1752,8 @@ public class MainActivity extends Activity {
             /** 更新说明（见 WhatsNew）：页面启动时来取（只读、不记账，所以可以不带口令；预览页调了也压不掉更新说明，0.6.10 审计 200-1-08），
              *  显示出来后调带口令的 whatsNewSeen 记账 */
             @android.webkit.JavascriptInterface public String whatsNew(String lang) { return WhatsNew.pending(MainActivity.this, lang); }
+            /** 附件栏里的文件不要了（drop）或已经发出去了（!drop）：分享拷进来的那份按清单删掉 / 划掉（199-1-05） */
+            @android.webkit.JavascriptInterface public void shareDone(String k, String path, boolean drop) { if (!Env.bridgeOk(k)) return; MainActivity.this.shareDone(path, drop); }
             @android.webkit.JavascriptInterface public void whatsNewSeen(String k) { if (!Env.bridgeOk(k)) return; WhatsNew.seen(MainActivity.this); }
             @android.webkit.JavascriptInterface public boolean nightMode() { return systemNight(); }
             @android.webkit.JavascriptInterface public String wallColor() { return MainActivity.this.wallColor(); }
