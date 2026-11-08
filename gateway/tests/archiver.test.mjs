@@ -222,3 +222,21 @@ test("压缩来源在 home 里（工作区外）：拒绝", async () => {
   const r2 = await call("/api/arc/create", { items: [CFG.home], dest: path.join(W, "h2.zip"), format: "zip" });
   assert.equal(r2.code, 403);
 });
+
+test("工作区本身：可以当解压目标，不能整个压缩；装着私有目录的上级两样都不行（pathguard.holdsPrivate）", async () => {
+  const zip = path.join(W, "ws.zip");
+  fs.writeFileSync(zip, makeZip([{ name: "ws-probe.txt", data: "ok" }]));
+  const r = await call("/api/arc/extract", { path: zip, dest: CFG.workspace });
+  assert.equal(r.code, 200);
+  const j = await waitJob(r.body.id);
+  assert.equal(j.state, "done");
+  assert.equal(fs.readFileSync(path.join(CFG.workspace, "ws-probe.txt"), "utf8"), "ok");
+  fs.rmSync(path.join(CFG.workspace, "ws-probe.txt"), { force: true });
+  const r2 = await call("/api/arc/create", { items: [CFG.workspace], dest: path.join(W, "ws-all.zip"), format: "zip" });
+  assert.equal(r2.code, 403);
+  const up = path.dirname(CFG.home);
+  const r3 = await call("/api/arc/extract", { path: zip, dest: up });
+  assert.equal(r3.code, 403);
+  const r4 = await call("/api/arc/create", { items: [up], dest: path.join(W, "up.zip"), format: "zip" });
+  assert.equal(r4.code, 403);
+});
