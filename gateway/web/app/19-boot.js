@@ -221,6 +221,9 @@
       if (!ok()) return;
       // 手机浏览器从 127.0.0.1 / localhost 打开：/api 因来源校验必然 403，网关其实在线（0.6.9 审计 195-G.6）
       if (e.status === 403 && location.hostname !== "127.0.0.2") {
+        srv.foreign = true;
+        clearTimeout(busWatch); busWatch = 0;
+        if (es) { try { es.close(); } catch {} es = null; }
         $("status-box").textContent = t("请在 cccodroid 应用里打开");
         setStatus(t("请在 cccodroid 应用里打开"), "warn");
         return;

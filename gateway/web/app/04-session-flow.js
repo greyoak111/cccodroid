@@ -621,6 +621,7 @@
     // 新的连接已经由用户在开头：把上一轮排着的重连定时器取消，否则 2 秒后它会把刚建好的连接再断一次（0.6.9 审计 195-P.6）
     clearTimeout(busWatch); busWatch = 0;
     if (es) { try { es.close(); } catch {} }
+    if (srv.foreign) { es = null; return; }   // 浏览器从别的地址打开：/api 必然 403，别一直重拨（195-G.6）
     // 换视图要整轮重放：旧视图的游标作废，免得重拨时又带着它续传，新视图缺东西（审查 #50 S2-05）
     if (!resume) lastEventId = "";
     // 整轮重放时带上正在看的会话 / 轮次：网关先放它们，别的会话的长轮排后面（#188）
@@ -645,7 +646,8 @@
   }
   function setConn(ok) {
     srv.connected = ok;
-    if (!ok) setStatus(t("与网关断开，正在重连…（生成不受影响）"), "warn");
+    // 浏览器从 127.0.0.1 / localhost 打开：网关在线，只是来源不对，别说「断开」盖掉「请在应用里打开」（195-G.6 真机）
+    if (!ok) setStatus(srv.foreign ? t("请在 cccodroid 应用里打开") : t("与网关断开，正在重连…（生成不受影响）"), "warn");
   }
   document.addEventListener("visibilitychange", () => {
     // 切回前台：WebView 在后台冻过，连接可能已经悄悄死了

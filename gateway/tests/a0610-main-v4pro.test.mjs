@@ -22,3 +22,11 @@ test("195-M.4 guard 半：只打版本时不联网补核，没核过照样不起
   assert.match(s, /if \(cs\.pending && !versionOnly && fs\.existsSync\(inst\)\) \{/);
   assert.ok(s.indexOf("versionOnly") < s.indexOf("if (cs.ok === false)"), "核验失败照样退出 4");
 });
+
+test("195-G.6 真机：浏览器打开时 403 记成 foreign，事件流别再重拨、也别用「断开」盖掉提示", () => {
+  const boot = rd("web/app/19-boot.js"), flow = rd("web/app/04-session-flow.js");
+  assert.match(boot, /e\.status === 403 && location\.hostname !== "127\.0\.0\.2"\) \{\s*srv\.foreign = true;[\s\S]{0,120}es\.close\(\)/);
+  assert.match(flow, /if \(srv\.foreign\) \{ es = null; return; \}/);
+  assert.match(flow, /setStatus\(srv\.foreign \? t\("请在 cccodroid 应用里打开"\) : t\("与网关断开/);
+  assert.match(rd("web/index.html"), /<title>cccodroid<\/title>/);
+});
