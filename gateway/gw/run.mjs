@@ -27,7 +27,7 @@ import { pathWatch, previewHint, settlePathNote, takePathNote } from "./pathnote
 import { claudeSeal, sealStillValid } from "./claudeseal.mjs";
 import { gwRuntimeBlocked } from "./gwpin.mjs";
 import { tamperNote, tamperRecord } from "./tamper.mjs";
-import { SPOOF_NOTE, checkSession, integrityHint, integrityNote, neutralizeMarkers, sealSession } from "./integrity.mjs";
+import { SPOOF_NOTE, checkSession, integrityHint, integrityNote, neutralizeMarkers, sealSession, sessionAnchor } from "./integrity.mjs";
 import { ruleblockHint } from "./ruleblock.mjs";
 import { recordExtra } from "./lineage-store.mjs";
 import { refNote, refNoteSync } from "./merge.mjs";
@@ -410,8 +410,8 @@ export async function startRun(item) {
   // 会话封签（见 integrity.mjs）：上一轮之后记录在应用外被改过、或是导入的，这一轮告诉模型别把那段历史当成自己说过的。
   // 起进程前核对：claude --resume 一起来就可能往文件里写
   const sfile = () => run.sessionId ? findSessionFile(String(run.sessionId))?.file : null;
-  const integ = checkSession(run.sessionId, sfile());
-  const integNote = isCmd || P.local ? "" : integrityNote(integ);
+  let integ = checkSession(run.sessionId, sfile());
+  let integNote = isCmd || P.local ? "" : integrityNote(integ);
   // 消息里提到档号（0ab2·61）：附上那一章的压缩摘要（见 merge.mjs refNote）。读不出来就算了，不挡这一轮
   const refN = isCmd || P.local ? "" : await refNote(message, run.sessionId).catch((e) => { log("档号引用失败: " + e.message); return ""; });
   // 上面拉模型清单、问设备工具、读建档提示都要等：这期间点了停止（还没有进程可杀）就别再起了（安全通告 GHSA-g35m）
@@ -509,6 +509,10 @@ export async function startRun(item) {
     emit({ type: "error", message: msg });
     return endRun(run, { failed: true, finalText: msg });
   }
+  // 会话封签起进程紧前再核一次：上面等卡片、核程序可能等很久，这期间记录被改了，这一轮就该带提醒（199-S-04）。
+  // 同时拍底，收尾时核这一轮只是往后追加
+  if (!integ) { integ = checkSession(run.sessionId, sfile()); if (integ) integNote = isCmd || P.local ? "" : integrityNote(integ); }
+  run.sealBase = run.sessionId ? { sid: run.sessionId, ...sessionAnchor(sfile()) } : null;
   const [cmd0, args0] = claudeCmd(argv);
   // 外面套着 seccomp 监督器时，claude 是监督器的子进程：监督器把它的 pid 从 fd 3 报上来（不可转储的 claude 在 /proc 里看不见，作证要用，见 privWitness）
   const wrapped = cmd0 !== PATHS.claudeLoader;
@@ -901,7 +905,7 @@ export async function startRun(item) {
     run.meter.close();                   // 中断 / 被杀也走这里：子代理记录最后扫一遍
     try { run.agents?.close(); } catch (e) { log("子代理收尾出错: " + e.message); }
     // claude 已经退出，这时的记录就是下一轮的基准；提醒这一轮已经交出去（正常答完）才清掉标记
-    try { sealSession(run.sessionId, sfile(), { clear: !!integNote && !run.aborted && !!lastResult && !lastResult.is_error }); } catch (e) { log(`[封签] ${e.message}`); }
+    try { sealSession(run.sessionId, sfile(), { clear: !!integNote && !run.aborted && !!lastResult && !lastResult.is_error, base: run.sealBase?.sid === run.sessionId && run.sealBase.hash ? run.sealBase : null }); } catch (e) { log(`[封签] ${e.message}`); }
     run.inputOpen = false;
     run.perms.clear();                // 卡片随 run_end 一起作废（前端按 run_end 收起）
     requeuePending();

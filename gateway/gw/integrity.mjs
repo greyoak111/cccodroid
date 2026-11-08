@@ -77,22 +77,45 @@ export function forgetSeal(sid) {
 /** 会话文件的 sha256：分块读，不整个读进内存（导入上限 512 MB，每轮开头结尾各算一次）。
  *  一律全量哈希：旧版超过 64 MB 只算头尾各 32 MB，中间改动哈希不变（红队 11-07 实测 128 MB 文件改中间 48 字节发现不了）。
  *  全量成本实测约 700 MB/s（本机）：512 MB 上限约 0.7 秒，claude 自己每轮读整份文件，这点增量不算卡（审查 v0.5.9 A1 的量级更新） */
-function hashOf(file) {
+function hashOf(file, mark = -1) {
   let fd; try { fd = fs.openSync(file, "r"); } catch { return null; }
   try {
     const size = fs.fstatSync(fd).size, h = crypto.createHash("sha256"), buf = Buffer.allocUnsafe(1 << 20);
     const feed = (from, to) => { for (let p = from; p < to;) { const k = fs.readSync(fd, buf, 0, Math.min(buf.length, to - p), p); if (k <= 0) break; h.update(buf.subarray(0, k)); p += k; } };
+    // mark：顺带算出前 mark 个字节的哈希（收尾核「这一轮只是往后追加」用，不用再读一遍）
+    if (mark >= 0 && mark <= size) {
+      feed(0, mark);
+      const prefix = h.copy().digest("hex");
+      feed(mark, size);
+      return { hash: h.digest("hex"), prefix };
+    }
     feed(0, size);
-    return h.digest("hex");
+    return mark >= 0 ? { hash: h.digest("hex"), prefix: null } : h.digest("hex");
   } catch { return null; } finally { try { fs.closeSync(fd); } catch {} }
 }
 
-/** 给会话文件封签。flag：要带上的标记（"imported" / "edited"）；不给就沿用原有的，除非 clear（提醒已经交给模型了） */
-export function sealSession(sid, file, { flag, clear = false } = {}) {
+/** 起进程紧前给会话文件拍的底（大小 + 哈希）：收尾时核这一轮只是往后追加（见 sealSession 的 base） */
+export function sessionAnchor(file) {
+  if (!file) return null;
+  let size; try { size = fs.statSync(file).size; } catch { return null; }
+  const hash = hashOf(file);
+  return hash ? { size, hash } : null;
+}
+
+/** 给会话文件封签。flag：要带上的标记（"imported" / "edited"）；不给就沿用原有的，除非 clear（提醒已经交给模型了）。
+ *  base：起进程紧前拍的底（sessionAnchor）。claude 跑一轮只往记录后面追加：前面那段对不上，就是运行期间被别人改了，
+ *  标成 edited、不清（0.6.9 审计 199-S-04：以前收尾一律按现状重封，运行中的改写被洗成干净）。
+ *  这一轮新追加的那段被改看不出来（和 claude 自己写的分不开），兜底靠下一轮开头的核对 */
+export function sealSession(sid, file, { flag, clear = false, base = null } = {}) {
   if (!sid || !file) return;
   let size; try { size = fs.statSync(file).size; } catch { return; }
-  const hash = hashOf(file);
-  if (!hash) return;
+  const r = hashOf(file, base ? base.size : -1);
+  if (!r) return;
+  const hash = base ? r.hash : r;
+  if (base && r.prefix !== base.hash) {
+    flag = "edited"; clear = false;
+    log(`[封签] 会话 ${String(sid).slice(0, 8)} 的记录在这一轮运行期间被改了前面的内容，下一轮提醒模型`);
+  }
   const keep = flag || (clear ? null : seals()[sid]?.flag);
   seals()[sid] = { size, hash, at: Date.now(), ...(keep ? { flag: keep } : {}) };
   saveSeals();

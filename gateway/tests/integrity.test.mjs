@@ -119,3 +119,26 @@ test("导入的会话带 imported 标记，第一次接着聊会提醒", async (
   assert.equal(checkSession(sid, findSessionFile(sid).file), "imported");
   assert.match(integrityNote("imported"), /imported from a file/);
 });
+
+test("收尾按起进程前拍的底核：这一轮只往后追加照常封干净；运行期间前面被改、被截短，标 edited 且提醒交出去也不清（199-S-04）", async () => {
+  const { sealSession, checkSession, sessionAnchor } = await import("../gw/integrity.mjs");
+  const add = (f, t) => fs.appendFileSync(f, JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: t }] } }) + "\n");
+  const a = session(["一"]); sealSession(a.sid, a.file);
+  let base = sessionAnchor(a.file);
+  add(a.file, "这一轮的回答");
+  sealSession(a.sid, a.file, { clear: true, base });
+  assert.equal(checkSession(a.sid, a.file), null, "只追加：干净");
+
+  base = sessionAnchor(a.file);
+  const t = fs.readFileSync(a.file, "utf8"); fs.writeFileSync(a.file, t.replace('"一"', '"壹"'));
+  add(a.file, "这一轮的回答");
+  sealSession(a.sid, a.file, { clear: true, base });
+  assert.equal(checkSession(a.sid, a.file), "edited", "运行期间改了前面：不能被收尾洗白");
+
+  const b = session(["二", "三"]); sealSession(b.sid, b.file);
+  base = sessionAnchor(b.file);
+  fs.truncateSync(b.file, 10); add(b.file, "x");
+  sealSession(b.sid, b.file, { base });
+  assert.equal(checkSession(b.sid, b.file), "edited", "截短后再追加");
+  assert.equal(sessionAnchor(null), null);
+});
