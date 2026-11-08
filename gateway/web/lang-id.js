@@ -2972,4 +2972,5 @@ window.I18N_DICT["id"] = {
   "这一轮没跑完：网关被关闭或重启了（{when} 开始的）。": "Giliran ini tidak selesai: gateway dihentikan atau dimulai ulang (dimulai {when}).",
   "工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。": "Folder kerja {dir} sudah tidak ada (dihapus, diganti nama, atau kartu penyimpanan dilepas), jadi giliran ini tidak dijalankan. Kembalikan foldernya, atau ubah path di pengaturan proyek, lalu kirim lagi.",
   "这一轮还没开始就被结束了（{when} 发的）。": "Giliran ini terhenti sebelum dimulai (dikirim {when}).",
+  "就绪 · 后台任务都结束了，正在收尾": "Siap · tugas latar belakang selesai, sedang merapikan",
 };

@@ -2969,3 +2969,4 @@
 2969	Giliran ini tidak selesai: gateway dihentikan atau dimulai ulang (dimulai {when}).
 2970	Folder kerja {dir} sudah tidak ada (dihapus, diganti nama, atau kartu penyimpanan dilepas), jadi giliran ini tidak dijalankan. Kembalikan foldernya, atau ubah path di pengaturan proyek, lalu kirim lagi.
 2971	Giliran ini terhenti sebelum dimulai (dikirim {when}).
+2972	Siap · tugas latar belakang selesai, sedang merapikan

@@ -2969,3 +2969,4 @@
 2969	Este turno no terminó: el gateway se detuvo o se reinició (empezó {when}).
 2970	La carpeta de trabajo {dir} ya no existe (borrada, renombrada o se quitó la tarjeta de almacenamiento), así que este turno no se ejecutó. Vuelve a poner la carpeta o cambia la ruta en los ajustes del proyecto y envía de nuevo.
 2971	Este turno se cortó antes de empezar (enviado {when}).
+2972	Listo · las tareas en segundo plano terminaron, cerrando

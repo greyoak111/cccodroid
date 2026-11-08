@@ -764,7 +764,7 @@
         // 这一轮答完了，只是 Claude 起的后台任务（本地服务之类）还在跑
         const rv = runViews.get(ev.runId);
         if (rv && !rv.idle) { rv.idle = true; rv.timer?.stop(ev.at); rv.av.finish(); rv.avDone = true; }
-        if (view.runIds.has(ev.runId)) setStatus(t("就绪 · 后台任务在跑（{n} 个）", { n: ev.bg || 0 }), "ok");
+        if (view.runIds.has(ev.runId)) setStatus(idleStatus(ev.bg), "ok");
         return;
       }
       case "run_busy": {
@@ -1017,7 +1017,7 @@
     const livePerms = new Set((srv.run?.perms || []).map((p) => p.id));
     for (const [id, it] of PERMS) if (!it.done && srv.run && it.runId === srv.run.id && !livePerms.has(id) && it.p.at < Date.now() - 1500) permDone(id, "gone");
     if (busy) setStatus(t("生成中…"), "live");
-    else if (srv.run?.idle) setStatus(t("就绪 · 后台任务在跑（{n} 个）", { n: srv.run.bg || 0 }), "ok");
+    else if (srv.run?.idle) setStatus(idleStatus(srv.run.bg), "ok");
     else if (srv.runs.some((r) => !r.idle)) setStatus(t("另有 {n} 个会话在生成", { n: srv.runs.filter((r) => !r.idle).length }), "ok");
     // 别的会话在等你确认：当前视图看不到它的卡片，状态栏和会话列表里提醒
     const elsewhere = srv.runs.filter((r) => r !== srv.run && r.perms && r.perms.length);
@@ -1037,6 +1037,8 @@
   }
 
   /** 网关给的中断记录：列表（旧网关是单条对象或 null） */
+  // 答完了、只剩后台任务：任务清零后网关还要等一会儿才收尾（claude 可能接着起一轮），这段时间别显示「在跑（0 个）」（195-P.9）
+  function idleStatus(n) { return n > 0 ? t("就绪 · 后台任务在跑（{n} 个）", { n }) : t("就绪 · 后台任务都结束了，正在收尾"); }
   function intrList(v) { return (Array.isArray(v) ? v : v ? [v] : []).filter((e) => e && e.id); }
   /** 上一轮被系统结束（App 连同网关被杀）：每个被打断的会话底部各挂一张卡，给「继续」 */
   function renderInterrupted(list) {

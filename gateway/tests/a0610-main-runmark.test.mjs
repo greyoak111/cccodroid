@@ -149,3 +149,9 @@ test("195-P.3：还没起进程就被结束的那轮 → 中断记录标 unstart
   const src = fs.readFileSync(new URL("../web/app/04-session-flow.js", import.meta.url), "utf8");
   assert.match(src, /cont = !!it\.sessionId && !card && !unstarted/);
 });
+
+test("195-P.9：后台任务清零后状态栏不再显示「在跑（0 个）」", () => {
+  const src = fs.readFileSync(new URL("../web/app/04-session-flow.js", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /后台任务在跑（\{n\} 个）", \{ n: (ev|srv\.run)\.bg \|\| 0 \}/);
+  assert.match(src, /function idleStatus\(n\) \{ return n > 0 \?/);
+});
