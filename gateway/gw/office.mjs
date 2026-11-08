@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { CFG, HERE, PREFIX, log, tz } from "./config.mjs";
 import { ensureShell, killTree } from "./claude.mjs";
-import { NEXT, readBody, sendJson } from "./http.mjs";
+import { NEXT, rangeOf, readBody, sendJson } from "./http.mjs";
 import { safeFilePath } from "./files.mjs";
 import { termEnv } from "./terminal.mjs";
 const OFFICE_ENV_DENY = /^(ANTHROPIC_|OPENAI_|GH_|GITHUB_|GITLAB_|GITEE_|AWS_|AZURE_|GOOGLE_|GCP_|HF_|HUGGING|NPM_|DEEPSEEK_|MOONSHOT_|DASHSCOPE_|ZHIPU|ARK_|XAI_|OPENROUTER_|CLAUDE_CODE_OAUTH)|_(KEY|KEYS|TOKEN|TOKENS|SECRET|SECRETS|PASSWORD|PASSWD|PWD|PASS|PASSPHRASE|AUTH|CREDENTIAL|CREDENTIALS|COOKIE|SESSION)(_FILE)?$|^(PASSWORD|PASSWD|TOKEN|SECRET|API_KEY|APIKEY)$/i;
@@ -58,16 +58,34 @@ function officePdf(file) {
   job.finally(() => officeJobs.delete(key)).catch(() => {});
   return job;
 }
+/** 上一次网关被杀 / 转换早期失败留下的 work-*（里面有用户文档副本）：超过 2 小时的一律清掉（200-8-09） */
+function officeCleanWork() {
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(OFFICE_DIR)) {
+      if (!/^work-/.test(f)) continue;
+      const p = path.join(OFFICE_DIR, f);
+      try { if (now - fs.statSync(p).mtimeMs > 2 * 3600e3) fs.rmSync(p, { recursive: true, force: true }); } catch {}
+    }
+  } catch {}
+}
 function officeConvert(file, key, out) {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(OFFICE_DIR, { recursive: true });
     const work = path.join(OFFICE_DIR, "work-" + key);
-    fs.rmSync(work, { recursive: true, force: true });
-    fs.mkdirSync(work);
     // 文件名可能带空格、中文、奇怪符号：先拷成固定名字再转，转出来的就是 in.pdf
     const ext = path.extname(file).toLowerCase().replace(/[^.a-z0-9]/g, "") || ".bin";
     const src = path.join(work, "in" + ext);
-    fs.copyFileSync(file, src);
+    try {
+      officeCleanWork();
+      fs.rmSync(work, { recursive: true, force: true });
+      fs.mkdirSync(work);
+      fs.copyFileSync(file, src);
+    } catch (e) {
+      // 早期失败（源文件读不了、空间不够）：把已建的 work 目录收掉，别留文档副本（200-8-09）
+      try { fs.rmSync(work, { recursive: true, force: true }); } catch {}
+      return reject(e);
+    }
     // 解析的是外来文档，LibreOffice 又是出过不少漏洞的解析器（审查 10-30 第九份 后端低6）：HOME / TMPDIR 指到这次的工作目录，
     // 不让它顺手碰到真 home 里的令牌和配置；指向密钥、令牌的环境变量一个不给。字体缓存放 office 自己的目录，免得每次重建
     const env = { ...termEnv(), FONTCONFIG_FILE: officeFonts(), SAL_USE_VCLPLUGIN: "svp", HOME: work, TMPDIR: work, XDG_CACHE_HOME: path.join(OFFICE_DIR, "cache"), XDG_CONFIG_HOME: path.join(work, ".config") };
@@ -88,18 +106,25 @@ function officeConvert(file, key, out) {
     c.on("error", (e) => { clearTimeout(timer); reject(e); });
     c.on("close", (code) => {
       clearTimeout(timer);
-      const pdf = path.join(work, "in.pdf");
-      if (fs.existsSync(pdf) && fs.statSync(pdf).size > 0) {
-        fs.renameSync(pdf, out);
+      // 这里跑在事件回调里：statSync/renameSync 抛错没人接，会直接带走整个网关（199-8-01）
+      try {
+        const pdf = path.join(work, "in.pdf");
+        if (fs.existsSync(pdf) && fs.statSync(pdf).size > 0) {
+          fs.renameSync(pdf, out);
+          fs.rmSync(work, { recursive: true, force: true });
+          log(`[office] ${path.basename(file)} → PDF ${Math.round((Date.now() - t0) / 100) / 10}s`);
+          officePrune();
+          return resolve(out);
+        }
         fs.rmSync(work, { recursive: true, force: true });
-        log(`[office] ${path.basename(file)} → PDF ${Math.round((Date.now() - t0) / 100) / 10}s`);
-        officePrune();
-        return resolve(out);
+        const why = log2.trim().split("\n").filter((l) => /error|fail|exception/i.test(l)).pop() || log2.trim().split("\n").pop() || "";
+        log(`[office] 转换失败 rc=${code}：${log2.trim().slice(-400)}`);
+        reject(new Error(tz("LibreOffice 没转出来") + (why ? "：" + why.slice(0, 200) : `（rc=${code}）`)));
+      } catch (e) {
+        try { fs.rmSync(work, { recursive: true, force: true }); } catch {}
+        log(`[office] 收尾失败：${e && (e.stack || e.message)}`);
+        reject(e);
       }
-      fs.rmSync(work, { recursive: true, force: true });
-      const why = log2.trim().split("\n").filter((l) => /error|fail|exception/i.test(l)).pop() || log2.trim().split("\n").pop() || "";
-      log(`[office] 转换失败 rc=${code}：${log2.trim().slice(-400)}`);
-      reject(new Error(tz("LibreOffice 没转出来") + (why ? "：" + why.slice(0, 200) : `（rc=${code}）`)));
     });
   });
 }
@@ -154,8 +179,13 @@ export async function routeOffice(req, res, u, p) {
       const key = /^[0-9a-f]{20}$/.test(k) && officeDone.get(k) === r.file ? k : officeKey(r.file, fs.statSync(r.file));
       const out = path.join(OFFICE_DIR, key + ".pdf");
       let st; try { st = fs.statSync(out); } catch { return sendJson(res, 404, { error: "not converted" }); }
-      res.writeHead(200, { "content-type": "application/pdf", "content-length": st.size, "cache-control": "no-store" });
-      const rs = fs.createReadStream(out);
+      // PDF 也要支持 Range：阅读器按需取页，以前只能整份下载（195-C.2）
+      const rg = rangeOf(req.headers.range, st.size);
+      if (rg && rg.bad) { res.writeHead(416, { "content-range": `bytes */${st.size}` }); return res.end(); }
+      const head = { "content-type": "application/pdf", "content-length": rg ? rg.end - rg.start + 1 : st.size, "accept-ranges": "bytes", "cache-control": "no-store" };
+      if (rg) head["content-range"] = `bytes ${rg.start}-${rg.end}/${st.size}`;
+      res.writeHead(rg ? 206 : 200, head);
+      const rs = fs.createReadStream(out, rg ? { start: rg.start, end: rg.end } : undefined);
       rs.on("error", () => { try { res.destroy(); } catch {} });
       res.on("close", () => { if (!res.writableFinished) rs.destroy(); });     // 客户端中途断开就关源（#148-1）
       rs.pipe(res);
@@ -171,3 +201,4 @@ export async function routeOffice(req, res, u, p) {
   }
   return NEXT;
 }
+export const _officeForTest = { officeKey, officeConvert, OFFICE_DIR, officeDone };   // 只给测试用

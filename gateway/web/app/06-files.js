@@ -31,8 +31,12 @@
     await fsLoad(path || state.fs.path || state.settings.workspace || "/sdcard");
   }
 
-  async function fsLoad(p, { keepSel = false } = {}) {
+  // 目录超过 1000 项时网关只回前 1000 项并带 truncated；搜索改成让网关先过滤再截断，
+  // 不然只能搜到前 1000 项里的（195-C.5、196 输入域第 9 条）
+  let fsQSeq = 0, fsQTimer = 0;
+  async function fsLoad(p, { keepSel = false, keepQ = false } = {}) {
     const ok = latest("fs");    // 先点的目录响应慢、后到：别把人带回旧目录（审查 C-004 / #49 P3-1）
+    fsQSeq++;                   // 换目录 / 刷新：在途的搜索作废
     try {
       const r = await api(`/api/files?path=${encodeURIComponent(p)}` +
         (state.fs.hidden ? "&hidden=1" : ""));
@@ -41,11 +45,40 @@
       if (r.error) throw new Error(r.error);
       Object.assign(state.fs, {
         path: r.path, parent: r.parent, entries: r.entries || [], roots: r.roots || [],
+        truncated: !!r.truncated, qRemote: false,
       });
       if (!keepSel) state.fs.sel = null;
-      $("fs-search").value = state.fs.q = "";
+      // 刷新时保留搜索词：关闭查看器、重命名之后的自动刷新不该把过滤清掉（196 查看器域第 4 条）
+      if (!keepQ) { $("fs-search").value = state.fs.q = ""; }
       renderFs();
+      if (state.fs.q && state.fs.truncated) fsSearchNow(state.fs.q);
     } catch (e) { if (ok()) toast(t("打开目录失败：{msg}", { msg: e.message }), true); }
+  }
+
+  // 大目录里按网关的 q 过滤（先过滤再截 1000 项），本地那一层过滤只是立刻给个反馈
+  async function fsSearchNow(q) {
+    const my = ++fsQSeq, p = state.fs.path;
+    try {
+      const r = await api(`/api/files?path=${encodeURIComponent(p)}` +
+        (state.fs.hidden ? "&hidden=1" : "") + `&q=${encodeURIComponent(q)}`);
+      if (my !== fsQSeq || p !== state.fs.path || state.fs.q !== q) return;
+      if (r.error) throw new Error(r.error);
+      state.fs.entries = r.entries || [];
+      state.fs.truncated = !!r.truncated;
+      state.fs.qRemote = true;    // 这份 entries 是网关按 q 过滤过的，再改搜索词要重新问网关
+      renderFs();
+    } catch (e) { if (my === fsQSeq) toast(t("搜索失败：{msg}", { msg: e.message }), true); }
+  }
+  function fsSearchTyped(v) {
+    state.fs.q = v;
+    clearTimeout(fsQTimer);
+    if (!v) {
+      if (state.fs.qRemote) return fsLoad(state.fs.path, { keepSel: true, keepQ: true });
+      return renderFs();
+    }
+    if (!state.fs.truncated && !state.fs.qRemote) return renderFs();   // 小目录：本地过滤就够
+    fsQTimer = setTimeout(() => fsSearchNow(v), 250);   // 抖一下：别每敲一个字就打一次网关
+    renderFs();
   }
 
   function fsVisible() {
@@ -59,7 +92,8 @@
       .map((r) => `<span class="chip" data-p="${esc(r)}">${esc(r.replace(/^\/sdcard/, "~"))}</span>`).join("");
 
     const list = fsVisible();
-    $("fs-count").textContent = t("{n} 项 · {path}", { n: list.length, path: state.fs.path || "" });
+    $("fs-count").textContent = t("{n} 项 · {path}", { n: list.length, path: state.fs.path || "" }) +
+      (state.fs.truncated ? " · " + t("只显示了前 1000 项") : "");
     $("fs-list").innerHTML = list.length ? list.map((e, i) => `
       <div class="item fs-item ${state.fs.sel === e.name ? "active" : ""}" data-i="${i}" tabindex="0" role="button">
         <div class="fs-row">
@@ -67,7 +101,7 @@
           <span class="it-title">${esc(e.name)}${e.dir ? "/" : ""}</span>
           <span class="fs-meta">${e.dir ? "" : fmtSize(e.size)}</span>
         </div>
-      </div>`).join("") : '<div class="tiny">' + t("（空目录）") + '</div>';
+      </div>`).join("") : '<div class="tiny">' + (state.fs.q ? t("没有匹配项") : t("（空目录）")) + '</div>';
 
     // 图片直接出缩略图，别的类型给一行摘要
     if (list.some((e) => e.kind === "image")) {
@@ -101,7 +135,14 @@
 
   function fsSelect(e) {
     state.fs.sel = e.name;
-    renderFs();
+    // 只换高亮和右侧预览，不整表重画：重画会把列表滚回顶部、所有缩略图重新请求解码（195-C.6）
+    const list = fsVisible();
+    $("fs-list").querySelectorAll(".fs-item").forEach((el) => {
+      const x = list[Number(el.dataset.i)];
+      el.classList.toggle("active", !!x && x.name === e.name);
+    });
+    $("fs-insert").disabled = !state.fs.sel;
+    renderFsPreview();
   }
 
   // 每次重画领一个号：读文本是异步的，先点 A 再点 B，A 的内容晚到不能把 B 盖掉（按钮也会绑到 A 上）—— 审查 中13
@@ -125,7 +166,12 @@
       box.innerHTML = `<div class="fs-prev-head"><span class="mono">${esc(e.name)}</span><span class="tiny">${t("读取中…")}</span></div>`;
       try {
         // 403 / 404 时回来的是一段 JSON 错误，别当正文显示（审查 C-009）
-        const txt = await fetch(fileUrl(full)).then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); });
+        const r0 = await fetch(fileUrl(full));
+        if (!r0.ok) throw new Error("HTTP " + r0.status);
+        // 按字节认编码再解：以前一律当 UTF-8，UTF-16 / GBK 的笔记预览全是乱码（195-C.13，查看器里的同一套逻辑）
+        const buf = new Uint8Array(await r0.arrayBuffer());
+        if (vwLooksBinary(buf)) throw new Error(t("这是二进制文件，当作文本打开会把界面卡住。"));
+        const txt = vwDecode(buf).text;
         body = `<pre class="fs-pre">${esc(txt.slice(0, 12000))}${txt.length > 12000 ? "\n" + t("…（已截断）") : ""}</pre>`;
       } catch (err) { body = '<div class="tiny">' + t("读取失败") + (err && err.message ? "：" + esc(err.message) : "") + '</div>'; }
       if (seq !== fsPrevSeq) return;
@@ -160,7 +206,15 @@
   function closeFiles() { dropReq("fs"); MO.hide(filesEl, MO.paneOut()); }   // 关了就作废在途的目录请求，别让旧结果回来重画（审查 v0.5.4 F-L2）
 
   // 新建 / 重命名：都不覆盖已有的同名项。新建文件默认 .txt，建好直接进编辑器；想换类型就改后缀
-  const fsErr = (e) => toast(/exists|409/.test(e.message) ? t("已经有同名的文件或文件夹") : t("操作失败：{msg}", { msg: e.message }), true);
+  // 原始英文的 Node 错误（ENAMETOOLONG / EACCES / ENOSPC）对用户没意义，换成能照着做的说法（196 静默错误域）
+  const fsErr = (e) => {
+    const m = String((e && e.message) || e || "");
+    if (/exists|409|已经有同名/.test(m)) return toast(t("已经有同名的文件或文件夹"), true);
+    if (/ENAMETOOLONG|name too long/i.test(m)) return toast(t("文件名太长（最多 255 字节，中文一个字算 3 个）"), true);
+    if (/EACCES|EPERM/.test(m)) return toast(t("没有权限访问这个位置（共享存储需要在系统设置里允许「所有文件访问」）"), true);
+    if (/ENOSPC/.test(m)) return toast(t("存储空间不够了"), true);
+    toast(t("操作失败：{msg}", { msg: m }), true);
+  };
   const badName = (n) => !n || n === "." || n === ".." || /[\/\0]/.test(n);
   async function fsCreate(dir) {
     if (!state.fs.path) return;
@@ -183,7 +237,7 @@
     try {
       await api(`/api/file/rename?from=${encodeURIComponent(fullPathOf(e))}&name=${encodeURIComponent(name)}`, { method: "POST" });
       if (state.fs.sel === e.name) state.fs.sel = name;
-      await fsLoad(state.fs.path, { keepSel: true });
+      await fsLoad(state.fs.path, { keepSel: true, keepQ: true });
       toast(t("已重命名"));
     } catch (err) { fsErr(err); }
   }
@@ -191,13 +245,13 @@
   $("fs-mkdir").addEventListener("click", () => fsCreate(true));
 
   $("fs-close").addEventListener("click", closeFiles);
-  $("fs-reload").addEventListener("click", () => { fsDotsAt = 0; fsLoad(state.fs.path, { keepSel: true }); });
+  $("fs-reload").addEventListener("click", () => { fsDotsAt = 0; fsLoad(state.fs.path, { keepSel: true, keepQ: true }); });
   $("fs-git").addEventListener("click", () => openGit(state.fs.path));
   $("fs-up").addEventListener("click", () => {
     if (state.fs.parent && state.fs.parent !== state.fs.path) fsLoad(state.fs.parent);
   });
   $("fs-hidden").addEventListener("change", (e) => { state.fs.hidden = e.target.checked; fsLoad(state.fs.path); });
-  $("fs-search").addEventListener("input", (e) => { state.fs.q = e.target.value.trim(); renderFs(); });
+  $("fs-search").addEventListener("input", (e) => { fsSearchTyped(e.target.value.trim()); });
   $("fs-insert").addEventListener("click", () => {
     const e = state.fs.entries.find((x) => x.name === state.fs.sel);
     if (e) insertFile(e);

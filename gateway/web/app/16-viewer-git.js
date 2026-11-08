@@ -414,7 +414,7 @@
     closeViewerPdf();
     vwDropEd();
     vwHtmlStop();
-    Object.assign(VW, { path, kind: kind || "other", size: size || 0, text: "", mtime: 0, dirty: false, zoom: 1, git: null, gitInfo: "", gitMarks: null, plainMd: false, wb: null, sheets: null, ready: false });
+    Object.assign(VW, { path, kind: kind || "other", size: size || 0, text: "", mtime: 0, dirty: false, zoom: 1, git: null, gitInfo: "", gitMarks: null, plainMd: false, wb: null, sheets: null, ready: false, eol: "" });
     // 换了文档就换代：上一个文档还在途的读取、转换、保存回执一律作废（审查 C-001、04-F04、04-F05）
     VW.gen = (VW.gen || 0) + 1;
     vwActs([]);    // 上一个文档的「保存」先撤掉：读取中点它会把空正文存进新文件（私下反馈 10-29）
@@ -600,7 +600,10 @@
   async function vwLoadText(mode) {
     if (VW.size > VW_EDIT_MAX) {
       vwActs([]);
-      $("vw-body").innerHTML = `<div class="vw-empty"><div>${t("文件太大（{size}），只能下载查看。", { size: fmtSize(VW.size) })}</div></div>`;
+      // 说“只能下载查看”却没有下载入口；给一个（195-C.10）
+      $("vw-body").innerHTML = `<div class="vw-empty"><div>${t("文件太大（{size}），只能下载查看。", { size: fmtSize(VW.size) })}</div>
+        <a class="btn ghost sm" href="${fileUrl(VW.path, true)}" download>⤓ ${t("下载")}</a>
+        <button class="btn ghost sm" data-a="share">${shareIco()}${t("分享")}</button></div>`;
       return;
     }
     $("vw-body").innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
@@ -625,6 +628,9 @@
     if (gen !== VW.gen) return;
     // 编码、BOM 和正文一起认：以前编码在世代检查之前就写进 VW，迟到的旧文件回执能把当前文件的只读保护摘掉（#106 07-001）
     VW.enc = dec.enc; VW.bom = dec.bom;
+    // 纯 CRLF 的文件记下来，保存时按原样写回（textarea 的 value 里只剩 \n）（195-C.4）
+    const lf = (dec.text.match(/\n/g) || []).length;
+    VW.eol = lf && (dec.text.match(/\r\n/g) || []).length === lf ? "\r\n" : "";
     VW.mtime = mtime; VW.text = dec.text;
     VW.dirty = false;
     const draft = await draftTake(gen);
@@ -830,14 +836,20 @@
     // 只认最近这一次：中途切了源码再点预览，先发的那次迟到了也不再挂定时器、不写正文（#177-3）
     const stale = () => n !== VW.pvSeq || p !== VW.path || VW.mode !== "html";
     $("vw-body").innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
-    let r;
-    try { r = await post("/api/preview", { path: p }); }
-    catch (e) { if (!stale()) $("vw-body").innerHTML = `<div class="vw-empty">${t("预览打不开")}: ${esc(e.message)}</div>`; return; }
+    let r, pvCap;
+    try {
+      r = await post("/api/preview", { path: p });
+      // 回执里没有 url 时以前在 try 外 new URL 抛错，查看器永远停在“读取中…”（196 前端注入域）
+      if (!r || typeof r.url !== "string") throw new Error(t("预览服务没有返回地址"));
+      pvCap = new URL(r.url).pathname.split("/")[1];
+    } catch (e) { if (!stale()) $("vw-body").innerHTML = `<div class="vw-empty">${t("预览打不开")}: ${esc(e.message)}</div>`; return; }
     if (stale()) return;
-    VW.pv = { url: r.url, mtime: r.mtime, net: !!r.net, cap: new URL(r.url).pathname.split("/")[1], blocked: 0 };
+    VW.pv = { url: r.url, mtime: r.mtime, net: !!r.net, cap: pvCap, blocked: 0 };
     pvNative();
     vwRenderActs();
-    $("vw-body").innerHTML = `<iframe class="vw-html" src="${esc(pvSrc())}" sandbox="allow-scripts allow-same-origin allow-modals allow-downloads allow-pointer-lock" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>`;
+    // allow-forms / allow-popups：本地网页的表单提交（form-action 'self' 已放行同源）和 target=_blank 以前在沙箱里
+    // 一点反应都没有（195-C.9）。弹窗仍受预览 CSP 约束，不会变成逃出沙箱的新窗口
+    $("vw-body").innerHTML = `<iframe class="vw-html" src="${esc(pvSrc())}" sandbox="allow-scripts allow-same-origin allow-modals allow-downloads allow-pointer-lock allow-forms allow-popups" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>`;
     // Claude 一边改、你一边看：每 1.5 秒看一眼修改时间，变了就重新载入
     const h = VW.pvTimer = setInterval(async () => {
       if (n !== VW.pvSeq) return clearInterval(h);   // 已经不是当前这次预览：只停自己，别拆后来的
@@ -1069,11 +1081,14 @@
     if (VW.saving) return;
     if (VW.enc) return toast(t("这个文件是 {enc} 编码，存回去会损坏原文，只能查看", { enc: VW.enc }), true);
     const text = vwText(), gen = VW.gen, path = VW.path;
+    // 一字未改就不写盘：CRLF 文件即使不编辑，textarea 也会把换行规整成 LF，存一次整份文件就变了（195-C.4）
+    if (!VW.dirty && !force) return toast(t("没有改动"));
     let r;
     VW.saving = true;
     try {
       r = await fetch(`/api/file/save?path=${encodeURIComponent(path)}&mtime=${VW.mtime}${force ? "&force=1" : ""}`, {
-        method: "POST", body: (VW.bom ? "\uFEFF" : "") + text,   // 原文带 BOM 的照样带回去
+        // 原文带 BOM / 纯 CRLF 换行的照样带回去
+        method: "POST", body: (VW.bom ? "\uFEFF" : "") + (VW.eol === "\r\n" ? text.replace(/\r?\n/g, "\r\n") : text),
       });
     } catch (e) { VW.saving = false; return toast(t("保存失败：{msg}", { msg: e.message }), true); }
     VW.saving = false;

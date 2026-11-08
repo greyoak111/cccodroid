@@ -3,10 +3,16 @@
   // 两者都可以切到「原版式」—— 和 ppt / doc 等一样交给 LibreOffice 转成 PDF（网关缓存结果）。
   // 脚本加载用 01 段的 loadScript：这里以前另声明了一个同名的，把那边（带 css 参数）的盖掉了，
   // 对话里先出现公式时 KaTeX 的样式不加载（审查 #49 P1-1）
-  async function vwFetchBuf() {
+  // docx / xlsx 是整份读进主线程解析的：超过这个大小就别硬来，改用 LibreOffice 或下载（195-C.3）
+  const VW_OFFICE_MAX = 32 * 1024 * 1024;
+  async function vwFetchBuf(max) {
     const r = await fetch(fileUrl(VW.path));
     if (!r.ok) throw new Error("HTTP " + r.status);
-    return r.arrayBuffer();
+    const b = await r.arrayBuffer();
+    if (max && b.byteLength > max) {
+      throw new Error(t("文件太大（{size}），不适合在应用里直接解析；可以用「原版式」转成 PDF 看，或下载后用别的应用打开。", { size: fmtSize(b.byteLength) }));
+    }
+    return b;
   }
   // 领一个号：同一文档里切版式（网页 ↔ 原版式）、换了文档、关了查看器，之前在途的读取 / 转换 / 安装回来都不许再写正文（审查 #48 04-F04、04-F05）
   const vwTake = () => { VW.mgen = (VW.mgen || 0) + 1; const g = VW.gen, m = VW.mgen; return () => VW.gen === g && VW.mgen === m && !viewerEl.classList.contains("hidden"); };
@@ -52,7 +58,7 @@
     let r;
     try {
       await loadScript("/office/mammoth.browser.min.js");
-      r = await window.mammoth.convertToHtml({ arrayBuffer: await vwFetchBuf() });
+      r = await window.mammoth.convertToHtml({ arrayBuffer: await vwFetchBuf(VW_OFFICE_MAX) });
     } catch (e) {
       if (still()) vwFail(t("这个文档读不出来：{msg}", { msg: e.message || String(e) }), true);
       return;
@@ -75,6 +81,29 @@
   const SHEET_MAX_R = 5000, SHEET_MAX_C = 200;
   // 行、列各封顶还不够：两格隔得远（A1 和 CV1000）就是十万个空格子。按总格数分段画，余下的点「再显示」续上（#73）
   const SHEET_CELLS = 20000;
+  // xlsx 是 ZIP：先扫中央目录，声明解压后的大小有上限，挡住“几十 KB 解出几百 MB”的压缩炸弹（199-A-02）。
+  // SheetJS 本身没有解压 / 共享字符串上限，只能在这之前拦。返回 true = 不要交给 SheetJS
+  function zipExpandsTooMuch(buf) {
+    const b = new Uint8Array(buf);
+    if (b.length < 22 || b[0] !== 0x50 || b[1] !== 0x4b) return false;   // 不是 ZIP（老 .xls 等）：交给 SheetJS 按原格式读
+    let eocd = -1;
+    for (let i = b.length - 22; i >= Math.max(0, b.length - 22 - 65535); i--) {
+      if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x05 && b[i + 3] === 0x06) { eocd = i; break; }
+    }
+    if (eocd < 0) return true;                                          // 结构都找不全：别硬解
+    const dv = new DataView(buf);
+    const count = dv.getUint16(eocd + 10, true);
+    let off = dv.getUint32(eocd + 16, true), total = 0;
+    for (let n = 0; n < count; n++) {
+      if (off + 46 > b.length || dv.getUint32(off, true) !== 0x02014b50) return true;
+      const usize = dv.getUint32(off + 24, true);
+      if (usize === 0xffffffff) return true;                            // ZIP64：肯定超过这里的上限
+      total += usize;
+      if (usize > 128 * 1024 * 1024 || total > 256 * 1024 * 1024) return true;
+      off += 46 + dv.getUint16(off + 28, true) + dv.getUint16(off + 30, true) + dv.getUint16(off + 32, true);
+    }
+    return false;
+  }
   async function vwSheet() {
     const still = vwTake();
     vwActs([[t("原版式"), "aspdf"]]);
@@ -82,7 +111,9 @@
     let wb;
     try {
       await loadScript("/office/xlsx.full.min.js");
-      wb = window.XLSX.read(await vwFetchBuf(), { type: "array", cellStyles: true, cellNF: true });   // cellStyles 才读得出隐藏行列和列宽（审查 C-006）
+      const ab = await vwFetchBuf(VW_OFFICE_MAX);
+      if (zipExpandsTooMuch(ab)) throw new Error(t("这个表格文件内部展开后太大，不能安全打开。"));
+      wb = window.XLSX.read(ab, { type: "array", cellStyles: true, cellNF: true });   // cellStyles 才读得出隐藏行列和列宽（审查 C-006）
     } catch (e) {
       if (still()) vwFail(t("这个表格读不出来：{msg}", { msg: e.message || String(e) }), true);
       return;
@@ -133,7 +164,10 @@
     box.querySelector(".vw-cellbar").textContent = "";
     const wrap = box.querySelector(".vw-grid-wrap");
     if (!ws || !ws["!ref"]) { wrap.innerHTML = `<div class="vw-empty">${t("（这张表是空的）")}</div>`; return; }
-    const rg = X.utils.decode_range(ws["!ref"]);
+    // 畸形文件的 !ref 可能让 decode_range 抛错：以前整个切换停在旧图 / 白屏（196 前端注入域）
+    let rg;
+    try { rg = X.utils.decode_range(ws["!ref"]); }
+    catch { wrap.innerHTML = `<div class="vw-empty">${t("这张表的范围信息坏了，读不出来")}</div>`; return; }
     const r1 = Math.min(rg.e.r, rg.s.r + SHEET_MAX_R - 1), c1 = Math.min(rg.e.c, rg.s.c + SHEET_MAX_C - 1);
     // 合并单元格：左上角那格带 rowspan/colspan，被盖住的格子不画
     // 只处理落在显示窗口里的部分：畸形文件可以写一个盖住 A1:XFD1048576 的合并，或者成千上万个互相重叠的大合并，
@@ -278,6 +312,8 @@
       const task = lib.getDocument({
         url: url || fileUrl(VW.path), cMapUrl: "/pdfjs/cmaps/", cMapPacked: true, wasmUrl: "/pdfjs/wasm/",
         isEvalSupported: false,
+        // 图片像素封顶：PDF 里写一张 12000×12000 的图就会被全尺寸解码，渲染进程一下涨上 GB（199-A-01）
+        maxImageSize: 16e6,
       });
       task.onPassword = (cb, reason) => {
         const pw = prompt(reason === 2 ? t("密码不对，再输一次：") : t("这个 PDF 有密码："));
@@ -369,7 +405,22 @@
       if (VW.pdf !== doc || (h._gen || 0) !== gen) return;
       h.dataset.state = "done";
     } catch (e) {
-      if (e?.name !== "RenderingCancelledException") h.dataset.state = "";
+      if (e?.name === "RenderingCancelledException") return;
+      // 换文档 / 这页已被释放：别往别人的页里画错误
+      if (VW.pdf !== doc || (h._gen || 0) !== gen) return;
+      // 以前这里把状态一清就完了：页面上是一块白，没有提示也没有重试（195-C.12）
+      h.dataset.state = "error";
+      h.replaceChildren();
+      const box = document.createElement("div");
+      box.className = "vw-empty";
+      const msg = document.createElement("div");
+      msg.textContent = t("这一页没画出来");
+      const btn = document.createElement("button");
+      btn.className = "btn ghost sm";
+      btn.textContent = t("重试");
+      btn.addEventListener("click", () => { h.dataset.state = ""; h.replaceChildren(); vwPdfRender(h); });
+      box.append(msg, btn);
+      h.appendChild(box);
     }
   }
 
@@ -408,7 +459,7 @@
     VW.text = ""; VW.wb = VW.sheets = null;   // 大文本、工作簿别跟着查看器一直挂在内存里（#56）
     MO.hide(viewerEl, MO.paneOut(), 170, () => { $("vw-body").innerHTML = ""; });   // 内容等滑出去了再清，别先白一下
     // 文件面板开着就刷新一下：大小 / 修改时间可能变了
-    if (!filesEl.classList.contains("hidden") && state.fs.path) fsLoad(state.fs.path, { keepSel: true });
+    if (!filesEl.classList.contains("hidden") && state.fs.path) fsLoad(state.fs.path, { keepSel: true, keepQ: true });
   }
   $("vw-close").addEventListener("click", closeViewer);
   window.addEventListener("resize", () => { if (VW.pdf) { clearTimeout(VW.rt); VW.rt = setTimeout(vwPdfRelayout, 200); } });

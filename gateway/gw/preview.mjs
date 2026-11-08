@@ -21,19 +21,21 @@ const UP_LEVELS = 3;
 // 凭证闲置这么久就作废；预览页一直在用（每次取资源）就顺延（原来固定 12 小时，审查 10-29 高1）
 const CAP_IDLE = 3600e3;
 // 预览页的脚本能读到它所在目录树里的文件，所以这些一概不交：以点开头的路径（.env、.git、.npmrc…）、私钥证书一类
+// 大小写不敏感：/sdcard 不区分大小写，.SSH/ID_RSA/SERVER.PEM 这类变体也指得到同一个文件（196 网关安全二轮）
 const PREVIEW_DENY = /(^|\/)\.(?!well-known(\/|$))|\.(pem|key|p12|pfx|jks|keystore|kdbx|gpg|asc)$|(^|\/)id_[a-z0-9]+(\.pub)?$/i;
 const PREVIEW = { server: null, port: 0, starting: null, caps: new Map() };
 // 不联网（默认）：预览页能读到它所在目录树里的文件，没有外发通道这些才出不去（审查 v0513b 中-5）。
 // 脚本照常跑（内联、eval 都许），资源只许从本机预览服务来；被拦的地址经 report-uri 报回来，查看器提示可以一键允许联网。
 // 页面把自己跳到外站这种 CSP 管不了，由壳在原生层拦（MainActivity.pvOffline）
 const PV_CSP = (cap) => "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'; base-uri 'self'; "
-  + `frame-src 'self' data: blob:; worker-src 'self' blob:; report-uri /__cc/csp/${cap}`;
+  + `frame-src 'self' data: blob:; worker-src 'self' blob:; prefetch-src 'none'; report-uri /__cc/csp/${cap}`;
 const BLOCKED_MAX = 20;
 function previewStart() {
   if (PREVIEW.port) return Promise.resolve(PREVIEW.port);
   if (PREVIEW.starting) return PREVIEW.starting;
   PREVIEW.starting = new Promise((resolve, reject) => {
     const srv = http.createServer(previewServe);
+    srv.maxConnections = 64;   // 同机应用别把预览端口的连接/FD 耗尽（196 网关安全二轮）
     srv.on("error", (e) => { PREVIEW.starting = null; reject(e); });
     srv.unref();   // 网关有主服务撑着；单测里别让它拖住进程
     // 预览只收 GET 和很小的 CSP 报告：请求头 20 秒、整个请求 60 秒内收完，慢连接别一直挂着
@@ -51,7 +53,10 @@ function broadDirs() {
 }
 /** 不许当预览根、也不许往上爬进去的目录 */
 function isBroad(d, set) {
-  if (set.has(d) || STORAGE_ROOT.test(d) || STORAGE_ROOT.test(path.dirname(d))) return true;
+  // /sdcard 不区分大小写：/sdcard/DOWNLOAD 和 /sdcard/Download 是同一个目录，比较也不能分大小写
+  const low = String(d).toLowerCase();
+  for (const x of set) if (String(x).toLowerCase() === low) return true;
+  if (STORAGE_ROOT.test(d) || STORAGE_ROOT.test(path.dirname(d))) return true;
   return d.split("/").filter(Boolean).length <= 1;
 }
 async function previewGrant(p, net) {
@@ -85,6 +90,9 @@ function previewServe(req, res) {
   // 网址里带着能力令牌：页面里点外链时别把它当 Referer 带出去（审查 v0.5.7 L2）。setHeader 先放，下面各处 writeHead 都会带上。
   // same-origin 而不是 no-referrer：外站照样一个字节都拿不到，预览服务自己要靠 Referer 给 /assets/x.svg 这种站点绝对路径找回凭证（审查 B30）
   res.setHeader("referrer-policy", "same-origin");
+  // 离线预览要挡住 resource hint：DNS prefetch / preconnect 不受 connect-src 约束，
+  // 网页只要写个 <link rel=dns-prefetch href=//外站> 就能把请求域名带出去（199-3-01）
+  res.setHeader("x-dns-prefetch-control", "off");
   const fail = (code, msg) => { res.writeHead(code, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }); res.end(msg); };
   const host = String(req.headers.host || "").toLowerCase();
   if (host !== `localhost:${PREVIEW.port}` && host !== `127.0.0.1:${PREVIEW.port}`) return fail(421, "bad host");
@@ -113,10 +121,13 @@ function previewServe(req, res) {
   if (req.headers["service-worker"]) return fail(403, "service workers are not available in preview");
   let pathname, query;
   try { const u = new URL(req.url, "http://localhost"); pathname = decodeURIComponent(u.pathname); query = u.searchParams; } catch { return fail(400, "bad path"); }
-  // 开发者工具（Eruda，MIT，随包内置）：本体从包里吐，不走网络；凭证随机，不会和 __cc 撞
-  const CC_FILES = { "/__cc/eruda.js": ["eruda", "eruda.js"], "/__cc/pick.js": ["cc-pick.js"] };
-  if (CC_FILES[pathname]) {
-    const full = path.join(PATHS.web, "vendor", ...CC_FILES[pathname]);
+  // 开发者工具（Eruda，MIT，随包内置）：本体从包里吐，不走网络。
+  // 路径里必须带这张预览的能力令牌：同机别的应用也能连 127.0.0.1 上的预览端口，不能让它们凭空取到这些脚本（200-3-06）
+  const ccFile = /^\/__cc\/([0-9a-f]{24})\/(eruda\.js|pick\.js)$/.exec(pathname);
+  if (ccFile) {
+    const g0 = PREVIEW.caps.get(ccFile[1]);
+    if (!g0 || g0.exp < Date.now()) return fail(404, "preview expired — reopen the file");
+    const full = ccFile[2] === "eruda.js" ? path.join(PATHS.web, "vendor", "eruda", "eruda.js") : path.join(PATHS.web, "vendor", "cc-pick.js");
     let buf; try { buf = fs.readFileSync(full); } catch { return fail(404, "no devtools"); }
     if (APP && !APP.served(path.relative(path.dirname(PATHS.web), full), buf, fs.statSync(full))) return fail(503, "app files modified");
     res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "max-age=86400", "content-length": buf.length });
@@ -165,9 +176,18 @@ function previewServe(req, res) {
     else if (query.has("_r")) g.dt = null;
   }
   if (g.dt && isHtml && nav && req.method === "GET" && r.size <= 16 * 1024 * 1024) {
-    let src; try { src = fs.readFileSync(r.file).toString("latin1"); } catch { return fail(404, "read failed"); }
+    // 注入分支也要按 fd 读、不跟软链，并复核打开后的文件确实还是刚才核过的那一份（200-H-5）：
+    // 核完到读之间被换成别的文件（甚至 FIFO），不能把别处的内容当这个网页吐出去
+    let src, fd0 = null;
+    try {
+      fd0 = fs.openSync(r.file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      const fst = fs.fstatSync(fd0);
+      if (!fst.isFile() || fst.size !== r.size) throw new Error("changed");
+      src = fs.readFileSync(fd0).toString("latin1");
+    } catch { return fail(404, "read failed"); }
+    finally { if (fd0 != null) { try { fs.closeSync(fd0); } catch {} } }
     const theme = g.dt.dark ? "Dark" : "Light";
-    const tag = `<script src="/__cc/pick.js"></script><script src="/__cc/eruda.js"></script><script>try{eruda.init({defaults:{displaySize:50,transparency:.97,theme:"${theme}"}})}catch(e){}</script>`;
+    const tag = `<script src="/__cc/${cap}/pick.js"></script><script src="/__cc/${cap}/eruda.js"></script><script>try{eruda.init({defaults:{displaySize:50,transparency:.97,theme:"${theme}"}})}catch(e){}</script>`;
     const m = /<head\b[^>]*>/i.exec(src) || /<html\b[^>]*>/i.exec(src) || /<!doctype[^>]*>/i.exec(src);
     const at = m ? m.index + m[0].length : 0;
     const out = Buffer.from(src.slice(0, at) + tag + src.slice(at), "latin1");
