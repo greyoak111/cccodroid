@@ -27,6 +27,12 @@ const SECRETS = [
   [/[\w-]\.(?:pem|key)(?=$|[\s"'\/;|&)])/, "private key file"],
   [/(?:^|[\/\s"'=~@<>:])\.(?:npmrc|pypirc)\b/, "package registry token"],
   [/(?:^|[\/\s"'=~@<>:])\.env(?:\.(?!example\b|sample\b|template\b|dist\b)[\w-]+)?(?=$|[\s"'\/;|&)<>])/, ".env secrets"],
+  // 终端环境里指向钥匙文件的变量：cat "$CCAPP_KEY_FILE" 不带 .cache/ccapp-key 字样也要认（0.6.9 审计 199-4-03）
+  [/\bCCAPP_KEY_FILE\b/, "API key file"],
+  // 用户级配置的确认副本：settings 的 env 块（可能带 Key）原样留在这里，撤销时要用（196-凭据.3）
+  [/\.ccapp-userconf\b/, "user config backups"],
+  // 终端 bash 的历史：机主在终端里敲过的命令（可能带 export KEY=…）都在这（200-4-05）
+  [/(?:^|[\/\s"'=~@<>:])\.(?:bash|zsh|sh)_history\b|\bHISTFILE\b/, "shell history"],
 ];
 
 // 管着提示词和安全机制的文件：改了能让下一轮的 Claude 换一套规矩，或者伪造「它之前说过的话」（见 gw/integrity.mjs）。
