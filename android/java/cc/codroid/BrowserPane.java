@@ -355,7 +355,7 @@ public class BrowserPane extends LinearLayout {
     /** 宿主在 onActivityResult 里转过来（请求码是构造时给的 fileReq） */
     public void onResult(int res, Intent data) {
         if (fileCb == null) return;
-        fileCb.onReceiveValue(MainActivity.chooserResult(res, data));
+        fileCb.onReceiveValue(MainActivity.chooserResult(act, res, data));
         fileCb = null;
     }
 

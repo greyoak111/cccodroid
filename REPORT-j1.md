@@ -5,7 +5,7 @@
 | 条目 | 文件 | 状态 |
 |---|---|---|
 | 199-1-01 | Docs.java SAF provider 把 `.claude/settings*.json` 当普通文件 | 已修 |
-| 199-1-02 | MainActivity.java 文件选择结果不校验 authority | 待做 |
+| 199-1-02 | MainActivity.java 文件选择结果不校验 authority | 已修 |
 | 199-1-03 | Env.java 只探测 127.0.0.2:8791（GatewayService 那半移交 j2） | 待做 |
 | 199-1-04 | MainActivity.java + 19-boot.js 伪造 SSE / onopen 无校验 | 待做 |
 | 199-1-05 | MainActivity.java ACTION_SEND 写 workspace/uploads | 待做 |
@@ -20,6 +20,7 @@
 | 条目 | 提交 | 怎么修的（一句） | 怎么验的（测试文件 / 手动步骤） |
 |---|---|---|---|
 | 199-1-01 | 本条 | `Docs.java` 加 `sensitive()` / `denySensitive()`：`.claude/settings(.local).json` 在列表、搜索、queryDocument、openDocument（含软链按 fd 真实路径）、create、rename 源/目标、delete 全部拒绝，别的工作区文件不受影响 | `javac` 全量编译通过（JAVAC_OK）。真机：MT 管理器/系统「文件」授权 cccodroid「内部文件」→ 进 workspace/.claude，看不到 settings.json / settings.local.json，搜索也搜不到；同目录别的文件照常读写；对已保存的 settings.json 文档 URI 打开会报「这个文件不通过文件访问提供」 |
+| 199-1-02 | 本条 | `chooserResult()` 增加 `ownUri()` 过滤：本应用包名下的 content authority（docs/share/shizuku）和指向应用私有目录的 file URI 一律丢弃，WebView 与浏览器窗格两处共用 | `javac` 全量编译通过。真机：在对话输入框点回形针 → 系统选择器里选 cccodroid「内部文件」里的任意文件 → 不再附加（旧版会以本应用身份读出来）；从相册 / 下载 / 云盘选正常文件照常附加；应用内浏览器网页的 `<input type=file>` 同理 |
 
 ## 不成立
 
@@ -40,6 +41,7 @@
 
 | 条目 | 用户可见变化 |
 |---|---|
+| 199-1-02 | 从系统文件选择器里选 cccodroid「内部文件」里的文件作为附件 / 网页上传，现在会被忽略（工作区文件请用输入框的 `@` 文件面板引用路径）。正常应用（相册、下载、云盘）给的文件不受影响。 |
 
 ## 全量测试
 

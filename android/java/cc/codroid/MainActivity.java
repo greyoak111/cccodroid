@@ -2170,14 +2170,14 @@ public class MainActivity extends Activity {
         }
         if (req == 7 && fileCb == null) {
             // 选文件期间界面被系统收掉重建过（审查 #105 06-010）：网页的回调没了，选的文件照大附件那样递路径 / 收进 uploads，别静默丢掉
-            Uri[] all = chooserResult(res, data);
+            Uri[] all = chooserResult(this, res, data);
             if (all != null && all.length > 0) attachBig(java.util.Arrays.asList(all), false);
             return;
         }
         if (req == 7) {
             // 附件大小门限：超过 BIG_ATTACH 的不交给网页（网页要把整个文件经 fetch 送进网关，几百 MB 时界面和网关都扛不住），
             // 在这边处理 —— 共享存储里有真实路径的只递路径，Claude 按路径自己读；没有的（云盘、别的应用私有的）在后台流式拷进 uploads/
-            Uri[] all = chooserResult(res, data);
+            Uri[] all = chooserResult(this, res, data);
             ValueCallback<Uri[]> cb = fileCb;
             fileCb = null;
             if (all == null) { cb.onReceiveValue(null); return; }
@@ -2289,16 +2289,36 @@ public class MainActivity extends Activity {
         return i;
     }
 
+    /** 本应用自己的 content URI、或指向应用私有目录的 file URI：系统选择器回来的结果里出现这两种一律不认
+     *  （0.6.10 审计 199-1-02）。恶意 ACTION_GET_CONTENT 应用可以塞回 content://cc.codroid.docs/workspace/…，
+     *  界面会以本应用身份把工作区里任意文件读出来交给页面（再随对话送去模型）。正常应用给的云盘 / 共享存储 URI 不受影响。 */
+    private static boolean ownUri(android.content.Context c, Uri u) {
+        if (u == null) return false;
+        String a = u.getAuthority(), pkg = c.getPackageName();
+        if (a != null && (a.equals(pkg) || a.startsWith(pkg + "."))) return true;
+        if ("file".equals(u.getScheme())) {
+            try {
+                String p = new File(u.getPath()).getCanonicalPath(), d = c.getDataDir().getCanonicalPath();
+                return p.equals(d) || p.startsWith(d + File.separator);
+            } catch (Exception e) { return true; }   // 路径解不开的不认
+        }
+        return false;
+    }
+
     /** 系统的 parseResult() 只读 getData()：一次选了多个时文件在 ClipData 里，它会返回空，结果一个都附加不上 */
-    static Uri[] chooserResult(int res, Intent data) {
+    static Uri[] chooserResult(android.content.Context c, int res, Intent data) {
         if (res != RESULT_OK || data == null) return null;
-        android.content.ClipData c = data.getClipData();
-        if (c != null && c.getItemCount() > 0) {
+        android.content.ClipData clip = data.getClipData();
+        if (clip != null && clip.getItemCount() > 0) {
             java.util.ArrayList<Uri> out = new java.util.ArrayList<>();
-            for (int i = 0; i < c.getItemCount(); i++) { Uri u = c.getItemAt(i).getUri(); if (u != null) out.add(u); }
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                Uri u = clip.getItemAt(i).getUri();
+                if (u != null && !ownUri(c, u)) out.add(u);
+            }
             if (!out.isEmpty()) return out.toArray(new Uri[0]);
         }
-        return data.getData() != null ? new Uri[] { data.getData() } : null;
+        Uri one = data.getData();
+        return one != null && !ownUri(c, one) ? new Uri[] { one } : null;
     }
 
     @Override public void onBackPressed() {
