@@ -170,6 +170,10 @@ test("L.2/L.3/L.4/L.6/L.9/L.11/12-10：样式修补都在 0.6.10 f1 追加块里
   ]) assert.ok(css.includes(s), "缺少样式：" + s);
 });
 
+test("L.11 命中区伸出视口不能让整页滚：根元素 overflow:hidden（不然用量条会被挤到顶栏底下）", () => {
+  assert.match(css, /^html\{overflow:hidden\}$/m);
+});
+
 test("移动端：从输入区按钮起手不算抽屉手势", () => {
   assert.ok(src19.includes('#composer button,#composer .att,#composer .chip,#composer [role=button]'));
 });
