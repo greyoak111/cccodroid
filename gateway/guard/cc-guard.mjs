@@ -13,6 +13,8 @@ import fs from "node:fs";
 // 密钥与凭据：按路径特征认，不依赖具体 home 在哪
 const SECRETS = [
   [/\.gateway-token\b|\bCCAPP_TOKEN_FILE\b/, "gateway token"],
+  // 空格 / 引号拼接改形（红队 r8 11-08）：cat ~/.gate way-token、cat ~/.gate''way-token 这类也要问
+  [/\.gate[\s"']*way[\s"']*-?[\s"']*token\b/, "gateway token (split spelling)"],
   [/ccapp-(?:providers|config|seed)[\w.-]*\.json/, "provider API keys"],
   [/\.cache\/(?:ccapp-key|llama-api-key)/, "API key file"],
   [/(?:^|[\/\s"'=~@<>:])\.ssh(?:\/|\b)/, "SSH keys"],
@@ -58,6 +60,8 @@ const PROMPT = [
   // 能把这一层整个关掉的：安全模式（--safe-mode 连 --settings 挂的钩子一起不跑）的开关文件和接口，
   // 以及再起一个不带这一层的 claude —— 多个 --settings 后一个整个顶掉前一个，--bare / --safe-mode 不跑任何钩子（2.1.311 实测）
   [/\.ccapp-safe-mode\b|\/api\/safe-mode\b/, "safe mode (turns this check off)"],
+  // 网关的控制端点：有令牌就能直调，改权限模式、换上游、存钩子、测钩子（spawn shell）、开终端都得经手确认（红队 r8 11-08）
+  [/\/api\/(?:perm\/mode|providers\/save|ext\/hooks\/(?:save|test)|term\/new)\b/, "gateway control endpoint (changes global state)"],
   // 旗标前允许引号（claude "--bare"），--allowedTools 能不问就放行工具（DeepSeek 复核必修 4）
   [/\bclaude\b[^\n;&|]*?[\s"'](?:--settings|--setting-sources|--safe-mode|--bare|--dangerously-skip-permissions|--allow-dangerously-skip-permissions|--allowed-?[Tt]ools|--permission-mode["']?[\s=]+["']?(?:bypassPermissions|auto|dontAsk|acceptEdits))(?=$|[\s=;|&)'"])/, "Claude Code started without this check"],
   // Claude Code 程序、它的签名清单、current 软链：删了清单再换程序，起 claude 前的核验就无从比对（见 gw/claudeseal.mjs）
@@ -106,17 +110,40 @@ function strings(tool, inp) {
   return [inp.file_path, inp.path, inp.notebook_path, inp.pattern, inp.glob];
 }
 
+// 命令归一（只给 judge 用，不落盘、不回显）：base64 段解出来是可读文本就还原；去掉 '' / "" 引号拼接与反斜杠续词；
+// $(echo token) / ${HOME} 这类 shell 展开成字面——命令写得绕一点也认得（红队 r8 11-08：三条绕过里两条真能读到令牌）
+const B64_RUN = /\b[A-Za-z0-9+/]{12,}={0,2}\b/g;
+function normCmd(s) {
+  let t = s;
+  try {
+    t = t.replace(B64_RUN, (m) => {
+      try {
+        const d = Buffer.from(m, "base64").toString("utf8").trimEnd();
+        return /^[\x20-\x7e]{4,}$/.test(d) ? d : m;
+      } catch { return m; }
+    });
+  } catch {}
+  return t
+    .replace(/["']{2}/g, "")
+    .replace(/\\(?=[A-Za-z])/g, "")
+    .replace(/\$\s*\(\s*echo\s+(?:-n\s+)?['"]?([^'")]+)['"]?\s*\)/g, "$1")
+    .replace(/\$\{([A-Za-z_][\w]*)\}/g, "$1");
+}
+
 export function judge(tool, inp) {
   const m = /^mcp__device__(.+)$/.exec(String(tool || ""));
   if (m && DEVICE[m[1]]) return { cat: DEVICE[m[1]], what: m[1] };
-  for (const s of strings(tool, inp)) {
+  const list = strings(tool, inp);
+  // Bash 命令：原文和归一后的两条都查（归一后能认出拼接/展开/base64 改形的密钥路径）
+  const texts = list.flatMap((s) => (tool === "Bash" && typeof s === "string" && s ? [s, normCmd(s)] : [s]));
+  for (const s of texts) {
     if (typeof s !== "string" || !s) continue;
     for (const [re, what] of SECRETS) {
       const hit = re.exec(s);
       if (hit) return { cat: "secret:" + what, what: what + ": " + hit[0].replace(/^[\s"'=~@<>:\/]+/, "").slice(0, 80) };
     }
   }
-  if (WRITERS.has(tool)) for (const s of strings(tool, inp)) {
+  if (WRITERS.has(tool)) for (const s of texts) {
     if (typeof s !== "string" || !s) continue;
     for (const [re, what] of PROMPT) {
       const hit = re.exec(s);
