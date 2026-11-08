@@ -180,10 +180,12 @@ function guardSlots(srv) {
 guardSlots(server); guardSlots(uiServer);
 // 主地址被占（EADDRINUSE 之类）：记一笔再退出，GatewayService 会重拉；以前没挂监听，直接抛成未捕获异常、日志里什么都没有（审查 v0513b 低-9）
 server.on("error", (e) => { log(`⚠️ 主地址 127.0.0.1:${CFG.port} 监听失败：${e.code || e.message}，退出等重拉`); setTimeout(() => process.exit(1), 200); });
-// 上一任留下的运行标记：等所有模块都求值完再收（放在 queue.mjs 顶层会撞循环引用——sessionops 的 SID_RE 还没初始化，带会话的排队消息一恢复网关就崩，11-02 群友日志）
-try { recoverRunMark(); } catch (e) { log("恢复上次的运行标记失败：" + (e.stack || e.message)); }
-uiServer.listen(CFG.port, UI_HOST);
 server.listen(CFG.port, "127.0.0.1", () => {
+  // 上一任留下的运行标记：等所有模块都求值完再收（放在 queue.mjs 顶层会撞循环引用——sessionops 的 SID_RE 还没初始化，带会话的排队消息一恢复网关就崩，11-02 群友日志）。
+  // 端口拿到了才收：以前在 listen 之前，旧网关还在跑时重复拉起的这个先改了它的恢复记录，再因 EADDRINUSE 退出（0.6.9 审计 195-T.2）。
+  // 'listening' 先于任何连接派发，界面的第一个请求照样看得到恢复出来的队列
+  try { recoverRunMark(); } catch (e) { log("恢复上次的运行标记失败：" + (e.stack || e.message)); }
+  uiServer.listen(CFG.port, UI_HOST);   // 界面地址也放到恢复之后：别让界面在队列恢复前先连进来
   log(`claude-apk 网关 v3 已启动  http://127.0.0.1:${CFG.port}`);
   log(`  运行时 ${CFG.runtime}`);
   log(`  工作区 ${CFG.workspace}`);
