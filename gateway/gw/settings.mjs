@@ -15,6 +15,9 @@ import { SETTINGS, saveSettings, outputStyles } from "./settings-store.mjs";
 
 // ── 路由：/api/settings ──
 export async function routeSettings(req, res, u, p) {
+  // 工作岛：设置页看它起没起来、没起来的原因，点「重试」重新检测（195-P.4）
+  if (p === "/api/work-island" && req.method === "GET") return sendJson(res, 200, (await import("./work-island.mjs")).workIslandStatus());
+  if (p === "/api/work-island/retry" && req.method === "POST") return sendJson(res, 200, (await import("./work-island.mjs")).retryWorkIsland());
   // ── 设置 ──
   // 执行方式（targetSdk 28 / 36 双方案）：偏好写在 files/.exec-mode，由 Env.java 读，GatewayService 每次拉起网关都重读 ——
   // 所以改完重启网关就生效。targetSdk ≥ 29 的包只能经加载器，选「直接」会被拒

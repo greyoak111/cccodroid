@@ -36,9 +36,10 @@ export function envFactsKey() {
   const comps = installedCompKey();
   return `${dk.sha256 || dk.tag || "?"}|${tag}${mods ? "|" + mods : ""}${comps ? "|c:" + comps : ""}`;
 }
-let envFactsJob = null;
-function envFactsRun() {
-  const st = path.join(process.env.CCAPP_BIN || "", "cccodroid-selftest");
+let envFactsJob = null, envFactsStarted = 0, envFactsErr = "";   // 最近一次没跑出结果的原因：设置页「本机自检」要显示（195-M.1）
+const selftestPath = () => path.join(process.env.CCAPP_BIN || "", "cccodroid-selftest");
+function envFactsRun(why = "工具包或应用换了版本") {
+  const st = selftestPath();
   if (!PREFIX || envFactsJob || !fs.existsSync(st)) return;
   const key = envFactsKey(), nice = path.join(PREFIX, "bin", "nice");
   // 经 Claude 用的同一个 shell 包装起（挂着 termux-exec）：直接调 bash 的话 #!/usr/bin/env 一类脚本全报 bad interpreter，
@@ -46,7 +47,8 @@ function envFactsRun() {
   const sh = ensureShell();
   const argv = fs.existsSync(nice) ? [nice, "-n", "10", sh, st] : [sh, st];
   let out = "";
-  log("[env] 本机自检开始（工具包或应用换了版本）");
+  log(`[env] 本机自检开始（${why}）`);
+  envFactsStarted = Date.now(); envFactsErr = "";
   envFactsJob = spawn(argv[0], argv.slice(1), { env: { ...termEnv(), CCAPP_ENVFACTS: "1" }, cwd: CFG.home, detached: true, stdio: ["ignore", "pipe", "pipe"] });
   envFactsJob.stdout.setEncoding("utf8"); envFactsJob.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
   envFactsJob.stdout.on("data", guarded("envFacts stdout", (d) => { if (out.length < 1 << 20) out += d; }));
@@ -58,21 +60,22 @@ function envFactsRun() {
   let spawnFailed = false;
   envFactsJob.on("error", (e) => {
     spawnFailed = true; clearTimeout(t); envFactsJob = null;
+    envFactsErr = "spawn: " + (e.code || e.message);
     log("[env] 自检启动失败：" + (e.code || e.message));
   });
   envFactsJob.on("close", guarded("envFacts close", () => {
     clearTimeout(t); envFactsJob = null;
     if (spawnFailed) return;
     // 超时强杀时输出只有半份：不能当完整结果写进去（0.6.9 审计 195-M.1）
-    if (timedOut) { log("[env] 自检超时，结果不完整，下次再试"); return; }
+    if (timedOut) { envFactsErr = "timeout"; log("[env] 自检超时，结果不完整，下次再试"); return; }
     const r = { key, at: Date.now(), pass: 0, fail: [], info: [] };
     for (const l of out.split("\n")) {
       if (l.startsWith("PASS ")) r.pass++;
       else if (l.startsWith("FAIL ")) r.fail.push(l.slice(5, 260));
       else if (l.startsWith("INFO ")) r.info.push(l.slice(5, 260));
     }
-    if (!r.pass) { log("[env] 自检没跑出结果，下次再试"); return; }
-    try { fs.writeFileSync(ENV_FACTS, JSON.stringify(r, null, 1)); } catch {}
+    if (!r.pass) { envFactsErr = "empty"; log("[env] 自检没跑出结果，下次再试"); return; }
+    try { fs.writeFileSync(ENV_FACTS, JSON.stringify(r, null, 1)); } catch (e) { envFactsErr = "write: " + (e.code || e.message); }
     log(`[env] 本机自检：通过 ${r.pass} 项，失败 ${r.fail.length} 项`);
   }));
 }
@@ -83,6 +86,21 @@ function envFactsTick() {
   // 结果最多用一周：修好组件 / 联网恢复后不用等工具包再换一次版本才重测（0.6.9 审计 195-M.1）
   const old = !cur || !cur.at || Date.now() - cur.at > 7 * 86400e3;
   if (old || cur.key !== envFactsKey()) envFactsRun();
+}
+/** 设置页「本机自检」：上次的结果 + 是不是正在跑 + 上次没跑出结果的原因（195-M.1） */
+export function envFactsStatus() {
+  let r = null; try { const raw = readSmallFile(ENV_FACTS, 256 << 10); r = raw == null ? null : JSON.parse(raw); } catch {}
+  if (!r || typeof r !== "object") r = null;
+  return {
+    supported: !!PREFIX && fs.existsSync(selftestPath()), running: !!envFactsJob, startedAt: envFactsJob ? envFactsStarted : null,
+    at: r && r.at || null, pass: r && +r.pass || 0, fail: r && Array.isArray(r.fail) ? r.fail.slice(0, 50) : [],
+    info: r && Array.isArray(r.info) ? r.info.slice(0, 50) : [], stale: !!r && r.key !== envFactsKey(), error: envFactsErr || null,
+  };
+}
+/** 用户点「重新自检」：不等过期、不看有没有 claude 在跑（自检本身 nice 10）；已经在跑就不另起 */
+export function envFactsRerun() {
+  if (!envFactsJob) envFactsRun("用户要求重新自检");
+  return envFactsStatus();
 }
 // 定时器里读 modules.json / 拼 key，坏状态文件的形状问题不能带走网关（0.6.9 审计 198 P1-19）
 const envFactsTickSafe = guarded("envFactsTick", envFactsTick);

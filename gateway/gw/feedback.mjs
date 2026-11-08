@@ -5,7 +5,7 @@ import { NEXT, sendJson } from "./http.mjs";
 import { COMP_DIR, compRecord, devkitIdentity } from "./components.mjs";
 import { devkitVersion } from "./envfacts.mjs";
 import { privCall } from "./usage.mjs";
-import { ENV_FACTS, envFactsKey } from "./envfacts.mjs";
+import { ENV_FACTS, envFactsKey, envFactsRerun, envFactsStatus } from "./envfacts.mjs";
 
 // ── 反馈：拼一个预先填好的 GitHub Issue 链接 ─────────────────────────────
 // 用户点「到 GitHub 反馈」：机型、系统、各家 ROM 版本、自检结果、装了哪些组件都填好，用户只写遇到了什么。
@@ -84,5 +84,8 @@ async function issueDraft(lang) {
 // ── 路由：/api/issue-draft ──
 export async function routeFeedback(req, res, u, p) {
   if (req.method === "GET" && p === "/api/issue-draft") return sendJson(res, 200, await issueDraft(reqLang(req)));
+  // 本机自检：设置 → 排障里看结果、点「重新自检」（195-M.1）
+  if (req.method === "GET" && p === "/api/env-facts") return sendJson(res, 200, envFactsStatus());
+  if (req.method === "POST" && p === "/api/env-facts/rerun") return sendJson(res, 200, envFactsRerun());
   return NEXT;
 }

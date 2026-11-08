@@ -2981,5 +2981,18 @@ window.I18N_DICT.en = {
   "项目清单没保存上（存储满了或不可写），重启后这次改动会丢": "The project list couldn't be saved (storage full or not writable); this change will be lost after a restart",
   "有 {n} 个对话没能移进回收站，目录没删：{why}": "{n} chats couldn't be moved to the Trash, so the folder wasn't deleted: {why}",
   "组件「{id}」依赖的 {n} 个共享文件被删了": "{n} shared files that component \"{id}\" depends on were deleted",
-  "网关被系统结束，这一轮没跑完": "The gateway was stopped by the system before this run finished"
+  "网关被系统结束，这一轮没跑完": "The gateway was stopped by the system before this run finished",
+  "超时了": "timed out",
+  "没有输出": "no output",
+  "正在自检…（要一两分钟）": "Running the self-test… (takes a minute or two)",
+  "上次 {time}：通过 {pass} 项，失败 {fail} 项": "Last run {time}: {pass} passed, {fail} failed",
+  "工具包或应用更新前测的": "measured before the devkit or app was updated",
+  "还没有自检结果": "No self-test results yet",
+  "上次没跑出结果：{why}": "The last run produced no result: {why}",
+  "失败项": "Failed checks",
+  "系统不允许本应用启动工作岛服务，所以没有显示。": "The system doesn't let this app start the Work Island service, so nothing is shown.",
+  "没检测到「工作岛」应用：装好后点重试。": "The Work Island app wasn't detected — install it, then tap Retry.",
+  "本机自检": "Device self-test",
+  "把工具包里的编译器、Python、Node、git 等逐项跑一遍，结果会告诉 Claude 这台设备上什么能用、什么不能用。工具包或应用更新后会自动重测；修好了什么、想马上让 Claude 知道，就点重新自检。": "Runs the devkit's compilers, Python, Node, git and so on one by one; the results tell Claude what works on this device and what doesn't. It re-runs automatically after a devkit or app update; if you've fixed something and want Claude to know right away, tap Re-run self-test.",
+  "重新自检": "Re-run self-test"
 };

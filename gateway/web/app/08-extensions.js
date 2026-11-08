@@ -1316,6 +1316,31 @@
     if (!r) toast(t("核对失败"), true);
     else if (!r.supported) toast(t("这里没有工具包，不用核对"));
   });
+  // 本机自检（195-M.1）：看上次结果，点「重新自检」不等过期立刻重跑；跑着的时候每 5 秒刷新一次
+  let envFactsTimer = 0;
+  function paintEnvFacts(r) {
+    $("envfacts-row").classList.toggle("hidden", !r.supported);
+    const el = $("envfacts-state"), b = $("btn-envfacts");
+    b.disabled = !!r.running;
+    const why = { timeout: t("超时了"), empty: t("没有输出") };
+    const lines = [];
+    if (r.running) lines.push(`<div>${esc(t("正在自检…（要一两分钟）"))}</div>`);
+    if (r.at) lines.push(`<div>${esc(t("上次 {time}：通过 {pass} 项，失败 {fail} 项", { time: new Date(r.at).toLocaleString(), pass: r.pass, fail: r.fail.length }))}${r.stale ? " · " + esc(t("工具包或应用更新前测的")) : ""}</div>`);
+    else if (!r.running) lines.push(`<div>${esc(t("还没有自检结果"))}</div>`);
+    if (r.error && !r.running) lines.push(`<div class="warn">${esc(t("上次没跑出结果：{why}", { why: why[r.error] || r.error }))}</div>`);
+    if (r.fail.length) lines.push(`<details><summary>${esc(t("失败项"))}</summary>${r.fail.map((f) => `<div><code>${esc(f)}</code></div>`).join("")}</details>`);
+    el.innerHTML = lines.join("");
+    clearTimeout(envFactsTimer);
+    if (r.running) envFactsTimer = setTimeout(() => { if (!$("set-ov").classList.contains("hidden")) loadEnvFacts(); }, 5000);
+  }
+  async function loadEnvFacts() {
+    const r = await api("/api/env-facts").catch(() => null);
+    if (r) paintEnvFacts(r);
+  }
+  $("btn-envfacts").addEventListener("click", async () => {
+    const r = await post("/api/env-facts/rerun").catch((e) => (toast(e.message, true), null));
+    if (r) paintEnvFacts(r);
+  });
   const LEDGER_KIND = () => ({ verify: t("校验"), repair: t("修复"), install: t("安装"), uninstall: t("卸载"), recover: t("恢复"), "safe-mode": t("安全模式"), logs: t("日志") });
   $("btn-ledger").addEventListener("click", async () => {
     const box = $("ledger-list");

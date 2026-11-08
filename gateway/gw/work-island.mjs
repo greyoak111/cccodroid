@@ -45,6 +45,7 @@ function amSend(action, title, text, since, state, extra) {
     // 再每 1.5 秒试下去也没用，停掉发送（0.6.9 审计 195-P.4 / 196 日志考古.2）
     if (/invalid source|not allowed|Permission Denial|SecurityException|unable to start/i.test(String(err || "") + e.message)) {
       log("[work-island] 系统不允许启动工作岛服务，已停止发送；重新打开设置里的开关可再试");
+      fail("blocked", String(err || "").trim() || e.message);
       started = false;
       if (unsub) { try { unsub(); } catch {} unsub = null; }
       if (core) { try { core.stop(true, false); } catch {} core = null; }
@@ -59,6 +60,9 @@ function amSendSync(action, title, text, since, state, extra) {
 
 let started = false;
 let detecting = false;
+// 最近一次没起来的原因：设置页显示并给「重试」（195-P.4）。not_installed = 没检测到应用；blocked = 系统不许从应用身份起服务
+let lastErr = null;
+const fail = (code, detail = "") => { lastErr = { code, detail: String(detail).replace(/\s+/g, " ").slice(0, 200), at: Date.now() }; };
 let unsub = null;
 let core = null;
 // 每次开 / 关 +1：检测是异步的，关掉又开之后旧那次的回调必须作废，不能把第二份 core / 订阅装进来（#124-1）
@@ -79,7 +83,8 @@ function detectApp(cb) {
     { timeout: 4000 }, (e2, out2, err2) => {
       const msg = String(err2 || "");
       // 明确的「找不到」或「系统不许从应用身份起」都算用不了；超时之类的错误当作装了，交给后续 am 重试。
-      cb(!(e2 && /not found|does not exist|does not have|unable to find|invalid source|not allowed|Permission Denial|SecurityException/i.test(msg)));
+      if (e2 && /invalid source|not allowed|Permission Denial|SecurityException/i.test(msg)) return cb(false, "blocked", msg);
+      cb(!(e2 && /not found|does not exist|does not have|unable to find/i.test(msg)), "not_installed", msg);
     });
   execFile("/system/bin/pm", ["list", "packages", "--user", "0", PKG], { timeout: 3000 }, (e, out) => {
     if (!e && String(out).includes("package:" + PKG)) return cb(true);
@@ -99,13 +104,14 @@ export function startWorkIsland() {
   started = true;
   detecting = true;
   const my = ++gen;                              // 这一次检测的世代：回来时不是它了就不作数
-  seam.detect((ok) => {
+  seam.detect((ok, why, detail) => {
     if (my !== gen) return;                      // 检测期间关过 / 又开过：旧回调直接丢掉
     detecting = false;
     if (!started) return;                        // 检测期间被关掉了
     if (!ok) {
       started = false;
-      log("[work-island] 没检测到工作岛应用，跳过（装好后可在设置里重开一次）");
+      fail(why === "blocked" ? "blocked" : "not_installed", detail || "");
+      log(why === "blocked" ? "[work-island] 系统不允许启动工作岛服务，跳过" : "[work-island] 没检测到工作岛应用，跳过（装好后可在设置里重开一次）");
       return;
     }
     core = createWorkIsland({
@@ -120,6 +126,7 @@ export function startWorkIsland() {
     const live = runList().filter((r) => r && !r.ended);
     if (live.length) core.start(live[0]);        // 开设置时已经有轮次在跑
     else core.stop(true, true);                  // 没有轮次：先发一次 IDLE，收掉上一任网关被 SIGKILL 后留下的胶囊（195-P.1）
+    lastErr = null;
     log("[work-island] 已订阅网关事件");
   });
 }
@@ -138,6 +145,18 @@ export function stopWorkIsland(sync = false) {
 /** 网关 SIGTERM：同步发一次 IDLE，让岛收起，再退出。 */
 export function stopWorkIslandSync() {
   stopWorkIsland(true);
+}
+
+/** 设置页显示用：开着没有、跑起来没有、没起来是为什么（195-P.4） */
+export function workIslandStatus() {
+  return { supported: seam.android(), wanted: SETTINGS.workIsland === true, started: started && !detecting, detecting, error: started ? null : lastErr };
+}
+/** 「重试」：关了再开，重新检测（装好应用、或系统放开之后） */
+export function retryWorkIsland() {
+  stopWorkIsland();
+  lastErr = null;
+  startWorkIsland();
+  return workIslandStatus();
 }
 
 /** 设置页开关变化时调用。 */

@@ -15,7 +15,7 @@
     closeDrawer();
     // 每次打开设置页都重取设置（loadSettings 里也会重拉厂商和型号）：启动时那一次失败/竞态，
     // 以前就一直显示默认或旧值（195-E.8）
-    loadSettings(); loadPriv(); loadUpd(); loadNotify(); loadDev(); loadReconcile(false); loadFonts(); renderTbList(); renderAccent(); renderMsgActs();
+    loadSettings(); loadPriv(); loadUpd(); loadNotify(); loadDev(); loadReconcile(false); loadEnvFacts(); loadFonts(); renderTbList(); renderAccent(); renderMsgActs();
     // 焦点进模态：不然键盘 / 读屏还停在被盖住的背景上（审查 P2-12）
     // 窄屏的分类列表没有选中项、关闭键也藏着：落到第一个看得见的控件（审查 #52 P2-12）
     requestAnimationFrame(() => { if (setOpen) focusInto($("set-ov"), $("set-cats").querySelector("button.on:not(.hidden)")); });

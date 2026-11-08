@@ -2944,3 +2944,16 @@
 2944	No se pudieron mover {n} chats a la papelera, así que la carpeta no se borró: {why}
 2945	Se borraron {n} archivos compartidos de los que depende el componente «{id}»
 2946	El sistema detuvo la pasarela antes de que terminara esta ejecución
+2947	se agotó el tiempo
+2948	sin salida
+2949	Ejecutando la autoprueba… (tarda uno o dos minutos)
+2950	Última vez {time}: {pass} correctas, {fail} fallidas
+2951	medido antes de actualizar el kit de desarrollo o la app
+2952	Todavía no hay resultados de la autoprueba
+2953	La última ejecución no dio resultado: {why}
+2954	Comprobaciones fallidas
+2955	El sistema no permite que esta app inicie el servicio de Work Island, así que no se muestra nada.
+2956	No se detectó la app Work Island: instálala y pulsa Reintentar.
+2957	Autoprueba del dispositivo
+2958	Ejecuta uno a uno los compiladores, Python, Node, git, etc. del kit de desarrollo; el resultado le dice a Claude qué funciona en este dispositivo y qué no. Se repite sola tras actualizar el kit o la app; si arreglaste algo y quieres que Claude lo sepa ya, pulsa Repetir autoprueba.
+2959	Repetir autoprueba

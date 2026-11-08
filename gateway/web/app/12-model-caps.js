@@ -437,6 +437,7 @@
       $("set-static").checked = state.settings.staticCompat !== false;
       $("set-idlecompact").checked = state.settings.idleCompaction !== false;
       $("set-workisland").checked = state.settings.workIsland === true;
+      loadWorkIsland();
       loadExecMode();
     } catch {}
   }
@@ -549,7 +550,23 @@
   const extSync = () => { $("set-extimg").checked = uiGet("extImg") !== "auto"; };
   extSync(); document.addEventListener("cc:ui", (e) => { if (e.detail.key === "extImg" || e.detail.key == null) extSync(); });
   $("set-extimg").addEventListener("change", (e) => uiSet("extImg", e.target.checked ? null : "auto"));
-  $("set-workisland").addEventListener("change", (e) => saveSettings({ workIsland: e.target.checked }));
+  // 工作岛起没起来（195-P.4）：检测要几秒（pm 再加 am 探一次），开关 / 重试之后隔几秒再看
+  async function loadWorkIsland() {
+    const r = await api("/api/work-island").catch(() => null), box = $("wi-state");
+    const show = !!(r && r.supported && r.wanted && !r.started && !r.detecting && r.error);
+    box.classList.toggle("hidden", !show);
+    if (!show) return;
+    $("wi-state-txt").textContent = r.error.code === "blocked"
+      ? t("系统不允许本应用启动工作岛服务，所以没有显示。") + (r.error.detail ? "（" + r.error.detail + "）" : "")
+      : t("没检测到「工作岛」应用：装好后点重试。");
+  }
+  const wiLater = () => { for (const ms of [2000, 6000, 10000]) setTimeout(loadWorkIsland, ms); };
+  $("wi-retry").addEventListener("click", async () => {
+    await post("/api/work-island/retry").catch((e) => toast(e.message, true));
+    $("wi-state").classList.add("hidden");
+    wiLater();
+  });
+  $("set-workisland").addEventListener("change", (e) => saveSettings({ workIsland: e.target.checked }).then(wiLater));
   $("set-parallel").addEventListener("change", (e) => {
     const v = Math.round(Number(e.target.value));
     if (!(v >= 1)) { e.target.value = state.settings.maxParallel || 3; return; }

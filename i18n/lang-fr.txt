@@ -2944,3 +2944,16 @@
 2944	{n} discussions n’ont pas pu être déplacées dans la corbeille ; le dossier n’a donc pas été supprimé : {why}
 2945	{n} fichiers partagés dont dépend le composant « {id} » ont été supprimés
 2946	La passerelle a été arrêtée par le système avant la fin de cette exécution
+2947	délai dépassé
+2948	aucune sortie
+2949	Autotest en cours… (une ou deux minutes)
+2950	Dernière exécution {time} : {pass} réussis, {fail} échoués
+2951	mesuré avant la mise à jour du kit de dév. ou de l’app
+2952	Pas encore de résultats d’autotest
+2953	La dernière exécution n’a donné aucun résultat : {why}
+2954	Vérifications échouées
+2955	Le système n’autorise pas cette app à démarrer le service Work Island ; rien n’est donc affiché.
+2956	L’app Work Island n’a pas été détectée : installez-la, puis touchez Réessayer.
+2957	Autotest de l’appareil
+2958	Exécute un à un les compilateurs, Python, Node, git, etc. du kit de dév. ; le résultat indique à Claude ce qui marche sur cet appareil et ce qui ne marche pas. Il se relance tout seul après une mise à jour du kit ou de l’app ; si vous avez réparé quelque chose et voulez que Claude le sache tout de suite, touchez Relancer l’autotest.
+2959	Relancer l’autotest

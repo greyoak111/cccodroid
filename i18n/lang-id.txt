@@ -2944,3 +2944,16 @@
 2944	{n} percakapan tidak dapat dipindahkan ke tempat sampah, jadi folder tidak dihapus: {why}
 2945	{n} file bersama yang dibutuhkan komponen "{id}" telah dihapus
 2946	Gateway dihentikan sistem sebelum proses ini selesai
+2947	waktu habis
+2948	tidak ada keluaran
+2949	Menjalankan swauji… (butuh satu-dua menit)
+2950	Terakhir {time}: {pass} lulus, {fail} gagal
+2951	diukur sebelum Devkit atau aplikasi diperbarui
+2952	Belum ada hasil swauji
+2953	Proses terakhir tidak menghasilkan apa pun: {why}
+2954	Pemeriksaan yang gagal
+2955	Sistem tidak mengizinkan aplikasi ini memulai layanan Work Island, jadi tidak ada yang ditampilkan.
+2956	Aplikasi Work Island tidak terdeteksi — pasang dulu, lalu ketuk Coba lagi.
+2957	Swauji perangkat
+2958	Menjalankan kompiler, Python, Node, git, dan lainnya dari Devkit satu per satu; hasilnya memberi tahu Claude apa yang berfungsi di perangkat ini dan apa yang tidak. Diulang otomatis setelah Devkit atau aplikasi diperbarui; jika Anda sudah memperbaiki sesuatu dan ingin Claude segera tahu, ketuk Ulangi swauji.
+2959	Ulangi swauji
