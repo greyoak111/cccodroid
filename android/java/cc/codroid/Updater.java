@@ -132,6 +132,20 @@ final class Updater {
                 prefs().edit().remove("appStaged").apply();
             }
         } catch (Exception ignored) {}
+        sweepOldApks();
+    }
+
+    /** 以前下的安装包：除了眼下待装的那份，一律删掉。装完靠 MY_PACKAGE_REPLACED 清，可国产 ROM 常拦这条广播，
+     *  群友 11-08：updates/ 里攒了 0.3.16 到 0.6.7 五个旧包 74 MB。只认 .apk（和下载中途的 .apk.part），工具包的别碰 */
+    private void sweepOldApks() {
+        File[] fs = new File(env.files, "updates").listFiles();
+        if (fs == null) return;
+        for (File f : fs) {
+            String n = f.getName();
+            if (!f.isFile() || !(n.endsWith(".apk") || n.endsWith(".apk.part"))) continue;   // 老版本的命名不一定带 cccodroid- 前缀
+            if (app.file != null && (f.equals(app.file) || n.equals(app.file.getName() + ".part"))) continue;
+            if (f.delete()) Log.i(TAG, "删掉旧安装包 " + n);
+        }
     }
 
     /** 已下载待装的那份其实已经装上了（上次被打断、recover() 接着装完的）：删掉，别再装一遍 */
