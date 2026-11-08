@@ -272,11 +272,12 @@ const SNAP = new Map();      // runId → Map(rel → h)
 const ATTR = new Map();      // rel → { sid, at }
 const AGAIN = new Map();     // rel → 撤销过几次又被改回来
 /** 起进程紧前调：和确认记录对不上（卡片之后又被改了、或者看见过改了又改回）返回这些 rel，这一轮就别起了 */
-export function ucBeforeRun(run) {
+export function ucBeforeRun(run, only = null) {
   try {
     ensureWatch(); flushSeen();
     const cur = ucScan(), drift = [];
     if (loadRec()) for (const rel of new Set([...Object.keys(REC.files), ...cur.keys(), ...SEEN.keys()])) {
+      if (only && !only.includes(rel)) continue;
       if (SEEN.has(rel) || (REC.files[rel] || undefined) !== cur.get(rel)?.h) drift.push(rel);
     }
     if (drift.length) { log(`⚠️ [用户配置] 确认之后又被改了：${drift.slice(0, 8).join(", ")}`); return drift; }
@@ -330,8 +331,12 @@ function preview(rel, f, oldText) {
   return mask(ls.slice(0, 15).join("\n").slice(0, 900) + (ls.length > 15 ? `\n… (${ls.length})` : ""));
 }
 
-/** 起一轮前：有没有没确认的改动。没有返回 null */
-export function ucPending() {
+// 发行版只问这两份：CLAUDE.md、rules、skill、插件这些发行版根本不读（edition.mjs），回填进来的只有 MCP 与权限规则（seal.mjs），
+// 这两样过了破甲扫描也照样能让程序跑起来、放宽自动批准，被注入驱动着改了要人点头（0.6.9 审计 199-11-06）
+export const UC_SEALED = [".claude.json", ".claude/settings.json"];
+
+/** 起一轮前：有没有没确认的改动。没有返回 null。only：只看这几项（发行版给 UC_SEALED） */
+export function ucPending(only = null) {
   ensureWatch();
   let cur; try { flushSeen(); cur = ucScan(); } catch (e) { log(`[用户配置] 核不了：${e.message}`); return null; }
   let first = false;
@@ -343,6 +348,7 @@ export function ucPending() {
   }
   const changes = [];
   for (const rel of new Set([...Object.keys(REC.files), ...cur.keys(), ...SEEN.keys()])) {
+    if (only && !only.includes(rel)) continue;
     const was = REC.files[rel], f = cur.get(rel), s = SEEN.get(rel);
     const a = ATTR.get(rel), during = s?.sid || (a ? a.sid || true : null);
     if (was === f?.h) {

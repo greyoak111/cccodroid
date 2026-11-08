@@ -39,7 +39,7 @@ import { holdsPrivate } from "./pathguard.mjs";
 import { guarded } from "./crashguard.mjs";
 // 权限确认等多久没人答就按拒绝收掉（0.6.9 审计 P1-4）。测试可用 CCAPP_PERM_WAIT_MS 改短
 const PERM_WAIT_MS = Number(process.env.CCAPP_PERM_WAIT_MS) > 0 ? Number(process.env.CCAPP_PERM_WAIT_MS) : 30 * 60e3;
-import { ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "./userconf.mjs";
+import { UC_SEALED, ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "./userconf.mjs";
 import { keepProcs, killProcs, leftoverProcs, nowTicks, procStart } from "./leftover.mjs";
 import { localAddr, witnessMac } from "./access.mjs";
 import { sealed } from "./edition.mjs";
@@ -417,8 +417,8 @@ export async function startRun(item) {
   // 上面拉模型清单、问设备工具、读建档提示都要等：这期间点了停止（还没有进程可杀）就别再起了（安全通告 GHSA-g35m）
   if (run.aborted) { log("⏹ 起进程前已停止"); return endRun(run, { durationMs: 0 }); }
   // 用户级配置（~/.claude）有没确认的改动、之前的对话留下了后台进程（见 userconf.mjs / leftover.mjs）：先问。
-  // 没人看着的（定时任务、空闲压缩）不跑：定时任务按失败记、照任务设置通知
-  const ucp = sealed() ? null : ucPending(), procs = leftoverProcs(new Map([...RUNS].filter(([k]) => k !== run.id).map(([k, r]) => [String(k), r.childStart ?? null])));
+  // 没人看着的（定时任务、空闲压缩）不跑：定时任务按失败记、照任务设置通知。发行版只问回填进来的 MCP 与权限（UC_SEALED）
+  const ucp = ucPending(sealed() ? UC_SEALED : null), procs = leftoverProcs(new Map([...RUNS].filter(([k]) => k !== run.id).map(([k, r]) => [String(k), r.childStart ?? null])));
   if (ucp || procs.length) {
     if (run.unattended || run.auto) {
       const msg = tz("Claude Code 的用户级配置有改动还没确认，或者之前的对话留下了后台进程，这次没有运行。打开 cccodroid 发一条消息，在弹出的卡片里确认后再试。");
@@ -496,7 +496,7 @@ export async function startRun(item) {
     argv.push(...prep.args);
     if (prep.settings && Object.keys(prep.settings).length) argv.push("--settings", JSON.stringify(prep.settings));
   }
-  const drift = sealed() ? [] : ucBeforeRun(run);
+  const drift = ucBeforeRun(run, sealed() ? UC_SEALED : null);
   if (drift.length) {
     emit({ type: "error", message: tr(LAST_LANG, tz("用户级配置在确认之后又被改了，这一轮没有启动：{list}。再发一条消息，在弹出的卡片里确认。", { list: drift.slice(0, 6).join(", ") })) });
     return endRun(run, { failed: true });

@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, PATHS } from "../gw/config.mjs";
-import { _ucFlush, _ucReset, ucAfterRun, ucAppBegin, ucAppWrote, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "../gw/userconf.mjs";
+import { UC_SEALED, _ucFlush, _ucReset, ucAfterRun, ucAppBegin, ucAppWrote, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "../gw/userconf.mjs";
 import { _keptReset, keepProcs, killProcs, leftoverProcs, procStart } from "../gw/leftover.mjs";
 import { hookContext } from "../gw/stream.mjs";
 import { transcriptItems } from "../gw/transcript.mjs";
@@ -405,4 +405,27 @@ test("卡片之后改了又改回同一版：常驻监视看见了，也不认",
   put(".claude/CLAUDE.md", "偷换\n"); _ucFlush();
   put(".claude/CLAUDE.md", "V1\n"); _ucFlush();
   assert.deepEqual(ucKeep(p.rels, p.ticket), [".claude/CLAUDE.md"]);
+});
+
+test("发行版只问回填进来的 MCP 与权限：CLAUDE.md、skill 改了不问；.claude.json 加 MCP、settings 加 allow 要问，起进程紧前也只核这两份（199-11-06）", () => {
+  fresh();
+  put(".claude.json", JSON.stringify({ mcpServers: { a: { command: "node", args: ["a.js"] } } }));
+  put(".claude/CLAUDE.md", "# x\n");
+  const first = ucPending(UC_SEALED);
+  assert.ok(first && first.first);
+  assert.deepEqual(first.rels, [".claude.json"], "第一次：有 MCP 的问一次，CLAUDE.md 发行版不读、不出现");
+  ucKeep(first.rels, first.ticket);
+  assert.equal(ucPending(UC_SEALED), null);
+  put(".claude/CLAUDE.md", "# y\n");
+  put(".claude/skills/s/SKILL.md", "---\nname: s\n---\n");
+  assert.equal(ucPending(UC_SEALED), null, "发行版不读的不问");
+  assert.deepEqual(ucBeforeRun({ id: 1 }, UC_SEALED), [], "也不挡起进程");
+  ucAfterRun({ id: 1 });
+  put(".claude/settings.json", JSON.stringify({ permissions: { allow: ["Bash(*)"] } }));
+  put(".claude.json", JSON.stringify({ mcpServers: { a: { command: "node", args: ["a.js"] }, b: { command: "sh", args: ["b.sh"] } } }));
+  const p = ucPending(UC_SEALED);
+  assert.deepEqual(p.rels.sort(), [".claude.json", ".claude/settings.json"]);
+  assert.match(p.changes.find((c) => c.rel === ".claude.json").preview, /mcpServers: a, b/);
+  assert.deepEqual(ucBeforeRun({ id: 2 }, UC_SEALED).sort(), [".claude.json", ".claude/settings.json"]);
+  assert.ok(ucPending().rels.includes(".claude/CLAUDE.md"), "开发版照旧全看");
 });
