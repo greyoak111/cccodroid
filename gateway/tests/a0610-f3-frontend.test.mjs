@@ -14,6 +14,8 @@ const src09 = read("app/09-settings.js");
 const src11 = read("app/11-usage.js");
 const src13 = read("app/13-nav-menus.js");
 const src14 = read("app/14-projects-sched.js");
+const src16 = read("app/16-viewer-git.js");
+const src17 = read("app/17-office.js");
 const src19 = read("app/19-boot.js");
 
 test("A1 195-A.6 / P1-12：权限切档以网关回的 mode 为准，全局设置记 wanted", () => {
@@ -124,6 +126,16 @@ test("B14 196 端侧.5：到 GitHub 反馈按钮有忙碌态，防连点", () =>
   assert.ok(src08.includes("if (b.dataset.busy) return;"), "忙碌时直接返回");
   assert.ok(src08.includes("b.dataset.busy = \"1\"; b.disabled = true;"), "取 Issue 草稿期间置忙");
   assert.ok(src08.includes("finally { delete b.dataset.busy; b.disabled = false; }"), "完成或失败都恢复");
+});
+
+test("B18 196 注入域 .2/.3/.4/.6/.9：缺字段不破渲染，选中文字不能往草稿里注入", () => {
+  assert.ok(src16.includes("if (!r || typeof r.url !== \"string\") throw new Error(t(\"预览服务没有返回地址\"))"), "预览回执缺 url 有守卫（已由 f234f61 修）");
+  assert.ok(src17.includes("try { rg = X.utils.decode_range(ws[\"!ref\"]); }"), "畸形 !ref 有守卫（已由 f234f61 修）");
+  assert.ok(src16.includes("const cmsg = typeof c.message === \"string\" ? c.message : \"\""), "git show 缺 message 不抛错");
+  assert.ok(src16.includes("const cfiles = Array.isArray(c.files) ? c.files : []"), "git show 缺 files 不抛错");
+  assert.ok(src08.includes("const ub = m.usedBy || {}"), "模块缺 usedBy 不炸整个列表");
+  assert.ok(src16.includes(".replace(/`/g, \"`\\u200b\")"), "选择器里的反引号不能闭合行内代码");
+  assert.ok(src16.includes(".replace(/[\\r\\n]+/g, \" \")"), "选择器里的换行压平");
 });
 
 test("C28 195-O.5–O.7 / 197-5.12：跨午夜 / 换时区重算，补算进度也重画，清除本月不误删邻月", () => {

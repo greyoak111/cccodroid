@@ -369,19 +369,22 @@
     const ok = latest("gitbody");
     try { c = await gapi("show", { commit: hash }); } catch (e) { if (ok()) box.innerHTML = `<div class="vw-empty">${esc(e.message)}</div>`; return; }
     if (!ok()) return;
+    // 回执缺 message / files 时 split / map 会抛错，整个详情面板停在「读取中…」（196 前端注入域）
+    const cmsg = typeof c.message === "string" ? c.message : "";
+    const cfiles = Array.isArray(c.files) ? c.files : [];
     box.innerHTML = `<div class="row-actions git-back"><button class="btn ghost sm" data-a="back">${t("← 返回历史")}</button>
         <button class="btn ghost sm" data-a="all">${t("看整次提交的对比")}</button></div>
-      <div class="prov-state"><b>${esc(c.message.split("\n")[0])}</b>${c.message.includes("\n") ? `<pre class="tiny" style="white-space:pre-wrap;margin:4px 0 0">${esc(c.message.split("\n").slice(1).join("\n").trim())}</pre>` : ""}
-        <div class="tiny mono">${esc(c.hash.slice(0, 12))} · ${esc(c.author)} · ${esc(new Date(c.at).toLocaleString())}</div></div>
-      ${c.files.map((f, i) => `<div class="git-row" data-f="${i}" style="cursor:pointer">
-        <span class="gs gs-${{ M: "modified", A: "added", D: "deleted", R: "renamed" }[f.status] || "modified"}">${esc(f.status)}</span>
+      <div class="prov-state"><b>${esc(cmsg.split("\n")[0])}</b>${cmsg.includes("\n") ? `<pre class="tiny" style="white-space:pre-wrap;margin:4px 0 0">${esc(cmsg.split("\n").slice(1).join("\n").trim())}</pre>` : ""}
+        <div class="tiny mono">${esc(String(c.hash || "").slice(0, 12))} · ${esc(c.author || "")} · ${esc(new Date(c.at).toLocaleString())}</div></div>
+      ${cfiles.map((f, i) => `<div class="git-row" data-f="${i}" style="cursor:pointer">
+        <span class="gs gs-${{ M: "modified", A: "added", D: "deleted", R: "renamed" }[f.status] || "modified"}">${esc(f.status || "")}</span>
         <span class="gp">${gbdi(f.orig ? f.orig + " → " + f.path : f.path)}</span>${gnum(f)}</div>`).join("")}`;
     box.onclick = (e) => {
       const a = e.target.dataset && e.target.dataset.a;
       if (a === "back") { GIT.view = null; return gitRender(); }
       if (a === "all") { GIT.file = ""; GIT.view = { kind: "diff", commit: hash }; return gitRender(); }
       const row = e.target.closest("[data-f]");
-      if (row) { GIT.file = c.files[+row.dataset.f].path; GIT.view = { kind: "diff", commit: hash }; gitRender(); }
+      if (row) { GIT.file = cfiles[+row.dataset.f].path; GIT.view = { kind: "diff", commit: hash }; gitRender(); }
     };
   }
 
@@ -903,7 +906,9 @@
   /** 选中的元素放进输入框：只取选择器和一小段 HTML 当文字，不执行任何东西 */
   function pickInsert(where, d) {
     const str = (v, n) => String(v == null ? "" : v).slice(0, n);
-    const sel = str(d.sel, 300), html = str(d.html, 900).replace(/```/g, "`\u200b``");
+    // \u9009\u62e9\u5668\u8981\u585e\u8fdb\u884c\u5185\u4ee3\u7801\uff1a\u53cd\u5f15\u53f7\u52a0\u96f6\u5bbd\u7a7a\u683c\u3001\u6362\u884c\u538b\u5e73\uff0c\u514d\u5f97\u95ed\u5408\u53cd\u5f15\u53f7\u5f80\u8349\u7a3f\u91cc\u6ce8\u5165 Markdown\uff08196 \u524d\u7aef\u6ce8\u5165\u57df\uff09
+    const sel = str(d.sel, 300).replace(/`/g, "`\u200b").replace(/[\r\n]+/g, " ");
+    const html = str(d.html, 900).replace(/```/g, "`\u200b``");
     insertAtCursor(t("{path} 里的 {sel}：", { path: where, sel: "`" + sel + "`" }) + "\n```html\n" + html + "\n```\n");
     toast(t("已放进输入框，接着写要怎么改"));
   }
