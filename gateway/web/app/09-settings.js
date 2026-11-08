@@ -319,6 +319,8 @@
     const r = await post("/api/login/logout").catch((e) => ({ ok: false, output: e.message }));
     toast(r.ok ? t("已退出登录") : t("退出失败：{msg}", { msg: r.output || r.message || "" }), !r.ok);
     renderProvCard();
+    // 退出成功后顶栏 / 用量页的额度要跟着撤掉，不能留着上一个账户的数（195-O.9）
+    if (r.ok) { refreshStatus(); qbLoad(); loadQuota().catch(() => {}); }
   }
 
   // ── 密钥卡（Claude API Key 与第三方厂商）──
@@ -455,7 +457,10 @@
     const pid = curProv() || s.provider, pb = pid !== s.provider ? provOf(pid) : null;
     const cur = pb ? { id: pid, name: provLabel(pid), login: pb.keyMode === "login" } : { id: s.provider, name: provName(s), login: s.keyMode === "login" };
     if (cur.login) {
-      const st = await api("/api/login/status").catch(() => null);
+      let st = null, failed = false;
+      try { st = await api("/api/login/status"); } catch { failed = true; }
+      // 查询失败（网络/网关忙）别把已经显示的已登录额度清掉；只有接口明确回“没登录”才撤（195-O.9）
+      if (failed && QB.cur && QB.cur.id === cur.id) return QB.cur;
       cur.limits = st && st.loggedIn ? st.limits || null : null;
     } else {
       cur.bill = await api(`/api/billing?id=${encodeURIComponent(cur.id)}${force ? "&refresh=1" : ""}`).catch(() => null);

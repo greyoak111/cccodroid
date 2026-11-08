@@ -313,9 +313,17 @@
   const KIND = () => ({ glibc: t("Linux 程序（glibc）"), bionic: t("安卓原生程序"), static: t("静态程序"), script: t("脚本"),
     musl: "musl", unsupported: t("跑不了") });
   async function loadCustom() {
-    const r = await api("/api/custom").catch(() => ({ supported: false }));
-    $("custom-field").classList.toggle("hidden", !r.supported);
-    if (!r.supported) return;
+    // 读失败不能当成「这个版本没有自定义组件」把整节藏掉（195-N.4 / X.2）
+    const r = await api("/api/custom").catch((e) => ({ supported: true, error: e.message, items: [] }));
+    if (r.ok === false && !r.error) r.error = r.message || "?";
+    $("custom-field").classList.remove("hidden");
+    if (r.error) {
+      $("custom-count").textContent = "—";
+      $("custom-list").innerHTML = '<div class="tiny err">' + esc(t("自定义组件列表读取失败：{msg}", { msg: r.error })) + '</div><div class="it-acts"><button class="btn ghost sm" id="custom-retry">' + t("重试") + "</button></div>";
+      $("custom-retry").onclick = () => loadCustom();
+      return;
+    }
+    if (!r.supported) { $("custom-field").classList.add("hidden"); return; }
     custRestore();
     $("custom-count").textContent = (r.items || []).length || "";
     $("custom-list").innerHTML = (r.items || []).map((c) => {
@@ -399,6 +407,7 @@
       if (!x.ok) { b.disabled = false; b.textContent = t("安装"); return toast(t("失败：{msg}", { msg: x.message || "" }), true); }
       if (cust.rep === r) { cust.rep = null; custSave(); renderCustomWiz(); }
       toast(x.unresolved && x.unresolved.length ? t("已安装，但还缺 {n} 个库", { n: x.unresolved.length }) : t("已安装，Claude 和终端里都能用了"), !!(x.unresolved && x.unresolved.length));
+      loadExtSkills();   // 自定义组件会生成一个技能：同页的技能列表跟着刷新（195-J.9）
       return loadCustom();
     }
     if (a === "remove") {
@@ -407,6 +416,7 @@
       b.disabled = true;
       const x = await cpost("/api/custom/remove", { id: b.dataset.id }).catch((err) => ({ ok: false, message: err.message }));
       toast(x.ok ? t("已卸载") : t("失败：{msg}", { msg: x.message || "" }), !x.ok);
+      if (x.ok) loadExtSkills();   // 它的技能也一起删了（195-J.9）
       return loadCustom();
     }
     if (a === "try") {
@@ -477,7 +487,8 @@
       }
       else body.innerHTML = llmDl.html;
       body.querySelectorAll(".llm-fam").forEach((d) => d.addEventListener("toggle", () => { d.open ? llmDl.fam.add(d.dataset.fam) : llmDl.fam.delete(d.dataset.fam); }));
-      const inp = $("llm-url"); if (inp) inp.addEventListener("input", () => { llmDl.url = inp.value; });
+      // 正打字的输入框是原地保留的：每次轮询都 addEventListener 会越积越多（195-6.04）
+      const inp = $("llm-url"); if (inp) inp.oninput = () => { llmDl.url = inp.value; };
     }
     const busy = (r.items || []).some((m) => m.job && m.job.phase !== "error");
     if (busy && llmDl.open && $("llm-dl") && pageOn("ext"))
@@ -567,7 +578,8 @@
     // 翻页在途再点「再显示」：两次都按同一个 offset 取，同一页追加两遍、最后一页反而没取（审查 F-003）
     if (more && ext.busy) return;
     // 连着搜两个词，慢的那个迟到不许盖掉新词的结果（审查 F-004）；新搜索也让在途的翻页作废
-    if (!more) { latest("plugcat"); ext.busy = false; ext.offset = 0; ext.q = $("ext-p-q").value.trim(); box.innerHTML = `<div class="tiny">${t("正在拉取插件目录…")}</div>`; }
+    // 新搜索清掉分类筛选：否则选了「已启用 / 某个市场」后搜别的，结果全被旧筛选藏起来（195-J.2）
+    if (!more) { latest("plugcat"); ext.busy = false; ext.offset = 0; extPick.plugin = ""; ext.q = $("ext-p-q").value.trim(); box.innerHTML = `<div class="tiny">${t("正在拉取插件目录…")}</div>`; }
     const n = LATEST.plugcat, ok = () => LATEST.plugcat === n;
     if (more) ext.busy = true;
     let r;
@@ -596,14 +608,25 @@
     if (r.needConfirm) {
       if (confirm(t("这个插件安装时要在本机执行下面这条命令，确认是你信任的来源再继续：\n\n{cmd}", { cmd: r.command }))) {
         r = await post("/api/ext/plugins/install", { id, accept: r.sha256 }).catch((e) => ({ ok: false, message: e.message }));
-      } else r = { ok: false, message: t("已取消") };
+      } else {
+        // 用户自己点的取消不是「安装失败」（195-J.12）
+        toast(t("已取消"));
+        btn.disabled = false; btn.textContent = t("安装");
+        return;
+      }
     }
     if (r.ok) { toast(t("已安装 {name}，下一条消息生效", { name: id.split("@")[0] })); btn.closest(".item").remove(); loadExtPlugins(); }
     else { toast(t("安装失败：{msg}", { msg: r.message || "" }), true); btn.disabled = false; btn.textContent = t("安装"); }
   }
 
   async function loadExtMarkets() {
-    const r = await api("/api/ext/marketplaces").catch(() => ({ items: [] }));
+    // 读失败要报错，不能画成「只有内置的官方目录」（195-N.4 / X.2）
+    const r = await api("/api/ext/marketplaces").catch((e) => ({ items: [], err: e.message }));
+    if (r.ok === false) r.err = r.err || r.message || "?";
+    if (r.err) {
+      $("ext-markets").innerHTML = `<div class="tiny err">${esc(t("插件市场读取失败：{msg}", { msg: r.err }))}</div><div class="it-acts"><button class="btn ghost sm" data-x="market-retry">${t("重试")}</button></div>`;
+      return;
+    }
     $("ext-markets").innerHTML = (r.items || []).map((m) => extItem(esc(m.name), `<span>${esc(m.source)}</span>`,
       `<button data-x="market-rm" data-id="${esc(m.name)}">${t("移除")}</button>`)).join("")
       || `<div class="tiny">${t("只有内置的官方目录。可以添加别的插件市场（GitHub 仓库或网址）。")}</div>`;
@@ -612,6 +635,7 @@
   async function loadExtSkills() {
     // 读失败不能显示成「还没有技能」、计数 0（审查 F-007）
     const r = await api("/api/ext/skills").catch((e) => ({ items: [], err: e.message || "?" }));
+    if (r.ok === false) r.err = r.message || "?";   // 200 + {ok:false}（195-X.2）
     if (r.err) {
       $("ext-s-count").textContent = "—";
       $("ext-skills").innerHTML = `<div class="tiny err">${esc(t("技能列表读取失败：{msg}", { msg: r.err }))}</div><div class="it-acts"><button class="btn ghost sm" id="ext-s-retry">${esc(t("重试"))}</button></div>`;
@@ -622,7 +646,7 @@
     // 发行版：skill 经检查后以插件「user」交给 Claude Code，斜杠调用时名字带 user: 前缀（见 gw/seal.mjs）
     $("ext-skills").innerHTML = (r.sealed && (r.items || []).length ? `<div class="tiny">${esc(t("cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。", { name: r.items[0].name }))}</div>` : "") + (r.items || []).map((s) => extItem(esc(s.name), "",
       `<button data-x="skill-rm" data-id="${esc(s.dir)}">${t("删除")}</button>`,
-      `<div class="tiny ext-desc">${esc(!isZh() && s.descEn ? s.descEn : s.description)}</div>`, [s.component ? "comp" : s.official ? "official" : "user"])).join("")
+      `<div class="tiny ext-desc">${esc(s.orphan ? t("这个文件夹里没有 SKILL.md（可能是以前导入到一半失败留下的），可以删掉。") : !isZh() && s.descEn ? s.descEn : s.description)}</div>`, [s.component ? "comp" : s.official ? "official" : "user"])).join("")
       || `<div class="tiny">${t("~/.claude/skills 里还没有技能。插件也可能自带技能。")}</div>`;
     renderIdx("skill", [["official", t("官方")], ["comp", t("组件自带")], ["user", t("自己装的")]]);
     if ($("ext-s-catbox").open) loadSkillCat();
@@ -715,6 +739,7 @@
   async function loadExtHooks() {
     let d;
     try { d = await api("/api/ext/hooks"); } catch (e) { $("ext-hooks").innerHTML = `<div class="tiny">${esc(e.message)}</div>`; return; }
+    if (d && d.ok === false) { $("ext-hooks").innerHTML = `<div class="tiny err">${esc(d.message || "?")}</div>`; return; }
     HK.data = d;
     if (!d.scopes.some((s) => s.scope === HK.scope)) HK.scope = "user";
     renderHooks();
@@ -736,7 +761,7 @@
     };
     // 发行版不跑这里配的钩子（见 gw/edition.mjs、seal.mjs）：配置照样能看能改，只是不加载
     $("hook-bar").innerHTML = (d.sealed ? `<div class="tiny warn">${esc(t("发行版不运行这里配置的 hooks：hooks 能执行任意命令、把任意内容放进对话，cccodroid 没法检查。规则留在文件里，不会被删。"))}</div>` : "") + `<div class="tiny">${esc(SCD[HK.scope])}
-        ${sc && sc.file ? `<a href="#" data-hk="open-file">${t("打开配置文件")}</a>` : ""}</div>
+        ${sc && sc.file && sc.exists ? `<a href="#" data-hk="open-file">${t("打开配置文件")}</a>` : ""}</div>
       <label class="tiny hk-pause"><input type="checkbox" data-hk="pause"${sc && sc.disableAll ? " checked" : ""}> ${t("暂停这一层的 hooks（规则留着，先不跑）")}</label>`;
     if (!sc || sc.error && !sc.badJson) { $("ext-hooks").innerHTML = `<div class="tiny warn">${esc((sc && sc.error) || "")}</div>`; return; }
     if (sc.badJson) {
@@ -854,7 +879,13 @@
   async function hkRunTest(box, ev, cmd, matcher, timeout, input) {
     if (!cmd) return toast(t("命令是空的"), true);
     box.innerHTML = `<div class="tiny">${t("运行中…")}</div>`;
-    if (/\$HOME\/\.claude\/hooks\/cc-/.test(cmd)) await api("/api/ext/hooks/scripts", { method: "POST", body: "{}" }).catch(() => {});
+    // 内置脚本没装上时试运行必然失败：以前把这个错误吞了，用户只看到“命令跑不起来”（197-2.9）
+    if (/\$HOME\/\.claude\/hooks\/cc-/.test(cmd)) {
+      let inst;
+      try { inst = await api("/api/ext/hooks/scripts", { method: "POST", body: "{}" }); }
+      catch (e) { box.innerHTML = `<div class="tiny warn">${esc(t("内置脚本没装上：{msg}", { msg: e.message }))}</div>`; return; }
+      if (inst.ok === false) { box.innerHTML = `<div class="tiny warn">${esc(t("内置脚本没装上：{msg}", { msg: inst.message || "?" }))}</div>`; return; }
+    }
     try {
       const res = await api("/api/ext/hooks/test", { method: "POST", body: JSON.stringify({ command: cmd, event: ev, matcher, timeout, input, dir: HK.data.dir }) });
       if (res.ok === false) throw new Error(res.message);
@@ -879,7 +910,21 @@
     const a = b.dataset.hk;
     const items = hkFlat(hkScopeData());
     const it = b.closest(".hk-item") ? items[+b.closest(".hk-item").dataset.i] : null;
-    if (a === "open-file") { const sc = hkScopeData(); return openViewer(sc.file, "text", 0); }
+    if (a === "open-file") {
+      // 用户级 settings.json 在 home 里，按路径政策不能经 /api/file 读：走扩展自己的只读接口展示（195-J.1）
+      const sc = hkScopeData();
+      let r;
+      try { r = await api(`/api/ext/hooks/file?scope=${encodeURIComponent(HK.scope)}&dir=${encodeURIComponent(HK.data.dir)}`); }
+      catch (e) { return toast(e.message, true); }
+      let box = $("hk-file-view");
+      if (!box) { box = document.createElement("div"); box.id = "hk-file-view"; $("hook-bar").after(box); }
+      if (r.ok === false) { box.innerHTML = `<div class="tiny err">${esc(r.message || "?")}</div>`; return; }
+      box.innerHTML = `<div class="tiny">${esc(r.file || (sc && sc.file) || "")}${r.exists ? "" : "（" + esc(t("文件还不存在")) + "）"}</div>` +
+        `<pre class="hk-pre">${esc(r.text || "")}</pre>` +
+        `<div class="it-acts"><button class="btn ghost sm" data-hk="close-file">${t("关闭")}</button></div>`;
+      return;
+    }
+    if (a === "close-file") { $("hk-file-view")?.remove(); return; }
     if (a === "test" && it) return hkRunTest(b.closest(".hk-item").querySelector(".hk-out"), it.ev, it.h.command, it.matcher, it.h.timeout);
     if (a === "del" && it) {
       if (!confirm(t("删除这条规则？"))) return;
@@ -903,7 +948,13 @@
     if (a === "f-save") {
       const v = hkFormVal();
       if (!v.command) return toast(t("命令是空的"), true);
-      if (/\$HOME\/\.claude\/hooks\/cc-/.test(v.command)) await api("/api/ext/hooks/scripts", { method: "POST", body: "{}" }).catch(() => {});
+      // 内置脚本装不上就别保存规则：以前吞掉错误，界面提示“已保存”，实际这条规则永远跑不起来（197-2.9）
+      if (/\$HOME\/\.claude\/hooks\/cc-/.test(v.command)) {
+        let inst;
+        try { inst = await api("/api/ext/hooks/scripts", { method: "POST", body: "{}" }); }
+        catch (e) { return toast(t("内置脚本没装上：{msg}，规则没有保存", { msg: e.message }), true); }
+        if (inst.ok === false) return toast(t("内置脚本没装上：{msg}，规则没有保存", { msg: inst.message || "?" }), true);
+      }
       const h = hkClone();
       const entry = { type: "command", command: v.command };
       if (v.timeout) entry.timeout = v.timeout;
@@ -947,7 +998,8 @@
   async function loadExtMcp() {
     const box = $("ext-mcp");
     const r = await api("/api/ext/mcp").catch((e) => ({ items: [], err: e.message }));
-    $("ext-m-count").textContent = (r.items || []).length;
+    if (r.ok === false) r.err = r.message || "?";   // 200 + {ok:false} 也是失败，不能画成空列表（195-X.2）
+    $("ext-m-count").textContent = r.err ? "—" : (r.items || []).length;
     box.innerHTML = (r.items || []).map((m) => extItem(
       esc(m.name) + (m.cloud ? ` <span class="badge">${t("账户连接器")}</span>` : ""),
       `<span class="mono">${esc(m.target)}</span>`,
@@ -1023,6 +1075,7 @@
     if (b.classList.contains("mcpcat-more")) return searchMcpCat(true);
     const x = b.dataset.x;
     if (x === "skillcat-retry") return loadSkillCat(true);
+    if (x === "market-retry") return loadExtMarkets();
     if (x === "skillcat-install") {
       b.disabled = true; b.textContent = t("安装中…");
       const r = await post("/api/ext/catalog/skills/install", { dir: b.dataset.id }).catch((er) => ({ ok: false, message: er.message }));
@@ -1065,6 +1118,8 @@
     if (!list.length) return;
     const ok = [], bad = [];
     for (const f of list) {
+      // 后端整包接收上限 64 MB：先看大小，别把几百 MB 读进内存再撞 413（196 HTTP/静态/路由）
+      if (f.size > 64 * 1024 * 1024) { bad.push(`${f.name}：${t("技能包超过 64 MB，请解压后逐个导入")}`); continue; }
       const r = await api("/api/ext/skills/import", { method: "POST", headers: { "content-type": "application/octet-stream" }, body: await f.arrayBuffer() })
         .catch((err) => ({ ok: false, message: err.message }));
       if (r.ok) ok.push(...(r.dirs || [r.dir]));
@@ -1086,7 +1141,9 @@
   });
   $("ext-mcp-add").addEventListener("click", async () => {
     const transport = $("ext-mcp-tr").value;
-    const extra = $("ext-mcp-env").value.split(",").map((x) => x.trim()).filter(Boolean);
+    // 请求头的值本身可能带英文逗号：有换行就按行分（一行一条），没换行才退回逗号（195-J.11）
+    const raw = $("ext-mcp-env").value;
+    const extra = (raw.includes("\n") ? raw.split("\n") : raw.split(",")).map((x) => x.trim()).filter(Boolean);
     const body = {
       name: $("ext-mcp-name").value.trim(), transport, target: $("ext-mcp-target").value.trim(),
       env: extra.filter((x) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(x)),
@@ -1237,8 +1294,7 @@
     return r;
   }
   $("btn-reconcile").addEventListener("click", async () => {
-    const box = $("reconcile-box");
-    if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }
+    // 按钮是「核对」：已有结果时点它也要重新核，不能第一次只把面板收起来（195-M.6）
     toast(t("正在核对…"));
     const r = await loadReconcile(true);
     if (!r) toast(t("核对失败"), true);
@@ -1314,7 +1370,9 @@
     const b = e.target.closest("[data-uc]"); if (!b) return;
     const sc = ucScope(), it = b.closest(".uc-item"), c = it && sc ? sc.items[+it.dataset.i] : null;
     const act = b.dataset.uc;
-    if (act === "use" && c) { closePage(); inputEl.value = "/" + c.name + " "; autoGrow(); inputEl.focus(); return; }
+    // 发行版把指令经合成插件交给 Claude，实际名字是 /user:<名字>；插入裸名会展开不了（195-J.6）
+    // 插到光标处，别把还没发的草稿整个盖掉（196 输入框域；insertAtCursor 是输入框统一入口）
+    if (act === "use" && c) { closePage(); insertAtCursor((UC.data.sealed ? "/user:" : "/") + c.name); inputEl.focus(); return; }
     if (act === "edit" && c) return ucForm(c);
     if (act === "del" && c) {
       if (!confirm(t("删除指令 /{name}？", { name: c.name }))) return;

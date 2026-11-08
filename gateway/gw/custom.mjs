@@ -151,7 +151,7 @@ function customCmdClash(cmd, selfId) {
 }
 
 /** 测试用：直接看命令名预留和冲突判断（#122-4） */
-export const _customForTest = { CMD_RESERVED, customCmdClash, customSkill, rmTree, runCapped, headOf };
+export const _customForTest = { CMD_RESERVED, CUSTOM_STAGES, customCmdClash, customSkill, rmTree, runCapped, headOf };
 
 const GZ_MAX = 256 << 20, DEB_MAX = 512 << 20;
 // Termux glibc 仓库的 Contents（文件 → 包）与 Packages（包 → 下载地址、sha256），缓存一天。
@@ -214,25 +214,30 @@ async function unpackedSize(sp, zip) {
 }
 
 /** 分析：解开（压缩包）或拷进（单个文件）暂存区，逐个看 ELF，列出程序、缺的库、能补的库 */
-async function customAnalyze(src) {
+async function customAnalyze(src, displayName) {
   if (!PREFIX) return { ok: false, message: "only available in cccodroid" };
   let sp = String(src || "").trim();
   if (!sp) return { ok: false, message: tz("没给文件") };
   if (!path.isAbsolute(sp)) sp = path.join(CFG.workspace, sp);
   let st; try { sp = fs.realpathSync(sp); st = fs.statSync(sp); } catch { return { ok: false, message: tz("找不到文件：{p}", { p: sp }) }; }
-  // 同文件面板的路径政策：应用私有目录、凭据不许拿来分析（以前这里是唯一没过 pathBlocked 的路径入口，0.6.9 审计 P2 R1）
-  if (pathBlocked(sp)) return { ok: false, message: tz("这个位置不能读") };
+  // 同文件面板的路径政策：应用私有目录、凭据不许拿来分析（以前这里是唯一没过 pathBlocked 的路径入口，0.6.9 审计 P2 R1）。
+  // 自己上传的暂存目录在私有树里，要放行，否则上传功能整个不能用了
+  const ownStaging = (p) => p === CUSTOM_DIR || p.startsWith(CUSTOM_DIR + path.sep);
+  if (!ownStaging(sp) && pathBlocked(sp)) return { ok: false, message: tz("这个位置不能读") };
   if (!st.isFile()) return { ok: false, message: tz("要选一个文件（程序本身或压缩包）") };
   for (const [k, v] of CUSTOM_STAGES) if (Date.now() - v.at > 3600000) { rmTree(v.dir); CUSTOM_STAGES.delete(k); }
   const stage = crypto.randomBytes(6).toString("hex");
   const dir = path.join(CUSTOM_DIR, ".stage-" + stage), x = path.join(dir, "x");
   fs.mkdirSync(x, { recursive: true });
-  const base = path.basename(sp), warnings = [];
+  // 上传落盘用的是 ASCII 化的临时名（带随机前缀）：显示名、默认 ID 要用用户原来的文件名，
+  // 不能把「工具-1.2.zip」变成「a1b2c3d4-______.zip」（195-J.3）
+  const base = path.basename(String(displayName || "").trim()) || path.basename(sp), warnings = [];
   const fail = (m) => { rmTree(dir); return { ok: false, message: m }; };
   const isTar = /\.(tar\.(gz|xz|bz2|zst)|tgz|txz|tbz2?|tar)$/i.test(base), isZip = /\.zip$/i.test(base);
   if (isTar || isZip) {
     // 先拷进私有暂存区再查、再解：查和解是两次打开，源文件在共享存储上，中间能被换成另一个包（11-03 审查 L-5）
-    const own = path.join(dir, "src-" + base);
+    // 暂存文件名用随机串：显示名可能很长或是中文，直接拼进文件名会超 255 字节
+    const own = path.join(dir, "src-" + crypto.randomBytes(4).toString("hex") + path.extname(sp).slice(0, 16).replace(/[^\w.]/g, ""));
     try { fs.copyFileSync(sp, own); } catch (e) { return fail(tz("拷不进暂存区：{msg}", { msg: e.code || e.message })); }
     sp = own;
     const n = await unpackedSize(sp, isZip);
@@ -347,7 +352,10 @@ async function customAnalyze(src) {
     glibc: gv, gpu: fs.existsSync(path.join(PREFIX, "bin", "lgpu-run")),
     readme: files.map((f) => f.rel).find((r) => /^readme(\.(md|txt))?$/i.test(path.basename(r)) && !r.includes("/", r.indexOf("/") + 1)) || "",
   };
-  CUSTOM_STAGES.set(stage, { dir, root, report, at: Date.now() });
+  const at = Date.now();
+  CUSTOM_STAGES.set(stage, { dir, root, report, at });
+  // 分析结果也存一份在暂存目录里：网关重启后内存表没了，向导还在，安装还能接着装（195-J.4）
+  try { fs.writeFileSync(path.join(dir, "report.json"), JSON.stringify({ at, root: path.relative(dir, root), report })); } catch {}
   return report;
 }
 
@@ -473,7 +481,23 @@ ${lines.join("\n")}
 
 async function customInstall(b) {
   if (!PREFIX) return { ok: false, message: "only available in cccodroid" };
-  const s = CUSTOM_STAGES.get(String(b.stage || ""));
+  let s = CUSTOM_STAGES.get(String(b.stage || ""));
+  if (!s) {
+    // 网关重启后内存里的暂存表没了，但分析结果和暂存目录还在盘上：读回来接着装（195-J.4）
+    const stg = String(b.stage || "");
+    if (/^[0-9a-f]{12}$/.test(stg)) {
+      const dir = path.join(CUSTOM_DIR, ".stage-" + stg);
+      try {
+        const saved = JSON.parse(fs.readFileSync(path.join(dir, "report.json"), "utf8"));
+        const at = Number(saved.at) || 0;
+        const root = path.resolve(dir, String(saved.root || "x"));
+        if (saved.report && Date.now() - at < 3600000 && root.startsWith(dir + path.sep) && fs.existsSync(root)) {
+          s = { dir, root, report: saved.report, at };
+          CUSTOM_STAGES.set(stg, s);
+        }
+      } catch {}
+    }
+  }
   if (!s) return { ok: false, message: tz("分析结果过期了，重新导入一次") };
   const id = String(b.id || "");
   if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id)) return { ok: false, message: tz("名字只能用小写字母、数字和 -") };
@@ -632,7 +656,9 @@ async function handleCustom(req, res, p, u) {
   if (p === "/api/custom/upload") {
     // 程序可能很大（几百 MB）：流式落盘到暂存目录，不走 /api/upload 的 64 MB 内存缓冲
     if (!PREFIX) return sendJson(res, 200, { ok: false, message: "only available in cccodroid" });
-    const name = path.basename(u.searchParams.get("name") || "program").replace(/[^\w.+-]/g, "_").slice(0, 120) || "program";
+    // 落盘名只用 ASCII；显示名保留用户原来的（中文文件名别变成下划线，195-J.3）
+    const shown = path.basename(String(u.searchParams.get("name") || "program")).slice(0, 120) || "program";
+    const name = shown.replace(/[^\w.+-]/g, "_").slice(0, 120) || "program";
     const up = path.join(CUSTOM_DIR, ".uploads"); fs.mkdirSync(up, { recursive: true });
     try { for (const f of fs.readdirSync(up)) if (Date.now() - fs.statSync(path.join(up, f)).mtimeMs > 3600000) fs.rmSync(path.join(up, f), { force: true }); } catch {}
     const out = path.join(up, crypto.randomBytes(4).toString("hex") + "-" + name);
@@ -646,9 +672,8 @@ async function handleCustom(req, res, p, u) {
         req.pipe(w); w.on("finish", resolve); w.on("error", reject); req.on("error", reject);
       });
     } catch (e) { fs.rmSync(out, { force: true }); return sendJson(res, e.big ? 413 : 500, { ok: false, message: e.message }); }
-    const r = await customAnalyze(out);
+    const r = await customAnalyze(out, shown);
     fs.rmSync(out, { force: true });
-    if (r.ok) r.source = r.source.replace(/^[0-9a-f]{8}-/, "");
     return sendJson(res, 200, r);
   }
   let body = {}; try { body = JSON.parse((await readBody(req)) || "{}"); } catch {}

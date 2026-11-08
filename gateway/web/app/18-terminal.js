@@ -47,12 +47,12 @@
   const raisePane = (id) => window.CCLayout && CCLayout.raise(id);
   // 首次加载 xterm 时连点两下顶栏入口：两次都拿到空列表、各建一个终端（审查 UI05-004）
   // 收起后再打开：上一次已经作废，重新开一次（closeTerm 清掉了 TERM.opening）
-  function openTerm() {
+  function openTerm(opts = {}) {
     if (TERM.opening) { MO.cancel(termEl); termEl.classList.remove("hidden"); raisePane("term"); return TERM.opening; }
-    const p = openTerm0().finally(() => { if (TERM.opening === p) TERM.opening = null; });
+    const p = openTerm0(opts).finally(() => { if (TERM.opening === p) TERM.opening = null; });
     return (TERM.opening = p);
   }
-  async function openTerm0() {
+  async function openTerm0(opts = {}) {
     MO.cancel(termEl); termEl.classList.remove("hidden"); raisePane("term");
     const g = TERM.gen;
     try { await loadXterm(); } catch (e) { if (g === TERM.gen) toast(t("终端组件加载失败：{msg}", { msg: e.message }), true); return; }
@@ -67,7 +67,8 @@
     // 已退出的：本界面开过的留着，别处留下的不显示
     TERM.list = srv.filter((x) => x.alive || TERM.inst.has(x.id));
     const live = TERM.list.filter((x) => x.alive);
-    if (!live.length) return newTerm({ gen: g });
+    // 没有终端时直接按目标目录开一个：以前先开一个默认 bash，再开一个目标目录的（195-H.6）
+    if (!live.length) return newTerm({ gen: g, ...(opts.cwd ? { cwd: opts.cwd } : {}) });
     if (!TERM.list.some((x) => x.id === TERM.cur)) TERM.cur = live[live.length - 1].id;
     renderTermTabs();
     showTerm(TERM.cur);
@@ -90,6 +91,9 @@
   }
 
   async function newTerm(opts = {}) {
+    // 没显式带 gen 的入口（「+」、登录、项目目录）也要按发起时的世代记账：收起面板后迟到的回执
+    // 不能挂在隐藏的面板里连 SSE、占名额（195-H.7）
+    const gen = opts.gen != null ? opts.gen : TERM.gen;
     const box = $("term-screens");
     // 先用一个探针算出这块地方能放几行几列，开出来就是对的大小，免得 shell 先按 80x24 画一遍
     let cols = 80, rows = 24;
@@ -103,7 +107,7 @@
     catch (e) { toast(t("新建终端失败：{msg}", { msg: e.message }), true); return; }
     TERM.list.push(r.term);
     // 建的途中面板被收起了：终端已经在网关那边，留在标签里，下次打开时再连（不给藏着的面板挂输出流、抢焦点）
-    if (opts.gen != null && opts.gen !== TERM.gen) return;
+    if (gen !== TERM.gen) return;
     TERM.cur = r.term.id;
     renderTermTabs();
     showTerm(r.term.id);
@@ -172,12 +176,18 @@
         const buf = xt.buffer.active;
         let top = y - 1;
         while (top > 0 && buf.getLine(top)?.isWrapped) top--;
-        let text = "", rows = [];
+        // 逐格取字符，同时记下每个字符在第几列：中文 / emoji 占两格，以前把 UTF-16 下标当列坐标，
+        // 中文后面的网址下划线和点击区会错位（195-H.8）
+        let text = "";
+        const at = [];
         for (let i = top; i < buf.length; i++) {
           const ln = buf.getLine(i);
           if (!ln || (i > top && !ln.isWrapped)) break;
-          const s = ln.translateToString(false).padEnd(xt.cols).slice(0, xt.cols);
-          rows.push(i); text += s;
+          for (let x = 0; x < xt.cols; x++) {
+            const cell = ln.getCell(x);
+            const ch = cell ? cell.getChars() : "";
+            for (let k = 0; k < ch.length; k++) { text += ch[k]; at.push({ x: x + 1, y: i + 1 }); }
+          }
         }
         const out = [];
         // 规则同聊天区：中文标点、句末标点、配不上对的右括号不算网址（审查 F3）
@@ -185,8 +195,8 @@
           let url = m[0].replace(/[.,;:!?*]+$/, "");
           while (url.endsWith(")") && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length) url = url.slice(0, -1).replace(/[.,;:!?*]+$/, "");
           if (!url) continue;
-          const at = (k) => ({ x: (k % xt.cols) + 1, y: rows[Math.floor(k / xt.cols)] + 1 });
-          const st = at(m.index), en = at(m.index + url.length - 1);
+          const st = at[m.index], en = at[m.index + url.length - 1];
+          if (!st || !en) continue;
           if (y < st.y || y > en.y) continue;
           out.push({ range: { start: st, end: en }, text: url, activate: () => openExternal(url) });
         }
@@ -205,14 +215,30 @@
 
   /** 只有正在看的终端连着输出流：每个终端一条常驻 SSE，开到五六个就把同源连接占满，
    *  输入、关闭、别的接口全排队（审查 #49 P2-7）。连上时网关先发 replay（整段缓冲），切回来照样接得上 */
-  function termDetach(a) { if (a.es) { try { a.es.close(); } catch {} a.es = null; } }
+  function termDetach(a) { if (a.es) { try { a.es.close(); } catch {} a.es = null; } a.cols = a.rows = 0; }   // 再连上时补发一次 resize（195-H.1）
   function termAttach(a) {
     if (a.es || a.exited) return;
     const { id, xt } = a;
     const es = new EventSource(`/api/term/${encodeURIComponent(id)}/stream`);
     a.es = es;
-    es.addEventListener("replay", (m) => { xt.reset(); try { xt.write(JSON.parse(m.data)); } catch {} });
-    es.addEventListener("o", (m) => { try { xt.write(JSON.parse(m.data)); } catch {} });
+    es.addEventListener("replay", (m) => {
+      // { data, total }：只补上次画过之后的新内容，xterm 里已有的回滚和历史留着（195-H.1）。
+      // 缺得太多（超过网关的环形缓冲）就只能整段重来
+      let j; try { j = JSON.parse(m.data); } catch { return; }
+      const data = typeof j === "string" ? j : j.data || "";
+      const total = typeof j === "string" ? null : j.total;
+      if (typeof total === "number" && typeof a.seen === "number" && total >= a.seen && total - a.seen <= data.length) {
+        if (total > a.seen) xt.write(data.slice(data.length - (total - a.seen)));
+      } else {
+        xt.reset(); xt.write(data);
+      }
+      if (typeof total === "number") a.seen = total;
+    });
+    es.addEventListener("o", (m) => {
+      let s; try { s = JSON.parse(m.data); } catch { return; }
+      xt.write(s);
+      if (typeof a.seen === "number") a.seen += String(s).length;
+    });
     es.addEventListener("exit", (m) => {
       let code = null; try { code = JSON.parse(m.data).code; } catch {}
       es.close(); if (a.es === es) a.es = null; a.exited = true;
@@ -220,12 +246,19 @@
       const x = TERM.list.find((y) => y.id === id);
       if (x) { x.alive = false; x.code = code; renderTermTabs(); }
     });
-    // 网关重启后这个终端就没了：重连拿到 404，EventSource 自己停下，这时说一声。
+    // 网关重启后这个终端就没了：重连拿到 404，EventSource 自己停下，这时说一声并标成已退出（195-H.4）。
     // 网关整个没了的时候它一直停在「连接中」，以前什么都不显示（复审 中12）：第一次断就先提示在重连
     let lost = false;
     es.onopen = () => { lost = false; };
     es.onerror = () => {
-      if (es.readyState === EventSource.CLOSED) { xt.write("\r\n\x1b[2m" + t("[与网关的连接已断开]") + "\x1b[0m\r\n"); return; }
+      if (a.exited) return;   // 正常退出后连接关闭，不再补一句
+      if (es.readyState === EventSource.CLOSED) {
+        es.close(); if (a.es === es) a.es = null; a.exited = true;
+        const x = TERM.list.find((y) => y.id === id);
+        if (x) { x.alive = false; renderTermTabs(); }
+        xt.write("\r\n\x1b[2m" + t("[与网关的连接已断开]") + "\x1b[0m\r\n");
+        return;
+      }
       if (!lost) { lost = true; xt.write("\r\n\x1b[2m" + t("[与网关的连接断了，正在重连…]") + "\x1b[0m\r\n"); }
     };
   }
@@ -236,11 +269,20 @@
     // 一整块（粘贴、输入法一次交上来的词）不吃粘住的 Ctrl / Alt，也不把它消耗掉：留给下一个单键（审查 F7）
     // 括号粘贴（\x1b[200~…\x1b[201~）也是一整块，虽然以 ESC 开头：给它加 ESC 前缀就把粘贴标记弄坏了（11-04 报告 三）
     if (d.length > 1 && (!d.startsWith("\x1b") || d.startsWith("\x1b[200~"))) return d;
-    if (TERM.ctrl && d.length === 1) {
-      const c = d.toUpperCase().charCodeAt(0);
-      if (c >= 64 && c <= 95) d = String.fromCharCode(c - 64);
-      else if (d === " ") d = "\x00";
-      else if (d === "?") d = "\x7f";
+    if (TERM.ctrl) {
+      if (d.length === 1) {
+        const c = d.toUpperCase().charCodeAt(0);
+        if (c >= 64 && c <= 95) d = String.fromCharCode(c - 64);
+        else if (d === " ") d = "\x00";
+        else if (d === "?") d = "\x7f";
+        else if (d === "\x7f") d = "\x08";      // Ctrl+退格
+      } else {
+        // 方向键 / Home / End / PgUp / PgDn / Del 这类多字符 ESC 序列：按 xterm 的规矩把修饰键放进参数
+        // （以前这些键直接跳过 Ctrl 分支，粘住的 Ctrl 被静默清掉，195-H.2）
+        const m = /^\x1b\[([0-9]*)([ABCDHF])$/.exec(d);
+        if (m) d = `\x1b[${m[1] ? m[1] + ";" : "1;"}5${m[2]}`;
+        else { const t = /^\x1b\[([0-9]+)~$/.exec(d); if (t) d = `\x1b[${t[1]};5~`; }
+      }
     }
     if (TERM.alt) d = "\x1b" + d;
     TERM.ctrl = TERM.alt = false;
@@ -257,7 +299,14 @@
       // 串起来发，保证顺序（并发的 fetch 不保证先到先处理）
       // 没送到要说一声：网关重启时按键无声丢掉，人以为命令已经发出去了（审查 F4）
       a.sending = a.sending.then(() => fetch(`/api/term/${encodeURIComponent(a.id)}/in`, { method: "POST", body })
-        .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); })
+        .then((r) => {
+          // 进程已退出：网关回 409（195-H.5），说清楚，别当成网关在重启
+          if (r.status === 409) {
+            if (!a.exitedHint) { a.exitedHint = true; a.xt.write("\r\n\x1b[2m" + t("[终端已退出，输入没有送出去]") + "\x1b[0m\r\n"); }
+            return;
+          }
+          if (!r.ok) throw new Error("HTTP " + r.status);
+        })
         .catch(() => { if (!a.lostIn) { a.lostIn = true; a.xt.write("\r\n\x1b[2m" + t("[输入没送到终端，网关可能在重启]") + "\x1b[0m\r\n"); setTimeout(() => { a.lostIn = false; }, 3000); } }));
     }, 6);
   }
@@ -383,7 +432,8 @@
       let s = "";
       try { s = await navigator.clipboard.readText(); } catch {}
       if (!s) s = prompt(t("粘贴到终端：")) || "";
-      if (s) a.xt.paste(s);
+      // 剪贴板里自带的括号粘贴结束标记会提前结束粘贴，后面的内容被 shell 当命令执行（199-4.02）：去掉
+      if (s) a.xt.paste(s.replace(/\x1b\[20[01]~/g, ""));
       return a.xt.focus();
     }
     // 方向键在应用光标模式（vim、less…）下要换成 ESC O x
@@ -397,6 +447,7 @@
     const a = TERM.inst.get(TERM.cur);
     if (!a) return;
     const b = a.xt.buffer.active, lines = [];
+    TERM.tvCut = b.length > 3000;   // 只导出最后 3000 行：复制提示不能说「已复制全部」（195-H.3）
     for (let i = Math.max(0, b.length - 3000); i < b.length; i++) lines.push(b.getLine(i)?.translateToString(true) ?? "");
     while (lines.length && !lines[lines.length - 1]) lines.pop();
     $("term-text-pre").textContent = lines.join("\n");
@@ -405,10 +456,11 @@
     const pre = $("term-text-pre");
     pre.scrollTop = pre.scrollHeight;
   });
-  $("term-text-copy").addEventListener("click", () => {
+  $("term-text-copy").addEventListener("click", async () => {
     const sel = String(getSelection() || "");
-    copyText(sel || $("term-text-pre").textContent);
-    toast(sel ? t("已复制选中内容") : t("已复制全部"));
+    const ok = await copyText(sel || $("term-text-pre").textContent);
+    if (!ok) return toast(t("复制失败，请长按选择文字再复制"), true);
+    toast(sel ? t("已复制选中内容") : TERM.tvCut ? t("已复制最后 3000 行") : t("已复制全部"));
   });
   $("term-text-close").addEventListener("click", () => $("term-textview").classList.add("hidden"));
 

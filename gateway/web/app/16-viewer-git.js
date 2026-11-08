@@ -30,6 +30,7 @@
   async function openGit(dir, opts = {}) {
     Object.assign(GIT, { dir, root: "", tab: opts.tab || "changes", status: null, file: opts.file || "", view: opts.file ? (opts.tab === "history" ? { kind: "log" } : { kind: "diff" }) : null });
     GIT.sel = new Set(); GIT.known = null;    // 重开和第一次一样默认全选（审查 C-010）
+    GIT.status = null; gitSyncBar();          // 先收起上一个仓库的同步栏；加载失败也不能留着它（196 Git 域第 12 条）
     if (GIT.msgRoot !== dir) GIT.msg = "";   // 提交说明草稿只在同一个仓库面板里留着
     MO.cancel(gitEl); gitEl.classList.remove("hidden"); window.CCLayout && CCLayout.raise("git");
     $("git-name").textContent = String(dir).split("/").pop();
@@ -50,9 +51,17 @@
     // 先开 A 仓库再开 B：A 的状态迟到不许盖上来，不然显示的是 A、撤销提交却作用于 B（审查 #49 P2-2）
     const ok = latest("git"), dir = GIT.dir;
     let s;
-    try { s = await gapi("status"); } catch (e) { if (ok()) $("git-body").innerHTML = `<div class="vw-empty">${esc(e.message)}</div>`; return; }
+    try { s = await gapi("status"); }
+    catch (e) {
+      if (ok()) {
+        GIT.status = null; gitSyncBar(); $("git-info").textContent = "";   // 别留着上一个仓库的同步栏和分支（196 Git 域第 12 条）
+        $("git-body").innerHTML = `<div class="vw-empty">${esc(e.message)}</div>`;
+      }
+      return;
+    }
     if (!ok() || GIT.dir !== dir) return;
     if (s.notRepo) {
+      GIT.status = null;
       $("git-info").textContent = "";
       $("git-sync").classList.add("hidden");
       $("git-body").innerHTML = `<div class="vw-empty"><div>${t("这个文件夹还不是 git 仓库。")}</div>
@@ -64,7 +73,11 @@
       };
       return;
     }
-    if (s.error) { $("git-body").innerHTML = `<div class="vw-empty">${esc(s.error)}</div>`; return; }
+    if (s.error) {
+      GIT.status = null; gitSyncBar(); $("git-info").textContent = "";   // status 失败同样不能沿用上一个仓库的同步栏
+      $("git-body").innerHTML = `<div class="vw-empty">${esc(s.error)}</div>`;
+      return;
+    }
     GIT.status = s; GIT.root = s.root;
     // 默认全选；刷新时保留用户的取舍，新冒出来的文件默认选上
     const known = GIT.known || new Set();
@@ -122,7 +135,7 @@
     }
     GIT_BUSY.delete(dir);
     if (GIT.dir !== dir) return;
-    GIT.known = null;
+    // 不再把 known 清空：抓取/拉取/推送后保留用户的勾选，只有新冒出来的文件默认选上（196 Git 域第 6 条）
     gitLoad();
   });
 
@@ -167,6 +180,8 @@
       if (ck != null) {
         const f = s.files[+ck]; e.target.checked ? GIT.sel.add(f.path) : GIT.sel.delete(f.path);
         const b = $("git-do"); b.disabled = !GIT.sel.size; b.textContent = t("提交选中的 {n} 个文件", { n: GIT.sel.size });
+        // “全选”框跟着单个勾选走：以前取消一个文件后全选框还是勾着的，再点一次反而清空（196 Git 域第 5 条）
+        const all = $("git-all"); if (all) all.checked = GIT.sel.size === s.files.length;
         return;
       }
       if (op) { GIT.file = s.files[+op.dataset.open].path; GIT.view = { kind: "diff" }; return gitRender(); }
@@ -229,12 +244,12 @@
   async function gitCommit(again) {
     const msg = ($("git-msg")?.value || "").trim();
     if (!msg) { toast(t("写一句提交说明"), true); $("git-msg")?.focus(); return; }
-    // 状态列表截断了（超过 1000 项）：全选的只是看得见的这些，照样按清单传，没显示的不能跟着提交（#106 07-002）
-    const all = GIT.sel.size === GIT.status.files.length && !GIT.status.truncated;
+    // 一律按勾选清单传：以前「全选」发 files:null，网关 add -A 把状态快照之后新冒出来的文件、子模块指针也一起提交了
+    // （0.6.10 审计 195-S.1）。列表截断时也是清单的子集，没显示的本来就不该跟着提交（#106 07-002）
     // 提交在途时面板可能已换到别的仓库：回执只收拾发起它的那个仓库，别清掉另一个仓库正在写的说明（#154-1）
     const dir = GIT.dir;
     try {
-      const r = await gpost("commit", { message: msg, files: all ? null : [...GIT.sel] });
+      const r = await gpost("commit", { message: msg, files: [...GIT.sel] });
       toast(r.message || t("已提交"));
       if (GIT.dir !== dir) return;
       GIT.sel = new Set(); GIT.known = null;
@@ -244,7 +259,8 @@
       gitLoad();
     } catch (e) {
       if (GIT.dir !== dir) return toast(e.message, true);
-      if (e.status === 409 && !again) return gitAskIdentity();
+      // 只有「还没设置署名」才弹身份表单；冲突、合并中不能只提交一部分之类也是 409，要直接说清楚（195-S.2）
+      if (e.status === 409 && e.body && e.body.error === "no_identity" && !again) return gitAskIdentity();
       toast(e.message, true);
     }
   }
@@ -413,7 +429,7 @@
     closeViewerPdf();
     vwDropEd();
     vwHtmlStop();
-    Object.assign(VW, { path, kind: kind || "other", size: size || 0, text: "", mtime: 0, dirty: false, zoom: 1, git: null, gitInfo: "", gitMarks: null, plainMd: false, wb: null, sheets: null, ready: false });
+    Object.assign(VW, { path, kind: kind || "other", size: size || 0, text: "", mtime: 0, dirty: false, zoom: 1, git: null, gitInfo: "", gitMarks: null, plainMd: false, wb: null, sheets: null, ready: false, eol: "" });
     // 换了文档就换代：上一个文档还在途的读取、转换、保存回执一律作废（审查 C-001、04-F04、04-F05）
     VW.gen = (VW.gen || 0) + 1;
     vwActs([]);    // 上一个文档的「保存」先撤掉：读取中点它会把空正文存进新文件（私下反馈 10-29）
@@ -599,7 +615,10 @@
   async function vwLoadText(mode) {
     if (VW.size > VW_EDIT_MAX) {
       vwActs([]);
-      $("vw-body").innerHTML = `<div class="vw-empty"><div>${t("文件太大（{size}），只能下载查看。", { size: fmtSize(VW.size) })}</div></div>`;
+      // 说“只能下载查看”却没有下载入口；给一个（195-C.10）
+      $("vw-body").innerHTML = `<div class="vw-empty"><div>${t("文件太大（{size}），只能下载查看。", { size: fmtSize(VW.size) })}</div>
+        <a class="btn ghost sm" href="${fileUrl(VW.path, true)}" download>⤓ ${t("下载")}</a>
+        <button class="btn ghost sm" data-a="share">${shareIco()}${t("分享")}</button></div>`;
       return;
     }
     $("vw-body").innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
@@ -624,6 +643,9 @@
     if (gen !== VW.gen) return;
     // 编码、BOM 和正文一起认：以前编码在世代检查之前就写进 VW，迟到的旧文件回执能把当前文件的只读保护摘掉（#106 07-001）
     VW.enc = dec.enc; VW.bom = dec.bom;
+    // 纯 CRLF 的文件记下来，保存时按原样写回（textarea 的 value 里只剩 \n）（195-C.4）
+    const lf = (dec.text.match(/\n/g) || []).length;
+    VW.eol = lf && (dec.text.match(/\r\n/g) || []).length === lf ? "\r\n" : "";
     VW.mtime = mtime; VW.text = dec.text;
     VW.dirty = false;
     const draft = await draftTake(gen);
@@ -689,16 +711,21 @@
   /** 统一 diff → Map(新文件行号 → { type, old:[原来的行] }) */
   function gutMarks(diff) {
     const m = new Map();
-    let n = 0, dels = [], adds = [];
+    let n = 0, dels = [], adds = [], inHunk = false;
     const flush = () => {
       if (adds.length) adds.forEach((ln, i) => m.set(ln, { type: dels.length ? "mod" : "add", old: i === 0 ? dels : null, first: i === 0 }));
       else if (dels.length) m.set(n, { type: "del", old: dels });
       dels = []; adds = [];
     };
     for (const line of String(diff || "").split("\n")) {
+      // 只在 hunk 里认正文。以前用 /^(---|\+\+\+) / 排除文件头，正文里以 "-- " / "++ " 开头的行
+      // 会被当成文件头跳过，后面的行号整体偏移（196 Git 域第 8 条）
+      if (line.startsWith("diff --git ") || line.startsWith("diff --cc ") || line.startsWith("diff --combined ")) {
+        flush(); inHunk = false; continue;
+      }
       const h = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (h) { flush(); n = +h[1]; continue; }
-      if (!n || /^(\+\+\+|---) /.test(line) || line.startsWith("\\")) continue;
+      if (h) { flush(); n = +h[1]; inHunk = true; continue; }
+      if (!inHunk || line.startsWith("\\")) continue;
       if (line[0] === "-") { if (adds.length) flush(); dels.push(line.slice(1)); }
       else if (line[0] === "+") { adds.push(n++); }
       else if (line[0] === " ") { flush(); n++; }
@@ -829,14 +856,20 @@
     // 只认最近这一次：中途切了源码再点预览，先发的那次迟到了也不再挂定时器、不写正文（#177-3）
     const stale = () => n !== VW.pvSeq || p !== VW.path || VW.mode !== "html";
     $("vw-body").innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
-    let r;
-    try { r = await post("/api/preview", { path: p }); }
-    catch (e) { if (!stale()) $("vw-body").innerHTML = `<div class="vw-empty">${t("预览打不开")}: ${esc(e.message)}</div>`; return; }
+    let r, pvCap;
+    try {
+      r = await post("/api/preview", { path: p });
+      // 回执里没有 url 时以前在 try 外 new URL 抛错，查看器永远停在“读取中…”（196 前端注入域）
+      if (!r || typeof r.url !== "string") throw new Error(t("预览服务没有返回地址"));
+      pvCap = new URL(r.url).pathname.split("/")[1];
+    } catch (e) { if (!stale()) $("vw-body").innerHTML = `<div class="vw-empty">${t("预览打不开")}: ${esc(e.message)}</div>`; return; }
     if (stale()) return;
-    VW.pv = { url: r.url, mtime: r.mtime, net: !!r.net, cap: new URL(r.url).pathname.split("/")[1], blocked: 0 };
+    VW.pv = { url: r.url, mtime: r.mtime, net: !!r.net, cap: pvCap, blocked: 0 };
     pvNative();
     vwRenderActs();
-    $("vw-body").innerHTML = `<iframe class="vw-html" src="${esc(pvSrc())}" sandbox="allow-scripts allow-same-origin allow-modals allow-downloads allow-pointer-lock" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>`;
+    // allow-forms / allow-popups：本地网页的表单提交（form-action 'self' 已放行同源）和 target=_blank 以前在沙箱里
+    // 一点反应都没有（195-C.9）。弹窗仍受预览 CSP 约束，不会变成逃出沙箱的新窗口
+    $("vw-body").innerHTML = `<iframe class="vw-html" src="${esc(pvSrc())}" sandbox="allow-scripts allow-same-origin allow-modals allow-downloads allow-pointer-lock allow-forms allow-popups" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>`;
     // Claude 一边改、你一边看：每 1.5 秒看一眼修改时间，变了就重新载入
     const h = VW.pvTimer = setInterval(async () => {
       if (n !== VW.pvSeq) return clearInterval(h);   // 已经不是当前这次预览：只停自己，别拆后来的
@@ -1068,11 +1101,14 @@
     if (VW.saving) return;
     if (VW.enc) return toast(t("这个文件是 {enc} 编码，存回去会损坏原文，只能查看", { enc: VW.enc }), true);
     const text = vwText(), gen = VW.gen, path = VW.path;
+    // 一字未改就不写盘：CRLF 文件即使不编辑，textarea 也会把换行规整成 LF，存一次整份文件就变了（195-C.4）
+    if (!VW.dirty && !force) return toast(t("没有改动"));
     let r;
     VW.saving = true;
     try {
       r = await fetch(`/api/file/save?path=${encodeURIComponent(path)}&mtime=${VW.mtime}${force ? "&force=1" : ""}`, {
-        method: "POST", body: (VW.bom ? "\uFEFF" : "") + text,   // 原文带 BOM 的照样带回去
+        // 原文带 BOM / 纯 CRLF 换行的照样带回去
+        method: "POST", body: (VW.bom ? "\uFEFF" : "") + (VW.eol === "\r\n" ? text.replace(/\r?\n/g, "\r\n") : text),
       });
     } catch (e) { VW.saving = false; return toast(t("保存失败：{msg}", { msg: e.message }), true); }
     VW.saving = false;

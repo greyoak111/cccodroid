@@ -469,6 +469,7 @@
       <div class="row-actions">
         <button class="btn sm" data-act="save">${p ? t("保存") : t("添加")}</button>
         ${p ? `<button class="btn sm ghost" data-act="test">${t("测试")}</button>
+               ${p.hasKey ? `<button class="btn sm ghost danger" data-act="clear">${t("清除 Key")}</button>` : ""}
                <button class="btn sm ghost danger" data-act="del">${t("删除")}</button>${useBtn(p)}` : ""}
       </div>
       <div class="prov-state" id="pc-result"></div>
@@ -480,11 +481,25 @@
       if (!act) return;
       if (act === "use") return useProvider(p);
       if (act === "test") return testAndShow(p.id);
+      if (act === "clear") {
+        if (!confirm(t("清除 {name} 的 Key？", { name: p.label }))) return;
+        // 留空保存会继续用旧 Key，以前只能把整个接口删掉（195-E.9）；后端支持 clearKey
+        let r;
+        try { r = await post("/api/providers/save", { id: p.id, clearKey: true }); } catch (e2) { return toast(e2.message, true); }
+        if (r && r.ok === false) return toast(t("清除失败：{msg}", { msg: r.message || "?" }), true);
+        return reloadProv(t("已清除"));
+      }
       if (act === "del") {
         if (!confirm(t("删除接口「{name}」？", { name: p.label }))) return;
-        try { await post("/api/providers/delete", { id: p.id }); } catch (e2) { return toast(e2.message, true); }
-        state.provView = state.providerActive === p.id ? null : state.providerActive;
-        return reloadProv(t("已删除"));
+        let r;
+        try { r = await post("/api/providers/delete", { id: p.id }); } catch (e2) { return toast(e2.message, true); }
+        if (r && r.ok === false) return toast(t("删除失败：{msg}", { msg: r.message || "?" }), true);
+        const wasActive = state.providerActive === p.id;
+        state.provView = wasActive ? null : state.providerActive;
+        await reloadProv(t("已删除"));
+        // 删的就是正在用的接口：reloadProv 里 provView 已经清空，型号 / 思考强度下拉会停在已删清单上；
+        // 这里强制按新接口重拉一次，免得再保存时把旧型号写成新接口的型号（195-E.3）
+        if (wasActive) await loadModels(true);
       }
       const body = {
         id: p ? p.id : "", label: $("cc-label").value.trim(), baseUrl: $("cc-base").value.trim(),

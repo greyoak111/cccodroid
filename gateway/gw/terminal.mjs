@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { CFG, HERE, PATHS, PREFIX, log } from "./config.mjs";
+import { CFG, HERE, PATHS, PREFIX, log, tz } from "./config.mjs";
 import { claudeEnv, ensureShell, killTree, termKeyFile } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 
@@ -112,20 +112,22 @@ function termNew({ cols, rows, login, cwd: want } = {}) {
   // 开好后替用户敲下 claude auth login —— 授权码由用户贴给 claude 自己的提示，网关只当字节通道
   const env = termEnv();
   if (login) for (const k of Object.keys(env)) if (/^ANTHROPIC_|^CCAPP_KEY_FILE$/.test(k)) delete env[k];
+  const seq = nextTermSeq();
+  const id = seq.toString(36) + crypto.randomBytes(8).toString("hex");   // 别靠 Math.random 那 20 来位（审查 低20）
+  // 终端里的每个进程都带着这个标记：关闭终端时按它把 setsid 跑掉的后代也找出来（200-4.04）
+  env.CCAPP_TERM_ID = id;
   const child = spawn(pc[0], [...pc.slice(1), String(rows), String(cols), shell], {
     cwd, env, detached: true, stdio: ["pipe", "pipe", "pipe", "pipe"],
   });
   if (login) setTimeout(() => { try { child.stdin.write("claude auth login" + (login === "console" ? " --console" : "") + "\r"); } catch {} }, 400);
-  const seq = nextTermSeq();
-  const id = seq.toString(36) + crypto.randomBytes(8).toString("hex");   // 别靠 Math.random 那 20 来位（审查 低20）
   const t = {
     id, title: `${path.basename(shell) === "bash" ? "bash" : "sh"} ${seq}`, cols, rows,
     created: Date.now(), alive: true, code: null, child,
-    buf: "", subs: new Set(), dec: new StringDecoder("utf8"),
+    buf: "", total: 0, subs: new Set(), dec: new StringDecoder("utf8"),
   };
   const out = (s) => {
     if (!s) return;
-    t.buf += s;
+    t.buf += s; t.total += s.length;
     if (t.buf.length > TERM_RING) t.buf = t.buf.slice(t.buf.length - TERM_RING);
     for (const r of t.subs) sseSend(r, "o", s, t);
   };
@@ -161,12 +163,29 @@ function sseSend(res, ev, data, t) {
   } catch {}
 }
 
+/** 这个终端名下还活着的进程（含自己 setsid 跑掉的）：按环境里的 CCAPP_TERM_ID 找。
+ *  关闭终端后扫一次，别让 ✕ 只关掉前台、后台还留着一条会话（200-4.04）。只在杀终端时跑，平时不扫 */
+function killTermProcs(id) {
+  let pids = [];
+  try {
+    for (const d of fs.readdirSync("/proc")) {
+      if (!/^\d+$/.test(d) || +d === process.pid) continue;
+      let env = "";
+      try { env = fs.readFileSync(`/proc/${d}/environ`, "latin1"); } catch { continue; }   // 同 uid 才读得到
+      if (env.split("\0").includes("CCAPP_TERM_ID=" + id)) pids.push(+d);
+    }
+  } catch {}
+  for (const p of pids) { try { process.kill(p, "SIGKILL"); } catch {} }
+  return pids.length;
+}
 function termKill(t) {
   if (!t) return;
   if (t.alive) { try { t.child.stdin.end(); } catch {} setTimeout(() => { if (t.alive) killTree(t.child); }, 1500); }
   TERMS.delete(t.id);
   for (const r of t.subs) { try { r.end(); } catch {} }
   t.subs.clear();
+  // ptyhost 退出后，躲在 setsid 里的子孙还在：等它收完再扫一遍（关闭是用户明确要结束这个终端）
+  setTimeout(() => { const n = killTermProcs(t.id); if (n) log(`[term] ${t.id} 关闭时结束了 ${n} 个后代进程`); }, 1600).unref?.();
 }
 
 async function handleTerm(req, res, p) {
@@ -192,7 +211,8 @@ async function handleTerm(req, res, p) {
       "x-accel-buffering": "no",
     });
     res.socket?.setNoDelay?.(true);
-    sseSend(res, "replay", t.buf);
+    // 带上累计输出的字符数：界面重连时只补没画过的那一段，已有的回滚和历史不用清掉（195-H.1）
+    sseSend(res, "replay", { data: t.buf, total: t.total });
     if (!t.alive) { sseSend(res, "exit", { code: t.code }); return res.end(); }
     t.subs.add(res);
     const ka = setInterval(() => { try { res.write(": k\n\n"); } catch {} }, 25000);
@@ -202,7 +222,9 @@ async function handleTerm(req, res, p) {
   if (req.method !== "POST") return sendJson(res, 405, { error: "method" });
   const body = await readBody(req);
   if (op === "in") {
-    if (t.alive) try { t.child.stdin.write(body); } catch {}
+    // 进程已经退出：以前照样回 200，输入被静默吞掉（195-H.5）。现在明确告诉界面
+    if (!t.alive) return sendJson(res, 409, { error: "exited", message: tz("终端进程已经退出，输入没有送出去") });
+    try { t.child.stdin.write(body); } catch {}
     return sendJson(res, 200, { ok: true });
   }
   let b = {};
@@ -226,4 +248,4 @@ export async function routeTerminal(req, res, u, p) {
   if (p.startsWith("/api/term/")) return handleTerm(req, res, p);
   return NEXT;
 }
-export const _termForTest = { sseSend };   // 只给测试用
+export const _termForTest = { sseSend, killTermProcs };   // 只给测试用

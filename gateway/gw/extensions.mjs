@@ -205,6 +205,16 @@ const pausedFile = (file) => file + ".ccapp-paused";
 function readPaused(file) {
   try { const raw = readSmallFile(pausedFile(file), 1 << 20); if (raw == null) return null; const h = JSON.parse(raw); return h && typeof h === "object" && !Array.isArray(h) ? h : null; } catch { return null; }
 }
+/** 扩展页「打开配置文件」：只读地看这三份 settings.json 的内容。
+ *  用户级文件在 home 里，按路径政策不能经 /api/file 读；这里只按 hookSettingsFile 解析出的固定路径读，不接受任意路径（195-J.1） */
+function hooksFileView(scope, dir) {
+  const s = ["user", "project", "local"].includes(scope) ? scope : "user";
+  const file = hookSettingsFile(s, dir);
+  const txt = readSmallFile(file, 1 << 20);
+  let exists = true;
+  if (txt == null) { try { fs.lstatSync(file); } catch { exists = false; } }
+  return { ok: true, file, exists, text: txt == null ? "" : txt, unreadable: txt == null && exists };
+}
 export function listHooks(dir) {
   const scopes = [];
   for (const scope of ["user", "project", "local"]) {
@@ -319,7 +329,8 @@ function testHook({ command, event, matcher, dir, input, timeout }) {
   let cwd = path.resolve(String(dir || CFG.workspace));
   try { if (!fs.statSync(cwd).isDirectory()) cwd = CFG.home; } catch { cwd = CFG.home; }
   let stdin = input != null && String(input).trim() ? String(input) : JSON.stringify(hookSample(String(event || ""), matcher, cwd), null, 2);
-  const ms = Math.max(1, Math.min(60, Number(timeout) || 30)) * 1000;
+  // 界面写的是「留空用默认 60、最大 600」：以前按 30/60 夹，试运行到 40 秒就被杀（195-J.7）
+  const ms = Math.max(1, Math.min(600, Number(timeout) || 60)) * 1000;
   return new Promise((resolve) => {
     const t0 = Date.now();
     const child = spawn(ensureShell(), ["-c", command], {
@@ -372,13 +383,19 @@ function listSkills() {
     const m = skillMeta(path.join(SKILLS_DIR, d.name));
     // 组件技能的 SKILL.md 是中文写的（给 Claude 看的触发说明）：非中文界面显示组件索引里的英文简介
     const cid = fromComp.get(d.name) || "", ce = cid && compIndexCache.data && compIndexCache.data.components[cid];
-    return m ? { dir: d.name, name: m.name || d.name, description: m.description, descEn: (ce && ce.desc && ce.desc.en) || "", component: cid, official: (skillSource(d.name) || {}).repo === SKILL_REPO } : null;
+    // 没有 SKILL.md 的目录也列出来（orphan）：官方目录里同名安装会提示「已有同名技能」，这里不列就删不掉，
+    // 用户在「显示未安装 / 安装说同名」之间打转（195-J.10）
+    if (!m) return { dir: d.name, name: d.name, description: "", descEn: "", component: cid, official: false, orphan: true };
+    return { dir: d.name, name: m.name || d.name, description: m.description, descEn: (ce && ce.desc && ce.desc.en) || "", component: cid, official: (skillSource(d.name) || {}).repo === SKILL_REPO };
   }).filter(Boolean);
 }
 function deleteSkill(dir) {
   if (!SID_RE.test(dir)) return { ok: false, message: "bad name" };
   const p = path.join(SKILLS_DIR, dir);
-  if (!fs.existsSync(path.join(p, "SKILL.md"))) return { ok: false, message: "not found" };
+  let st; try { st = fs.lstatSync(p); } catch { return { ok: false, message: "not found" }; }
+  // 没有 SKILL.md 的目录（导入到一半失败留下的）也要能删：列表里现在会把它列出来并说明（195-J.10）。
+  // 只删 skills 目录下这一级的目录 / 软链本身，不跟链接
+  if (!st.isDirectory() && !st.isSymbolicLink()) return { ok: false, message: "not found" };
   const ucb = ucAppBegin();
   fs.rmSync(p, { recursive: true, force: true });
   ucAppWrote([".claude/skills/" + dir], ucb);
@@ -574,6 +591,10 @@ export async function routeExtensions(req, res, u, p) {
       if (req.method === "GET" && p === "/api/ext/catalog/mcp") return sendJson(res, 200, await listMcpCatalog(u.searchParams.get("q"), u.searchParams.get("cursor")));
       if (req.method === "POST" && p === "/api/ext/skills/delete") return sendJson(res, 200, deleteSkill(String(body.dir || "")));
       if (req.method === "GET" && p === "/api/ext/hooks") return sendJson(res, 200, { ...listHooks(u.searchParams.get("dir")), sealed: sealed() });
+      if (req.method === "GET" && p === "/api/ext/hooks/file") {
+        try { return sendJson(res, 200, hooksFileView(u.searchParams.get("scope") || "user", u.searchParams.get("dir"))); }
+        catch (e) { return sendJson(res, 200, { ok: false, message: e.message }); }
+      }
       if (req.method === "POST" && p === "/api/ext/hooks/save") {
         try { return sendJson(res, 200, await saveHooks(body)); }
         catch (e) { return sendJson(res, 200, { ok: false, code: e.code, message: e.message }); }

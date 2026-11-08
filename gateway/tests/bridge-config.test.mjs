@@ -769,7 +769,9 @@ test("100个长Unicode模型可保存，超过128KiB配置拒绝且不执行组�
   assert.equal(result.status, 200, JSON.stringify(result.body));
   assert.deepEqual((await request()).body.models, models);
   const before = calls().length;
-  // readBodyBuf 超限主动断开连接，不保证能再把 JSON 错误送到已关闭的 socket。
-  await assert.rejects(request(input({ apiKey: "x".repeat(128 * 1024) })));
+  // 195-C.19 起 readBodyBuf 不再 req.destroy()：读掉超限部分后正常回错误，前端能看见原因。
+  // 这条断言原来锁的是「超必断连接」，属于被修的 bug；路由把读取失败统一归为 invalid_input（400）。
+  const over = await request(input({ apiKey: "x".repeat(128 * 1024) }));
+  assert.equal(over.status, 400);
   assert.equal(calls().length, before);
 });

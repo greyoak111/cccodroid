@@ -15,8 +15,9 @@ export const MIME = {
   ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
   ".webp": "image/webp", ".bmp": "image/bmp", ".avif": "image/avif", ".ico": "image/x-icon",
   ".pdf": "application/pdf",
-  ".mp4": "video/mp4", ".webm": "video/webm", ".mkv": "video/x-matroska",
+  ".mp4": "video/mp4", ".webm": "video/webm", ".mkv": "video/x-matroska", ".3gp": "video/3gpp",
   ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".flac": "audio/flac",
+  ".opus": "audio/ogg",
   ".txt": "text/plain; charset=utf-8", ".md": "text/markdown; charset=utf-8",
   ".log": "text/plain; charset=utf-8", ".csv": "text/csv; charset=utf-8",
   ".yaml": "text/yaml; charset=utf-8", ".yml": "text/yaml; charset=utf-8",
@@ -53,6 +54,24 @@ export function fileKind(name, isDir) {
 }
 export const mimeOf = (f) => MIME[path.extname(f).toLowerCase()] || "application/octet-stream";
 
+/** 解析单段 Range（bytes=a-b / bytes=a- / bytes=-n）。看不清的按没有 Range 处理（回 200 全量，HTTP 允许）；
+ *  范围越界返回 { bad:true }，调用方回 416。preview.mjs 的音视频出流一直用这套语义。 */
+export function rangeOf(header, size) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(header || ""));
+  if (!m || !size) return null;
+  let start, end;
+  if (!m[1]) {
+    const n = Number(m[2]);
+    if (!(n > 0)) return { bad: true };
+    start = Math.max(0, size - n); end = size - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) return { bad: true };
+  return { start, end };
+}
+
 /** 二进制安全的体读取（readBody 走 utf8，会把图片读坏） */
 /** 读 fetch 的响应体，超过 max 字节就断开报错：厂商端点出问题、或配置指到奇怪的地址时，别一口气读进几百 MB（审查 v0.5.7 L5） */
 export async function fetchText(r, max = 8 * 1024 * 1024) {
@@ -72,12 +91,15 @@ export const fetchJsonCapped = async (r, max) => JSON.parse(await fetchText(r, m
 
 // App 按次签名的请求：签名里带了请求体的 sha256（access.mjs 的 sigOk），读完核对，冒牌的转发时改了体就不认
 const bodySigOk = (req, b) => !req.ccBodySha || crypto.createHash("sha256").update(b).digest("hex") === req.ccBodySha;
+const bodyTooLarge = () => Object.assign(new Error("body too large"), { status: 413 });
 export function readBodyBuf(req, max = 64 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = []; let n = 0;
     req.on("data", (c) => {
       n += c.length;
-      if (n > max) { reject(new Error("body too large")); req.destroy(); return; }
+      // 超限后别 destroy：socket 一起没了，413/500 根本送不到界面（200-H-2）。把剩下的读掉丢掉，
+      // 让路由的 catch / 全局处理把回执发出去
+      if (n > max) { if (chunks.length) chunks.length = 0; reject(bodyTooLarge()); return; }
       chunks.push(c);
     });
     req.on("end", () => { const b = Buffer.concat(chunks); bodySigOk(req, b) ? resolve(b) : reject(new Error("body does not match signature")); });
@@ -184,7 +206,7 @@ export function readBody(req) {
     let n = 0;
     req.on("data", (c) => {
       n += c.length;
-      if (n > 16 * 1024 * 1024) { reject(new Error("body too large")); req.destroy(); return; }
+      if (n > 16 * 1024 * 1024) { if (chunks.length) chunks.length = 0; reject(bodyTooLarge()); return; }
       chunks.push(c);
     });
     req.on("end", () => { const b = Buffer.concat(chunks); bodySigOk(req, b) ? resolve(b.toString("utf8")) : reject(new Error("body does not match signature")); });

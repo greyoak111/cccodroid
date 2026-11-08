@@ -156,10 +156,19 @@
     paintEff(effLevels, info.effort || "");
     // 跟随全局默认：没单独选过时只是说明一句；选过了给个按钮改回去
     const followBox = m.querySelector(".mp-follow");
+    // 跟随的是「这个会话的默认」：项目可以有自己的默认接口 / 型号（#79），只看全局会把项目默认说错（195-E.5）
+    const followEff = () => {
+      const d = state.settings || {}, e = state.sessEff && state.sessEff.provider ? state.sessEff : null;
+      return {
+        prov: e ? e.provider : globalProv(),
+        model: e ? (e.model || e.defaultModel || "") : (d.model || ""),
+        effort: e ? (e.effortRun ?? e.effort ?? "") : (d.effort || ""),
+      };
+    };
     const paintFollow = () => {
-      const d = state.settings || {};
       const usable = (state.provList || []).filter((p) => p.usable && !p.hidden).length;
-      const dm = (usable > 1 ? provLabel(globalProv()) + " · " : "") + (prettyModel(d.model) || t("默认")) + (d.effort ? " · " + d.effort : "");
+      const f = followEff();
+      const dm = (usable > 1 ? provLabel(f.prov) + " · " : "") + (prettyModel(f.model) || t("默认")) + (f.effort ? " · " + f.effort : "");
       followBox.innerHTML = own()
         ? `<button type="button" class="mp-item mp-reset"><span>${esc(t("改回跟随默认"))}</span><small>${esc(dm)}</small></button>`
         : `<div class="tiny">${esc(t("跟随默认：{model}", { model: dm }))}</div>`;
@@ -167,7 +176,8 @@
     paintFollow();
     followBox.addEventListener("click", async (e) => {
       if (!e.target.closest(".mp-reset")) return;
-      if (curProv() !== globalProv() && view.sessionId && !confirm(switchWarn(globalProv()))) return;
+      const to = followEff().prov;
+      if (curProv() !== to && view.sessionId && !confirm(switchWarn(to))) return;
       close();
       try { await pickSessModel(null); } catch (er) { return er.stale || toast(er.message, true); }
       paintModel(chipName());
@@ -432,6 +442,17 @@
   }
 
 
+  // 附加目录的增删串行化：连点两次时，第二次要基于第一次存完的结果算，不能各自拿着旧数组互相覆盖（195-E.12）
+  let dirQ = Promise.resolve();
+  function updateDirs(fn) {
+    dirQ = dirQ.then(async () => {
+      // 网关对 addDirs 是整组替换：先取它当前存的那组做底，别拿前端可能还没加载到的默认值把它清空（195-E.8）
+      let base = state.settings.addDirs || [];
+      try { const r = await api("/api/settings"); if (r && Array.isArray(r.addDirs)) base = r.addDirs; } catch {}
+      return saveSettings({ addDirs: fn(base) });
+    });
+    return dirQ;
+  }
   function renderDirs() {
     const dirs = state.settings.addDirs || [];
     $("dir-toggle").textContent = t("{n} 个", { n: dirs.length });
@@ -439,9 +460,10 @@
       ? dirs.map((d, i) => `<div class="item"><div class="it-title">${esc(d)}</div>
           <div class="it-acts"><button data-i="${i}">${t("移除")}</button></div></div>`).join("")
       : '<div class="tiny">' + t("（没有附加目录）") + '</div>';
-    $("dir-list").querySelectorAll("button").forEach((b) => b.addEventListener("click", async () => {
-      const dirs2 = (state.settings.addDirs || []).filter((_, i) => i !== Number(b.dataset.i));
-      await saveSettings({ addDirs: dirs2 });
+    $("dir-list").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+      const gone = (state.settings.addDirs || [])[Number(b.dataset.i)];
+      if (gone == null) return;
+      updateDirs((ds) => ds.filter((d) => d !== gone));   // 按目录名删：连点时下标会变
     }));
   }
 
@@ -551,8 +573,19 @@
   function acPaint(win, set, def) {
     const box = $("ac-slide");
     acWin = Number(win) || 0; acSet = Number(set) || 0; acDef = Number(def) || 0;
-    box.classList.toggle("hidden", acWin <= AC_MIN);
-    if (acWin <= AC_MIN) return;
+    const unknown = acWin <= AC_MIN;
+    // 窗口未知（厂商清单没报）但已经设了压缩线：滑块没法按窗口换算，至少把设过的值显示出来，
+    // 别整块藏掉让人以为没设（195-E.10）
+    box.classList.toggle("hidden", unknown && !acSet);
+    if (unknown) {
+      if (acSet) {
+        $("ac-val").textContent = t("已设 {line}（模型窗口未知，按你设的生效）", { line: fmtTok(acSet) });
+        $("ac-range").classList.add("hidden");
+        $("ac-auto").classList.remove("hidden");
+      }
+      return;
+    }
+    $("ac-range").classList.remove("hidden");
     const rg = $("ac-range");
     if (acForce || document.activeElement !== rg) rg.value = acSet ? acPos(acSet) : acDef ? acPos(acDef) : 100;
     acForce = false;
@@ -569,11 +602,11 @@
     const v = e.target.value.trim();
     saveSettings({ autoCompactWindow: v ? Number(v) : null }).then(() => { acForce = true; return loadModels(); });
   });
-  $("btn-add-dir").addEventListener("click", () => {
+  $("btn-add-dir").addEventListener("click", async () => {
     const v = $("inp-dir").value.trim();
     if (!v) return;
-    saveSettings({ addDirs: [...(state.settings.addDirs || []), v] });
-    $("inp-dir").value = "";
+    const r = await updateDirs((ds) => (ds.includes(v) ? ds : [...ds, v]));
+    if (r) $("inp-dir").value = "";   // 没存上时留着输入，改一下还能重试
   });
   $("btn-cli-doctor").addEventListener("click", async () => {
     const box = $("cli-out");
@@ -689,7 +722,7 @@
   $("caps-cmds").addEventListener("click", (e) => {
     const b = e.target.closest("[data-cmd]"); if (!b) return;
     closePage();
-    inputEl.value = b.dataset.cmd + " "; autoGrow(); inputEl.focus();
+    insertAtCursor(b.dataset.cmd); inputEl.focus();   // 不覆盖未发送草稿（196 输入框域）
   });
 
   $("btn-refresh-mcp").addEventListener("click", async () => {

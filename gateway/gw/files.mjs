@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { CFG, PREFIX, log, tz } from "./config.mjs";
 import { SETTINGS } from "./settings-store.mjs";
 import { SEED_FILE } from "./providers.mjs";
-import { NEXT, fileKind, mimeOf, readBody, readBodyBuf, sendJson } from "./http.mjs";
+import { NEXT, fileKind, mimeOf, rangeOf, readBody, readBodyBuf, sendJson } from "./http.mjs";
 import { toFront } from "./local.mjs";
 import { bodyToFile } from "./bigfile.mjs";
 import { holdsPrivate, zoneOf } from "./pathguard.mjs";
@@ -150,6 +150,21 @@ export function fileRoots() {
   return out;
 }
 
+// 上传中途被杀留下的 .part-* 隐藏临时文件：启动后第一次上传时清掉一小时前的（200-H-4）
+let uploadCleanAt = 0;
+function uploadCleanParts() {
+  if (Date.now() - uploadCleanAt < 3600e3) return;
+  uploadCleanAt = Date.now();
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(UPLOAD_DIR)) {
+      if (!f.startsWith(".part-")) continue;
+      const p = path.join(UPLOAD_DIR, f);
+      try { if (now - fs.statSync(p).mtimeMs > 3600e3) fs.rmSync(p, { force: true }); } catch {}
+    }
+  } catch {}
+}
+
 // ── 截屏 ──────────────────────────────────────────────────────────────
 /** 整屏截图（PNG）。cccodroid：priv 的 stdout 是干净的二进制通道，直接收；
  *  开发端的 rish 会把输出随机拆到 stdout / stderr，二进制会坏 —— 先写到共享存储再读回来 */
@@ -214,27 +229,41 @@ export async function routeFiles(req, res, u, p) {
   // ── 取文件内容（消息里的图片、文件预览、下载都走这里）──
   if (req.method === "GET" && p === "/api/file") {
     const r = safeFilePath(u.searchParams.get("path"));
-    if (r.error) return sendJson(res, r.status || 404, { error: r.error, detail: r.detail });
+    if (r.error) {
+      // 没有共享存储权限时 realpath 报 EACCES，以前一律当 404，界面以为文件没了（195-C.7）
+      const denied = /EACCES|EPERM/.test(String(r.detail || ""));
+      return sendJson(res, denied ? 403 : r.status || 404, denied
+        ? { error: "forbidden", message: tz("没有读取这个位置的权限（共享存储需要在系统设置里允许「所有文件访问」）") }
+        : { error: r.error, detail: r.detail });
+    }
+    // procfs / sysfs 的 size 和实际能读出的字节对不上，按 size 发 Content-Length 会被浏览器判成截断（200-H-2）
+    if (/^\/(proc|sys)(\/|$)/.test(r.file)) return sendJson(res, 400, { error: "not a regular file", message: tz("这类系统伪文件不能这样读") });
+    // 按已核过的真实路径打开、不跟软链：核完到打开之间被换成指向别处的软链也读不到（审查 v0.5.4 B-L1）
+    let fd;
+    try { fd = fs.openSync(r.file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW); } catch (e) { return sendJson(res, 404, { error: "not found", detail: e.code || e.message }); }
+    let size = r.size;
+    try { const fst = fs.fstatSync(fd); if (!fst.isFile()) { fs.closeSync(fd); return sendJson(res, 400, { error: "not a file" }); } size = fst.size; }
+    catch (e) { try { fs.closeSync(fd); } catch {} return sendJson(res, 500, { error: e.message }); }
+    // 音视频 / PDF 拖进度要 Range；以前整份发，大文件只能从头播（195-C.2）
+    const rg = rangeOf(req.headers.range, size);
+    if (rg && rg.bad) { try { fs.closeSync(fd); } catch {} res.writeHead(416, { "content-range": `bytes */${size}` }); return res.end(); }
     const head = {
       "content-type": mimeOf(r.file),
-      "content-length": r.size,
+      "content-length": rg ? rg.end - rg.start + 1 : size,
+      "accept-ranges": "bytes",
       "cache-control": "no-store",
       "x-mtime": String(r.mtime),     // 编辑器保存时带回来做冲突检测
       // 文件内容不可信（Claude 写的、别处下的）：哪怕被整页打开，也只当不透明源、不跑脚本，碰不到网关的 Cookie 和 /api
       "content-security-policy": "sandbox",
       "x-content-type-options": "nosniff",
     };
+    if (rg) head["content-range"] = `bytes ${rg.start}-${rg.end}/${size}`;
     if (u.searchParams.get("download") === "1") {
       head["content-disposition"] =
         `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(r.file))}`;
     }
-    // 按已核过的真实路径打开、不跟软链：核完到打开之间被换成指向别处的软链也读不到（审查 v0.5.4 B-L1）
-    let fd;
-    try { fd = fs.openSync(r.file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW); } catch (e) { return sendJson(res, 404, { error: "not found", detail: e.code || e.message }); }
-    try { const fst = fs.fstatSync(fd); if (!fst.isFile()) { fs.closeSync(fd); return sendJson(res, 400, { error: "not a file" }); } head["content-length"] = fst.size; }
-    catch (e) { try { fs.closeSync(fd); } catch {} return sendJson(res, 500, { error: e.message }); }
-    res.writeHead(200, head);
-    const st = fs.createReadStream(null, { fd });
+    res.writeHead(rg ? 206 : 200, head);
+    const st = fs.createReadStream(null, { fd, ...(rg ? { start: rg.start, end: rg.end } : {}) });
     st.on("error", () => { try { res.destroy(); } catch {} });
     // 客户端中途断开（关查看器、切文件）：pipe 只会停下，不会关源，fd 一直占着（#148-1）
     res.on("close", () => { if (!res.writableFinished) st.destroy(); });
@@ -283,6 +312,10 @@ export async function routeFiles(req, res, u, p) {
   }
   // ── 文件面板：新建文件 / 新建文件夹 / 重命名。都不覆盖已有的东西，防呆规则同保存 ──
   if (req.method === "POST" && (p === "/api/file/new" || p === "/api/file/mkdir")) {
+    // 文件名上限 255 字节（不是字符）：中文一个字 3 字节，超了系统只回原始 ENAMETOOLONG（195-C.14）
+    if (Buffer.byteLength(path.basename(String(u.searchParams.get("path") || ""))) > 255) {
+      return sendJson(res, 400, { error: "name too long", message: tz("文件名太长（最多 255 字节，中文一个字算 3 个）") });
+    }
     const r = safeWritePath(u.searchParams.get("path"));
     if (r.error) return sendJson(res, r.status || 400, { error: r.error });
     if (!r.fresh) return sendJson(res, 409, { error: "exists" });
@@ -299,6 +332,7 @@ export async function routeFiles(req, res, u, p) {
     const name = String(u.searchParams.get("name") || "").trim();
     if (!path.isAbsolute(from)) return sendJson(res, 400, { error: "absolute path required" });
     if (!name || name === "." || name === ".." || /[\/\0]/.test(name)) return sendJson(res, 400, { error: "bad name" });
+    if (Buffer.byteLength(name) > 255) return sendJson(res, 400, { error: "name too long", message: tz("文件名太长（最多 255 字节，中文一个字算 3 个）") });
     let st; try { st = fs.lstatSync(from); } catch { return sendJson(res, 404, { error: "not found" }); }
     // 源：文件走 safeFilePath；目录借它父目录下的一个虚拟子路径过一遍 safeWritePath 的根目录检查
     const src = st.isDirectory() ? safeWritePath(path.join(from, ".probe-" + Date.now())) : safeFilePath(from);
@@ -307,7 +341,13 @@ export async function routeFiles(req, res, u, p) {
     if (st.isDirectory() && holdsPrivate(from)) return sendJson(res, 403, { error: "forbidden" });
     const dst = safeWritePath(path.join(path.dirname(from), name));
     if (dst.error) return sendJson(res, dst.status || 400, { error: dst.error });
-    if (!dst.fresh) return sendJson(res, 409, { error: "exists" });
+    if (!dst.fresh) {
+      // /sdcard 不区分大小写：只改大小写时 lstat 看到的是原文件，不能当“同名已存在”拒掉（200-8-05）。
+      // 比 dev+ino 确认是同一个文件才放行
+      let a = null, b = null;
+      try { a = fs.lstatSync(from); b = fs.lstatSync(dst.file); } catch {}
+      if (!(a && b && a.dev === b.dev && a.ino === b.ino)) return sendJson(res, 409, { error: "exists", message: tz("已经有同名的文件或文件夹") });
+    }
     try { fs.renameSync(from, dst.file); } catch (e) { return sendJson(res, 500, { error: e.message }); }
     log(`[file] 重命名 ${from} → ${dst.file}`);
     return sendJson(res, 200, { ok: true, path: dst.file, kind: fileKind(dst.file, st.isDirectory()) });
@@ -331,16 +371,31 @@ export async function routeFiles(req, res, u, p) {
     const nm0 = safe || "upload.bin", dot0 = nm0.lastIndexOf(".");
     const ext = dot0 > 0 ? clipBytes(nm0.slice(dot0), 32) : "", stem = clipBytes(dot0 > 0 ? nm0.slice(0, dot0) : nm0, 200 - Buffer.byteLength(ext)) || "upload";
     const nm = stem + ext;
-    let out = "";
-    for (let i = 1; i < 1000 && !out; i++) {
-      const cand = path.join(UPLOAD_DIR, `${stamp}-${i === 1 ? nm : stem + "-" + i + ext}`);
-      try { fs.writeFileSync(cand, "", { flag: "wx" }); out = cand; }
+    // 先写到隐藏的 .part 临时文件，完整收完再原子挂上最终名字：上传途中网关被杀 / 客户端断开，
+    // 只会留下 .part（文件列表默认不显示），不会把半截文件伪装成上传成功的附件（200-H-4）
+    uploadCleanParts();
+    let tmp = "";
+    for (let i = 0; i < 20 && !tmp; i++) {
+      const t = path.join(UPLOAD_DIR, `.part-${stamp}-${process.pid}-${Math.random().toString(16).slice(2, 10)}`);
+      try { fs.writeFileSync(t, "", { flag: "wx" }); tmp = t; }
       catch (e) { if (e.code !== "EEXIST") return sendJson(res, 500, { error: e.message }); }
     }
-    if (!out) return sendJson(res, 500, { error: "name taken" });
+    if (!tmp) return sendJson(res, 500, { error: "name taken" });
     let size;
-    try { size = await bodyToFile(req, out, UPLOAD_MAX); } catch (e) { return sendJson(res, /large/.test(e.message) ? 413 : 400, { error: e.message }); }
-    if (!size) { fs.rmSync(out, { force: true }); return sendJson(res, 400, { error: "empty body" }); }
+    try { size = await bodyToFile(req, tmp, UPLOAD_MAX); }
+    catch (e) { fs.rmSync(tmp, { force: true }); return sendJson(res, /large/.test(e.message) ? 413 : 400, { error: e.message }); }
+    // 0 字节也是合法文件：以前当成失败拒掉，用户附不上空文件（195-C.18）
+    let out = "";
+    // 查名 + rename 放在同一段同步代码里：node 单线程，两个并发上传不会插进来；目标盘不支持硬链接（本机 EACCES），
+    // 不能用 link 占名，但同步段内的 exists+rename 同样不会被另一个请求插入
+    for (let i = 1; i < 1000 && out === ""; i++) {
+      const cand = path.join(UPLOAD_DIR, `${stamp}-${i === 1 ? nm : stem + "-" + i + ext}`);
+      if (fs.existsSync(cand)) continue;
+      try { fs.renameSync(tmp, cand); out = cand; }
+      catch (e) { fs.rmSync(tmp, { force: true }); return sendJson(res, 500, { error: e.message }); }
+    }
+    fs.rmSync(tmp, { force: true });
+    if (!out) return sendJson(res, 500, { error: "name taken" });
     const kind = fileKind(out, false);
     log(`[upload] ${safe || "upload.bin"} ${size}B → ${out}`);
     return sendJson(res, 200, {
@@ -373,7 +428,7 @@ export async function routeFiles(req, res, u, p) {
     const dir = u.searchParams.get("path") || CFG.workspace;
     const q = (u.searchParams.get("q") || "").toLowerCase();
     const showHidden = u.searchParams.get("hidden") === "1";
-    const out = { path: dir, parent: path.dirname(dir), entries: [], roots: fileRoots() };
+    const out = { path: dir, parent: path.dirname(dir), entries: [], roots: fileRoots(), truncated: false };
     try {
       const real = fs.realpathSync(dir);
       out.path = real;
@@ -381,21 +436,24 @@ export async function routeFiles(req, res, u, p) {
       // 列目录也过同一套政策：之前只有读文件把关，列目录能看见 home 下全部文件名（审查 10-30 v0.5.12 低1）
       if (pathBlocked(real)) return sendJson(res, 403, { ...out, error: "forbidden" });
       const items = fs.readdirSync(real, { withFileTypes: true });
-      for (const it of items) {
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
         if (!showHidden && it.name.startsWith(".")) continue;
         if (q && !it.name.toLowerCase().includes(q)) continue;
-        if (SECRET_NAMES.has(it.name)) continue;
+        // 共享存储（/sdcard）不区分大小写，大小写变体也能指到同一个密钥名，过滤不能只认小写（196 网关安全二轮）
+        if (SECRET_NAMES.has(it.name.toLowerCase())) continue;
         let isDir = it.isDirectory(), size = 0, mtime = 0;
         try {
           const full = path.join(real, it.name), st = fs.statSync(full);
           // 软链指向被挡的地方（私有目录、令牌文件）：目标的类型、大小、时间都不报（DeepSeek 复核 低-1，旧代码就跟链取了 size/mtime）
-          const hid = it.isSymbolicLink() && (() => { const t = fs.realpathSync(full); return pathBlocked(t) || SECRET_NAMES.has(path.basename(t)); })();
+          const hid = it.isSymbolicLink() && (() => { const t = fs.realpathSync(full); return pathBlocked(t) || SECRET_NAMES.has(path.basename(t).toLowerCase()); })();
           // 目录软链：Dirent 不跟链，按目标算，不然面板里点不进去（#106 07-007）；进去时 /api/files 照样过 realpath + pathBlocked
           if (!isDir && !hid && st.isDirectory()) isDir = true;
           if (!hid) { size = isDir ? 0 : st.size; mtime = st.mtimeMs; }
         } catch {}
         out.entries.push({ name: it.name, dir: isDir, size, mtime, kind: fileKind(it.name, isDir) });
-        if (out.entries.length >= 1000) break;
+        // 超过 1000 项：明说还有没列出来的，别让界面以为目录就这么多（195-C.5）
+        if (out.entries.length >= 1000) { if (i < items.length - 1) out.truncated = true; break; }
       }
       out.entries.sort((a, b) => {
         if (a.dir !== b.dir) return a.dir ? -1 : 1;
@@ -404,7 +462,12 @@ export async function routeFiles(req, res, u, p) {
         if (b.kind === "image" && a.kind !== "image") return 1;
         return b.mtime - a.mtime || a.name.localeCompare(b.name);
       });
-    } catch (e) { out.error = e.message; }
+    } catch (e) {
+      // 没给「所有文件访问」时 /sdcard 的 readdir/realpath 报 EACCES：换成能照着做的提示（195-C.7）
+      out.error = /EACCES|EPERM/.test(String(e.code || "")) || /EACCES|EPERM/.test(String(e.message || ""))
+        ? tz("没有访问这个目录的权限（共享存储需要在系统设置里允许「所有文件访问」）")
+        : e.message;
+    }
     return sendJson(res, 200, out);
   }
   return NEXT;
