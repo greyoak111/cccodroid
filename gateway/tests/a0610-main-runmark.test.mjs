@@ -129,3 +129,14 @@ test("195-A.11：正常收到 SIGTERM 退出的记 stop，下次启动中断记�
   Q.recoverRunMark();
   assert.equal(Q.INTERRUPTED.find((e) => e.id === "a11b").cause, undefined);
 });
+
+test("195-B.4：待批的写文件请求内容很大 → 给界面的只带前 64K、记下原来的行数；命令不截；小的原样", () => {
+  const big = "a\n".repeat(1 << 20);
+  const v = Q.permView({ id: "p", tool: "Write", input: { file_path: "/x", content: big } });
+  assert.ok(JSON.stringify(v).length < 100 << 10);
+  assert.equal(v.inputCut.content.lines, (1 << 20) + 1);
+  const cmd = "echo " + "b".repeat(200 << 10);
+  assert.equal(Q.permView({ tool: "Bash", input: { command: cmd } }).input.command, cmd, "命令要看全");
+  const small = { tool: "Write", input: { file_path: "/y", content: "hi" } };
+  assert.equal(Q.permView(small), small);
+});

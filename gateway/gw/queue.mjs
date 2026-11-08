@@ -53,9 +53,24 @@ const sameLane = (q, run) => { const l = laneOfItem(q), sid = sidOfLane(l); retu
 let RUN_N = 0;
 const newRunId = () => `r${BOOT}${(++RUN_N).toString(36)}`;
 
+// 待批的写文件请求给界面看的样子：要写的内容几 MB 时，每次 state / hello 和事件回放里都是整份（实测 2 MB 输入 → 4 MB 事件，
+// 几次广播就挤掉 32 MB 的回放环，0.6.9 审计 195-B.4）。只截文件内容这几个字段（卡片本来也只显示前几十行），
+// 命令、路径不截：批的是什么必须看全。批准时网关照旧用 claude 发来的原样（run.perms 里存的是全的）
+const PERM_FIELD_MAX = 64 << 10;
+const CUT_FIELDS = ["content", "old_string", "new_string", "new_source"];
+const cutStr = (s) => (typeof s === "string" && s.length > PERM_FIELD_MAX ? s.slice(0, PERM_FIELD_MAX) : s);
+export function permView(p) {
+  const i = p && p.input;
+  if (!i || typeof i !== "object" || JSON.stringify(i).length <= PERM_FIELD_MAX) return p;
+  const out = { ...i }, cut = {};
+  for (const k of CUT_FIELDS) if (typeof out[k] === "string" && out[k].length > PERM_FIELD_MAX) { cut[k] = { chars: out[k].length, lines: out[k].split("\n").length }; out[k] = cutStr(out[k]); }
+  if (Array.isArray(out.edits)) out.edits = out.edits.slice(0, 50).map((e) => (e && typeof e === "object" ? { ...e, old_string: cutStr(e.old_string), new_string: cutStr(e.new_string) } : e));
+  return { ...p, input: out, ...(Object.keys(cut).length ? { inputCut: cut } : {}) };
+}
+
 const runInfo = (r) => r && {
   id: r.id, cid: r.cid, text: r.text.slice(0, 2000), sessionId: r.sessionId, follow: r.follow, startedAt: r.startedAt,
-  perms: r.perms ? [...r.perms.values()] : [],
+  perms: r.perms ? [...r.perms.values()].map(permView) : [],
   // sealed：答完了、后台任务还在，但 stdin 已关——插话、停单个任务都送不进去，只能等它结束或整个停掉
   idle: !!r.idle, sealed: !!r.idle && !r.inputOpen && !r.ended, bg: r.bgTasks || 0, bgList: r.bgList || [], auto: r.auto || null, permMode: r.permMode || null,
 };

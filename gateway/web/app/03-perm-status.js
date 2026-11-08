@@ -46,8 +46,9 @@
         h = `<div class="perm-path">${esc(i.file_path || "")}</div>` + (i.edits || []).slice(0, 8).map((e) => permDiffHtml(e.old_string, e.new_string)).join("");
         break;
       case "Write": {
-        const c = String(i.content || ""), ls = c.split("\n");
-        h = `<div class="perm-path">${esc(i.file_path || "")}</div><pre class="perm-diff">${ls.slice(0, 30).map((l) => `<span class="add">+ ${esc(l)}</span>`).join("\n")}${ls.length > 30 ? "\n" + esc(t("…（共 {n} 行）", { n: ls.length })) : ""}</pre>`;
+        // 内容很大时网关只发了前一段（inputCut 里是原来的行数，195-B.4）
+        const c = String(i.content || ""), ls = c.split("\n"), n = p.inputCut?.content?.lines || ls.length;
+        h = `<div class="perm-path">${esc(i.file_path || "")}</div><pre class="perm-diff">${ls.slice(0, 30).map((l) => `<span class="add">+ ${esc(l)}</span>`).join("\n")}${n > 30 ? "\n" + esc(t("…（共 {n} 行）", { n })) : ""}</pre>`;
         break;
       }
       case "Read": case "Glob": case "Grep":

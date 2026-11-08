@@ -11,7 +11,7 @@ import { setLastInit } from "./caps.mjs";
 import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
 import { SWALLOW_HOOKS } from "./streamfix.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { END_HOOKS, INTERRUPTED, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setInterrupted, setPermMode, sidForItem } from "./queue.mjs";
+import { END_HOOKS, INTERRUPTED, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, permView, publishState, runEmit, saveRunMark, setInterrupted, setPermMode, sidForItem } from "./queue.mjs";
 import { LOCAL_CMD_RE, handleLocalCommand } from "./modelcmd.mjs";
 import { LL, ensureLlama, localCustomActive } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "./usage.mjs";
@@ -721,7 +721,7 @@ export async function startRun(item) {
       }), PERM_WAIT_MS);
       tm.unref?.();
       log(`⏸ 等确认 ${p.tool} ${argLen(p.input)}`);
-      emit({ type: "perm_request", ...p });
+      emit({ type: "perm_request", ...permView(p) });
       publishState();
       return;
     }
