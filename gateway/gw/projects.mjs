@@ -115,7 +115,8 @@ function topFiles(p, max = 40) {
 
 function gitClone(url, dest) {
   return new Promise((resolve, reject) => {
-    const c = spawn("git", ["clone", "--depth", "50", url, dest], { env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0" }, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    // 和面板别处的 git 同口径：不许 ext:: 传输、不跑 fsmonitor；地址前加 --，别被当成选项（v4pro 复核 0.6.10，一致性）
+    const c = spawn("git", ["-c", "protocol.ext.allow=never", "-c", "core.fsmonitor=false", "clone", "--depth", "50", "--", url, dest], { env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0" }, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     let err = "";
     c.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
     const t = setTimeout(() => { killTree(c); reject(new Error(tz("克隆超时（5 分钟）"))); }, 5 * 60000);

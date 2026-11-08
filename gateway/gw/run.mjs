@@ -767,6 +767,8 @@ export async function startRun(item) {
     saveRunMark();                       // 标记里补上会话号：被杀之后「继续」要靠它 --resume
     if (!SESSIONS.has(init.session_id)) {
       SESSIONS.set(init.session_id, { id: init.session_id, title: message.slice(0, 60), createdAt: Date.now() });
+      // 网关长跑不重启时别一直涨（0.6.9 审计 200-6-05 剩下的一半，v4pro 复核）。只拿来判断「本次起过的会话」，淘汰掉的退回查文件在不在
+      if (SESSIONS.size > 5000) SESSIONS.delete(SESSIONS.keys().next().value);
     }
     if (model && init.model && model !== init.model) ALIAS_SEEN[model] = init.model;
     emit({

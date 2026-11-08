@@ -34,7 +34,9 @@ if (!sealed()) { process.stdout.write([...ours, ...user].map(q).join(" ") + "\n"
   const check = () => claudeSeal(BIN, { home }).catch((e) => ({ ok: false, why: e.message }));
   let cs = await check();
   const inst = path.join(HERE, "scripts", "install-claude.mjs");
-  if (cs.pending && fs.existsSync(inst)) {
+  // 只是打个版本（自检就这么问）：不为它联网补核、一等十分钟；没核过照样不起，当场报（0.6.9 审计 195-M.4 guard 半，v4pro 复核）
+  const versionOnly = user.length === 1 && (user[0] === "--version" || user[0] === "-v");
+  if (cs.pending && !versionOnly && fs.existsSync(inst)) {
     process.stderr.write("cccodroid: 这个版本还没有官方签名清单，正在联网补核… / no signed manifest yet, fetching the official one…\n");
     spawnSync(process.execPath, [inst, "--recheck"], { stdio: ["ignore", 2, 2], timeout: 600000 });
     cs = await check();
