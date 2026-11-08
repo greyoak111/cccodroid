@@ -165,6 +165,17 @@ function failed(result, code, status = 400) {
     "MODELS_AUTH", "MODELS_FORBIDDEN", "MODELS_NOT_FOUND", "MODELS_RATE_LIMIT", "MODELS_TIMEOUT", "MODELS_NETWORK", "MODELS_INVALID_RESPONSE", "MODELS_TOO_LARGE", "MODELS_REDIRECT", "MODELS_FAILED"].includes(result.body.code), "只能返回静态白名单错误码");
   assert.equal("models" in result.body, false); assert.equal("apiKey" in result.body, false);
 }
+// 上游错误按类别映射状态码，外部客户端才能按码退避（0.6.9 审计 196 上游.8）
+function upstreamStatus(code) {
+  return ["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(code) ? 409
+    : code === "MODELS_RATE_LIMIT" ? 429
+    : code === "MODELS_TIMEOUT" ? 504
+    : ["MODELS_NETWORK", "MODELS_FAILED"].includes(code) ? 502
+    : code === "MODELS_AUTH" ? 401
+    : code === "MODELS_FORBIDDEN" ? 403
+    : code === "MODELS_NOT_FOUND" ? 404
+    : 400;
+}
 function success(result, models = protocol().models, truncated = false) {
   assert.equal(result.status, 200); assert.deepEqual(result.body, { ok: true, models, truncated });
 }
@@ -263,7 +274,7 @@ test("App 只调用组件，成功和失败均不得自己 fetch/http/https/sock
   try {
     success(await request());
     control({ mode: "error", code: "MODELS_NETWORK", message: upstreamSecret });
-    failed(await request(), "MODELS_NETWORK");
+    failed(await request(), "MODELS_NETWORK", 502);
     assert.deepEqual(attempts, []); assert.deepEqual(snapshot(), before); assert.equal(launched.length, 2);
     assert.deepEqual(calls().map((call) => call.args), [["gui-models"], ["gui-models"]]);
   } finally { for (const hook of hooks) hook.mock.restore(); syncBuiltinESMExports(); }
@@ -373,9 +384,9 @@ test("模型输出上限是 128KiB 而非配置的 16KiB，超一字节立即拒
 test("组件失败只接受静态 MODELS_* 白名单，未知码/任意异常不得回显或冒充成功", async () => {
   const before = snapshot();
   for (const code of ["MODELS_AUTH", "MODELS_FORBIDDEN", "MODELS_NOT_FOUND", "MODELS_RATE_LIMIT", "MODELS_TIMEOUT", "MODELS_NETWORK", "MODELS_INVALID_RESPONSE", "MODELS_TOO_LARGE", "MODELS_REDIRECT", "MODELS_FAILED", "INVALID_INPUT", "KEY_REQUIRED", "KEY_HOST_CHANGED", "RUNTIME_CONFLICT", "BUSY"])
-    { control({ mode: "error", code, message: upstreamSecret + " " + home }); failed(await request(), code, ["RUNTIME_CONFLICT", "BUSY"].includes(code) ? 409 : 400); }
+    { control({ mode: "error", code, message: upstreamSecret + " " + home }); failed(await request(), code, upstreamStatus(code)); }
   for (const code of ["EVIL_" + upstreamSecret, "MODELS_" + upstreamSecret, "MODELS_NOT_A_REAL_CODE", "component_spawn", "__proto__", "constructor"])
-    { control({ mode: "error", code, message: oldSecret }); failed(await request(), "MODELS_FAILED"); }
+    { control({ mode: "error", code, message: oldSecret }); failed(await request(), "MODELS_FAILED", 502); }
   assert.deepEqual(snapshot(), before);
 });
 
@@ -383,9 +394,9 @@ test("stderr 的已知错误码也必须有正确 schema/id，其他包一律静
   const error = { code: "MODELS_AUTH", message: upstreamSecret + " " + home };
   for (const reply of [{ schema: "1", id: "openai-bridge", error }, { schema: 2, id: "openai-bridge", error },
     { schema: 1, id: "wrong-bridge", error }, { schema: 1, id: "openai-bridge", error: { code: { value: "MODELS_AUTH" } } }]) {
-    control({ mode: "stderr-raw", raw: JSON.stringify(reply) }); failed(await request(), "MODELS_FAILED");
+    control({ mode: "stderr-raw", raw: JSON.stringify(reply) }); failed(await request(), "MODELS_FAILED", 502);
   }
-  control({ mode: "stderr-raw", raw: upstreamSecret }); failed(await request(), "MODELS_FAILED");
+  control({ mode: "stderr-raw", raw: upstreamSecret }); failed(await request(), "MODELS_FAILED", 502);
 });
 
 test("超时终止短命 gui-models；错误静态、配置不变，finished 后可再次获取", async (t) => {
@@ -395,7 +406,7 @@ test("超时终止短命 gui-models；错误静态、配置不变，finished 后
     return schedule(fn, ms, ...args);
   });
   control({ mode: "hang" });
-  failed(await request(), "MODELS_TIMEOUT");
+  failed(await request(), "MODELS_TIMEOUT", 504);
   assert.equal(scheduled.length, 1, "必须确实走生产超时计时器而非 fixture 自行退出");
   await until(() => fs.existsSync(stoppedFile), "超时必须终止组件，不只是提前返回HTTP");   // 组件收到信号后才写这个文件，和 HTTP 返回有先后
   assert.equal(fs.readFileSync(stoppedFile, "utf8"), "stopped", "超时必须终止组件，不只是提前返回HTTP");
@@ -421,7 +432,7 @@ for (const mode of ["ok", "error"]) test(`fetching-models ${mode} 期间与重�
     assert.equal(calls().length, 1, "占槽期间绝不能启动第二个组件命令");
   } finally { fs.writeFileSync(releaseFile, "release"); await pending; }
   const result = await pending;
-  if (mode === "ok") success(result); else failed(result, "MODELS_NETWORK");
+  if (mode === "ok") success(result); else failed(result, "MODELS_NETWORK", 502);
   assert.deepEqual(snapshot(), before);
   assert.equal((await listItem()).progress, null);
   control({ mode: "ok" }); success(await request());
@@ -448,7 +459,7 @@ test("config POST 主动抢占 fetch：models 静态失败，helper close 后才
     const configured = await request({ ...input(), model: "new-model" }, { pathname: configPath });
     const cancelled = await pending;
     assert.ok(performance.now() - started < 2000, "配置必须主动取消在途 helper 并在2秒内接手，不能等15秒网络超时");
-    failed(cancelled, "MODELS_FAILED");
+    failed(cancelled, "MODELS_FAILED", 502);
     assert.equal(configured.status, 409); assert.equal(configured.body.code, "RUNTIME_CONFLICT", "应执行配置 fixture，不能因在途 fetch 返回 BUSY");
     assert.equal(childClosed, true); assert.equal(fs.readFileSync(stoppedFile, "utf8"), "stopped");
     assert.deepEqual(calls().map((call) => call.args), [["gui-models"], ["gui-status"], ["gui-configure"]]);

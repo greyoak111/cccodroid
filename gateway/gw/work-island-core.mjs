@@ -150,6 +150,8 @@ export function createWorkIsland(opts = {}) {
 
   const L = () => (String(lang() || "zh").startsWith("zh") ? ZH : EN);
   const liveRuns = () => (runs() || []).filter((r) => r && !r.ended);
+  // 打开工作岛时可能已经有待确认的请求（run.perms）：不能一直显示「正在干活」（0.6.9 审计 195-P.5）
+  const permCount = (run) => (run && run.perms && typeof run.perms.size === "number" ? run.perms.size : Array.isArray(run && run.perms) ? run.perms.length : 0);
 
   let active = null;        // { id, startedAt, last }
   let shown = false;        // 岛上还挂着东西（干活中，或「任务完成」还没收起）
@@ -206,10 +208,16 @@ export function createWorkIsland(opts = {}) {
 
   function start(run, text) {
     if (active) {
-      if (run && run.id) active.id = run.id;
+      // 并行会话：显示换到另一轮时，计时按那一轮自己的开始时间算（0.6.9 审计 195-P.5）
+      if (run && run.id && run.id !== active.id) {
+        active.id = run.id;
+        active.startedAt = Number(run.startedAt) || active.startedAt;
+        active.last = "";
+      }
       // 已经在显示了：state 快照每次都会走到这里，别把「等你确认」之类刷回「正在干活」（#97 02-010）。
-      // 状态变化由各自的事件（perm_resolved、phase…）来改
-      if (text) update(text);
+      // 状态变化由各自的事件（perm_resolved、phase…）来改；但快照里已经有待确认的请求时要说出来
+      if (permCount(run)) update(L().perm(""), L().waiting, "waiting");
+      else if (text) update(text);
       return;
     }
     clearPending();
@@ -220,7 +228,8 @@ export function createWorkIsland(opts = {}) {
       startedAt: Number(run && run.startedAt) || clock(),
       last: "",
     };
-    update(text || L().start, L().working, "working");
+    if (permCount(run)) update(L().perm(""), L().waiting, "waiting");
+    else update(text || L().start, L().working, "working");
   }
 
   function finish(reason) {
@@ -312,14 +321,15 @@ export function createWorkIsland(opts = {}) {
     }
   }
 
-  function stop(sync = false) {
+  // force：用户关开关 / 网关退出 / 启动清理时，即使这一进程里没显示过东西，也发一次 IDLE 把岛上可能残留的旧胶囊收掉
+  function stop(sync = false, force = false) {
     const had = active || shown;
     active = null;
     shown = false;
     clearPending();
     if (doneTimer) { clearTimeout(doneTimer); doneTimer = null; }
     if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
-    if (had) {
+    if (had || force) {
       const fn = sync ? emitSync : emit;
       fn("IDLE", L().idleTitle, L().idleText, 0, "idle");
     }

@@ -36,9 +36,19 @@ let warned = false;
 function amSend(action, title, text, since, state, extra) {
   // 用绝对路径：PATH 里的包装脚本在部分环境会返回非零，实际却已经送达。
   execFile("/system/bin/am", amArgs(action, title, text, since, state, extra), { timeout: 8000 }, (e, out, err) => {
-    if (!e || warned) return;
-    warned = true;
-    log(`[work-island] am 失败（应用没装或服务未就绪？后面不再重复）：${e.message} ${String(err || "").slice(0, 120)}`);
+    if (!e) return;
+    if (!warned) {
+      warned = true;
+      log(`[work-island] am 失败（应用没装或服务未就绪？后面不再重复）：${e.message} ${String(err || "").slice(0, 120)}`);
+    }
+    // 系统不允许从应用身份起这个服务（Can't start from invalid source / Permission Denial）：
+    // 再每 1.5 秒试下去也没用，停掉发送（0.6.9 审计 195-P.4 / 196 日志考古.2）
+    if (/invalid source|not allowed|Permission Denial|SecurityException|unable to start/i.test(String(err || "") + e.message)) {
+      log("[work-island] 系统不允许启动工作岛服务，已停止发送；重新打开设置里的开关可再试");
+      started = false;
+      if (unsub) { try { unsub(); } catch {} unsub = null; }
+      if (core) { try { core.stop(true, false); } catch {} core = null; }
+    }
   });
 }
 function amSendSync(action, title, text, since, state, extra) {
@@ -68,8 +78,8 @@ function detectApp(cb) {
     ["start-foreground-service", "--user", "0", "-n", SVC, "-a", PKG + ".IDLE"],
     { timeout: 4000 }, (e2, out2, err2) => {
       const msg = String(err2 || "");
-      // 只有明确的「找不到」才算没装；超时/权限之类的错误当作装了，交给后续 am 重试。
-      cb(!(e2 && /not found|does not exist|does not have|unable to find/i.test(msg)));
+      // 明确的「找不到」或「系统不许从应用身份起」都算用不了；超时之类的错误当作装了，交给后续 am 重试。
+      cb(!(e2 && /not found|does not exist|does not have|unable to find|invalid source|not allowed|Permission Denial|SecurityException/i.test(msg)));
     });
   execFile("/system/bin/pm", ["list", "packages", "--user", "0", PKG], { timeout: 3000 }, (e, out) => {
     if (!e && String(out).includes("package:" + PKG)) return cb(true);
@@ -109,6 +119,7 @@ export function startWorkIsland() {
     });
     const live = runList().filter((r) => r && !r.ended);
     if (live.length) core.start(live[0]);        // 开设置时已经有轮次在跑
+    else core.stop(true, true);                  // 没有轮次：先发一次 IDLE，收掉上一任网关被 SIGKILL 后留下的胶囊（195-P.1）
     log("[work-island] 已订阅网关事件");
   });
 }
@@ -119,7 +130,7 @@ export function stopWorkIsland(sync = false) {
   gen++;                                         // 在途检测的结果作废（#124-1）
   if (unsub) { try { unsub(); } catch {} unsub = null; }
   if (core) {
-    try { core.stop(sync); } catch {}
+    try { core.stop(sync, true); } catch {}   // 用户关开关 / 网关退出：总要发 IDLE，别管这一进程里显示过没有（195-P.1）
     core = null;
   }
 }

@@ -14,7 +14,7 @@ export function _setSealed(v) { SEALED = !!v; }
 
 // 不开会话的管理子命令：照常读配置（扩展页的 mcp list / plugin 管理靠它们）。
 // agents 会在后台开会话，不算管理命令
-const MGMT = new Set(["mcp", "plugin", "plugins", "config", "doctor", "update", "install", "auth", "setup-token", "migrate-installer"]);
+const MGMT = new Set(["mcp", "plugin", "plugins", "config", "doctor", "update", "install", "auth", "setup-token", "migrate-installer", "version"]);
 // 带参数的旗标（找子命令时要跳过它们的值）。不全也无妨：认不出子命令就按开会话封口，宁严勿松
 const WITH_VALUE = new Set(["--model", "--resume", "-r", "--settings", "--setting-sources", "--permission-mode", "--input-format", "--output-format",
   "--append-system-prompt", "--append-system-prompt-file", "--system-prompt", "--system-prompt-file", "--mcp-config", "--add-dir", "--effort",
@@ -26,6 +26,8 @@ function subcommand(argv) {
   // `-p mcp`、未知旗标（如 --debug-file mcp）、`-- mcp` 都不能再被当成管理命令：以前会整层跳过封口（审查 11-05）。
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    // `claude --version` 只是打版本、不开会话：别走封口去补核，自检 90 秒等不起（0.6.9 审计 195-M.4）
+    if (a === "--version") return "version";
     if (a === "--") return "";
     if (a.startsWith("-")) {
       const name = a.split("=")[0];

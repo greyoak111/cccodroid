@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { CFG, PREFIX, reqLang, tr, tz } from "./config.mjs";
 import { NEXT, sendJson } from "./http.mjs";
 import { COMP_DIR, compRecord, devkitIdentity } from "./components.mjs";
+import { devkitVersion } from "./envfacts.mjs";
 import { privCall } from "./usage.mjs";
 import { ENV_FACTS, envFactsKey } from "./envfacts.mjs";
 
@@ -25,9 +26,9 @@ async function issueDraft(lang) {
     for (const m of out.matchAll(/^\[([^\]]+)\]: \[([^\]]*)\]$/gm)) props[m[1]] = m[2];
   } catch {}
   const g = (k) => props[k] || "";
-  const upd = PREFIX ? await privCall({ op: "upd_status" }, 5000) : {};
+  // 两次问原生并行：以前串行，最坏各等 5 秒，「到 GitHub 反馈」要 ~10 秒（0.6.9 审计 196 端侧.5）
+  const [upd, shz] = PREFIX ? await Promise.all([privCall({ op: "upd_status" }, 5000), privCall({ op: "status" }, 5000)]) : [{}, {}];
   const ver = (id) => ((upd.items || []).find((i) => i.id === id) || {}).current || "";
-  const shz = PREFIX ? await privCall({ op: "status" }, 5000) : {};
   const rom = ROM_PROPS.filter(([k]) => g(k)).map(([k, n]) => `${n} ${g(k)}`).slice(0, 2).join(" · ") || g("ro.build.display.id");
   const gpu = fs.existsSync("/dev/kgsl-3d0") ? "Adreno (kgsl)" : fs.existsSync("/dev/mali0") ? "Mali" : fs.existsSync("/dev/pvrsrvkm") ? "PowerVR" : "?";
   let ram = ""; try { ram = (Number(/MemTotal:\s+(\d+)/.exec(fs.readFileSync("/proc/meminfo", "utf8"))[1]) / 1048576).toFixed(1) + " GB"; } catch {}
@@ -37,7 +38,7 @@ async function issueDraft(lang) {
   const dev = [
     "| | |", "|---|---|",
     row("cccodroid", ver("app") || (PREFIX ? "?" : "dev")),
-    row("Toolchain", ver("devkit") || dk.tag),
+    row("Toolchain", ver("devkit") || devkitVersion(dk)),
     row("Claude Code", ver("claude")),
     row("Android", `${g("ro.build.version.release")} (SDK ${g("ro.build.version.sdk")})`),
     row("Device", `${g("ro.product.manufacturer")} ${g("ro.product.model")}${g("ro.product.brand") && g("ro.product.brand").toLowerCase() !== g("ro.product.manufacturer").toLowerCase() ? ` (${g("ro.product.brand")})` : ""}`),
@@ -51,10 +52,15 @@ async function issueDraft(lang) {
   ].filter(Boolean).join("\n");
   let st = "";
   let r = null; try { r = JSON.parse(fs.readFileSync(ENV_FACTS, "utf8")); } catch {}
-  if (r) {
-    st = `Passed ${r.pass}, failed ${r.fail.length}${r.key !== envFactsKey() ? " (before the last update)" : ""}`;
-    if (r.fail.length) st += "\n\n" + r.fail.slice(0, 15).map((x) => "- " + x).join("\n");
-    if (r.info.length) st += "\n\n<details><summary>Info</summary>\n\n" + r.info.slice(0, 10).map((x) => "- " + x).join("\n") + "\n</details>";
+  // 自检文件是合法 JSON 但缺/写坏 fail、info、pass 时别 500（0.6.9 审计 195-M.9）
+  if (r && typeof r === "object" && !Array.isArray(r)) {
+    const fails = Array.isArray(r.fail) ? r.fail : [];
+    const infos = Array.isArray(r.info) ? r.info : [];
+    const pass = Number.isFinite(Number(r.pass)) ? Number(r.pass) : 0;
+    st = `Passed ${pass}, failed ${fails.length}${r.key !== envFactsKey() ? " (before the last update)" : ""}`;
+    if (fails.length) st += "\n\n" + fails.slice(0, 15).map((x) => "- " + x).join("\n");
+    if (infos.length) st += "\n\n<details><summary>Info</summary>\n\n" + infos.slice(0, 10).map((x) => "- " + x).join("\n") + "\n</details>";
+    r = { pass, fail: fails, info: infos };
   } else st = PREFIX ? "Not run yet" : "n/a";
   let comps = "";
   try {

@@ -3,6 +3,7 @@ import { CFG, PATHS, PREFIX } from "./config.mjs";
 import { SETTINGS } from "./settings-store.mjs";
 import { API_KEY, PROVIDER, providerBrief } from "./providers.mjs";
 import { bridgeAlive, runClaude, safeMode } from "./claude.mjs";
+import { AUTH_CACHE } from "./login.mjs";
 import { LAST_SESSION, RUNS } from "./runs.mjs";
 import { NEXT, sendJson, uiTag } from "./http.mjs";
 import { QUEUE } from "./queue.mjs";
@@ -99,6 +100,10 @@ export async function routeCaps(req, res, u, p) {
       // 登录态厂商也算"就绪"：它不用密钥，用的是 claude 自己的 OAuth 登录
       hasKey: !!API_KEY || !!PROVIDER.login,
       keyMode: API_KEY ? "key" : (PROVIDER.login ? "login" : "none"),
+      // 真实的 OAuth 状态（问过才有；unknown 表示问不出，不等于未登录）。界面别只看 loader 在不在（0.6.9 审计 195-G.3）
+      auth: AUTH_CACHE && AUTH_CACHE.v ? {
+        loggedIn: !!AUTH_CACHE.v.loggedIn, unknown: !!AUTH_CACHE.v.unknown, stale: !!AUTH_CACHE.v.stale, at: AUTH_CACHE.at,
+      } : null,
       // 别家填了 Key 也算接上了：会话可以单独选那家（0.3.16 起），首屏不该再叫人去接模型
       otherKey: providerBrief().some((p) => !p.active && p.keyMode === "key" && !(SETTINGS.hiddenProviders || []).includes(p.id)),
       model: SETTINGS.model || PROVIDER.defaultModel || null,

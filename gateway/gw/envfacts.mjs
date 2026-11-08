@@ -10,17 +10,31 @@ import { modInstalled, modulesInfo } from "./modules.mjs";
 import { reconcileFacts } from "./reconcile.mjs";
 import { deviceFacts } from "./device.mjs";
 import { readSmallFile } from "./saferead.mjs";
+import { guarded } from "./crashguard.mjs";
 
 // ── 本机实况：TOOLS.md 是打包时在测试机上测的，这里补上「这台设备上实际怎样」 ──
 // 自检（cccodroid-selftest）在本机跑一遍，失败项和 INFO（比如有没有硬件编码器）接在 TOOLS.md 后面；
 // 装了哪些组件、用 pkg 装了哪些包，每轮现读。自检只在工具包或应用版本变了之后、空闲时重跑（要一两分钟 CPU）
 export const ENV_FACTS = PREFIX ? path.join(CFG.home, ".cccodroid-env.json") : "";
+/** 工具包版本：.devkit-ok 没有 tag 字段（0.6.9 审计 195-M.5），从 Release 的 base 地址里取，取不到再退回 tag */
+export function devkitVersion(dk = devkitIdentity()) {
+  const m = /\/devkit-([^/]+)\/?$/.exec(String((dk && dk.base) || ""));
+  return m ? m[1] : String((dk && dk.tag) || "");
+}
+/** 已装组件的 id@版本：装/卸组件后自检要重跑（以前 key 不变，失败项永久留在系统提示里，0.6.9 审计 195-M.1） */
+function installedCompKey() {
+  try {
+    return fs.readdirSync(COMP_DIR).filter((f) => f.endsWith(".json")).map((f) => compRecord(f.slice(0, -5)))
+      .filter((r) => r && r.state === "ok").map((r) => `${r.id}@${r.version}`).sort().join(",");
+  } catch { return ""; }
+}
 export function envFactsKey() {
   const dk = devkitIdentity() || {};
   let tag = ""; try { tag = (readSmallFile(path.join(HERE, "TAG"), 64) || "").trim(); } catch {}
   // 模块化工具包：装 / 卸模块后也要重测（自检按已装模块跑）
-  const mj = modulesInfo(), mods = mj ? (mj.modules || []).filter((m) => modInstalled(mj, m.id)).map((m) => m.id).join(",") : "";
-  return `${dk.sha256 || dk.tag || "?"}|${tag}${mods ? "|" + mods : ""}`;
+  const mj = modulesInfo(), mods = mj && Array.isArray(mj.modules) ? mj.modules.filter((m) => modInstalled(mj, m.id)).map((m) => m.id).join(",") : "";
+  const comps = installedCompKey();
+  return `${dk.sha256 || dk.tag || "?"}|${tag}${mods ? "|" + mods : ""}${comps ? "|c:" + comps : ""}`;
 }
 let envFactsJob = null;
 function envFactsRun() {
@@ -35,9 +49,10 @@ function envFactsRun() {
   log("[env] 本机自检开始（工具包或应用换了版本）");
   envFactsJob = spawn(argv[0], argv.slice(1), { env: { ...termEnv(), CCAPP_ENVFACTS: "1" }, cwd: CFG.home, detached: true, stdio: ["ignore", "pipe", "pipe"] });
   envFactsJob.stdout.setEncoding("utf8"); envFactsJob.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
-  envFactsJob.stdout.on("data", (d) => { if (out.length < 1 << 20) out += d; });
+  envFactsJob.stdout.on("data", guarded("envFacts stdout", (d) => { if (out.length < 1 << 20) out += d; }));
   envFactsJob.stderr.on("data", () => {});
-  const t = setTimeout(() => { try { killTree(envFactsJob); } catch {} }, 15 * 60e3);
+  let timedOut = false;
+  const t = setTimeout(() => { timedOut = true; try { killTree(envFactsJob); } catch {} }, 15 * 60e3);
   // 自检脚本可能在 existsSync 之后、spawn 之前被删/不可执行。不接 error 就是未处理的 error 事件，
   // server.mjs 只兜 unhandledRejection，整个网关会跟着退出
   let spawnFailed = false;
@@ -45,9 +60,11 @@ function envFactsRun() {
     spawnFailed = true; clearTimeout(t); envFactsJob = null;
     log("[env] 自检启动失败：" + (e.code || e.message));
   });
-  envFactsJob.on("close", () => {
+  envFactsJob.on("close", guarded("envFacts close", () => {
     clearTimeout(t); envFactsJob = null;
     if (spawnFailed) return;
+    // 超时强杀时输出只有半份：不能当完整结果写进去（0.6.9 审计 195-M.1）
+    if (timedOut) { log("[env] 自检超时，结果不完整，下次再试"); return; }
     const r = { key, at: Date.now(), pass: 0, fail: [], info: [] };
     for (const l of out.split("\n")) {
       if (l.startsWith("PASS ")) r.pass++;
@@ -57,15 +74,19 @@ function envFactsRun() {
     if (!r.pass) { log("[env] 自检没跑出结果，下次再试"); return; }
     try { fs.writeFileSync(ENV_FACTS, JSON.stringify(r, null, 1)); } catch {}
     log(`[env] 本机自检：通过 ${r.pass} 项，失败 ${r.fail.length} 项`);
-  });
+  }));
 }
 // 空闲（没有 claude 在跑）且结果过期时才跑：启动 2 分钟后看一次，之后每 5 分钟
 function envFactsTick() {
   if (RUNS.size || envFactsJob) return;
   let cur = null; try { const raw = readSmallFile(ENV_FACTS, 256 << 10); cur = raw == null ? null : JSON.parse(raw); } catch {}
-  if (!cur || cur.key !== envFactsKey()) envFactsRun();
+  // 结果最多用一周：修好组件 / 联网恢复后不用等工具包再换一次版本才重测（0.6.9 审计 195-M.1）
+  const old = !cur || !cur.at || Date.now() - cur.at > 7 * 86400e3;
+  if (old || cur.key !== envFactsKey()) envFactsRun();
 }
-if (PREFIX) { setTimeout(envFactsTick, 2 * 60e3).unref?.(); setInterval(envFactsTick, 5 * 60e3).unref?.(); }
+// 定时器里读 modules.json / 拼 key，坏状态文件的形状问题不能带走网关（0.6.9 审计 198 P1-19）
+const envFactsTickSafe = guarded("envFactsTick", envFactsTick);
+if (PREFIX) { setTimeout(envFactsTickSafe, 2 * 60e3).unref?.(); setInterval(envFactsTickSafe, 5 * 60e3).unref?.(); }
 
 // 这里拼的名字、版本都来自 home 下的文件（组件记录、pkg 清单、模块表），claude 自己就写得动：
 // 一律压成单行、限长，换行和控制符不让它带进成段的「指令」（11-04 报告）
@@ -76,8 +97,8 @@ export function envFacts() {
   const out = [];
   const dev = deviceFacts();
   if (dev) out.push(dev);
-  const dk = devkitIdentity();
-  if (dk && dk.tag) out.push(`- 工具包：${word(dk.tag)}`);
+  const dk = devkitIdentity(), dkv = devkitVersion(dk);
+  if (dkv) out.push(`- 工具包：${word(dkv)}`);
   // 模块化工具包：装了哪些模块；没装的模块里的命令现在用不了 —— TOOLS.md 是按全装写的，这里纠正
   const mj = modulesInfo();
   if (mj) {
@@ -95,8 +116,11 @@ export function envFacts() {
   }
   // 扩展页装的组件
   try {
+    // 工具包换过之后，旧组件的文件已经不在：别再把它列成「已装组件」（0.6.9 审计 195-M.3）
     const comps = fs.readdirSync(COMP_DIR).filter((f) => f.endsWith(".json")).map((f) => compRecord(f.slice(0, -5)))
-      .filter((r) => r && r.state === "ok").map((r) => `${word(r.id)} ${word(r.version)}${Array.isArray(r.bin) && r.bin.length ? `（命令：${r.bin.slice(0, 12).map(word).join("、")}）` : ""}`);
+      .filter((r) => r && r.state === "ok" && (!dk || r.base === dk.sha256)
+        && (!Array.isArray(r.bin) || !r.bin.length || r.bin.some((b) => fs.existsSync(path.join(PREFIX, "bin", b)))))
+      .map((r) => `${word(r.id)} ${word(r.version)}${Array.isArray(r.bin) && r.bin.length ? `（命令：${r.bin.slice(0, 12).map(word).join("、")}）` : ""}`);
     if (comps.length) out.push(`- 已装组件：${comps.join("；")}`);
   } catch {}
   // pkg 装的包（只列用户点名装的，依赖不列）

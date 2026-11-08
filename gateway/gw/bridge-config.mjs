@@ -333,7 +333,15 @@ export async function handleBridgeModels(req, res, signal) {
     if (res.destroyed || res.writableEnded) return;
     const codes = [...COMPONENT_ERRORS, ...MODELS_ERROR_CODES, "not_installed", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key"];
     const code = codes.includes(error.code) ? error.code : "MODELS_FAILED";
-    const status = ["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(code) ? 409 : 400;
+    // 上游的 429 / 超时 / 网络错误要给外部客户端能退避的状态码，不能一律 400（0.6.9 审计 196 上游.8）
+    const status = ["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(code) ? 409
+      : code === "MODELS_RATE_LIMIT" ? 429
+      : code === "MODELS_TIMEOUT" ? 504
+      : ["MODELS_NETWORK", "MODELS_FAILED"].includes(code) ? 502
+      : code === "MODELS_AUTH" ? 401
+      : code === "MODELS_FORBIDDEN" ? 403
+      : code === "MODELS_NOT_FOUND" ? 404
+      : 400;
     log(`[bridge-config] models failed stage=${code}`);
     return sendJson(res, status, { ok: false, code,
       ...(["endpoint", "apiKey"].includes(error.field) ? { field: error.field } : {}), message: failure(code).message });

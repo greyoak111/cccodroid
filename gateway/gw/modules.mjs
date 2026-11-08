@@ -22,7 +22,19 @@ const DEVKIT_MIRROR = "https://dl.cccodroid.net/devkit/";
 
 export function modulesInfo() {
   if (!DK) return null;
-  try { return JSON.parse(fs.readFileSync(path.join(DK, "modules.json"), "utf8")); } catch { return null; }
+  let j;
+  try { j = JSON.parse(fs.readFileSync(path.join(DK, "modules.json"), "utf8")); } catch { return null; }
+  // 0.6.9 审计 198 P1-19：modules.json 是合法 JSON 但形状不对（modules 不是数组、里面混了 null
+  // 或缺 id / dir 的条目）时，坏条目会一路带到 envFactsKey 的定时器里抛 TypeError，
+  // 网关崩了重启、重启再崩。这里只放行能用的条目；连模块表都不是数组就当没有模块表。
+  if (!j || typeof j !== "object" || Array.isArray(j) || !Array.isArray(j.modules)) {
+    log("[mod] modules.json 形状不对（modules 不是数组），按整包工具包处理");
+    return null;
+  }
+  const n = j.modules.length;
+  j.modules = j.modules.filter((m) => m && typeof m === "object" && typeof m.id === "string" && m.id && typeof m.dir === "string" && m.dir);
+  if (j.modules.length !== n) log(`[mod] modules.json 里有 ${n - j.modules.length} 个坏条目，已忽略`);
+  return j;
 }
 const blockOf = (mj, id) => (mj.modules || []).find((m) => m.id === id) || null;
 const dirOf = (m) => path.join(PREFIX, m.dir);
@@ -98,14 +110,16 @@ function modList() {
   const items = (mj.modules || []).map((m) => {
     const job = MOD_JOBS.get(m.id), inst = modInstalled(mj, m.id);
     const dep = inst ? modDependents(mj, m.id) : { modules: [], components: [], pkgs: [] };
+    // 一条链共用一个 job：只有正在装的那一块显示进度，已经装好的那块照旧显示「已安装」（0.6.9 审计 195-I.5）
+    const cur = job && !job.finished && job.current === m.id;
     return {
       id: m.id, kind: m.kind, required: !!m.required, name: m.name, desc: m.desc, uses: m.uses || [],
       deps: m.deps || [], users: m.users || [], commands: m.commands || [], key: m.key || [],
       packages: (m.packages || []).map((p) => `${p.name} ${p.version}`),
       download: (m.gz && m.gz.bytes) || 0, installed: m.installed || 0, files: m.files || 0,
-      state: job && !job.finished ? job.phase : inst ? "ok" : job && job.error ? "error" : "absent",
-      progress: job && !job.finished ? { phase: job.phase, done: job.done, total: job.total, via: job.via || "", current: job.current || m.id } : null,
-      error: job && job.error ? tr(LAST_LANG, job.error) : "",
+      state: cur ? job.phase : inst ? "ok" : job && job.error && job.current === m.id ? "error" : "absent",
+      progress: cur ? { phase: job.phase, done: job.done, total: job.total, via: job.via || "", current: job.current } : null,
+      error: job && job.error && job.current === m.id ? tr(LAST_LANG, job.error) : "",
       usedBy: dep,
       sha256: (m.gz && m.gz.sha256) || "",
     };
@@ -128,8 +142,15 @@ async function modInstall(id) {
   if (!chain.length) return { ok: true, already: true };
   const dk = devkitIdentity() || {};
   if (!dk.base) return { ok: false, message: tz("工具包是从本地文件装的，不知道该去哪个 Release 下载模块。请先在设置里更新一次工具包") };
-  // 空间：压缩包 + 解开后的大小（暂存区与目标在同一分区，搬进去是换名不占双份），再留 10%
-  const need = chain.reduce((s, c) => { const b = blockOf(mj, c); return s + b.gz.bytes + b.installed; }, 0) * 1.1;
+  // 空间：压缩包 + 解开后的大小（暂存区与目标在同一分区，搬进去是换名不占双份），再留 10%。
+  // 上次失败留下的、大小对得上的压缩包已经占着空间，不再重复要；上次失败留下的解包树先清掉，
+  // 不然重试先被自己留下的残留挡住（0.6.9 审计 #186 / 195-I.2）
+  for (const c of chain) {
+    const b = blockOf(mj, c);
+    if (!b.gz || !Number.isFinite(b.gz.bytes) || typeof b.gz.sha256 !== "string" || !b.gz.sha256) return { ok: false, message: tz("这个模块的下载信息不完整，先更新一次工具包") };
+    try { fs.rmSync(path.join(STAGE, c), { recursive: true, force: true }); } catch {}
+  }
+  const need = modSpaceNeed(mj, chain);
   try { const st = fs.statfsSync(path.dirname(PREFIX)); const free = st.bavail * st.bsize; if (free < need) return { ok: false, message: tz("存储空间不够：需要约 {need} MB，只剩 {free} MB", { need: Math.ceil(need / 1048576), free: Math.floor(free / 1048576) }) }; } catch {}
   const job = { phase: "downloading", done: 0, total: 0, queue: chain, current: chain[0], finished: false };
   for (const c of chain) MOD_JOBS.set(c, job);
@@ -147,6 +168,33 @@ async function modInstall(id) {
     }
   })();
   return { ok: true, chain };
+}
+
+/** 这条链还要多少空间（压缩包 + 解开后的大小，留 10%）：暂存区里大小对得上的压缩包不再重复要（0.6.9 审计 #186） */
+export function modSpaceNeed(mj, chain) {
+  let need = 0;
+  for (const c of chain) {
+    const b = blockOf(mj, c);
+    const bytes = b && b.gz && Number(b.gz.bytes) || 0;
+    let reuse = 0;
+    try {
+      if (b.gz && b.gz.sha256 && fs.statSync(path.join(STAGE, `${b.id}-${b.gz.sha256.slice(0, 12)}.tar.gz`)).size === b.gz.bytes) reuse = b.gz.bytes;
+    } catch {}
+    need += bytes - reuse + ((b && b.installed) || 0);
+  }
+  return need * 1.1;
+}
+
+/** 读模块包里的 MANIFEST：空/缺失不是「没有文件要校验」，路径也必须在包内（0.6.9 审计 200-10-08） */
+export function modManifest(tree, dir) {
+  const man = readLines(path.join(tree, "usr", dir, "MANIFEST"));
+  if (!man.length) throw new Error(tz("模块包里缺文件清单（MANIFEST），为安全起见不安装"));
+  return man.map((line) => {
+    const i = line.indexOf(" "), j = line.indexOf(" ", i + 1), rel = line.slice(j + 1);
+    // 包内 MANIFEST 同 uid 可改，别让 ../ 或绝对路径把核对带出暂存区
+    if (i < 0 || j < 0 || !rel || path.isAbsolute(rel) || rel.split("/").includes("..")) throw new Error(tz("模块包的文件清单里有不合法的路径：{file}", { file: rel.slice(0, 160) }));
+    return { h: line.slice(0, i), n: Number(line.slice(i + 1, j)), rel };
+  });
 }
 
 let modMirrorFirst = false;
@@ -183,7 +231,8 @@ async function modRunInstall(mj, m, base, job) {
     fs.renameSync(part, gz);
   }
   if (job.cancelled) throw new Error("cancelled");
-  job.phase = "verifying"; job.done = 0; job.total = m.installed || 0;
+  // 解包阶段没有可靠的字节进度：不画永远 0% 的条（0.6.9 审计 195-I.8），解完按清单给总量
+  job.phase = "verifying"; job.done = 0; job.total = 0;
   fs.rmSync(tree, { recursive: true, force: true });
   fs.mkdirSync(tree, { recursive: true });
   // 解之前按目录查（同组件包）：MANIFEST 解完才核，经包内软链或 .. 写到暂存区外面的条目那时已经落地了（11-03 审查 L-8）
@@ -195,15 +244,14 @@ async function modRunInstall(mj, m, base, job) {
     await compRun(job, path.join(PREFIX, "bin", "tar"), ["-xzf", gz, "-C", tree]);
   }
   catch (e) { if (!job.cancelled) fs.rmSync(gz, { force: true }); throw e; }
-  const man = readLines(path.join(tree, "usr", m.dir, "MANIFEST"));
-  job.total = man.reduce((a, l) => a + (Number(l.split(" ")[1]) || 0), 0);   // 按清单字节算，installed 含链接等到不了头
-  for (const line of man) {
+  const man = modManifest(tree, m.dir);
+  job.total = man.reduce((a, e) => a + (Number.isFinite(e.n) ? e.n : 0), 0);   // 按清单字节算，installed 含链接等到不了头
+  for (const e of man) {
     await breathe();
     if (job.cancelled) throw new Error("cancelled");
-    const i = line.indexOf(" "), j = line.indexOf(" ", i + 1), h = line.slice(0, i), n = Number(line.slice(i + 1, j)), rel = line.slice(j + 1);
-    const f = path.join(tree, "usr", rel);
-    let st; try { st = fs.statSync(f); } catch { throw new Error(tz("模块包缺文件：{file}", { file: rel })); }
-    if (st.size !== n || (await sha256File(f, null, st.size)) !== h) throw new Error(tz("模块包里的文件校验不符：{file}", { file: rel }));
+    const f = path.join(tree, "usr", e.rel);
+    let st; try { st = fs.statSync(f); } catch { throw new Error(tz("模块包缺文件：{file}", { file: e.rel })); }
+    if (st.size !== e.n || (await sha256File(f, null, st.size)) !== e.h) throw new Error(tz("模块包里的文件校验不符：{file}", { file: e.rel }));
     job.done += st.size;
   }
   // 搬进去：.ok 最后写，中途被打断就是「没装」，重装会覆盖、卸载按 FILES 删
@@ -212,7 +260,15 @@ async function modRunInstall(mj, m, base, job) {
   const skipped = modMoveIn(path.join(tree, "usr"));
   if (skipped.length) log(`[mod] ${m.id}：${skipped.length} 个路径和已有目录冲突，没放：${skipped.slice(0, 5).join(", ")}`);
   const fr = path.join(dirOf(m), "first-run.sh");
-  if (fs.existsSync(fr)) { try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); } catch (e) { log(`[mod] ${m.id} first-run：${e.message}`); } }
+  if (fs.existsSync(fr)) {
+    try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); }
+    catch (e) {
+      if (job.cancelled) throw new Error("cancelled");
+      // first-run 失败不能写 .ok：以前照样写，模块显示已装但没有配置，也没有重试入口（0.6.9 审计 200-14-06）。
+      // 不写 .ok 就是「没装」，重装会再跑一遍
+      throw new Error(tz("模块「{name}」的首次配置没跑完（{err}），再装一次会重试", { name: (m.name && m.name.zh) || m.id, err: String(e.message).slice(0, 200) }));
+    }
+  }
   fs.writeFileSync(path.join(dirOf(m), ".ok"), JSON.stringify({ sha256: m.gz.sha256, at: Date.now() }) + "\n");
   fs.rmSync(tree, { recursive: true, force: true });
   fs.rmSync(gz, { force: true });

@@ -77,14 +77,19 @@ export function appGuard(root, { onRestart, expect, onBadList } = {}) {
         try { if (fs.readFileSync(f).equals(s.buf)) { seen.set(rel, k); continue; } } catch {}
       }
       if (!parentInside(f)) { restart(`${rel}（上级目录被换成软链）`); continue; }
+      // 先写临时文件再换名：以前先 rm 再写，写失败（满盘/被杀）就把原文件也弄没了（0.6.9 审计 196 补充 11）
+      const tmp = path.join(path.dirname(f), `.${path.basename(f)}.heal-${process.pid}`);
       try {
-        try { fs.rmSync(f, { recursive: true, force: true }); } catch {}
         fs.mkdirSync(path.dirname(f), { recursive: true });
-        fs.writeFileSync(f, s.buf, { mode: s.mode });
-        fs.chmodSync(f, s.mode);
+        fs.writeFileSync(tmp, s.buf, { mode: s.mode });
+        fs.chmodSync(tmp, s.mode);
+        fs.renameSync(tmp, f);
         const n = fs.lstatSync(f); seen.set(rel, `${n.size}:${n.mtimeMs}:${n.ctimeMs}`);
         fixed.push(rel);
-      } catch (e) { restart(`${rel}（写不回去：${e.message}）`); }
+      } catch (e) {
+        try { fs.rmSync(tmp, { force: true }); } catch {}
+        restart(`${rel}（写不回去：${e.message}）`);
+      }
     }
     // 多出来的：bin、pre 在 PATH 里，scripts、archive、guard 也只该有安装包里的那些
     for (const d of SNAP_DIRS) {

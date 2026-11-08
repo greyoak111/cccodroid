@@ -429,7 +429,13 @@ export function retireManagedBridge(id) {
       log("[comp] openai-bridge 卸载降级（stage=retire-binding）");
       return false;
     }
-    await launch(r, "uninstall").promise;
+    try { await launch(r, "uninstall").promise; }
+    catch (e) {
+      // 注册表指向的运行时目录已经不存在：旧实例不可能还在跑，launch 只会失败，不能再让它卡住组件卸载。
+      // 其它失败（安装器退出非 0）照旧保注册、报错让用户重试，不能把还在的实例悄悄丢下（0.6.9 审计 200-OB-06）
+      if (e.stage === "retire-lock" || fs.existsSync(r.runtimeDir)) throw e;
+      log(`[comp] openai-bridge 卸载降级（stage=${e.stage || "retire-launch"}，运行时目录已不在）`);
+    }
     // uninstall 自己也要拿注册锁，不能跨进程执行持锁；返回后重新拿锁校验身份。
     // 原实例已消失则无需拿锁；同实例残留可清，别的新实例绝不删，不访问 runtimeDir。
     try {
