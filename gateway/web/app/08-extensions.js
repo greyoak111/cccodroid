@@ -37,6 +37,8 @@
 
   // ── 工具包模块（0.3.9 起）：基础 + 随装随卸的模块；用途、命令、包、大小、依赖、谁在用都摆出来 ──
   let modTimer = 0;
+  // 模块装完 / 卸完后组件卡要跟着刷新：组件装的正是刚补上的模块，不刷新的话安装按钮一直是灰的（0.6.10 审计 195-I.4）
+  let modTouched = false;
   const MOD_USES = () => ({
     claude: t("Claude Code 本身"), git: t("git 面板"), terminal: t("终端"), shizuku: t("Shizuku 一键启动（无线调试）"), search: t("Claude 搜代码、看差异"),
     "native-build": t("编译原生程序"), apk: t("打 APK"), "usb-adb": t("USB 调试"), "gpu-components": t("GPU 组件（Blender、浏览器等）"),
@@ -98,6 +100,8 @@
         '<span class="num">' + size + "</span>" + acts, { more: desc, extra: bar });
     }).join("");
     if (moving && pageOn("ext")) modTimer = setTimeout(loadModules, 1500);
+    // 装 / 卸完成后（列表里不再有进行中的那块）再刷组件卡；模块 POST 一返回任务才刚起，不能当场刷
+    if (!moving && modTouched && pageOn("ext")) { modTouched = false; loadComponents(); }
   }
   $("mod-list").addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-c]");
@@ -113,6 +117,7 @@
     b.disabled = true;
     const r = await post("/api/devkit/modules/" + c, { id }).catch((e2) => ({ ok: false, message: e2.message }));
     if (!r.ok) toast(r.message || t("失败"), true);
+    else modTouched = true;   // 任务结束后刷组件卡（见 loadModules 末尾）
     setTimeout(loadModules, 300);
   });
 
@@ -203,12 +208,12 @@
       if (compRemoving.has(c.id)) c = { ...c, state: "removing", progress: null };
       const name = esc(pickLang(c.name) || c.id), pr = c.progress;
       const size = c.available ? t("下载约 {a}，装好后约 {b}", { a: MB(c.bytes), b: MB(c.installed) }) : "";
-      const st = {
+      const st = c.state === "outdated" && !c.available ? t("工具包更新过，暂无适配版本") : ({
         absent: c.available ? t("未安装") : t("暂无适配当前工具包的版本"),
         downloading: t("下载中"), verifying: t("校验中"), installing: t("正在装进工具包…"), removing: t("正在卸载…"), configuring: t("正在配置…请等待完成"), "fetching-models": t("正在读取模型清单…"),
         ok: t("已安装"), update: t("有新版本"), outdated: t("工具包已更新，需要重新安装"),
         damaged: t("安装不完整，需要重新安装"), error: t("安装失败"),
-      }[c.state] || c.state;
+      }[c.state] || c.state);
       // 依赖没装齐：安装按钮置灰，下面写明要先装哪个；只限骁龙的组件在别家 SoC 上干脆不给装
       const miss = (c.requires || []).filter((d) => !d.ok).map((d) => esc(pickLang(d.name) || d.id));
       const gpuOnly = c.needs && (c.needs.gpu === "adreno" || c.needs.gpu === "mali") ? c.needs.gpu : "";
@@ -236,6 +241,8 @@
           : "<span>" + (gpuOnly === "mali" ? t("Mali 专用") : t("骁龙专用")) + "</span>") : "");
       let desc = '<div class="tiny ext-desc">' + esc(pickLang(c.desc)) + "</div>";
       if (c.error) desc += '<div class="tiny err">' + esc(c.error) + "</div>";
+      // 没有对应构建时说明原因，并给「检查更新」：索引可能还没拉到（0.6.10 审计 195-I.7）
+      if (c.state === "outdated" && !c.available) desc += '<div class="tiny warn">' + t("工具包更新过，组件库里暂时没有适配当前工具包的版本；先更新工具包，或点「检查更新」重新拉一次清单。") + "</div>";
       if (miss.length && c.state !== "ok") desc += '<div class="tiny warn">' + t("要先装：{names}", { names: listOf(miss) }) + "</div>";
       if (webUrl(c.homepage) && c.state !== "ok") desc += '<div class="tiny"><a class="weblink" href="' + esc(c.homepage) + '">' + esc(c.homepage) + "</a></div>";
       if (c.state === "ok" && c.bin.length) desc += '<div class="tiny">' + t("命令：") + " " + c.bin.map((b) => "<code>" + esc(b) + "</code>").join(" ") + "</div>";
@@ -263,6 +270,8 @@
       } else if (["update", "outdated", "damaged", "error"].includes(c.state)) {
         if (c.available) cbtn += btn("install", c.id, ei("download") + (c.state === "update" ? t("更新") : t("重新安装"))).replace("<button ", '<button class="btn sm" ');
         if (c.installedVersion) cbtn += btn("remove", c.id, t("卸载")).replace("<button ", '<button class="btn sm ghost" ');
+        // 索引里没有对应构建时没有安装按钮，至少给个重新拉清单的入口（0.6.10 审计 195-I.7）
+        if (c.state === "outdated" && !c.available) cbtn += btn("reindex", c.id, t("检查更新")).replace("<button ", '<button class="btn sm ghost" ');
       }
       const live = (c.id === "gh" && c.state === "ok") || (c.id === "llama-cpp" && c.state === "ok") ? desc.slice(desc.indexOf(c.id === "gh" ? '<div class="gh-auth"' : '<details class="llm-dl"')) : "";
       const more = (live ? desc.slice(0, desc.length - live.length) : desc) + '<div class="it-meta">' + meta + "</div>";
@@ -1270,11 +1279,17 @@
   });
   // 到 GitHub 反馈：网关拼好链接（设备、ROM、自检、组件），先给用户看要填进去的内容，再用外部浏览器打开
   $("btn-issue").addEventListener("click", async () => {
-    let r;
-    try { r = await api("/api/issue-draft"); } catch (e) { return toast(e.message, true); }
-    const dev = r.body.slice(r.body.indexOf("### Device"), r.body.indexOf("<sub>")).trim();
-    if (!confirm(t("将打开 GitHub 的新建 Issue 页面，下面这些会预先填好，提交前还能改：") + "\n\n" + (dev.length > 1500 ? dev.slice(0, 1500) + "…" : dev))) return;
-    openExternal(r.url);
+    const b = $("btn-issue");
+    // 网关要现拼设备 / 自检 / 组件，最坏要等十来秒：这期间别让连点堆出一串请求（0.6.10 审计 196 端侧.5）
+    if (b.dataset.busy) return;
+    b.dataset.busy = "1"; b.disabled = true;
+    try {
+      let r;
+      try { r = await api("/api/issue-draft"); } catch (e) { return toast(e.message, true); }
+      const dev = r.body.slice(r.body.indexOf("### Device"), r.body.indexOf("<sub>")).trim();
+      if (!confirm(t("将打开 GitHub 的新建 Issue 页面，下面这些会预先填好，提交前还能改：") + "\n\n" + (dev.length > 1500 ? dev.slice(0, 1500) + "…" : dev))) return;
+      openExternal(r.url);
+    } finally { delete b.dataset.busy; b.disabled = false; }
   });
   // 状态对账：组件 / 模块 / 包清单 / 自定义组件的记录和磁盘对一遍（网关启动后自动核过一次，这里看结果或再核）
   function paintReconcile(r, always) {

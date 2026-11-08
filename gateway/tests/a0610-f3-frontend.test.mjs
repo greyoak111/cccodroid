@@ -9,6 +9,7 @@ const src03 = read("app/03-perm-status.js");
 const src04 = read("app/04-session-flow.js");
 const src05 = read("app/05-composer.js");
 const src07 = read("app/07-sessions.js");
+const src08 = read("app/08-extensions.js");
 const src09 = read("app/09-settings.js");
 const src11 = read("app/11-usage.js");
 const src13 = read("app/13-nav-menus.js");
@@ -105,6 +106,24 @@ test("A10 195-C.18：0 字节文件照传，失败原因读网关回的 message 
   assert.ok(src05.includes("0 字节也照传：网关现在收空文件"), "写明为什么不再拦");
   assert.ok(src05.includes("j && (j.message || j.error)"), "非 2xx 读网关原因，不只报状态码");
   assert.ok(src05.includes("r.status === 507 ? t(\"存储空间不够了\")"), "网关没给原因时按状态给本地化原因");
+});
+
+test("B12 195-I.4 / 196 组件市场.1：模块装完 / 卸完后刷新组件卡", () => {
+  assert.ok(src08.includes("let modTouched = false;"), "记下模块操作成功");
+  assert.ok(src08.includes("else modTouched = true;"), "模块 POST 成功才置位");
+  assert.ok(src08.includes("if (!moving && modTouched && pageOn(\"ext\")) { modTouched = false; loadComponents(); }"), "任务结束（没有进行中的模块）再刷组件卡");
+});
+
+test("B13 195-I.7 / 196 组件.4：无对应构建时说明原因并给「检查更新」入口", () => {
+  assert.ok(src08.includes("工具包更新过，暂无适配版本"), "状态文案不再说「需要重新安装」");
+  assert.ok(src08.includes("先更新工具包，或点「检查更新」重新拉一次清单。"), "卡片里说明怎么办");
+  assert.ok(src08.includes("btn(\"reindex\", c.id, t(\"检查更新\"))"), "没有安装按钮时给检查更新入口");
+});
+
+test("B14 196 端侧.5：到 GitHub 反馈按钮有忙碌态，防连点", () => {
+  assert.ok(src08.includes("if (b.dataset.busy) return;"), "忙碌时直接返回");
+  assert.ok(src08.includes("b.dataset.busy = \"1\"; b.disabled = true;"), "取 Issue 草稿期间置忙");
+  assert.ok(src08.includes("finally { delete b.dataset.busy; b.disabled = false; }"), "完成或失败都恢复");
 });
 
 test("C28 195-O.5–O.7 / 197-5.12：跨午夜 / 换时区重算，补算进度也重画，清除本月不误删邻月", () => {

@@ -214,5 +214,29 @@
     "ru": "Импортировано {n}; затем ошибка: {msg}",
     "id": "{n} diimpor; lalu gagal: {msg}",
     "ar": "تم استيراد {n}؛ ثم فشل: {msg}"
+  },
+  {
+    "zh": "工具包更新过，暂无适配版本",
+    "en": "Toolkit updated; no compatible version yet",
+    "ja": "ツールキットが更新されました。対応版はまだありません",
+    "ko": "툴킷이 업데이트되었지만 아직 호환되는 버전이 없습니다",
+    "zh-Hant": "工具包更新過，暫無適配版本",
+    "es": "El kit se actualizó; aún no hay una versión compatible",
+    "fr": "La boîte à outils a été mise à jour ; aucune version compatible pour l'instant",
+    "ru": "Набор инструментов обновлён; совместимой версии пока нет",
+    "id": "Toolkit diperbarui; belum ada versi yang cocok",
+    "ar": "تم تحديث صندوق الأدوات؛ لا يوجد إصدار متوافق بعد"
+  },
+  {
+    "zh": "工具包更新过，组件库里暂时没有适配当前工具包的版本；先更新工具包，或点「检查更新」重新拉一次清单。",
+    "en": "The toolkit was updated and the component index has no build for the current toolkit yet. Update the toolkit first, or tap “Check for updates” to fetch the index again.",
+    "ja": "ツールキットが更新されましたが、コンポーネント一覧に現在のツールキットに対応するビルドがまだありません。まずツールキットを更新するか、「更新を確認」を押して一覧を取り直してください。",
+    "ko": "툴킷이 업데이트되었지만 구성 요소 목록에 현재 툴킷에 맞는 빌드가 아직 없습니다. 먼저 툴킷을 업데이트하거나 '업데이트 확인'을 눌러 목록을 다시 가져오세요.",
+    "zh-Hant": "工具包更新過，組件庫裡暫時沒有適配目前工具包的版本；先更新工具包，或點「檢查更新」重新拉一次清單。",
+    "es": "El kit se actualizó y el índice de componentes aún no tiene una compilación para el kit actual. Actualiza el kit primero o pulsa «Buscar actualizaciones» para volver a cargar el índice.",
+    "fr": "La boîte à outils a été mise à jour et l'index des composants n'a pas encore de version adaptée. Mettez d'abord à jour la boîte à outils, ou appuyez sur « Rechercher des mises à jour » pour recharger l'index.",
+    "ru": "Набор инструментов обновлён, но в каталоге компонентов пока нет сборки для текущего набора. Сначала обновите набор инструментов или нажмите «Проверить обновления», чтобы загрузить каталог заново.",
+    "id": "Toolkit diperbarui dan indeks komponen belum memiliki versi untuk toolkit saat ini. Perbarui toolkit dulu, atau ketuk «Periksa pembaruan» untuk memuat ulang indeks.",
+    "ar": "تم تحديث صندوق الأدوات ولا يوجد في فهرس المكوّنات إصدار متوافق معه بعد. حدّث صندوق الأدوات أولًا، أو اضغط «البحث عن تحديثات» لإعادة جلب الفهرس."
   }
 ]
