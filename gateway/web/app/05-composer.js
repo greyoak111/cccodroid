@@ -532,11 +532,7 @@
     const mine = () => draftEpoch === ep0 || (view.sessionId || "") === draftOwner(ep0, key0);
     let away = 0, fails = 0, lastErr = "";
     for (const f of list) {
-      if (!f.size) {     // 0 字节网关不收，先在这里说清楚（0.6.9 审计 195-C.18）
-        fails++; lastErr = t("空文件（0 字节）");
-        toast(t("「{name}」附加失败：{msg}", { name: f.name, msg: lastErr }), true);
-        continue;
-      }
+      // 0 字节也照传：网关现在收空文件（0.6.9 审计 195-C.18）
       // 大文件（粘贴 / 拖进来的；从选择器挑的 App 壳已经分流了）：网关流式落盘，这里只提示一下要等
       if (f.size > BIG_ATT) toast(t("「{name}」较大（{s}），正在收进工作区…", { name: f.name, s: fmtSize(f.size) }));
       const up = ++uploadSeq;

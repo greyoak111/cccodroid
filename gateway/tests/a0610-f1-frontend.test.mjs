@@ -82,11 +82,12 @@ test("前端注入：图片地址白名单、同源接口不带 Cookie、项目�
   assert.ok(src13.includes('const c = /^#[0-9a-f]{6}$/i.test(p.color || "") ? p.color : "var(--accent)";'));
 });
 
-test("权限卡：缺 input 不再卡死；生效模式按安全模式回退；全屏层能弹提示", () => {
+test("权限卡：缺 input 不再卡死；生效模式以网关回的 mode 为准；全屏层能弹提示", () => {
   assert.ok(src03.includes('if (!ev.input || typeof ev.input !== "object" || Array.isArray(ev.input)) ev = Object.assign({}, ev, { input: {} });'));
   assert.ok(src03.includes("const COVER_IDS"));
   assert.ok(src03.includes("function revealChat()"));
-  assert.ok(src03.includes('["bypassPermissions", "auto", "acceptEdits"].includes(r.mode)'));
+  // 0.6.10 第二轮 f3（A1）：网关回的是实际生效的 mode，前端不再按 safeMode 自己推导；断言跟着改成新行为
+  assert.ok(src03.includes("const eff = r.mode || r.wanted || mode"));
   assert.ok(src03.includes("simple = (it) => !it.p.guard"));
 });
 
@@ -108,10 +109,12 @@ test("N.3 启动时设置接口失败会补拉；R.7 整页盖着时先退回对
   assert.ok(src19.includes('$("btn-palette").addEventListener("click", () => { if (curPage) closePage(); openCmdPalette(""); inputEl.focus(); });'));
 });
 
-test("批量上传/附件：未完成不发、0 字节跳过、失败合并且不砍掉成功的", () => {
+test("批量上传/附件：未完成不发、0 字节照传、失败合并且不砍掉成功的", () => {
   assert.ok(src05.includes("const uploading = new Set()"));
   assert.ok(src05.includes("if (fromInput && uploading.size)"));
-  assert.ok(src05.includes("if (!f.size)"));
+  // 0.6.10 第二轮 f3（A10）：网关已收空文件，前端放行 0 字节；第一轮「本地跳过」的断言作废
+  assert.ok(!src05.includes("if (!f.size)"));
+  assert.ok(src05.includes("0 字节也照传：网关现在收空文件"));
   assert.ok(src05.includes("已附加 {n} 个，{m} 个失败"));
   assert.ok(src05.includes("function normAtt"));
   assert.ok(src05.includes("selectionStart"));

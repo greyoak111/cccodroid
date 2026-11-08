@@ -111,6 +111,13 @@
     const syncSave = () => box.querySelector(".pj-save").classList.toggle("hidden", !!d.instrErr || ta.value === (d.instr || ""));
     ta.addEventListener("input", syncSave);
     if (keepDraft != null) { ta.value = keepDraft; syncSave(); }
+    // 新建时选的目录里本来就有 CLAUDE.md，填的指令没写进去：把用户填的内容并进指令框当草稿，
+    // 「保存」按钮亮着由他决定要不要合并，别跟着弹窗一起丢掉（0.6.9 审计 195-K.4）
+    if (PJ.instrDraft && PJ.instrDraft.id === id) {
+      const draft = PJ.instrDraft.text;
+      PJ.instrDraft = null;
+      if (!d.instrErr && draft) { ta.value = (d.instr ? d.instr.replace(/\n+$/, "") + "\n\n" : "") + draft; syncSave(); }
+    }
   }
   $("tab-projects").addEventListener("click", async (e) => {
     const box = $("tab-projects");
@@ -251,7 +258,15 @@
       const body = { name: name.value.trim(), mode, path: o.querySelector("#np-dir").value.trim(), url: o.querySelector("#np-url").value.trim(), instr: o.querySelector("#np-instr").value };
       if (!body.name) return toast(t("项目名不能为空"), true);
       b.disabled = true; b.textContent = mode === "git" ? t("正在克隆…") : t("创建中…");
-      try { const r = await jsend("/api/projects", body); OV.close(o); await loadProjects(); toast(t("已创建项目")); openProject(r.project.id); }
+      try {
+        const r = await jsend("/api/projects", body);
+        OV.close(o);
+        await loadProjects();
+        // 选了已有目录、里面本来就有 CLAUDE.md：填的指令没写进去，要说一声，并且别让填的内容跟着弹窗一起丢（0.6.9 审计 195-K.4）
+        if (r.instrSkipped && body.instr.trim()) PJ.instrDraft = { id: r.project.id, text: body.instr.trim() };
+        toast(r.instrSkipped ? t("项目已创建；目录里已有 CLAUDE.md，填的指令没写进去") : t("已创建项目"));
+        openProject(r.project.id);
+      }
       catch (err) { b.disabled = false; b.textContent = t("创建"); toast(err.message, true); }
     });
   }
@@ -483,7 +498,10 @@
     const edit = !!(x && x.id);
     const v = Object.assign({ name: "", prompt: "", projectId: null, freq: { kind: "daily", time: "09:00" }, session: "new", perm: "ro", tools: "", model: "", effort: "",
       cond: { wifi: false, charging: false, battery: 0 }, busy: "queue", limitCost: 0, limitMin: 15, retry: 0, missed: "ask", notify: "all", quiet: "", saveSession: true, carryLast: false, until: { kind: "ever" } }, x || {}, preset || {});
-    const f = Object.assign({ time: "09:00", days: [1], day: 1, hours: 2, from: "08:00", to: "23:00", date: new Date(Date.now() + 864e5).toISOString().slice(0, 10), cron: "30 8 * * 1-5" }, v.freq);
+    // 「仅一次」的默认日期是本地日历的明天：toISOString() 是 UTC，东八区凌晨会算成今天（0.6.10 审计 197-5.12）
+    const dtm = new Date(); dtm.setDate(dtm.getDate() + 1);
+    const dstr = dtm.getFullYear() + "-" + String(dtm.getMonth() + 1).padStart(2, "0") + "-" + String(dtm.getDate()).padStart(2, "0");
+    const f = Object.assign({ time: "09:00", days: [1], day: 1, hours: 2, from: "08:00", to: "23:00", date: dstr, cron: "30 8 * * 1-5" }, v.freq);
     const opt = (val, l, cur) => `<option value="${esc(val)}"${String(val) === String(cur) ? " selected" : ""}>${esc(l)}</option>`;
     // 已存的值不在预设选项里（接口或旧版本存下的，比如每隔 24 小时、重试 3 次）：补成一项，别一打开编辑就悄悄改掉（审查 E12）
     const sel = (id, opts, cur) => `<select id="${id}">${opts.concat(cur !== "" && cur != null && !opts.some(([a]) => String(a) === String(cur)) ? [[cur, String(cur)]] : []).map(([a, b]) => opt(a, b, cur)).join("")}</select>`;

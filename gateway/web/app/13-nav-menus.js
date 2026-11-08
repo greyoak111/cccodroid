@@ -198,13 +198,16 @@
     $("acct-sub").textContent = provName(s);
     paintProf();
     if (s.product) $("side-title").textContent = s.product;
+    // 登录与否先用 /api/status 的 auth 定（退出登录后菜单马上换回「登录账户」）；
+    // 邮箱和额度再问 /api/login/status。问不出（unknown）时不动上次的判断（0.6.9 审计 195-G.3）
+    if (s.keyMode === "login" && s.auth && !s.auth.unknown) acctLogged = !!s.auth.loggedIn;
     // 官方账户：名字换成登录邮箱（问一次，之后十分钟内沿用）
     if (s.keyMode === "login" && Date.now() - acctEmailAt > 600000) {
       acctEmailAt = Date.now();
       api("/api/login/status").then((st) => {
         const wk = st && st.limits && st.limits.sevenDay ? Math.round(st.limits.sevenDay.used) : null;
         if (!st) return;
-        acctLogged = !!st.loggedIn;
+        if (!st.unknown) acctLogged = !!st.loggedIn;   // 问不出时别把上次的「已登录」翻成未登录
         const em = st.loggedIn ? st.email || acctEmail : "";
         if (em !== acctEmail || wk !== acctWeek) { acctEmail = em; acctWeek = wk; paintAcct(s); }
       }).catch(() => {});
@@ -353,7 +356,9 @@
     // 被 AI 归进杂项的会话，用户置顶了或正在跑，从侧栏消失只会让人找不着（群反馈：置顶的在跑会话点一下就不见了）
     const list = (state.sessions || []).filter((x) => !x.misc || x.pinned || x.id === view.sessionId || live.has(x.id) || ask.has(x.id) || intr.has(x.id));
     const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-    const t0 = d0.getTime(), y0 = t0 - 86400000;
+    // 昨天按本地日历往前一天；拿 86400000 减，夏令时切换那天会少 / 多一小时，边界算错（0.6.10 审计 197-5.12）
+    const yd = new Date(d0); yd.setDate(yd.getDate() - 1);
+    const t0 = d0.getTime(), y0 = yd.getTime();
     const groups = [[t("置顶"), list.filter((x) => x.pinned), "pin"], [t("今天"), [], "today"], [t("昨天"), [], "yday"], [t("更早"), [], "older"]];
     for (const x of list) if (!x.pinned) groups[x.mtime >= t0 ? 1 : x.mtime >= y0 ? 2 : 3][1].push(x);
     const more = groups[3][1].length > RECENT_MAX;
@@ -476,6 +481,8 @@
       if (!confirm(t("退出这台设备上的 Claude 账户登录？"))) return;
       const r = await post("/api/login/logout").catch((e) => ({ ok: false, output: e.message }));
       toast(r.ok ? t("已退出登录") : t("退出失败：{msg}", { msg: r.output || r.message || "" }), !r.ok);
+      // 立刻换成「登录账户」，不用等下一次状态查询（0.6.9 审计 195-G.3）
+      if (r.ok) { acctLogged = false; acctEmail = ""; acctWeek = null; }
       acctEmailAt = 0;
       refreshStatus();
     } });
@@ -536,7 +543,11 @@
     if (curPage === "sessions") renderSessions();
   }
   async function loadSched() {
-    try { SC.data = await api("/api/sched"); SC.err = ""; } catch (e) { SC.err = e.message || "?"; if (curPage === "sched" && !SC.cur) renderSched(); return; }
+    const ok = latest("sched");   // hello 里也会拉一次：先发的慢、后发的快时，迟到的旧响应不许盖掉新的（0.6.10 审计 195-BB.4）
+    let r;
+    try { r = await api("/api/sched"); } catch (e) { if (!ok()) return; SC.err = e.message || "?"; if (curPage === "sched" && !SC.cur) renderSched(); return; }
+    if (!ok()) return;
+    SC.data = r; SC.err = "";
     if (curPage === "sched") renderSched();
     if (curPage === "projects" && PJ.cur) renderProjects();
     if (curPage === "sessions") renderSessions();
@@ -553,7 +564,9 @@
     if (!ms) return "—";
     const d = new Date(ms), hm = p2(d.getHours()) + ":" + p2(d.getMinutes());
     const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-    const diff = Math.floor((ms - d0.getTime()) / 864e5);
+    // 按本地日历日比：夏令时切换那天一天不是 24 小时，除毫秒会把「明天」算成后天（0.6.10 审计 197-5.12）
+    const dd = new Date(ms); dd.setHours(0, 0, 0, 0);
+    const diff = Math.round((dd.getTime() - d0.getTime()) / 864e5);
     if (diff === 0) return t("今天 {t}", { t: hm });
     if (diff === 1) return t("明天 {t}", { t: hm });
     if (diff === -1) return t("昨天 {t}", { t: hm });

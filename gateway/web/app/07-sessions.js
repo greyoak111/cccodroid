@@ -48,10 +48,13 @@
   // 按最后变动分组：今天 / 7 天内（不含今天）/ 30 天内 / 某年某月。key 不随界面语言变，用来记折叠状态
   function sessGroup(ms) {
     const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-    const day = 86400000, t0 = d0.getTime();
+    // 7 / 30 天按本地日历往前推：夏令时那天少或多一小时，86400000 的倍数会把边界算偏（0.6.10 审计 197-5.12）
+    const d7 = new Date(d0); d7.setDate(d7.getDate() - 7);
+    const d30 = new Date(d0); d30.setDate(d30.getDate() - 30);
+    const t0 = d0.getTime();
     if (ms >= t0) return { key: "today", label: t("今天") };
-    if (ms >= t0 - 7 * day) return { key: "week", label: t("7 天内") };
-    if (ms >= t0 - 30 * day) return { key: "month", label: t("30 天内") };
+    if (ms >= d7.getTime()) return { key: "week", label: t("7 天内") };
+    if (ms >= d30.getTime()) return { key: "month", label: t("30 天内") };
     const d = new Date(ms), key = "m:" + d.getFullYear() + "-" + (d.getMonth() + 1);
     try { return { key, label: d.toLocaleDateString(document.documentElement.lang || undefined, { year: "numeric", month: "long" }) }; }
     catch { return { key, label: key.slice(2) }; }
@@ -322,10 +325,16 @@
       const r = await api("/api/sessions/import", {
         method: "POST", headers: { "content-type": "application/zip" }, body: f,   // 直接交文件：大包不先整个读进页面内存
       });
-      toast(r.skipped.length
-        ? t("已导入 {n} 个会话，跳过 {m} 个已存在的", { n: r.imported.length, m: r.skipped.length })
-        : t("已导入 {n} 个会话", { n: r.imported.length }));
-    } catch (err) { toast(t("导入失败：{msg}", { msg: err.message }), true); }
+      const n = (r.imported || []).length, skip = (r.skipped || []).length;
+      toast(skip
+        ? t("已导入 {n} 个会话，跳过 {m} 个已存在的", { n, m: skip })
+        : t("已导入 {n} 个会话", { n }));
+    } catch (err) {
+      // 中途失败：网关在错误回执里带了已经放好的那几个，别把已导入的说没了（196-会话.6）
+      const n = err.body && Array.isArray(err.body.imported) ? err.body.imported.length : 0;
+      toast(n ? t("已导入 {n} 个，后面的失败：{msg}", { n, msg: err.message })
+        : t("导入失败：{msg}", { msg: err.message }), true);
+    }
     if (sess.mode === "trash") sess.mode = "list";
     loadSessions();
   });

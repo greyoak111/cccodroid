@@ -188,12 +188,21 @@
       $("btn-ledger").classList.toggle("hidden", !s.hasLedger);
       paintModel(curModel() || s.model || "—");
       state.model = s.model;
+      // 登录态以 /api/status 的 auth 为准：配了「官方账户」不等于真的还登着；问不出（unknown）不算未登录，
+      // stale 是沿用上次问到的结果，要标出来（0.6.9 审计 195-G.3）
+      const auth = s.keyMode === "login" ? s.auth : null;
+      const credTxt = s.keyMode !== "login" ? (s.hasKey ? t("已配置密钥") : t("未配置"))
+        : !auth ? t("官方登录态")
+        : auth.unknown ? t("官方登录态 · 问不出登录状态")
+        : auth.stale ? (auth.loggedIn ? t("官方登录态 · 上次问到时已登录") : t("官方登录态 · 上次问到时未登录"))
+        : auth.loggedIn ? t("官方登录态 · 已登录") : t("官方登录态 · 未登录");
+      const needLogin = !!auth && auth.loggedIn === false && !auth.unknown;
       $("status-box").textContent =
                 `${t("网关")}     ${s.version} (pid ${s.pid})\n` +
         `${t("运行时")}   ${s.ready ? t("就绪") : t("缺失")}\n` +
         `${t("厂商")}     ${provName(s)}\n` +
         `${t("上游")}     ${s.upstream}\n` +
-        `${t("凭据")}     ${s.keyMode === "login" ? t("官方登录态") : (s.hasKey ? t("已配置密钥") : t("未配置"))}\n` +
+        `${t("凭据")}     ${credTxt}\n` +
         `${t("DNS 桥")}   ${s.bridge ? t("已连接") : t("未启动")}\n` +
         `${t("模型")}     ${s.model || t("(由 claude 决定)")}\n` +
         `${t("生成")}     ${s.busy ? t("进行中") : t("空闲")}${s.queued ? t(" · 排队 {n} 条", { n: s.queued }) : ""}\n` +
@@ -204,8 +213,9 @@
         setStatus(t("与网关断开，正在重连…（生成不受影响）"), "warn");
         api("/api/state").then(applyState).catch(() => {});
       } else if (!s.busy) {
-        setStatus(s.ready && s.hasKey ? t("就绪") : s.hasKey ? t("运行时缺失") : t("需要配置密钥"),
-          s.ready && s.hasKey ? "ok" : "warn");
+        // 官方账户实际没登录（或上次问到时没登）就别再说「就绪」：一发消息就失败（0.6.9 审计 195-G.3）
+        setStatus(needLogin ? t("需要登录账户") : s.ready && s.hasKey ? t("就绪") : s.hasKey ? t("运行时缺失") : t("需要配置密钥"),
+          s.ready && s.hasKey && !needLogin ? "ok" : "warn");
       }
     } catch (e) {
       if (!ok()) return;
