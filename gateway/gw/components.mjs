@@ -85,7 +85,8 @@ export function compRecord(id) { return compRecordInfo(id).rec; }
 function compWriteRecord(id, rec) {
   return writeAtomic(compRecFile(id), JSON.stringify(rec, null, 1));
 }
-export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile, compDropDanglingDocs, compSweepDanglingDocs };   // 只给测试用
+export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile, compDropDanglingDocs, compSweepDanglingDocs,
+  compState, compVerCmp, compOlder, compInstall };   // 只给测试用
 
 function compFetch(src, quick) {
   // quick：拉索引用——连不上 8 秒就放弃、只重试一次，好尽快换镜像（GitHub 被墙时以前要干等一分多钟）
@@ -124,27 +125,76 @@ async function compFetchIndex(src, mirror) {
   try { sig = Buffer.from(String(await compFetch(src + ".sig", true)).trim(), "base64"); } catch {}
   const ok = sig && sig.length === 64 && crypto.verify(null, body, COMP_INDEX_PUBKEY, sig);
   if (!ok && !allowUnsigned()) throw new Error(sig ? tz("索引签名不对，已拒绝") : tz("索引没有签名，已拒绝"));
-  return { ...JSON.parse(String(body)), signed: !!ok };
+  const parsed = JSON.parse(String(body));
+  // 原始正文与签名一起带回去：磁盘缓存要按它们复核（195-V.3），不能再存一份合并后的对象当可信数据
+  return { ...parsed, signed: !!ok, _raw: String(body), _sig: sig && sig.length === 64 ? sig.toString("base64") : "" };
 }
 
 /** 两个来源合并：预置（cccodroid 仓库）在前，社区（cccodroid-components）在后；id 撞了以预置为准。
- *  共享目录里放了 components/components.json、且私有目录有 use-local-index 开关，就代替预置来源（离线 / 测试），同样要签名。 */
-// 磁盘缓存：上回验过签的合并索引存一份，重开 App 后扩展页先拿它出列表，不用等网络（群友：每次重开组件栏都要等好久）。
-// 文件在私有目录（和已装记录同处、同等可信）；名字别以 .json 结尾——COMP_DIR 里的 *.json 都当已装记录读
+ *  拉索引与读磁盘缓存都走这里，合并口径只有一份。 */
+function compMerge(got) {
+  const components = {};
+  for (const g of got) {
+    if (g.e) continue;
+    for (const [id, e] of Object.entries(g.d.components || {})) if (!components[id]) components[id] = { ...e, source: g.source, signed: g.d.signed };
+  }
+  return components;
+}
+
+// 磁盘缓存：上回验过签的索引正文与签名按来源各存一份，重开 App 后扩展页先拿它出列表，不用等网络（群友：每次重开组件栏都要等好久）。
+// 名字别以 .json 结尾——COMP_DIR 里的 *.json 都当已装记录读。
+// 以前存的是合并后的对象、读回来只 JSON.parse：同 uid 改一改就能塞进「已签名」的条目、绕过整条验签链去执行包里
+// 的 first-run.sh（0.6.9 审计 195-V.3）。现在读回来当场按公钥复核，`signed` 字段不再从缓存里信。
 const compCacheFile = () => COMP_DIR && path.join(COMP_DIR, "index.cache");
+let compIndexRaw = null;      // 这份索引可复核的原始正文与签名（source → { body, sig }），存盘用
 function compLoadDiskCache() {
   if (compIndexCache.data || !compCacheFile()) return;
   try {
     const t = readSmall(compCacheFile()); if (t == null) return;
     const c = JSON.parse(t);
-    if (c && c.data && c.data.components) { compIndexCache = { at: c.at || 0, data: c.data, error: "" }; compIndexViaMirror = c.viaMirror && typeof c.viaMirror === "object" ? c.viaMirror : {}; }
+    const via = c && c.viaMirror && typeof c.viaMirror === "object" ? c.viaMirror : {};
+    if (c && c.sources && typeof c.sources === "object") {
+      const got = [], raw = {};
+      let rejected = false;
+      for (const source of ["preset", "community"]) {
+        const v = c.sources[source];
+        if (!v || typeof v.body !== "string" || !v.body) continue;
+        let ok = false;
+        try {
+          const sig = v.sig ? Buffer.from(String(v.sig), "base64") : null;
+          ok = !!(sig && sig.length === 64 && crypto.verify(null, Buffer.from(v.body), COMP_INDEX_PUBKEY, sig));
+        } catch {}
+        if (!ok && !allowUnsigned()) { rejected = true; continue; }
+        let parsed = null;
+        try { parsed = JSON.parse(v.body); } catch { rejected = true; continue; }
+        if (!parsed || typeof parsed !== "object" || !parsed.components) { rejected = true; continue; }
+        got.push({ source, d: { components: parsed.components, signed: ok } });
+        raw[source] = { body: v.body, sig: v.sig ? String(v.sig) : "" };
+      }
+      if (got.length) {
+        // 有来源没复核过：整份当过期，下一次 compIndex 重新拉，别让半份数据顶十分钟
+        compIndexCache = { at: rejected ? 0 : c.at || 0, data: { components: compMerge(got) }, error: "" };
+        compIndexRaw = raw;
+        compIndexViaMirror = via;
+      }
+      return;
+    }
+    if (c && c.data && c.data.components) {
+      // 旧格式缓存（0.6.10 之前写的）：没有可复核的正文和签名，只能当没验过的数据用。
+      // signed 一律 false——显示、查依赖可以，装不行（compInstall 会拒）；at 置 0，联网后马上换成新格式
+      const components = {};
+      for (const [id, e] of Object.entries(c.data.components)) components[id] = { ...e, signed: false };
+      compIndexCache = { at: 0, data: { components }, error: "" };
+      compIndexRaw = null;
+      compIndexViaMirror = via;
+    }
   } catch {}
 }
 function compSaveDiskCache() {
   if (!compCacheFile() || !compIndexCache.data) return;
   try {
     fs.mkdirSync(COMP_DIR, { recursive: true });
-    fs.writeFileSync(compCacheFile() + ".tmp", JSON.stringify({ at: compIndexCache.at, viaMirror: compIndexViaMirror, data: compIndexCache.data }));
+    fs.writeFileSync(compCacheFile() + ".tmp", JSON.stringify({ at: compIndexCache.at, viaMirror: compIndexViaMirror, sources: compIndexRaw || {} }));
     fs.renameSync(compCacheFile() + ".tmp", compCacheFile());
   } catch {}
 }
@@ -162,19 +212,19 @@ export async function compIndex(force) {
 }
 
 async function compIndexFetch() {
-  // 共享目录里的索引只在私有目录有 use-local-index 开关时才认：/sdcard 别的应用也能写，
-  // 放一份 GitHub 上公开的旧索引（签名是真的）就能把组件压回旧构建（审查 10-29 中2）
-  const local = process.env.CCAPP_SHARED && COMP_DIR && fs.existsSync(path.join(COMP_DIR, "use-local-index")) && path.join(process.env.CCAPP_SHARED, "components", "components.json");
+  // 共享目录里的索引只在网关启动时带了 CCAPP_COMPONENTS_USE_LOCAL_INDEX=1 才认：/sdcard 别的应用也能写，
+  // 放一份 GitHub 上公开的旧索引（签名是真的）就能把组件压回旧构建（审查 10-29 中2）。
+  // 以前看私有目录里的 use-local-index 文件，应用身份跑的任何程序（包括模型自己）touch 一下就能换来源；
+  // 和 allow-unsigned 一样只认启动环境变量（0.6.9 审计 195-V.2）
+  const local = process.env.CCAPP_COMPONENTS_USE_LOCAL_INDEX === "1" && process.env.CCAPP_SHARED && COMP_DIR &&
+    path.join(process.env.CCAPP_SHARED, "components", "components.json");
   const sources = [
     { source: "preset", url: local && fs.existsSync(local) ? "file://" + local : COMP_INDEX },
     { source: "community", url: COMP_COMMUNITY_INDEX },
   ];
   const got = await Promise.all(sources.map((s) => compFetchIndex(s.url, s.url.startsWith("file://") ? null : COMP_INDEX_MIRROR[s.source]).then((d) => ({ ...s, d }), (e) => ({ ...s, e }))));
-  const components = {}, errors = [];
-  for (const g of got) {
-    if (g.e) { errors.push(`${g.source}: ${g.e.message}`); continue; }
-    for (const [id, e] of Object.entries(g.d.components || {})) if (!components[id]) components[id] = { ...e, source: g.source, signed: g.d.signed };
-  }
+  const components = compMerge(got), errors = [];
+  for (const g of got) if (g.e) errors.push(`${g.source}: ${g.e.message}`);
   // 某个来源这次没取到：沿用上次那个来源的条目，免得已装组件的状态跳成"不在索引里"
   const prev = (compIndexCache.data && compIndexCache.data.components) || {};
   for (const g of got) if (g.e) for (const [id, e] of Object.entries(prev)) if (e.source === g.source && !components[id]) components[id] = e;
@@ -182,7 +232,13 @@ async function compIndexFetch() {
   compIndexCache = anyOk || !compIndexCache.data
     ? { at: errors.length ? Date.now() - 9 * 60e3 : Date.now(), data: { components }, error: errors.join("；") }   // 有失败的一分钟后再试
     : { at: Date.now() - 9 * 60e3, data: compIndexCache.data, error: errors.join("；") };
-  if (anyOk) compSaveDiskCache();
+  if (anyOk) {
+    // 缓存里只存这次拿到、能复核的正文与签名；沿用来的旧条目在缓存里没有可信来源，不存
+    const raw = {};
+    for (const g of got) if (!g.e && g.d._raw) raw[g.source] = { body: g.d._raw, sig: g.d._sig || "" };
+    compIndexRaw = raw;
+    compSaveDiskCache();
+  }
   return compIndexCache;
 }
 
@@ -190,6 +246,15 @@ async function compIndexFetch() {
 function compBuildFor(entry, dk) {
   const sha = dk && dk.sha256;
   return (entry.builds || []).find((b) => sha && b.base === sha) || null;
+}
+
+// 版本号比较：数字段逐段比，缺的当 0（和 custom.mjs 的 verCmp 同一个口径）
+function compVerCmp(a, b) { const x = String(a).split("."), y = String(b).split("."); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (+x[i] || 0) - (+y[i] || 0); if (d) return d; } return 0; }
+// 索引里的构建是不是比已装记录旧。只有两边版本都是非空字符串、且索引确实更旧才算——
+// 版本缺失（旧索引 / 旧记录）时一律当不旧，宁可照旧显示可更新，也不误拦（0.6.9 审计 195-V.1）
+function compOlder(build, rec) {
+  return !!(build && rec && typeof build.version === "string" && build.version &&
+    typeof rec.version === "string" && rec.version && compVerCmp(build.version, rec.version) < 0);
 }
 
 function compState(id, entry, dk) {
@@ -206,7 +271,9 @@ function compState(id, entry, dk) {
   if (!dk || rec.base !== dk.sha256) return "outdated";          // 工具包换过：组件的文件已随旧工具包一起没了
   for (const b of rec.bin || []) if (!fs.existsSync(path.join(PREFIX, "bin", b))) return "damaged";
   const build = entry && compBuildFor(entry, dk);
-  if (build && build.sha256 !== rec.sha256) return "update";
+  // 索引能是旧的（镜像晚一拍、磁盘缓存用了十分钟）：里面的构建比已装的还旧时不算「可更新」，
+  // 否则界面推着用户降级（0.6.9 审计 195-V.1）
+  if (build && build.sha256 !== rec.sha256 && !compOlder(build, rec)) return "update";
   return "ok";
 }
 
@@ -556,12 +623,22 @@ async function compInstall(id) {
   if (pending && !pending.finished) return { ok: false, message: "busy" };
   const entry = ix.data && ix.data.components && ix.data.components[id];
   if (!entry) return { ok: false, message: ix.error || tz("没有这个组件") };
+  // 旧格式磁盘缓存里的条目没复核过签名（signed:false），拿它查到的东西不能直接执行：
+  // 同 uid 改缓存正如以前能绕过整条验签链（195-V.3）。只拦安装/更新，列表和依赖查询照常
+  if (!entry.signed && !allowUnsigned()) return { ok: false, message: tz("索引没有通过验签，不能安装组件") };
   const un = compUnsupported(entry);
   if (un) return { ok: false, message: un === "mali" ? tz("这个组件只能用在 ARM Mali GPU（天玑、Exynos 等）的设备上，本机用不了") : tz("这个组件只能用在高通骁龙（Adreno GPU）的设备上，本机用不了") };
   const miss = (entry.requires || []).filter((rid) => !compDepOk(rid, ix.data.components, dk));
   if (miss.length) return { ok: false, message: tz("要先装：{names}", { names: miss.map((rid) => compName(rid, ix.data.components).zh || rid).join("、") }) };
   const b0 = compBuildFor(entry, dk), b = b0 && { ...b0, source: entry.source, requires: entry.requires || [] };
   if (!b) return { ok: false, message: tz("这个组件还没有对应当前工具包的版本，先更新工具包或稍后再试") };
+  // 防回滚：已装好且索引里的构建版本更旧，不装。过期索引（镜像晚一拍、缓存十分钟）里常有上一版，
+  // 用户点一下「更新」反而把新版换掉；损坏/装到一半的记录不拦，那是修复（0.6.9 审计 195-V.1）
+  {
+    const oldRec = compRecordInfo(id).rec;
+    if (oldRec && oldRec.state === "ok" && compOlder(b, oldRec))
+      return { ok: false, message: tz("索引里的版本（{v}）比已装的（{now}）旧，已拒绝降级", { v: b.version, now: oldRec.version }) };
+  }
   // 模块化工具包：组件依赖的底座包所在的模块得先装上
   const needMods = modulesMissingFor(b.baseDeps);
   if (needMods.length) return { ok: false, needModules: needMods.map((m) => m.id), message: tz("要先装工具包模块：{names}（扩展页上方「工具包模块」）", { names: needMods.map((m) => m.name.zh || m.id).join("、") }) };

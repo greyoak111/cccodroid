@@ -231,7 +231,11 @@
         const pct = Math.min(100, (pr.done / pr.total) * 100).toFixed(1);
         bar = '<div class="comp-bar"><i style="width:' + pct + '%"></i></div><div class="tiny">' + MB(pr.done) + " / " + MB(pr.total) + (pr.via ? " · " + t("来自 {src}", { src: esc(pr.via) }) : "") + "</div>";
       }
-      const ver = c.installedVersion || c.version;
+      // 已装和待装不是同一个版本时两个都写出来：以前只显示已装版本，点「更新」之前看不到会升到哪一版，
+      // 被回放的旧索引推着「更新」也无从察觉（0.6.9 审计 195-V.1）
+      const ver = c.installedVersion && c.version && c.installedVersion !== c.version
+        ? c.installedVersion + " → " + c.version
+        : (c.installedVersion || c.version);
       const meta = "<span>" + esc(st) + "</span>" + (ver ? "<span>" + esc(ver) + "</span>" : "") +
         (size && c.state !== "ok" ? "<span>" + esc(size) + "</span>" : "") +
         // 社区组件标出来；没有真机验证记录的再加一个提醒
