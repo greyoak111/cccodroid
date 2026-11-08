@@ -202,5 +202,17 @@
     "ru": "Модель «{id}» удалена",
     "id": "Model «{id}» dihapus",
     "ar": "تم حذف الطراز «{id}»"
+  },
+  {
+    "zh": "已导入 {n} 个，后面的失败：{msg}",
+    "en": "Imported {n}; then it failed: {msg}",
+    "ja": "{n} 個をインポートしましたが、その後失敗しました：{msg}",
+    "ko": "{n}개를 가져왔지만 그다음 실패했습니다: {msg}",
+    "zh-Hant": "已匯入 {n} 個，後面的失敗：{msg}",
+    "es": "Se importaron {n}; después falló: {msg}",
+    "fr": "{n} importé(s) ; échec ensuite : {msg}",
+    "ru": "Импортировано {n}; затем ошибка: {msg}",
+    "id": "{n} diimpor; lalu gagal: {msg}",
+    "ar": "تم استيراد {n}؛ ثم فشل: {msg}"
   }
 ]

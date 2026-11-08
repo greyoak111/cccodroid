@@ -8,6 +8,7 @@ const read = (p) => fs.readFileSync(new URL(`../web/${p}`, import.meta.url), "ut
 const src03 = read("app/03-perm-status.js");
 const src04 = read("app/04-session-flow.js");
 const src05 = read("app/05-composer.js");
+const src07 = read("app/07-sessions.js");
 const src09 = read("app/09-settings.js");
 const src11 = read("app/11-usage.js");
 const src13 = read("app/13-nav-menus.js");
@@ -91,6 +92,12 @@ test("A9 195-F.4：手动放入 / 直链下好的模型能在应用里删除", (
   assert.ok(src09.includes("data-del=\"${esc(m.id)}\""), "模型列表带删除按钮");
   assert.ok(src09.includes("post(\"/api/local/model\", { op: \"remove\", id })"), "调用网关的 remove");
   assert.ok(src09.includes("删掉模型「{id}」？文件会从模型目录里删除。"), "删除前确认");
+});
+
+test("A11 196-会话.6：导入中途失败也列出已导入的数量", () => {
+  assert.ok(src07.includes("err.body && Array.isArray(err.body.imported)"), "读错误回执里的 imported");
+  assert.ok(src07.includes("已导入 {n} 个，后面的失败：{msg}"), "已导入的如实说出来");
+  assert.ok(src07.includes("const n = (r.imported || []).length"), "成功路径也防字段缺失");
 });
 
 test("A10 195-C.18：0 字节文件照传，失败原因读网关回的 message / error", () => {

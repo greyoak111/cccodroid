@@ -322,10 +322,16 @@
       const r = await api("/api/sessions/import", {
         method: "POST", headers: { "content-type": "application/zip" }, body: f,   // 直接交文件：大包不先整个读进页面内存
       });
-      toast(r.skipped.length
-        ? t("已导入 {n} 个会话，跳过 {m} 个已存在的", { n: r.imported.length, m: r.skipped.length })
-        : t("已导入 {n} 个会话", { n: r.imported.length }));
-    } catch (err) { toast(t("导入失败：{msg}", { msg: err.message }), true); }
+      const n = (r.imported || []).length, skip = (r.skipped || []).length;
+      toast(skip
+        ? t("已导入 {n} 个会话，跳过 {m} 个已存在的", { n, m: skip })
+        : t("已导入 {n} 个会话", { n }));
+    } catch (err) {
+      // 中途失败：网关在错误回执里带了已经放好的那几个，别把已导入的说没了（196-会话.6）
+      const n = err.body && Array.isArray(err.body.imported) ? err.body.imported.length : 0;
+      toast(n ? t("已导入 {n} 个，后面的失败：{msg}", { n, msg: err.message })
+        : t("导入失败：{msg}", { msg: err.message }), true);
+    }
     if (sess.mode === "trash") sess.mode = "list";
     loadSessions();
   });
