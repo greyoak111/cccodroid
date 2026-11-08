@@ -8,7 +8,7 @@
 | 199-1-02 | MainActivity.java 文件选择结果不校验 authority | 已修 |
 | 199-1-03 | Env.java 只探测 127.0.0.2:8791（GatewayService 那半移交 j2） | 已修（Env 半）+ 移交 |
 | 199-1-04 | MainActivity.java + 19-boot.js 伪造 SSE / onopen 无校验 | 已修（原生层）+ 移交（04 前端加强） |
-| 199-1-05 | MainActivity.java ACTION_SEND 写 workspace/uploads | 待做 |
+| 199-1-05 | MainActivity.java ACTION_SEND 写 workspace/uploads | 待定 |
 | 199-1-06 | MainActivity.java IK 明文存 shared_prefs | 待做 |
 | 199-1-07 | 并入 13-02，主要位置 GatewayService/Env → 归 j2，配合项写移交 | 移交 |
 | 199-1-08 | MainActivity.java 无口令 JS 桥 whatsNew | 待做 |
@@ -33,6 +33,7 @@
 
 | 条目 | 为什么没修 / 需要谁定什么 |
 |---|---|
+| 199-1-05 | 确认成立：`MainActivity.receiveShare()`（约 516-598 行）只要收到 `ACTION_SEND` 就直接把文件拷进 `workspace/uploads/`（单个 4 GB、最多 32 个），不要求 `getReferrer()` 有来源（来源不明时连提示都没有），也收不到「草稿取消」的信号，文件永久留下（`gw/files.mjs` 只清一小时前的 `.part-*`）。**没修的原因**：三种可行修法都会改变用户看得到的交互或要动别的车道，按 P3「拿不准交回」处理：① 收文件前弹确认框（推荐）：显示来源和文件数，点「收下」才拷 —— 每次正常分享多一步；② 只收来源可辨（`getReferrer()` 非 null）的分享，来源不明的不写盘只提示 —— 可能误伤不设 referrer 的正常应用；③ 清理：网页侧在附件移除 / 草稿丢弃时调一个带口令的新桥方法 `dropAttach(path)`，Android 只删自己拷出来的路径（需要记一份创建清单），另外 `uploads` 本身的 TTL（6-01）归 f2/主会话。请主会话或用户选一种（建议 ①＋③）。 |
 
 ## 移交（需要改别的车道 / 主会话的文件）
 
