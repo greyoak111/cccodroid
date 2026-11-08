@@ -48,10 +48,13 @@
   // 按最后变动分组：今天 / 7 天内（不含今天）/ 30 天内 / 某年某月。key 不随界面语言变，用来记折叠状态
   function sessGroup(ms) {
     const d0 = new Date(); d0.setHours(0, 0, 0, 0);
-    const day = 86400000, t0 = d0.getTime();
+    // 7 / 30 天按本地日历往前推：夏令时那天少或多一小时，86400000 的倍数会把边界算偏（0.6.10 审计 197-5.12）
+    const d7 = new Date(d0); d7.setDate(d7.getDate() - 7);
+    const d30 = new Date(d0); d30.setDate(d30.getDate() - 30);
+    const t0 = d0.getTime();
     if (ms >= t0) return { key: "today", label: t("今天") };
-    if (ms >= t0 - 7 * day) return { key: "week", label: t("7 天内") };
-    if (ms >= t0 - 30 * day) return { key: "month", label: t("30 天内") };
+    if (ms >= d7.getTime()) return { key: "week", label: t("7 天内") };
+    if (ms >= d30.getTime()) return { key: "month", label: t("30 天内") };
     const d = new Date(ms), key = "m:" + d.getFullYear() + "-" + (d.getMonth() + 1);
     try { return { key, label: d.toLocaleDateString(document.documentElement.lang || undefined, { year: "numeric", month: "long" }) }; }
     catch { return { key, label: key.slice(2) }; }

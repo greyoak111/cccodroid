@@ -12,11 +12,14 @@ const src07 = read("app/07-sessions.js");
 const src08 = read("app/08-extensions.js");
 const src09 = read("app/09-settings.js");
 const src11 = read("app/11-usage.js");
+const src12 = read("app/12-model-caps.js");
 const src13 = read("app/13-nav-menus.js");
 const src14 = read("app/14-projects-sched.js");
 const src16 = read("app/16-viewer-git.js");
 const src17 = read("app/17-office.js");
 const src19 = read("app/19-boot.js");
+const src15 = read("app/15-pages.js");
+const html = read("index.html");
 
 test("A1 195-A.6 / P1-12：权限切档以网关回的 mode 为准，全局设置记 wanted", () => {
   assert.ok(src03.includes("state.settings.permissionMode = r.wanted || r.mode || mode"), "全局设置要记用户选的 wanted");
@@ -136,6 +139,34 @@ test("B18 196 注入域 .2/.3/.4/.6/.9：缺字段不破渲染，选中文字不
   assert.ok(src08.includes("const ub = m.usedBy || {}"), "模块缺 usedBy 不炸整个列表");
   assert.ok(src16.includes(".replace(/`/g, \"`\\u200b\")"), "选择器里的反引号不能闭合行内代码");
   assert.ok(src16.includes(".replace(/[\\r\\n]+/g, \" \")"), "选择器里的换行压平");
+});
+
+test("C23 195-BB.4：loadSched 用 latest 序号，迟到的旧排程不许盖掉新的", () => {
+  assert.ok(src13.includes('const ok = latest("sched");'), "拉排程前先领序号");
+  assert.ok(src13.includes("if (!ok()) return;\n    SC.data = r;"), "慢的旧响应到了先看序号");
+  assert.ok(src13.includes("catch (e) { if (!ok()) return;"), "失败分支也看序号");
+});
+
+test("C26 197-5.12：显示层日期按本地日历算，不拿 UTC / 86400000 硬减", () => {
+  assert.ok(!src14.includes("toISOString().slice(0, 10)"), "默认日期不再用 UTC 的 toISOString");
+  assert.ok(src14.includes("dtm.setDate(dtm.getDate() + 1)"), "「仅一次」默认本地明天");
+  assert.ok(src13.includes("const yd = new Date(d0); yd.setDate(yd.getDate() - 1);"), "昨天按本地日历推");
+  assert.ok(src13.includes("const dd = new Date(ms); dd.setHours(0, 0, 0, 0);"), "whenText 先归到本地整日");
+  assert.ok(src13.includes("Math.round((dd.getTime() - d0.getTime()) / 864e5)"), "按日差四舍五入，跨夏令时不出错");
+  assert.ok(src07.includes("d7.setDate(d7.getDate() - 7)"), "7 天边界按日历推");
+  assert.ok(src07.includes("d30.setDate(d30.getDate() - 30)"), "30 天边界按日历推");
+});
+
+test("C29 195-L.1：只有简体拉 zh 文档，繁体回落英文", () => {
+  assert.ok(src15.includes('((window.I18N && I18N.lang) || "zh") === "zh" ? "zh" : "en"'), "帮助 / 更新日志按精确语言码选文件");
+  assert.ok(!src15.includes("/^zh/.test((window.I18N && I18N.lang)"), "不再把所有 zh-* 都当简体");
+});
+
+test("C30 195-O.2：自动压缩窗口下限 100k，与 claude 夹取一致", () => {
+  assert.ok(html.includes('id="set-autocompact" type="number" inputmode="numeric" min="100000"'), "输入框带 min");
+  assert.ok(src12.includes("const AC_MIN = 100000;"), "滑块下限同步 100k");
+  assert.ok(src12.includes("n = AC_MIN;"), "手填小于 100k 时按 100k 存");
+  assert.ok(src12.includes("压缩线最小 100k，已按 100k 存"), "改值要说一声");
 });
 
 test("C28 195-O.5–O.7 / 197-5.12：跨午夜 / 换时区重算，补算进度也重画，清除本月不误删邻月", () => {

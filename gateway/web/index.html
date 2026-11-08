@@ -593,7 +593,7 @@
           </div>
           <div class="srow">
             <div class="sl"><b data-i18n>自动压缩窗口（token）</b><p data-i18n>上下文到多少 token 时压缩</p><p id="ac-info" class="clamp" data-i18n-html>用量逼近这个值时自动摘要历史。留空即不干预；也可在输入框打 <code>/autocompact &lt;n&gt;k</code>。</p></div>
-            <div class="sc"><input id="set-autocompact" type="number" inputmode="numeric" placeholder="留空 = 交给 claude 按窗口决定" data-i18n-attr="placeholder"></div>
+            <div class="sc"><input id="set-autocompact" type="number" inputmode="numeric" min="100000" step="1000" placeholder="留空 = 交给 claude 按窗口决定" data-i18n-attr="placeholder"></div>
           </div>
           <div class="srow">
             <div class="sl"><b data-i18n>空闲压缩</b><p data-i18n>长会话闲置快一小时时先压缩</p><p class="clamp" data-i18n>只对 Claude 账户和 Anthropic API Key 生效。上下文超过 20 万 token 的会话闲置约 54 分钟、1 小时提示缓存快过期时，先压缩一次；回来接着聊就不用把整段历史按全价重新处理，订阅账户少占额度，API Key 少花钱。电脑上的 Claude Code 也是这么做的。</p></div>

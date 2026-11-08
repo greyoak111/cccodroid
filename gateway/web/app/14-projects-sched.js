@@ -498,7 +498,10 @@
     const edit = !!(x && x.id);
     const v = Object.assign({ name: "", prompt: "", projectId: null, freq: { kind: "daily", time: "09:00" }, session: "new", perm: "ro", tools: "", model: "", effort: "",
       cond: { wifi: false, charging: false, battery: 0 }, busy: "queue", limitCost: 0, limitMin: 15, retry: 0, missed: "ask", notify: "all", quiet: "", saveSession: true, carryLast: false, until: { kind: "ever" } }, x || {}, preset || {});
-    const f = Object.assign({ time: "09:00", days: [1], day: 1, hours: 2, from: "08:00", to: "23:00", date: new Date(Date.now() + 864e5).toISOString().slice(0, 10), cron: "30 8 * * 1-5" }, v.freq);
+    // 「仅一次」的默认日期是本地日历的明天：toISOString() 是 UTC，东八区凌晨会算成今天（0.6.10 审计 197-5.12）
+    const dtm = new Date(); dtm.setDate(dtm.getDate() + 1);
+    const dstr = dtm.getFullYear() + "-" + String(dtm.getMonth() + 1).padStart(2, "0") + "-" + String(dtm.getDate()).padStart(2, "0");
+    const f = Object.assign({ time: "09:00", days: [1], day: 1, hours: 2, from: "08:00", to: "23:00", date: dstr, cron: "30 8 * * 1-5" }, v.freq);
     const opt = (val, l, cur) => `<option value="${esc(val)}"${String(val) === String(cur) ? " selected" : ""}>${esc(l)}</option>`;
     // 已存的值不在预设选项里（接口或旧版本存下的，比如每隔 24 小时、重试 3 次）：补成一项，别一打开编辑就悄悄改掉（审查 E12）
     const sel = (id, opts, cur) => `<select id="${id}">${opts.concat(cur !== "" && cur != null && !opts.some(([a]) => String(a) === String(cur)) ? [[cur, String(cur)]] : []).map(([a, b]) => opt(a, b, cur)).join("")}</select>`;

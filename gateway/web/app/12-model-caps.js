@@ -555,8 +555,10 @@
     if (!(v >= 1)) { e.target.value = state.settings.maxParallel || 3; return; }
     saveSettings({ maxParallel: v }).then(() => { e.target.value = state.settings.maxParallel || v; });
   });
-  // ── 压缩线滑块（接口与型号页）：0–100 映射到 [20k, 模型窗口]；没设 = 交给 claude，滑块停在最右、虚线轨道 ──
-  const AC_MIN = 20000;
+  // ── 压缩线滑块（接口与型号页）：0–100 映射到 [100k, 模型窗口]；没设 = 交给 claude，滑块停在最右、虚线轨道 ──
+  // 100k 是 claude 认的下限（gw/models.mjs 的 defaultCompactLine 注释：只认 100k–1M），
+  // 以前允许 20k，上下文条按 20k 显示满格、claude 实际按 100k 压（0.6.10 审计 195-O.2）
+  const AC_MIN = 100000;
   let acWin = 0, acSet = 0, acDef = 0, acForce = false;   // acDef：没设时网关给第三方型号的默认线（0 = 交给 claude）   // acForce：刚存过，焦点还在控件上也按存下的值回填（没存上就弹回去）
   function acStep() { return Math.max(1000, Math.ceil((acWin - AC_MIN) / 100 / 1000) * 1000); }
   function acTok(p) { return Math.min(acWin, Math.round((AC_MIN + (acWin - AC_MIN) * p / 100) / acStep()) * acStep()); }
@@ -599,8 +601,16 @@
   });
   $("ac-auto").addEventListener("click", () => saveSettings({ autoCompactWindow: null }).then(() => { acForce = true; return loadModels(); }));
   $("set-autocompact").addEventListener("change", (e) => {
-    const v = e.target.value.trim();
-    saveSettings({ autoCompactWindow: v ? Number(v) : null }).then(() => { acForce = true; return loadModels(); });
+    const raw = e.target.value.trim();
+    let n = raw ? Math.round(Number(raw)) : null;
+    if (n == null || !Number.isFinite(n) || n <= 0) n = null;   // 空 / 0 / 乱填 = 交给 claude
+    else if (n < AC_MIN) {
+      // claude 只认 100k 起的压缩线，更小的它按 100k 处理：界面别让人设成 20k，免得上下文条按 20k 显示满格（195-O.2）
+      n = AC_MIN;
+      toast(t("压缩线最小 100k，已按 100k 存"));
+    }
+    e.target.value = n == null ? "" : String(n);
+    saveSettings({ autoCompactWindow: n }).then(() => { acForce = true; return loadModels(); });
   });
   $("btn-add-dir").addEventListener("click", async () => {
     const v = $("inp-dir").value.trim();

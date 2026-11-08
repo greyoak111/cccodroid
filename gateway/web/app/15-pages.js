@@ -233,7 +233,8 @@
     return sv ? sv.outerHTML : "";
   }
   async function loadHelp() {
-    const lang = /^zh/.test((window.I18N && I18N.lang) || "zh") ? "zh" : "en";
+    // 只有简体有自己的一份；繁体（zh-Hant）没有译文就按注释回落英文，别再拉成简体（0.6.10 审计 195-L.1）
+    const lang = ((window.I18N && I18N.lang) || "zh") === "zh" ? "zh" : "en";
     if (helpLang === lang) return spyHelp();
     const body = $("help-body"), toc = $("help-toc");
     body.innerHTML = `<p class="muted">${esc(t("加载中…"))}</p>`;
@@ -362,7 +363,8 @@
   // 离远了收回成量好高度的空壳 —— DOM 里任何时候只有眼前那几版。目录、滚动高亮、搜索和帮助页同一套，搜索查原文不用渲染。
   const CL = { lang: "", list: [], low: [], h: [], io: null };
   async function loadChangelog() {
-    const lang = /^zh/.test((window.I18N && I18N.lang) || "zh") ? "zh" : "en";
+    // 同帮助页：繁体没有单独一份，回落英文（0.6.10 审计 195-L.1）
+    const lang = ((window.I18N && I18N.lang) || "zh") === "zh" ? "zh" : "en";
     if (CL.lang === lang) return spyToc("changelog");
     const body = $("cl-body"), toc = $("cl-toc");
     if (CL.io) { CL.io.disconnect(); CL.io = null; }

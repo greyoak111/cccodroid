@@ -238,5 +238,17 @@
     "ru": "Набор инструментов обновлён, но в каталоге компонентов пока нет сборки для текущего набора. Сначала обновите набор инструментов или нажмите «Проверить обновления», чтобы загрузить каталог заново.",
     "id": "Toolkit diperbarui dan indeks komponen belum memiliki versi untuk toolkit saat ini. Perbarui toolkit dulu, atau ketuk «Periksa pembaruan» untuk memuat ulang indeks.",
     "ar": "تم تحديث صندوق الأدوات ولا يوجد في فهرس المكوّنات إصدار متوافق معه بعد. حدّث صندوق الأدوات أولًا، أو اضغط «البحث عن تحديثات» لإعادة جلب الفهرس."
+  },
+  {
+    "zh": "压缩线最小 100k，已按 100k 存",
+    "en": "The compaction line is at least 100k; saved as 100k",
+    "ja": "圧縮ラインの最小は 100k です。100k で保存しました",
+    "ko": "압축 기준선은 최소 100k입니다. 100k로 저장했습니다",
+    "zh-Hant": "壓縮線最小 100k，已按 100k 存",
+    "es": "La línea de compactación mínima es 100k; se guardó como 100k",
+    "fr": "La ligne de compactage est au minimum de 100k ; enregistrée à 100k",
+    "ru": "Минимальная граница сжатия — 100k; сохранено как 100k",
+    "id": "Garis pemadatan minimal 100k; disimpan sebagai 100k",
+    "ar": "الحد الأدنى لخط الضغط هو 100k؛ تم الحفظ على 100k"
   }
 ]
