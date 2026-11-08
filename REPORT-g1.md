@@ -13,7 +13,7 @@
 | 195-V.2 | `use-local-index` 是私有目录里的文件开关，可把来源换成 `file://` 且不校验新鲜度 | `gw/components.mjs` | 已修 |
 | 195-V.3 | 索引磁盘缓存未验签，同 uid 可伪造条目绕过整条验签链并执行 `first-run.sh` | `gw/components.mjs` | 已修 |
 | 196-供应链.1 | 组件安装只按 id 锁，跨组件并发共享文件可被删/覆盖；`compRecords()` 看不到 installing | `gw/components.mjs` | 已修 |
-| 196-供应链.2 | 模块/自定义组件暂存清理缺口：devkit-stage 失败不删；`.stage-*` 重启后永久孤儿 | `gw/modules.mjs`（custom.mjs 半 移交） | 待办 |
+| 196-供应链.2 | 模块/自定义组件暂存清理缺口：devkit-stage 失败不删；`.stage-*` 重启后永久孤儿 | `gw/modules.mjs`（custom.mjs 半 移交） | 已修（模块半）/ 移交（custom.mjs 半） |
 | 196-供应链.3 | `pkg uninstall/upgrade` 与 `modRemove` 按可写记录删文件，未做 safeRel | `android/assets/bin/pkg.mjs`；`gw/modules.mjs` | 待办 |
 | 196-供应链.4 | `devkit.lock.json` 仅靠 TLS、无签名且长期缓存，却参与依赖版本判定 | `android/assets/bin/pkg.mjs` | 待办 |
 | 196-供应链.5 | 技能 zip 导入无条目数上限，逐条同步写可阻塞事件循环 | `gw/extensions.mjs`（sessionops.mjs 半 移交） | 待办 |
@@ -31,6 +31,7 @@
 | 195-V.2 | 本条（与 V.1/V.3 同一次提交） | 本地索引只认启动环境变量 `CCAPP_COMPONENTS_USE_LOCAL_INDEX=1`，私有目录里的 `use-local-index` 文件不再算数；与 `allow-unsigned` 同口径 | `gateway/tests/a0610-g1-comp-cache.test.mjs` 第 1 条：放旧开关文件仍走官方源；只有环境变量置 1 才认共享目录索引 |
 | 195-V.3 | 本条（与 V.1/V.2 同一次提交） | 磁盘缓存改存每个来源的原始正文与签名，读回来当场按公钥复核（旧格式缓存按未验签处理、`at=0` 强制刷新）；`compInstall` 对未验签条目直接拒绝 | 同上文件后 3 条：真签名缓存重开不联网即用、正文被改即丢弃重拉、伪造的旧格式缓存装不了组件 |
 | 196-供应链.1 | 本条 | 加 `compFsExclusive` 串行链：安装的切换（删旧版、写 installing 记录、搬文件）和收尾（技能、共享文件复核、写 ok），以及卸载的「读记录→删文件→删记录→清暂存」都排进同一条链；首启脚本留在锁外，排队中的安装仍可取消。卸载改成退役桥之后、进锁再读记录，不再拿旧快照删文件。`compRecords()` 收录 installing 是第一轮 ecc02e7 已修的（复核确认） | `gateway/tests/a0610-g1-comp-lock.test.mjs`：串行顺序与失败不堵链、installing 组件要用的共享文件在别的组件卸载后仍在且留在它名下；`components` 等 5 个相关测试文件 38 条全过 |
+| 196-供应链.2 | 本条 | `modRunInstall` 把解包树记到 `job.stageTree`；`modInstall` 的失败分支当场删掉它（压缩包仍按原逻辑处理）。以前只有下次重装开头才清，用户不再重试就一直占着 | `gateway/tests/a0610-g1-mod-stage.test.mjs`：暂存区放一份校验和对得上、但不是 tar.gz 的文件，让解包失败；任务结束后 `devkit-stage/modx` 必须不存在。去掉清理那行后该测试失败（已实测红/绿） |
 
 ## 不成立
 
@@ -46,6 +47,7 @@
 |---|---|---|
 | 195-G.6 | `gateway/web/app/19-boot.js`（启动拉 `/api/status` 的那段，约 219-224 行） | 失败时别一律 `setStatus(t("网关离线"), "err")`。手机浏览器从 `127.0.0.1` / `localhost` 打开时，`/api/*` 因来源校验必然 403，这是设计（不能放宽）。判断 `location.hostname` 不是界面专用地址 `127.0.0.2` 且错误 `status === 403` 时，改提示 `t("请在 cccodroid 应用里打开")`；文案连同 9 种译文已写进 `i18n-g1.json` |
 | 195-G.6 | `gateway/server.mjs`（启动日志，约 190 行） | `log(\`claude-apk 网关 v3 已启动  http://127.0.0.1:${CFG.port}\`)` 公布的是原生地址，手机浏览器打开只会看到 403。建议改打印界面地址，或补一句「界面请从 cccodroid 应用打开」 |
+| 196-供应链.2（custom.mjs 半） | `gateway/gw/custom.mjs`：`CUSTOM_STAGES`（27 行）、`customAnalyze`（223-236 行）、启动入口 | 分析暂存目录 `~/.cccodroid/custom/.stage-*` 只记在内存 map 里：TTL 清理要等下一次分析才跑，网关重启后 map 清空，目录永久留下。建议在 `customAnalyze` 开头（或启动时）先扫一遍 `CUSTOM_DIR`，把名字匹配 `.stage-*`、且不在当前 map 里的目录删掉（重启后 map 必空，全删即可；同进程内超 1 小时的已有逻辑不动）。失败路径 236 行 `fail()` 和安装成功 530 行已经会删，不用改 |
 
 ## 全量测试
 

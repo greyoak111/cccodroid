@@ -160,6 +160,9 @@ async function modInstall(id) {
       log(`[mod] 已装：${chain.join(" → ")}`);
     } catch (e) {
       job.error = e.message === "cancelled" ? "" : e.message;
+      // 失败的解包树（可能几百 MB）以前一直留在 devkit-stage，只有下次重装才会被开头那句清掉；
+      // 用户不再重试就没有入口删。这里当场清掉。压缩包按组件安装的做法留着，重试时大小对得上就不重下（196-供应链.2）
+      try { if (job.stageTree) fs.rmSync(job.stageTree, { recursive: true, force: true }); } catch {}
       log(`[mod] ${job.current} 安装失败：${e.message}`);
     } finally {
       job.finished = true; job.child = null;
@@ -201,6 +204,7 @@ let modMirrorFirst = false;
 async function modRunInstall(mj, m, base, job) {
   fs.mkdirSync(STAGE, { recursive: true });
   const gz = path.join(STAGE, `${m.id}-${m.gz.sha256.slice(0, 12)}.tar.gz`), tree = path.join(STAGE, m.id);
+  job.stageTree = tree;      // 失败时由 modInstall 的 catch 清掉（196-供应链.2）
   if (fs.existsSync(gz)) {
     job.phase = "verifying"; job.done = 0; job.total = m.gz.bytes;
     if ((await sha256File(gz, job)) !== m.gz.sha256) fs.rmSync(gz, { force: true });
@@ -363,3 +367,6 @@ export async function routeModules(req, res, u, p) {
   if (p === "/api/devkit/modules/remove") return sendJson(res, 200, modRemove(id));
   return sendJson(res, 404, { error: "not found" });
 }
+
+// 只给测试用（和 components.mjs 的 _compForTest 一个口径）
+export const _modForTest = { modInstall, modRemove, MOD_JOBS };
