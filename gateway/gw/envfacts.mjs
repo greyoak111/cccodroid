@@ -10,6 +10,7 @@ import { modInstalled, modulesInfo } from "./modules.mjs";
 import { reconcileFacts } from "./reconcile.mjs";
 import { deviceFacts } from "./device.mjs";
 import { readSmallFile } from "./saferead.mjs";
+import { guarded } from "./crashguard.mjs";
 
 // ── 本机实况：TOOLS.md 是打包时在测试机上测的，这里补上「这台设备上实际怎样」 ──
 // 自检（cccodroid-selftest）在本机跑一遍，失败项和 INFO（比如有没有硬件编码器）接在 TOOLS.md 后面；
@@ -19,7 +20,7 @@ export function envFactsKey() {
   const dk = devkitIdentity() || {};
   let tag = ""; try { tag = (readSmallFile(path.join(HERE, "TAG"), 64) || "").trim(); } catch {}
   // 模块化工具包：装 / 卸模块后也要重测（自检按已装模块跑）
-  const mj = modulesInfo(), mods = mj ? (mj.modules || []).filter((m) => modInstalled(mj, m.id)).map((m) => m.id).join(",") : "";
+  const mj = modulesInfo(), mods = mj && Array.isArray(mj.modules) ? mj.modules.filter((m) => modInstalled(mj, m.id)).map((m) => m.id).join(",") : "";
   return `${dk.sha256 || dk.tag || "?"}|${tag}${mods ? "|" + mods : ""}`;
 }
 let envFactsJob = null;
@@ -35,7 +36,7 @@ function envFactsRun() {
   log("[env] 本机自检开始（工具包或应用换了版本）");
   envFactsJob = spawn(argv[0], argv.slice(1), { env: { ...termEnv(), CCAPP_ENVFACTS: "1" }, cwd: CFG.home, detached: true, stdio: ["ignore", "pipe", "pipe"] });
   envFactsJob.stdout.setEncoding("utf8"); envFactsJob.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
-  envFactsJob.stdout.on("data", (d) => { if (out.length < 1 << 20) out += d; });
+  envFactsJob.stdout.on("data", guarded("envFacts stdout", (d) => { if (out.length < 1 << 20) out += d; }));
   envFactsJob.stderr.on("data", () => {});
   const t = setTimeout(() => { try { killTree(envFactsJob); } catch {} }, 15 * 60e3);
   // 自检脚本可能在 existsSync 之后、spawn 之前被删/不可执行。不接 error 就是未处理的 error 事件，
@@ -45,7 +46,7 @@ function envFactsRun() {
     spawnFailed = true; clearTimeout(t); envFactsJob = null;
     log("[env] 自检启动失败：" + (e.code || e.message));
   });
-  envFactsJob.on("close", () => {
+  envFactsJob.on("close", guarded("envFacts close", () => {
     clearTimeout(t); envFactsJob = null;
     if (spawnFailed) return;
     const r = { key, at: Date.now(), pass: 0, fail: [], info: [] };
@@ -57,7 +58,7 @@ function envFactsRun() {
     if (!r.pass) { log("[env] 自检没跑出结果，下次再试"); return; }
     try { fs.writeFileSync(ENV_FACTS, JSON.stringify(r, null, 1)); } catch {}
     log(`[env] 本机自检：通过 ${r.pass} 项，失败 ${r.fail.length} 项`);
-  });
+  }));
 }
 // 空闲（没有 claude 在跑）且结果过期时才跑：启动 2 分钟后看一次，之后每 5 分钟
 function envFactsTick() {
@@ -65,7 +66,9 @@ function envFactsTick() {
   let cur = null; try { const raw = readSmallFile(ENV_FACTS, 256 << 10); cur = raw == null ? null : JSON.parse(raw); } catch {}
   if (!cur || cur.key !== envFactsKey()) envFactsRun();
 }
-if (PREFIX) { setTimeout(envFactsTick, 2 * 60e3).unref?.(); setInterval(envFactsTick, 5 * 60e3).unref?.(); }
+// 定时器里读 modules.json / 拼 key，坏状态文件的形状问题不能带走网关（0.6.9 审计 198 P1-19）
+const envFactsTickSafe = guarded("envFactsTick", envFactsTick);
+if (PREFIX) { setTimeout(envFactsTickSafe, 2 * 60e3).unref?.(); setInterval(envFactsTickSafe, 5 * 60e3).unref?.(); }
 
 // 这里拼的名字、版本都来自 home 下的文件（组件记录、pkg 清单、模块表），claude 自己就写得动：
 // 一律压成单行、限长，换行和控制符不让它带进成段的「指令」（11-04 报告）

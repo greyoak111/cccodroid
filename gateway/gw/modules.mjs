@@ -22,7 +22,19 @@ const DEVKIT_MIRROR = "https://dl.cccodroid.net/devkit/";
 
 export function modulesInfo() {
   if (!DK) return null;
-  try { return JSON.parse(fs.readFileSync(path.join(DK, "modules.json"), "utf8")); } catch { return null; }
+  let j;
+  try { j = JSON.parse(fs.readFileSync(path.join(DK, "modules.json"), "utf8")); } catch { return null; }
+  // 0.6.9 审计 198 P1-19：modules.json 是合法 JSON 但形状不对（modules 不是数组、里面混了 null
+  // 或缺 id / dir 的条目）时，坏条目会一路带到 envFactsKey 的定时器里抛 TypeError，
+  // 网关崩了重启、重启再崩。这里只放行能用的条目；连模块表都不是数组就当没有模块表。
+  if (!j || typeof j !== "object" || Array.isArray(j) || !Array.isArray(j.modules)) {
+    log("[mod] modules.json 形状不对（modules 不是数组），按整包工具包处理");
+    return null;
+  }
+  const n = j.modules.length;
+  j.modules = j.modules.filter((m) => m && typeof m === "object" && typeof m.id === "string" && m.id && typeof m.dir === "string" && m.dir);
+  if (j.modules.length !== n) log(`[mod] modules.json 里有 ${n - j.modules.length} 个坏条目，已忽略`);
+  return j;
 }
 const blockOf = (mj, id) => (mj.modules || []).find((m) => m.id === id) || null;
 const dirOf = (m) => path.join(PREFIX, m.dir);
