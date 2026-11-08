@@ -259,7 +259,7 @@ public class MainActivity extends Activity {
                 }
                 askBatteryExemption();
                 say(Tr.t("等待网关…"));
-                for (int i = 0; i < 120 && !ping(); i++) Thread.sleep(500);
+                waitGateway(true);
                 ui.post(() -> { if (isDestroyed()) return; showWeb(); booted = true; handle(pending); pending = null; });
                 // 后台快速自检：只看文件在不在，缺了就提示修复
                 if (!upd.devkitMoving() && !upd.devkitStaged()) upd.verifyAsync(false);
@@ -1129,7 +1129,7 @@ public class MainActivity extends Activity {
                 say(Tr.t("（旧的工具包已经不在了的话，划掉应用重新打开会重新安装）"));
                 try { Thread.sleep(4000); } catch (InterruptedException ignored) {}
             }
-            try { for (int i = 0; i < 120 && !ping(); i++) Thread.sleep(500); } catch (InterruptedException ignored) {}
+            try { waitGateway(true); } catch (InterruptedException ignored) {}
             ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; } });
         }, "devkit-local").start();
     }
@@ -1230,8 +1230,28 @@ public class MainActivity extends Activity {
             say("✗ " + e.getMessage());
             say(Tr.t("（旧的工具包已经不在了的话，划掉应用重新打开会重新安装）"));
         }
-        try { for (int i = 0; i < 120 && !ping(); i++) Thread.sleep(500); } catch (InterruptedException ignored) {}
+        try { waitGateway(true); } catch (InterruptedException ignored) {}
         ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; } });
+    }
+
+    /** 等网关答话，最多约 60 秒。网关服务正在联网取回运行库时（GatewayService.gwFetchStep）不计时：
+     *  几百 MB 在移动数据下要好几分钟，到点切到一个打不开的界面只会让人以为卡死（11-09 群友）。
+     *  show：把取回的进度显示在启动页上，并说明断了会续传、别关应用 */
+    private void waitGateway(boolean show) throws InterruptedException {
+        String shown = null;
+        for (int i = 0; i < 120 && !ping(); ) {
+            String st = GatewayService.gwFetchStep;
+            if (st == null) i++;
+            else if (show) {
+                if (!st.equals(shown)) {
+                    if (shown == null) say(Tr.t("网关自己的运行库和安装包对不上，正在联网取回（下载断了会接着下，请别关掉应用）"));
+                    say(st); shown = st;
+                }
+                long d = GatewayService.gwFetchDone, t = GatewayService.gwFetchTotal;
+                if (t > 0) progress(d, t);
+            }
+            Thread.sleep(500);
+        }
     }
 
     /** assets/app → files/app。内容哈希写在 TAG 里，没变、且逐个文件核对和安装包一致（见 AppFiles）就不动 */
@@ -1957,7 +1977,7 @@ public class MainActivity extends Activity {
         System.arraycopy(recoverAt, 1, recoverAt, 0, 2); recoverAt[2] = now;
         recovering = true;
         new Thread(() -> {
-            try { for (int i = 0; i < 120 && !ping(); i++) Thread.sleep(500); } catch (InterruptedException ignored) {}
+            try { waitGateway(false); } catch (InterruptedException ignored) {}
             ui.post(() -> { recovering = false; if (web != null && bounceStage == 0 && !isFinishing()) loadUi(); });
         }, "recover").start();
     }

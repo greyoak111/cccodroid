@@ -70,8 +70,8 @@ final class GwRuntime {
         return o.toString();
     }
 
-    /** 进度（通知栏上的那行字）；可为 null */
-    interface Say { void say(String s); }
+    /** 进度（通知栏、启动页上的那行字）；可为 null。bytes：下载的字节进度 */
+    interface Say { void say(String s); default void bytes(long done, long total) {} }
 
     /**
      * 让 files/gw 和钉子一致。返回 null 表示好了；否则是给人看的原因。
@@ -194,7 +194,7 @@ final class GwRuntime {
         if (gz == null || tar == null) throw new IOException(Tr.t("模块表里没有基础模块"));
         Installer ins = new Installer(env, new Installer.Progress() {
             public void step(String m) { if (say != null) say.say(m); }
-            public void bytes(long done, long total) {}
+            public void bytes(long done, long total) { if (say != null) say.bytes(done, total); }
         });
         long need = gz.optLong("bytes") + tar.optLong("bytes") + (100L << 20);
         long free = new android.os.StatFs(env.files.getPath()).getAvailableBytes();

@@ -215,6 +215,10 @@ public class GatewayService extends Service {
     static final class GwUnavailable extends Exception { GwUnavailable(String m) { super(m); } }
     private String gwLastErr;        // 同一个原因只记一次账本
     private long gwFetchAt;          // 上次联网取运行库的时间：取回来还对不上时别每分钟下一遍 128 MB
+    /** 起网关前正在联网取回网关运行库（GwRuntime.fetchBase）：当前这一步和下载字节数。启动页据此显示进度、不按 60 秒超时切走。
+     *  11-09 群友：移动数据下 122 MB 的基础模块包下了好几分钟，启动页只写「等待网关…」、进度只在通知栏里，以为卡死，划掉重开了六次 */
+    static volatile String gwFetchStep;
+    static volatile long gwFetchDone, gwFetchTotal;
 
     /** 守护循环：网关退出就重拉；连续快速崩溃时退避，别把电池耗光 */
     private void supervise() {
@@ -290,7 +294,18 @@ public class GatewayService extends Service {
         // 凑不齐：发行版不起网关（$PREFIX 里的 node 和库同 uid 的进程都能换）；开发版退回 $PREFIX 的，记账本
         GwRuntime gw = new GwRuntime(this, env);
         boolean fetch = System.currentTimeMillis() - gwFetchAt > 30 * 60000L;
-        String gwErr = gw.ensure(fetch, this::update);
+        String gwErr;
+        try {
+            gwErr = gw.ensure(fetch, new GwRuntime.Say() {
+                long lastMb = -1;
+                public void say(String m) { gwFetchStep = m.trim(); update(gwFetchStep); }
+                public void bytes(long d, long t) {
+                    gwFetchDone = d; gwFetchTotal = t;
+                    long mb = d >> 20;      // 通知一兆一更，别刷屏
+                    if (t > 0 && mb != lastMb) { lastMb = mb; update(Tr.f("取回网关运行库：{0} / {1} MB", mb, t >> 20)); }
+                }
+            });
+        } finally { gwFetchStep = null; gwFetchDone = gwFetchTotal = 0; }
         if (gwErr != null && fetch) gwFetchAt = System.currentTimeMillis();
         if (gwErr != null && !gwErr.equals(gwLastErr)) Ledger.add(env, "verify", false, Tr.t("网关运行库：") + gwErr, null);
         gwLastErr = gwErr;
