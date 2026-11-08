@@ -59,6 +59,8 @@ export function sseRepairer() {
     if (!data.length) return raw + "\n\n";            // 注释 / 心跳
     let j;
     try { j = JSON.parse(data.join("\n")); } catch { return ""; }   // [DONE] 之类
+    // data 是 null / 数字 / 数组：不是 Anthropic 的事件，原样交给 claude，别在这里按对象去读字段把网关带走（0.6.9 审计 199-9-01）
+    if (!j || typeof j !== "object" || Array.isArray(j)) return raw + "\n\n";
     const t = j?.type || event;
     if (t === "error") {
       // 说完之后才来的报错：不让它把整条回答作废
@@ -102,6 +104,7 @@ export function sseRepairer() {
       return null;
     },
     get complete() { return gotMsgStop; },
+    get started() { return started; },
   };
 }
 
@@ -111,17 +114,26 @@ function handle(req, res) {
   if (base) { ROUTES.delete(m[1]); ROUTES.set(m[1], base); }
   if (!base) { res.writeHead(404); res.end(); return; }
   let target;
-  try { target = new URL(base.href.replace(/\/+$/, "") + (m[2] || "/")); } catch {}
+  // 路径接在 baseUrl 的路径后面，查询串两边合起来：以前整串 href 拼接，baseUrl 带 ?key=… 时 /v1/messages 落进了查询串（0.6.9 审计 200-9-08）
+  try {
+    const rest = new URL(m[2] || "/", "http://x");
+    target = new URL(base.href);
+    target.pathname = base.pathname.replace(/\/+$/, "") + rest.pathname;
+    for (const [k, v] of rest.searchParams) target.searchParams.append(k, v);
+    target.hash = "";
+  } catch { target = null; }
   // 拼出来的地址必须还在那一家（防 // 开头、反斜杠之类把主机换掉）
   if (!target || target.origin !== base.origin || target.username || target.password) { res.writeHead(404); res.end(); return; }
-  const isMsg = req.method === "POST" && /\/v1\/messages(\?|$)/.test(target.pathname + target.search);
+  const isMsg = req.method === "POST" && /\/v1\/messages$/.test(target.pathname);
   const headers = { ...req.headers, host: target.host };
   delete headers.connection; delete headers.cookie;   // 只有 claude 会来，用不着 Cookie；别把浏览器的带出去
   if (isMsg) headers["accept-encoding"] = "identity";   // 要读 SSE，别让上游压缩
   const mod = target.protocol === "https:" ? https : http;
   let sseRes = false;      // 上游回的是不是 SSE：error 分支据此决定能不能直接销毁下游
   const up = mod.request(target, { method: req.method, headers }, (ur) => {
-    const sse = isMsg && /text\/event-stream/i.test(String(ur.headers["content-type"] || ""));
+    // 只修 2xx、没压缩的 SSE：4xx/5xx 的错误流、上游不顾 identity 硬压缩的，原样转给 claude 自己认（0.6.9 审计 200-9-06）
+    const enc = String(ur.headers["content-encoding"] || "identity").toLowerCase();
+    const sse = isMsg && (ur.statusCode || 0) >= 200 && ur.statusCode < 300 && (enc === "identity" || enc === "") && /text\/event-stream/i.test(String(ur.headers["content-type"] || ""));
     sseRes = sse;
     if (!sse) {
       res.writeHead(ur.statusCode || 502, ur.headers); ur.pipe(res);
@@ -138,7 +150,8 @@ function handle(req, res) {
     const end = () => {
       if (ended) return; ended = true;
       const t = fix.finish();
-      if (t === null) { res.destroy(); return; }      // 块还开着：真断了，原样交给 claude
+      // 块还开着：真断了，原样交给 claude。连 message_start 都没有、上游又是正常收完的：不是我们认得的流，照常收尾（200-9-06）
+      if (t === null) { if (ur.complete && !fix.started) res.end(); else res.destroy(); return; }
       res.end(t);
     };
     ur.setEncoding("utf8");
