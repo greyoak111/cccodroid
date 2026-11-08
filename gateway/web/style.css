@@ -389,6 +389,7 @@ td{color:var(--fg2)}
 #perm-bar .pb-note{border-color:var(--line);color:var(--fg2)}
 #perm-bar .pb-txt,#perm-bar .pb-note span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #perm-bar .pb-note span{white-space:normal}
+#perm-bar .pb-txt.wrap{white-space:normal}
 #perm-bar .pb-n{flex:0 0 auto;font-size:11px;color:var(--warn);font-variant-numeric:tabular-nums}
 #perm-bar .mono{font-family:var(--mono);font-size:11.5px;color:var(--fg2)}
 #perm-bar .pb-more{font-size:11.5px;color:var(--fg3);padding:0 10px;display:flex;gap:8px;align-items:center}

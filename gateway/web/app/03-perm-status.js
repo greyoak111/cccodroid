@@ -442,14 +442,18 @@
       permWaiting = false;
       return;
     }
-    // 敏感卡（guard）不能当成 simple：底部条的「允许」不带风险说明、还会顺带「始终允许」，必须点开卡再答（0.6.9 审计 195-B.3）
+    // 敏感卡（guard）不能当成 simple、不进「全部允许」（0.6.9 审计 195-B.3）。但全部放行模式下弹出来的只剩敏感卡，
+    // 底部条一个「允许」都没有（用户 11-09）：单个敏感卡带上卡片同一句风险说明再给「允许」；
+    // 用户级配置 / 项目配置两种的选项不是允许拒绝（保留撤销、记住），仍只给「查看」
     const f = list[0].p, simple = (it) => !it.p.guard && it.p.tool !== "ExitPlanMode" && it.p.tool !== "AskUserQuestion";
+    const quick = (it) => simple(it) || (!!it.p.guard && it.p.tool !== "ExitPlanMode" && it.p.tool !== "AskUserQuestion" && it.p.guard.cat !== "userconf" && it.p.guard.cat !== "project");
     const what = f.tool === "Bash" ? f.input.command : (f.input.file_path || f.input.url || f.input.query || "");
     permBar.innerHTML = `
       <div class="pb-main">
         ${list.length > 1 ? `<span class="pb-n">${t("第 {i}/{n} 个", { i: 1, n: list.length })}</span>` : ""}
-        <span class="pb-txt">${uiI("pause")}${f.tool === "ExitPlanMode" ? t("计划待批准") : f.tool === "AskUserQuestion" ? t("Claude 想问你") : t("Claude 在等你确认") + " · "}${simple(list[0]) ? `<b>${esc(f.tool)}</b> <span class="mono">${esc(String(what || "").slice(0, 80))}</span>` : ""}</span>
-        ${simple(list[0]) ? `<button class="pb-allow primary">${t("允许")}</button>` : ""}
+        <span class="pb-txt${f.guard ? " wrap" : ""}">${uiI("pause")}${f.tool === "ExitPlanMode" ? t("计划待批准") : f.tool === "AskUserQuestion" ? t("Claude 想问你") : t("Claude 在等你确认") + " · "}${simple(list[0]) ? `<b>${esc(f.tool)}</b> <span class="mono">${esc(String(what || "").slice(0, 80))}</span>`
+          : quick(list[0]) ? `<b>${t("敏感操作")}</b> ${esc(permGuardWhat(f.guard, f.input))}` : ""}</span>
+        ${quick(list[0]) ? `<button class="pb-allow primary" data-id="${esc(String(f.id))}">${t("允许")}</button>` : ""}
         <button class="pb-view">${t("查看")}</button>
       </div>
       ${list.length > 1 ? `<div class="pb-more">${t("还有 {n} 项", { n: list.length - 1 })}
@@ -481,7 +485,8 @@
       setTimeout(wait, 150);
       return;
     }
-    if (b.classList.contains("pb-allow")) return permAnswer(list[0].p.id, { behavior: "allow" });
+    // 只放条上显示的那一张：渲染后列表变了（新来一张排到前面）也不会顺手放掉没看到的卡
+    if (b.classList.contains("pb-allow")) { const it = list.find((x) => String(x.p.id) === b.dataset.id); return it ? permAnswer(it.p.id, { behavior: "allow" }) : renderPermBar(); }
     if (b.classList.contains("pb-all")) list.forEach((it) => permAnswer(it.p.id, { behavior: "allow" }));
   });
 

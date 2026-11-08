@@ -91,6 +91,25 @@ test("权限卡：缺 input 不再卡死；生效模式以网关回的 mode 为�
   assert.ok(src03.includes("simple = (it) => !it.p.guard"));
 });
 
+test("底部确认条：单张敏感卡带风险说明给「允许」，配置类与计划/提问不给，「全部允许」不含敏感卡（用户 11-09）", () => {
+  const line = (re) => { const m = src03.match(re); assert.ok(m, String(re)); return m[0]; };
+  const simpleSrc = line(/simple = \(it\) => [^;]+;/), quickSrc = line(/const quick = \(it\) => [^;]+;/);
+  const quick = new Function(`const ${simpleSrc} ${quickSrc} return quick;`)();
+  const P = (tool, guard) => ({ p: { tool, guard, input: {} } });
+  assert.equal(quick(P("Bash")), true);
+  assert.equal(quick(P("mcp__device__clipboard_read", { cat: "device:clipboard", what: "" })), true);
+  assert.equal(quick(P("Read", { cat: "secret", what: "key: ~/.ssh/id_ed25519" })), true);
+  assert.equal(quick(P("Bash", { cat: "userconf", what: "~/.claude" })), false);
+  assert.equal(quick(P("Bash", { cat: "project", what: "/w" })), false);
+  assert.equal(quick(P("ExitPlanMode")), false);
+  assert.equal(quick(P("AskUserQuestion")), false);
+  // 条上要有卡片同一句风险说明；「允许」绑卡号，点时只放那一张；「全部允许」仍按 simple（不含敏感卡）
+  assert.ok(src03.includes('quick(list[0]) ? `<b>${t("敏感操作")}</b> ${esc(permGuardWhat(f.guard, f.input))}`'));
+  assert.ok(src03.includes('<button class="pb-allow primary" data-id="${esc(String(f.id))}">'));
+  assert.ok(src03.includes('list.find((x) => String(x.p.id) === b.dataset.id)'));
+  assert.ok(src03.includes('${list.every(simple) ? `<button class="pb-all">'));
+});
+
 test("复制失败不再假报成功（三处调用点都看返回值）", () => {
   assert.ok(src02.includes('copyText(body.trim() || text).then((ok) => toast(ok ? t("已复制") : t("复制失败"), !ok))'));
   assert.ok(src03.includes('copyText(text).then((ok) => toast(ok ? t("已复制") : t("复制失败"), !ok))'));
