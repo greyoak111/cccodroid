@@ -1574,6 +1574,12 @@ public class MainActivity extends Activity {
                 // HTML 预览没开「联网」时：整个界面 WebView 不许出本机（审查 v0513b 中-5）。CSP 管得住 fetch / 图片 / 脚本，
                 // 管不住预览页把自己跳到外站（地址里带着读到的文件）；iframe 的整页跳转也走这里，在这一层一起拦
                 if (pvOffline && !localHost(u.getHost())) return blocked();
+                // 界面自己的 /api/*：先当场核一次对面还是不是本应用这次拉起的网关（0.6.10 审计 199-1-04）。
+                // 页面开着的时候网关被杀、端口被同机应用占住的空档里，冒牌的一能让事件总线 onopen（页面以为连上了），
+                // 二能收走 /api/chat 里用户输入的内容。核不过就回 502，页面按断线处理；核的时候不吃 Env 的 3 秒缓存。
+                // 静态资源已由下面的 fetchStatic 按 X-CC-Mac 核过，这里把 /api 也纳入同一道证明。
+                if (isOwnGateway(u.toString()) && u.getPath() != null && u.getPath().startsWith("/api/")
+                    && !Env.proveGateway(true)) return unavailable();
                 // 界面 WebView 用不着 Service Worker；预览页要是注册一个，它发的请求不归页面的 CSP 管（10-31 复核）。注册时取脚本这一步就拦掉
                 java.util.Map<String, String> rh = req.getRequestHeaders();
                 if (rh != null) for (java.util.Map.Entry<String, String> h : rh.entrySet())
