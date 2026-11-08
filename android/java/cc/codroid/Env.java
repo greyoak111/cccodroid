@@ -151,10 +151,16 @@ final class Env {
         } catch (Exception e) { return null; }
     }
 
-    /** 端口上有没有人在听（不发任何东西） */
+    /** 端口上有没有人在听（不发任何东西）。网关两个回环地址都听（server.mjs：主服务 127.0.0.1、界面 HOST=127.0.0.2），
+     *  只探 HOST 就漏掉 127.0.0.1 被别的应用占住的情况：supervise 当成「没被占」，反复拉起网关、网关反复退出
+     *  （0.6.10 审计 199-1-03）。 */
     static boolean portBusy() {
+        return listening(HOST) || listening("127.0.0.1");
+    }
+
+    private static boolean listening(String host) {
         try (java.net.Socket s = new java.net.Socket()) {
-            s.connect(new java.net.InetSocketAddress(HOST, PORT), 500);
+            s.connect(new java.net.InetSocketAddress(host, PORT), 500);
             return true;
         } catch (java.io.IOException e) { return false; }
     }

@@ -6,7 +6,7 @@
 |---|---|---|
 | 199-1-01 | Docs.java SAF provider 把 `.claude/settings*.json` 当普通文件 | 已修 |
 | 199-1-02 | MainActivity.java 文件选择结果不校验 authority | 已修 |
-| 199-1-03 | Env.java 只探测 127.0.0.2:8791（GatewayService 那半移交 j2） | 待做 |
+| 199-1-03 | Env.java 只探测 127.0.0.2:8791（GatewayService 那半移交 j2） | 已修（Env 半）+ 移交 |
 | 199-1-04 | MainActivity.java + 19-boot.js 伪造 SSE / onopen 无校验 | 待做 |
 | 199-1-05 | MainActivity.java ACTION_SEND 写 workspace/uploads | 待做 |
 | 199-1-06 | MainActivity.java IK 明文存 shared_prefs | 待做 |
@@ -21,6 +21,7 @@
 |---|---|---|---|
 | 199-1-01 | 本条 | `Docs.java` 加 `sensitive()` / `denySensitive()`：`.claude/settings(.local).json` 在列表、搜索、queryDocument、openDocument（含软链按 fd 真实路径）、create、rename 源/目标、delete 全部拒绝，别的工作区文件不受影响 | `javac` 全量编译通过（JAVAC_OK）。真机：MT 管理器/系统「文件」授权 cccodroid「内部文件」→ 进 workspace/.claude，看不到 settings.json / settings.local.json，搜索也搜不到；同目录别的文件照常读写；对已保存的 settings.json 文档 URI 打开会报「这个文件不通过文件访问提供」 |
 | 199-1-02 | 本条 | `chooserResult()` 增加 `ownUri()` 过滤：本应用包名下的 content authority（docs/share/shizuku）和指向应用私有目录的 file URI 一律丢弃，WebView 与浏览器窗格两处共用 | `javac` 全量编译通过。真机：在对话输入框点回形针 → 系统选择器里选 cccodroid「内部文件」里的任意文件 → 不再附加（旧版会以本应用身份读出来）；从相册 / 下载 / 云盘选正常文件照常附加；应用内浏览器网页的 `<input type=file>` 同理 |
+| 199-1-03（Env 半） | 本条 | `Env.portBusy()` 改为 `listening(127.0.0.2) \|\| listening(127.0.0.1)`：网关两个回环地址都听，主服务那个被别的应用占住时也要报「被占」，不再让 supervise 反复拉起又退出 | `javac` 全量编译通过。真机：先用别的应用/`nc -l 127.0.0.1 8791` 占住主端口，再启动 App → 应显示「端口被占」提示而不是网关反复重启；释放端口后能正常起。GatewayService 那半见「移交」 |
 
 ## 不成立
 
@@ -36,6 +37,8 @@
 
 | 条目 | 文件与函数 | 要做什么 |
 |---|---|---|
+| 199-1-03（GatewayService 半） | `GatewayService.java` 的 `squatted()` / `alive()` | j2 做 13-02 时会重写这段：请保留「两个回环地址都算被占」的前提（`Env.portBusy()` 现已同时探测 127.0.0.1 / 127.0.0.2）；判断「是不是自己的网关」不能只看 127.0.0.2 的 proof |
+| 199-1-07 | 并入 13-02（GatewayService / Env），本轮归 j2 | 按 LANE-j1 的划分整条移交；j1 名下没有需要配合的代码点 |
 
 ## 行为变化
 
