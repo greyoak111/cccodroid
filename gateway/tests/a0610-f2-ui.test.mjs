@@ -71,6 +71,13 @@ test("196 HTTP 技能导入：超过后端 64 MB 上限的包先在界面拦住�
   assert.ok(s.indexOf("f.size > 64 * 1024 * 1024") < s.indexOf("await f.arrayBuffer()"), "大小检查在读取之前");
 });
 
+test("196 输入域：「使用」指令和指令卡插到光标处，不覆盖未发送草稿", () => {
+  const ext = src("08-extensions.js"), caps = src("12-model-caps.js");
+  has(ext, /if \(act === "use" && c\) \{ closePage\(\); insertAtCursor\(/, "命令「使用」走 insertAtCursor");
+  assert.doesNotMatch(ext, /if \(act === "use" && c\)[^\n]*inputEl\.value =/, "命令「使用」还在整段覆盖");
+  has(caps, /insertAtCursor\(b\.dataset\.cmd\)/, "指令卡走 insertAtCursor");
+});
+
 test("195-N.8 帮助/更新日志加载失败说清楚是哪一步并给重试", () => {
   const s = src("15-pages.js");
   has(s, /帮助加载失败：\{msg\}/, "帮助失败文案");

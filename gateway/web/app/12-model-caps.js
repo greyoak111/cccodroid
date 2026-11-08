@@ -722,7 +722,7 @@
   $("caps-cmds").addEventListener("click", (e) => {
     const b = e.target.closest("[data-cmd]"); if (!b) return;
     closePage();
-    inputEl.value = b.dataset.cmd + " "; autoGrow(); inputEl.focus();
+    insertAtCursor(b.dataset.cmd); inputEl.focus();   // 不覆盖未发送草稿（196 输入框域）
   });
 
   $("btn-refresh-mcp").addEventListener("click", async () => {

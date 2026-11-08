@@ -1371,7 +1371,8 @@
     const sc = ucScope(), it = b.closest(".uc-item"), c = it && sc ? sc.items[+it.dataset.i] : null;
     const act = b.dataset.uc;
     // 发行版把指令经合成插件交给 Claude，实际名字是 /user:<名字>；插入裸名会展开不了（195-J.6）
-    if (act === "use" && c) { closePage(); inputEl.value = (UC.data.sealed ? "/user:" : "/") + c.name + " "; autoGrow(); inputEl.focus(); return; }
+    // 插到光标处，别把还没发的草稿整个盖掉（196 输入框域；insertAtCursor 是输入框统一入口）
+    if (act === "use" && c) { closePage(); insertAtCursor((UC.data.sealed ? "/user:" : "/") + c.name); inputEl.focus(); return; }
     if (act === "edit" && c) return ucForm(c);
     if (act === "del" && c) {
       if (!confirm(t("删除指令 /{name}？", { name: c.name }))) return;
