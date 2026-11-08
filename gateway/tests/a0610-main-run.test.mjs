@@ -163,6 +163,15 @@ test("200-7-08：换厂商时桥还没换完上游 → 新起的轮次等它换�
   assert.equal(endOf("a0610-708").subtype, "success");
 });
 
+test("195-K.1：指定的工作目录不在了 → 这一轮不跑、报出来，不悄悄换到工作区", async () => {
+  script([{ raw: `: > ${root}/ran-k1` }, init(crypto.randomUUID()), result], 0);
+  await startRun({ id: "a0610-k1", message: "fixture", cwd: path.join(root, "gone-dir") });
+  await until(() => endOf("a0610-k1"));
+  assert.equal(endOf("a0610-k1").failed, true);
+  assert.ok(events.some((e) => e.type === "error" && /gone-dir/.test(e.message || "")));
+  assert.equal(fs.existsSync(path.join(root, "ran-k1")), false);
+});
+
 // 放最后：它留下的后台 sleep 30 还活着时，后面的轮次会先弹「用户配置」确认卡
 test("195-T.1：claude 退出了、后台子孙还攥着输出管道 → 5 秒后自己收尾，不永远「生成中」", async () => {
   script([init(crypto.randomUUID()), result, { raw: `${SLEEP} 30 &` }], 0);

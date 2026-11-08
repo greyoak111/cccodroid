@@ -2967,3 +2967,4 @@
 2967	Catatan sesi asli tidak bisa dihapus, jadi sesi tetap di tempat semula: {err}
 2968	Giliran ini tidak selesai: gateway dimulai ulang saat aplikasi diperbarui (dimulai {when}).
 2969	Giliran ini tidak selesai: gateway dihentikan atau dimulai ulang (dimulai {when}).
+2970	Folder kerja {dir} sudah tidak ada (dihapus, diganti nama, atau kartu penyimpanan dilepas), jadi giliran ini tidak dijalankan. Kembalikan foldernya, atau ubah path di pengaturan proyek, lalu kirim lagi.

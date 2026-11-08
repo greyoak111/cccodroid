@@ -2967,3 +2967,4 @@
 2967	No se pudo borrar el registro original de la sesión; la sesión se queda donde estaba: {err}
 2968	Este turno no terminó: el gateway se reinició mientras se actualizaba la app (empezó {when}).
 2969	Este turno no terminó: el gateway se detuvo o se reinició (empezó {when}).
+2970	La carpeta de trabajo {dir} ya no existe (borrada, renombrada o se quitó la tarjeta de almacenamiento), así que este turno no se ejecutó. Vuelve a poner la carpeta o cambia la ruta en los ajustes del proyecto y envía de nuevo.

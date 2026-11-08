@@ -2970,4 +2970,5 @@ window.I18N_DICT["es"] = {
   "原来的会话记录删不掉，会话留在原处：{err}": "No se pudo borrar el registro original de la sesión; la sesión se queda donde estaba: {err}",
   "这一轮没跑完：App 更新时网关重启了（{when} 开始的）。": "Este turno no terminó: el gateway se reinició mientras se actualizaba la app (empezó {when}).",
   "这一轮没跑完：网关被关闭或重启了（{when} 开始的）。": "Este turno no terminó: el gateway se detuvo o se reinició (empezó {when}).",
+  "工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。": "La carpeta de trabajo {dir} ya no existe (borrada, renombrada o se quitó la tarjeta de almacenamiento), así que este turno no se ejecutó. Vuelve a poner la carpeta o cambia la ruta en los ajustes del proyecto y envía de nuevo.",
 };

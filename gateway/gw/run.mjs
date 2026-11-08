@@ -55,12 +55,15 @@ const IDLE_CLOSE_MS = Number(process.env.CCAPP_IDLE_CLOSE_MS) || 120000;
 
 /** 这一轮在哪个目录跑：显式指定 → 接着的会话当初的 cwd（--resume 只在同一 cwd 下找得到）→ 项目目录 → 工作区 */
 const isDirSync = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
+// 指定了目录（请求带的、会话记着的、项目的）却不在了（被删、改名、存储卡拔了）：返回 lost，这一轮不跑。
+// 以前悄悄换到工作区去跑，项目的权限 / 型号照套，读的却是工作区的 CLAUDE.md（0.6.9 审计 195-K.1）
 function cwdOf(item, sessionId) {
-  if (item.cwd && isDirSync(item.cwd)) return item.cwd;
-  if (sessionId) { const f = findSessionFile(String(sessionId)); const c = f && peekSession(f.file).cwd; if (c && isDirSync(c)) return c; }
-  if (item.projectId) { const p = projectById(item.projectId); if (p && isDirSync(p.path)) return p.path; }
+  if (item.cwd) return isDirSync(item.cwd) ? item.cwd : { lost: item.cwd };
+  if (sessionId) { const f = findSessionFile(String(sessionId)); const c = f && peekSession(f.file).cwd; if (c) return isDirSync(c) ? c : { lost: c }; }
+  if (item.projectId) { const p = projectById(item.projectId); if (p) return isDirSync(p.path) ? p.path : { lost: p.path }; }
   return fs.existsSync(CFG.workspace) ? CFG.workspace : CFG.home;
 }
+const cwdPath = (c) => (typeof c === "string" ? c : null);
 
 // ── 跑一轮 ────────────────────────────────────────────────────────────
 // 和 HTTP 请求完全脱钩：前端断了也接着跑，结果照样落进 transcript、照样广播。
@@ -99,7 +102,7 @@ const argLen = (inp) => { const v = String(inp?.command || inp?.file_path || inp
 export function pickProvider(item) {
   // 跟的那条被撤销了也照样接上车道上首条跑出来的会话（#120-1），不然会另起一个会话
   const sid0 = sidForItem(item);
-  const pdef0 = projectDefaults(item.projectId ? projectById(item.projectId) : projectOfDir(cwdOf(item, sid0)));
+  const pdef0 = projectDefaults(item.projectId ? projectById(item.projectId) : projectOfDir(cwdPath(cwdOf(item, sid0))));
   const rec0 = sessModel(sid0);
   return { sid0, pdef0, P: (item.provider && providerById(item.provider))
     || (item.pin && item.pin.provider && providerById(item.pin.provider))
@@ -301,7 +304,14 @@ export async function startRun(item) {
   }
   if (run.aborted) return endRun(run, { failed: true });   // 等桥的时候就被停了
 
-  const cwd = cwdOf(item, run.sessionId);
+  const cwd0 = cwdOf(item, run.sessionId);
+  if (typeof cwd0 !== "string") {
+    const msg = tz("工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。", { dir: cwd0.lost });
+    log(`⛔ 工作目录不在了：${cwd0.lost}`);
+    emit({ type: "error", message: tr(LAST_LANG, msg) });
+    return endRun(run, { failed: true, finalText: msg });
+  }
+  const cwd = cwd0;
   run.cwd = cwd;
   const pdef = projectDefaults(item.projectId ? projectById(item.projectId) : projectOfDir(cwd));
   if (!item.permissionMode && pdef.perm) item.permissionMode = pdef.perm;
