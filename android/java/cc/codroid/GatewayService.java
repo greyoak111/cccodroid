@@ -102,7 +102,14 @@ public class GatewayService extends Service {
                 sleep(2000);
                 // 划掉时在跑的任务跑完了：连着三次（约 6 秒）都空闲才停，免得撞上队列里下一条、/goal 下一轮开跑前的空档
                 idle = closeWhenIdle && !busy() ? idle + 1 : 0;
-                if (idle >= 3) { Log.i(TAG, "划掉时在跑的任务跑完了，停止服务"); shutdown(); break; }
+                if (idle >= 3) {
+                    // 标记文件可能没写上（存储满）或没来得及更新：真要停之前直接问一次网关。
+                    // 问不到（网关没起来）才算空闲；网关起着说还有轮次 / 排队，就接着保活（0.6.9 审计 13-03）
+                    if (Updater.gatewayBusy()) { idle = 0; continue; }
+                    // 问的这几秒里用户可能又把界面打开了：那就不算「划掉」
+                    if (closeWhenIdle && !MainActivity.appForeground()) { Log.i(TAG, "划掉时在跑的任务跑完了，停止服务"); shutdown(); break; }
+                    idle = 0;
+                }
                 long gap = android.os.SystemClock.uptimeMillis() - t0 - 2000;
                 if (gap > 15_000) {
                     Log.w(TAG, "被冻结了约 " + gap / 1000 + " 秒");
@@ -142,8 +149,16 @@ public class GatewayService extends Service {
     @Override public void onTaskRemoved(Intent root) {
         android.content.ComponentName cn = root == null ? null : root.getComponent();
         if (cn != null && MainActivity.class.getName().equals(cn.getClassName())) {
-            if (!busy()) { Log.i(TAG, "界面被划掉且没有任务在跑，停止服务"); shutdown(); }
-            else { Log.i(TAG, "界面被划掉，任务跑完再停"); closeWhenIdle = true; }
+            if (busy()) { Log.i(TAG, "界面被划掉，任务跑完再停"); closeWhenIdle = true; }
+            else {
+                // 标记文件可能没写上（0.6.9 审计 13-03）：问一次网关再决定。这里在主线程，网络请求放后台线程，
+                // 问不到（网关没起来）就当空闲；网关起着说还有轮次 / 排队，就改成跑完再停
+                new Thread(() -> {
+                    if (MainActivity.appForeground()) { Log.i(TAG, "界面又打开了，不按划掉处理"); return; }
+                    if (Updater.gatewayBusy()) { Log.i(TAG, "界面被划掉，网关说还有任务，跑完再停"); closeWhenIdle = true; }
+                    else { Log.i(TAG, "界面被划掉且没有任务在跑，停止服务"); shutdown(); }
+                }, "task-removed-check").start();
+            }
         }
         super.onTaskRemoved(root);
     }
