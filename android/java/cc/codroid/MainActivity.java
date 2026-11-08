@@ -1693,7 +1693,8 @@ public class MainActivity extends Activity {
             /** 界面连不上网关（事件流一直断着）：服务被停掉了就拉起来 */
             @android.webkit.JavascriptInterface public void ensureGateway(String k) { if (!Env.bridgeOk(k)) return; ui.post(() -> recoverGateway(false)); }
             @android.webkit.JavascriptInterface public void unfreeze(String k) { if (!Env.bridgeOk(k)) return; ui.post(() -> bounce()); }
-            /** 更新说明（见 WhatsNew）：页面启动时来取，显示出来后调 whatsNewSeen */
+            /** 更新说明（见 WhatsNew）：页面启动时来取（只读、不记账，所以可以不带口令；预览页调了也压不掉更新说明，0.6.10 审计 200-1-08），
+             *  显示出来后调带口令的 whatsNewSeen 记账 */
             @android.webkit.JavascriptInterface public String whatsNew(String lang) { return WhatsNew.pending(MainActivity.this, lang); }
             @android.webkit.JavascriptInterface public void whatsNewSeen(String k) { if (!Env.bridgeOk(k)) return; WhatsNew.seen(MainActivity.this); }
             @android.webkit.JavascriptInterface public boolean nightMode() { return systemNight(); }

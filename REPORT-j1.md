@@ -11,7 +11,7 @@
 | 199-1-05 | MainActivity.java ACTION_SEND 写 workspace/uploads | 待定 |
 | 199-1-06 | MainActivity.java IK 明文存 shared_prefs | 已修 |
 | 199-1-07 | 并入 13-02，主要位置 GatewayService/Env → 归 j2，配合项写移交 | 移交 |
-| 199-1-08 | MainActivity.java 无口令 JS 桥 whatsNew | 待做 |
+| 199-1-08 | MainActivity.java 无口令 JS 桥 whatsNew | 已修 |
 | 200-13-07 | MainActivity.java 分屏失焦也发通知 | 待做 |
 | 200-13-08 | MainActivity.java 工作岛 am 发送并发乱序 | 待做 |
 
@@ -24,6 +24,7 @@
 | 199-1-03（Env 半） | 本条 | `Env.portBusy()` 改为 `listening(127.0.0.2) \|\| listening(127.0.0.1)`：网关两个回环地址都听，主服务那个被别的应用占住时也要报「被占」，不再让 supervise 反复拉起又退出 | `javac` 全量编译通过。真机：先用别的应用/`nc -l 127.0.0.1 8791` 占住主端口，再启动 App → 应显示「端口被占」提示而不是网关反复重启；释放端口后能正常起。GatewayService 那半见「移交」 |
 | 199-1-04 | 本条 | 界面 WebView 的 `shouldInterceptRequest` 给所有指向本网关的 `/api/*` 加一道当场证明：`Env.proveGateway(true)`（不吃 3 秒缓存），核不过直接回 502，请求（连同 Cookie 和用户输入）根本不出 WebView。页面里的 `EventSource` 重连也走这里，冒牌占端口时 `onopen` 不会成立。静态资源原有的 `X-CC-Mac` 校验不变 | `javac` 全量编译通过。真机：正常打开界面、发消息、看事件总线照常；通知栏「停止」网关 → 在应用内终端 `nc -l 127.0.0.2 8791` → 切回已打开的界面，状态应显示「与网关断开，正在重连…」而不是「已连接」，输入框发消息后 nc 终端里看不到任何用户内容（只会有 `/__proof?n=…` 的探测行）；关掉 nc、等网关被拉起后界面自动接回。logcat 无专门标签，可看 `cccodroid` 日志里没有新的异常 |
 | 199-1-06 | 本条 | `MainActivity.intentKey()` 改为从 Android Keystore 的不可导出 HMAC 密钥（别名 `cc-ik`，本应用已有 Keystore 用法见 `Consent.java`）派生，不再往 shared_prefs 写明文；旧版本的明文 `k` 首次运行删掉。Keystore 不可用时退回「本次启动随机、只放内存」，绝不写盘 | `javac` 全量编译通过。真机：① 升级安装后运行一次，用应用内终端 `cat /data/user/0/cc.codrdev/shared_prefs/intent.xml` → 里面没有 `k`；② 正常使用通知动作（跑完一轮后切后台收到完成通知，点进去）照常打开对应会话；③ 重启手机后再点旧通知，仍能打开（说明 Keystore 派生的口令跨进程 / 重启稳定）；④ 若某机型 Keystore 异常，动作在进程重启后失效但界面其他功能不受影响（退回内存随机） |
+| 199-1-08 | 本条 | `WhatsNew.pending()` 改成纯读：去掉「全新安装」和「本版没写说明」两处 `mark()` 写 side effect，记账只由带口令的 `whatsNewSeen → seen()` 做。无口令的 JS 桥 `whatsNew` 于是变成只读，预览 iframe 调它不会再压掉更新说明（不用动 `theme.js` 的口令表） | `javac` 全量编译通过。真机：① 清数据后全新安装 → 首开不弹更新说明（同旧版）；② 从上一版覆盖升级 → 首开弹本版说明，点「知道了」后再开不再弹（`ui` prefs 里的 `whatsNewSeen` 正常写）；③ 打开一个 HTML 预览，在其 iframe 里执行 `CCApp.whatsNew('zh')`，随后检查 `shared_prefs/ui.xml` 的 `whatsNewSeen` 没有因这次调用被改写（代码层面已保证 `pending()` 不再写，此项可选验） |
 
 ## 不成立
 
@@ -51,6 +52,7 @@
 | 199-1-02 | 从系统文件选择器里选 cccodroid「内部文件」里的文件作为附件 / 网页上传，现在会被忽略（工作区文件请用输入框的 `@` 文件面板引用路径）。正常应用（相册、下载、云盘）给的文件不受影响。 |
 | 199-1-04 | 网关重启后的第一个 `/api` 请求可能先失败一次（核到新启动号、Cookie 换掉之后自动恢复）；`/api` 请求每次都多一趟本机证明往返（毫秒级）。网关被杀时界面会更快显示「与网关断开」，而不是悄悄把输入发给占端口的应用。 |
 | 199-1-06 | 升级到这一版后，升级前发出去、还挂在通知栏里的旧动作通知点进去不再响应（旧口令已作废）；升级后新出现的通知不受影响。第一次运行会把 shared_prefs 里的明文口令删掉。 |
+| 199-1-08 | 全新安装后一直没有「看过更新说明」的记录：以后第一次升级时只显示当前这一版的说明（以前会按安装时的版本往后补，跨版本时可能多显示一两版）。正常升级用户无变化。 |
 
 ## 全量测试
 
