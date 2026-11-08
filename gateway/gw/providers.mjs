@@ -8,6 +8,7 @@ import { MODEL_ID_RE, dropModelCache, extraModelsOf, normalizeModels } from "./m
 import { RUNS } from "./runs.mjs";
 import { NEXT, fetchText, readBody, sendJson } from "./http.mjs";
 import { readSmallFile } from "./saferead.mjs";
+import { isObj, loadState } from "./statefile.mjs";
 
 // ── 厂商配置（不写死任何一家）─────────────────────────────────────────
 // 端点 / 认证风格 / 模型清单来源 全部来自 ccapp-providers.json。
@@ -324,6 +325,12 @@ function composeProvider(id, raw) {
   }
   // 自定义条目整条来自 raw，fallbackModels 也要清洗
   if (Array.isArray(v.fallbackModels)) v.fallbackModels = cleanModels(v.fallbackModels);
+  // 线路表只认数组里像样的条目：自定义条目整条来自配置文件，endpoints 写成对象 / 字符串时 .find 抛错，
+  // 而这里在模块加载时就跑 —— 网关启动即崩、重启再崩（0.6.9 审计 P1-15）
+  if (v.endpoints != null) {
+    v.endpoints = Array.isArray(v.endpoints) ? v.endpoints.filter((e) => e && typeof e === "object" && typeof e.id === "string" && typeof e.baseUrl === "string") : [];
+    if (!v.endpoints.length) delete v.endpoints;
+  }
   if (v.endpoints && v.endpoints.length) {
     const ep = v.endpoints.find((e) => e.id === v.endpoint) || v.endpoints[0];
     v.endpoint = ep.id;
@@ -343,14 +350,22 @@ const bare = (o) => Object.assign(Object.create(null), o);
 let PROVIDERS_RAW = { active: null, providers: bare({}) };   // 配置文件原样（只含用户字段与自定义条目）
 let PROV_DISK_H = null;    // 盘上那份最后读写时的样子（见 providersDiskCheck）
 const provHash = (s) => crypto.createHash("sha256").update(s).digest("hex");
+/** 配置文件的形状：顶层是对象，providers 是对象、每条也是对象（别的丢掉） */
+function provShape(j) {
+  if (!isObj(j)) return undefined;
+  const providers = bare({});
+  if (isObj(j.providers)) for (const [k, v] of Object.entries(j.providers)) if (isObj(v)) providers[k] = v;
+  return { ...j, providers };
+}
 function loadProviders() {
-  try {
+  // 读坏了（语法错、形状不对）：原文件留底成 .bad-*（厂商 Key 都在里面），按空表起。
+  // 以前是静默回落空表，下一次保存就把整份连 Key 一起覆盖掉（0.6.9 审计 P1-1）
+  const r = loadState(PROVIDERS_FILE, { shape: provShape, fallback: () => null, max: 4 << 20 });
+  if (r.data) {
+    PROVIDERS_RAW = r.data;
     const raw = readSmallFile(PROVIDERS_FILE, 4 << 20);
-    if (raw == null) throw new Error("providers unreadable");
-    PROV_DISK_H = provHash(raw);
-    const j = JSON.parse(raw);
-    if (j && typeof j === "object") PROVIDERS_RAW = { ...j, providers: bare((j.providers && typeof j.providers === "object") ? j.providers : {}) };
-  } catch {}
+    PROV_DISK_H = raw == null ? null : provHash(raw);
+  } else if (r.bad) PROV_DISK_H = null;
   const providers = bare({});
   for (const id of Object.keys(PRESETS)) providers[id] = composeProvider(id, PROVIDERS_RAW.providers[id]);
   for (const [id, raw] of Object.entries(PROVIDERS_RAW.providers)) {
@@ -406,6 +421,17 @@ function providerView(id, v) {
   };
 }
 
+/** home 下网关自己的状态文件（会话钉选、项目、定时任务、设置…）里还记着的最大 custom-N。只是数号，读不了的跳过 */
+function maxCustomReferenced() {
+  let n = 0;
+  let names = []; try { names = fs.readdirSync(CFG.home).filter((f) => /^ccapp-.*\.json$/.test(f)); } catch {}
+  for (const f of names) {
+    const raw = readSmallFile(path.join(CFG.home, f), 8 << 20);
+    if (raw) for (const m of raw.matchAll(/"custom-(\d{1,9})"/g)) n = Math.max(n, Number(m[1]));
+  }
+  return n;
+}
+
 export function upsertProvider(id, b, prepare) {
   const isNew = !id;
   if (isNew) {
@@ -417,6 +443,9 @@ export function upsertProvider(id, b, prepare) {
       const m = /^custom-(\d+)$/.exec(k);
       if (m) n = Math.max(n, Number(m[1]));
     }
+    // 老配置没有 nextCustom、最大号又刚被删掉时，上面数不到它：会话钉选、项目、定时任务、设置里还记着的 custom-N 也算进来，
+    // 否则新接口拿到同一个号，旧会话 / 任务被悄悄送到新端点（0.6.9 审计 P1-8）
+    n = Math.max(n, maxCustomReferenced());
     n += 1;
     while (PROVIDERS_RAW.providers["custom-" + n] || PRESETS["custom-" + n]) n++;
     id = "custom-" + n;
@@ -424,6 +453,7 @@ export function upsertProvider(id, b, prepare) {
   }
   if (!PRESETS[id] && !PROVIDERS_RAW.providers[id] && !isNew) return { error: "unknown provider" };
   const cur = { ...(PROVIDERS_RAW.providers[id] || {}) };
+  let keyCleared = false;
   const str = (v) => String(v == null ? "" : v).trim();
   // 预置厂商还没 Key、这次又什么都没给：别回「已保存」，其实什么都没配上（审查 P3-3）
   if (PRESETS[id] && !isNew && "apiKey" in b && !str(b.apiKey) && !cur.apiKey && !b.clearKey
@@ -459,6 +489,14 @@ export function upsertProvider(id, b, prepare) {
     if (!cur.label) cur.label = id;
     if (!/^https?:\/\//.test(cur.baseUrl || "")) return { error: "bad_baseUrl", message: tz("端点地址要以 http:// 或 https:// 开头") };
     cur.baseUrl = cur.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");   // claude 自己会补 /v1/messages
+    // 改了端点（或模型清单）的主机、这次又没给新 Key：旧 Key 不能跟着送去新主机，清掉，要用户重新填（0.6.9 审计 P1-2）
+    const host = (u) => { try { return new URL(u).host.toLowerCase(); } catch { return ""; } };
+    const prev = PROVIDERS_RAW.providers[id] || {};
+    const hostsOf = (v) => [host(v.baseUrl), host(v.modelsUrl)].filter(Boolean);
+    if (!isNew && cur.apiKey && !("apiKey" in b && str(b.apiKey)) && hostsOf(cur).some((h) => !hostsOf(prev).includes(h))) {
+      delete cur.apiKey;
+      keyCleared = true;
+    }
   }
   // 正在用这家的轮次已经拿了旧地址，密钥却是每次现读（apiKeyHelper / keyOf 按 id 取新的）：改连接会拼出「旧地址 + 新密钥」，
   // 和删除一样等它跑完（审查 B01）。只改默认型号、窗口、名字这些不碍事，照常放行
@@ -477,7 +515,7 @@ export function upsertProvider(id, b, prepare) {
   if (id === PROVIDER.id) applyProvider();
   dropModelCache();   // 会话可能钉在不是全局的这家上：哪家改了都清，免得清单/窗口还是旧的
   log(`[provider] 已保存 ${id}${"apiKey" in b && str(b.apiKey) ? "（含密钥）" : ""}`);
-  return { ok: true, id, provider: providerView(id, PROVIDERS_CFG.providers[id]) };
+  return { ok: true, id, provider: providerView(id, PROVIDERS_CFG.providers[id]), ...(keyCleared ? { keyCleared: true } : {}) };
 }
 
 /** 模型清单地址能不能带密钥去问：要 https、和接口地址同一个主机（审查 10-30 第九份 存疑4、v0.5.12 中1、v0.5.13 低1）。
