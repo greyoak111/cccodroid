@@ -5,6 +5,8 @@ import { promptTokens } from "./stream.mjs";
 import { isInjected } from "./integrity.mjs";
 
 // ── 读会话记录：分页翻 transcript、子代理 ─────────────────────────────
+const MAX_ASSISTANT_TEXT = 200000;   // 单条回复最多交给前端这么多字（195-Q.10）
+
 /** 工具参数里的长字符串截短 —— 历史里一个 Write 工具能带几百 KB 的文件内容，
  *  原样回传只会把界面拖死；摘要（command / file_path …）用不到那么长。 */
 function clipInput(v, depth = 0) {
@@ -62,7 +64,12 @@ export function transcriptItems(ev) {
     }
   } else if (ev.type === "assistant") {
     for (const c of ev.message?.content || []) {
-      if (c.type === "text" && c.text) out.push({ role: "assistant", text: c.text, uuid: ev.uuid || null });   // uuid：书签落点
+      if (c.type === "text" && c.text) {
+        // 单条正文不设上限：重开大会话时整段 renderMd 会把界面卡死（195-Q.10）。留一个很大的顶，超出的标出来
+        const over = c.text.length > MAX_ASSISTANT_TEXT;
+        const text = over ? c.text.slice(0, MAX_ASSISTANT_TEXT) + "\n\n" + tr(LAST_LANG, tz("（正文太长，只显示前 {n} 字）", { n: MAX_ASSISTANT_TEXT })) : c.text;
+        out.push({ role: "assistant", text, uuid: ev.uuid || null, ...(over ? { truncated: true } : {}) });   // uuid：书签落点
+      }
       else if (c.type === "thinking" && c.thinking) out.push({ role: "thinking", text: c.thinking.slice(0, 60000) });
       else if (c.type === "tool_use") out.push({ role: "tool_use", id: c.id, name: c.name, input: clipInput(c.input) });
     }
@@ -134,53 +141,71 @@ export async function readSessionPage(file, { before = null, limit = 40, exclude
   try {
     const size = (await fh.stat()).size;
     let cursor = before == null ? size : Math.max(0, Math.min(Number(before) || 0, size));
-    let pos = cursor, tail = Buffer.alloc(0), scanned = 0;
+    let pos = cursor, scanned = 0;
     const items = [];
     let contextTokens = null, contextDone = false;
+    // 跨块的行按片段攒着，凑齐一行再 Buffer.concat：以前每个 256 KB 块都把整条未完成的行拼一遍，
+    // 20–64 MB 的单行会退化成平方级拷贝（195-Q.2）。carry 里是新→旧的片段
+    let carry = [];
 
-    while (pos > 0) {
+    const handle = (line, at) => {
+      cursor = at;
+      let turnStart = false;
+      if (line) {
+        let ev = null; try { ev = JSON.parse(line); } catch {}
+        // exclude 只防止正文重复渲染，用量仍要从最新的主会话消息取。
+        if (ev && !contextDone) {
+          const c = contextOf(ev);
+          if (c) { contextDone = true; contextTokens = c.n; }
+        }
+        if (ev && !(excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) {
+          const its = pick(ev);
+          if (its.length) {
+            items.unshift(...its);
+            turnStart = its[0].role === "user";
+          }
+        }
+      }
+      if ((items.length >= limit && turnStart) || items.length >= limit * 4) {
+        return { items, cursor, size, contextTokens };
+      }
+      return null;
+    };
+
+    outer: while (pos > 0) {
       const start = Math.max(0, pos - CH);
       const chunk = Buffer.alloc(pos - start);
       await fh.read(chunk, 0, chunk.length, start);
-      const data = tail.length ? Buffer.concat([chunk, tail]) : chunk;   // 覆盖 [start, cursor)
       pos = start;
       scanned += chunk.length;
-      let lineEnd = data.length;
+      let end = chunk.length;   // 这一行在本块里的结尾（不含）
 
       for (;;) {
-        const from = lineEnd - 2;
-        const nl = from >= 0 ? data.lastIndexOf(10, from) : -1;
-        if (nl < 0 && start > 0) { tail = data.subarray(0, lineEnd); break; }   // 行头还在更前面
-        const lineStart = nl < 0 ? 0 : nl + 1;
-        const line = data.toString("utf8", lineStart, lineEnd).trim();
-        lineEnd = lineStart;
-        cursor = start + lineStart;
-
-        let turnStart = false;
-        if (line) {
-          let ev = null; try { ev = JSON.parse(line); } catch {}
-          // exclude 只防止正文重复渲染，用量仍要从最新的主会话消息取。
-          if (ev && !contextDone) {
-            const c = contextOf(ev);
-            if (c) { contextDone = true; contextTokens = c.n; }
+        const nl = end >= 2 ? chunk.lastIndexOf(10, end - 2) : -1;
+        if (nl < 0) {
+          if (start > 0) {
+            // 整段都是某条跨块行的开头部分：先攒着（它是目前最旧的一段，放在 carry 末尾）
+            carry.push(Buffer.from(chunk.subarray(0, end)));
+            break;
           }
-          if (ev && !(excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) {
-            const its = pick(ev);
-            if (its.length) {
-              items.unshift(...its);
-              turnStart = its[0].role === "user";
-            }
-          }
+          // 文件头、且这一行没有换行：把攒下的片段拼成完整的一行
+          const parts = carry.length ? [chunk.subarray(0, end), ...carry.slice().reverse()] : [chunk.subarray(0, end)];
+          carry = [];
+          const ret = handle(Buffer.concat(parts).toString("utf8").trim(), 0);
+          if (ret) return ret;
+          break outer;
         }
-        if (cursor === 0) break;
-        if ((items.length >= limit && turnStart) || items.length >= limit * 4) {
-          return { items, cursor, size, contextTokens };
-        }
-        if (nl < 0) break;
+        const seg = chunk.subarray(nl + 1, end);
+        const line = carry.length ? Buffer.concat([seg, ...carry.slice().reverse()]).toString("utf8").trim() : seg.toString("utf8").trim();
+        carry = [];
+        const ret = handle(line, start + nl + 1);
+        if (ret) return ret;
+        if (cursor === 0) break outer;
+        end = nl;
       }
       if (scanned >= MAX_SCAN && items.length) break;   // 极端大行：先交这一页，别无限往前扫
     }
-    return { items, cursor: pos === 0 && !tail.length ? 0 : cursor, size, contextTokens };
+    return { items, cursor: pos === 0 && !carry.length ? 0 : cursor, size, contextTokens };
   } finally {
     await fh.close();
   }

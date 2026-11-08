@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline";
 import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
 import { SID_RE, TRASH_KEEP_DAYS, inTrash, exportSessions, deleteMessage, forkSession, importSessions, listTrash, locateUserTurn, purgeTrash, realWorkspace, restoreSession, rewindFiles, rewindFixup, trashSession, undoDelete } from "./sessionops.mjs";
 import { goalStateOf, tasksOf } from "./goal.mjs";
@@ -12,55 +13,62 @@ import { runOfSession } from "./runs.mjs";
 import { archiveBrief, archiveDb, archivedTitle } from "./archive-store.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { isInjected } from "./integrity.mjs";
+import { isObj, loadState, saveState } from "./statefile.mjs";
 
 // ── 会话重命名表 ──────────────────────────────────────────────────────
-export let NAMES = {};
-{
-  let raw = null;
-  try { raw = fs.readFileSync(PATHS.names, "utf8"); } catch {}
-  if (raw != null) {
-    try { NAMES = JSON.parse(raw); } catch { NAMES = null; }
-    // 文件坏了（解析不了、或是 null / 数组之类）：当没有，别让整个会话列表跟着抛错（#98 03-012）；
-    // 原件留一份底稿再说——下次改名就会把它覆盖掉（DeepSeek 复核 #9，同档案的 .bad- 底稿）
-    if (!NAMES || typeof NAMES !== "object" || Array.isArray(NAMES)) {
-      NAMES = {};
-      try { fs.copyFileSync(PATHS.names, PATHS.names + ".bad-" + Date.now()); } catch {}
-    }
-  }
-}
+// 文件坏了（解析不了、或是 null / 数组之类）：留底成 .bad-* 再当没有，别让整个会话列表跟着抛错（#98 03-012）
+const namesShape = (j) => {
+  if (!isObj(j)) return undefined;
+  const out = {};
+  for (const [id, v] of Object.entries(j)) if (typeof v === "string" && v) out[id] = v;
+  return out;
+};
+export let NAMES = loadState(PATHS.names, { shape: namesShape, fallback: () => ({}) }).data;
 // 会话标题只在这里定：用户改过的 > 建档的最新一章题名 > 第一句提问。列表、详情、搜索都走它，免得顶栏和侧栏各说各的（#44）
 const sessionTitle = (id, meta) => NAMES[id] || archivedTitle(id) || meta.title;
 
 // 改名表的版本：每次落盘加一。脉络/剖面的缓存戳带上它，改名（键数不变）也会重建（DeepSeek 复核 #6）
 export let NAMES_REV = 0;
-/** 写 JSON 表：先写同目录临时文件再 rename。直接写目标文件在写一半被杀/满盘时会留下截断 JSON，
- *  下次启动只能按空表起，用户改过的标题/置顶就全丢了。 */
+/** 写 JSON 表：走 statefile 的临时文件 + fsync + rename；返回是否写成，调用方要据此回 500（197-2.6） */
 function writeJsonTable(file, obj) {
-  const tmp = file + ".tmp-" + process.pid;
-  try { fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: 0o600 }); fs.renameSync(tmp, file); }
-  catch { try { fs.rmSync(tmp, { force: true }); } catch {} }
+  return saveState(file, obj);
 }
 export function saveNames() {
   NAMES_REV++;
-  writeJsonTable(PATHS.names, NAMES);
+  const ok = writeJsonTable(PATHS.names, NAMES);
+  if (!ok) log("会话标题没保存上（存储满了或没有权限）");
+  return ok;
 }
 // 置顶表：会话号 → 置顶时刻
 const PINS_FILE = path.join(CFG.home, "ccapp-session-pins.json");
-export let PINS = {};
-try { const j = JSON.parse(fs.readFileSync(PINS_FILE, "utf8")); if (j && typeof j === "object" && !Array.isArray(j)) PINS = j; } catch {}
+const pinsShape = (j) => {
+  if (!isObj(j)) return undefined;
+  const out = {};
+  for (const [id, v] of Object.entries(j)) if (Number.isFinite(+v)) out[id] = +v;
+  return out;
+};
+// PINS 以前坏了不留下底，下一次保存就把用户置顶全盖掉（197-9.8）
+export let PINS = loadState(PINS_FILE, { shape: pinsShape, fallback: () => ({}) }).data;
 export function savePins() {
-  writeJsonTable(PINS_FILE, PINS);
+  const ok = writeJsonTable(PINS_FILE, PINS);
+  if (!ok) log("会话置顶没保存上（存储满了或没有权限）");
+  return ok;
 }
 
 // ── 会话（claude 的 transcript 文件）─────────────────────────────────
 /** 项目目录名 → 真实 cwd（从 jsonl 里读，目录名本身不可逆） */
 export const PEEK_CACHE = new Map();   // 标题/cwd 取自文件开头，写进去就不变了，没必要每次列表都重读
-export function peekSession(file) {
-  let hit = PEEK_CACHE.get(file);
-  if (hit && hit.title !== "(无标题)") return hit;
-  hit = peekSessionRaw(file);
-  PEEK_CACHE.set(file, hit);
-  return hit;
+/** st：调用方已经 stat 过就传进来。缓存带上 size/mtime/inode：同尺寸原地改写、删消息重写也能察觉（200-15-08） */
+export function peekSession(file, st = null) {
+  let cur = st;
+  if (!cur) { try { cur = fs.statSync(file); } catch { cur = null; } }
+  const hit = PEEK_CACHE.get(file);
+  if (hit && cur && hit.size === cur.size && hit.mtimeMs === cur.mtimeMs && (hit.ino == null || cur.ino == null || hit.ino === cur.ino)) return hit;
+  const rec = peekSessionRaw(file);
+  if (cur) { rec.size = cur.size; rec.mtimeMs = cur.mtimeMs; rec.ino = cur.ino; }
+  PEEK_CACHE.set(file, rec);
+  if (PEEK_CACHE.size > 5000) PEEK_CACHE.delete(PEEK_CACHE.keys().next().value);   // 只增不减（200-6-05）
+  return rec;
 }
 function peekSessionRaw(file) {
   let title = "", cwd = "", firstMsg = "", created = 0;
@@ -118,6 +126,7 @@ export function listSessions(limit = 150) {
         project: d.name,
         mtime: st.mtimeMs,
         size: st.size,
+        ino: st.ino,
       });
     }
   }
@@ -125,7 +134,7 @@ export function listSessions(limit = 150) {
   found.sort((a, b) => b.mtime - a.mtime);
   const shown = found.filter((s, i) => i < limit || PINS[s.id]);
   const out = shown.map((s) => {
-    const meta = peekSession(s.file), ab = archiveBrief(s.id, s.size, lineageCached(s.id)?.compacts?.length || 0);
+    const meta = peekSession(s.file, { size: s.size, mtimeMs: s.mtime, ino: s.ino }), ab = archiveBrief(s.id, s.size, lineageCached(s.id)?.compacts?.length || 0);
     return {
       id: s.id,
       no: ab.no, misc: ab.misc,
@@ -147,18 +156,42 @@ export function listSessions(limit = 150) {
 // ── 会话内容搜索 ──
 // 每个 jsonl 只抽人和助手的正文（跳过工具结果、<…> 包起来的系统注入），按读到的字节偏移增量追加。
 // 索引放内存：首次搜索要扫一遍全部会话，之后只读新追加的部分。
-const SEARCH_IDX = new Map();   // file → { off, text, lower }
+const SEARCH_IDX = new Map();   // file → { off, text, lower, skip }
 // 常驻上限（按字符，text + lower 两份 UTF-16 约 4 字节/字）：最近的会话常驻，超出的旧会话搜时现读、用完就扔，
-// 搜得全但内存有顶（审查 中5）
+// 搜得全但内存有顶（审查 中5）。单个会话另设上限：超了不建索引、查询时流式扫，避免一个 32 MB 的中文会话把 RSS 顶到几百 MB（195-Q.3）
 const SEARCH_KEEP_CHARS = 16e6;
+const SEARCH_FILE_KEEP = 4e6;
+const SEARCH_STREAM_SIZE = Number(process.env.CCAPP_SEARCH_STREAM_SIZE) || (12 << 20);
+const normText = (s) => String(s).normalize("NFKC").toLowerCase();
 function searchText(line) {
   if (line.length > 4e6 || !(line.includes('"user"') || line.includes('"assistant"'))) return "";
   let ev; try { ev = JSON.parse(line); } catch { return ""; }
-  if ((ev.type !== "user" && ev.type !== "assistant") || ev.isMeta) return "";
+  // 侧链（子代理）和压缩摘要是另一条线的内容，界面不显示，不放进人看的搜索（200-15-04）
+  if ((ev.type !== "user" && ev.type !== "assistant") || ev.isMeta || ev.isSidechain || ev.isCompactSummary) return "";
   const c = ev.message?.content, out = [];
   if (typeof c === "string") out.push(c);
   else if (Array.isArray(c)) for (const b of c) if (b && b.type === "text" && typeof b.text === "string") out.push(b.text);
   return out.filter((t) => t && !isInjected(t)).join(" ").replace(/\s+/g, " ").trim();
+}
+/** 大文件不建索引，按查询流式扫（内存有顶，搜得全；每查一次读一遍） */
+async function streamSearch(file, needle) {
+  let count = 0, snippet = "";
+  const rl = readline.createInterface({ input: fs.createReadStream(file), crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      const t = searchText(line);
+      if (!t) continue;
+      const low = normText(t), src = t.length === low.length ? t : low;
+      let i = low.indexOf(needle);
+      while (i >= 0 && count < 99) {
+        count++;
+        if (!snippet) { const a = Math.max(0, i - 30), b = Math.min(src.length, i + needle.length + 60); snippet = (a > 0 ? "…" : "") + src.slice(a, b).replace(/\n/g, " ") + (b < src.length ? "…" : ""); }
+        i = low.indexOf(needle, i + needle.length);
+      }
+      if (count >= 99) break;
+    }
+  } finally { rl.close(); }
+  return { count, snippet };
 }
 // 增量的前提是文件只往后追加。删消息（整份重写）、撤销（抄回备份）、导入覆盖都不是：长度可能还变长了，
 // 照旧偏移接着读会留着已删的命中、漏掉恢复的正文（审查 B14）。所以记下 inode 和偏移前 64 字节，对不上就从头建
@@ -171,12 +204,15 @@ async function indexTail(fh, off) {
 }
 async function indexSessionFile(file, size) {
   let e = SEARCH_IDX.get(file);
-  if (!e || size < e.off) e = { off: 0, text: "", lower: "" };
+  if (!e || size < e.off) e = { off: 0, text: "", lower: "", skip: false };
+  // 文件本身就很大：不建索引，查询时流式扫（Q.3）
+  if (size > SEARCH_STREAM_SIZE) { e = { off: size, text: "", lower: "", skip: true }; SEARCH_IDX.set(file, e); return e; }
+  if (e.skip) return e;
   if (e.off) {
     const fh = await fs.promises.open(file, "r");
     try {
       const st = await fh.stat();
-      if (st.ino !== e.ino || (await indexTail(fh, e.off)) !== e.tail) e = { off: 0, text: "", lower: "" };
+      if (st.ino !== e.ino || (await indexTail(fh, e.off)) !== e.tail) e = { off: 0, text: "", lower: "", skip: false };
     } finally { await fh.close(); }
   }
   if (size > e.off) {
@@ -197,11 +233,18 @@ async function indexSessionFile(file, size) {
         for (const line of chunk.toString("utf8", 0, nl).split("\n")) { const t = searchText(line); if (t) parts.push(t); }
         await new Promise((r) => setImmediate(r));   // 别一口气把事件循环占住
       }
+      // 末行不带换行（导入的、被打断的记录）：能解析成完整 JSON 就收进来，不然最后一条正文永远搜不到（200-15-03）
+      if (rest.length) {
+        const tail = rest.toString("utf8");
+        try { JSON.parse(tail.trim()); const t = searchText(tail); if (t) parts.push(t); pos = size; rest = Buffer.alloc(0); } catch {}
+      }
       e.off = pos - rest.length;   // 半行留到下次
       e.tail = await indexTail(fh, e.off);
       if (parts.length) {
         const add = (e.text ? "\n" : "") + parts.join("\n");
-        e.text += add; e.lower += add.toLowerCase();
+        e.text += add;
+        e.lower += normText(add);   // NFKC + 小写：前后端归一化口径一致（200-15-06）
+        if (e.text.length > SEARCH_FILE_KEEP) { e = { off: size, text: "", lower: "", skip: true }; SEARCH_IDX.set(file, e); return e; }
       }
     } finally { await fh.close(); }
   }
@@ -210,13 +253,14 @@ async function indexSessionFile(file, size) {
 }
 let searchChain = Promise.resolve();
 let importBusy = false;
-function searchSessions(q) {
+export function searchSessions(q) {
   const run = searchChain.then(() => searchSessionsNow(q));
   searchChain = run.catch(() => {});
   return run;
 }
 async function searchSessionsNow(q) {
-  const needle = q.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
+  // 按码点截 200：以前按 UTF-16 码元切，可能切在代理对中间，长查询还会假命中（200-15-12）
+  const needle = normText([...String(q || "").replace(/\s+/g, " ").trim()].slice(0, 200).join(""));
   if (!needle) return { q, results: [] };
   const t0 = Date.now();
   const files = [];
@@ -228,7 +272,7 @@ async function searchSessionsNow(q) {
     try { names = fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isFile() && d.name.endsWith(".jsonl")).map((d) => d.name); } catch { continue; }
     for (const f of names) {
       const full = path.join(dir, f);
-      try { const st = fs.statSync(full); files.push({ id: f.slice(0, -6), file: full, mtime: st.mtimeMs, size: st.size }); } catch {}
+      try { const st = fs.statSync(full); files.push({ id: f.slice(0, -6), file: full, mtime: st.mtimeMs, size: st.size, ino: st.ino }); } catch {}
     }
   }
   files.sort((a, b) => b.mtime - a.mtime);
@@ -238,19 +282,29 @@ async function searchSessionsNow(q) {
   const results = [];
   let kept = 0;
   for (const f of files) {
-    const meta = peekSession(f.file);
+    const meta = peekSession(f.file, { size: f.size, mtimeMs: f.mtime, ino: f.ino });
     const title = sessionTitle(f.id, meta);
     let e;
     try { e = await indexSessionFile(f.file, f.size); } catch { continue; }
     kept += e.text.length;
     if (kept > SEARCH_KEEP_CHARS) SEARCH_IDX.delete(f.file);
-    let i = e.lower.indexOf(needle), count = 0, snippet = "";
-    if (i >= 0) {
-      const a = Math.max(0, i - 30), b = Math.min(e.text.length, i + needle.length + 60);
-      snippet = (a > 0 ? "…" : "") + e.text.slice(a, b).replace(/\n/g, " ") + (b < e.text.length ? "…" : "");
-      for (let j = i; j >= 0 && count < 99; j = e.lower.indexOf(needle, j + needle.length)) count++;
+    let i = -1, count = 0, snippet = "";
+    if (e.skip) {
+      // 大文件没建索引：流式扫一遍（内存有顶，搜得全）
+      const s = await streamSearch(f.file, needle);
+      count = s.count; snippet = s.snippet;
+      i = count ? 0 : -1;
+    } else {
+      i = e.lower.indexOf(needle);
+      if (i >= 0) {
+        // 归一化可能改变长度（NFKC / 个别字符小写后变长）：对不上时用归一化文本出摘录，别切错原文
+        const src = e.text.length === e.lower.length ? e.text : e.lower;
+        const a = Math.max(0, i - 30), b = Math.min(src.length, i + needle.length + 60);
+        snippet = (a > 0 ? "…" : "") + src.slice(a, b).replace(/\n/g, " ") + (b < src.length ? "…" : "");
+        for (let j = i; j >= 0 && count < 99; j = e.lower.indexOf(needle, j + needle.length)) count++;
+      }
     }
-    const inTitle = title.toLowerCase().includes(needle);
+    const inTitle = normText(title).includes(needle);
     if (!inTitle && i < 0) continue;
     results.push({
       id: f.id, title, renamed: !!NAMES[f.id], cwd: meta.cwd, mtime: f.mtime, created: meta.created || 0,
@@ -276,6 +330,22 @@ export function findSessionFile(id) {
 }
 
 // ── 路由：/api/sessions/search /api/sessions /api/sessions/trash /api/trash /api/trash/restore /api/trash/purge /api/sessions/export /api/sessions/import /api/session/ ──
+/** 只剩后台任务的 idle 轮：先结束它、等它收尾，再删 / 回退 / 删消息（195-A.3）。
+ *  真正在生成的返回 false（调用方回 409）。复用 queue.abortRun（和「排队消息要槽位时结束空闲轮」同一口径）；
+ *  动态 import 避免 sessions ↔ queue 顶层成环。进程被杀后 close 才来（abortRun 有 5+2 秒兜底），等它从 RUNS 消失再动文件 */
+async function idleRetired(id) {
+  const live = runOfSession(id);
+  if (!live) return true;
+  if (!live.idle) return false;
+  try {
+    const { abortRun } = await import("./queue.mjs");
+    if (!abortRun(live, { hold: false })) return true;
+  } catch (e) { log("结束空闲轮失败：" + e.message); return false; }
+  const until = Date.now() + 8000;
+  while (runOfSession(id) && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+  return !runOfSession(id);
+}
+
 export async function routeSessions(req, res, u, p) {
   // ── 会话 ──
   if (req.method === "GET" && p === "/api/sessions/search") {
@@ -314,7 +384,7 @@ export async function routeSessions(req, res, u, p) {
   if (req.method === "POST" && p === "/api/trash/purge") {
     const b = JSON.parse((await readBody(req)) || "{}");
     const ids = b.all ? listTrash().map((m) => m.id) : [].concat(b.ids || []).map(String);
-    const n = purgeTrash(ids);
+    const n = await purgeTrash(ids);
     log(`回收站：彻底删除 ${n} 个会话`);
     return sendJson(res, 200, { ok: true, purged: n });
   }
@@ -440,12 +510,13 @@ export async function routeSessions(req, res, u, p) {
 
     if (req.method === "DELETE" && !action) {
       if (!found) return sendJson(res, 404, { error: "not found" });
-      if (runOfSession(id)) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中。") });
+      if (!(await idleRetired(id))) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中。") });
       // 删除先进回收站（30 天内可恢复），彻底删除走 /api/trash/purge
       let r;
       try { r = trashSession(id); } catch (e) { return sendJson(res, 500, { error: e.message }); }
       if (r.ok) log(`会话进回收站 ${id.slice(0, 8)}`);
-      return sendJson(res, r.ok ? 200 : 404, r);
+      // 写不进 meta 是服务端/存储问题，别报成 404（195-N.1）
+      return sendJson(res, r.ok ? 200 : r.error === "write_failed" ? 500 : 404, r);
     }
 
     if (req.method === "POST" && action === "rename") {
@@ -453,14 +524,15 @@ export async function routeSessions(req, res, u, p) {
       const name = String(b.title || "").trim().slice(0, 120);
       if (!name) return sendJson(res, 400, { error: "empty" });
       if (!found) return sendJson(res, 404, { error: "not found" });      // 不存在的会话不往名字表里记（审查 v0513b 低-6）
-      NAMES[id] = name; saveNames();
+      const before = NAMES[id]; NAMES[id] = name;
+      if (!saveNames()) { if (before === undefined) delete NAMES[id]; else NAMES[id] = before; return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
       return sendJson(res, 200, { ok: true, title: name });
     }
 
     // 回退到某条用户消息之前：文件（claude 检查点）+ 可选连对话一起（截到这条之前另起一个会话，原会话不动）
     if (req.method === "POST" && action === "rewind") {
       const b = JSON.parse((await readBody(req)) || "{}");
-      if (runOfSession(id)) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中，等它答完再回退。") });
+      if (!(await idleRetired(id))) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中，等它答完再回退。") });
       const loc = locateUserTurn(id, String(b.userText || ""), b.after, String(b.uuid || "").slice(0, 64));
       if (!loc.ok) return sendJson(res, loc.status || 400, { error: "locate", message: loc.message });
       const uuid = loc.users[loc.best].uuid;
@@ -493,6 +565,8 @@ export async function routeSessions(req, res, u, p) {
     // 删一条消息（which: user = 这一轮的提问；bot = 这一轮 Claude 的整条回复），可撤销最近一次
     if (req.method === "POST" && (action === "delmsg" || action === "undodel")) {
       const b = JSON.parse((await readBody(req)) || "{}");
+      // 只剩后台任务的 idle 轮：先结束它（否则永远 409），真正在生成的仍拒绝（195-A.3）
+      if (action === "delmsg" && !(await idleRetired(id))) return sendJson(res, 409, { ok: false, error: "delmsg", message: tz("这个会话正在生成中，等它答完再删。") });
       let r;
       try { r = action === "delmsg" ? deleteMessage(id, String(b.userText || ""), Number(b.after) || 0, b.which === "user" ? "user" : "bot", String(b.uuid || "").slice(0, 64), String(b.replyUuid || "").slice(0, 64), Array.isArray(b.offs) ? b.offs.slice(0, 64).map(Number) : []) : undoDelete(id, String(b.undo || "")); }
       catch (e) { r = { ok: false, status: 500, message: e.message }; }
@@ -509,8 +583,9 @@ export async function routeSessions(req, res, u, p) {
 
     if (req.method === "POST" && action === "pin") {
       const b = JSON.parse((await readBody(req)) || "{}");
+      const before = PINS[id];
       if (b.pin === false) delete PINS[id]; else PINS[id] = Date.now();
-      savePins();
+      if (!savePins()) { if (before === undefined) delete PINS[id]; else PINS[id] = before; return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
       return sendJson(res, 200, { ok: true, pinned: PINS[id] || 0 });
     }
   }

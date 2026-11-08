@@ -220,11 +220,14 @@ test("B05 定时任务不塞进同一会话里空闲着的手动轮次", async (
 test("B16/B17 一次性任务到点排队：计时不把它当过期关掉；排队中被删，醒来后不再入队", async (t) => {
   const { _schedForTest: S } = await import("../gw/sched.mjs");
   const { QUEUE } = await import("../gw/queue.mjs");
-  const { RUNS } = await import("../gw/runs.mjs");
+  const { RUNS, maxParallel } = await import("../gw/runs.mjs");
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const task = { id: "b17", name: "b17", prompt: "做事", on: true, freq: { kind: "once" }, nextAt: null, busy: "queue", session: "new", perm: "read" };
   S.DB.tasks.push(task);
-  RUNS.set("b17-busy", { id: "b17-busy", text: "", startedAt: Date.now(), log: [], idle: false, ended: false });
+  // 0.6.10：busy 按 RUNS.size >= maxParallel 算（和 queue.pump 同口径），要把并行槽占满才会排队
+  const fakes = [];
+  for (let i = 0; i < maxParallel(); i++) { const id = "b17-busy" + i; fakes.push(id); RUNS.set(id, { id, text: "", startedAt: Date.now(), log: [], idle: false, ended: false }); }
+  t.after(() => { for (const id of fakes) RUNS.delete(id); });
   const allow = S.DB.allowLogin; S.DB.allowLogin = true;   // 测试环境默认接口是订阅账户：不放开的话一进来就跳过了
   t.after(() => { S.DB.allowLogin = allow; });
   const q0 = QUEUE.length;
@@ -235,7 +238,7 @@ test("B16/B17 一次性任务到点排队：计时不把它当过期关掉；排
   assert.ok(!S.runlog().some((r) => r.taskId === "b17" && /时间已过/.test(r.msg)));
   // 排队中被删，别的对话又正好在醒来前结束
   S.DB.tasks.splice(S.DB.tasks.indexOf(task), 1);
-  RUNS.delete("b17-busy");
+  for (const id of fakes) RUNS.delete(id);
   t.mock.timers.tick(30000);
   await going;
   assert.equal(QUEUE.length, q0, "删了的任务不能再入队");
