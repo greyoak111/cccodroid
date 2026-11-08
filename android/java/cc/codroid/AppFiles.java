@@ -3,6 +3,7 @@ package cc.codroid;
 import android.content.Context;
 import android.system.Os;
 import android.system.OsConstants;
+import android.util.Log;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -47,7 +48,8 @@ final class AppFiles {
     // 和上次核对通过时记下的不同 —— 才算升级。版本没变、文件却对不上的仍按篡改处理。
     // TAG 和记录都是同 uid 能改的：光凭它们，篡改能被装成「升级」，每次都不留痕（DeepSeek 复核 v066 必修 1a；文件照样整树还原，丢的是留痕和提醒）。
     // 所以再要一条同 uid 改不了的：系统记的安装时间（lastUpdateTime）在 24 小时内。装完服务一般马上起、当场核对，
-    // 24 小时是给「装完很久才打开」留的余地；能钻空子的只剩真实升级后的这一段
+    // 24 小时是给「装完很久才打开」留的余地；能钻空子的只剩真实升级后的这一段。
+    // 降级安装（版本号比上次核对通过时低）不算升级：系统不拦侧载旧包，应用拦不住，但文件差异不能因此被吃掉、不留痕（0.6.9 审计 14-04）
     private static final long UPDATE_WINDOW = 24L * 3600 * 1000;
     private static String updated = null;
     private static long installedAt(Context c) {
@@ -60,7 +62,8 @@ final class AppFiles {
             return vc + ":" + p.lastUpdateTime + ":" + p.versionName;
         } catch (Exception e) { return ""; }
     }
-    /** 刚升级（或覆盖安装）过：返回「旧版本名->新版本名」，不是返回 null */
+    /** 刚升级（或覆盖安装）过：返回「旧版本名->新版本名」，不是返回 null。
+     *  降级安装不算：版本号比上次核对通过时的低就返回 null，让调用方按篡改留痕处理（0.6.9 审计 14-04） */
     static synchronized String updatedFrom(Context c, File app) {
         String now = pkgStamp(c);
         if (now.isEmpty()) return null;
@@ -68,14 +71,31 @@ final class AppFiles {
         if (age < 0 || age > UPDATE_WINDOW) return null;
         String seen = c.getSharedPreferences("appfiles", Context.MODE_PRIVATE).getString("seen", "");
         if (now.equals(seen)) return null;
+        // 侧载旧包（adb install -d、文件管理器里装旧版本）系统不拦，lastUpdateTime 和 TAG 也都会变：以前 24 小时窗口里
+        // 一律按「升级」吃掉文件差异、不留篡改痕迹。先比版本号，低了按降级安装处理（0.6.9 审计 14-04）
+        long nowVc = stampVc(now), seenVc = stampVc(seen);
+        if (nowVc >= 0 && seenVc >= 0 && nowVc < seenVc) {
+            Log.w("cccodroid", "安装的版本（" + versionName(now) + "，" + nowVc + "）比上次核对通过的（" + versionName(seen) + "，" + seenVc + "）旧：按降级安装处理，文件差异不当作升级");
+            return null;
+        }
         String want, have;
         try (InputStream in = c.getAssets().open("app/TAG")) { want = new String(readAll(in), StandardCharsets.UTF_8).trim(); } catch (Exception e) { return null; }
         try { have = new String(java.nio.file.Files.readAllBytes(new File(app, "TAG").toPath()), StandardCharsets.UTF_8).trim(); } catch (Exception e) { have = ""; }
         if (want.equals(have)) return null;
         // seen 是 0.6.6 才有的；从更早的版本升上来时借更新说明记的「上次看到的版本」，只用来显示
-        String from = !seen.isEmpty() ? seen.substring(seen.lastIndexOf(58) + 1)
+        String from = !seen.isEmpty() ? versionName(seen)
                 : c.getSharedPreferences("ui", Context.MODE_PRIVATE).getString("whatsNewSeen", "?");
-        return from + "->" + now.substring(now.lastIndexOf(58) + 1);
+        return from + "->" + versionName(now);
+    }
+    /** 安装版本戳（versionCode:lastUpdateTime:versionName）里的 versionCode；认不出给 -1 */
+    private static long stampVc(String stamp) {
+        int i = stamp.indexOf(':');
+        if (i <= 0) return -1;
+        try { return Long.parseLong(stamp.substring(0, i)); } catch (NumberFormatException e) { return -1; }
+    }
+    /** 安装版本戳里的 versionName */
+    private static String versionName(String stamp) {
+        return stamp.substring(stamp.lastIndexOf(':') + 1);
     }
     /** files/app 和这个安装包对上了：记下安装版本，之后再对不上就不是升级 */
     static synchronized void markSeen(Context c) {

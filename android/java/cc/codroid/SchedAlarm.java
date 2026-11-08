@@ -22,10 +22,12 @@ import java.nio.file.Files;
 public class SchedAlarm extends BroadcastReceiver {
     static final String TAG = "cccodroid";
     static final String ACTION = "cc.codroid.SCHED_ALARM";
+    /** 这次闹钟按哪个计划时刻设的：响的时候交给网关，Doze 推迟几分钟也按「到点」执行（0.6.9 审计 13-04） */
+    static final String EXTRA_AT = "at";
     private static long lastAt = -1;
 
-    private static PendingIntent pi(Context c) {
-        Intent i = new Intent(c, SchedAlarm.class).setAction(ACTION);
+    private static PendingIntent pi(Context c, long at) {
+        Intent i = new Intent(c, SchedAlarm.class).setAction(ACTION).putExtra(EXTRA_AT, at);
         return PendingIntent.getBroadcast(c, 70, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
@@ -34,7 +36,7 @@ public class SchedAlarm extends BroadcastReceiver {
         if (at == lastAt) return;
         AlarmManager am = c.getSystemService(AlarmManager.class);
         if (am == null) return;
-        PendingIntent p = pi(c);
+        PendingIntent p = pi(c, at);
         if (at <= 0) {
             try { am.cancel(p); lastAt = at; Log.i(TAG, "定时任务闹钟：已取消"); }
             catch (Exception e) { lastAt = -1; Log.w(TAG, "定时任务闹钟取消失败", e); }
@@ -74,12 +76,39 @@ public class SchedAlarm extends BroadcastReceiver {
         } catch (Exception e) { Log.w(TAG, "精确闹钟引导发不出去", e); }
     }
 
+    /** 后台起不了前台服务时叫人：单独一个渠道，点了打开应用（不用「等你确认」渠道，那不是要用户确认什么）。
+     *  只在 targetSdk 31+ 且精确闹钟权限没给时才会走到这里（0.6.9 审计 13-05） */
+    private static void wakeUser(Context c, long at) {
+        try {
+            Tr.init(c);   // 闹钟叫醒的新进程里词典可能还没初始化过
+            android.app.NotificationManager nm = c.getSystemService(android.app.NotificationManager.class);
+            android.app.NotificationChannel ch = new android.app.NotificationChannel("sched", Tr.t("定时任务"), android.app.NotificationManager.IMPORTANCE_DEFAULT);
+            ch.setDescription(Tr.t("到点提醒：系统不让后台拉起应用时，点通知打开应用"));
+            nm.createNotificationChannel(ch);
+            Intent go = new Intent(c, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            PendingIntent tap = PendingIntent.getActivity(c, 72, go, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            String text = Tr.f("定时任务到点了（{0}），但系统不让在后台启动应用。点此打开，任务会补跑或提示错过",
+                at > 0 ? new java.util.Date(at).toLocaleString() : Tr.t("刚刚"));
+            nm.notify(72, new android.app.Notification.Builder(c, "sched")
+                .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                .setContentTitle(Tr.t("定时任务没有在后台跑"))
+                .setContentText(text).setStyle(new android.app.Notification.BigTextStyle().bigText(text))
+                .setContentIntent(tap).setAutoCancel(true).build());
+            Log.w(TAG, "定时任务闹钟：系统不让后台起服务，已发通知请用户打开应用");
+        } catch (Exception e) { Log.w(TAG, "定时任务提醒发不出去", e); }
+    }
+
     /** 网关写的 home/ccapp-sched-next（服务启动、事件流重连时补一次，免得漏掉事件） */
     static void fromFile(Context c) {
         try {
             File f = new File(new Env(c).home, "ccapp-sched-next");
             if (!f.exists()) return;
-            set(c, Long.parseLong(new String(Files.readAllBytes(f.toPath()), "UTF-8").trim()));
+            // 只认正常大小的普通文件：旧版是直接覆盖写，断电 / 崩溃留下半截时，半个数字也会 parse 成
+            // 一个过去的时刻，立刻叫醒一次；FIFO / 目录更会卡住读取（0.6.9 审计 13-11）
+            if (!f.isFile() || f.length() > 32) { Log.w(TAG, "定时任务闹钟：文件不对（" + (f.isFile() ? f.length() + " 字节" : "不是普通文件") + "），先不登记"); return; }
+            String s = new String(Files.readAllBytes(f.toPath()), "UTF-8").trim();
+            if (!s.matches("\\d{1,16}")) { Log.w(TAG, "定时任务闹钟：文件内容不是时刻，先不登记"); return; }
+            set(c, Long.parseLong(s));
         } catch (Exception e) {
             Log.w(TAG, "定时任务闹钟：读文件失败", e);
         }
@@ -87,17 +116,27 @@ public class SchedAlarm extends BroadcastReceiver {
 
     @Override public void onReceive(Context c, Intent i) {
         if (!ACTION.equals(i.getAction())) return;
-        Log.i(TAG, "定时任务闹钟响了");
+        // 闹钟原定的时刻：Doze 推迟几分钟时网关据此照常执行这次计划，不当成「错过」（0.6.9 审计 13-04）
+        final long at = i.getLongExtra(EXTRA_AT, 0);
+        Log.i(TAG, "定时任务闹钟响了（计划 " + new java.util.Date(at) + "）");
         synchronized (SchedAlarm.class) { lastAt = -1; }   // 已经响过，下次报来的同一时刻也要重新定
-        try { GatewayService.start(c); } catch (Exception e) { Log.w(TAG, "定时任务闹钟：拉起服务失败", e); }
+        // 闹钟叫醒的服务跑完就退，不常驻（0.6.9 审计 13-01）
+        boolean started = false;
+        try { started = GatewayService.startAlarm(c); } catch (Exception e) { Log.w(TAG, "定时任务闹钟：拉起服务失败", e); }
+        // targetSdk 31+ 没给精确闹钟时响的是非精确闹钟，从后台不许起前台服务：网关起不来，任务就没人执行。
+        // 发通知请用户点开应用（界面在前台就能起服务；下面这段 tick 最多试 50 秒，用户快点开还能赶上）
+        if (!started) wakeUser(c, at);
         // 挂住广播（后台广播最多约 60 秒）：等网关能接请求了让它立刻查一遍；网关刚启动的话它 5 秒后也会自己查
+        final byte[] payload = ("{\"at\":" + at + "}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
         PendingResult pr = goAsync();
         new Thread(() -> {
             try {
                 for (int n = 0; n < 20; n++) {
                     try {
-                        HttpURLConnection h = Env.gateway("POST", "/api/sched/tick", null);
+                        HttpURLConnection h = Env.gateway("POST", "/api/sched/tick", payload);
                         h.setConnectTimeout(2000); h.setReadTimeout(5000);
+                        h.setDoOutput(true);
+                        try (java.io.OutputStream o = h.getOutputStream()) { o.write(payload); }
                         int code = h.getResponseCode();
                         h.disconnect();
                         if (code == 200) { Log.i(TAG, "定时任务闹钟：网关已查过"); return; }

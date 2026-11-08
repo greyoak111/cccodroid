@@ -911,41 +911,107 @@ final class Installer {
     }
 
     /**
-     * 更新工具包时，把用户自己装进 $PREFIX 的东西搬到新目录：pip（不带 --user）、npm -g 装的包和它们的命令。
-     * 判断"用户自己装的"：不在旧工具包任何一个包的文件清单（var/lib/dpkg/info/*.list）里，且新工具包里没有同名的。
-     * Python 小版本变了就不搬 site-packages（编译过的扩展对不上新解释器）。
+     * 更新工具包时，把用户自己装进 $PREFIX 的东西搬到新目录：pip（不带 --user）、npm -g 装的包和它们的命令，
+     * 以及用户自己在 etc / share / var / opt 这些地方放的文件（0.6.9 审计 14-02：以前只搬 bin、lib/node_modules、
+     * site-packages 三处，其余位置的用户内容随着旧目录一起删掉了）。
+     * 判断"用户自己装的"：不在旧工具包的任何一份清单里 —— dpkg 的 var/lib/dpkg/info/*.list、底座与各模块的
+     * FILES / MANIFEST / MANIFEST.local、组件的 MANIFEST 与界面那边的安装记录（files/components/*.json）。
+     * 口径照网关的 gw/orphans.mjs baseOwnedPaths：旧工具包的文件一个都不能当用户内容搬进新版。
+     * Python 小版本变了就不搬 lib/python3.X（编译过的扩展对不上新解释器）；tmp 与安装器自己的标记不搬。
      */
     private void carryOver(File old, File neu) {
         java.util.Set<String> owned = new java.util.HashSet<>();
+        // dpkg 清单：写的是 /data/data/<包名>/files/usr/…，而 env.usr 是 /data/user/0/…：只比 usr/ 之后的相对路径。
+        // 0.3.9 及以前直接拿绝对路径比，一条都对不上，旧工具包和旧组件 bin/ 下的东西全被当成用户的搬了过来
         File[] lists = new File(old, "var/lib/dpkg/info").listFiles((d, n) -> n.endsWith(".list"));
         if (lists != null) for (File l : lists) {
-            // 清单里写的是 /data/data/<包名>/files/usr/…，而 env.usr 是 /data/user/0/…：只比 usr/ 之后的相对路径。
-            // 0.3.9 及以前直接拿绝对路径比，一条都对不上，旧工具包和旧组件 bin/ 下的东西全被当成用户的搬了过来
             try {
-                for (String line : java.nio.file.Files.readAllLines(l.toPath())) {
-                    int i = line.indexOf("/files/usr/");
-                    if (i >= 0) owned.add(line.trim().substring(i + 11));
-                }
+                for (String line : java.nio.file.Files.readAllLines(l.toPath())) addOwned(owned, line);
             }
             catch (IOException ignored) {}
         }
-        java.util.List<String> dirs = new java.util.ArrayList<>(java.util.Arrays.asList("bin", "lib/node_modules"));
-        File[] py = new File(old, "lib").listFiles((d, n) -> n.matches("python3\\.\\d+"));
-        if (py != null) for (File p : py) if (new File(neu, "lib/" + p.getName()).isDirectory()) dirs.add("lib/" + p.getName() + "/site-packages");
-        int n = 0;
-        for (String d : dirs) {
-            File[] kids = new File(old, d).listFiles();
-            if (kids == null) continue;
-            for (File k : kids) {
-                String rel = d + "/" + k.getName();
-                if (owned.contains(rel)) continue;
-                File to = new File(neu, rel);
-                if (to.exists() || isSymlink(to)) continue;
-                to.getParentFile().mkdirs();
-                if (k.renameTo(to)) n++;
-            }
+        // 底座与各模块自己的清单（MANIFEST 行是「sha 大小 相对路径」，FILES 是纯路径）
+        addManifest(owned, new File(old, MANIFEST));
+        addManifest(owned, new File(old, LOCAL_MANIFEST));
+        addPaths(owned, new File(old, "libexec/devkit/FILES"));
+        File[] ms = new File(old, "libexec/devkit/modules").listFiles();
+        if (ms != null) for (File m : ms) {
+            addPaths(owned, new File(m, "FILES"));
+            for (String f : new String[]{"MANIFEST", "MANIFEST.local"}) addManifest(owned, new File(m, f));
         }
-        if (n > 0) ui.step(Tr.f("保留了你自己装进工具包的 {0} 项（pip / npm -g 等）", n));
+        // 已装组件：包内 MANIFEST 加上界面那边的安装记录（files/components/<id>.json 的 files / shared）
+        File[] cs = new File(old, "libexec/devkit/components").listFiles();
+        if (cs != null) for (File cmp : cs) addManifest(owned, new File(cmp, "MANIFEST"));
+        File[] recs = new File(env.files, "components").listFiles((d, n) -> n.endsWith(".json"));
+        if (recs != null) for (File r : recs) {
+            try {
+                JSONObject j = new JSONObject(new String(java.nio.file.Files.readAllBytes(r.toPath()), StandardCharsets.UTF_8));
+                for (String k : new String[]{"files", "shared"}) {
+                    org.json.JSONArray a = j.optJSONArray(k);
+                    if (a != null) for (int i = 0; i < a.length(); i++) addOwned(owned, a.optString(i, ""));
+                }
+            } catch (Exception ignored) {}
+        }
+        // 整棵都没人认领的目录一次 rename 搬走，不用逐个文件走（lib / share 下动辄几万个文件）
+        java.util.Set<String> ownedDirs = new java.util.HashSet<>();
+        for (String rel : owned) for (int i = rel.lastIndexOf('/'); i > 0; i = rel.lastIndexOf('/', i - 1)) ownedDirs.add(rel.substring(0, i));
+        int n = moveUser(old, neu, "", owned, ownedDirs);
+        if (n > 0) ui.step(Tr.f("保留了你自己装进工具包的 {0} 项", n));
+    }
+
+    /** 清单里的一行 → 相对 $PREFIX 的路径：绝对路径取出 /files/usr/ 之后的部分，去掉 ./ 与结尾的 / */
+    private static void addOwned(java.util.Set<String> owned, String line) {
+        if (line == null) return;
+        line = line.trim();
+        int i = line.indexOf("/files/usr/");
+        if (i >= 0) line = line.substring(i + 11);
+        else if (line.startsWith("./")) line = line.substring(2);
+        while (line.endsWith("/")) line = line.substring(0, line.length() - 1);
+        if (line.isEmpty() || line.startsWith("/") || line.contains("../")) return;
+        owned.add(line);
+    }
+
+    /** MANIFEST 格式：每行「sha256 大小 相对路径」（路径里允许有空格，取剩下的全部） */
+    private static void addManifest(java.util.Set<String> owned, File f) {
+        try {
+            for (String line : java.nio.file.Files.readAllLines(f.toPath())) {
+                String[] p = line.split(" ", 3);
+                if (p.length == 3) addOwned(owned, p[2]);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    /** FILES 格式：每行一个相对路径 */
+    private static void addPaths(java.util.Set<String> owned, File f) {
+        try { for (String line : java.nio.file.Files.readAllLines(f.toPath())) addOwned(owned, line); }
+        catch (Exception ignored) {}
+    }
+
+    /** 搬 old 里没人认领的文件到 neu。整棵没人认领、新工具包也没有同名的目录一次 rename；同名的目录下钻，只搬里面多出来的 */
+    private int moveUser(File old, File neu, String relDir, java.util.Set<String> owned, java.util.Set<String> ownedDirs) {
+        File[] kids = new File(old, relDir).listFiles();
+        if (kids == null) return 0;
+        int n = 0;
+        for (File k : kids) {
+            String rel = relDir.isEmpty() ? k.getName() : relDir + "/" + k.getName();
+            // 安装器自己的东西：tmp、完成标记、清单，以及各模块的 .ok / MANIFEST.local（新版 first-run 会重写；
+            // 搬过去会让没装的模块看着像装好了）。dpkg 数据库也不搬：里面的包清单只用来认主
+            if (rel.equals("tmp") || rel.equals(".devkit-ok") || rel.equals(".devkit-manifest") || rel.equals(".devkit-relocated")
+                || rel.equals("var/lib/dpkg") || rel.equals("libexec/devkit/modules.json")
+                || (rel.startsWith("libexec/devkit/modules/") && (rel.endsWith("/.ok") || rel.endsWith("/MANIFEST.local")))) continue;
+            // 解释器小版本变了：编译过的扩展搬过去也加载不了，整棵 lib/python3.X 不动（和以前的 site-packages 口径一致）
+            if (rel.matches("lib/python3\\.\\d+") && !new File(neu, rel).isDirectory()) continue;
+            boolean dir = k.isDirectory() && !isSymlink(k);
+            boolean mine = !owned.contains(rel) && !(dir && ownedDirs.contains(rel));
+            File to = new File(neu, rel);
+            if (mine && !to.exists() && !isSymlink(to)) {
+                File p = to.getParentFile();
+                if (p != null) p.mkdirs();
+                if (k.renameTo(to)) { n++; continue; }
+            }
+            if (dir) n += moveUser(old, neu, rel, owned, ownedDirs);
+        }
+        return n;
     }
 
     /** glibc 版程序（官方 Claude Code）解析域名靠它；安卓没有 /etc/resolv.conf */

@@ -26,6 +26,8 @@ public class GatewayService extends Service {
     static final String CH = "gateway";
     static final String ACTION_STOP = "cc.codroid.STOP";
     static final String ACTION_BOOT = "cc.codroid.BOOT";
+    /** 系统闹钟叫醒（SchedAlarm）：跑完到点的任务就自己退，不常驻（0.6.9 审计 13-01） */
+    static final String ACTION_ALARM = "cc.codroid.ALARM";
 
     /** 替换工具包期间停住网关（它跑的 node 就在要被换掉的目录里） */
     private static volatile boolean paused;
@@ -37,20 +39,35 @@ public class GatewayService extends Service {
     }
 
     private Env env;
-    private Process proc;
+    // 守护线程里赋值、界面线程（划掉 / 停止 / 更新工具包）里读：不 volatile 时那边可能拿到 null，
+    // 该杀的网关没杀，留下一个占着端口的孤儿（0.6.9 审计 13-06）
+    private volatile Process proc;
+    /** 这次网关起于何时：刚起来的那几秒还答不了身份证明，alive() 据此给宽限 */
+    private volatile long spawnedAt;
     private PowerManager.WakeLock wake;
     private volatile boolean stopping;
-    /** 界面被划掉时还有任务在跑：跑完再停（重新打开界面就作罢） */
+    /** 界面被划掉时还有任务在跑：跑完再停（重新打开界面就作罢）。闹钟 / 粘性重建拉起的也用它（0.6.9 审计 13-01） */
     private volatile boolean closeWhenIdle;
+    /** 空闲退出的宽限拍数：刚被闹钟叫醒时网关还没起来、任务还没进队列，先别数空闲（watchFreeze 每 2 秒减一） */
+    private volatile int idleGrace;
     private Thread supervisor;
 
     /** 服务这会儿在不在（常驻通知里点了停止之后为 false） */
     static boolean serviceUp() { return self != null; }
 
     static void start(Context c) {
-        Intent i = new Intent(c, GatewayService.class);
+        start(c, new Intent(c, GatewayService.class));
+    }
+
+    /** 系统闹钟叫醒：和界面明确打开的启动不同，干完活要能自己退（见 onStartCommand 的 closeWhenIdle）
+     *  @return 系统收没接受启动请求：targetSdk 31+ 后台会被拒，调用方得告诉用户（0.6.9 审计 13-05） */
+    static boolean startAlarm(Context c) {
+        return start(c, new Intent(c, GatewayService.class).setAction(ACTION_ALARM));
+    }
+
+    private static boolean start(Context c, Intent i) {
         // targetSdk ≥ 31：后台（非精确闹钟、没在电池优化白名单）拉前台服务会抛 ForegroundServiceStartNotAllowedException，别让它崩掉调用方
-        try { c.startForegroundService(i); } catch (RuntimeException e) { Log.w(TAG, "拉起网关服务被系统拒绝", e); }
+        try { c.startForegroundService(i); return true; } catch (RuntimeException e) { Log.w(TAG, "拉起网关服务被系统拒绝", e); return false; }
     }
 
     @Override public IBinder onBind(Intent i) { return null; }
@@ -98,9 +115,20 @@ public class GatewayService extends Service {
             while (!stopping) {
                 long t0 = android.os.SystemClock.uptimeMillis();
                 sleep(2000);
+                // 界面开着就是用户在用它：把「跑完就停」作罢。闹钟 / 粘性重建拉起时界面恰好开着、之后按 Home
+                // 退到后台（没划掉）也不会被当成空闲退出（0.6.9 审计 13-01）
+                if (MainActivity.appForeground()) closeWhenIdle = false;
                 // 划掉时在跑的任务跑完了：连着三次（约 6 秒）都空闲才停，免得撞上队列里下一条、/goal 下一轮开跑前的空档
-                idle = closeWhenIdle && !busy() ? idle + 1 : 0;
-                if (idle >= 3) { Log.i(TAG, "划掉时在跑的任务跑完了，停止服务"); shutdown(); break; }
+                if (idleGrace > 0) { idleGrace--; idle = 0; }
+                else idle = closeWhenIdle && !busy() ? idle + 1 : 0;
+                if (idle >= 3) {
+                    // 标记文件可能没写上（存储满）或没来得及更新：真要停之前直接问一次网关。
+                    // 问不到（网关没起来）才算空闲；网关起着说还有轮次 / 排队，就接着保活（0.6.9 审计 13-03）
+                    if (Updater.gatewayBusy()) { idle = 0; continue; }
+                    // 问的这几秒里用户可能又把界面打开了：那就不算「划掉」
+                    if (closeWhenIdle && !MainActivity.appForeground()) { Log.i(TAG, "划掉时在跑的任务跑完了，停止服务"); shutdown(); break; }
+                    idle = 0;
+                }
                 long gap = android.os.SystemClock.uptimeMillis() - t0 - 2000;
                 if (gap > 15_000) {
                     Log.w(TAG, "被冻结了约 " + gap / 1000 + " 秒");
@@ -127,6 +155,9 @@ public class GatewayService extends Service {
         // 开机重新激活 Shizuku 也只认自己的开机广播带来的口令（11-01 独立审查低-6）
         // 有人明确要服务（打开界面、闹钟、开机）：划掉时记的「跑完就停」作罢。口令对不上的 STOP 不算（服务是导出的，审查 0601b）
         if (i != null && !ACTION_STOP.equals(i.getAction())) closeWhenIdle = false;
+        // 系统闹钟叫醒的、系统粘性重建的，都不是用户在盯着界面：跑到点该跑的任务就自己退，不常驻、不占着 WakeLock。
+        // 给约 60 秒宽限，等网关起来、任务进队列（.run-active 落盘）再开始数空闲（0.6.9 审计 13-01）
+        if (i == null || ACTION_ALARM.equals(i.getAction())) { closeWhenIdle = true; idleGrace = 30; }
         if (i != null && ACTION_BOOT.equals(i.getAction()) && mine) ShizukuSetup.get(this).reactivateAsync(true);
         if (supervisor == null || !supervisor.isAlive()) {
             supervisor = new Thread(this::supervise, "gateway-supervisor");
@@ -140,8 +171,16 @@ public class GatewayService extends Service {
     @Override public void onTaskRemoved(Intent root) {
         android.content.ComponentName cn = root == null ? null : root.getComponent();
         if (cn != null && MainActivity.class.getName().equals(cn.getClassName())) {
-            if (!busy()) { Log.i(TAG, "界面被划掉且没有任务在跑，停止服务"); shutdown(); }
-            else { Log.i(TAG, "界面被划掉，任务跑完再停"); closeWhenIdle = true; }
+            if (busy()) { Log.i(TAG, "界面被划掉，任务跑完再停"); closeWhenIdle = true; }
+            else {
+                // 标记文件可能没写上（0.6.9 审计 13-03）：问一次网关再决定。这里在主线程，网络请求放后台线程，
+                // 问不到（网关没起来）就当空闲；网关起着说还有轮次 / 排队，就改成跑完再停
+                new Thread(() -> {
+                    if (MainActivity.appForeground()) { Log.i(TAG, "界面又打开了，不按划掉处理"); return; }
+                    if (Updater.gatewayBusy()) { Log.i(TAG, "界面被划掉，网关说还有任务，跑完再停"); closeWhenIdle = true; }
+                    else { Log.i(TAG, "界面被划掉且没有任务在跑，停止服务"); shutdown(); }
+                }, "task-removed-check").start();
+            }
         }
         super.onTaskRemoved(root);
     }
@@ -315,6 +354,7 @@ public class GatewayService extends Service {
         Env.spawnKey = ks.toString();
         Env.resetBoot();
         proc = pb.start();
+        spawnedAt = System.currentTimeMillis();
         gwBlocked = null;
         try (java.io.OutputStream o = proc.getOutputStream()) { o.write((ks + "\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII)); }
         catch (java.io.IOException e) { Log.w(TAG, "启动随机数没交过去：" + e.getMessage()); }
@@ -331,7 +371,18 @@ public class GatewayService extends Service {
     /** 端口上已经有活的网关（比如服务重建前留下的那个）就别再起一个。
      *  只认证明得了自己的（审查 S1）：以前任何答 200 的都算，探活时还把令牌头带过去了 */
     private boolean alive() {
-        if (proc != null && proc.isAlive()) { Env.proveGateway(); return true; }   // 顺手核一下：网关换过了，Cookie 跟着换
+        Process p = proc;
+        if (p != null && p.isAlive()) {
+            // 自己拉起的进程还活着：也要有证明。刚起的几秒网关还没监听好，给一段宽限；
+            // 过了宽限还证明不了自己（卡死、端口被别人接了）就结束它重起 —— 以前根本不看证明结果（0.6.9 审计 13-02）
+            if (Env.proveGateway()) return true;
+            if (System.currentTimeMillis() - spawnedAt < 20000) return true;
+            Log.w(TAG, "网关进程还活着但证明不了自己，结束重起");
+            killGateway();
+            return false;
+        }
+        // 没有自己拉起的进程：端口上那个必须证明得了自己。接管不了 —— 启动随机数只在原进程内存里（Env.key），
+        // 认不出来的只能请它退出重起，不能把令牌交给一个证明不了身份的进程（0.6.9 审计 13-02）
         return Env.proveGateway();
     }
 
@@ -342,12 +393,23 @@ public class GatewayService extends Service {
         return cmd.contains("\0--input-type=module\0-e\0") && cmd.endsWith("\0" + app + "\0" + Env.PORT + "\0");
     }
 
-    /** 端口有人占着、又证明不了自己。本应用自己的残留网关（旧版没有 /__proof，或令牌换过）就杀掉、返回 false 照常起；
-     *  杀不着的是别的应用 —— 不起网关，也不往那儿交任何东西 */
+    private static boolean alivePid(int pid) {
+        try { android.system.Os.stat("/proc/" + pid); return true; } catch (Exception e) { return false; }
+    }
+    private static boolean anyAlive(java.util.List<Integer> pids) {
+        for (int p : pids) if (alivePid(p)) return true;
+        return false;
+    }
+
+    /** 端口有人占着、又证明不了自己。本应用自己的残留网关（旧版没有 /__proof，或令牌换过）就请它退出、返回 false 照常起；
+     *  杀不着的是别的应用 —— 不起网关，也不往那儿交任何东西。
+     *  前提是 Env.portBusy() 把 127.0.0.1 和 127.0.0.2 都算上（199-1-03 的 Env 半，j1 车道改）；
+     *  只探 127.0.0.2 的话，127.0.0.1 被占时这里看不出来，网关会起不来又反复重启 */
     private boolean squatted() {
         if (!Env.portBusy()) return false;
         int me = android.os.Process.myUid(), killed = 0;
         File[] ps = new File("/proc").listFiles();
+        java.util.List<Integer> gw = new java.util.ArrayList<>();
         for (File d : ps == null ? new File[0] : ps) {
             String name = d.getName();
             if (!name.matches("\\d+")) continue;
@@ -355,15 +417,23 @@ public class GatewayService extends Service {
                 if (android.system.Os.stat(d.getPath()).st_uid != me) continue;
                 String cmd = new String(java.nio.file.Files.readAllBytes(new File(d, "cmdline").toPath()), java.nio.charset.StandardCharsets.UTF_8);
                 if (!isGatewayCmd(cmd, env.app.getPath())) continue;   // 只认本应用的网关，用户自己的 server.mjs 不碰
-                Log.w(TAG, "端口上是本应用的残留网关 pid=" + name + "，杀掉重起");
-                android.os.Process.sendSignal(Integer.parseInt(name), 9);
-                killed++;
+                gw.add(Integer.parseInt(name));
             } catch (Exception ignored) {}
         }
-        if (killed > 0) { sleep(1000); return false; }
+        if (!gw.isEmpty()) {
+            // 先礼后兵：SIGTERM 让网关自己收尾（它退出时会连带结束正在跑的 claude 进程树）。
+            // 以前直接 SIGKILL：收尾没跑，claude 成了孤儿；而且这里就 return 了，下面的兜底清理也不做（0.6.9 审计 13-02）
+            for (int pid : gw) { Log.w(TAG, "端口上是本应用的残留网关 pid=" + pid + "，请它退出"); android.os.Process.sendSignal(pid, 15); }
+            long until = System.currentTimeMillis() + 3000;
+            while (System.currentTimeMillis() < until && anyAlive(gw)) sleep(100);
+            for (int pid : gw) if (alivePid(pid)) { Log.w(TAG, "残留网关没退出，强制结束 pid=" + pid); android.os.Process.sendSignal(pid, 9); }
+            killed += gw.size();
+            sleep(500);
+        }
         // 再看一遍：网关拉起的进程（claude、钩子、终端里跑的东西）环境里都带着 CCAPP_TOKEN_FILE。网关已经不在了，
         // 它们占着端口、又证明不了自己，多半是会话里起的冒牌网关（反破甲 11-03，DeepSeek 复核必修 2）：杀掉再起。
-        // 把这个变量摘掉再起的认不出来；那种情况强行停止应用（整个 uid 的进程一起结束）就能恢复
+        // 把这个变量摘掉再起的认不出来；那种情况强行停止应用（整个 uid 的进程一起结束）就能恢复。
+        // 上面刚把网关杀掉时更要走这里：被 SIGKILL 的网关没机会收尾，它的 claude 子树就靠这一段兜底（0.6.9 审计 13-02）
         int mine = android.os.Process.myPid();
         for (File d : ps == null ? new File[0] : ps) {
             String name = d.getName();

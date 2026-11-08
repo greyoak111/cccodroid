@@ -85,13 +85,20 @@ final class Updater {
         void set(String st, String msg) { state = st; message = msg == null ? "" : msg; Log.i(TAG, id + " → " + st + " " + message); }
     }
 
+    /** 确保「更新」渠道存在。安装确认的通知由 Events 发：那条广播可能在新进程里到（Updater 谁也没构造过），
+     *  直接拿 Updater.CH 发，系统会因为渠道不存在把通知丢掉（0.6.9 审计 13-09） */
+    static void ensureChannel(Context c) {
+        Tr.init(c);   // 新进程里词典可能还没初始化，渠道名会退回中文
+        NotificationChannel ch = new NotificationChannel(CH, Tr.t("更新"), NotificationManager.IMPORTANCE_DEFAULT);
+        ch.setDescription(Tr.t("新版本已下载、等你点一下安装"));
+        c.getSystemService(NotificationManager.class).createNotificationChannel(ch);
+    }
+
     private Updater(Context c) {
         ctx = c;
         env = new Env(c);
         app.silentFail = prefs().getBoolean("appSilentFail", false);
-        NotificationChannel ch = new NotificationChannel(CH, Tr.t("更新"), NotificationManager.IMPORTANCE_DEFAULT);
-        ch.setDescription(Tr.t("新版本已下载、等你点一下安装"));
-        c.getSystemService(NotificationManager.class).createNotificationChannel(ch);
+        ensureChannel(c);
         refreshCurrent();
         // 上次下好、还没装的工具包（进程重启后状态在内存里没了，靠这条记录接上）
         try {
@@ -361,9 +368,32 @@ final class Updater {
         return null;
     }
 
+    /** 已装的与本 APK 钉的工具包，哪一个版本新：比它旧的安装算降级，要先问用户（0.6.9 审计 14-03） */
+    private String devkitFloor() {
+        String floor = null;
+        JSONObject pin = devkitPin(ctx);
+        for (String f : new String[] { tagOf(installedDevkitBase()), pin != null ? pin.optString("tag", "") : "" })
+            if (f != null && f.startsWith("devkit-") && (floor == null || cmpVer(f.substring(7), floor.substring(7)) > 0)) floor = f;
+        return floor;
+    }
+
+    /** 比 floor 旧的工具包要用户点头才装（和 Claude Code 降级同一个规矩）：不静默拒绝 —— 问了，用户不点就不装 */
+    private boolean allowDevkitDowngrade(String tag, String who) {
+        if (tag == null || !tag.startsWith("devkit-")) return true;
+        String floor = devkitFloor();
+        if (floor == null || cmpVer(tag.substring(7), floor.substring(7)) >= 0) return true;
+        if (Priv.confirm(Tr.f("把开发工具包降级到 {0}（现在装的是 {1}）", tag, floor), who, "devkit:" + tag)) return true;
+        Log.w(TAG, "用户没有允许把开发工具包降级到 " + tag);
+        return false;
+    }
+
     /** 更新卡片的「从本地文件安装」：在 MainActivity 的线程里调，进度打到安装界面。id 为 null = 用户确认过硬装 */
     void applyLocalDevkit(Installer ins, Installer.Source src, long total, boolean gzip, String sha, JSONObject id) throws Exception {
         if (devkitMoving()) throw new IOException(Tr.t("工具包正在下载或安装，等它结束再试"));
+        // 本地文件也能装旧版（0.6.9 审计 14-03）：认得出是哪一版、又比已装 / APK 钉的旧，就要用户点头
+        String tag = id != null ? id.optString("tag") : "";
+        if (!allowDevkitDowngrade(tag, Tr.t("从本地文件安装开发工具包")))
+            throw new IOException(Tr.f("{0} 比现在装着的开发工具包旧，没有安装", tag));
         devkit.set("installing", "");
         GatewayService.pause(true);
         try {
@@ -543,10 +573,7 @@ final class Updater {
         // 不往回装：比已装的、比本 APK 钉的旧，一律当没有新版。签名有效的旧清单照样验得过，
         // 中间人只给一份旧版本的发布列表，就能把工具链退回有已知问题的旧版（审查 v0513b 低-21；APK 和 Claude Code 早就防了）
         {
-            String floor = null;
-            JSONObject pin0 = devkitPin(ctx);
-            for (String f : new String[] { tagOf(installedDevkitBase()), pin0 != null ? pin0.optString("tag", "") : "" })
-                if (f != null && f.startsWith("devkit-") && (floor == null || cmpVer(f.substring(7), floor.substring(7)) > 0)) floor = f;
+            String floor = devkitFloor();
             if (floor != null && cmpVer(best.substring(7), floor.substring(7)) < 0) {
                 Log.w(TAG, "发布列表里最新的工具包 " + best + " 比 " + floor + " 旧，不装");
                 devkit.set("uptodate", "");
@@ -1102,6 +1129,10 @@ final class Updater {
 
     /** 在 MainActivity 的线程里调。ins 的进度打到安装界面 */
     void applyDevkit(Installer ins) throws Exception {
+        // 暂存的 / 修复用的工具包也可能是旧的（进程重启前下好、或者从 prefs 接上的）：装之前照样先问（0.6.9 审计 14-03）
+        String tag = tagOf(devkit.base);
+        if (!allowDevkitDowngrade(tag, repairing ? Tr.t("修复开发工具包") : Tr.t("安装开发工具包")))
+            throw new IOException(Tr.f("{0} 比现在装着的开发工具包旧，没有安装", tag));
         devkit.set("installing", "");
         try {
             // 落盘以后可能过了好几天、经历过 APK 升级：装之前再核一遍，坏了就删掉重下，不拿它去换掉能用的旧版
