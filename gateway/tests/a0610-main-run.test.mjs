@@ -18,6 +18,7 @@ const PID = "custom-a0610run";
 const hadProviders = fs.existsSync(providerFile) ? fs.readFileSync(providerFile) : null;
 fs.writeFileSync(providerFile, JSON.stringify({ active: PID, providers: {
   [PID]: { label: "Fixture", baseUrl: "https://fixture.example.invalid", apiKey: "fixture-only", authStyle: "bearer", defaultModel: "fixture-model", fallbackModels: [{ id: "fixture-model" }] },
+  "custom-a0610slow": { label: "Slow", baseUrl: "https://slow.example.invalid", modelsUrl: "https://slow.example.invalid/v1/models", apiKey: "fixture-only", authStyle: "bearer", defaultModel: "slow-model" },
 } }));
 const cli = path.join(root, "fake-cli.sh");
 const sh = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
@@ -126,6 +127,26 @@ test("200-S-10：提醒没送到模型（没答完就退出）放回去，下一
   await until(() => endOf("a0610-s10b"));
   assert.equal(takePathNote(sid), "", "同一会话的路径提醒：定时任务那轮答完就交出去了");
   assert.match(tamperNote(), /s10-probe\.json/, "失败那轮放回来了，定时任务那轮没取");
+});
+
+test("200-7-07：起进程前的等待（这里是拉另一家的模型清单）还没回来时点停止 → 立刻收尾，不等它，也不再起进程", async () => {
+  const { abortRun } = await import("../gw/queue.mjs");
+  let release;
+  const prev = globalThis.fetch;
+  globalThis.fetch = () => new Promise((_, rej) => { release = () => rej(new Error("late")); });
+  try {
+    script([init(crypto.randomUUID()), result], 0);
+    const p = startRun({ id: "a0610-707", message: "fixture", cwd: root, pin: { provider: "custom-a0610slow" } });
+    await until(() => release);
+    const t0 = Date.now();
+    abortRun(RUNS.get("a0610-707"));
+    await until(() => endOf("a0610-707"), 2000);
+    assert.ok(Date.now() - t0 < 1000, "不等那个请求回来");
+    release();
+    await p;
+    assert.equal(events.filter((e) => e.type === "run_end" && e.runId === "a0610-707").length, 1);
+    assert.ok(!events.some((e) => e.type === "init" && e.runId === "a0610-707"), "等待回来后不再起进程");
+  } finally { globalThis.fetch = prev; }
 });
 
 // 放最后：它留下的后台 sleep 30 还活着时，后面的轮次会先弹「用户配置」确认卡

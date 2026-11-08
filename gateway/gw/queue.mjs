@@ -277,6 +277,9 @@ export function abortRun(run, { hold = true } = {}) {
   // 并行时只挂起这个会话自己排着的，别的会话不受影响。
   // hold:false 只给「答完了、只剩后台任务、输入已关」的那种：用户要的是让排着的消息发出去，不是停对话
   if (hold) holdLane(run); else run.retired = true;   // retired：这一轮的回答早就完整了，收尾别报成「已中断」
+  // 还没起进程（在等桥、拉模型清单、起端侧模型、核验程序…）：这些等待不全能中断，等它们回来才收尾的话，
+  // 这段时间槽一直占着、界面一直「生成中」。现在就收尾；等待回来后 startRun 看到 aborted / ended 不再起进程（0.6.9 审计 200-7-07）
+  if (!run.child && run.preSpawn) { log("⏹ 起进程前停止，立即收尾"); endRun(run, { durationMs: 0 }); return true; }
   if (run.child) {
     const c = run.child;
     killTree(c);

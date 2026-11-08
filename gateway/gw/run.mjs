@@ -231,7 +231,7 @@ export async function startRun(item) {
     cid: item.cid,
     auto: item.auto || null,           // "idle" = 网关自己发起的空闲压缩（界面画成系统提示，不发通知）
     startedAt: Date.now(),
-    child: null, aborted: false, ended: false,
+    child: null, aborted: false, ended: false, preSpawn: true,
     provider: P.id,                    // 这一轮用的那家：记 token、删接口前查占用都看它
     log: [], pend: null, pendTimer: null,
     sched: item.sched || null,         // 定时任务跑的：{ taskId, runKey }（结束时 sched.mjs 记运行记录）
@@ -513,6 +513,7 @@ export async function startRun(item) {
   // 同时拍底，收尾时核这一轮只是往后追加
   if (!integ) { integ = checkSession(run.sessionId, sfile()); if (integ) integNote = isCmd || P.local ? "" : integrityNote(integ); }
   run.sealBase = run.sessionId ? { sid: run.sessionId, ...sessionAnchor(sfile()) } : null;
+  if (run.aborted || run.ended) { log("⏹ 起进程前已停止"); return endRun(run, { durationMs: 0 }); }
   const [cmd0, args0] = claudeCmd(argv);
   // 外面套着 seccomp 监督器时，claude 是监督器的子进程：监督器把它的 pid 从 fd 3 报上来（不可转储的 claude 在 /proc 里看不见，作证要用，见 privWitness）
   const wrapped = cmd0 !== PATHS.claudeLoader;
@@ -523,7 +524,7 @@ export async function startRun(item) {
     stdio: wrapped ? ["pipe", "pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe"],
     detached: true,            // 当进程组长，中断时好整组带走（见 killTree）
   });
-  run.child = child;
+  run.child = child; run.preSpawn = false;
   run.claudePid = wrapped ? 0 : child.pid;
   if (wrapped && child.stdio[3]) {
     let got = "";
