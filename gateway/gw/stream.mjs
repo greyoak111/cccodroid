@@ -129,6 +129,18 @@ export function hookContext(ev) {
 }
 
 /** 把 claude 的 stream-json 事件翻译成前端事件 */
+/** 「这条消息已经逐字推过」按来路分开记：主会话用 flags 本身，子代理（parent_tool_use_id）、旁链（isSidechain）各记各的。
+ *  以前共用一份：子代理一条 message_start 就把主会话的标记清掉，主会话的 assistant 整段又发一遍（重复）；
+ *  旁链的增量把它置上，主会话没增量的正文反被挡住（丢字）（0.6.9 审计 195-U.1） */
+const isMainLane = (ev) => !ev.parent_tool_use_id && !ev.isSidechain;
+function laneFlags(flags, ev) {
+  if (!flags || isMainLane(ev)) return flags;
+  const k = ev.parent_tool_use_id || "sidechain";
+  const m = (flags.lanes ||= new Map());
+  let o = m.get(k);
+  if (!o) { o = { gotDelta: false, gotThinkDelta: false }; m.set(k, o); if (m.size > 64) m.delete(m.keys().next().value); }
+  return o;
+}
 export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider }) {
   if (!ev || typeof ev !== "object") return;
   switch (ev.type) {
@@ -171,14 +183,15 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
       // delta 的 usage 可能只有输出字段，只合并同一次请求，绝不能跨请求累加。
       // 流在中途断了（厂商掐线、网络抖），claude 会自己补一句「接着说」再请求一次。断掉那次已逐字推出去、
       // 但没等到 assistant 事件的半截正文 / 思考不会进对话记录 —— 界面上也得删掉，否则两遍回答拼在一个气泡里（群友截图）
-      if (e?.type === "message_start" && flags && !ev.parent_tool_use_id && (flags.pendText || flags.pendThink)) {
+      if (e?.type === "message_start" && flags && isMainLane(ev) && (flags.pendText || flags.pendThink)) {
         sse({ type: "discard_partial", text: flags.pendText || 0, think: flags.pendThink || 0 });
         flags.pendText = 0; flags.pendThink = 0;
       }
       if (e?.type === "message_start") {
         // 每条消息单独记「是否已逐字推过」：同一条进程里会有多轮 assistant（后台回报、插话、斜杠命令），
         // 沿用上一条的 true 会把下一条没有增量的正文吞掉（审查 11-05）
-        if (flags) { flags.gotDelta = false; flags.gotThinkDelta = false; }
+        const lf = laneFlags(flags, ev);
+        if (lf) { lf.gotDelta = false; lf.gotThinkDelta = false; }
         if (!ev.parent_tool_use_id && !ev.isSidechain) {
           if (flags) flags.promptUsage = { ...e.message?.usage };
           contextUsage(e.message?.usage, flags, sse);
@@ -214,10 +227,10 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
         }
       }
       if (e?.type === "content_block_delta" && e.delta?.type === "text_delta" && e.delta.text) {
-        if (flags) { flags.gotDelta = true; if (!ev.parent_tool_use_id) flags.pendText = (flags.pendText || 0) + e.delta.text.length; }
+        if (flags) { laneFlags(flags, ev).gotDelta = true; if (isMainLane(ev)) flags.pendText = (flags.pendText || 0) + e.delta.text.length; }
         sse({ type: "delta", text: e.delta.text });
       } else if (e?.type === "content_block_delta" && e.delta?.type === "thinking_delta" && e.delta.thinking) {
-        if (flags) { flags.gotThinkDelta = true; if (!ev.parent_tool_use_id) flags.pendThink = (flags.pendThink || 0) + e.delta.thinking.length; }
+        if (flags) { laneFlags(flags, ev).gotThinkDelta = true; if (isMainLane(ev)) flags.pendThink = (flags.pendThink || 0) + e.delta.thinking.length; }
         sse({ type: "thinking_delta", text: e.delta.thinking });
       }
       break;
@@ -238,7 +251,8 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
       // 逐字增量已发过就别重复整段文本
       const content = ev.message?.content || [];
       // 这一块已确认进了对话：逐字推过的不再算「半截」
-      if (flags) for (const c of content) { if (c.type === "text") flags.pendText = 0; else if (c.type === "thinking" || c.type === "redacted_thinking") flags.pendThink = 0; }
+      if (flags && isMainLane(ev)) for (const c of content) { if (c.type === "text") flags.pendText = 0; else if (c.type === "thinking" || c.type === "redacted_thinking") flags.pendThink = 0; }
+      const lf = laneFlags(flags, ev);
       for (const c of content) {
         // 本地命令（/context /cost /compact …）的正文 claude 会发两遍：一条合成的 assistant 消息 + result。
         // 界面拿 result 画命令卡片，这里再发就重复了（以前 /context 显示两次）
@@ -246,10 +260,10 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
         if (c.type === "text" && c.text) {
           // 逐字增量发过就不重复整段；没发过（增量没到）才补完整文本。
           // 本地命令的合成消息没有增量，且本轮前面正常回答时 gotDelta 已是 true，必须无条件发（审查 11-05）
-          if (!flags || !flags.gotDelta || ev.message?.model === "<synthetic>") sse({ type: "assistant_text", text: c.text });
+          if (!lf || !lf.gotDelta || ev.message?.model === "<synthetic>") sse({ type: "assistant_text", text: c.text });
         } else if (c.type === "thinking" && c.thinking) {
           // 同理：思考也逐字发过了。以前这里无条件再发整段，思考块里每段都重复两遍
-          if (!flags || !flags.gotThinkDelta) sse({ type: "thinking", text: c.thinking });
+          if (!lf || !lf.gotThinkDelta) sse({ type: "thinking", text: c.thinking });
         } else if (c.type === "tool_use") {
           if (flags) {
             (flags.toolsOut ||= new Set()).add(c.id);
