@@ -13,7 +13,7 @@
 | 199-1-07 | 并入 13-02，主要位置 GatewayService/Env → 归 j2，配合项写移交 | 移交 |
 | 199-1-08 | MainActivity.java 无口令 JS 桥 whatsNew | 已修 |
 | 200-13-07 | MainActivity.java 分屏失焦也发通知 | 已修 |
-| 200-13-08 | MainActivity.java 工作岛 am 发送并发乱序 | 待做 |
+| 200-13-08 | MainActivity.java 工作岛 am 发送并发乱序 | 不成立（前提归属误标）+ 移交 b1 |
 
 ## 已修
 
@@ -31,6 +31,7 @@
 
 | 条目 | 理由（代码位置） |
 |---|---|
+| 200-13-08 | 审计把位置写成 `MainActivity.java`，但 Java 侧根本没有这段代码：`android/java` 全树搜 `workisland` / `work-island` / `IslandService` / `/system/bin/am` 零命中（`AndroidManifest.xml:43` 只有一条 `<package android:name="com.dafeiyu.workisland"/>` 的包可见性声明）；`git log -S workisland -- android/java` 也查不到历史上的实现。真正的 `am` 发送在 `gateway/gw/work-island.mjs` 的 `amSend()` / `amSendSync()`（配套 `work-island-core.mjs`），属车道 b1 的文件，j1 名下没有可改的点。b1 的车道报告同样确认「Java 里没有」并移交主会话。并发乱序本身成立，修复见「移交」。 |
 
 ## 待定（交回主会话或用户定）
 
@@ -45,6 +46,7 @@
 | 199-1-03（GatewayService 半） | `GatewayService.java` 的 `squatted()` / `alive()` | j2 做 13-02 时会重写这段：请保留「两个回环地址都算被占」的前提（`Env.portBusy()` 现已同时探测 127.0.0.1 / 127.0.0.2）；判断「是不是自己的网关」不能只看 127.0.0.2 的 proof |
 | 199-1-07 | 并入 13-02（GatewayService / Env），本轮归 j2 | 按 LANE-j1 的划分整条移交；j1 名下没有需要配合的代码点 |
 | 199-1-04（前端加强） | `web/app/04-session-flow.js` 的 `connectBus`（约 620-645 行，主会话名下） | 可选加固、不是本条修复的必要条件：原生层已经把 `/api/*`（含 `/api/events`）卡在证明上，核不过时 `onopen` 不会成立。若还想在页面侧再挡一层，可把 `es.onopen` 里直接 `setConn(true)` 改成「收到第一条 `hello` 才置已连接」，并在 3 秒内没收到 hello 时主动 `es.close()` 重连。19-boot.js 这边不需要改：它没有连接状态判断，启动时的 `refreshStatus()`/`connectBus()` 都已被原生层的 `/api` 证明覆盖 |
+| 200-13-08（真正的修复点） | `gateway/gw/work-island.mjs` 的 `amSend()` / `amSendSync()`（`LANE-b1.md` 第 7 行名下的文件；`work-island-core.mjs` 不用动） | 现状：`amSend` 用 `execFile` fire-and-forget，UPDATE / DONE / IDLE 各起一个 `am` 子进程，完成顺序不受控；`stopWorkIslandSync()` 的同步 IDLE 更可能与在途 UPDATE 交错。修法：把异步发送串成一条 FIFO 队列（同一时刻最多一个 `am` 子进程，后一条等前一条回调后再起），DONE / IDLE 也走同一队列即可保证「旧 UPDATE 不会晚于收尾」；`stopWorkIslandSync()` 要同步收尾时，先 `kill` 掉在途的 `am` 子进程（IDLE 本来就覆盖它）再 `execFileSync`，不要在退出路径上等 Promise。测试：在 `work-island.mjs` 加一个可替换的 exec 缝（仿 `_islandForTest.seam`），断言 ①同时最多一个子进程、②动作顺序与入队顺序一致、③收尾时先杀在途 UPDATE 再发 IDLE；放在 `gateway/tests/` 下由 b1 跑 |
 
 ## 行为变化
 
