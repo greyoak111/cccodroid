@@ -53,7 +53,7 @@
 </div>
 
 <!-- ── 消息区 ── -->
-<main id="chat" aria-live="polite"></main>
+<main id="chat"></main>
 
 <!-- ── 输入区 ── -->
 <div id="composer">
@@ -981,6 +981,8 @@
 <div id="ws-tabs"></div>
 <div id="ws-split" title="拖动调整宽度，双击复原" data-i18n-attr="title"></div>
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
+<!-- 读屏专用：只播「回复完成 / 出错」这种一句话结果。整块 #chat 当 live region 会让流式每帧都触发播报（0.6.9 审计 195-L.7） -->
+<div id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="dropzone" class="hidden"><div data-i18n>松手即附加</div></div>
 
 <!-- 顺序要紧：语言注册表 → i18n（定义 I18N.t，按需插入当前语言的词典并翻译静态标记）→ layout（大屏分档）→ app.js -->
@@ -989,5 +991,19 @@
 <script src="/layout.js"></script>
 <script src="/lineage/map.js"></script>
 <script src="/app.js"></script>
+<script>
+  // app.js 自身没加载出来（网关正在重启、静态文件缺失、脚本早退）时，静态壳会一直停在「连接中…」。
+  // 5 秒后还没看到 app 挂出的 window.__cc，就把状态行改成可点的重试提示（#182 S-02 网页端半）
+  setTimeout(function () {
+    if (window.__cc) return;
+    var el = document.getElementById("sub-title");
+    if (!el) return;
+    var msg = "界面脚本没能加载，点这里重试";
+    el.textContent = (window.I18N && I18N.t) ? I18N.t(msg) : msg;
+    el.className = "err";
+    el.style.cursor = "pointer";
+    el.onclick = function () { location.reload(); };
+  }, 5000);
+</script>
 </body>
 </html>

@@ -1,4 +1,6 @@
-// v0.6.2 审查 #120-3：首个 hello 自动跟到别的会话时，草稿要按会话交接，不能把 A 的字/附件带进 B
+// v0.6.2 审查 #120-3：首个 hello 自动跟到别的会话时，草稿要按会话交接，不能把 A 的字/附件带进 B。
+// 0.6.9 审计 195-P.7 改了前半句：本地已经记着会话时不再跟到别的轮次（否则覆盖最后查看的会话）；
+// 只有本地没有会话号（新对话 / 刚装）时才跟。原「本地有 A、run 在 B 也切过去」的断言随之更新。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -32,10 +34,10 @@ function hello(viewSid, runSid) {
   return { swaps, view };
 }
 
-test("首次 hello 跟到另一个会话：先把 A 的草稿留在 A，再换成 B 的（#120-3）", () => {
+test("本地记着会话时首次 hello 不跟别的轮次（0.6.9 审计 195-P.7）", () => {
   const { swaps, view } = hello("session-a", "session-b");
-  assert.deepEqual(swaps, [["session-a", "session-b"]]);
-  assert.equal(view.sessionId, "session-b");
+  assert.deepEqual(swaps, []);
+  assert.equal(view.sessionId, "session-a");
 });
 
 test("首次 hello 跟的就是眼前这个会话：不动草稿", () => {
@@ -44,8 +46,14 @@ test("首次 hello 跟的就是眼前这个会话：不动草稿", () => {
   assert.equal(view.sessionId, "session-a");
 });
 
-test("首次 hello 跟到还没拿到会话号的新会话：草稿交给新会话位", () => {
-  const { swaps, view } = hello("session-a", null);
-  assert.deepEqual(swaps, [["session-a", null]]);
+test("本地没有会话号时首次 hello 才跟：跟到另一个会话，草稿按会话交接（#120-3）", () => {
+  const { swaps, view } = hello(null, "session-b");
+  assert.deepEqual(swaps, [[null, "session-b"]]);
+  assert.equal(view.sessionId, "session-b");
+});
+
+test("本地没有会话号、在跑的轮次也还没拿到会话号：留在新对话页，草稿不用搬", () => {
+  const { swaps, view } = hello(null, null);
+  assert.deepEqual(swaps, []);
   assert.equal(view.sessionId, null);
 });

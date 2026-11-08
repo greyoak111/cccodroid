@@ -401,7 +401,7 @@
     popMenu(anchor, [
       { label: x.pinned ? t("取消置顶") : t("置顶"), icon: SM.pin, fn: () => post(`/api/session/${encodeURIComponent(id)}/pin`, { pin: !x.pinned }).then(reload, (e) => toast(e.message, true)) },
       { label: t("移到项目…"), icon: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', fn: () => moveToProject(id, anchor) },
-      { label: t("重命名"), icon: SM.edit, fn: () => { const n = prompt(t("新的会话名称"), x.title || ""); if (n) post(`/api/session/${encodeURIComponent(id)}/rename`, { title: n }).then(reload, (e) => toast(e.message, true)); } },
+      { label: t("重命名"), icon: SM.edit, fn: () => { const n = prompt(t("新的会话名称"), x.title || ""); if (n) post(`/api/session/${encodeURIComponent(id)}/rename`, { title: n }).then(() => { if (id === view.sessionId) { view.title = n; paintTitle(); } reload(); }, (e) => toast(e.message, true)); } },
       { label: t("脉络"), icon: SM.lineage, fn: () => lineageMenu(id, anchor) },
       { label: x.misc ? t("移出杂项") : t("归入杂项"), icon: SM.tray, fn: () => post("/api/archive/misc", { session: id, misc: !x.misc }).then(reload, (e) => toast(e.message, true)) },
       { label: t("导出"), icon: SM.export, fn: async () => {
@@ -445,7 +445,9 @@
       const last = r.volumes[r.volumes.length - 1], n = last.chapters[last.chapters.length - 1];
       const title = prompt(t("新的题名"), last.title || "");
       if (!title) return;
-      post("/api/archive", { session: id, title, chapter: n }).then(() => loadSessions(), (e) => toast((e.body && e.body.errors || [e.message]).join("；"), true));
+      // same 要原样带上：不带的话同一卷「同一件事」的标记丢了，下次刷新会被拆成两卷（0.6.9 审计 195-K.3）
+      const same = !!r.chapters?.[n - 1]?.same;
+      post("/api/archive", { session: id, title, chapter: n, same }).then(() => loadSessions(), (e) => toast((e.body && e.body.errors || [e.message]).join("；"), true));
     } });
     // 从脉络页（手机树）点开的：已经在脉络里，换成汇合 / 分叉 / 补记这几项
     if (more) items.push(...more); else items.push({ label: t("在脉络中查看"), icon: SM.lineage, fn: () => { closeDrawer(); openLineage(id); } });
@@ -515,8 +517,16 @@
     for (const p of PJ.list) { const r = normPath(p.path); if ((c === r || c.startsWith(r + "/")) && (!best || r.length > normPath(best.path).length)) best = p; }
     return best;
   }
-  function pjMark(p) { return `<span class="pj-mark"><i style="background:${esc(p.color || "var(--accent)")}"></i>${esc(p.name)}</span>`; }
-  function pjOfSession(id) { const s = (state.sessions || []).find((x) => x.id === id); return s ? pjOfCwd(s.cwd) : null; }
+  // 颜色要进 style 属性：只认 #rrggbb，其余当没设（0.6.9 审计 196-前端注入.8；esc 挡不住 `;`）
+  function pjMark(p) {
+    const c = /^#[0-9a-f]{6}$/i.test(p.color || "") ? p.color : "var(--accent)";
+    return `<span class="pj-mark"><i style="background:${c}"></i>${esc(p.name)}</span>`;
+  }
+  function pjOfSession(id) {
+    const s = (state.sessions || []).find((x) => x.id === id);
+    // 旧会话不在最近 150 条里：当前会话用历史接口带回来的 cwd 认项目（0.6.9 审计 196-显示.3）
+    return pjOfCwd(s ? s.cwd : (id && id === view.sessionId ? view.cwd : ""));
+  }
   // 项目颜色要进 style 属性：载入时只认 #rrggbb，其余当没设（审查 10-30 第九份 前端低2）
   async function loadProjects() {
     try { const r = await api("/api/projects"); PJ.list = (r.projects || []).map((p) => (/^#[0-9a-f]{6}$/i.test(p.color || "") ? p : { ...p, color: "" })); PJ.colors = r.colors || []; PJ.ws = r.workspace || ""; PJ.loaded = true; PJ.err = ""; }
@@ -537,7 +547,8 @@
   const p2 = (n) => String(n).padStart(2, "0");
   // 星期名跟界面语言走（Intl）：WD()[0] 是周日；dayShort(1..7) 给「每周一、三」和选日按钮用（中文去掉「周」字）
   const WD = () => [0, 1, 2, 3, 4, 5, 6].map((d) => new Date(2024, 0, 7 + d).toLocaleDateString(I18N.lang, { weekday: "short" }));
-  const dayShort = (d) => { const n = WD()[d % 7]; return /^zh/.test(I18N.lang) ? n.replace(/^(周|星期)/, "") : n; };
+  // zh-Hant 的 Intl 星期名是「週一」，模板已经带「每週」：不去掉这个「週」就会显示成「每週週一」（0.6.9 审计 195-L.8）
+  const dayShort = (d) => { const n = WD()[d % 7]; return /^zh/.test(I18N.lang) ? n.replace(/^(周|週|星期)/, "") : n; };
   function whenText(ms) {
     if (!ms) return "—";
     const d = new Date(ms), hm = p2(d.getHours()) + ":" + p2(d.getMinutes());

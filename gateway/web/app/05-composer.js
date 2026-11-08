@@ -3,11 +3,17 @@
   // 几百 MB 的东西读不进还白占一轮；只写路径和大小，用到时让它自己按路径读（解压、抽样、跑脚本）。这句落款各语言都写中文，气泡按它认（02 splitRefs）
   const BIG_ATT = 20 << 20;
   const isBigAtt = (a) => !!a.big || a.size > BIG_ATT;
-  const attRef = (a) => isBigAtt(a) ? `[附件：${a.path} · ${a.size ? fmtSize(a.size) : "?"}，文件较大没有直接读入，需要时按路径读取]` : "@" + a.path;
+  // 带空白的路径要用引号包起来：@ 提及按空白截断，不包的话 claude 只拿到前半截（0.6.9 审计 195-D.2）
+  const attAt = (p) => (/[\s"]/.test(p) ? '@"' + p.replace(/"/g, '\\"') + '"' : "@" + p);
+  const attRef = (a) => isBigAtt(a) ? `[附件：${a.path} · ${a.size ? fmtSize(a.size) : "?"}，文件较大没有直接读入，需要时按路径读取]` : attAt(a.path);
   const newCid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  // 还在上传的文件（0.6.9 审计 195-D.1）：传完之前不发送，否则这些附件不在本条消息里、下一条又悄悄带上
+  const uploading = new Set();
+  let uploadSeq = 0;
 
   async function send(forcedText, mode) {
     const fromInput = forcedText == null;
+    if (fromInput && uploading.size) return void toast(t("还有 {n} 个文件正在上传，传完再发送。", { n: uploading.size }), true);
     const typed = (fromInput ? inputEl.value : forcedText).trim();
     // 附件只在附件栏里显示，发出时才把 @路径 接到末尾（claude 靠它读文件）；手动写过的不重复
     // 大附件只给路径（见 attRef），Claude 用到时自己按路径读
@@ -37,8 +43,13 @@
         addNote(t("正在启动登录…"));
         const j = await post("/api/login/start", { method: arg === "console" ? "console" : "claudeai" });
         if (!j.ok) throw new Error(j.message || t("启动登录失败"));
-        addSysMsg(t("在浏览器打开下面的地址完成授权，授权后浏览器跳回本机，登录自动完成：") + `\n\n[${j.url}](${j.url})\n\n` +
+        const bubble = addSysMsg(t("在浏览器打开下面的地址完成授权，授权后浏览器跳回本机，登录自动完成：") + `\n\n[${j.url}](${j.url})\n\n` +
           t("浏览器跳不回来（比如在别的设备上授权）：打开终端运行 {cmd}，把页面给出的授权码直接贴给 claude。", { cmd: "`claude auth login`" }), "/login");
+        // OAuth 在应用内 WebView 里会被 Google 等拦：和设置页登录卡一样交给系统浏览器（0.6.9 审计 195-G.1）
+        openExternal(j.url);
+        bubble.querySelectorAll("a.weblink").forEach((a) => a.addEventListener("click", (e) => {
+          e.preventDefault(); e.stopPropagation(); openExternal(a.getAttribute("href"));
+        }));
       } catch (e) { toast(e.message, true); }
       return;
     }
@@ -101,7 +112,6 @@
       view.runIds.add(r.id);
       view.lastRunId = r.id;
       view.pendingMerge = null;
-      lastSendAt = Date.now();
       // 斜杠命令只在空闲时插进去，送进去就画出来了（gw/run.mjs 的 run.inject），不用再提示
       if (r.injected) { if (!text.trim().startsWith("/")) toast(t("已插话：当前这一步做完，Claude 就会看到")); }
       else if (!r.started) toast(mode === "inject" ? t("这一轮正在收尾，插不进去 —— 已排到最前，马上发出")
@@ -195,7 +205,9 @@
     popKey = key;
     const left = Math.max(col.left + 8, c.left), right = Math.min(col.right - 8, c.right);
     // 用 top 从输入框上沿往上量，不用 bottom：软键盘悬浮 / 可视区缩放时 innerHeight 和固定定位的参照高度对不上，会压住输入框
-    const maxH = Math.max(120, Math.min(fixedH() * 0.46, c.top - top - 8));   // 不盖顶栏
+    // 不再给 120px 下限：键盘上方只剩几十像素时，硬留 120px 会把浮层顶到输入框上盖住已输入的字（0.6.9 审计 196-移动.1）
+    const avail = Math.max(0, c.top - top - 8);
+    const maxH = Math.max(24, Math.min(fixedH() * 0.46, avail));   // 不盖顶栏、不盖输入框
     Object.assign(popupEl.style, { left: left + "px", right: "auto", width: (right - left) + "px", bottom: "auto", maxHeight: maxH + "px" });
     popupEl.style.top = Math.max(top, c.top - 8 - popupEl.offsetHeight) + "px";
   }
@@ -232,6 +244,7 @@
   async function openFilePalette(filter) {
     const dir = state.fileDir || state.settings.workspace || "/sdcard";
     const ok = latest("filepal");    // 慢的旧请求迟到不许盖掉新的、也不许把已收起的浮层重新打开（审查 A-CHAT-003）
+    const prevDir = state.fileDir;   // 点「..」进不去时退回来，别把 fileDir 永久卡在打不开的目录（0.6.9 审计 195-D.6）
     try {
       const r = await api(`/api/files?path=${encodeURIComponent(dir)}&q=${encodeURIComponent(filter || "")}`);
       if (!ok()) return;
@@ -245,7 +258,13 @@
       }));
       if (r.parent && r.parent !== r.path) items.unshift({ label: "..", dir: true, cat: r.path, raw: ".." });
       showPopup("file", items, t("引用文件 · {path}", { path: r.path }));
-    } catch { if (ok()) hidePopup(); }
+    } catch (e) {
+      // 失败不能静默消失（0.6.9 审计 195-N.9）：退回上一个能打开的目录，并说清原因
+      if (!ok()) return;
+      if (prevDir && state.fileDir !== prevDir) state.fileDir = prevDir;
+      hidePopup();
+      toast(t("文件列表没读到：{msg}", { msg: e.message }), true);
+    }
   }
   /** 把光标前正在补全的那一截（/xx 或 @xx）换成 s，前后的草稿原样留着（审查 A-CHAT-004） */
   function replaceToken(re, s) {
@@ -295,8 +314,12 @@
 
   /** 在光标处插入一段文本 */
   function insertAtCursor(s) {
-    const v = inputEl.value, caret = inputEl.selectionStart ?? v.length;
-    const before = v.slice(0, caret), after = v.slice(caret);
+    s = String(s ?? "");
+    // 文件面板 / 查看器插进来的是「@绝对路径」：路径带空白时补引号，不然 @ 提及按空白截断（0.6.9 审计 195-D.2）
+    if (/^@\//.test(s) && !/^@"/.test(s) && /\s/.test(s)) s = attAt(s.slice(1));
+    // 有选区就整段替换，不是只在选区起点插（0.6.9 审计 195-D.8）
+    const v = inputEl.value, a = inputEl.selectionStart ?? v.length, b = inputEl.selectionEnd ?? a;
+    const before = v.slice(0, a), after = v.slice(b);
     const glue = before && !/\s$/.test(before) ? " " : "";
     inputEl.value = before + glue + s + " " + after;
     const pos = (before + glue + s + " ").length;
@@ -327,6 +350,7 @@
   inputEl.addEventListener("input", () => {
     autoGrow();
     syncInterject();
+    draftPersistSoon();
     const v = inputEl.value;
     // 逐字退格时保留删之前最长的那版；改成别的内容才换掉
     if (v) { if (v.length >= draftLast.length || !draftLast.startsWith(v)) draftLast = v; if (v.trim()) draftChip.classList.add("hidden"); }
@@ -382,8 +406,9 @@
   });
 
   // 有字就发（忙时自动排队）；没字且正在生成 = 停止
-  // 刚发出的那一下之后紧跟的第二下（双击、手抖）不算「停止」：不然会把刚发的这一轮杀掉（审查 v0.5.3 F1）
-  sendEl.addEventListener("click", () => (hasDraft() || !isBusy() ? send() : Date.now() - lastSendAt < 1500 ? null : abort()));
+  // 刚发出的那一下之后紧跟的第二下（双击、手抖）不算「停止」：不然会把刚发的这一轮杀掉（审查 v0.5.3 F1）。
+  // 窗口只从点发送那一刻算 0.6 秒，且不再从 POST 回执重算——以前回执一慢，想停的时候全被吞掉（0.6.9 审计 196-聊天.3）
+  sendEl.addEventListener("click", () => (hasDraft() || !isBusy() ? send() : Date.now() - lastSendAt < 600 ? null : abort()));
   interjectEl.addEventListener("click", interjectNow);
 
   // ── 递东西进来：上传 ──────────────────────────────────────────────
@@ -396,10 +421,19 @@
 
   // 附件栏记在 sessionStorage：冻结脱困 / 重新载入后照原样恢复（文件已经在设备上，只记路径）
   const ATT_KEY = "cc.att";
-  try { const a = JSON.parse(sessionStorage.getItem(ATT_KEY) || "[]"); if (Array.isArray(a) && a.length) state.attachments = a.filter((x) => x && x.path); } catch {}
+  // 形状不对的附件记录（name 不是字符串、path 不是绝对路径）就地丢掉：以前一条坏记录会让整个附件栏渲染抛错，
+  // 而且坏记录一直留着（0.6.9 审计 196-前端注入.5 / 195-D 附件形状）
+  function normAtt(a) {
+    if (!a || typeof a !== "object" || typeof a.path !== "string" || !a.path) return null;
+    return { ...a, name: typeof a.name === "string" && a.name ? a.name : (a.path.split("/").pop() || "file"),
+      kind: typeof a.kind === "string" ? a.kind : "", size: Number(a.size) || 0 };
+  }
+  const normAtts = (list) => (Array.isArray(list) ? list.map(normAtt).filter(Boolean) : []);
+  try { const a = JSON.parse(sessionStorage.getItem(ATT_KEY) || "[]"); if (Array.isArray(a) && a.length) state.attachments = normAtts(a); } catch {}
   function renderAttachments() {
-    const list = state.attachments;
+    const list = state.attachments = normAtts(state.attachments);
     try { list.length ? sessionStorage.setItem(ATT_KEY, JSON.stringify(list)) : sessionStorage.removeItem(ATT_KEY); } catch {}
+    draftPersistSoon();
     attachStrip.classList.toggle("hidden", !list.length);
     attachStrip.innerHTML = list.map((a, i) => `
       <div class="att" data-i="${i}">
@@ -442,15 +476,40 @@
     for (const k of keys.slice(30)) delete all[k];
     try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
     inputEl.value = d && typeof d.text === "string" ? d.text : "";
-    state.attachments = d && Array.isArray(d.att) ? d.att.filter((x) => x && x.path) : [];
+    state.attachments = d && Array.isArray(d.att) ? normAtts(d.att) : [];
     renderAttachments(); autoGrow();
     draftLast = inputEl.value; draftStash = ""; draftChip.classList.add("hidden");   // 「恢复误删」是上一个会话的，别带过来
   }
   // 新会话（还没有会话号）的草稿在第一轮 init 时拿到会话号：同一代次里的空草稿就是那个会话的。
   // 上传 / 选择器回执按这个找回发起的会话，不然切走之后会落进空草稿、被下一个新会话带出来（#133）
   const DRAFT_ALIAS = new Map();   // 换草稿的代次 → 这一代的空草稿后来成了哪个会话
-  function draftAdopt(sid) { if (sid) DRAFT_ALIAS.set(draftEpoch, sid); }
+  function draftAdopt(sid) {
+    if (!sid) return;
+    DRAFT_ALIAS.set(draftEpoch, sid);
+    // 「新对话」名下的草稿挪到这个会话：进程被杀后按会话号还能找回（0.6.9 审计 195-D.3）
+    const all = draftsRead(), d = all[""];
+    if (d && !all[sid]) { all[sid] = d; delete all[""]; try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {} }
+  }
   const draftOwner = (ep, key) => key || DRAFT_ALIAS.get(ep) || "";
+  // 当前会话的草稿及时落盘：以前只在切会话 / pagehide 时写，App 被系统杀时正在打的字和附件都会丢（0.6.9 审计 195-D.3）
+  let draftSaveT = 0;
+  function draftPersist() {
+    clearTimeout(draftSaveT); draftSaveT = 0;
+    const k = view.sessionId || "", text = inputEl.value, att = normAtts(state.attachments);
+    const all = draftsRead();
+    if (text.trim() || att.length) all[k] = { text, att, at: Date.now() };
+    else if (all[k]) delete all[k]; else return;
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
+  }
+  function draftPersistSoon() { if (!draftSaveT) draftSaveT = setTimeout(draftPersist, 400); }
+  /** 启动时把当前会话的草稿装回输入框（进程被杀 / 重新打开都走这里） */
+  function draftLoad(key) {
+    const d = draftsRead()[key || ""];
+    if (!d) return;
+    if (!inputEl.value && typeof d.text === "string") inputEl.value = d.text;
+    if (!state.attachments.length) state.attachments = normAtts(d.att);
+    renderAttachments(); autoGrow(); draftLast = inputEl.value;
+  }
   /** 不在眼前的会话的草稿里追加正文 / 附件（发送失败找回、迟到的上传和截屏都往这里放） */
   function draftPutAway(k, text, att) {
     const all = draftsRead(), d = all[k] || { text: "", att: [] };
@@ -471,17 +530,31 @@
     // 上传途中切了会话：回执要落回发起的那个会话的草稿，不能塞进现在这个（审查 B08）
     const ep0 = draftEpoch, key0 = view.sessionId || "";
     const mine = () => draftEpoch === ep0 || (view.sessionId || "") === draftOwner(ep0, key0);
-    let away = 0;
+    let away = 0, fails = 0, lastErr = "";
     for (const f of list) {
+      if (!f.size) {     // 0 字节网关不收，先在这里说清楚（0.6.9 审计 195-C.18）
+        fails++; lastErr = t("空文件（0 字节）");
+        toast(t("「{name}」附加失败：{msg}", { name: f.name, msg: lastErr }), true);
+        continue;
+      }
       // 大文件（粘贴 / 拖进来的；从选择器挑的 App 壳已经分流了）：网关流式落盘，这里只提示一下要等
       if (f.size > BIG_ATT) toast(t("「{name}」较大（{s}），正在收进工作区…", { name: f.name, s: fmtSize(f.size) }));
+      const up = ++uploadSeq;
+      uploading.add(up);
       try {
         const r = await fetch("/api/upload?name=" + encodeURIComponent(f.name || "upload.bin"), {
           method: "POST",
           body: f,           // 直接流式送 File，fetch 自己带 content-type
         });
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        const j = await r.json();
+        if (!r.ok) {
+          // 原因要照实给：507/413 以前只剩一个状态码，用户不知道是空间不够还是文件太大（0.6.9 审计 195-D.4）
+          let j = null;
+          try { j = await r.json(); } catch {}
+          throw new Error((j && (j.message || j.error)) ||
+            (r.status === 507 ? t("存储空间不够了") : r.status === 413 ? t("文件太大，服务器没有收") : t("服务器返回 {status}", { status: r.status })));
+        }
+        const j = normAtt(await r.json());
+        if (!j) throw new Error(t("服务器没有认出上传的文件"));
         done.push(j);
         if (insert && mine()) state.attachments.push(j);
         else if (insert) {
@@ -489,14 +562,21 @@
           away++;
         }
       } catch (e) {
+        fails++; lastErr = e.message;
         toast(t("「{name}」附加失败：{msg}", { name: f.name, msg: e.message }), true);
+      } finally {
+        uploading.delete(up);
       }
     }
-    if (done.length) {
+    if (done.length || fails) {
       renderAttachments();
-      // 一部分落在这里、一部分回了原会话：两句都说（DeepSeek 复核 低-6）
-      const here = done.length - away;
-      toast([here ? t("已附加 {n} 个文件", { n: here }) : "", away ? t("{n} 个文件已附加到刚才那个会话的草稿", { n: away }) : ""].filter(Boolean).join("；"));
+      // 一部分落在这里、一部分回了原会话：两句都说（DeepSeek 复核 低-6）。
+      // 有失败时用一条总账，别让成功的 toast 把失败顶掉（0.6.9 审计 195-D.5）
+      if (fails) toast(t("已附加 {n} 个，{m} 个失败：{msg}", { n: done.length, m: fails, msg: lastErr }), true);
+      else {
+        const here = done.length - away;
+        toast([here ? t("已附加 {n} 个文件", { n: here }) : "", away ? t("{n} 个文件已附加到刚才那个会话的草稿", { n: away }) : ""].filter(Boolean).join("；"));
+      }
     }
     return done;
   }

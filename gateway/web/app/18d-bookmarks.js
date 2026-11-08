@@ -17,6 +17,18 @@
   const markBoxes = (msg) => (isUserMsg(msg) ? [msg.querySelector(".bubble")] : [...msg.querySelectorAll(":scope > .bubble .txt")]);
   const boxUuid = (msg, box) => (isUserMsg(msg) ? msg.dataset.uuid : box.dataset.uuid) || "";
   const msgUuids = (msg) => markBoxes(msg).map((b) => boxUuid(msg, b)).filter(Boolean);
+  // 同一条 assistant 事件可能拆成好几段正文，每段都盖同一个 uuid。para 记成「整条消息里第几段」，
+  // 否则好几段共用一个 uuid 时书签 / 上次读到总是落回第一段（0.6.9 审计 200-15-11）
+  function paraIndex(msg, box, para) {
+    if (isUserMsg(msg)) return para;
+    let n = 0;
+    for (const b of markBoxes(msg)) {
+      const ps = paraList(b);
+      if (b === box) return n + Math.min(para, Math.max(0, ps.length - 1));
+      n += ps.length;
+    }
+    return para;
+  }
   // 块里的「段」：正文块分冻结区（一截截定稿）和尾巴，两边的子元素按顺序排起来
   function paraList(box) {
     if (!box.classList.contains("txt")) return [...box.children];
@@ -45,7 +57,7 @@
     for (const msg of chatEl.querySelectorAll("#hist .msg.user, #hist .msg.bot, #live .msg.user, #live .msg.bot")) {
       if (msg.getBoundingClientRect().bottom <= top || !msgUuids(msg).length) continue;
       const tg = topIn(msg), uuid = tg && boxUuid(msg, tg.box);
-      if (uuid) return { uuid, para: tg.para, off: Number(msg.closest(".page")?.dataset.from) || 0 };
+      if (uuid) return { uuid, para: paraIndex(msg, tg.box, tg.para), off: Number(msg.closest(".page")?.dataset.from) || 0 };
     }
     return null;
   }
@@ -83,7 +95,7 @@
     if (unsure) return toast(t("后面有一条同样的话还没确认存下，等那一轮答完（或重新打开这个会话）再加书签"), true);
     try {
       const r = await post("/api/bookmarks", {
-        session: sid, uuid, hint: Number(msg.closest(".page")?.dataset.from) || 0, para: tg.para,
+        session: sid, uuid, hint: Number(msg.closest(".page")?.dataset.from) || 0, para: paraIndex(msg, tg.box, tg.para),
         role: user ? "user" : "assistant", head, nth,
         excerpt: ((tg.el && tg.el.innerText) || src).trim().slice(0, 120),
       });
@@ -99,10 +111,11 @@
 
   /** 落到书签：把那一段放到视口上三分之一（「上次读到」放在顶上、不闪） */
   function landOnMark(page, a) {
-    const el = page.querySelector(`[data-uuid="${CSS.escape(a.uuid)}"]`);
-    if (!el) return null;
-    const box = el.classList.contains("txt") ? el : el.querySelector(".bubble") || el;
-    const p = paraList(box)[a.para] || el;
+    // 一个 uuid 可能对应同一条回复里的好几段正文：把所有段按 DOM 顺序摊平，para 是摊平后的序号
+    const els = [...page.querySelectorAll(`[data-uuid="${CSS.escape(a.uuid)}"]`)];
+    if (!els.length) return null;
+    const paras = els.flatMap((x) => paraList(x.classList.contains("txt") ? x : x.querySelector(".bubble") || x));
+    const p = paras[Math.min(a.para || 0, Math.max(0, paras.length - 1))] || els[0];
     const y = p.getBoundingClientRect().top - chatEl.getBoundingClientRect().top + chatEl.scrollTop;
     chatEl.scrollTop = Math.max(0, y - (a.quiet ? 6 : chatEl.clientHeight / 3));
     if (!a.quiet) { p.classList.remove("bm-hit"); void p.offsetWidth; p.classList.add("bm-hit"); setTimeout(() => p.classList.remove("bm-hit"), 2400); }
@@ -119,7 +132,12 @@
     if (stick && view.next == null) { if (!m[sid]) return; delete m[sid]; }
     else {
       const tg = viewTopMark();
-      if (!tg) return;
+      if (!tg) {
+        // 视口顶部是刚推来的实时消息（还没有 uuid），记不成锚点；旧锚点必须清掉，
+        // 不然切回来会跳到更早的旧位置（0.6.9 审计 195-K.5）
+        if (m[sid]) { delete m[sid]; try { localStorage.setItem(LR_KEY, JSON.stringify(m)); } catch {} }
+        return;
+      }
       m[sid] = { ...tg, at: Date.now() };
       const ks = Object.keys(m);
       if (ks.length > 40) ks.sort((x, y) => m[x].at - m[y].at).slice(0, ks.length - 40).forEach((k) => delete m[k]);
