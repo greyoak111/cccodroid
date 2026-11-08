@@ -41,7 +41,7 @@ export const SWALLOW_HOOKS = [];
 /** SSE 修补状态机：feed 进上游原文，吐出要发给 claude 的文本；finish 在上游结束时调用，返回补的尾巴或 null（= 该断就断）。
  *  onSwallow(报错文字)：说完之后才来的 error 被吞掉时调用 */
 export function sseRepairer({ onSwallow } = {}) {
-  let buf = "", cr = "", started = false, gotStop = false, gotMsgStop = false, outTokens = 0;
+  let buf = "", cr = "", started = false, gotStop = false, gotMsgStop = false, outTokens = 0, outBytes = 0;
   const open = new Set(), kinds = new Map();
   let hasOutput = false, hasTool = false;
   const done = () => started && !gotMsgStop && open.size === 0 && hasOutput;
@@ -49,7 +49,9 @@ export function sseRepairer({ onSwallow } = {}) {
   const ev = (type, obj) => `event: ${type}\ndata: ${JSON.stringify(obj)}\n\n`;
   const tail = () => {
     let s = "";
-    if (!gotStop) s += ev("message_delta", { type: "message_delta", delta: { stop_reason: stopReason(), stop_sequence: null }, usage: { output_tokens: outTokens } });
+    // 上游没给 message_delta 的用量就断了：message_start 里那个通常是 1 之类的占位，按已经吐出的内容估一个（UTF-8 约 3.5 字节一个 token，
+    // 中文偏多、英文偏少），取两者大的，账本 / 用量别记成几乎为零（0.6.9 审计 200-9-07）
+    if (!gotStop) s += ev("message_delta", { type: "message_delta", delta: { stop_reason: stopReason(), stop_sequence: null }, usage: { output_tokens: Math.max(outTokens, Math.ceil(outBytes / 3.5)) } });
     gotStop = true; gotMsgStop = true;
     return s + ev("message_stop", { type: "message_stop" });
   };
@@ -85,6 +87,9 @@ export function sseRepairer({ onSwallow } = {}) {
       const k = kinds.get(j.index);
       if (k === "tool_use" || k === "server_tool_use") { hasTool = true; hasOutput = true; }
       else if (k === "text") hasOutput = true;
+    } else if (t === "content_block_delta") {
+      const d = j.delta || {};
+      for (const k of ["text", "partial_json", "thinking"]) if (typeof d[k] === "string") outBytes += Buffer.byteLength(d[k]);
     } else if (t === "message_delta") {
       if (j.usage?.output_tokens) outTokens = j.usage.output_tokens;
       if (j.delta?.stop_reason) gotStop = true;

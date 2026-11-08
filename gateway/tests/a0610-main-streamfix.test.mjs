@@ -64,3 +64,15 @@ test("195-U.4：说完后才来的 error 照旧补成说完，但报给发起的
     assert.deepEqual(got, [["sid-u4", "upstream hiccup"]]);
   } finally { SWALLOW_HOOKS.splice(SWALLOW_HOOKS.indexOf(h), 1); }
 });
+
+test("200-9-07：上游没给用量就断、由我们补的收尾 → 输出 token 按已吐出的内容估，不是 message_start 的占位", () => {
+  const f = sseRepairer();
+  let out = f.feed(START);
+  out += f.feed(ev({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
+  out += f.feed(ev({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "x".repeat(700) } }));
+  out += f.feed(ev({ type: "content_block_stop", index: 0 }));
+  out += f.finish() || "";
+  const md = out.split("\n\n").map((b) => b.split("\n").find((l) => l.startsWith("data:"))).filter(Boolean).map((l) => JSON.parse(l.slice(5))).find((j) => j.type === "message_delta");
+  assert.ok(md, out);
+  assert.equal(md.usage.output_tokens, 200);
+});
