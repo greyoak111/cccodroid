@@ -2968,4 +2968,6 @@ window.I18N_DICT["fr"] = {
   "3 天": "3 jours",
   "7 天": "7 jours",
   "原来的会话记录删不掉，会话留在原处：{err}": "Impossible de supprimer l’enregistrement d’origine de la session ; elle reste à sa place : {err}",
+  "这一轮没跑完：App 更新时网关重启了（{when} 开始的）。": "Ce tour n’a pas abouti : la passerelle a redémarré pendant la mise à jour de l’app (commencé {when}).",
+  "这一轮没跑完：网关被关闭或重启了（{when} 开始的）。": "Ce tour n’a pas abouti : la passerelle a été arrêtée ou redémarrée (commencé {when}).",
 };

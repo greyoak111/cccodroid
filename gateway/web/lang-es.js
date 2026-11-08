@@ -2968,4 +2968,6 @@ window.I18N_DICT["es"] = {
   "3 天": "3 días",
   "7 天": "7 días",
   "原来的会话记录删不掉，会话留在原处：{err}": "No se pudo borrar el registro original de la sesión; la sesión se queda donde estaba: {err}",
+  "这一轮没跑完：App 更新时网关重启了（{when} 开始的）。": "Este turno no terminó: el gateway se reinició mientras se actualizaba la app (empezó {when}).",
+  "这一轮没跑完：网关被关闭或重启了（{when} 开始的）。": "Este turno no terminó: el gateway se detuvo o se reinició (empezó {when}).",
 };

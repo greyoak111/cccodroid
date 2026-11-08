@@ -2965,3 +2965,5 @@
 2965	3 hari
 2966	7 hari
 2967	Catatan sesi asli tidak bisa dihapus, jadi sesi tetap di tempat semula: {err}
+2968	Giliran ini tidak selesai: gateway dimulai ulang saat aplikasi diperbarui (dimulai {when}).
+2969	Giliran ini tidak selesai: gateway dihentikan atau dimulai ulang (dimulai {when}).

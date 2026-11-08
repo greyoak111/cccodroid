@@ -3002,5 +3002,7 @@ window.I18N_DICT.en = {
   "1 天": "1 day",
   "3 天": "3 days",
   "7 天": "7 days",
-  "原来的会话记录删不掉，会话留在原处：{err}": "Couldn't delete the original session record, so the session stays where it was: {err}"
+  "原来的会话记录删不掉，会话留在原处：{err}": "Couldn't delete the original session record, so the session stays where it was: {err}",
+  "这一轮没跑完：App 更新时网关重启了（{when} 开始的）。": "This turn didn't finish: the gateway restarted while the app was updating (started {when}).",
+  "这一轮没跑完：网关被关闭或重启了（{when} 开始的）。": "This turn didn't finish: the gateway was stopped or restarted (started {when})."
 };

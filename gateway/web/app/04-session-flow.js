@@ -1055,6 +1055,9 @@
     // why: card —— 启动前的确认卡没人答、超时停下的（#171）：claude 根本没起，有会话也只能「重发」，不能「继续」
     const card = it.why === "card", cont = !!it.sessionId && !card;
     setHtml(b, `<p>${esc(card ? t("这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。", { n: 10, when })
+        // cause：网关分得清的中断原因（195-A.11）。没有就是没打招呼就没了：系统回收、强行停止
+        : it.cause === "update" ? t("这一轮没跑完：App 更新时网关重启了（{when} 开始的）。", { when })
+        : it.cause === "stop" ? t("这一轮没跑完：网关被关闭或重启了（{when} 开始的）。", { when })
         : t("这一轮没跑完：App 在后台被系统结束了（{when} 开始的）。", { when }))}</p>
       <blockquote>${esc(String(it.text || "").slice(0, 300))}</blockquote>
       <p class="perm-sub">${esc(card ? t("Claude 没收到这条消息。点「重发」把它放回输入框。")

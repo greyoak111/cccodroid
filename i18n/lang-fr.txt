@@ -2965,3 +2965,5 @@
 2965	3 jours
 2966	7 jours
 2967	Impossible de supprimer l’enregistrement d’origine de la session ; elle reste à sa place : {err}
+2968	Ce tour n’a pas abouti : la passerelle a redémarré pendant la mise à jour de l’app (commencé {when}).
+2969	Ce tour n’a pas abouti : la passerelle a été arrêtée ou redémarrée (commencé {when}).

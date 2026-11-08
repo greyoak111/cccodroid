@@ -1,6 +1,8 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
-import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
+import { CFG, HERE, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
+import { onShutdown } from "./crashguard.mjs";
 import { SETTINGS, saveSettings, capList } from "./settings-store.mjs";
 import { keepBad, writeAtomic } from "./statefile.mjs";
 import { PERM_MODES, PROVIDER, keyOf, providerById } from "./providers.mjs";
@@ -97,6 +99,12 @@ export const publishState = () => { saveRunMark(); publish({ type: "state", ...s
 const RUN_MARK = path.join(CFG.home, "ccapp-run-mark.json");
 const INTR_FILE = path.join(CFG.home, "ccapp-interrupted.json");
 const TEXT_KEEP = 64 << 10;     // 运行标记里每轮留的提问字数（标记每次排队变化都重写，别存整条 200 万字）
+// 中断的原因要分得清（0.6.9 审计 195-A.11：以前一律说「App 在后台被系统结束」）：
+//   标记里记着安装包清单的指纹，下次启动对不上 → App 更新了；收到 SIGTERM / SIGINT 正常退出时记一笔 stop → 网关被关闭或重启；
+//   两样都没有 → 没打招呼就没了（系统回收、强行停止）
+const APP_ID = (() => { try { return crypto.createHash("sha256").update(fs.readFileSync(path.join(HERE, "FILES"))).digest("hex").slice(0, 16); } catch { return ""; } })();
+let STOPPING = false;
+onShutdown("运行标记", () => { STOPPING = true; if (RUNS.size) saveRunMark(); });
 export function saveRunMark() {
   // 「有任务」标记跟着同步：在跑的，加上排着、会自己发出去的（挂起等 ⚡ 的不算）。外壳据此判断划掉时能不能停服务（审查 0601b）
   runFlag(RUNS.size > 0 || QUEUE.some((q) => !q.held));
@@ -104,6 +112,7 @@ export function saveRunMark() {
     if (!RUNS.size && !QUEUE.length) { fs.rmSync(RUN_MARK, { force: true }); return true; }
     const live = runList().filter((r) => !r.ended);
     return writeAtomic(RUN_MARK, JSON.stringify({
+      ...(APP_ID ? { app: APP_ID } : {}), ...(STOPPING ? { stop: true } : {}),
       // done：已经答完、只是进程还留着等后台任务回报，而且任务也都清零了 —— 这时被结束不算中断
       // text 以前截 4000 字、别的都不存：没建会话的「重发」长消息后半截悄悄没了，项目 / 模型 / 权限也回落全局（195-AA.5）。
       // 现在存到 64K（更长的标 textCut，界面要说），连同发送参数 req、定时任务身份 sched（AA.3）
@@ -182,7 +191,8 @@ export function recoverRunMark() {
     log(`⚠️ 上一轮没跑完就被结束了（会话 ${r.sessionId || "未建立"}），已标为中断`);
   }
   if (runs.length) {
-    const now = Date.now(), fresh = runs.map((r) => ({ ...r, at: now }));
+    const cause = m.app && APP_ID && m.app !== APP_ID ? "update" : m.stop ? "stop" : null;
+    const now = Date.now(), fresh = runs.map((r) => ({ ...r, at: now, ...(cause ? { cause } : {}) }));
     // 上次没处理的中断记录留着；同一个会话以这次的为准
     const sids = new Set(fresh.map((r) => r.sessionId).filter(Boolean)), ids = new Set(fresh.map((r) => r.id));
     if (!setInterrupted([...INTERRUPTED.filter((e) => !ids.has(e.id) && !(e.sessionId && sids.has(e.sessionId))), ...fresh])) {

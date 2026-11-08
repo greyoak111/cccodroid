@@ -118,3 +118,14 @@ test("195-A.8：被结束的那轮按标记里拍的底重新封签——只往�
   assert.equal(checkSession(a.sid, a.f), null, "只追加：不提醒模型");
   assert.equal(checkSession(b.sid, b.f), "edited");
 });
+
+test("195-A.11：正常收到 SIGTERM 退出的记 stop，下次启动中断记录带 cause；没打招呼就没了的不带", () => {
+  reset();
+  fs.writeFileSync(MARK, JSON.stringify({ stop: true, runs: [{ id: "a11a", text: "x", startedAt: 1 }], queue: [] }));
+  Q.recoverRunMark();
+  assert.equal(Q.INTERRUPTED.find((e) => e.id === "a11a").cause, "stop");
+  reset();
+  fs.writeFileSync(MARK, JSON.stringify({ runs: [{ id: "a11b", text: "x", startedAt: 1 }], queue: [] }));
+  Q.recoverRunMark();
+  assert.equal(Q.INTERRUPTED.find((e) => e.id === "a11b").cause, undefined);
+});

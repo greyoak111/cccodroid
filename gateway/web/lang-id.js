@@ -2968,4 +2968,6 @@ window.I18N_DICT["id"] = {
   "3 天": "3 hari",
   "7 天": "7 hari",
   "原来的会话记录删不掉，会话留在原处：{err}": "Catatan sesi asli tidak bisa dihapus, jadi sesi tetap di tempat semula: {err}",
+  "这一轮没跑完：App 更新时网关重启了（{when} 开始的）。": "Giliran ini tidak selesai: gateway dimulai ulang saat aplikasi diperbarui (dimulai {when}).",
+  "这一轮没跑完：网关被关闭或重启了（{when} 开始的）。": "Giliran ini tidak selesai: gateway dihentikan atau dimulai ulang (dimulai {when}).",
 };
