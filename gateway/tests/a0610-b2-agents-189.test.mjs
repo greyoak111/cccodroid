@@ -1,12 +1,14 @@
 // 0.6.10 车道 b2：#189 代理历史回填缓存——meta.json 只改 finished / toolUseId 时缓存也要失效
 import "../gw/config.mjs";
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { CFG } from "../gw/config.mjs";
 import { backfillAgents } from "../gw/agents.mjs";
+
+after(() => fs.rmSync(path.join(CFG.home, ".claude", "projects", "-b2-agents"), { recursive: true, force: true }));
 
 test("改 meta.json 的 finished：第二次回填不能拿旧缓存（#189）", () => {
   const sid = crypto.randomUUID();

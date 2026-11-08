@@ -1,6 +1,6 @@
 // 0.6.10 车道 b2：会话删除 / 回收站 / 恢复 / 导出导入 / 彻底删除（195-A.1/A.5/A.7/A.10/A.14、197-2.2/2.3/2.4、197-9.9、200-8-04、196-真机.1/2、195-Y.2/Y.3/Y.5/Y.6）
 import "../gw/config.mjs";
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,6 +14,8 @@ import * as integration from "../gw/integrity.mjs";
 import { lineageDb, recordPrimary } from "../gw/lineage-store.mjs";
 
 const EDITS = path.join(CFG.home, ".ccapp-trash", ".edits");
+// 共用临时 home：跑完清掉本测试留下的会话（含恢复/导入回去的），别影响后面的用量补算
+after(() => fs.rmSync(path.join(PATHS.projects, "-b2-ops"), { recursive: true, force: true }));
 const ORPHANS = path.join(CFG.home, "ccapp-session-orphans.json");
 const readJson = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
 const uid = () => crypto.randomUUID();
@@ -176,6 +178,7 @@ test("导入的会话 mtime 改成现在：列表里立刻看得到（196-会话
   const f = findSessionFile(s.sid);
   assert.ok(f);
   assert.ok(Date.now() - fs.statSync(f.file).mtimeMs < 60000, "按导入时间排，而不是包里的旧时间");
+  fs.rmSync(f.file, { force: true });   // 导入落在工作区项目目录：清掉，别影响后面的用量补算
 });
 
 test("分叉先写 .part：成功后不留临时文件（195-Y.6）", () => {

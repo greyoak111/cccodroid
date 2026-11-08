@@ -33,6 +33,8 @@ for (let i = 0; i < maxParallel(); i++) { const id = "b2-busy" + i; fake.push(id
 
 const allow0 = S.DB.allowLogin, budget0 = S.DB.dailyBudget, spent0 = { ...S.DB.spent };
 after(() => { S.DB.allowLogin = allow0; S.DB.dailyBudget = budget0; S.DB.spent = spent0; });
+// 共用临时 home：清掉本测试造的会话，别让后面的用量补算把它们算进来
+after(() => fs.rmSync(path.join(CFG.home, ".claude", "projects", "-b2-sched"), { recursive: true, force: true }));
 const dayK = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 const monthK = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
 let n = 0;

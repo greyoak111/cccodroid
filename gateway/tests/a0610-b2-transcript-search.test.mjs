@@ -1,6 +1,6 @@
 // 0.6.10 车道 b2：会话记录分页（195-Q.2 / Q.10）与会话搜索（195-Q.3、200-15-03/04/06/08/12、200-6-05 的 PEEK_CACHE）
 import "../gw/config.mjs";
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,6 +14,8 @@ const { searchSessions, listSessions } = await import("../gw/sessions.mjs");
 
 const PROJ = path.join(PATHS.projects, "-b2-search");
 fs.mkdirSync(PROJ, { recursive: true });
+// 测试文件共用同一个临时 home：跑完把自己的会话删掉，别让后面的用量补算把它们算进去
+after(() => fs.rmSync(PROJ, { recursive: true, force: true }));
 const line = (o) => JSON.stringify(o);
 const userLine = (sid, text, extra = {}) => line({ type: "user", sessionId: sid, uuid: crypto.randomUUID(), timestamp: new Date().toISOString(), message: { role: "user", content: text }, ...extra });
 const botLine = (sid, text, extra = {}) => line({ type: "assistant", sessionId: sid, uuid: crypto.randomUUID(), timestamp: new Date().toISOString(), message: { role: "assistant", content: [{ type: "text", text }] }, ...extra });

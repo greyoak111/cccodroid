@@ -25,6 +25,7 @@ const call = async (method, url, body) => {
 
 before(() => { fs.mkdirSync(PATHS.projects, { recursive: true }); });
 after(() => { try { fs.chmodSync(PATHS.projects, 0o755); } catch {} });
+after(() => fs.rmSync(path.join(PATHS.projects, "-b2-bm"), { recursive: true, force: true }));
 
 test("projects 目录读不出来：书签原样回、标 unreadable，不清空（195-Y.8）", async () => {
   fs.chmodSync(PATHS.projects, 0o000);
