@@ -219,6 +219,12 @@
       }
     } catch (e) {
       if (!ok()) return;
+      // 手机浏览器从 127.0.0.1 / localhost 打开：/api 因来源校验必然 403，网关其实在线（0.6.9 审计 195-G.6）
+      if (e.status === 403 && location.hostname !== "127.0.0.2") {
+        $("status-box").textContent = t("请在 cccodroid 应用里打开");
+        setStatus(t("请在 cccodroid 应用里打开"), "warn");
+        return;
+      }
       $("status-box").textContent = t("无法连接网关：{msg}", { msg: e.message });
       setStatus(t("网关离线"), "err");
     }

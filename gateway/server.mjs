@@ -187,7 +187,8 @@ server.listen(CFG.port, "127.0.0.1", () => {
   // 'listening' 先于任何连接派发，界面的第一个请求照样看得到恢复出来的队列
   try { recoverRunMark(); } catch (e) { log("恢复上次的运行标记失败：" + (e.stack || e.message)); }
   uiServer.listen(CFG.port, UI_HOST);   // 界面地址也放到恢复之后：别让界面在队列恢复前先连进来
-  log(`claude-apk 网关 v3 已启动  http://127.0.0.1:${CFG.port}`);
+  // 浏览器直接开这个地址只拿得到静态页，/api 按来源校验一律 403；界面要从应用里开（0.6.9 审计 195-G.6）
+  log(`claude-apk 网关 v3 已启动  http://127.0.0.1:${CFG.port}（界面请从 cccodroid 应用里打开）`);
   log(`  运行时 ${CFG.runtime}`);
   log(`  工作区 ${CFG.workspace}`);
   log(`  前端   ${PATHS.web}  存在=${fs.existsSync(PATHS.web)}`);
