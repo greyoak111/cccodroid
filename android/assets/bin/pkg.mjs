@@ -722,10 +722,14 @@ function guardedPaths() {
   }
   return GUARDED;
 }
+/** installed.json 同 uid 可改：卸载 / 升级只认 $PREFIX 内的普通相对路径，
+ *  别让 "../" 或绝对路径把前缀外的文件删了（196-供应链.3，和组件记录同一个口径） */
+const safeRel = (r) => typeof r === "string" && r.length > 0 && !r.includes("\0") && !r.includes("\\") &&
+  !path.isAbsolute(r) && r.split("/").every((p) => p && p !== "." && p !== "..");
 /** 删掉 rec 里归这个包的文件；别的包（.list）也认领的、组件/模块在用的、或 keep 里的留下 */
 function removeFiles(name, rec, own, keep = new Set()) {
   const dirs = new Set(), guarded = guardedPaths();
-  for (const r of rec.files || []) {
+  for (const r of (Array.isArray(rec.files) ? rec.files : []).filter(safeRel)) {
     if (keep.has(r) || guarded.has(r) || (own.get(r) || []).some((o) => o !== name)) continue;
     try { fs.rmSync(path.join(PREFIX, r), { force: true }); } catch {}
     dirs.add(path.dirname(r));

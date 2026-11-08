@@ -20,6 +20,13 @@ const STAGE = PREFIX ? path.join(path.dirname(PREFIX), "devkit-stage") : "";
 const MOD_JOBS = new Map();          // id → { phase, done, total, via, error, child, cancelled, finished, queue }
 const DEVKIT_MIRROR = "https://dl.cccodroid.net/devkit/";
 
+/** modules.json 同 uid 可改：dir 只认 $PREFIX 内的普通相对路径 —— 卸载时会对 dirOf(m) 整个 rmSync（196-供应链.3） */
+const modDirOk = (d) => typeof d === "string" && d.length > 0 && !d.includes("\0") && !d.includes("\\") &&
+  !path.isAbsolute(d) && d.split("/").every((p) => p && p !== "." && p !== "..");
+/** FILES 里的一行同理，不安全的行不参与删除（196-供应链.3） */
+const safeRel = (r) => typeof r === "string" && r.length > 0 && !r.includes("\0") && !r.includes("\\") &&
+  !path.isAbsolute(r) && r.split("/").every((p) => p && p !== "." && p !== "..");
+
 export function modulesInfo() {
   if (!DK) return null;
   let j;
@@ -32,7 +39,7 @@ export function modulesInfo() {
     return null;
   }
   const n = j.modules.length;
-  j.modules = j.modules.filter((m) => m && typeof m === "object" && typeof m.id === "string" && m.id && typeof m.dir === "string" && m.dir);
+  j.modules = j.modules.filter((m) => m && typeof m === "object" && typeof m.id === "string" && m.id && modDirOk(m.dir));
   if (j.modules.length !== n) log(`[mod] modules.json 里有 ${n - j.modules.length} 个坏条目，已忽略`);
   return j;
 }
@@ -46,7 +53,7 @@ export function modInstalled(mj, id) {
 }
 const readLines = (f) => { try { return fs.readFileSync(f, "utf8").split("\n").filter(Boolean); } catch { return []; } };
 /** 一块放进 $PREFIX 的全部路径（文件 + 软链），相对 $PREFIX */
-const filesOf = (m) => readLines(path.join(dirOf(m), "FILES"));
+const filesOf = (m) => readLines(path.join(dirOf(m), "FILES")).filter(safeRel);
 
 /** 组件要用、但所在模块没装的底座包 → 要先装的模块（共享层报给用它的模块）。整包工具包或不知道依赖时返回 [] */
 export function modulesMissingFor(baseDeps) {
