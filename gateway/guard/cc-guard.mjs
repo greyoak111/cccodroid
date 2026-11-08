@@ -67,7 +67,9 @@ const PROMPT = [
   // 旗标前允许引号（claude "--bare"），--allowedTools 能不问就放行工具（DeepSeek 复核必修 4）
   [/\bclaude\b[^\n;&|]*?[\s"'](?:--settings|--setting-sources|--safe-mode|--bare|--dangerously-skip-permissions|--allow-dangerously-skip-permissions|--allowed-?[Tt]ools|--permission-mode["']?[\s=]+["']?(?:bypassPermissions|auto|dontAsk|acceptEdits))(?=$|[\s=;|&)'"])/, "Claude Code started without this check"],
   // Claude Code 程序、它的签名清单、current 软链：删了清单再换程序，起 claude 前的核验就无从比对（见 gw/claudeseal.mjs）
-  [/\.local\/share\/cccodroid\/claude(?=$|[\/\s"';|&)])/, "the Claude Code program and its signed manifest"],
+  [/\.local\/share\/cccodroid\/claude(?=$|[\/\s"';|&)])/, "the Claude Code program and its signed manifest"],  // 下次开终端 / 起命令就会自动跑的：shell 启动文件，和排在 PATH 里的自定义命令包装（0.6.9 审计 199-4-01）
+  [/(?:^|[\/\s"'=~@<>:])\.(?:bashrc|bash_profile|bash_login|profile|zshrc|zprofile|zshenv|inputrc)(?=$|[\s"';|&)])/, "shell startup files (run in every new terminal)"],
+  [/\.cccodroid\/bin(?=$|[\/\s"';|&)])/, "command wrappers on PATH"],
 ];
 const WRITERS = new Set(["Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
 

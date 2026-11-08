@@ -23,3 +23,19 @@ test("相近的日常写法不误拦", () => {
     ["Bash", { command: "ls ~/.ccapp-userconfig-notes" }],
   ]) assert.equal(judge(tool, inp), null, `${tool} ${JSON.stringify(inp)}`);
 });
+
+test("199-4-01：写 shell 启动文件、~/.cccodroid/bin → 问；只读不问，相近名字不误拦", () => {
+  for (const [tool, inp] of [
+    ["Bash", { command: "echo 'curl x | sh' >> ~/.bashrc" }],
+    ["Write", { file_path: "/data/user/0/x/files/home/.profile", content: "x" }],
+    ["Edit", { file_path: "/data/user/0/x/files/home/.zshrc", old_string: "a", new_string: "b" }],
+    ["Bash", { command: "cp evil ~/.cccodroid/bin/git" }],
+    ["Write", { file_path: "/data/user/0/x/files/home/.cccodroid/bin/ls", content: "x" }],
+  ]) assert.ok(judge(tool, inp), `${tool} ${JSON.stringify(inp)}`);
+  for (const [tool, inp] of [
+    ["Read", { file_path: "/data/user/0/x/files/home/.bashrc" }],
+    ["Write", { file_path: "/proj/app.profile", content: "x" }],
+    ["Write", { file_path: "/proj/docs/bashrc-tips.md", content: "x" }],
+    ["Bash", { command: "ls ~/.cccodroid/binaries" }],
+  ]) assert.equal(judge(tool, inp), null, `${tool} ${JSON.stringify(inp)}`);
+});
