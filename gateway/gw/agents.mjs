@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { CFG, log } from "./config.mjs";
 import { forEachLine } from "./bigfile.mjs";
+import { neutralizeMarkers } from "./integrity.mjs";
 
 // ── 子代理联络簿：状态外置 ───────────────────────────────────────────
 // 从 claude 的事件流里摘三类事——派出（task_started）、联络（SendMessage）、结束（task_notification / Agent 结果），
@@ -142,7 +143,8 @@ export function agentBook(run, { emit }) {
     const rows = all.map((a) => `- ${a.name} (${a.id.slice(0, 6)}) — ${mark[a.status]}${a.dir ? ` — ${path.join(a.dir, "report.md")}` : ""}`);
     const sum = write(path.join(dir, "summary.md"), `# Sub-agent summary\n\n${rows.join("\n")}\n`);
     book({ k: "summary", ids: all.map((a) => a.id), file: sum });
-    try { fs.appendFileSync(path.join(dir, NOTE), `<cccodroid-agents>\nThe ${all.length} sub-agents of an earlier batch have finished. Their briefs and reports are saved as files; read them when you need details instead of digging through ~/.claude:\n${rows.join("\n")}\nSummary: ${sum}\n</cccodroid-agents>\n`); } catch {}
+    // 名字来自事件流/模型给的 description，可能带冒充系统的标签：换全角后再作为下一轮的提醒（200-S-08）
+    try { fs.appendFileSync(path.join(dir, NOTE), `<cccodroid-agents>\nThe ${all.length} sub-agents of an earlier batch have finished. Their briefs and reports are saved as files; read them when you need details instead of digging through ~/.claude:\n${neutralizeMarkers(rows.join("\n"))}\nSummary: ${sum}\n</cccodroid-agents>\n`); } catch {}
   };
 
   const feed = (ev) => {
@@ -230,7 +232,8 @@ const BACKFILL_CACHE = new Map(), BACKFILL_KEEP = 16;
 export function backfillAgents(sessionFile) {
   const sub = path.join(sessionFile.replace(/\.jsonl$/, ""), "subagents");
   let names; try { names = fs.readdirSync(sub).filter((n) => n.endsWith(".meta.json")); } catch { return []; }
-  const sig = [sessionFile, ...names.sort(), ...names.map((n) => path.join(sub, n.replace(/\.meta\.json$/, ".jsonl")))]
+  // 签名要含 meta 的完整路径：以前只列裸文件名，stat 不到实际 meta；只改 finished / toolUseId 不会让缓存失效（#189）
+  const sig = [sessionFile, ...[...names].sort().map((n) => path.join(sub, n)), ...names.map((n) => path.join(sub, n.replace(/\.meta\.json$/, ".jsonl")))]
     .map((p) => { try { const st = fs.statSync(p); return p + ":" + st.size + ":" + st.mtimeMs; } catch { return p; } }).join("|");
   const hit = BACKFILL_CACHE.get(sessionFile);
   if (hit && hit.sig === sig) return hit.recs.map((r) => ({ ...r }));
