@@ -9,6 +9,7 @@ import { SEED_FILE } from "./providers.mjs";
 import { NEXT, fileKind, mimeOf, rangeOf, readBody, readBodyBuf, sendJson } from "./http.mjs";
 import { toFront } from "./local.mjs";
 import { bodyToFile } from "./bigfile.mjs";
+import { fixUploadedImage } from "./imgfix.mjs";
 import { holdsPrivate, zoneOf } from "./pathguard.mjs";
 
 // ── 文件收发：读图 / 读文件 / 把东西递进来 ────────────────────────────
@@ -370,7 +371,6 @@ export async function routeFiles(req, res, u, p) {
     // 文件名上限是 255 字节不是字符：中文一个字 3 字节，按字符截到 120 还会超（#148-3）。时间戳前缀和「-序号」另留余量
     const nm0 = safe || "upload.bin", dot0 = nm0.lastIndexOf(".");
     const ext = dot0 > 0 ? clipBytes(nm0.slice(dot0), 32) : "", stem = clipBytes(dot0 > 0 ? nm0.slice(0, dot0) : nm0, 200 - Buffer.byteLength(ext)) || "upload";
-    const nm = stem + ext;
     // 先写到隐藏的 .part 临时文件，完整收完再原子挂上最终名字：上传途中网关被杀 / 客户端断开，
     // 只会留下 .part（文件列表默认不显示），不会把半截文件伪装成上传成功的附件（200-H-4）
     uploadCleanParts();
@@ -384,12 +384,16 @@ export async function routeFiles(req, res, u, p) {
     let size;
     try { size = await bodyToFile(req, tmp, UPLOAD_MAX); }
     catch (e) { fs.rmSync(tmp, { force: true }); return sendJson(res, /large/.test(e.message) ? 413 : 400, { error: e.message }); }
+    // 图片按内容认格式：扩展名不对的改对，HEIF / AVIF 转 JPEG（群友 11-08，抖音存的图；见 imgfix.mjs）
+    let fext = ext;
+    try { fext = await fixUploadedImage(tmp, ext); } catch (e) { log(`[upload] 图片格式核对失败：${e.message}`); }
+    if (fext !== ext) { log(`[upload] ${safe} 实际是 ${fext.slice(1)}，按 ${fext.slice(1)} 存`); try { size = fs.statSync(tmp).size; } catch {} }
     // 0 字节也是合法文件：以前当成失败拒掉，用户附不上空文件（195-C.18）
     let out = "";
     // 查名 + rename 放在同一段同步代码里：node 单线程，两个并发上传不会插进来；目标盘不支持硬链接（本机 EACCES），
     // 不能用 link 占名，但同步段内的 exists+rename 同样不会被另一个请求插入
     for (let i = 1; i < 1000 && out === ""; i++) {
-      const cand = path.join(UPLOAD_DIR, `${stamp}-${i === 1 ? nm : stem + "-" + i + ext}`);
+      const cand = path.join(UPLOAD_DIR, `${stamp}-${i === 1 ? stem + fext : stem + "-" + i + fext}`);
       if (fs.existsSync(cand)) continue;
       try { fs.renameSync(tmp, cand); out = cand; }
       catch (e) { fs.rmSync(tmp, { force: true }); return sendJson(res, 500, { error: e.message }); }
