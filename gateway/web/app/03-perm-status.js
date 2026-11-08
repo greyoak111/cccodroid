@@ -747,6 +747,8 @@
     const phText = () => {
       const ms = Date.now() - phT0, sec = ms >= 3000 ? " · " + fmtDur(ms) : "";
       switch (phEv.phase) {
+        case "prep":    return t("准备中") + sec;
+        case "boot":    return t("启动中，连接工具") + sec;
         case "connect": return t("连接中") + sec;
         case "wait":    return t("已连上，等待输出") + sec;
         // 出错原因第一次重试就写出来（手机上看不到悬停提示），不用等十次都失败（群反馈 11-06）
@@ -764,7 +766,7 @@
     const phPaint = () => {
       if (!ph || !phEv) return;
       ph.textContent = phText();
-      const slow = (phEv.phase === "connect" || phEv.phase === "wait") && Date.now() - phT0 > 30000;
+      const slow = ["prep", "boot", "connect", "wait"].includes(phEv.phase) && Date.now() - phT0 > 30000;
       ph.classList.toggle("slow", slow);
       ph.classList.toggle("bad", phEv.phase === "retry");
     };
@@ -779,6 +781,9 @@
       const k = ev && ev.phase;
       if (!k || k === "text") return phClear();
       if (k === "tool" && ev.id && cardTools.has(ev.id)) return;   // 这个工具的卡已经出来了（在跑）：迟到的「正在写参数」不认
+      // 启动阶段（F6）只往前走：「启动中」只接「准备中」，init 带来的「连接中」只接前两段，迟到 / 重放的不把已经出字的拉回去
+      if (k === "boot" && phEv && phEv.phase !== "prep") return;
+      if (ev.from === "init" && phEv && phEv.phase !== "prep" && phEv.phase !== "boot") return;
       const changed = !phEv || phEv.phase !== k || k === "retry" || (k === "tool" && phEv.name !== ev.name);
       if (changed) phT0 = Date.now();
       phEv = ev;

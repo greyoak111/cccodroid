@@ -202,6 +202,20 @@ test("195-R.1：「继续」那轮没答出来 → 中断记录留着（卡片�
 });
 
 // 放最后：它留下的后台 sleep 30 还活着时，后面的轮次会先弹「用户配置」确认卡
+test("F6：首字前分段——起进程发「启动中」，claude init 后发「连接中」(from init)，只发一次", async () => {
+  const sid = crypto.randomUUID();
+  const ms = { type: "stream_event", event: { type: "message_start", message: { usage: { input_tokens: 1 } } }, session_id: sid };
+  script([{ sleep: "0.2" }, init(sid), ms, init(sid), result], 0);
+  await startRun({ id: "a0610-phase", message: "fixture", cwd: root });
+  await until(() => endOf("a0610-phase"));
+  const ph = events.filter((e) => e.runId === "a0610-phase" && e.type === "phase").map((e) => e.phase + (e.from ? "@" + e.from : ""));
+  assert.deepEqual(ph.slice(0, 3), ["boot", "connect@init", "wait"]);
+  assert.equal(ph.filter((p) => p === "connect@init").length, 1, "第二次 init 不再发");
+  const run = events.findIndex((e) => e.runId === "a0610-phase" && e.type === "run_start"), boot = events.findIndex((e) => e.runId === "a0610-phase" && e.phase === "boot");
+  assert.ok(run >= 0 && boot > run, "run_start 在前，boot 在后");
+});
+
+// 放最后：它留下的后台 sleep 会让之后的轮次起进程前先弹「留下的进程」确认卡，没人答就一直等
 test("195-T.1：claude 退出了、后台子孙还攥着输出管道 → 5 秒后自己收尾，不永远「生成中」", async () => {
   script([init(crypto.randomUUID()), result, { raw: `${SLEEP} 30 &` }], 0);
   const t0 = Date.now();
@@ -210,3 +224,4 @@ test("195-T.1：claude 退出了、后台子孙还攥着输出管道 → 5 秒�
   assert.ok(Date.now() - t0 < 12000);
   assert.equal(endOf("a0610-held").subtype, "success");
 });
+

@@ -542,6 +542,9 @@ export async function startRun(item) {
     detached: true,            // 当进程组长，中断时好整组带走（见 killTree）
   });
   run.child = child; run.preSpawn = false;
+  // 首字前分段（F6）：准备（起进程前那些等待）→ 启动并连工具（到 claude 的 init）→ 等端口（到第一条 message_start）
+  run.tBoot = Date.now();
+  emit({ type: "phase", phase: "boot" });
   run.claudePid = wrapped ? 0 : child.pid;
   if (wrapped && child.stdio[3]) {
     let got = "";
@@ -755,6 +758,7 @@ export async function startRun(item) {
   // 开了 --include-partial-messages，正文已经逐字发过，assistant 事件别重复整段
   const flags = { gotDelta: false, isCmd };
   const onInit = (init) => {
+    if (!run.tInit) { run.tInit = Date.now(); emit({ type: "phase", phase: "connect", from: "init" }); }
     setLastInit(init);
     run.sessionId = init.session_id;
     run.usageModel = init.model || run.usageModel;
@@ -893,6 +897,11 @@ export async function startRun(item) {
         abortRun(run);
         return;
       }
+    }
+    if (!run.tFirst && run.tInit && ev.type === "stream_event" && ev.event?.type === "message_start" && !ev.parent_tool_use_id) {
+      run.tFirst = Date.now();
+      const s = (ms) => (ms / 1000).toFixed(1) + "s";
+      log(`⏱ 首个回应前：准备 ${s(run.tBoot - run.startedAt)} · 启动并连工具 ${s(run.tInit - run.tBoot)} · 等端口 ${s(run.tFirst - run.tInit)}`);
     }
     translate(ev, { sse: emit, flags, onInit, onResult, onReplay, provider: P });
   };

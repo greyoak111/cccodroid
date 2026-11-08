@@ -738,7 +738,7 @@
         if (ev.auto === "idle") av.note(t("会话闲置快一小时，提示缓存快过期了，先自动压缩上下文，下一条消息就不用把整段历史重算一遍。不需要可以在设置里关掉。"), true);
         const timer = RunTimer(ev.startedAt);
         timer.attach(av);
-        av.phase({ phase: "connect" });
+        av.phase({ phase: "prep" });     // 网关起进程前的准备；起了进程换「启动中」，claude 就绪换「连接中」（F6）
         runViews.set(ev.runId, { av, startedAt: ev.startedAt, timer, out: 0 });
         statLive(ev.runId);
         // 只有本窗口刚发的消息才强制回到底部；别的会话 / 别的窗口开始的轮次别把正在翻历史的人拽走（0.6.9 审计 196-聊天.4）

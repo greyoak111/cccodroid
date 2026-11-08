@@ -1181,6 +1181,8 @@ window.I18N_DICT.en = {
   "这一轮还在生成，等它答完再分叉。": "This turn is still generating. Fork once it finishes.",
   "分叉": "fork",
   "连接中": "Connecting",
+  "准备中": "Preparing",
+  "启动中，连接工具": "Starting, connecting tools",
   "已连上，等待输出": "Connected, waiting for output",
   "连接出错，第 {a}/{m} 次重试": "Connection error, retry {a}/{m}",
   "思考中": "Thinking",

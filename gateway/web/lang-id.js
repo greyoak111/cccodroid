@@ -1152,6 +1152,8 @@ window.I18N_DICT["id"] = {
   "这一轮还在生成，等它答完再分叉。": "Putaran ini masih dibuat. Buat cabang setelah selesai.",
   "分叉": "cabang",
   "连接中": "Menghubungkan",
+  "准备中": "Menyiapkan",
+  "启动中，连接工具": "Memulai, menghubungkan alat",
   "已连上，等待输出": "Terhubung, menunggu keluaran",
   "连接出错，第 {a}/{m} 次重试": "Kesalahan koneksi, percobaan ulang {a}/{m}",
   "思考中": "Sedang berpikir",

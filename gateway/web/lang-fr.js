@@ -1152,6 +1152,8 @@ window.I18N_DICT["fr"] = {
   "这一轮还在生成，等它答完再分叉。": "Ce tour est encore en cours. Bifurquez une fois terminé.",
   "分叉": "bifurcation",
   "连接中": "Connexion",
+  "准备中": "Préparation",
+  "启动中，连接工具": "Démarrage, connexion des outils",
   "已连上，等待输出": "Connecté, en attente de sortie",
   "连接出错，第 {a}/{m} 次重试": "Erreur de connexion, tentative {a}/{m}",
   "思考中": "Réflexion",
