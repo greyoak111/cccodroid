@@ -459,7 +459,11 @@
     VW.text = ""; VW.wb = VW.sheets = null;   // 大文本、工作簿别跟着查看器一直挂在内存里（#56）
     MO.hide(viewerEl, MO.paneOut(), 170, () => { $("vw-body").innerHTML = ""; });   // 内容等滑出去了再清，别先白一下
     // 文件面板开着就刷新一下：大小 / 修改时间可能变了
-    if (!filesEl.classList.contains("hidden") && state.fs.path) fsLoad(state.fs.path, { keepSel: true, keepQ: true });
+    // 正在看压缩包：刷新包内这一层，别用 fsLoad（它会清掉 state.fs.arc，把人踢出压缩包）
+    if (!filesEl.classList.contains("hidden")) {
+      if (state.fs.arc) arcLoad(state.fs.arc.dir, { keepSel: true });
+      else if (state.fs.path) fsLoad(state.fs.path, { keepSel: true, keepQ: true });
+    }
   }
   $("vw-close").addEventListener("click", closeViewer);
   window.addEventListener("resize", () => { if (VW.pdf) { clearTimeout(VW.rt); VW.rt = setTimeout(vwPdfRelayout, 200); } });

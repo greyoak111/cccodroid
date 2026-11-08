@@ -279,7 +279,7 @@
     if (state.fs.arc) return arcUp();
     if (state.fs.parent && state.fs.parent !== state.fs.path) fsLoad(state.fs.parent);
   });
-  $("fs-hidden").addEventListener("change", (e) => { state.fs.hidden = e.target.checked; fsLoad(state.fs.path); });
+  $("fs-hidden").addEventListener("change", (e) => { state.fs.hidden = e.target.checked; if (!state.fs.arc) fsLoad(state.fs.path); });   // 包里不分隐藏项；退出压缩包时按新设置列
   $("fs-search").addEventListener("input", (e) => { fsSearchTyped(e.target.value.trim()); });
   $("fs-insert").addEventListener("click", () => {
     const e = state.fs.entries.find((x) => x.name === state.fs.sel);
@@ -332,6 +332,7 @@
   /** 打开一个压缩包（要密码就先问） */
   async function arcOpen(path) {
     state.fs.sel = null;
+    state.fs.qRemote = false;   // 外面那层大目录按网关搜索过：进了包再清过滤词别回头 fsLoad（会把人踢出压缩包）
     state.fs.arc = { path, name: path.split("/").pop(), dir: "", enc: "auto", password: "", info: null };
     await arcLoad("");
   }
