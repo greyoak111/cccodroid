@@ -124,3 +124,10 @@ test("界面资源 HMAC（staticMac）：绑随机数、请求行、内容；随
   assert.equal(staticMac("xyz", "/", body), null);
   assert.equal(staticMac(undefined, "/", body), null);
 });
+
+test("200 3-03：同名 Cookie 有好几个时逐个比——别处种的假 Cookie 排在前面也顶不掉真的；全是假的照样拒", () => {
+  const fake = "0".repeat(64);
+  assert.equal(denyReason(req({ host: UIH, cookie: `${COOKIE}=${fake}; ${COOKIE}=${SESSION}` }), url("/api/state")), null);
+  assert.equal(denyReason(req({ host: UIH, cookie: `${COOKIE}=${fake}; ${COOKIE}=${"1".repeat(64)}` }), url("/api/state")), 403);
+  assert.equal(denyReason(req({ host: UIH, cookie: `x${COOKIE}=${SESSION}` }), url("/api/state")), 403, "名字前缀不同不算");
+});

@@ -128,9 +128,14 @@ export function staticMac(nonce, url, body, local = UI_HOST) {
 // 界面的事件总线 2 秒一重连，自己就接上了。开发端照旧用令牌：gw-swap 热换网关时界面不能掉线
 export const SESSION = PREFIX ? mac("cookie:" + BOOT) : TOKEN;
 const sessionOk = (t) => same(t, SESSION);
-function cookieToken(req) {
-  const m = new RegExp(`(?:^|;\\s*)${COOKIE}=([0-9a-f]{64})(?:;|$)`).exec(req.headers.cookie || "");
-  return m ? m[1] : "";
+/** 同名 Cookie 可能不止一个：Cookie 不分端口，本机别的端口上的页面能种一个同名的排在前面，只认第一个就被它顶掉（200 3-03）。
+ *  逐个比，有一个对得上就算 */
+function cookieOk(req) {
+  const re = new RegExp(`(?:^|;\\s*)${COOKIE}=([0-9a-f]{64})(?=;|$)`, "g");
+  const c = String(req.headers.cookie || "");
+  let m, n = 0;
+  while ((m = re.exec(c)) && n++ < 8) if (sessionOk(m[1])) return true;
+  return false;
 }
 export const denyLog = { at: 0, n: 0 };
 /** 返回 null 表示放行；否则返回拒绝的状态码 */
@@ -141,7 +146,7 @@ export function denyReason(req, u) {
   // 静态页面与资源不含秘密，照旧放行；但只有带着凭据来的才记成「自己人」（连接槽快满时不挤它，见 server.mjs guardSlots）
   if (!u.pathname.startsWith("/api/")) {
     const site = req.headers["sec-fetch-site"];
-    if (tokenOk(String(req.headers["x-cc-token"] || "")) || ((!site || site === "same-origin" || site === "none") && cookieHostOk(req) && sessionOk(cookieToken(req)))) req.ccAuthed = 1;
+    if (tokenOk(String(req.headers["x-cc-token"] || "")) || ((!site || site === "same-origin" || site === "none") && cookieHostOk(req) && cookieOk(req))) req.ccAuthed = 1;
     return null;
   }
   req.ccAuthed = 1;    // 下面任何一路放行都是带凭据的；不放行时这个标记用不上
@@ -156,6 +161,6 @@ export function denyReason(req, u) {
   // 地址栏直接打开是 none；claude、curl 这类不发这个头
   const site = req.headers["sec-fetch-site"];
   if (site && site !== "same-origin" && site !== "none") return 403;
-  if (cookieHostOk(req) && sessionOk(cookieToken(req))) return null;
+  if (cookieHostOk(req) && cookieOk(req)) return null;
   return 403;
 }
