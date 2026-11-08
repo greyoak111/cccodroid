@@ -16,7 +16,7 @@
 | 196-供应链.2 | 模块/自定义组件暂存清理缺口：devkit-stage 失败不删；`.stage-*` 重启后永久孤儿 | `gw/modules.mjs`（custom.mjs 半 移交） | 已修（模块半）/ 移交（custom.mjs 半） |
 | 196-供应链.3 | `pkg uninstall/upgrade` 与 `modRemove` 按可写记录删文件，未做 safeRel | `android/assets/bin/pkg.mjs`；`gw/modules.mjs` | 已修 |
 | 196-供应链.4 | `devkit.lock.json` 仅靠 TLS、无签名且长期缓存，却参与依赖版本判定 | `android/assets/bin/pkg.mjs` | 已修 |
-| 196-供应链.5 | 技能 zip 导入无条目数上限，逐条同步写可阻塞事件循环 | `gw/extensions.mjs`（sessionops.mjs 半 移交） | 待办 |
+| 196-供应链.5 | 技能 zip 导入无条目数上限，逐条同步写可阻塞事件循环 | `gw/extensions.mjs`（sessionops.mjs 半 移交） | 已修（extensions.mjs 半）/ 移交（sessionops.mjs 半） |
 | 197-9.6 F8 | 组件升级先删旧版再搬新版，中途失败旧版没了 | `gw/components.mjs` | 待办 |
 | 200-14-06 | 模块 `first-run` 失败仍写 `.ok` | `gw/modules.mjs` | 待核实（疑似已修） |
 | 200-14-07 | 本地文件安装时 `identifyDevkit` 顺序抓 8 个 release 的 lock/sig，无总预算/取消 | 实际在 `android/java/cc/codroid/Updater.java`（主会话名下） | 待办（移交） |
@@ -34,6 +34,7 @@
 | 196-供应链.2 | 本条 | `modRunInstall` 把解包树记到 `job.stageTree`；`modInstall` 的失败分支当场删掉它（压缩包仍按原逻辑处理）。以前只有下次重装开头才清，用户不再重试就一直占着 | `gateway/tests/a0610-g1-mod-stage.test.mjs`：暂存区放一份校验和对得上、但不是 tar.gz 的文件，让解包失败；任务结束后 `devkit-stage/modx` 必须不存在。去掉清理那行后该测试失败（已实测红/绿） |
 | 196-供应链.3 | 本条 | `pkg` 的 `removeFiles` 只遍历 `safeRel` 通过的记录路径（普通相对路径，无 `..` / 反斜杠 / 绝对路径，`rec.files` 非数组也不炸）；`modulesInfo` 用 `modDirOk` 丢掉 dir 不安全的模块条目（卸载会对它整个 `rmSync`），`filesOf` 过滤 FILES 里不安全的行 | `gateway/tests/a0610-g1-path-safety.test.mjs`：坏 dir 条目被丢弃；modRemove 删掉 `bin/safe0610` 但 `../escape0610`、绝对路径、穿越路径都还在；pkg 的 safeRel 抽取求值，十种坏路径全拒、三种正常路径放行 |
 | 196-供应链.4 | 本条 | 新增 `android/assets/bin/lockcheck.mjs`（build.sh 会随 `assets/bin/*` 一起打包）：`verifyLock` 对原始字节验 ed25519 签名，并核 `lock.release === tagOf(base)`（与 `Updater.lockSigned` 同口径），公钥与 APK 的 `INDEX_PUBKEY_B64` 同一把。`pkg` 取 lock 后先验签；磁盘缓存改存 `{_for, body, sig}`（原始正文 + 签名），读回来当场复核，旧格式解析对象和 `base` 不明时都不认 | `gateway/tests/a0610-g1-lock-sig.test.mjs`：公钥与 SPKI 尾部一致；改正文 / 错签名 / 旧 tag 重放 / 缺 release 全拒；tagOf 与 Java 正则一致；pkg 接线（下载后验签、缓存原文复核、旧写法已消失）源码断言。`pkg-lock-v062`、`harden-v2b` 7 条全过 |
+| 196-供应链.5 | 本条 | `importSkill` 在解压前按 zip 目录尾记录核对条目总数，超过 4096 直接拒绝（不先 inflate 几万个小条目）；解出的文件从 `mkdirSync`/`writeFileSync` 改成 `fs.promises` 逐条 `await` 写，长包不再整段占住事件循环；路由改成 `await importSkill(...)`，导入完成才回包。新提示语（含 9 种译文）在 `i18n-g1.json` | `gateway/tests/a0610-g1-skill-zip.test.mjs`：4097 条目的包被拒且不留目录；正常包与单个 SKILL.md 都落位；导入期间 `setImmediate` 能转（旧的全同步写计数为 0）；源码断言路由 await 与异步写。临时去掉两处修改实测 3 条变红，还原后 5 条全过 |
 
 ## 不成立
 
@@ -50,6 +51,7 @@
 | 195-G.6 | `gateway/web/app/19-boot.js`（启动拉 `/api/status` 的那段，约 219-224 行） | 失败时别一律 `setStatus(t("网关离线"), "err")`。手机浏览器从 `127.0.0.1` / `localhost` 打开时，`/api/*` 因来源校验必然 403，这是设计（不能放宽）。判断 `location.hostname` 不是界面专用地址 `127.0.0.2` 且错误 `status === 403` 时，改提示 `t("请在 cccodroid 应用里打开")`；文案连同 9 种译文已写进 `i18n-g1.json` |
 | 195-G.6 | `gateway/server.mjs`（启动日志，约 190 行） | `log(\`claude-apk 网关 v3 已启动  http://127.0.0.1:${CFG.port}\`)` 公布的是原生地址，手机浏览器打开只会看到 403。建议改打印界面地址，或补一句「界面请从 cccodroid 应用打开」 |
 | 196-供应链.2（custom.mjs 半） | `gateway/gw/custom.mjs`：`CUSTOM_STAGES`（27 行）、`customAnalyze`（223-236 行）、启动入口 | 分析暂存目录 `~/.cccodroid/custom/.stage-*` 只记在内存 map 里：TTL 清理要等下一次分析才跑，网关重启后 map 清空，目录永久留下。建议在 `customAnalyze` 开头（或启动时）先扫一遍 `CUSTOM_DIR`，把名字匹配 `.stage-*`、且不在当前 map 里的目录删掉（重启后 map 必空，全删即可；同进程内超 1 小时的已有逻辑不动）。失败路径 236 行 `fail()` 和安装成功 530 行已经会删，不用改 |
+| 196-供应链.5（sessionops.mjs 半） | `gateway/gw/sessionops.mjs`：`zipRead`（646-680 行） | 解压本身仍是逐条 `inflateRawSync`，同步跑在事件循环上；本次在技能导入入口按 EOCD 条目数卡了 4096、总解压量仍有 200 MB 上限，但单个大条目 inflate 期间照样卡住网关。要彻底异步化得把 `zipRead` 改成先读中央目录、逐条 `inflateRaw`（异步）或用 worker，涉及导出/导入等所有调用方，不在本车道文件范围 |
 
 ## 全量测试
 

@@ -499,9 +499,17 @@ function skillDirName(text, fallback) {
   const nm = fm && (/^name:\s*(.+?)\s*$/m.exec(fm[1]) || [])[1];
   return String(nm || fallback || "skill").trim().replace(/^["']|["']$/g, "").replace(/[^A-Za-z0-9._-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
 }
+/** 压缩包目录尾记录（EOCD）里写的条目总数；不是 zip / 找不到目录尾返回 -1。
+ *  目录尾只可能在最后 22+65535 字节里，扫法和 sessionops.mjs 的 zipRead 相同 */
+function zipEntryCount(buf) {
+  const floor = Math.max(0, buf.length - 22 - 65535);
+  for (let e = buf.length - 22; e >= floor; e--) if (buf.readUInt32LE(e) === 0x06054b50) return buf.readUInt16LE(e + 10);
+  return -1;
+}
+const SKILL_ZIP_MAX_ENTRIES = 4096;   // 技能包正常几十个文件；到几千个多半是整包，解压前就拒（196-供应链.5）
 /** 导入技能：zip（含 .skill）里每个 SKILL.md 各算一个技能，一次全装；也接受单独一个 SKILL.md。
- *  同名已存在的跳过并说明，不覆盖 */
-function importSkill(buf) {
+ *  同名已存在的跳过并说明，不覆盖。解出的文件逐条异步写，长包不整段卡住事件循环 */
+async function importSkill(buf) {
   const isZip = buf.length >= 4 && buf.readUInt32LE(0) === 0x04034b50;
   if (!isZip) {
     const text = buf.toString("utf8");
@@ -514,6 +522,10 @@ function importSkill(buf) {
     fs.writeFileSync(path.join(dst, "SKILL.md"), buf);
     return { ok: true, dir, dirs: [dir], skipped: [] };
   }
+  // 先按目录尾记录核对条目数再解压：几万个小条目的包光解出来就能占满内存/时间，别等解开才后悔
+  const nEntries = zipEntryCount(buf);
+  if (nEntries > SKILL_ZIP_MAX_ENTRIES)
+    throw new Error(tz("压缩包里的文件太多（{n} 个，最多 {max} 个），没有导入", { n: nEntries, max: SKILL_ZIP_MAX_ENTRIES }));
   const files = zipRead(buf, 200 * 1024 * 1024).filter((f) => !/(^|\/)(__MACOSX|\.git)\//.test(f.name) && !/(^|\/)\._/.test(f.name));
   // 浅的先占：一个技能目录里面再出现的 SKILL.md（示例、模板）归它自己，不另算
   const mds = files.filter((f) => /(^|\/)skill\.md$/i.test(f.name)).sort((a, b) => a.name.split("/").length - b.name.split("/").length);
@@ -542,8 +554,8 @@ function importSkill(buf) {
         if (!rel || rel.split("/").some((x) => !x || x === "." || x === "..")) continue;
         if (rel === ".cc-source.json") continue;   // 来源记录只由官方目录安装时写：导入的包自带一份就能冒充「官方」（11-03 审查 I-13）
         const out = path.join(tmp, rel);
-        fs.mkdirSync(path.dirname(out), { recursive: true });
-        fs.writeFileSync(out, f.data);
+        await fs.promises.mkdir(path.dirname(out), { recursive: true });
+        await fs.promises.writeFile(out, f.data);
       }
       fs.mkdirSync(SKILLS_DIR, { recursive: true });
       fs.renameSync(tmp, dst);
@@ -556,6 +568,7 @@ function importSkill(buf) {
   if (!dirs.length) throw new Error(skipped.map((x) => `${x.name}：${x.why}`).join("；"));
   return { ok: true, dir: dirs.join("、"), dirs, skipped };
 }
+export const _extForTest = { importSkill, zipEntryCount };   // 只给测试用
 
 // ── 路由：/api/ext/ ──
 export async function routeExtensions(req, res, u, p) {
@@ -602,7 +615,7 @@ export async function routeExtensions(req, res, u, p) {
       }
       if (req.method === "POST" && p === "/api/ext/hooks/scripts") return sendJson(res, 200, installHookScripts());
       if (req.method === "POST" && p === "/api/ext/hooks/test") return sendJson(res, 200, await testHook(body));
-      if (req.method === "POST" && p === "/api/ext/skills/import") return sendJson(res, 200, importSkill(await readBodyBuf(req, 64 * 1024 * 1024)));
+      if (req.method === "POST" && p === "/api/ext/skills/import") return sendJson(res, 200, await importSkill(await readBodyBuf(req, 64 * 1024 * 1024)));
     } catch (e) { return sendJson(res, 200, { ok: false, message: e.message }); }
     return sendJson(res, 404, { error: "not found" });
   }
