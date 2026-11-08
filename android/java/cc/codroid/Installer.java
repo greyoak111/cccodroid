@@ -262,8 +262,11 @@ final class Installer {
         } finally { if (c != null) c.disconnect(); }
     }
 
-    static byte[] httpGetSmall(String url) throws IOException {
+    static byte[] httpGetSmall(String url) throws IOException { return httpGetSmall(url, 0); }
+    /** timeoutMs > 0：连接和读都按它掐（总预算剩多少给多少），0 = 默认的 20 / 60 秒 */
+    static byte[] httpGetSmall(String url, int timeoutMs) throws IOException {
         HttpURLConnection c = open(url);
+        if (timeoutMs > 0) { c.setConnectTimeout(timeoutMs); c.setReadTimeout(timeoutMs); }
         try {
             if (code(c, url) != 200) throw new IOException("HTTP " + c.getResponseCode() + " " + url);
             // 只用来拿发布清单、锁文件、校验和这类小东西：读超过 32 MB 就是地址指错了或者对面出了问题，不往内存里塞（审查 v0.5.7 L10）

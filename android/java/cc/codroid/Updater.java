@@ -328,8 +328,11 @@ final class Updater {
         JSONObject pin = devkitPin(ctx);
         JSONObject hit = matchLock(pin, sha, pin != null ? pin.optString("base") : "");
         if (hit != null) return hit;
+        // 整段有个总预算：以前最多顺序翻 8 个 release、每个两份文件、各自 20+60 秒超时还要换镜像再来一遍，
+        // 网差时界面能卡在「识别中」十几分钟、没法取消（0.6.9 审计 200-14-07）。超了就按认不出处理，调用方有兜底
+        long deadline = System.nanoTime() + IDENTIFY_BUDGET_MS * 1_000_000L;
         try {
-            JSONArray rels = new JSONArray(new String(Installer.httpGetSmall(feed()), StandardCharsets.UTF_8));
+            JSONArray rels = new JSONArray(new String(Installer.httpGetSmall(feed(), msLeft(deadline)), StandardCharsets.UTF_8));
             int n = 0;
             for (int i = 0; i < rels.length() && n < 8; i++) {
                 JSONObject r = rels.getJSONObject(i);
@@ -339,14 +342,22 @@ final class Updater {
                 String base = "https://github.com/" + REPO + "/releases/download/" + tag + "/";
                 try {
                     // 线上清单要验过签才拿来认本地文件：只靠 TLS 的话，换掉清单就能让自制工具包显示成「已发布的版本」（审查 10-29 低8）
-                    byte[] lb = Installer.httpGetSmall(base + "devkit.lock.json");
-                    if (!lockSigned(base, lb)) continue;
+                    byte[] lb = Installer.httpGetSmall(base + "devkit.lock.json", msLeft(deadline));
+                    if (!lockSigned(base, lb, deadline)) continue;
                     hit = matchLock(new JSONObject(new String(lb, StandardCharsets.UTF_8)), sha, base);
                     if (hit != null) return hit;
                 } catch (Exception ignored) {}
+                if (deadline - System.nanoTime() <= 0) { Log.i(TAG, "identifyDevkit: 超过 " + IDENTIFY_BUDGET_MS / 1000 + " 秒没认出来，按认不出处理"); break; }
             }
         } catch (Exception e) { Log.i(TAG, "identifyDevkit: 查不了线上清单 " + e); }
         return null;
+    }
+    static final long IDENTIFY_BUDGET_MS = 30000;
+    /** 预算还剩多少毫秒（至少 1）；已经用完就抛，让当前这一步直接放弃 */
+    private static int msLeft(long deadline) throws IOException {
+        long left = (deadline - System.nanoTime()) / 1_000_000L;
+        if (left <= 0) throw new IOException("identify budget exhausted");
+        return (int) Math.min(left, Integer.MAX_VALUE);
     }
 
     private static JSONObject matchLock(JSONObject lock, String sha, String base) {
@@ -636,22 +647,25 @@ final class Updater {
 
     /** devkit.lock.json 带了 ed25519 签名（devkit.lock.json.sig，和 modules.json 同一把钥匙）且验得过，
      *  而且签进去的 release 就是下载地址里的这个 tag —— 旧版清单连签名一起搬到新 tag 下冒充新版过不去（审查 10-29 中2） */
-    static boolean lockSigned(String base, byte[] lockBytes) {
+    static boolean lockSigned(String base, byte[] lockBytes) { return lockSigned(base, lockBytes, 0); }
+    /** deadline 不为 0：取签名（含换镜像）都算进这个总预算 */
+    static boolean lockSigned(String base, byte[] lockBytes, long deadline) {
         if (lockBytes == null) return false;
         try {
             String rel = new JSONObject(new String(lockBytes, StandardCharsets.UTF_8)).optString("release");
             if (rel.isEmpty() || !rel.equals(tagOf(base))) return false;
             byte[][] got = new byte[1][];
-            fetchDevkitFile(base, "devkit.lock.json.sig", got);
+            fetchDevkitFile(base, "devkit.lock.json.sig", got, deadline);
             return Ed25519.verifyIndex(lockBytes, new String(got[0], StandardCharsets.UTF_8));
         } catch (Exception e) { return false; }
     }
 
     /** 工具包 Release 里的小文件：先 GitHub，连不上换 dl.cccodroid.net（同一份文件）。返回 true = 来自镜像 */
-    private static boolean fetchDevkitFile(String base, String name, byte[][] out) throws IOException {
-        try { out[0] = Installer.httpGetSmall(base + name); return false; }
+    private static boolean fetchDevkitFile(String base, String name, byte[][] out) throws IOException { return fetchDevkitFile(base, name, out, 0); }
+    private static boolean fetchDevkitFile(String base, String name, byte[][] out, long deadline) throws IOException {
+        try { out[0] = Installer.httpGetSmall(base + name, deadline == 0 ? 0 : msLeft(deadline)); return false; }
         catch (IOException e) {
-            try { out[0] = Installer.httpGetSmall(devkitMirror(base, name)); return true; }
+            try { out[0] = Installer.httpGetSmall(devkitMirror(base, name), deadline == 0 ? 0 : msLeft(deadline)); return true; }
             catch (IOException e2) { throw new IOException(Tr.t("GitHub 和 cccodroid.net 镜像都连不上：") + e.getMessage()); }
         }
     }
