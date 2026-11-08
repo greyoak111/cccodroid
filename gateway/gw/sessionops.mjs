@@ -3,6 +3,8 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
+import { Worker } from "node:worker_threads";
+import { zipReadCore } from "./zipcore.mjs";
 import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
 import { NAMES, PEEK_CACHE, PINS, findSessionFile, peekSession, saveNames, savePins } from "./sessions.mjs";
 import { claudeBlocked, claudeCmd, claudeEnv, killTree } from "./claude.mjs";
@@ -643,40 +645,31 @@ export function zipBuild(entries) {
   return Buffer.concat([...locals, cd, end]);
 }
 
+// zip 读取本体在 zipcore.mjs（worker 也用）；这里只负责把错误码翻成界面语言
+const ZIP_MSG = { tooBig: "压缩包解开后太大（超过 {n} MB），没有导入", notZip: "不是 zip 文件", badDir: "zip 目录损坏", method: "不支持的压缩方式：{name}" };
+const zipFail = (code, vars) => new Error(tz(ZIP_MSG[code], vars));
 export function zipRead(buf, max = 512 * 1024 * 1024) {
-  let e = buf.length - 22;
-  let total = 0;
-  const tooBig = () => new Error(tz("压缩包解开后太大（超过 {n} MB），没有导入", { n: Math.round(max / 1048576) }));
-  // 目录尾记录只可能在最后 22+65535 字节里（注释最长 64KB）：不是 zip 时别从尾扫到头（审查 v0.5.3 B2）
-  const floor = Math.max(0, buf.length - 22 - 65535);
-  while (e >= floor && buf.readUInt32LE(e) !== 0x06054b50) e--;
-  if (e < floor) e = -1;
-  if (e < 0) throw new Error(tz("不是 zip 文件"));
-  const n = buf.readUInt16LE(e + 10);
-  let p = buf.readUInt32LE(e + 16);
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error(tz("zip 目录损坏"));
-    const method = buf.readUInt16LE(p + 10), csize = buf.readUInt32LE(p + 20);
-    const nlen = buf.readUInt16LE(p + 28), xlen = buf.readUInt16LE(p + 30), clen = buf.readUInt16LE(p + 32);
-    const lo = buf.readUInt32LE(p + 42);
-    const usize = buf.readUInt32LE(p + 24);
-    // Windows 上打的包可能用反斜杠分目录
-    const name = buf.toString("utf8", p + 46, p + 46 + nlen).replace(/\\/g, "/");
-    p += 46 + nlen + xlen + clen;
-    if (name.endsWith("/")) continue;
-    const ds = lo + 30 + buf.readUInt16LE(lo + 26) + buf.readUInt16LE(lo + 28);
-    const body = buf.subarray(ds, ds + csize);
-    if (method !== 0 && method !== 8) throw new Error(tz("不支持的压缩方式：{name}", { name }));
-    if ((total += usize) > max) throw tooBig();
-    let data;
-    try { data = method === 8 ? zlib.inflateRawSync(body, { maxOutputLength: max - total + usize }) : Buffer.from(body); }
-    catch (err) { if (err.code === "ERR_BUFFER_TOO_LARGE" || err.code === "ERR_OUT_OF_RANGE") throw tooBig(); throw err; }
-    total += data.length - usize;    // 目录里写的大小可能是假的：按实际解出来的算
-    if (total > max) throw tooBig();
-    out.push({ name, data });
-  }
-  return out;
+  return zipReadCore(buf, max, zipFail);
+}
+/** 同 zipRead，但在 worker 线程里解：解压期间网关别的请求照常处理（F7，导入技能包用）。结果、报错与 zipRead 一致 */
+export function zipReadAsync(buf, max = 512 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    // 只把这个包的字节交过去：buf 可能是大块共用内存（Buffer 池）里的一段，拷成独立的一份再转移
+    const own = new Uint8Array(buf.byteLength);
+    own.set(buf);
+    let w;
+    try { w = new Worker(new URL("./zip-worker.mjs", import.meta.url), { workerData: { buf: own, max }, transferList: [own.buffer] }); }
+    catch (err) { return reject(err); }
+    let done = false;
+    w.once("message", (m) => {
+      done = true;
+      w.terminate().catch(() => {});
+      if (m.files) resolve(m.files.map((f) => ({ name: f.name, data: Buffer.from(f.data.buffer, f.data.byteOffset, f.data.byteLength) })));
+      else reject(m.err.code ? zipFail(m.err.code, m.err.vars) : new Error(m.err.message));
+    });
+    w.once("error", (err) => { if (!done) { done = true; reject(err); } });
+    w.once("exit", (code) => { if (!done) { done = true; reject(new Error(tz("zip 目录损坏") + ` (worker ${code})`)); } });
+  });
 }
 
 /** 导出：manifest.json + sessions/<id>.jsonl + sessions/<id>/…（子代理等） */

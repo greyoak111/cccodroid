@@ -80,3 +80,37 @@ test("路由等导入完成再回包，写文件不再用同步 API", () => {
   assert.match(src, /await fs\.promises\.writeFile\(out, f\.data\)/);
   assert.ok(!/fs\.writeFileSync\(out, f\.data\)/.test(src), "不能再同步写技能文件");
 });
+
+// F7（11-09）：技能包改在 worker 线程里解，结果、报错和同步的 zipRead 一致；解压期间主线程不被占住
+import { zipRead, zipReadAsync } from "../gw/sessionops.mjs";
+import zlib from "node:zlib";
+
+test("zipReadAsync：与 zipRead 结果一致（stored + deflate），报错照样翻译", async () => {
+  const big = Buffer.alloc(300000, "abc");
+  const buf = makeZip([{ name: "a/SKILL.md", data: "---\nname: a\n---\n" }, { name: "a/b.txt", data: "x" }, { name: "a/big.bin", data: big }]);
+  const a = zipRead(buf), b = await zipReadAsync(buf);
+  assert.deepEqual(b.map((f) => f.name), a.map((f) => f.name));
+  for (let i = 0; i < a.length; i++) assert.ok(Buffer.isBuffer(b[i].data) && b[i].data.equals(a[i].data), a[i].name);
+  await assert.rejects(zipReadAsync(Buffer.from("not a zip at all, definitely not")), /zip/);
+  await assert.rejects(zipReadAsync(buf, 1000), /太大/);
+  // deflate 条目：手工造一个 method 8 的包
+  const raw = Buffer.from("hello hello hello hello"), comp = zlib.deflateRawSync(raw);
+  const d = makeZip([{ name: "x.txt", data: comp }]);
+  d.writeUInt16LE(8, 8); const cd = d.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  d.writeUInt16LE(8, cd + 10); d.writeUInt32LE(raw.length, cd + 24);
+  assert.equal((await zipReadAsync(d))[0].data.toString(), raw.toString());
+});
+
+test("zipReadAsync：解大包期间主线程的定时器照常跑", async () => {
+  const blob = zlib.deflateRawSync(Buffer.alloc(150 * 1024 * 1024));
+  const d = makeZip([{ name: "z.bin", data: blob }]);
+  d.writeUInt16LE(8, 8); const cd = d.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  d.writeUInt16LE(8, cd + 10); d.writeUInt32LE(150 * 1024 * 1024, cd + 24);
+  let ticks = 0;
+  const iv = setInterval(() => ticks++, 5);
+  const p = zipReadAsync(d, 200 * 1024 * 1024);
+  const files = await p;
+  clearInterval(iv);
+  assert.equal(files[0].data.length, 150 * 1024 * 1024);
+  assert.ok(ticks >= 3, `主线程定时器只跑了 ${ticks} 次`);
+});

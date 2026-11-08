@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, PREFIX, log, tz } from "./config.mjs";
 import { claudeBlocked, claudeCmd, claudeEnv, ensureShell, killTree } from "./claude.mjs";
-import { SID_RE, skillDirOk, zipRead } from "./sessionops.mjs";
+import { SID_RE, skillDirOk, zipReadAsync } from "./sessionops.mjs";
 import { NEXT, readBody, readBodyBuf, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
 import { COMP_DIR, compIndex, compIndexCache, compRecord } from "./components.mjs";
@@ -500,7 +500,7 @@ function skillDirName(text, fallback) {
   return String(nm || fallback || "skill").trim().replace(/^["']|["']$/g, "").replace(/[^A-Za-z0-9._-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
 }
 /** 压缩包目录尾记录（EOCD）里写的条目总数；不是 zip / 找不到目录尾返回 -1。
- *  目录尾只可能在最后 22+65535 字节里，扫法和 sessionops.mjs 的 zipRead 相同 */
+ *  目录尾只可能在最后 22+65535 字节里，扫法和 zipcore.mjs 的 zipReadCore 相同 */
 function zipEntryCount(buf) {
   const floor = Math.max(0, buf.length - 22 - 65535);
   for (let e = buf.length - 22; e >= floor; e--) if (buf.readUInt32LE(e) === 0x06054b50) return buf.readUInt16LE(e + 10);
@@ -526,7 +526,7 @@ async function importSkill(buf) {
   const nEntries = zipEntryCount(buf);
   if (nEntries > SKILL_ZIP_MAX_ENTRIES)
     throw new Error(tz("压缩包里的文件太多（{n} 个，最多 {max} 个），没有导入", { n: nEntries, max: SKILL_ZIP_MAX_ENTRIES }));
-  const files = zipRead(buf, 200 * 1024 * 1024).filter((f) => !/(^|\/)(__MACOSX|\.git)\//.test(f.name) && !/(^|\/)\._/.test(f.name));
+  const files = (await zipReadAsync(buf, 200 * 1024 * 1024)).filter((f) => !/(^|\/)(__MACOSX|\.git)\//.test(f.name) && !/(^|\/)\._/.test(f.name));
   // 浅的先占：一个技能目录里面再出现的 SKILL.md（示例、模板）归它自己，不另算
   const mds = files.filter((f) => /(^|\/)skill\.md$/i.test(f.name)).sort((a, b) => a.name.split("/").length - b.name.split("/").length);
   if (!mds.length) throw new Error(tz("压缩包里没有 SKILL.md"));
