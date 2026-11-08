@@ -17,6 +17,7 @@ import zlib from "node:zlib";
 import crypto from "node:crypto";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { TERMUX_KEYS, verifyDetached } from "./pgp.mjs";     // 正本在 devkit/pgp.mjs，打包时拷到这旁边
+import { verifyLock } from "./lockcheck.mjs";                // devkit.lock.json 的 ed25519 验签（196-供应链.4）
 
 const PREFIX = process.env.PREFIX || process.env.CCAPP_PREFIX;
 if (!PREFIX || !fs.existsSync(path.join(PREFIX, ".devkit-ok"))) {
@@ -175,17 +176,34 @@ function db() {
   d.pkgs ||= {};
   return d;
 }
-/** 工具包的 lock（包名 → 版本）。只用来判断依赖的版本要求够不够；拿不到就当未知 */
+/** 从 Release 取 lock 并验签：签名对原始字节有效、release 与下载地址里的 tag 一致（与 APK 的 Updater.lockSigned 同口径）。
+ *  通过返回 { lock, body, sig }（body/sig 原样留给磁盘缓存复核），否则 null */
+function fetchLock(base) {
+  const body = curlBuf(base + "devkit.lock.json", 60);
+  const sig = String(curlBuf(base + "devkit.lock.json.sig", 60).toString("utf8")).trim();
+  const lock = verifyLock(body, sig, base);
+  return lock ? { lock, body: body.toString("utf8"), sig } : null;
+}
+/** 读缓存：只认带原始正文与签名、当场按公钥复核得过的；旧格式（解析后直接写的对象）没有可复核的字节，
+ *  同 uid 改两个字就能伪造「工具包带了什么包、什么版本」，不能信（196-供应链.4） */
+function readLockCache(f, id) {
+  const c = readJson(f, null);
+  if (!c || c._for !== id.sha256 || typeof c.body !== "string" || typeof c.sig !== "string") return null;
+  if (!id.base) return null;      // 不知道 base 就没法核 release，宁可按未知处理
+  return verifyLock(c.body, c.sig, id.base);
+}
+/** 工具包的 lock（包名 → 版本）。只用来判断依赖的版本要求够不够；拿不到 / 验不过就当未知 */
 function baseVersions() {
   const id = devkitId(), f = path.join(STATE, "devkit.lock.json");
-  let l = readJson(f, null);
-  if (!l || l._for !== id.sha256) {
-    l = null;
-    if (id.base) {
-      try { l = JSON.parse(curlBuf(id.base + "devkit.lock.json", 60).toString()); l._for = id.sha256; writeJson(f, l); } catch {}
-    }
+  let l = readLockCache(f, id);
+  if (!l && id.base) {
+    try {
+      const got = fetchLock(id.base);
+      if (got) { l = got.lock; writeJson(f, { _for: id.sha256, body: got.body, sig: got.sig }); }
+      else try { fs.rmSync(f, { force: true }); } catch {}     // 验不过的旧缓存别再留着
+    } catch {}
   }
-  return new Map(((l && l.packages) || []).map((p) => [p.name, p.version]));
+  return new Map(((l && Array.isArray(l.packages) ? l.packages : []).map((p) => [p.name, p.version])));
 }
 /** 模块化工具包（0.3.9 起）：没装的模块里有哪些包（包名 → 模块名）。这些包归模块管，pkg 不另装一份 ——
  *  不然以后装模块就和 pkg 装的撞了。整包工具包返回空表 */
@@ -722,10 +740,14 @@ function guardedPaths() {
   }
   return GUARDED;
 }
+/** installed.json 同 uid 可改：卸载 / 升级只认 $PREFIX 内的普通相对路径，
+ *  别让 "../" 或绝对路径把前缀外的文件删了（196-供应链.3，和组件记录同一个口径） */
+const safeRel = (r) => typeof r === "string" && r.length > 0 && !r.includes("\0") && !r.includes("\\") &&
+  !path.isAbsolute(r) && r.split("/").every((p) => p && p !== "." && p !== "..");
 /** 删掉 rec 里归这个包的文件；别的包（.list）也认领的、组件/模块在用的、或 keep 里的留下 */
 function removeFiles(name, rec, own, keep = new Set()) {
   const dirs = new Set(), guarded = guardedPaths();
-  for (const r of rec.files || []) {
+  for (const r of (Array.isArray(rec.files) ? rec.files : []).filter(safeRel)) {
     if (keep.has(r) || guarded.has(r) || (own.get(r) || []).some((o) => o !== name)) continue;
     try { fs.rmSync(path.join(PREFIX, r), { force: true }); } catch {}
     dirs.add(path.dirname(r));

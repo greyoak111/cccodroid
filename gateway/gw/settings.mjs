@@ -123,6 +123,9 @@ export async function routeSettings(req, res, u, p) {
           try {
             SETTINGS.provider = want;
             SETTINGS.model = null;          // 别把上一家的模型名带过去
+            // 自动起名的型号同理：界面上还补进新清单显示选中，autotitle 却因为型号不在这一家的清单里静默不用
+            // （0.6.9 审计 195-E.6）。清掉后回落到本轮模型，用户要就重新选
+            SETTINGS.titleModel = null;
             // 跟着全局接口走的项目、定时任务也一样（195-E.1：以前它们留着旧厂商的型号，在新接口上回落或 400）
             const np = clearFollowingModels(), nt = clearFollowingTaskModels();
             if (np || nt) log(`换接口：清掉 ${np} 个项目、${nt} 个定时任务里旧接口的模型名`);

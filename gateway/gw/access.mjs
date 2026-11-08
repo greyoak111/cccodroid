@@ -87,11 +87,28 @@ const SPAWN = (() => {
   delete process.env.CCAPP_SPAWN_KEY;
   const buf = Buffer.alloc(128), sab = new Int32Array(new SharedArrayBuffer(4)), t0 = Date.now();
   let got = "";
-  while (!got.includes("\n") && got.length < 100 && Date.now() - t0 < 5000) {
-    let n = 0;
-    try { n = fs.readSync(0, buf, 0, buf.length, null); } catch (e) { if (e.code !== "EAGAIN") break; Atomics.wait(sab, 0, 0, 20); continue; }
-    if (!n) break;
-    got += buf.subarray(0, n).toString("latin1");
+  // 管道默认是阻塞的：应用不写、或者晚写时 fs.readSync(0) 会一直等下去，下面的 5 秒期限根本轮不到，
+  // 网关在 listen 之前就挂住（0.6.9 审计 195-G.5）。经 /proc/self/fd/0 重开一份带 O_NONBLOCK 的描述符，
+  // 没数据时拿到 EAGAIN，才能 20ms 一轮地看期限。重开不了就不读——宁可认不出这个网关，也不能挂死在启动阶段。
+  const pump = (fd, nonblock) => {
+    while (!got.includes("\n") && got.length < 100 && Date.now() - t0 < 5000) {
+      let n = 0;
+      try { n = fs.readSync(fd, buf, 0, buf.length, null); } catch (e) { if (!nonblock || e.code !== "EAGAIN") break; Atomics.wait(sab, 0, 0, 20); continue; }
+      if (!n) break;
+      got += buf.subarray(0, n).toString("latin1");
+    }
+  };
+  let rfd = -1;
+  try { rfd = fs.openSync("/proc/self/fd/0", fs.constants.O_RDONLY | fs.constants.O_NONBLOCK); } catch {}
+  if (rfd >= 0) {
+    try { pump(rfd, true); } finally { try { fs.closeSync(rfd); } catch {} }
+  } else {
+    // 应用给的是真管道，重开得了；重开不了的是 Node 自己起的子进程（stdio: "pipe" / spawnSync 的 input），
+    // stdin 是 socketpair。它要么数据已经到了、要么父进程写完就关，退回阻塞读不会像应用那样一直挂着；
+    // 别的类型（重开失败的真管道）照旧不读，宁可认不出也不挂死。
+    let sock = false;
+    try { sock = (fs.fstatSync(0).mode & fs.constants.S_IFMT) === fs.constants.S_IFSOCK; } catch {}
+    if (sock) pump(0, false);
   }
   const k = got.split("\n")[0].trim();
   if (!/^[0-9a-f]{64}$/.test(k)) { log("⚠️ 没收到应用给的启动随机数，界面会认不出这个网关"); return "x"; }

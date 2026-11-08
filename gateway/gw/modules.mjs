@@ -20,6 +20,13 @@ const STAGE = PREFIX ? path.join(path.dirname(PREFIX), "devkit-stage") : "";
 const MOD_JOBS = new Map();          // id → { phase, done, total, via, error, child, cancelled, finished, queue }
 const DEVKIT_MIRROR = "https://dl.cccodroid.net/devkit/";
 
+/** modules.json 同 uid 可改：dir 只认 $PREFIX 内的普通相对路径 —— 卸载时会对 dirOf(m) 整个 rmSync（196-供应链.3） */
+const modDirOk = (d) => typeof d === "string" && d.length > 0 && !d.includes("\0") && !d.includes("\\") &&
+  !path.isAbsolute(d) && d.split("/").every((p) => p && p !== "." && p !== "..");
+/** FILES 里的一行同理，不安全的行不参与删除（196-供应链.3） */
+const safeRel = (r) => typeof r === "string" && r.length > 0 && !r.includes("\0") && !r.includes("\\") &&
+  !path.isAbsolute(r) && r.split("/").every((p) => p && p !== "." && p !== "..");
+
 export function modulesInfo() {
   if (!DK) return null;
   let j;
@@ -32,7 +39,7 @@ export function modulesInfo() {
     return null;
   }
   const n = j.modules.length;
-  j.modules = j.modules.filter((m) => m && typeof m === "object" && typeof m.id === "string" && m.id && typeof m.dir === "string" && m.dir);
+  j.modules = j.modules.filter((m) => m && typeof m === "object" && typeof m.id === "string" && m.id && modDirOk(m.dir));
   if (j.modules.length !== n) log(`[mod] modules.json 里有 ${n - j.modules.length} 个坏条目，已忽略`);
   return j;
 }
@@ -46,7 +53,7 @@ export function modInstalled(mj, id) {
 }
 const readLines = (f) => { try { return fs.readFileSync(f, "utf8").split("\n").filter(Boolean); } catch { return []; } };
 /** 一块放进 $PREFIX 的全部路径（文件 + 软链），相对 $PREFIX */
-const filesOf = (m) => readLines(path.join(dirOf(m), "FILES"));
+const filesOf = (m) => readLines(path.join(dirOf(m), "FILES")).filter(safeRel);
 
 /** 组件要用、但所在模块没装的底座包 → 要先装的模块（共享层报给用它的模块）。整包工具包或不知道依赖时返回 [] */
 export function modulesMissingFor(baseDeps) {
@@ -160,6 +167,9 @@ async function modInstall(id) {
       log(`[mod] 已装：${chain.join(" → ")}`);
     } catch (e) {
       job.error = e.message === "cancelled" ? "" : e.message;
+      // 失败的解包树（可能几百 MB）以前一直留在 devkit-stage，只有下次重装才会被开头那句清掉；
+      // 用户不再重试就没有入口删。这里当场清掉。压缩包按组件安装的做法留着，重试时大小对得上就不重下（196-供应链.2）
+      try { if (job.stageTree) fs.rmSync(job.stageTree, { recursive: true, force: true }); } catch {}
       log(`[mod] ${job.current} 安装失败：${e.message}`);
     } finally {
       job.finished = true; job.child = null;
@@ -201,6 +211,7 @@ let modMirrorFirst = false;
 async function modRunInstall(mj, m, base, job) {
   fs.mkdirSync(STAGE, { recursive: true });
   const gz = path.join(STAGE, `${m.id}-${m.gz.sha256.slice(0, 12)}.tar.gz`), tree = path.join(STAGE, m.id);
+  job.stageTree = tree;      // 失败时由 modInstall 的 catch 清掉（196-供应链.2）
   if (fs.existsSync(gz)) {
     job.phase = "verifying"; job.done = 0; job.total = m.gz.bytes;
     if ((await sha256File(gz, job)) !== m.gz.sha256) fs.rmSync(gz, { force: true });
@@ -363,3 +374,6 @@ export async function routeModules(req, res, u, p) {
   if (p === "/api/devkit/modules/remove") return sendJson(res, 200, modRemove(id));
   return sendJson(res, 404, { error: "not found" });
 }
+
+// 只给测试用（和 components.mjs 的 _compForTest 一个口径）
+export const _modForTest = { modInstall, modRemove, MOD_JOBS };

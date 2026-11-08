@@ -54,6 +54,17 @@ function readSmall(f, max = 1 << 20) {
   } catch { return null; }
 }
 const COMP_JOBS = new Map();      // id → { phase, done, total, error, child, cancelled }
+// 跨组件的文件操作串行链。COMP_JOBS 只按组件 id 独占，两个不同组件同时装 / 卸时，
+// 各自都要「看别的组件还要用哪些文件」（compRemoveFiles 还会把共享文件转记到别的组件名下），
+// 中间隔着下载解包、首启脚本这些 await，两段能交错；两边各读一份记录再各写回去就会丢改动。
+// 会改 $PREFIX 文件清单、组件记录、技能目录的阶段都排进这条链（196-供应链.1）。
+// 链上一步失败不影响后面排队的人；返回值 / 异常原样交给调用方。
+let compFsTail = Promise.resolve();
+export function compFsExclusive(fn) {
+  const run = compFsTail.catch(() => {}).then(fn);
+  compFsTail = run.catch(() => {});
+  return run;
+}
 export let compIndexCache = { at: 0, data: null, error: "" };
 
 export function devkitIdentity() {
@@ -85,7 +96,8 @@ export function compRecord(id) { return compRecordInfo(id).rec; }
 function compWriteRecord(id, rec) {
   return writeAtomic(compRecFile(id), JSON.stringify(rec, null, 1));
 }
-export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile, compDropDanglingDocs, compSweepDanglingDocs };   // 只给测试用
+export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile, compDropDanglingDocs, compSweepDanglingDocs,
+  compState, compVerCmp, compOlder, compInstall, compSwitch };   // 只给测试用
 
 function compFetch(src, quick) {
   // quick：拉索引用——连不上 8 秒就放弃、只重试一次，好尽快换镜像（GitHub 被墙时以前要干等一分多钟）
@@ -124,27 +136,76 @@ async function compFetchIndex(src, mirror) {
   try { sig = Buffer.from(String(await compFetch(src + ".sig", true)).trim(), "base64"); } catch {}
   const ok = sig && sig.length === 64 && crypto.verify(null, body, COMP_INDEX_PUBKEY, sig);
   if (!ok && !allowUnsigned()) throw new Error(sig ? tz("索引签名不对，已拒绝") : tz("索引没有签名，已拒绝"));
-  return { ...JSON.parse(String(body)), signed: !!ok };
+  const parsed = JSON.parse(String(body));
+  // 原始正文与签名一起带回去：磁盘缓存要按它们复核（195-V.3），不能再存一份合并后的对象当可信数据
+  return { ...parsed, signed: !!ok, _raw: String(body), _sig: sig && sig.length === 64 ? sig.toString("base64") : "" };
 }
 
 /** 两个来源合并：预置（cccodroid 仓库）在前，社区（cccodroid-components）在后；id 撞了以预置为准。
- *  共享目录里放了 components/components.json、且私有目录有 use-local-index 开关，就代替预置来源（离线 / 测试），同样要签名。 */
-// 磁盘缓存：上回验过签的合并索引存一份，重开 App 后扩展页先拿它出列表，不用等网络（群友：每次重开组件栏都要等好久）。
-// 文件在私有目录（和已装记录同处、同等可信）；名字别以 .json 结尾——COMP_DIR 里的 *.json 都当已装记录读
+ *  拉索引与读磁盘缓存都走这里，合并口径只有一份。 */
+function compMerge(got) {
+  const components = {};
+  for (const g of got) {
+    if (g.e) continue;
+    for (const [id, e] of Object.entries(g.d.components || {})) if (!components[id]) components[id] = { ...e, source: g.source, signed: g.d.signed };
+  }
+  return components;
+}
+
+// 磁盘缓存：上回验过签的索引正文与签名按来源各存一份，重开 App 后扩展页先拿它出列表，不用等网络（群友：每次重开组件栏都要等好久）。
+// 名字别以 .json 结尾——COMP_DIR 里的 *.json 都当已装记录读。
+// 以前存的是合并后的对象、读回来只 JSON.parse：同 uid 改一改就能塞进「已签名」的条目、绕过整条验签链去执行包里
+// 的 first-run.sh（0.6.9 审计 195-V.3）。现在读回来当场按公钥复核，`signed` 字段不再从缓存里信。
 const compCacheFile = () => COMP_DIR && path.join(COMP_DIR, "index.cache");
+let compIndexRaw = null;      // 这份索引可复核的原始正文与签名（source → { body, sig }），存盘用
 function compLoadDiskCache() {
   if (compIndexCache.data || !compCacheFile()) return;
   try {
     const t = readSmall(compCacheFile()); if (t == null) return;
     const c = JSON.parse(t);
-    if (c && c.data && c.data.components) { compIndexCache = { at: c.at || 0, data: c.data, error: "" }; compIndexViaMirror = c.viaMirror && typeof c.viaMirror === "object" ? c.viaMirror : {}; }
+    const via = c && c.viaMirror && typeof c.viaMirror === "object" ? c.viaMirror : {};
+    if (c && c.sources && typeof c.sources === "object") {
+      const got = [], raw = {};
+      let rejected = false;
+      for (const source of ["preset", "community"]) {
+        const v = c.sources[source];
+        if (!v || typeof v.body !== "string" || !v.body) continue;
+        let ok = false;
+        try {
+          const sig = v.sig ? Buffer.from(String(v.sig), "base64") : null;
+          ok = !!(sig && sig.length === 64 && crypto.verify(null, Buffer.from(v.body), COMP_INDEX_PUBKEY, sig));
+        } catch {}
+        if (!ok && !allowUnsigned()) { rejected = true; continue; }
+        let parsed = null;
+        try { parsed = JSON.parse(v.body); } catch { rejected = true; continue; }
+        if (!parsed || typeof parsed !== "object" || !parsed.components) { rejected = true; continue; }
+        got.push({ source, d: { components: parsed.components, signed: ok } });
+        raw[source] = { body: v.body, sig: v.sig ? String(v.sig) : "" };
+      }
+      if (got.length) {
+        // 有来源没复核过：整份当过期，下一次 compIndex 重新拉，别让半份数据顶十分钟
+        compIndexCache = { at: rejected ? 0 : c.at || 0, data: { components: compMerge(got) }, error: "" };
+        compIndexRaw = raw;
+        compIndexViaMirror = via;
+      }
+      return;
+    }
+    if (c && c.data && c.data.components) {
+      // 旧格式缓存（0.6.10 之前写的）：没有可复核的正文和签名，只能当没验过的数据用。
+      // signed 一律 false——显示、查依赖可以，装不行（compInstall 会拒）；at 置 0，联网后马上换成新格式
+      const components = {};
+      for (const [id, e] of Object.entries(c.data.components)) components[id] = { ...e, signed: false };
+      compIndexCache = { at: 0, data: { components }, error: "" };
+      compIndexRaw = null;
+      compIndexViaMirror = via;
+    }
   } catch {}
 }
 function compSaveDiskCache() {
   if (!compCacheFile() || !compIndexCache.data) return;
   try {
     fs.mkdirSync(COMP_DIR, { recursive: true });
-    fs.writeFileSync(compCacheFile() + ".tmp", JSON.stringify({ at: compIndexCache.at, viaMirror: compIndexViaMirror, data: compIndexCache.data }));
+    fs.writeFileSync(compCacheFile() + ".tmp", JSON.stringify({ at: compIndexCache.at, viaMirror: compIndexViaMirror, sources: compIndexRaw || {} }));
     fs.renameSync(compCacheFile() + ".tmp", compCacheFile());
   } catch {}
 }
@@ -162,19 +223,19 @@ export async function compIndex(force) {
 }
 
 async function compIndexFetch() {
-  // 共享目录里的索引只在私有目录有 use-local-index 开关时才认：/sdcard 别的应用也能写，
-  // 放一份 GitHub 上公开的旧索引（签名是真的）就能把组件压回旧构建（审查 10-29 中2）
-  const local = process.env.CCAPP_SHARED && COMP_DIR && fs.existsSync(path.join(COMP_DIR, "use-local-index")) && path.join(process.env.CCAPP_SHARED, "components", "components.json");
+  // 共享目录里的索引只在网关启动时带了 CCAPP_COMPONENTS_USE_LOCAL_INDEX=1 才认：/sdcard 别的应用也能写，
+  // 放一份 GitHub 上公开的旧索引（签名是真的）就能把组件压回旧构建（审查 10-29 中2）。
+  // 以前看私有目录里的 use-local-index 文件，应用身份跑的任何程序（包括模型自己）touch 一下就能换来源；
+  // 和 allow-unsigned 一样只认启动环境变量（0.6.9 审计 195-V.2）
+  const local = process.env.CCAPP_COMPONENTS_USE_LOCAL_INDEX === "1" && process.env.CCAPP_SHARED && COMP_DIR &&
+    path.join(process.env.CCAPP_SHARED, "components", "components.json");
   const sources = [
     { source: "preset", url: local && fs.existsSync(local) ? "file://" + local : COMP_INDEX },
     { source: "community", url: COMP_COMMUNITY_INDEX },
   ];
   const got = await Promise.all(sources.map((s) => compFetchIndex(s.url, s.url.startsWith("file://") ? null : COMP_INDEX_MIRROR[s.source]).then((d) => ({ ...s, d }), (e) => ({ ...s, e }))));
-  const components = {}, errors = [];
-  for (const g of got) {
-    if (g.e) { errors.push(`${g.source}: ${g.e.message}`); continue; }
-    for (const [id, e] of Object.entries(g.d.components || {})) if (!components[id]) components[id] = { ...e, source: g.source, signed: g.d.signed };
-  }
+  const components = compMerge(got), errors = [];
+  for (const g of got) if (g.e) errors.push(`${g.source}: ${g.e.message}`);
   // 某个来源这次没取到：沿用上次那个来源的条目，免得已装组件的状态跳成"不在索引里"
   const prev = (compIndexCache.data && compIndexCache.data.components) || {};
   for (const g of got) if (g.e) for (const [id, e] of Object.entries(prev)) if (e.source === g.source && !components[id]) components[id] = e;
@@ -182,7 +243,13 @@ async function compIndexFetch() {
   compIndexCache = anyOk || !compIndexCache.data
     ? { at: errors.length ? Date.now() - 9 * 60e3 : Date.now(), data: { components }, error: errors.join("；") }   // 有失败的一分钟后再试
     : { at: Date.now() - 9 * 60e3, data: compIndexCache.data, error: errors.join("；") };
-  if (anyOk) compSaveDiskCache();
+  if (anyOk) {
+    // 缓存里只存这次拿到、能复核的正文与签名；沿用来的旧条目在缓存里没有可信来源，不存
+    const raw = {};
+    for (const g of got) if (!g.e && g.d._raw) raw[g.source] = { body: g.d._raw, sig: g.d._sig || "" };
+    compIndexRaw = raw;
+    compSaveDiskCache();
+  }
   return compIndexCache;
 }
 
@@ -190,6 +257,15 @@ async function compIndexFetch() {
 function compBuildFor(entry, dk) {
   const sha = dk && dk.sha256;
   return (entry.builds || []).find((b) => sha && b.base === sha) || null;
+}
+
+// 版本号比较：数字段逐段比，缺的当 0（和 custom.mjs 的 verCmp 同一个口径）
+function compVerCmp(a, b) { const x = String(a).split("."), y = String(b).split("."); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (+x[i] || 0) - (+y[i] || 0); if (d) return d; } return 0; }
+// 索引里的构建是不是比已装记录旧。只有两边版本都是非空字符串、且索引确实更旧才算——
+// 版本缺失（旧索引 / 旧记录）时一律当不旧，宁可照旧显示可更新，也不误拦（0.6.9 审计 195-V.1）
+function compOlder(build, rec) {
+  return !!(build && rec && typeof build.version === "string" && build.version &&
+    typeof rec.version === "string" && rec.version && compVerCmp(build.version, rec.version) < 0);
 }
 
 function compState(id, entry, dk) {
@@ -206,7 +282,9 @@ function compState(id, entry, dk) {
   if (!dk || rec.base !== dk.sha256) return "outdated";          // 工具包换过：组件的文件已随旧工具包一起没了
   for (const b of rec.bin || []) if (!fs.existsSync(path.join(PREFIX, "bin", b))) return "damaged";
   const build = entry && compBuildFor(entry, dk);
-  if (build && build.sha256 !== rec.sha256) return "update";
+  // 索引能是旧的（镜像晚一拍、磁盘缓存用了十分钟）：里面的构建比已装的还旧时不算「可更新」，
+  // 否则界面推着用户降级（0.6.9 审计 195-V.1）
+  if (build && build.sha256 !== rec.sha256 && !compOlder(build, rec)) return "update";
   return "ok";
 }
 
@@ -500,8 +578,8 @@ export function compBaseDeps(id, sha, rec) {
 
 /** 删掉一个组件放进去的文件。两个组件带了同一个依赖包（浏览器和 GPU 驱动都带 mesa）时，
  *  后装的那个跳过了已存在的文件、记录里没有它们 —— 所以删之前先看别的组件要不要用：要用的留下、记到它名下，
- *  不然卸一个，另一个就悄悄坏了 */
-function compRemoveFiles(id, rec) {
+ *  不然卸一个，另一个就悄悄坏了。keep 里的路径不删：升级时新版里还有的同名文件（已经换成新内容） */
+function compRemoveFiles(id, rec, keep = null) {
   // 记录文件同 uid 可改：卸载/升级只认普通相对路径，别让 ../ 把前缀外的文件删了
   const safeRel = (r) => typeof r === "string" && r && !r.startsWith("/") && !r.split("/").includes("..");
   const files = (rec.files || []).filter(safeRel);
@@ -517,6 +595,7 @@ function compRemoveFiles(id, rec) {
   for (const r of files) {
     const keeper = others.find((o) => o.needs.has(r));
     if (keeper) { keeper.gained.push(r); continue; }
+    if (keep && keep.has(r)) continue;    // 新版里还有这个路径：已经换成新内容，别删
     if (base.has(r)) { baseKept++; continue; }
     try { fs.unlinkSync(path.join(PREFIX, r)); } catch {}
     for (let d = path.dirname(r); d && d !== "."; d = path.dirname(d)) dirs.add(d);
@@ -556,12 +635,22 @@ async function compInstall(id) {
   if (pending && !pending.finished) return { ok: false, message: "busy" };
   const entry = ix.data && ix.data.components && ix.data.components[id];
   if (!entry) return { ok: false, message: ix.error || tz("没有这个组件") };
+  // 旧格式磁盘缓存里的条目没复核过签名（signed:false），拿它查到的东西不能直接执行：
+  // 同 uid 改缓存正如以前能绕过整条验签链（195-V.3）。只拦安装/更新，列表和依赖查询照常
+  if (!entry.signed && !allowUnsigned()) return { ok: false, message: tz("索引没有通过验签，不能安装组件") };
   const un = compUnsupported(entry);
   if (un) return { ok: false, message: un === "mali" ? tz("这个组件只能用在 ARM Mali GPU（天玑、Exynos 等）的设备上，本机用不了") : tz("这个组件只能用在高通骁龙（Adreno GPU）的设备上，本机用不了") };
   const miss = (entry.requires || []).filter((rid) => !compDepOk(rid, ix.data.components, dk));
   if (miss.length) return { ok: false, message: tz("要先装：{names}", { names: miss.map((rid) => compName(rid, ix.data.components).zh || rid).join("、") }) };
   const b0 = compBuildFor(entry, dk), b = b0 && { ...b0, source: entry.source, requires: entry.requires || [] };
   if (!b) return { ok: false, message: tz("这个组件还没有对应当前工具包的版本，先更新工具包或稍后再试") };
+  // 防回滚：已装好且索引里的构建版本更旧，不装。过期索引（镜像晚一拍、缓存十分钟）里常有上一版，
+  // 用户点一下「更新」反而把新版换掉；损坏/装到一半的记录不拦，那是修复（0.6.9 审计 195-V.1）
+  {
+    const oldRec = compRecordInfo(id).rec;
+    if (oldRec && oldRec.state === "ok" && compOlder(b, oldRec))
+      return { ok: false, message: tz("索引里的版本（{v}）比已装的（{now}）旧，已拒绝降级", { v: b.version, now: oldRec.version }) };
+  }
   // 模块化工具包：组件依赖的底座包所在的模块得先装上
   const needMods = modulesMissingFor(b.baseDeps);
   if (needMods.length) return { ok: false, needModules: needMods.map((m) => m.id), message: tz("要先装工具包模块：{names}（扩展页上方「工具包模块」）", { names: needMods.map((m) => m.name.zh || m.id).join("、") }) };
@@ -742,10 +831,44 @@ async function compRunInstall(id, b, job) {
   const dkNow = devkitIdentity();
   const goneReq = (b.requires || []).filter((rid) => !compDepOk(rid, compsNow, dkNow));
   if (goneReq.length) throw new Error(tz("要先装：{names}", { names: goneReq.map((rid) => compName(rid, compsNow).zh || rid).join("、") }));
-  // 3) 切换：先写"安装中"的记录（被打断就是 damaged，可以重装或卸载），再逐个搬进 $PREFIX
-  job.phase = "installing";
+  // 3) 切换：先写"安装中"的记录（被打断就是 damaged，可以重装或卸载），再逐个搬进 $PREFIX。
+  // 升级时旧版同路径文件先备份、新版全部就位后才删旧版不要的，中途失败原样放回（197-9.6 F8）。
+  // 这一段和别的组件「按记录删文件 / 搬文件 / 写记录」互斥（196-供应链.1）；解包、首启仍在锁外，
+  // 排队的安装可以照常取消（这时 phase 还是 verifying，compCancel 放行）
+  const rec = await compFsExclusive(() => {
+    if (job.cancelled) throw new Error("cancelled");
+    job.phase = "installing";
+    return compSwitch(id, b, tree);
+  });
+  // 4) 首次运行配置（各包 postinst），失败不算安装失败
+  const fr = path.join(PREFIX, lx, "first-run.sh");
+  if (fs.existsSync(fr)) { try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); } catch (e) { log(`[comp] ${id} first-run：${e.message}`); } }
+  // 首启脚本在锁外跑（可能几分钟）；收尾这步重新进锁：技能目录、共享文件复核、ok 记录
+  // 和别的组件卸载时的删文件不能交错（196-供应链.1）
+  await compFsExclusive(() => {
+    // 5) 给 Claude 的技能
+    if (b.skill) compInstallSkill(id, b.skill, rec);
+    // 首次配置这段时间里，另一个卸载 / pkg 卸载可能把本组件依赖的共享文件删掉了：
+    // 提交 ok 之前再核一次，别报「装好了」却缺依赖（0.6.9 审计 #185）
+    const goneShared = (rec.shared || []).filter((r) => typeof r === "string" && !fs.existsSync(path.join(PREFIX, r)));
+    if (goneShared.length) throw new Error(tz("安装期间有 {n} 个共享文件被卸载删掉了，请重新安装", { n: goneShared.length }));
+    rec.state = "ok"; rec.at = Date.now();
+    // 最后一次写盘失败要如实报：磁盘上还是 installing，界面按 damaged 显示，可以重装或卸掉重来
+    if (!compWriteRecord(id, rec)) throw new Error(tz("文件已放进去了，但安装记录没写成（存储满了或没有权限），请重装或卸载"));
+    fs.rmSync(tree, { recursive: true, force: true });
+    fs.rmSync(gz, { force: true });
+  });
+}
+
+/** 安装切换（在 compFsExclusive 里跑）：把暂存树 tree/usr 里的新版放进 $PREFIX。
+ *  升级 / 重装时旧版同路径文件先挪进 <tree>.old 备份（别的组件也要用、底座认领的不动），
+ *  新版全部就位（提交点）后才删旧版里新版不要的文件；搬运中途失败把备份原样放回、记录退回旧版（197-9.6 F8）。
+ *  返回写好的 installing 记录；首启、技能、写 ok 在锁外另一段里做 */
+function compSwitch(id, b, tree) {
+  // 记录文件同 uid 可改：只认普通相对路径（和 compRemoveFiles 同口径）
+  const safeRel = (r) => typeof r === "string" && r && !r.startsWith("/") && !r.split("/").includes("..");
   const old = compRecord(id);
-  if (old) compRemoveFiles(id, old);                // 升级 / 重装：先清掉上一版（别的组件也要用的留下）
+  const oldFiles = new Set(((old && old.files) || []).filter(safeRel));
   const rec = { id, source: b.source || "", version: b.version, upstream: b.upstream, base: b.base, sha256: b.sha256, bin: b.bin || [],
     requires: b.requires || [], skill: "", state: "installing", at: Date.now(), files: [], shared: [],
     // 依赖的底座包：卸工具包模块时据此判断有没有组件在用。不记的话要靠索引，刚启动 / 离线 / 索引里这个构建没了就判断不了（#104 05-001）
@@ -761,27 +884,51 @@ async function compRunInstall(id, b, job) {
   // 已经在的（工具包自带，或别的组件放进去的）不覆盖、不归我们，但记进 shared：那个组件卸载时要知道我们也在用
   const orphans = compOrphans(list, id);
   if (orphans.size) log(`[comp] ${id}：${orphans.size} 个没人认领的旧文件被新包覆盖（${[...orphans].slice(0, 5).join(", ")}）`);
-  for (const r of list) { let have = false; try { fs.lstatSync(path.join(PREFIX, r)); have = true; } catch {} (have && !orphans.has(r) ? rec.shared : rec.files).push(r); }
+  // 升级时旧版本自己的文件还在：没人跟它抢的换成新版（先备份）；别的组件也要用、底座认领的留在原地当 shared
+  const othersNeed = new Set();
+  for (const [oid, orec] of compRecords()) if (oid !== id) for (const r of compNeeds(oid, orec)) othersNeed.add(r);
+  const baseNow = baseOwnedPaths(new Set(list));
+  const replaceable = new Set();
+  for (const r of list) {
+    let st = null; try { st = fs.lstatSync(path.join(PREFIX, r)); } catch {}
+    if (st && (st.isFile() || st.isSymbolicLink()) && (orphans.has(r) || (oldFiles.has(r) && !othersNeed.has(r) && !baseNow.has(r))))
+      replaceable.add(r);
+    (st && !replaceable.has(r) ? rec.shared : rec.files).push(r);
+  }
   // 记录写不进去就不能往下搬：文件搬进 $PREFIX 却没有清单，以后既卸不干净也认领不了（195-Z.10）
   if (!compWriteRecord(id, rec)) throw new Error(tz("安装记录写不进去（存储满了或没有权限），这次安装没有继续"));
-  const { skipped } = compMoveIn(path.join(tree, "usr"), "", [], [], orphans);
-  if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
+  // 旧版同路径文件先挪进备份：新版没全部就位前，$PREFIX 里的旧版文件一个都不删
+  const bak = path.join(path.dirname(tree), id + ".old");
+  fs.rmSync(bak, { recursive: true, force: true });
+  const backed = [], moved = [];
+  try {
+    for (const r of replaceable) {
+      const to = path.join(bak, r);
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.renameSync(path.join(PREFIX, r), to);
+      backed.push(r);
+    }
+    const { skipped } = compMoveIn(path.join(tree, "usr"), "", moved, [], orphans);
+    if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
+  } catch (e) {
+    // 回滚：备份原样放回、撤掉这次新放进去的文件、记录退回旧版
+    let restored = true;
+    for (const r of backed.reverse()) {
+      try { fs.mkdirSync(path.dirname(path.join(PREFIX, r)), { recursive: true }); fs.renameSync(path.join(bak, r), path.join(PREFIX, r)); } catch { restored = false; }
+    }
+    for (const r of moved) if (!replaceable.has(r)) { try { fs.unlinkSync(path.join(PREFIX, r)); } catch {} }
+    // 还有没放回去的备份就先留着，别把旧版文件最后一份也删了
+    if (restored) try { fs.rmSync(bak, { recursive: true, force: true }); } catch {}
+    else log(`[comp] ${id}：回滚时有备份没放回去，先留在 ${bak}`);
+    if (old && !compWriteRecord(id, old)) log(`[comp] ${id}：回滚后旧记录没写回去，界面会显示装到一半`);
+    throw e;
+  }
+  try { fs.rmSync(bak, { recursive: true, force: true }); } catch {}
+  // 新版全部就位（提交点）：这时才删旧版里新版不要的文件，别的组件也要用的转记到它们名下，旧技能清掉
+  if (old) compRemoveFiles(id, old, new Set(list));
   // 搬完再查（顺序不定，搬的时候目标可能还没就位）：目标仍然断掉的文档软链不留下（196-真机.3）
   compDropDanglingDocs(rec);
-  // 4) 首次运行配置（各包 postinst），失败不算安装失败
-  const fr = path.join(PREFIX, lx, "first-run.sh");
-  if (fs.existsSync(fr)) { try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); } catch (e) { log(`[comp] ${id} first-run：${e.message}`); } }
-  // 5) 给 Claude 的技能
-  if (b.skill) compInstallSkill(id, b.skill, rec);
-  // 首次配置这段时间里，另一个卸载 / pkg 卸载可能把本组件依赖的共享文件删掉了：
-  // 提交 ok 之前再核一次，别报「装好了」却缺依赖（0.6.9 审计 #185）
-  const goneShared = (rec.shared || []).filter((r) => typeof r === "string" && !fs.existsSync(path.join(PREFIX, r)));
-  if (goneShared.length) throw new Error(tz("安装期间有 {n} 个共享文件被卸载删掉了，请重新安装", { n: goneShared.length }));
-  rec.state = "ok"; rec.at = Date.now();
-  // 最后一次写盘失败要如实报：磁盘上还是 installing，界面按 damaged 显示，可以重装或卸掉重来
-  if (!compWriteRecord(id, rec)) throw new Error(tz("文件已放进去了，但安装记录没写成（存储满了或没有权限），请重装或卸载"));
-  fs.rmSync(tree, { recursive: true, force: true });
-  fs.rmSync(gz, { force: true });
+  return rec;
 }
 
 function compCancel(id) {
@@ -821,24 +968,28 @@ export async function compRemove(id) {
   // 停用服务需要等待子进程，期间仍占住组件槽，避免重装和第二次卸载交错。
   const removal = { phase: "removing", finished: false };
   COMP_JOBS.set(id, removal);
-  let stage = "read-record";
+  let stage = "retire-managed-bridge";
   try {
-    const { exists, rec } = compRemovalRecord(id);
-    stage = "retire-managed-bridge";
+    // 退役桥 / 清映射要等子进程；这期间别的组件可能刚把共享文件转记到这个组件名下。
+    // 所以记录等退役完、进锁之后再读，不拿退役前的旧快照删文件（196-供应链.1）
     const retired = await retireManagedBridge(id);
     stage = "clear-app-mapping";
     const unmapped = clearBridgeConfigMapping(id);
-    if (!exists && !retired && !unmapped) return { ok: false, message: "not installed" };
-    stage = "remove-files";
-    // installing / damaged 的完整记录仍有原受管文件清单，照既有管理器处理共享文件和技能。
-    if (rec) compRemoveFiles(id, rec);
-    else log(`[comp] ${id} 卸载恢复：安装记录缺失或损坏，未删除工具包内文件和技能`);
-    stage = "remove-record";
-    fs.rmSync(compRecFile(id), { force: true });
-    stage = "clear-stage";
-    compClearStage(id);
-    log(`[comp] ${id} 已卸载（${rec ? rec.files.length : 0} 个文件）`);
-    return { ok: true };
+    return await compFsExclusive(() => {
+      stage = "read-record";
+      const { exists, rec } = compRemovalRecord(id);
+      if (!exists && !retired && !unmapped) return { ok: false, message: "not installed" };
+      stage = "remove-files";
+      // installing / damaged 的完整记录仍有原受管文件清单，照既有管理器处理共享文件和技能。
+      if (rec) compRemoveFiles(id, rec);
+      else log(`[comp] ${id} 卸载恢复：安装记录缺失或损坏，未删除工具包内文件和技能`);
+      stage = "remove-record";
+      fs.rmSync(compRecFile(id), { force: true });
+      stage = "clear-stage";
+      compClearStage(id);
+      log(`[comp] ${id} 已卸载（${rec ? rec.files.length : 0} 个文件）`);
+      return { ok: true };
+    });
   } catch (e) {
     if (stage === "retire-managed-bridge" && ["retire-lock", "retire-spawn", "retire-exit", "retire-timeout"].includes(e.stage)) stage = e.stage;
     log(`[comp] ${id} 卸载失败（stage=${stage}）`);
