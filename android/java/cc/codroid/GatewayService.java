@@ -59,14 +59,15 @@ public class GatewayService extends Service {
         start(c, new Intent(c, GatewayService.class));
     }
 
-    /** 系统闹钟叫醒：和界面明确打开的启动不同，干完活要能自己退（见 onStartCommand 的 closeWhenIdle） */
-    static void startAlarm(Context c) {
-        start(c, new Intent(c, GatewayService.class).setAction(ACTION_ALARM));
+    /** 系统闹钟叫醒：和界面明确打开的启动不同，干完活要能自己退（见 onStartCommand 的 closeWhenIdle）
+     *  @return 系统收没接受启动请求：targetSdk 31+ 后台会被拒，调用方得告诉用户（0.6.9 审计 13-05） */
+    static boolean startAlarm(Context c) {
+        return start(c, new Intent(c, GatewayService.class).setAction(ACTION_ALARM));
     }
 
-    private static void start(Context c, Intent i) {
+    private static boolean start(Context c, Intent i) {
         // targetSdk ≥ 31：后台（非精确闹钟、没在电池优化白名单）拉前台服务会抛 ForegroundServiceStartNotAllowedException，别让它崩掉调用方
-        try { c.startForegroundService(i); } catch (RuntimeException e) { Log.w(TAG, "拉起网关服务被系统拒绝", e); }
+        try { c.startForegroundService(i); return true; } catch (RuntimeException e) { Log.w(TAG, "拉起网关服务被系统拒绝", e); return false; }
     }
 
     @Override public IBinder onBind(Intent i) { return null; }
