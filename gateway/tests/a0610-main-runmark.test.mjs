@@ -78,3 +78,27 @@ test("195-AA.5：运行标记带上重发要用的参数和定时任务身份；
     assert.equal(e.req.projectId, "p1"); assert.equal(e.textCut, true); assert.equal(e.sched.taskId, "t1");
   } finally { RUNS.delete("rm-aa5"); }
 });
+
+test("195-AA.3：被系统结束的定时任务轮次 → 补记一次失败，接着的对话写回 lastSid；再恢复一次不重复记", async () => {
+  reset();
+  const { _schedForTest: S } = await import("../gw/sched.mjs");
+  const id = "aa3-" + Date.now().toString(36);
+  const task = { id, name: "AA3", prompt: "做事", on: true, freq: { kind: "once" }, nextAt: null, busy: "run", session: "same", perm: "read" };
+  S.DB.tasks.push(task);
+  try {
+    const sid = "11111111-2222-4333-8444-555555555555";
+    const m = { runs: [{ id: "r-aa3", sessionId: sid, text: "做事", startedAt: 1000, sched: { taskId: id, key: "k1" } },
+      { id: "r-trial", text: "试跑", startedAt: 1001, sched: { taskId: id, key: "k2", trial: true } }], queue: [] };
+    fs.writeFileSync(MARK, JSON.stringify(m));
+    Q.recoverRunMark();
+    const mine = () => S.runlog().filter((x) => x.taskId === id);
+    assert.equal(mine().length, 1, "试跑不记");
+    assert.equal(mine()[0].st, "err");
+    assert.equal(mine()[0].runId, "r-aa3");
+    assert.equal(mine()[0].at, 1000);
+    assert.equal(task.lastSid, sid);
+    fs.writeFileSync(MARK, JSON.stringify(m));
+    Q.recoverRunMark();
+    assert.equal(mine().length, 1, "同一轮不重复记");
+  } finally { const i = S.DB.tasks.indexOf(task); if (i >= 0) S.DB.tasks.splice(i, 1); }
+});

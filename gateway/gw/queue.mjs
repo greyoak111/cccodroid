@@ -153,6 +153,9 @@ TRASH_HOOKS.push((id) => {
   publish({ type: "session_gone", id });
   publishState();
 });
+/** 上一任没跑完的轮次记成中断之后要知道的模块（定时任务记一次失败运行，AA.3）在这里挂；钩子出错不影响恢复。
+ *  标记写不掉时下次启动会再给一遍同样的轮次：钩子自己按 run id 去重 */
+export const RECOVER_HOOKS = [];
 /** 启动时调一次：上一任留下的标记 → 中断记录 + 挂起的队列。
  *  标记是唯一的来源：中断记录和队列都落了盘才把它换掉 / 删掉。以前一读完就删，
  *  这时再被系统结束（或中断记录没写上），没建会话的那几轮和排着的消息就都没了（0.6.9 审计 #183）。
@@ -178,6 +181,7 @@ export function recoverRunMark() {
       log("⚠️ 中断记录没写上，运行标记留着，下次启动再恢复");
       return restoreQueue(m, false);
     }
+    for (const h of RECOVER_HOOKS) { try { h(fresh); } catch (e) { log("中断恢复钩子出错: " + e.message); } }
   }
   restoreQueue(m, true);
 }

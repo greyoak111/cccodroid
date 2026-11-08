@@ -2980,5 +2980,6 @@ window.I18N_DICT.en = {
   "模块「{name}」的首次配置没跑完（{err}），再装一次会重试": "Module \"{name}\" didn't finish its first-time setup ({err}); installing again will retry it",
   "项目清单没保存上（存储满了或不可写），重启后这次改动会丢": "The project list couldn't be saved (storage full or not writable); this change will be lost after a restart",
   "有 {n} 个对话没能移进回收站，目录没删：{why}": "{n} chats couldn't be moved to the Trash, so the folder wasn't deleted: {why}",
-  "组件「{id}」依赖的 {n} 个共享文件被删了": "{n} shared files that component \"{id}\" depends on were deleted"
+  "组件「{id}」依赖的 {n} 个共享文件被删了": "{n} shared files that component \"{id}\" depends on were deleted",
+  "网关被系统结束，这一轮没跑完": "The gateway was stopped by the system before this run finished"
 };

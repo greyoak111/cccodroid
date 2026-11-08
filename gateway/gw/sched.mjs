@@ -11,7 +11,7 @@ import { CFG, LIVE, log, tz } from "./config.mjs";
 import { isObj, loadState, saveState, writeAtomic } from "./statefile.mjs";
 import { guarded } from "./crashguard.mjs";
 import { dec, NEXT, readBody, sendJson } from "./http.mjs";
-import { END_HOOKS, QUEUE, START_GUARDS, enqueue } from "./queue.mjs";
+import { END_HOOKS, QUEUE, RECOVER_HOOKS, START_GUARDS, enqueue } from "./queue.mjs";
 import { capList } from "./settings-store.mjs";
 import { RUNS, TRASH_HOOKS, maxParallel } from "./runs.mjs";
 import { publish } from "./bus.mjs";
@@ -419,6 +419,20 @@ START_GUARDS.push((q) => {
   log(`⏭ 定时任务${t ? "「" + t.name + "」" : ""}跳过：${msg}`);
   if (t) addRun({ taskId: t.id, at: Date.now(), st: "skip", msg });
   return false;
+});
+
+// 网关连同那一轮被系统结束：END_HOOKS 没机会跑，运行记录里就像这次没发生过，「接着同一个对话」的下一次也接不上（195-AA.3）。
+// 启动恢复时补记一次失败运行，接着的对话写回 lastSid。按 run id 去重：标记没删掉、下次启动又给一遍时不重复记
+RECOVER_HOOKS.push((runs) => {
+  for (const r of runs) {
+    if (!r.sched || !r.sched.taskId || r.sched.trial) continue;
+    const t = byId(r.sched.taskId);
+    if (!t || RUNLOG.some((x) => x.runId === r.id)) continue;
+    log(`⏰ 定时任务「${t.name}」上一轮被系统结束，记一次失败`);
+    // 时间记这一轮开始的时候；时长不知道（停机那段不能算进去），不写
+    addRun({ taskId: t.id, at: r.startedAt || Date.now(), st: "err", msg: tz("网关被系统结束，这一轮没跑完"), runId: r.id, sid: r.sessionId || null, attempt: 0 });
+    if (r.sessionId && t.session === "same") { t.lastSid = r.sessionId; delete t.lostSid; save(); }
+  }
 });
 
 // 会话进了回收站：接着它的任务放下 lastSid，详情里标「原来的对话已删除」，下一次新开（#173-3）

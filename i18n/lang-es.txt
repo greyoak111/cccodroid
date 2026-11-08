@@ -2943,3 +2943,4 @@
 2943	No se pudo guardar la lista de proyectos (almacenamiento lleno o sin permiso de escritura); este cambio se perderá al reiniciar
 2944	No se pudieron mover {n} chats a la papelera, así que la carpeta no se borró: {why}
 2945	Se borraron {n} archivos compartidos de los que depende el componente «{id}»
+2946	El sistema detuvo la pasarela antes de que terminara esta ejecución

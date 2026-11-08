@@ -310,5 +310,17 @@
   "ru": "Удалены {n} общих файлов, от которых зависит компонент «{id}»",
   "id": "{n} file bersama yang dibutuhkan komponen \"{id}\" telah dihapus",
   "ar": "حُذف {n} من الملفات المشتركة التي يعتمد عليها المكوّن «{id}»"
+ },
+ {
+  "zh": "网关被系统结束，这一轮没跑完",
+  "en": "The gateway was stopped by the system before this run finished",
+  "ja": "ゲートウェイがシステムに終了され、この実行は完了しませんでした",
+  "ko": "게이트웨이가 시스템에 의해 종료되어 이번 실행이 끝나지 않았습니다",
+  "zh-Hant": "閘道被系統結束，這一輪沒跑完",
+  "es": "El sistema detuvo la pasarela antes de que terminara esta ejecución",
+  "fr": "La passerelle a été arrêtée par le système avant la fin de cette exécution",
+  "ru": "Шлюз был остановлен системой до завершения этого запуска",
+  "id": "Gateway dihentikan sistem sebelum proses ini selesai",
+  "ar": "أوقف النظام البوابة قبل أن ينتهي هذا التشغيل"
  }
 ]

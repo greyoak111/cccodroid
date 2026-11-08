@@ -2946,4 +2946,5 @@ window.I18N_DICT["id"] = {
   "项目清单没保存上（存储满了或不可写），重启后这次改动会丢": "Daftar proyek tidak dapat disimpan (penyimpanan penuh atau tidak dapat ditulis); perubahan ini akan hilang setelah dimulai ulang",
   "有 {n} 个对话没能移进回收站，目录没删：{why}": "{n} percakapan tidak dapat dipindahkan ke tempat sampah, jadi folder tidak dihapus: {why}",
   "组件「{id}」依赖的 {n} 个共享文件被删了": "{n} file bersama yang dibutuhkan komponen \"{id}\" telah dihapus",
+  "网关被系统结束，这一轮没跑完": "Gateway dihentikan sistem sebelum proses ini selesai",
 };

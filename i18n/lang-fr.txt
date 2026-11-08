@@ -2943,3 +2943,4 @@
 2943	La liste des projets n’a pas pu être enregistrée (stockage plein ou non inscriptible) ; cette modification sera perdue au redémarrage
 2944	{n} discussions n’ont pas pu être déplacées dans la corbeille ; le dossier n’a donc pas été supprimé : {why}
 2945	{n} fichiers partagés dont dépend le composant « {id} » ont été supprimés
+2946	La passerelle a été arrêtée par le système avant la fin de cette exécution

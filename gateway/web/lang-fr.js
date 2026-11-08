@@ -2946,4 +2946,5 @@ window.I18N_DICT["fr"] = {
   "项目清单没保存上（存储满了或不可写），重启后这次改动会丢": "La liste des projets n’a pas pu être enregistrée (stockage plein ou non inscriptible) ; cette modification sera perdue au redémarrage",
   "有 {n} 个对话没能移进回收站，目录没删：{why}": "{n} discussions n’ont pas pu être déplacées dans la corbeille ; le dossier n’a donc pas été supprimé : {why}",
   "组件「{id}」依赖的 {n} 个共享文件被删了": "{n} fichiers partagés dont dépend le composant « {id} » ont été supprimés",
+  "网关被系统结束，这一轮没跑完": "La passerelle a été arrêtée par le système avant la fin de cette exécution",
 };

@@ -2943,3 +2943,4 @@
 2943	Daftar proyek tidak dapat disimpan (penyimpanan penuh atau tidak dapat ditulis); perubahan ini akan hilang setelah dimulai ulang
 2944	{n} percakapan tidak dapat dipindahkan ke tempat sampah, jadi folder tidak dihapus: {why}
 2945	{n} file bersama yang dibutuhkan komponen "{id}" telah dihapus
+2946	Gateway dihentikan sistem sebelum proses ini selesai

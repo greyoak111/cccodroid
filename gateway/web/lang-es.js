@@ -2946,4 +2946,5 @@ window.I18N_DICT["es"] = {
   "项目清单没保存上（存储满了或不可写），重启后这次改动会丢": "No se pudo guardar la lista de proyectos (almacenamiento lleno o sin permiso de escritura); este cambio se perderá al reiniciar",
   "有 {n} 个对话没能移进回收站，目录没删：{why}": "No se pudieron mover {n} chats a la papelera, así que la carpeta no se borró: {why}",
   "组件「{id}」依赖的 {n} 个共享文件被删了": "Se borraron {n} archivos compartidos de los que depende el componente «{id}»",
+  "网关被系统结束，这一轮没跑完": "El sistema detuvo la pasarela antes de que terminara esta ejecución",
 };
