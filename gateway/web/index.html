@@ -693,7 +693,10 @@
             <div class="prov-state" id="priv-ka-result"></div>
             <div class="srow sub" id="priv-na-row">
               <div class="sl"><p data-i18n>特权命令不再逐条确认（风险自负）：打开后特权命令直接执行，在后台也不会卡在等确认；涉及 cccodroid 自身和 Shizuku / Sui 的会尽量拦下来再问，但拦不住所有写法。只想放行一个会话，在确认框里勾「这个会话后面的都允许」即可</p></div>
-              <div class="sc"><input type="checkbox" class="sw" id="priv-na"></div>
+              <div class="sc"><select id="priv-na-hours" aria-label="时长" data-i18n-attr="aria-label">
+                <option value="1" data-i18n>1 小时</option><option value="4" data-i18n>4 小时</option><option value="24" selected data-i18n>1 天</option>
+                <option value="72" data-i18n>3 天</option><option value="168" data-i18n>7 天</option></select>
+                <input type="checkbox" class="sw" id="priv-na"></div>
             </div>
             <div class="prov-state" id="priv-na-result"></div>
           </div>

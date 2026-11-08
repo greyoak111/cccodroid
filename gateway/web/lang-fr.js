@@ -2961,4 +2961,10 @@ window.I18N_DICT["fr"] = {
   "把工具包里的编译器、Python、Node、git 等逐项跑一遍，结果会告诉 Claude 这台设备上什么能用、什么不能用。工具包或应用更新后会自动重测；修好了什么、想马上让 Claude 知道，就点重新自检。": "Exécute un à un les compilateurs, Python, Node, git, etc. du kit de dév. ; le résultat indique à Claude ce qui marche sur cet appareil et ce qui ne marche pas. Il se relance tout seul après une mise à jour du kit ou de l’app ; si vous avez réparé quelque chose et voulez que Claude le sache tout de suite, touchez Relancer l’autotest.",
   "重新自检": "Relancer l’autotest",
   "每周 · {model}": "Hebdomadaire · {model}",
+  "时长": "Durée",
+  "1 小时": "1 heure",
+  "4 小时": "4 heures",
+  "1 天": "1 jour",
+  "3 天": "3 jours",
+  "7 天": "7 jours",
 };

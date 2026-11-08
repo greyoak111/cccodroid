@@ -2958,3 +2958,9 @@
 2958	Menjalankan kompiler, Python, Node, git, dan lainnya dari Devkit satu per satu; hasilnya memberi tahu Claude apa yang berfungsi di perangkat ini dan apa yang tidak. Diulang otomatis setelah Devkit atau aplikasi diperbarui; jika Anda sudah memperbaiki sesuatu dan ingin Claude segera tahu, ketuk Ulangi swauji.
 2959	Ulangi swauji
 2960	Mingguan · {model}
+2961	Durasi
+2962	1 jam
+2963	4 jam
+2964	1 hari
+2965	3 hari
+2966	7 hari

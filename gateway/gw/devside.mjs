@@ -278,7 +278,9 @@ export async function routeDevside(req, res, u, p) {
   }
   if (req.method === "POST" && p === "/api/priv/noask") {
     let b; try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
-    return sendJson(res, 200, await privCall({ op: "noask", enable: b.enable === true }, 90000));
+    // 时长只认固定几档（应用侧同样只认这几档，别的按 24 小时），最长一周（11-08 用户定）
+    const hours = [1, 4, 24, 72, 168].includes(+b.hours) ? +b.hours : 24;
+    return sendJson(res, 200, await privCall({ op: "noask", enable: b.enable === true, hours }, 90000));
   }
   if (req.method === "POST" && p === "/api/priv/keepalive") {
     const b = JSON.parse((await readBody(req)) || "{}");

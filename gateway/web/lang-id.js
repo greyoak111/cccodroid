@@ -2961,4 +2961,10 @@ window.I18N_DICT["id"] = {
   "把工具包里的编译器、Python、Node、git 等逐项跑一遍，结果会告诉 Claude 这台设备上什么能用、什么不能用。工具包或应用更新后会自动重测；修好了什么、想马上让 Claude 知道，就点重新自检。": "Menjalankan kompiler, Python, Node, git, dan lainnya dari Devkit satu per satu; hasilnya memberi tahu Claude apa yang berfungsi di perangkat ini dan apa yang tidak. Diulang otomatis setelah Devkit atau aplikasi diperbarui; jika Anda sudah memperbaiki sesuatu dan ingin Claude segera tahu, ketuk Ulangi swauji.",
   "重新自检": "Ulangi swauji",
   "每周 · {model}": "Mingguan · {model}",
+  "时长": "Durasi",
+  "1 小时": "1 jam",
+  "4 小时": "4 jam",
+  "1 天": "1 hari",
+  "3 天": "3 hari",
+  "7 天": "7 hari",
 };

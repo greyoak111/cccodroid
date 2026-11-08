@@ -67,3 +67,15 @@ test("工作岛：系统不许起服务 / 没装应用 → 状态带原因；重
     assert.equal(s2.error.code, "not_installed");
   } finally { W.stopWorkIsland(); SETTINGS.workIsland = was; Object.assign(seam, orig); }
 });
+
+test("特权免确认时长可选、最长一周：网关只放行固定几档，前端带上选的时长，Java 侧同一张表", () => {
+  const src = (f) => fs.readFileSync(new URL(f, import.meta.url), "utf8");
+  assert.match(src("../gw/devside.mjs"), /\[1, 4, 24, 72, 168\]\.includes\(\+b\.hours\) \? \+b\.hours : 24/);
+  assert.match(src("../web/app/10-settings-device.js"), /hours: \+\$\("priv-na-hours"\)\.value \|\| 24/);
+  const java = src("../../android/java/cc/codroid/Priv.java");
+  assert.match(java, /NOASK_HOURS = \{ 1, 4, 24, 72, 168 \}/);
+  assert.match(java, /NOASK_MAX = 7L \* 24 \* 3600 \* 1000/);
+  assert.ok(!/NOASK_TTL/.test(java), "旧的固定 24 小时常量不再用");
+  const opts = [...src("../web/index.html").matchAll(/<option value="(\d+)"[^>]*>[^<]*<\/option>/g)].map((m) => +m[1]);
+  for (const h of [1, 4, 24, 72, 168]) assert.ok(opts.includes(h), "下拉里有 " + h);
+});

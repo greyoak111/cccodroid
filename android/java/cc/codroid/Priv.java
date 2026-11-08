@@ -377,16 +377,20 @@ final class Priv {
                 case "noask": {
                     // 特权命令免确认（总开关）：打开要过原生对话框里的免责说明，脚本发请求没用；关掉随时可以
                     boolean on = req.optBoolean("enable", false);
+                    // 时长可选，最长一周（11-08 用户定）；只认固定几档，别的一律按 24 小时。选的时长写进原生说明里，由用户在这里确认
+                    long ttl = noAskTtl(req.optInt("hours", 24));
+                    long hrs = ttl / 3600000L;
+                    String until = hrs % 24 == 0 ? Tr.f("{0} 天后自动关闭，恢复逐条确认。", hrs / 24) : Tr.f("{0} 小时后自动关闭，恢复逐条确认。", hrs);
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                     if (on && !noAsk() && !confirm(Tr.t("特权命令不再逐条确认（风险自负）") + "\n\n"
                             + Tr.t("打开后，Claude、终端和本机其他程序发来的特权命令都不再弹框问你，直接以 Shizuku（shell）身份执行，cccodroid 在后台时也一样。这类命令能装卸应用、改权限和系统设置。") + "\n\n"
                             + Tr.t("命令写错、模型判断失误、或者混进来的脚本，都可能造成数据丢失、应用异常甚至需要恢复出厂设置。打开即表示你了解并自行承担这些风险，cccodroid 及其作者不对由此造成的损失负责。") + "\n\n"
                             + Tr.t("涉及 cccodroid 自身、Shizuku / Sui 的命令会尽量拦下来再问你，但拦不住所有写法（比如藏在脚本文件里的）。随时可以在设置里关掉。") + "\n\n"
-                            + Tr.t("24 小时后自动关闭，恢复逐条确认。"), caller(pid), "noask")) {
+                            + until, caller(pid), "noask")) {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("没有确认，仍然逐条询问"));
                         break;
                     }
-                    if (on) { if (!noAsk()) Consent.grant(ctx, Consent.NOASK, String.valueOf(System.currentTimeMillis() + NOASK_TTL)); } else Consent.revoke(ctx, Consent.NOASK);
+                    if (on) { if (!noAsk()) Consent.grant(ctx, Consent.NOASK, String.valueOf(System.currentTimeMillis() + ttl)); } else Consent.revoke(ctx, Consent.NOASK);
                     Log.w(TAG, "特权命令免确认 " + (on ? "打开" : "关闭"));
                     resp = new JSONObject().put("ok", true).put("noask", on);
                     break;
@@ -595,14 +599,19 @@ final class Priv {
     }
     /** 存在 Consent 里（锁屏签名），不再是谁都能改的 prefs（11-03 审查 H-2） */
     /** 免确认是限时的：同意时存的是到期时刻（和同意一起签名，改不了），到点自动关。旧版存的 "1" 当作已到期 */
-    static final long NOASK_TTL = 24L * 3600 * 1000;
+    static final long NOASK_MAX = 7L * 24 * 3600 * 1000;
+    static final int[] NOASK_HOURS = { 1, 4, 24, 72, 168 };
+    static long noAskTtl(int hours) {
+        for (int h : NOASK_HOURS) if (h == hours) return h * 3600L * 1000;
+        return 24L * 3600 * 1000;
+    }
     static boolean noAsk() { return noAskUntil() > 0; }
     static long noAskUntil() {
         String v = Consent.get(ctx, Consent.NOASK);
         if (v == null) return 0;
         long t, now = System.currentTimeMillis();
         try { t = Long.parseLong(v); } catch (NumberFormatException e) { t = 0; }
-        if (t <= now || t > now + NOASK_TTL + 60000) { Consent.revoke(ctx, Consent.NOASK); Log.w(TAG, "特权命令免确认到期，已关闭"); return 0; }
+        if (t <= now || t > now + NOASK_MAX + 60000) { Consent.revoke(ctx, Consent.NOASK); Log.w(TAG, "特权命令免确认到期，已关闭"); return 0; }
         return t;
     }
     /** 动到本应用、Shizuku / Sui 自己的命令：开了免确认也照样问。规则见 PrivRules.touchesSelf */

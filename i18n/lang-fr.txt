@@ -2958,3 +2958,9 @@
 2958	Exécute un à un les compilateurs, Python, Node, git, etc. du kit de dév. ; le résultat indique à Claude ce qui marche sur cet appareil et ce qui ne marche pas. Il se relance tout seul après une mise à jour du kit ou de l’app ; si vous avez réparé quelque chose et voulez que Claude le sache tout de suite, touchez Relancer l’autotest.
 2959	Relancer l’autotest
 2960	Hebdomadaire · {model}
+2961	Durée
+2962	1 heure
+2963	4 heures
+2964	1 jour
+2965	3 jours
+2966	7 jours
