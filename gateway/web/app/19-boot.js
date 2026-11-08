@@ -19,6 +19,13 @@
   const onViewportResize = () => { queueBottomSync(); if (stick && !touching) scrollDown(true); };
   addEventListener("resize", onViewportResize);
   if (window.visualViewport) window.visualViewport.addEventListener("resize", onViewportResize);
+  // 整页本身永远停在顶上：根是 overflow:hidden，手指滚不动它，可长按选字拖到边缘、输入框聚焦、scrollIntoView 照样能把它滚走，
+  // 而且滚走了就回不来 —— 顶栏 sticky 不动、用量条和下面整体错位（0.6.11 真机「用力按住上下拖动会漂移」）。
+  // 消息区、各页面板都是自己的滚动容器，根和 body 不该有滚动位置；一有就拉回 0
+  addEventListener("scroll", (e) => {
+    const el = e.target === document ? document.scrollingElement : e.target;
+    if ((el === document.scrollingElement || el === document.body) && (el.scrollTop || el.scrollLeft)) el.scrollTop = el.scrollLeft = 0;
+  }, { capture: true, passive: true });
   chatScrollHooks.push(syncBottomBtn);
   // 内容长高才需要重算（以前盯整棵子树的每个字符变化，计时器每秒跳一下也触发）
   const bottomRO = new ResizeObserver(queueBottomSync);

@@ -174,6 +174,15 @@ test("L.11 命中区伸出视口不能让整页滚：根元素 overflow:hidden�
   assert.match(css, /^html\{overflow:hidden\}$/m);
 });
 
+test("长按拖动 / 聚焦 / scrollIntoView 也不能把整页滚走：body 用 clip 裁住，根和 body 一有滚动位置就拉回 0（0.6.11 真机漂移）", () => {
+  assert.match(css, /^body\{overflow:clip\}$/m);
+  const at = src19.indexOf('addEventListener("scroll", (e) => {');
+  assert.ok(at > 0, "缺整页滚动守卫");
+  const body = src19.slice(at, at + 400);
+  assert.ok(body.includes("document.scrollingElement") && body.includes("document.body") && body.includes("el.scrollTop = el.scrollLeft = 0"));
+  assert.ok(body.includes("capture: true"), "body 的 scroll 不冒泡，要在捕获阶段接");
+});
+
 test("移动端：从输入区按钮起手不算抽屉手势", () => {
   assert.ok(src19.includes('#composer button,#composer .att,#composer .chip,#composer [role=button]'));
 });

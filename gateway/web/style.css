@@ -49,6 +49,8 @@ html,body{height:100%;margin:0;overscroll-behavior:none}
 /* 整页本身不滚：只有消息区、各页面板自己滚。底部 chip 的 48px 命中区（L.11）伸出视口几像素就会让整页能滚，
    顶栏 sticky 不动、用量条被带着挤到顶栏底下（0.6.10 真机） */
 html{overflow:hidden}
+/* body 再用 clip 裁住：底下伸出去的东西不再给根留出滚动范围（clip 不是滚动容器，脚本和选字也滚不动它；固定定位的浮层不受影响） */
+body{overflow:clip}
 body{
   background:var(--bg);color:var(--fg);display:flex;flex-direction:column;
   font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
