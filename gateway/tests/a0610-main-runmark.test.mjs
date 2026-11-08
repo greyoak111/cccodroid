@@ -60,3 +60,21 @@ test("标记坏了 → 留底成 .bad-*，不当没有", () => {
   assert.ok(bads.length >= 1);
   for (const b of bads) fs.rmSync(path.join(CFG.home, b));
 });
+
+test("195-AA.5：运行标记带上重发要用的参数和定时任务身份；长提问存到 64K 并标出截断", async () => {
+  reset();
+  const { RUNS } = await import("../gw/runs.mjs");
+  const long = "长".repeat((64 << 10) + 10);
+  RUNS.set("rm-aa5", { id: "rm-aa5", sessionId: null, text: long, startedAt: 5, req: { projectId: "p1", pin: { model: "m" }, permissionMode: "plan" }, sched: { taskId: "t1", runKey: "k" } });
+  try {
+    assert.equal(Q.saveRunMark(), true);
+    const r = JSON.parse(fs.readFileSync(MARK, "utf8")).runs.find((x) => x.id === "rm-aa5");
+    assert.equal(r.text.length, 64 << 10); assert.equal(r.textCut, true);
+    assert.deepEqual(r.req, { projectId: "p1", pin: { model: "m" }, permissionMode: "plan" });
+    assert.deepEqual(r.sched, { taskId: "t1", runKey: "k" });
+    RUNS.delete("rm-aa5");
+    Q.recoverRunMark();
+    const e = Q.INTERRUPTED.find((x) => x.id === "rm-aa5");
+    assert.equal(e.req.projectId, "p1"); assert.equal(e.textCut, true); assert.equal(e.sched.taskId, "t1");
+  } finally { RUNS.delete("rm-aa5"); }
+});

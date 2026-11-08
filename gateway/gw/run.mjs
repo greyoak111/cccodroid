@@ -147,7 +147,8 @@ export function askCard(run, emit, { key, tool, input, guard, what, yes, no }) {
       log(`⏹ ${what}：${Math.round(CARD.timeout / 60e3)} 分钟没人确认，这一轮停下`);
       holdLane(run); run.aborted = true;
       setInterrupted([...INTERRUPTED.filter((e) => e.id !== run.id),
-        { id: run.id, sessionId: run.sessionId || null, text: String(run.text || "").slice(0, 4000), startedAt: run.startedAt, at: Date.now(), why: "card" }]);
+        { id: run.id, sessionId: run.sessionId || null, text: String(run.text || "").slice(0, 64 << 10), ...(String(run.text || "").length > 64 << 10 ? { textCut: true } : {}),
+          ...(run.req && Object.keys(run.req).length ? { req: run.req } : {}), startedAt: run.startedAt, at: Date.now(), why: "card" }]);   // 同运行标记（195-AA.5）
       emit({ type: "perm_resolved", id, behavior: "cancel" });
       done(null);
     }, CARD.timeout);
@@ -225,6 +226,9 @@ export async function startRun(item) {
     log: [], pend: null, pendTimer: null,
     sched: item.sched || null,         // 定时任务跑的：{ taskId, runKey }（结束时 sched.mjs 记运行记录）
     unattended: !!item.unattended,     // 没人看着：要确认的一律拒绝
+    // 被系统结束后「重发」要按原样发：项目、钉的模型、权限模式、附加目录、汇合来源都记进运行标记（0.6.9 审计 195-AA.5）
+    req: Object.fromEntries(Object.entries({ projectId: item.projectId, pin: item.pin, model: item.model, permissionMode: item.permissionMode,
+      addDirs: item.addDirs && item.addDirs.length ? item.addDirs : null, mergeFrom: item.mergeFrom }).filter(([, v]) => v != null)),
   };
   // 进程起来之前（拉模型、问设备工具、读建档提示都要等）用户改权限模式：先记下来，起进程时按最新的那个启动；
   // 起来后由下面真的 setMode 接手（审查 v0.5.20 02-001：以前这段时间收紧会被开头读的旧模式盖掉，新进程照样全部放行）

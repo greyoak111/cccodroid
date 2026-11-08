@@ -95,6 +95,7 @@ export const publishState = () => { saveRunMark(); publish({ type: "state", ...s
 // 排队的消息原样放回队列、一律挂起 —— 杀掉之后不许自己发出去，用户点 ⚡ 才发。
 const RUN_MARK = path.join(CFG.home, "ccapp-run-mark.json");
 const INTR_FILE = path.join(CFG.home, "ccapp-interrupted.json");
+const TEXT_KEEP = 64 << 10;     // 运行标记里每轮留的提问字数（标记每次排队变化都重写，别存整条 200 万字）
 export function saveRunMark() {
   // 「有任务」标记跟着同步：在跑的，加上排着、会自己发出去的（挂起等 ⚡ 的不算）。外壳据此判断划掉时能不能停服务（审查 0601b）
   runFlag(RUNS.size > 0 || QUEUE.some((q) => !q.held));
@@ -103,7 +104,11 @@ export function saveRunMark() {
     const live = runList().filter((r) => !r.ended);
     return writeAtomic(RUN_MARK, JSON.stringify({
       // done：已经答完、只是进程还留着等后台任务回报，而且任务也都清零了 —— 这时被结束不算中断
-      runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, text: r.text.slice(0, 4000), startedAt: r.startedAt, ...(r.idle && !r.bgTasks ? { done: true } : {}) })),
+      // text 以前截 4000 字、别的都不存：没建会话的「重发」长消息后半截悄悄没了，项目 / 模型 / 权限也回落全局（195-AA.5）。
+      // 现在存到 64K（更长的标 textCut，界面要说），连同发送参数 req、定时任务身份 sched（AA.3）
+      runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, text: r.text.slice(0, TEXT_KEEP), ...(r.text.length > TEXT_KEEP ? { textCut: true } : {}),
+        startedAt: r.startedAt, ...(r.req && Object.keys(r.req).length ? { req: r.req } : {}), ...(r.sched ? { sched: r.sched } : {}),
+        ...(r.idle && !r.bgTasks ? { done: true } : {}) })),
       // 已经写进 stdin、claude 还没吃进去的插话也算排队的：一起留下
       // 新会话首条还没拿到会话号时跟着发的（只有 follow）：首条已经结束、不在 runs 里了，重启后就认不出属于哪个会话。
       // 落盘时把会话号补实（#97 02-005；跟的那条被撤销时按车道找首条跑出来的会话，#120-1）
