@@ -792,14 +792,25 @@ export function noteTokens(id, u) {
 }
 
 // 汇率：界面货币跟语言走（中文显示人民币，其余显示美元），账户币种不同时按汇率换算并标「≈」。半天取一次
-let FX = null;
+// 取不到时退避（0.6.9 审计 195-E.11：以前每次 /api/billing 都重新去等，离线时每次多等十几秒）：
+// 失败后 1 分钟内不再试，连续失败翻倍到 1 小时；同时只有一个请求在路上，后来的等它
+let FX = null, FX_FAIL = 0, FX_NEXT = 0, FX_FLY = null;
 export async function usdCny() {
   if (FX && Date.now() - FX.at < 12 * 3600e3) return FX;
-  try {
-    const j = await fetchJson("https://open.er-api.com/v6/latest/USD", {});
-    if (j.result === "success" && j.rates && j.rates.CNY) FX = { rate: +j.rates.CNY, at: Date.now(), src: "open.er-api.com" };
-  } catch (e) { log(`汇率获取失败：${e.message}`); }
-  return FX;
+  if (Date.now() < FX_NEXT) return FX;
+  if (FX_FLY) return FX_FLY;
+  FX_FLY = (async () => {
+    try {
+      const j = await fetchJson("https://open.er-api.com/v6/latest/USD", {});
+      if (j.result === "success" && j.rates && j.rates.CNY) { FX = { rate: +j.rates.CNY, at: Date.now(), src: "open.er-api.com" }; FX_FAIL = 0; return FX; }
+      throw new Error("返回不对");
+    } catch (e) {
+      FX_FAIL++; FX_NEXT = Date.now() + Math.min(3600e3, 60e3 * 2 ** (FX_FAIL - 1));
+      log(`汇率获取失败：${e.message}（${Math.round((FX_NEXT - Date.now()) / 60e3)} 分钟内不再试）`);
+      return FX;
+    } finally { FX_FLY = null; }
+  })();
+  return FX_FLY;
 }
 
 const BAL_CACHE = new Map();   // id → { at, acct, data }

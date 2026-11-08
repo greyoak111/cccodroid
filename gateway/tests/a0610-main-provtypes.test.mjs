@@ -20,3 +20,16 @@ test("内置条目：型号不是字符串 → 用目录里的；自定义条目
   assert.equal(c.fastModel, "ok-model");
   assert.equal(c.baseUrl, "https://example.invalid");
 });
+
+test("195-E.11：汇率取不到 → 一分钟内不再去等；同时几个请求只发一次", async () => {
+  const { usdCny } = await import("../gw/providers.mjs");
+  let n = 0;
+  const prev = globalThis.fetch;
+  globalThis.fetch = async () => { n++; await new Promise((r) => setTimeout(r, 50)); throw new Error("offline"); };
+  try {
+    await Promise.all([usdCny(), usdCny(), usdCny()]);
+    assert.equal(n, 1, "并发合并成一次");
+    await usdCny();
+    assert.equal(n, 1, "退避期内不再试");
+  } finally { globalThis.fetch = prev; }
+});
