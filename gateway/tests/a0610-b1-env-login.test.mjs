@@ -1,6 +1,6 @@
 // 环境实况 / 对账 / 反馈 / 封口 / 登录状态（0.6.9 审计 195-M.1/M.3/M.4/M.5/M.7/M.9、G.3、R.8）
 import "../gw/config.mjs";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,6 +13,12 @@ import { routeCaps } from "../gw/caps.mjs";
 import { sealArgv } from "../gw/edition.mjs";
 
 const FILES = path.dirname(PREFIX);
+// 同一轮测试共用临时 home：清掉本文件造的记录，别影响后面的测试
+after(() => {
+  for (const id of ["keytest", "sharedgone", "dangle"]) fs.rmSync(path.join(COMP_DIR, id + ".json"), { force: true });
+  fs.rmSync(path.join(PREFIX, "share/dangling"), { force: true });
+  fs.rmSync(path.join(FILES, ".claude-uninstalled"), { force: true });
+});
 function fakeRes() {
   const r = { code: 0, body: null, writeHead(c) { r.code = c; }, end(b) { r.body = b ? JSON.parse(String(b)) : null; } };
   return r;

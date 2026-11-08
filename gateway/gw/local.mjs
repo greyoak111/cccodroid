@@ -180,7 +180,7 @@ function llamaStart(m, note) {
     log(`[local] 启动 llama-server：${m.id}（${gpu ? "GPU" : "CPU"}，上下文 ${ctx}）`);
     note && note("load", tz("正在加载端侧模型 {name}（{how}）…", { name: m.id, how: gpu ? "GPU" : "CPU" }));
     const c = spawn(argv[0], argv.slice(1), { env: termEnv(), cwd: CFG.home, detached: true, stdio: ["ignore", "pipe", "pipe"] });
-    try { fs.mkdirSync(path.dirname(LLAMA_PID), { recursive: true }); fs.writeFileSync(LLAMA_PID, JSON.stringify({ pid: c.pid, at: Date.now() }), { mode: 0o600 }); } catch {}
+    try { fs.mkdirSync(path.dirname(LLAMA_PID), { recursive: true }); fs.writeFileSync(LLAMA_PID, JSON.stringify({ pid: c.pid, gw: process.pid, at: Date.now() }), { mode: 0o600 }); } catch {}
     Object.assign(LL, { child: c, file: m.file, id: m.id, sig, gpu, state: "loading", since: Date.now(), err: "", loadMs: 0 });
     let tail = "", lastNote = 0, listened = false;
     // 端口是固定的，别的应用能先占上它、对 /health 回 200：光看 health 会把提示词和钥匙送给它（11-04 报告）。
@@ -250,6 +250,8 @@ function llamaStop(why) {
 function llamaReap() {
   let j = null; try { j = JSON.parse(fs.readFileSync(LLAMA_PID, "utf8")); } catch {}
   if (!j || !Number.isInteger(j.pid) || j.pid <= 0) { try { fs.rmSync(LLAMA_PID, { force: true }); } catch {} return; }
+  // 标记的网关还活着（双网关重叠启动）：那是人家的服务，别动
+  if (Number.isInteger(j.gw) && j.gw !== process.pid) { try { process.kill(j.gw, 0); return; } catch {} }
   let alive = false; try { process.kill(j.pid, 0); alive = true; } catch {}
   let mine = false; try { mine = fs.readFileSync(`/proc/${j.pid}/cmdline`, "utf8").includes("llama-server"); } catch {}
   if (alive && mine) {

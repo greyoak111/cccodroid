@@ -1,7 +1,7 @@
 // modules.json 形状坏不能把网关带进崩溃循环（0.6.9 审计 198 P1-19）
 // 修之前：modules 非数组 / 含 null 条目时，envFactsKey() 的定时器链抛 TypeError。
 import "../gw/config.mjs";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,6 +11,7 @@ import { envFactsKey } from "../gw/envfacts.mjs";
 
 const DK = path.join(PREFIX, "libexec/devkit");
 fs.mkdirSync(DK, { recursive: true });
+after(() => fs.rmSync(path.join(DK, "modules.json"), { force: true }));   // 别把坏模块表留给后面的测试
 const write = (v) => fs.writeFileSync(path.join(DK, "modules.json"), typeof v === "string" ? v : JSON.stringify(v));
 
 test("modules 非数组 / 原语：modulesInfo 返回 null，envFactsKey 不抛", () => {

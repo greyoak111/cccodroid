@@ -285,7 +285,7 @@ function markChild(child, cmd, args) {
   try {
     fs.mkdirSync(COMP_RUN_DIR, { recursive: true });
     const f = path.join(COMP_RUN_DIR, `${child.pid}-${crypto.randomBytes(4).toString("hex")}.json`);
-    fs.writeFileSync(f, JSON.stringify({ pid: child.pid, cmd, args: args.map(String).join(" ").slice(0, 4000), at: Date.now() }), { mode: 0o600 });
+    fs.writeFileSync(f, JSON.stringify({ pid: child.pid, gw: process.pid, cmd, args: args.map(String).join(" ").slice(0, 4000), at: Date.now() }), { mode: 0o600 });
     return f;
   } catch { return ""; }
 }
@@ -298,6 +298,8 @@ export function reapComponentRuns() {
   for (const f of files) {
     const p = path.join(COMP_RUN_DIR, f);
     let j = null; try { j = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
+    // 标记的网关还活着（双网关重叠启动）：那是人家的子进程，别抢着杀
+    if (j && Number.isInteger(j.gw) && j.gw !== process.pid) { try { process.kill(j.gw, 0); continue; } catch {} }
     let alive = false;
     if (j && Number.isInteger(j.pid) && j.pid > 0) { try { process.kill(j.pid, 0); alive = true; } catch {} }
     let mine = false;

@@ -1,6 +1,6 @@
 // 端侧模型与组件安装的几处回归（0.6.9 审计 195-F.5/F.7、#185、195-Z.11、195-T.4、#186、200-10-08）
 import "../gw/config.mjs";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -12,6 +12,17 @@ import { ensureLlama } from "../gw/local.mjs";
 
 const FILES = path.dirname(PREFIX);
 const dk = (sha) => fs.writeFileSync(path.join(PREFIX, ".devkit-ok"), JSON.stringify({ sha256: sha }));
+
+// 同一轮测试共用临时 home：把本文件造的记录清掉，别影响后面的测试（components.test 会断言组件目录里没有 *.json）
+after(() => {
+  for (const id of ["inst", "broken", "old", "a", "b", "keytest"]) fs.rmSync(path.join(COMP_DIR, id + ".json"), { force: true });
+  fs.rmSync(path.join(PREFIX, "libexec/devkit/components/broken"), { recursive: true, force: true });
+  fs.rmSync(path.join(FILES, "big-cancel.bin"), { force: true });
+  fs.rmSync(path.join(FILES, "manifest-test"), { recursive: true, force: true });
+  fs.rmSync(path.join(FILES, "devkit-stage"), { recursive: true, force: true });
+  for (const f of ["bin/shared", "bin/aonly", "bin/b"]) fs.rmSync(path.join(PREFIX, f), { force: true });
+  fs.rmSync(path.join(CFG.home, "models"), { recursive: true, force: true });
+});
 
 test("sha256File：校验中途取消，下一个数据块就停（195-F.5）", async () => {
   const f = path.join(FILES, "big-cancel.bin");
