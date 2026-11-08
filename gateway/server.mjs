@@ -70,7 +70,7 @@ import { routeFeedback } from "./gw/feedback.mjs";
 import { migrateHookPause, routeExtensions } from "./gw/extensions.mjs";
 import { routeNotices } from "./gw/notices.mjs";
 import { routeReconcile } from "./gw/reconcile.mjs";
-import { routeProjects } from "./gw/projects.mjs";
+import { PROJECTS, routeProjects } from "./gw/projects.mjs";
 import { routeBookmarks } from "./gw/bookmarks.mjs";
 import { routeFonts } from "./gw/fonts.mjs";
 import { commandRoutes } from "./gw/commands.mjs";
@@ -84,6 +84,7 @@ import { routeBackfill } from "./gw/backfill.mjs";
 import { routeArchive } from "./gw/archive.mjs";
 import { installCrashGuard, runShutdown } from "./gw/crashguard.mjs";
 import { RUNS } from "./gw/runs.mjs";
+import { syncGitSafe } from "./gw/gitsafe.mjs";
 import { COOKIE, SESSION, UI_HOST, cookieHostOk, denyLog, denyReason, localAddr, proofFor, tokenOk } from "./gw/access.mjs";
 import { startWorkIsland, stopWorkIslandSync } from "./gw/work-island.mjs";
 
@@ -147,16 +148,9 @@ installCrashGuard();
 
 // ── 启动 ──────────────────────────────────────────────────────────────
 try { fs.mkdirSync(CFG.workspace, { recursive: true }); } catch {}
-// /sdcard 上的文件属主是系统（media_rw），git 会以 "dubious ownership" 拒绝操作那里的仓库。
-// 只对前缀布局（cccodroid 自己的 HOME）做，不碰别人的 git 配置。
-if (PREFIX) {
-  try {
-    const gc = path.join(CFG.home, ".gitconfig");
-    const cur = fs.existsSync(gc) ? fs.readFileSync(gc, "utf8") : "";
-    // 文件末尾没有换行时先补一个：否则 [safe] 会粘到最后一行，safe.directory 根本设不上（审查 11-05）
-    if (!/directory\s*=\s*\*/.test(cur)) fs.appendFileSync(gc, (cur && !cur.endsWith("\n") ? "\n" : "") + "[safe]\n\tdirectory = *\n");
-  } catch {}
-}
+// git 的 safe.directory：只信任登记过的项目目录（共享存储上的仓库属主是系统，不列就被 git 拒绝）；
+// 以前一律 * —— 别的应用在共享存储放个恶意仓库就能借 git 执行命令（0.6.9 审计 P1-10，见 gw/gitsafe.mjs）
+syncGitSafe(PROJECTS.map((p) => p.path));
 try { fs.mkdirSync(CFG.home, { recursive: true }); } catch {}
 try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch {}
 startStreamFix();

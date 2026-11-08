@@ -94,7 +94,7 @@ export function safeWritePath(p) {
 
 /** 写文件但不跟最后一级软链（O_NOFOLLOW：是软链就报 ELOOP）。
  *  先写同目录临时文件、fsync 后再 rename 覆盖：写盘失败（ENOSPC/EIO）时原文件一个字节都不动（#121-3）。 */
-function writeNoFollow(file, buf) {
+export function writeNoFollow(file, buf) {
   const c = fs.constants;
   let mode = 0o644;
   // 已有文件：打开后按 /proc/self/fd 看实际打开的是哪个文件。核完路径到打开之间，上级目录也可能被换成软链（审查 10-30 第九份 后端低3），

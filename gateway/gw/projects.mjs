@@ -16,20 +16,24 @@ import { runOfSession } from "./runs.mjs";
 import { checkSession, resealAfterEdit } from "./integrity.mjs";
 import { rewriteLines } from "./bigfile.mjs";
 import { lineageForget } from "./lineage.mjs";
-import { pathBlocked } from "./files.mjs";
+import { pathBlocked, writeNoFollow } from "./files.mjs";
 import { holdsPrivate, isPrivate } from "./pathguard.mjs";
+import { loadState, saveState } from "./statefile.mjs";
+import { syncGitSafe } from "./gitsafe.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-projects.json");
 // 项目颜色：和界面强调色同一套饱和度，按顺序分配（用户可改）
 export const PROJ_COLORS = ["#c96442", "#2f6aa8", "#3d7a2a", "#8a5cb8", "#b08a2e", "#2f8a8a", "#b0506e", "#6b7280"];
 const SAME = ["", "follow"];   // 「跟随全局」存成空串
 
-export let PROJECTS = [];
-try { const j = JSON.parse(fs.readFileSync(FILE, "utf8")); if (Array.isArray(j)) PROJECTS = j.filter((p) => p && p.id && p.path); } catch {}
+// 读坏了（语法错、不是数组）原文件留底成 .bad-*，别让下一次保存把整张表覆盖掉（gw/statefile.mjs）
+export let PROJECTS = loadState(FILE, { shape: (j) => (Array.isArray(j) ? j.filter((p) => p && typeof p.id === "string" && typeof p.path === "string") : undefined), fallback: () => [] }).data;
+/** 落盘成功 true；失败 false —— 调用方要如实回报，别说「已保存」（0.6.9 审计 195-N.1） */
 function save() {
-  try { fs.writeFileSync(FILE + ".tmp", JSON.stringify(PROJECTS, null, 1)); fs.renameSync(FILE + ".tmp", FILE); }
-  catch (e) { log("项目清单保存失败: " + e.message); }
+  syncGitSafe(PROJECTS.map((p) => p.path));    // git 只信任登记过的项目目录（P1-10）
+  return saveState(FILE, PROJECTS, { mode: 0o644 });
 }
+const SAVE_FAIL = () => ({ error: "save_failed", message: tz("项目清单没保存上（存储满了或不可写），重启后这次改动会丢") });
 
 const real = (d) => { try { return fs.realpathSync(d); } catch { return path.resolve(String(d || "")); } };
 const isDir = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
@@ -215,9 +219,11 @@ export async function routeProjects(req, res, u, p) {
     // 悬空软链 existsSync 也是 false，但写下去会跟链在项目外创建文件：只认 lstat 真不存在
     if (instr && claudeMdMissing) fs.writeFileSync(claudeMd, instr + "\n", { flag: "wx" });
     const proj = { id: newId(), name, path: real(dir), color: PROJ_COLORS[PROJECTS.length % PROJ_COLORS.length], model: "", effort: "", perm: "", created: Date.now() };
-    PROJECTS.push(proj); save();
+    PROJECTS.push(proj);
+    if (!save()) { PROJECTS = PROJECTS.filter((x) => x !== proj); return sendJson(res, 500, SAVE_FAIL()); }
     log(`📁 新项目「${name}」 ${proj.path}`);
-    return sendJson(res, 200, { ok: true, project: proj });
+    // 选了已有目录、里面本来就有 CLAUDE.md：填的指令没写进去，要说一声（0.6.9 审计 195-K.4）
+    return sendJson(res, 200, { ok: true, project: proj, ...(instr && !claudeMdMissing ? { instrSkipped: true } : {}) });
   }
 
   const m = p.match(/^\/api\/projects\/([^/]+)(\/[a-z]+)?$/);
@@ -239,7 +245,7 @@ export async function routeProjects(req, res, u, p) {
     if (typeof b.name === "string" && b.name.trim()) proj.name = b.name.trim().slice(0, 60);
     if (typeof b.color === "string" && /^#[0-9a-f]{6}$/i.test(b.color)) proj.color = b.color;
     for (const k of ["model", "effort", "perm", "provider"]) if (typeof b[k] === "string") proj[k] = b[k].trim().slice(0, 80);
-    save();
+    if (!save()) return sendJson(res, 500, SAVE_FAIL());
     return sendJson(res, 200, { ok: true, project: proj });
   }
   if (!sub && req.method === "DELETE") {
@@ -256,11 +262,15 @@ export async function routeProjects(req, res, u, p) {
       const inDir = (s) => s.cwd && (real(s.cwd) === r || real(s.cwd).startsWith(r + "/"));
       // 有会话正在这个目录里跑：先别删（目录删了它还在往里写，对话也收不进回收站）
       if (listSessions(5000).some((s) => inDir(s) && runOfSession(s.id))) return sendJson(res, 409, { error: "busy", message: tz("这个项目里有会话正在生成，等它结束再删。") });
-      // 删目录前先把对话收进回收站（可恢复）；目录本身直接删
-      for (const s of listSessions(5000)) if (inDir(s)) { try { trashSession(s.id); } catch {} }
+      // 删目录前先把对话收进回收站（可恢复）。有一条没收进去就不删目录：以前吞掉错误照删（0.6.9 审计 195 第二批 R2/R5）。
+      // 会话不只看最近 5000 条（更早的也在这个目录里）
+      const failed = [];
+      for (const s of listSessions(1e6)) if (inDir(s)) { try { trashSession(s.id); } catch (e) { failed.push(`${s.id.slice(0, 8)}: ${e.message}`); } }
+      if (failed.length) return sendJson(res, 500, { error: "trash_failed", message: tz("有 {n} 个对话没能移进回收站，目录没删：{why}", { n: failed.length, why: failed.slice(0, 3).join("；") }) });
       try { fs.rmSync(r, { recursive: true, force: true }); } catch (e) { return sendJson(res, 500, { error: e.message }); }
     }
-    PROJECTS = PROJECTS.filter((x) => x.id !== proj.id); save();
+    PROJECTS = PROJECTS.filter((x) => x.id !== proj.id);
+    if (!save()) return sendJson(res, 500, SAVE_FAIL());
     log(`📁 删除项目「${proj.name}」${withDir ? "（连目录）" : ""}`);
     return sendJson(res, 200, { ok: true });
   }
@@ -282,14 +292,13 @@ export async function routeProjects(req, res, u, p) {
     if (req.method === "PUT") {
       const b = await body();
       const text = String(b.text || "");
-      if (!text.trim()) { try { fs.rmSync(f, { force: true }); } catch {} }
-      else {
-        let fd;
-        try {
-          fd = fs.openSync(f, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | NOFOLLOW, 0o644);
-          fs.writeFileSync(fd, text.endsWith("\n") ? text : text + "\n");
-        } catch (e) { return sendJson(res, e.code === "ELOOP" ? 409 : 500, { message: e.code || e.message }); }
-        finally { if (fd != null) fs.closeSync(fd); }
+      if (!text.trim()) {
+        try { fs.rmSync(f, { force: true }); } catch (e) { return sendJson(res, 500, { message: e.code || e.message }); }
+      } else {
+        // 先写同目录临时文件、fsync 再换名（files.mjs 的 writeNoFollow，也不跟软链）：以前 O_TRUNC 先把原文截成 0，
+        // 写到一半满盘 / 被杀就只剩空文件或半截（0.6.9 审计 P1-7）
+        try { writeNoFollow(f, text.endsWith("\n") ? text : text + "\n"); }
+        catch (e) { return sendJson(res, e.code === "ELOOP" ? 409 : 500, { message: e.code || e.message }); }
       }
       return sendJson(res, 200, { ok: true });
     }
