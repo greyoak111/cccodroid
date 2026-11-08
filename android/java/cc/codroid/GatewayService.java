@@ -26,6 +26,8 @@ public class GatewayService extends Service {
     static final String CH = "gateway";
     static final String ACTION_STOP = "cc.codroid.STOP";
     static final String ACTION_BOOT = "cc.codroid.BOOT";
+    /** 系统闹钟叫醒（SchedAlarm）：跑完到点的任务就自己退，不常驻（0.6.9 审计 13-01） */
+    static final String ACTION_ALARM = "cc.codroid.ALARM";
 
     /** 替换工具包期间停住网关（它跑的 node 就在要被换掉的目录里） */
     private static volatile boolean paused;
@@ -42,15 +44,25 @@ public class GatewayService extends Service {
     private volatile Process proc;
     private PowerManager.WakeLock wake;
     private volatile boolean stopping;
-    /** 界面被划掉时还有任务在跑：跑完再停（重新打开界面就作罢） */
+    /** 界面被划掉时还有任务在跑：跑完再停（重新打开界面就作罢）。闹钟 / 粘性重建拉起的也用它（0.6.9 审计 13-01） */
     private volatile boolean closeWhenIdle;
+    /** 空闲退出的宽限拍数：刚被闹钟叫醒时网关还没起来、任务还没进队列，先别数空闲（watchFreeze 每 2 秒减一） */
+    private volatile int idleGrace;
     private Thread supervisor;
 
     /** 服务这会儿在不在（常驻通知里点了停止之后为 false） */
     static boolean serviceUp() { return self != null; }
 
     static void start(Context c) {
-        Intent i = new Intent(c, GatewayService.class);
+        start(c, new Intent(c, GatewayService.class));
+    }
+
+    /** 系统闹钟叫醒：和界面明确打开的启动不同，干完活要能自己退（见 onStartCommand 的 closeWhenIdle） */
+    static void startAlarm(Context c) {
+        start(c, new Intent(c, GatewayService.class).setAction(ACTION_ALARM));
+    }
+
+    private static void start(Context c, Intent i) {
         // targetSdk ≥ 31：后台（非精确闹钟、没在电池优化白名单）拉前台服务会抛 ForegroundServiceStartNotAllowedException，别让它崩掉调用方
         try { c.startForegroundService(i); } catch (RuntimeException e) { Log.w(TAG, "拉起网关服务被系统拒绝", e); }
     }
@@ -100,8 +112,12 @@ public class GatewayService extends Service {
             while (!stopping) {
                 long t0 = android.os.SystemClock.uptimeMillis();
                 sleep(2000);
+                // 界面开着就是用户在用它：把「跑完就停」作罢。闹钟 / 粘性重建拉起时界面恰好开着、之后按 Home
+                // 退到后台（没划掉）也不会被当成空闲退出（0.6.9 审计 13-01）
+                if (MainActivity.appForeground()) closeWhenIdle = false;
                 // 划掉时在跑的任务跑完了：连着三次（约 6 秒）都空闲才停，免得撞上队列里下一条、/goal 下一轮开跑前的空档
-                idle = closeWhenIdle && !busy() ? idle + 1 : 0;
+                if (idleGrace > 0) { idleGrace--; idle = 0; }
+                else idle = closeWhenIdle && !busy() ? idle + 1 : 0;
                 if (idle >= 3) {
                     // 标记文件可能没写上（存储满）或没来得及更新：真要停之前直接问一次网关。
                     // 问不到（网关没起来）才算空闲；网关起着说还有轮次 / 排队，就接着保活（0.6.9 审计 13-03）
@@ -136,6 +152,9 @@ public class GatewayService extends Service {
         // 开机重新激活 Shizuku 也只认自己的开机广播带来的口令（11-01 独立审查低-6）
         // 有人明确要服务（打开界面、闹钟、开机）：划掉时记的「跑完就停」作罢。口令对不上的 STOP 不算（服务是导出的，审查 0601b）
         if (i != null && !ACTION_STOP.equals(i.getAction())) closeWhenIdle = false;
+        // 系统闹钟叫醒的、系统粘性重建的，都不是用户在盯着界面：跑到点该跑的任务就自己退，不常驻、不占着 WakeLock。
+        // 给约 60 秒宽限，等网关起来、任务进队列（.run-active 落盘）再开始数空闲（0.6.9 审计 13-01）
+        if (i == null || ACTION_ALARM.equals(i.getAction())) { closeWhenIdle = true; idleGrace = 30; }
         if (i != null && ACTION_BOOT.equals(i.getAction()) && mine) ShizukuSetup.get(this).reactivateAsync(true);
         if (supervisor == null || !supervisor.isAlive()) {
             supervisor = new Thread(this::supervise, "gateway-supervisor");

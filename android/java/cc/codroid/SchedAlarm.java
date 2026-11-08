@@ -98,7 +98,8 @@ public class SchedAlarm extends BroadcastReceiver {
         final long at = i.getLongExtra(EXTRA_AT, 0);
         Log.i(TAG, "定时任务闹钟响了（计划 " + new java.util.Date(at) + "）");
         synchronized (SchedAlarm.class) { lastAt = -1; }   // 已经响过，下次报来的同一时刻也要重新定
-        try { GatewayService.start(c); } catch (Exception e) { Log.w(TAG, "定时任务闹钟：拉起服务失败", e); }
+        // 闹钟叫醒的服务跑完就退，不常驻（0.6.9 审计 13-01）
+        try { GatewayService.startAlarm(c); } catch (Exception e) { Log.w(TAG, "定时任务闹钟：拉起服务失败", e); }
         // 挂住广播（后台广播最多约 60 秒）：等网关能接请求了让它立刻查一遍；网关刚启动的话它 5 秒后也会自己查
         final byte[] payload = ("{\"at\":" + at + "}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
         PendingResult pr = goAsync();
