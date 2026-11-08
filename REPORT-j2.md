@@ -15,7 +15,7 @@
 | 13-11 | `ccapp-sched-next` 直接覆盖 / 撕裂写 → 下次开机没闹钟 | 已修（撕裂部分第一轮 b7706bc 已改 writeAtomic，本轮补写失败重试与读侧） |
 | 14-02 | 工具包升级只保留 pip / npm -g，其他用户内容被静默删除 | 已修 |
 | 14-03 | 降级保护只在 `checkDevkit` 网络路径，本地文件 / 暂存 / 修复路径能装旧版 | 已修 |
-| 14-04 | APK 手动降级没有版本检查；24h 内任何 TAG 变化都被当成「升级」 | 待办 |
+| 14-04 | APK 手动降级没有版本检查；24h 内任何 TAG 变化都被当成「升级」 | 已修 |
 | 1-03（GatewayService 半） | 只探测 127.0.0.2:8791；127.0.0.1:8791 被占 → 重启循环 | 待办 |
 
 ## 已修
@@ -31,6 +31,7 @@
 | 13-05 | 见 git log | `GatewayService.start()` 改成返回系统收没收下启动请求，`startAlarm()` 返回该值；`SchedAlarm.onReceive` 拿到 false（targetSdk 31+ 后台起前台服务被拒）时发一条「定时任务没有在后台跑」通知，点开进应用；新文案进 `i18n-j2-java.json`，新建独立「定时任务」通知渠道。到点请求的 tick 重试循环不变：用户快点开通知还能赶上前 50 秒的补跑 | `javac` 全量通过；`i18n-j2-java.json` JSON 校验通过（5 键 × 10 语言）。本机 targetSdk 28 不会走这条路径，需 targetSdk 36 的包真机验：① `adb shell appops set cc.codroid SCHEDULE_EXACT_ALARM deny`（或设置里关「闹钟和提醒」）；② 设一个 2 分钟后的任务，退回桌面锁屏；③ 到点看通知栏应出现「定时任务没有在后台跑」，logcat `cccodroid` 有「拉起网关服务被系统拒绝」→「系统不让后台起服务，已发通知请用户打开应用」；④ 点通知进应用，网关启动后任务补跑或界面提示「错过」 |
 | 14-02 | 见 git log | `Installer.carryOver` 从「只扫 bin / lib/node_modules / site-packages」改成遍历整个旧 `$PREFIX`：凡是旧工具包任何一份清单都不认领的文件都搬。认主名单对齐网关 `gw/orphans.mjs baseOwnedPaths`——dpkg `.list`、底座 `.devkit-manifest` / `libexec/devkit/FILES` / `MANIFEST`、各模块 `FILES` / `MANIFEST` / `MANIFEST.local`、组件 `MANIFEST` 与 `files/components/*.json` 的 `files`+`shared`。整棵没人认领、新包又没有同名的目录一次 `renameTo`；同名目录下钻只搬多出来的。不搬：`tmp`、`.devkit-ok` / `.devkit-manifest` / `.devkit-relocated`、`var/lib/dpkg`、`libexec/devkit/modules.json` 与模块的 `.ok` / `MANIFEST.local`、以及解释器小版本不同的 `lib/python3.X` | `javac` 全量通过。只读扫描真机现有 `$PREFIX`（50721 个文件）核对认主名单：上述全部来源合并后「没人认领」只剩 1023 个，其中 971 个是 `lib/python3.14` 的 `__pycache__`/.pyc，其余是 ssh host key、`etc/pip.conf`、`glibc/etc/hosts`、gdk-pixbuf / graphviz / mandoc 缓存、`var/lib/dbus/machine-id`——没有旧工具包文件混进来。规则另用一份同逻辑的 JS 对照模拟跑过（自建 mock 树：用户的 bin / etc / share / opt、组件文件、`.ok` / `tmp` / dpkg、同名目录下钻），全部断言通过。真机验：① 终端里 `mkdir -p $PREFIX/share/mytest && echo hi > $PREFIX/share/mytest/a.txt`，记下 `sha256sum $PREFIX/etc/ssh/ssh_host_ed25519_key`；② 设置 → 开发工具包 → 换一个版本安装；③ 装完 `cat $PREFIX/share/mytest/a.txt` 内容还在、ssh host key 的 sha256 不变；④ `ls $PREFIX/libexec/devkit/modules/*/.ok` 的时间戳是这次升级后的（旧 `.ok` 没搬过来），`$PREFIX/tmp` 里没有旧内容 |
 | 14-03 | 见 git log | 新增 `devkitFloor()`（已装 tag 与 APK 钉的 tag 取新者，`checkDevkit` 的内联算法改成复用它）与 `allowDevkitDowngrade(tag, who)`：`applyLocalDevkit`（本地文件替换）和 `applyDevkit`（暂存包 / 修复）在动手前比较目标 tag，低于 floor 时用 `Priv.confirm` 弹「把开发工具包降级到 {0}（现在装的是 {1}）」，用户允许才继续；不允许则抛 `{0} 比现在装着的开发工具包旧，没有安装`，已装版本不动。修复路径重装同一版本 tag 相等，不会弹 | `javac` 全量通过。真机验：① 从 GitHub Releases 下一个比已装旧的 `devkit-<旧版本>.tar.gz`；② 设置 → 更新卡片 → 从本地文件安装，选中它：应在界面里弹出确认（Shizuku 特权确认框）「把开发工具包降级到 …」；③ 点不允许：安装界面显示「… 比现在装着的开发工具包旧，没有安装」，`设置 → 关于` 里的工具包版本不变；④ 再来一次点允许：正常装上旧版；⑤ 点「修复」重装同一版本：不应弹这个确认 |
+| 14-04 | 见 git log | `AppFiles.updatedFrom` 加版本判定：当前安装的 versionCode 比上次核对通过时 `seen` 里记的低，就按降级安装处理——返回 null，让调用方按篡改留痕走（整树还原、记账本一条、下一轮告知模型），并在 logcat 记一行「安装的版本（…，NN）比上次核对通过的（…，MM）旧：按降级安装处理，文件差异不当作升级」；只有版本号不降（升级 / 覆盖安装）才继续返回「旧版本名->新版本名」。侧载旧包系统不拦、应用也不静默拒绝，只是不再让它把文件差异吃成「升级」 | `javac` 全量通过；用反射直接调编译产物 `AppFiles.stampVc/versionName`，5 组版本戳（0.6.9 / 0.6.10 / 空 / 乱码 / 缺段）全部符合预期。真机验：① 装新版后打开一次应用让 `seen` 记下（`adb shell run-as cc.codroid cat shared_prefs/appfiles.xml` 能看到 `seen`）；② `adb install -d` 侧载一个更旧、同签名的 cccodroid APK；③ 打开应用：logcat `cccodroid` 应出现「安装的版本（0.6.x，NN）比上次核对通过的（0.6.y，MM）旧：按降级安装处理，文件差异不当作升级」，记账本出现一条「界面与网关的文件被改动过，已按安装包还原」，**不**出现「刚升级」；④ 再做一次正常升级：仍应出现「刚升级（旧->新）」，不产生篡改记录 |
 
 ## 不成立
 
@@ -57,6 +58,7 @@
 - 13-05：targetSdk 31+ 且没给「闹钟和提醒」权限时，非精确闹钟在后台被系统拒绝拉起服务后，会多一条「定时任务没有在后台跑」通知（新渠道「定时任务」）；点开应用后任务补跑或提示错过。targetSdk 28 的现有包无感知。
 - 14-02：工具包升级改为遍历整个旧 `$PREFIX`（手机上一轮约 5 万个文件）再搬，升级耗时比只扫三个目录多一些；保留的用户内容范围扩大到 etc / share / var / opt 等处（`tmp`、dpkg 数据库、安装器标记、解释器小版本不同的 `lib/python3.X` 除外）。用 `pkg` / `apt` 装的包仍按旧工具包文件算、不搬（升级后照旧按提示 `pkg restore`）。旧工具包若缺少清单（0.3.9 及以前），认主不全，仍可能把个别旧文件当用户内容搬过来；现网版本都带清单。
 - 14-03：从本地文件替换工具包、或安装一个早先下好的暂存工具包时，如果它比已装版本 / 本 APK 钉的版本旧，现在会先弹确认；用户不点允许就不装，安装界面显示「…比现在装着的开发工具包旧，没有安装」，已装版本不受影响（以前会直接装旧版）。确认框要求应用在前台（自动更新路径只会装不低于 floor 的版本，走不到这里）；重装修复同一版本不弹。首次安装（机器上还没有工具包）选本地文件不按降级处理。
+- 14-04：手动装旧版 APK（`adb install -d`、文件管理器侧载同签名旧包）后，应用不再把它当「升级」：`files/app` 的版本差异按篡改留痕处理——记账本记一条「界面与网关的文件被改动过，已按安装包还原」、界面提示一次、下一轮告诉模型一次，logcat 有「安装的版本…比上次核对通过的…旧：按降级安装处理」。侧载本身照旧允许（应用不拦截），只是不再静默；看到这条「被改动过」提示时，如果正是你自己刚装的旧版，属预期。正常升级仍走「刚升级（旧->新）」，不产生篡改记录。`seen` 里没有版本戳（0.6.6 之前升上来的）时无法判定，仍按原逻辑处理。
 
 ## 全量测试
 
