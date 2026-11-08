@@ -85,13 +85,20 @@ final class Updater {
         void set(String st, String msg) { state = st; message = msg == null ? "" : msg; Log.i(TAG, id + " → " + st + " " + message); }
     }
 
+    /** 确保「更新」渠道存在。安装确认的通知由 Events 发：那条广播可能在新进程里到（Updater 谁也没构造过），
+     *  直接拿 Updater.CH 发，系统会因为渠道不存在把通知丢掉（0.6.9 审计 13-09） */
+    static void ensureChannel(Context c) {
+        Tr.init(c);   // 新进程里词典可能还没初始化，渠道名会退回中文
+        NotificationChannel ch = new NotificationChannel(CH, Tr.t("更新"), NotificationManager.IMPORTANCE_DEFAULT);
+        ch.setDescription(Tr.t("新版本已下载、等你点一下安装"));
+        c.getSystemService(NotificationManager.class).createNotificationChannel(ch);
+    }
+
     private Updater(Context c) {
         ctx = c;
         env = new Env(c);
         app.silentFail = prefs().getBoolean("appSilentFail", false);
-        NotificationChannel ch = new NotificationChannel(CH, Tr.t("更新"), NotificationManager.IMPORTANCE_DEFAULT);
-        ch.setDescription(Tr.t("新版本已下载、等你点一下安装"));
-        c.getSystemService(NotificationManager.class).createNotificationChannel(ch);
+        ensureChannel(c);
         refreshCurrent();
         // 上次下好、还没装的工具包（进程重启后状态在内存里没了，靠这条记录接上）
         try {

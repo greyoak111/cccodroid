@@ -10,7 +10,7 @@
 | 13-04 | Doze 推迟的闹钟被当成「错过」 | 已修 |
 | 13-05 | targetSdk 36 上精确闹钟被拒 → 非精确后备在后台起不了前台服务 | 已修 |
 | 13-06 | `GatewayService.proc` 不是 volatile | 已修 |
-| 13-09 | 安装确认通知用了 `Updater.CH` 频道，新进程里频道可能不存在 | 待办 |
+| 13-09 | 安装确认通知用了 `Updater.CH` 频道，新进程里频道可能不存在 | 移交（`Updater.ensureChannel` 已加；`Events.java` 一行调用待主会话） |
 | 13-10 | 台账里没找到原文 | 待办（拟写「未找到」） |
 | 13-11 | `ccapp-sched-next` 直接覆盖 / 撕裂写 → 下次开机没闹钟 | 已修（撕裂部分第一轮 b7706bc 已改 writeAtomic，本轮补写失败重试与读侧） |
 | 14-02 | 工具包升级只保留 pip / npm -g，其他用户内容被静默删除 | 待办 |
@@ -44,6 +44,7 @@
 
 | 条目 | 文件与函数 | 要做什么 |
 |---|---|---|
+| 13-09 | `android/java/cc/codroid/Events.java`，`ACTION_INSTALLED` 分支里发「点此确认安装」通知之前（`Events.java:55` 附近） | 在 `new Notification.Builder(c, Updater.CH)` 之前加一行 `Updater.ensureChannel(c);`。`Updater.ensureChannel(Context)` 已在本车道改好并提交（含 `Tr.init` + 建「更新」渠道），构造 Updater 时也走它；但这条安装确认通知是 Events 直接发的，进程可能是新的、Updater 从没构造过，渠道不存在时安卓 8+ 会把通知丢掉。改完真机验：在后台触发一次 APK 安装（设置 → 更新），到「待用户确认」时应弹出「安装 cccodroid 新版本 / 点此确认安装」通知；改之前 logcat 里有 `No Channel found ... channelId=updates` |
 
 ## 行为变化
 
