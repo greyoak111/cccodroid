@@ -88,7 +88,11 @@ export async function routeBus(req, res, u, p) {
       // 续不上（网关重启过 / 断得太久）：把正在跑的每一轮从头重放（前端按会话自己认领）。
       // 边写边序列化，不先整轮 JSON.stringify 成一个数组（那等于把 run.log 再复制一份，0.6.9 审计 195-T.3）。
       // 这一刻的条数先记下，之后新来的走下面的队列；最后一条会被后到的增量就地续写，先按此刻的样子定下来，免得和队列里的重复
-      const logs = runList().sort((a, b) => a.startedAt - b.startedAt).map((r) => {
+      // 正在看的会话（focus=会话号，run=轮次号，前端换视图时带上）的轮次排最前：别的会话的长轮再大，也不挡着目标首屏（#188）。
+      // 只调顺序不删：前端按会话自己认领，别的视图要的东西照样都在
+      const focus = String(u.searchParams.get("focus") || ""), fRuns = new Set(String(u.searchParams.get("run") || "").split(",").filter(Boolean).slice(0, 64));
+      const mine = (r) => (focus && r.sessionId === focus) || fRuns.has(r.id) ? 0 : 1;
+      const logs = runList().sort((a, b) => mine(a) - mine(b) || a.startedAt - b.startedAt).map((r) => {
         const n = r.log.length;
         return { log: r.log, n, last: n ? `data: ${JSON.stringify(r.log[n - 1])}\n\n` : null };
       });

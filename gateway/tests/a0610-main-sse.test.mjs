@@ -127,3 +127,19 @@ test("T.3：整轮重放边写边序列化；重放途中最后一条被续写�
   assert.equal((got.match(/甲乙/g) || []).length, 0, "续写的部分不能在重放里再出现一次");
   assert.equal((got.match(/"type":"tool_result"/g) || []).length, 5);
 });
+
+test("#188：整轮重放带 focus → 正在看的会话先放，别的会话的轮照样都在、排后面", async () => {
+  RUNS.set("a0610-other", { id: "a0610-other", sessionId: "s-other", text: "", startedAt: 1, perms: null, log: [{ type: "run_start", runId: "a0610-other" }, { type: "delta", runId: "a0610-other", text: "o".repeat(1 << 20) }] });
+  RUNS.set("a0610-mine", { id: "a0610-mine", sessionId: "s-mine", text: "", startedAt: 2, perms: null, log: [{ type: "run_start", runId: "a0610-mine" }, { type: "delta", runId: "a0610-mine", text: "我的" }] });
+  try {
+    for (const [q, first] of [["?focus=s-mine", "a0610-mine"], ["?run=a0610-mine", "a0610-mine"], ["", "a0610-other"]]) {
+      const c = connect(busPort, "/api/events" + q);
+      const ok = await c.wait((b) => b.includes('"type":"sync"'), 20000);
+      const got = c.got(); c.sock.destroy();
+      assert.ok(ok, "没等到 sync");
+      const a = got.indexOf('"runId":"a0610-mine"'), b = got.indexOf('"runId":"a0610-other"');
+      assert.ok(a > 0 && b > 0, "两轮都要在");
+      assert.equal(a < b ? "a0610-mine" : "a0610-other", first, `参数 ${q || "（无）"}`);
+    }
+  } finally { RUNS.delete("a0610-other"); RUNS.delete("a0610-mine"); }
+});

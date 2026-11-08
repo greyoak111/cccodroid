@@ -615,7 +615,9 @@
     if (es) { try { es.close(); } catch {} }
     // 换视图要整轮重放：旧视图的游标作废，免得重拨时又带着它续传，新视图缺东西（审查 #50 S2-05）
     if (!resume) lastEventId = "";
-    const url = "/api/events" + (resume && lastEventId ? "?since=" + encodeURIComponent(lastEventId) : "");
+    // 整轮重放时带上正在看的会话 / 轮次：网关先放它们，别的会话的长轮排后面（#188）
+    const focus = !resume || !lastEventId ? [view.sessionId ? "focus=" + encodeURIComponent(view.sessionId) : "", view.runIds.size ? "run=" + encodeURIComponent([...view.runIds].slice(-64).join(",")) : ""].filter(Boolean).join("&") : "";
+    const url = "/api/events" + (resume && lastEventId ? "?since=" + encodeURIComponent(lastEventId) : focus ? "?" + focus : "");
     es = new EventSource(url);
     es.onmessage = (m) => {
       if (m.lastEventId) lastEventId = m.lastEventId;
