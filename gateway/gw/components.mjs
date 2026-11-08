@@ -14,6 +14,7 @@ import { clearBridgeConfigMapping, handleBridgeConfig, handleBridgeModels, handl
 import { archiveProblem, parseTarListing } from "./archive-check.mjs";
 import { baseOwnedPaths } from "./orphans.mjs";
 import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
+import { writeAtomic } from "./statefile.mjs";
 
 /** 前端文件（web/ 下全部，含 i18n.js 与各语言词典）的最后修改时间戳。界面拿它来判断「我是不是该刷新了」——
  *  这样以后只改 web/ 也能自动生效，不用重开 App。 */
@@ -59,14 +60,32 @@ export function devkitIdentity() {
   try { return JSON.parse(fs.readFileSync(path.join(PREFIX, ".devkit-ok"), "utf8")); } catch { return null; }
 }
 const compRecFile = (id) => path.join(COMP_DIR, id + ".json");
-export function compRecord(id) {
-  try { const t = readSmall(compRecFile(id)); return t == null ? null : JSON.parse(t); } catch { return null; }
+/** 读组件记录，返回 { rec, missing, bad }：没有记录和记录坏了不是一回事（195-Z.11）。
+ *  坏记录不能当成没装——文件还在 $PREFIX 里，界面得还能列出它、还能卸。
+ *  这里没有用 statefile 的 loadState：它读坏了会把原文件改名成 .bad-*，
+ *  列表按 <id>.json 就再也找不到这个组件，正好落回 Z.11 的老毛病。
+ *  rec 只做「是个普通对象」这层形状检查，逐字段校验仍由各调用方按自己的用途做（compRemovalRecord 等）。 */
+export function compRecordInfo(id) {
+  const f = compRecFile(id);
+  let st;
+  try { st = fs.lstatSync(f); }
+  catch (e) { return { rec: null, missing: e.code === "ENOENT", bad: e.code !== "ENOENT" }; }
+  if (!st.isFile()) return { rec: null, missing: false, bad: true };       // 软链 / 目录 / 设备文件
+  const t = readSmall(f);
+  if (t == null) return { rec: null, missing: false, bad: true };          // 超过 1 MB / 读不了
+  try {
+    const j = JSON.parse(t);
+    if (!j || typeof j !== "object" || Array.isArray(j)) return { rec: null, missing: false, bad: true };
+    return { rec: j, missing: false, bad: false };
+  } catch { return { rec: null, missing: false, bad: true }; }
 }
+export function compRecord(id) { return compRecordInfo(id).rec; }
+/** 写组件记录：临时文件 + fsync + 换名（statefile.mjs 的 writeAtomic），失败返回 false，
+ *  由调用方如实回给界面——以前是直接覆盖写，掉电 / 写满就留下半截 JSON，整条记录报废（195-Z.10） */
 function compWriteRecord(id, rec) {
-  fs.mkdirSync(COMP_DIR, { recursive: true });
-  fs.writeFileSync(compRecFile(id) + ".tmp", JSON.stringify(rec, null, 1));
-  fs.renameSync(compRecFile(id) + ".tmp", compRecFile(id));
+  return writeAtomic(compRecFile(id), JSON.stringify(rec, null, 1));
 }
+export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile };   // 只给测试用
 
 function compFetch(src, quick) {
   // quick：拉索引用——连不上 8 秒就放弃、只重试一次，好尽快换镜像（GitHub 被墙时以前要干等一分多钟）
@@ -176,11 +195,11 @@ function compBuildFor(entry, dk) {
 function compState(id, entry, dk) {
   const job = COMP_JOBS.get(id);
   if (job && !job.finished) return job.phase;
-  const rec = compRecord(id);
+  const { rec, bad } = compRecordInfo(id);
   if (!rec) {
     // 记录文件在、但读不出来（坏 JSON / 超上限 / 不是普通文件）：不能当成「没装」，
     // 否则界面显示未装，另一组件卸载时也会当它不存在（0.6.9 审计 195-Z.11）
-    try { fs.lstatSync(compRecFile(id)); return "damaged"; } catch {}
+    if (bad) return "damaged";
     return job && job.error ? "error" : "absent";
   }
   if (rec.state !== "ok") return "damaged";
@@ -462,8 +481,9 @@ function compRemoveFiles(id, rec) {
   for (const o of others) {
     if (!o.gained.length) continue;
     o.rec.files = [...new Set([...(o.rec.files || []), ...o.gained])];
-    compWriteRecord(o.id, o.rec);
-    log(`[comp] ${id}：${o.gained.length} 个文件 ${o.id} 也要用，留下归它`);
+    // 写不进去就如实记日志：文件留在原处不删（安全方向），只是没归到 o 名下，以后卸 o 会剩下
+    if (compWriteRecord(o.id, o.rec)) log(`[comp] ${id}：${o.gained.length} 个文件 ${o.id} 也要用，留下归它`);
+    else log(`[comp] ⚠️ ${id}：${o.gained.length} 个文件 ${o.id} 也要用，但 ${o.id} 的记录写不进去，没归到它名下`);
   }
   if (baseKept) log(`[comp] ${id}：${baseKept} 个文件现在归工具包，留下`);
   // 由深到浅删掉变空的目录（工具包自己的目录不空，自然删不掉）
@@ -568,7 +588,11 @@ export function compHealSkills() {
       let owner = (readSmall(path.join(want, SKILL_OWNER), 512) || "").trim();
       if (fs.existsSync(want) && owner !== id && (!fs.statSync(want).isDirectory() || fs.readdirSync(want).length)) continue;   // 同名已有别人的技能（或同名文件）：不补，也别每次刷列表都记一条日志
       compInstallSkill(id, rel, rec);
-      if (rec.skill) { compWriteRecord(id, rec); log(`[comp] ${id} 补装技能 ${rec.skill}`); }
+      if (rec.skill) {
+        // 记录没写进去不算白干：下次启动还会再补一遍（技能目录有归属标记，会认出来重装）
+        if (compWriteRecord(id, rec)) log(`[comp] ${id} 补装技能 ${rec.skill}`);
+        else log(`[comp] ${id} 补装技能 ${rec.skill}，但安装记录写不进去，下次启动再补`);
+      }
     } catch (e) { log(`[comp] ${id} 补装技能出错：${e.message}`); }
   }
 }
@@ -688,7 +712,8 @@ async function compRunInstall(id, b, job) {
   const orphans = compOrphans(list, id);
   if (orphans.size) log(`[comp] ${id}：${orphans.size} 个没人认领的旧文件被新包覆盖（${[...orphans].slice(0, 5).join(", ")}）`);
   for (const r of list) { let have = false; try { fs.lstatSync(path.join(PREFIX, r)); have = true; } catch {} (have && !orphans.has(r) ? rec.shared : rec.files).push(r); }
-  compWriteRecord(id, rec);
+  // 记录写不进去就不能往下搬：文件搬进 $PREFIX 却没有清单，以后既卸不干净也认领不了（195-Z.10）
+  if (!compWriteRecord(id, rec)) throw new Error(tz("安装记录写不进去（存储满了或没有权限），这次安装没有继续"));
   const { skipped } = compMoveIn(path.join(tree, "usr"), "", [], [], orphans);
   if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
   // 4) 首次运行配置（各包 postinst），失败不算安装失败
@@ -701,7 +726,8 @@ async function compRunInstall(id, b, job) {
   const goneShared = (rec.shared || []).filter((r) => typeof r === "string" && !fs.existsSync(path.join(PREFIX, r)));
   if (goneShared.length) throw new Error(tz("安装期间有 {n} 个共享文件被卸载删掉了，请重新安装", { n: goneShared.length }));
   rec.state = "ok"; rec.at = Date.now();
-  compWriteRecord(id, rec);
+  // 最后一次写盘失败要如实报：磁盘上还是 installing，界面按 damaged 显示，可以重装或卸掉重来
+  if (!compWriteRecord(id, rec)) throw new Error(tz("文件已放进去了，但安装记录没写成（存储满了或没有权限），请重装或卸载"));
   fs.rmSync(tree, { recursive: true, force: true });
   fs.rmSync(gz, { force: true });
 }
@@ -799,11 +825,12 @@ async function compDuBytes(dir) {
 async function compDataInfo(id) {
   const dir = compDataDir(id);
   try { if (!fs.lstatSync(dir).isDirectory()) return null; } catch { return null; }
-  if (compRecord(id) || compDataShared(id) || !compDataKnown(id)) return null;
+  // 记录坏了也当还装着：不能按「没装」把它的运行数据删了（195-Z.11）
+  if (!compRecordInfo(id).missing || compDataShared(id) || !compDataKnown(id)) return null;
   return { path: "~/.cccodroid/" + id, bytes: await compDuBytes(dir) };
 }
 async function compPurgeData(id) {
-  if (compRecord(id)) return { ok: false, message: "still installed" };
+  if (!compRecordInfo(id).missing) return { ok: false, message: "still installed" };
   if (compDataShared(id)) return { ok: false, message: "shared" };
   if (!compDataKnown(id)) return { ok: false, message: "not a component" };
   const dir = compDataDir(id);

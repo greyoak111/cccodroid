@@ -24,7 +24,8 @@
 |---|---|---|---|
 | 2（195-J.5，sessionops 半） | 4fac136 | 不动 `SID_RE`；新增 `skillDirOk(dir, listed)`：只认 skills/ 下已列出的目录名（精确匹配），拒绝路径分隔符 / NUL / `.` / `..`，中文与空格放行 | `a0610-b3-skilldir.test.mjs`：中文、空格、精确匹配、拒绝项、超长名 4 例全过；端到端需 extensions.mjs 那一行（见移交） |
 | 4（195-T.4 office 部分） | 3021267 | `components.mjs` 导出 `markChild` / `unmarkChild`（行为不变）；`office.mjs` 的 `officeConvert` 起 soffice 后按 `sofficePath()` 落 `.runs` 标记，`error` / `close` 时删掉——与组件安装共用同一套，启动时 `reapComponentRuns()` 会清上一任留下的 | `a0610-b3-office-runs.test.mjs`：假 soffice 转换期间 `.runs` 有标记、结束后消失、产物就位；修前跑该测试确认失败，修后通过 |
-| 5（200-15-10） | 待填 | 书签列表标题改为与会话列表同序：`NAMES[sid]`（用户改名）→ `archivedTitle(sid)`（档案最新题名）→ `peekSession().title`（首问）。列表里的 `sessionTitle` 在 sessions.mjs 未导出、本车道不改那个文件，按同序取同样三处来源（lineage.mjs 也是这么取的） | `a0610-b3-bookmarks-title.test.mjs`：三条会话分别为改名 / 有档案题名 / 都没有，标题依次断言；修前失败（改名没盖过首问）、修后通过；`a0610-b2-bookmarks` 3 例仍过 |
+| 5（200-15-10） | 35c8503 | 书签列表标题改为与会话列表同序：`NAMES[sid]`（用户改名）→ `archivedTitle(sid)`（档案最新题名）→ `peekSession().title`（首问）。列表里的 `sessionTitle` 在 sessions.mjs 未导出、本车道不改那个文件，按同序取同样三处来源（lineage.mjs 也是这么取的） | `a0610-b3-bookmarks-title.test.mjs`：三条会话分别为改名 / 有档案题名 / 都没有，标题依次断言；修前失败（改名没盖过首问）、修后通过；`a0610-b2-bookmarks` 3 例仍过 |
+| 6（195-Z.10 / Z.11） | 待填 | `components.mjs`：新增 `compRecordInfo()` 区分 missing / bad；坏记录留在原地（不学 `loadState` 改名——改名后列表按 `<id>.json` 找不到组件，正好落回 Z.11）；`compWriteRecord` 改用 `writeAtomic`（临时文件 + fsync + 换名）并返回成败，安装两处记录写失败直接抛错、由 job 报给界面，卸载移交文件时写失败如实记日志；`compDataInfo` / `compPurgeData` 不再把坏记录当没装。`custom.mjs`：记录读取改用 `loadState`（坏文件留底 `.bad-*`），坏记录 / 装到一半的目录按 `damaged` 照样列出，能卸能重装；安装写盘改 `writeAtomic`，失败抛错走回滚并报给界面；列表项加 `damaged` 字段 | `a0610-b3-records-atomic.test.mjs`：missing / bad 区分、坏文件原地保留、写失败返回 false 且不留临时文件、坏记录与半截安装仍列出、坏记录留底、二次读仍在；修前模块加载即失败，修后 3 例全过；`a0610-b1-local-comp` / `comp-skill` / `components*` / `a0610-f2-ext` 共 46 例全过 |
 
 ## 不成立
 
