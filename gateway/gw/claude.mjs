@@ -21,20 +21,35 @@ import { gwRuntimeBlocked } from "./gwpin.mjs";
 // 跑着的时候盘上那份被改了也换不掉正在挂的这一层。开发时（没有 FILES）照旧现读仓库里的。
 const GUARD_CLI = fileURLToPath(new URL("../guard/cc-guard.mjs", import.meta.url));
 const BREACH_SRC = fileURLToPath(new URL("./breach.mjs", import.meta.url));
-export function guardSource() {
-  let src = APP ? APP.text("guard/cc-guard.mjs") : null;
-  if (src == null) try { src = fs.readFileSync(GUARD_CLI, "utf8"); } catch { return null; }
-  // 破甲特征检查拼在前面（guard 拦往配置 / 记忆里写破甲内容，见 cc-guard.mjs breachWrite）。同样用核过的那份；去掉 export 才能当脚本跑
-  let br = APP ? APP.text("gw/breach.mjs") : null;
-  if (br == null) try { br = fs.readFileSync(BREACH_SRC, "utf8"); } catch { br = ""; }
-  return br.replace(/^export /gm, "") + "\n" + src.replace(/^#!.*\n/, "") + "\nrunHook();\n";
+// 部署出来的（有 APP）只认核过的：快照里没有（启动时就对不上）就按清单现读现核，对不上返回 BAD，不回退读盘
+// （0.6.9 审计 200-14-05：以前快照缺了就读盘，核完到加载前被换的那份照样挂上）
+const BAD = Symbol("bad");
+function appText(app, rel, file) {
+  if (app) { const b = app.code(rel); return b ? b.toString("utf8") : BAD; }
+  try { return fs.readFileSync(file, "utf8"); } catch { return null; }
 }
-export function guardHooks() {
-  const src = guardSource();
+export function guardSource(app = APP) {
+  const src = appText(app, "guard/cc-guard.mjs", GUARD_CLI);
+  if (src === BAD) return BAD;
+  if (src == null) return null;
+  // 破甲特征检查拼在前面（guard 拦往配置 / 记忆里写破甲内容，见 cc-guard.mjs breachWrite）。同样用核过的那份；去掉 export 才能当脚本跑
+  const br = appText(app, "gw/breach.mjs", BREACH_SRC);
+  if (br === BAD) return BAD;
+  return (br || "").replace(/^export /gm, "") + "\n" + src.replace(/^#!.*\n/, "") + "\nrunHook();\n";
+}
+export function guardHooks(app = APP) {
+  const src = guardSource(app);
   if (!src) return null;
   const q = (x) => "'" + String(x).replace(/'/g, "'\\''") + "'";
-  return [{ matcher: "Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob|mcp__device__.*",
-    hooks: [{ type: "command", command: q(process.execPath) + " --input-type=module -e " + q(src), timeout: 10 }] }];
+  const matcher = "Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob|mcp__device__.*";
+  if (src === BAD) {
+    // 核不过：这一层不能换成别的，也不能整层不挂。挂一个一律拦下的（PreToolUse 退出码 2 = 不许用），等空闲重启按安装包还原
+    log("⚠️ [应用文件] guard / breach.mjs 和安装包对不上，敏感工具这一轮一律拦下");
+    app?.restart("guard/cc-guard.mjs 或 gw/breach.mjs（和安装包对不上）");
+    const deny = "process.stderr.write('cccodroid: the safety check could not be verified against the installed package; this tool is blocked until the app restores it.');process.exit(2)";
+    return [{ matcher, hooks: [{ type: "command", command: q(process.execPath) + " -e " + q(deny), timeout: 10 }] }];
+  }
+  return [{ matcher, hooks: [{ type: "command", command: q(process.execPath) + " --input-type=module -e " + q(src), timeout: 10 }] }];
 }
 import { NEXT, readBody, sendJson } from "./http.mjs";
 
