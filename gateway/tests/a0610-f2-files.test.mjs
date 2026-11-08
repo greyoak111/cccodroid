@@ -154,6 +154,23 @@ test("199-8-01 / 200-8-09 Office 早期失败不会带走网关，并清掉 work
   assert.equal(fs.existsSync(path.join(_officeForTest.OFFICE_DIR, "work-" + key)), false);
 });
 
+test("C.7 共享存储没权限时回 403 和能照着做的提示，而不是 404", async () => {
+  const dir = path.join(W, "deny-dir");
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, "a.txt");
+  fs.writeFileSync(f, "x");
+  fs.chmodSync(dir, 0o000);
+  try {
+    const r = await raw(`/api/file?path=${q(f)}`);
+    assert.equal(r.status, 403);
+    const j = await r.json();
+    assert.match(String(j.message || ""), /所有文件访问/);
+  } finally {
+    fs.chmodSync(dir, 0o700);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("前端修复的源码断言（C.4/C.6/C.9/C.10/C.13、196 预览回执、A-01/A-02）", async () => {
   const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web", "app");
   const files = fs.readFileSync(path.join(dir, "06-files.js"), "utf8");

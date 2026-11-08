@@ -126,3 +126,17 @@ test("197-2.9 内置 hook 脚本装不上时接口回 ok:false，前端不再当
   const src = fs.readFileSync(path.join(APP, "08-extensions.js"), "utf8");
   assert.match(src, /内置脚本没装上：\{msg\}，规则没有保存/);
 });
+
+test("前端扩展域源码断言（J.2/J.9/J.11/J.12/M.6/N.4/X.2）", () => {
+  const s = fs.readFileSync(path.join(APP, "08-extensions.js"), "utf8");
+  assert.match(s, /if \(!more\) \{ latest\("plugcat"\);[^]*?extPick\.plugin = "";/, "J.2 新搜索没清旧筛选");
+  assert.match(s, /loadExtSkills\(\);[^\n]*自定义组件会生成一个技能/, "J.9 安装后没刷新技能");
+  assert.match(s, /loadExtSkills\(\);[^\n]*它的技能也一起删了/, "J.9 卸载后没刷新技能");
+  assert.match(s, /env: o\.kind === "npm" \? filled\.map/, "J.11 还在按整串切 env");
+  assert.match(s, /toast\(t\("已取消"\)\)/, "J.12 取消仍报失败");
+  assert.match(s, /已有结果时点它也要重新核/, "M.6 第一次点击只收起");
+  assert.match(s, /自定义组件列表读取失败：\{msg\}/, "N.4 自定义读失败仍隐藏");
+  assert.match(s, /插件市场读取失败：\{msg\}/, "N.4 市场读失败仍画成只有官方目录");
+  assert.match(s, /技能列表读取失败：\{msg\}/, "N.4/X.2 技能读失败仍画成空");
+  assert.ok((s.match(/r\.ok === false/g) || []).length >= 3, "X.2 200+{ok:false} 未按失败处理");
+});

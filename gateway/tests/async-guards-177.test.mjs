@@ -19,7 +19,7 @@ test("终端：打开途中收起面板，迟到的列表回执不再建终端�
     api: async (u) => { if (u === "/api/term/list") { await gate.p; return { available: true, terms: [] }; } calls.push("new"); return { term: { id: "T" + calls.length, alive: true } }; },
   };
   vm.runInNewContext("const TERM = { list: [], cur: null, inst: new Map(), gen: 0 };\n" +
-    take(term, "  function openTerm()", "  /** 手动登录") + take(term, "  async function newTerm(", "  function renderTermTabs(") +
+    take(term, "  function openTerm(", "  /** 手动登录") + take(term, "  async function newTerm(", "  function renderTermTabs(") +
     "\nglobalThis.f = { openTerm, closeTerm, TERM };", box);
   const p1 = box.f.openTerm();
   box.f.closeTerm();
