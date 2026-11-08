@@ -82,7 +82,8 @@ import { routeMerge } from "./gw/merge.mjs";
 import { routeProfile } from "./gw/profile.mjs";
 import { routeBackfill } from "./gw/backfill.mjs";
 import { routeArchive } from "./gw/archive.mjs";
-import { installCrashGuard } from "./gw/crashguard.mjs";
+import { installCrashGuard, runShutdown } from "./gw/crashguard.mjs";
+import { RUNS } from "./gw/runs.mjs";
 import { COOKIE, SESSION, UI_HOST, cookieHostOk, denyLog, denyReason, localAddr, proofFor, tokenOk } from "./gw/access.mjs";
 import { startWorkIsland, stopWorkIslandSync } from "./gw/work-island.mjs";
 
@@ -234,5 +235,15 @@ setTimeout(async () => {
 }, 2500);
 
 // 工作岛的收起放最后：它要同步调 am（最多 3 秒），App 等 5 秒就强杀，先把 claude 和终端收了
-process.on("SIGTERM", () => { for (const t of TERMS.values()) if (t.alive) killTree(t.child); try { bridgeProc?.kill(); } catch {} try { stopWorkIslandSync(); } catch {} process.exit(0); });
-process.on("SIGINT", () => { try { bridgeProc?.kill(); } catch {} try { stopWorkIslandSync(); } catch {} process.exit(0); });
+// 正在跑的 claude 一并带走（整个进程组）：以前只收终端，claude 成了孤儿继续写文件、继续计费（0.6.9 审计 P1-3）。
+// 中断记录（run mark）是随时落盘的，重启后照常给「继续」卡
+const shutdown = (sig) => {
+  for (const r of RUNS.values()) if (r.child && !r.ended) { try { killTree(r.child); } catch {} }
+  if (sig === "SIGTERM") for (const t of TERMS.values()) if (t.alive) { try { killTree(t.child); } catch {} }
+  try { bridgeProc?.kill(); } catch {}
+  runShutdown();
+  try { stopWorkIslandSync(); } catch {}
+  process.exit(0);
+};
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

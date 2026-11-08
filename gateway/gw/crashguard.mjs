@@ -28,3 +28,13 @@ export function guarded(label, fn) {
     catch (e) { log(`⚠️ ${label} 出错（已跳过）: ${(e && e.stack) || e}`); }
   };
 }
+
+// ── 退出前要做的事（SIGTERM / SIGINT）：防抖还没落盘的状态写下去、收掉自己起的子进程 ──
+// 以前 SIGTERM 直接 exit：正在跑的 claude 成了孤儿接着写、接着计费，5 秒防抖的用量 / 300ms 的会话钉选没写下去（0.6.9 审计 P1-3、195-W.2）
+const SHUTDOWN = [];
+/** 登记一个退出前要跑的同步函数（异步的不等） */
+export function onShutdown(label, fn) { SHUTDOWN.push([label, fn]); }
+/** 依次跑登记过的退出钩子，单个出错不影响别的 */
+export function runShutdown() {
+  for (const [label, fn] of SHUTDOWN.splice(0)) { try { fn(); } catch (e) { try { log(`⚠️ 退出钩子 ${label} 出错: ${e.message}`); } catch {} } }
+}

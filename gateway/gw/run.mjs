@@ -35,6 +35,9 @@ import { projectRisks, projectTrusted, trustProject } from "./projtrust.mjs";
 import { checkAppFiles } from "./appfiles.mjs";
 import { pathBlocked } from "./files.mjs";
 import { holdsPrivate } from "./pathguard.mjs";
+import { guarded } from "./crashguard.mjs";
+// 权限确认等多久没人答就按拒绝收掉（0.6.9 审计 P1-4）。测试可用 CCAPP_PERM_WAIT_MS 改短
+const PERM_WAIT_MS = Number(process.env.CCAPP_PERM_WAIT_MS) > 0 ? Number(process.env.CCAPP_PERM_WAIT_MS) : 30 * 60e3;
 import { ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "./userconf.mjs";
 import { keepProcs, killProcs, leftoverProcs, nowTicks, procStart } from "./leftover.mjs";
 import { localAddr, witnessMac } from "./access.mjs";
@@ -667,6 +670,13 @@ export async function startRun(item) {
         return;
       }
       run.perms.set(id, p);
+      // 一直没人答：到点按「拒绝并停止」收掉，别让这一轮永远占着车道、后面的消息一直排队（0.6.9 审计 P1-4）
+      const tm = setTimeout(guarded("权限确认超时", () => {
+        if (!run.perms.has(id) || run.ended) return;
+        log(`⌛ ${p.tool} 等确认超过 ${PERM_WAIT_MS / 60000} 分钟没人答，按拒绝处理并停止这一轮`);
+        run.answerPerm(id, { behavior: "deny", interrupt: true, message: `The user did not respond to this permission request for ${PERM_WAIT_MS / 60000} minutes, so it was denied.` });
+      }), PERM_WAIT_MS);
+      tm.unref?.();
       log(`⏸ 等确认 ${p.tool} ${argLen(p.input)}`);
       emit({ type: "perm_request", ...p });
       publishState();
@@ -835,7 +845,8 @@ export async function startRun(item) {
     while ((nl = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, nl).trim();
       buf = buf.slice(nl + 1);
-      if (line) feed(line);
+      // 单条事件处理出错只丢这一条：以前这里没有 try，一个形状不对的事件就带走整个网关（0.6.9 审计 P1-6）
+      if (line) { try { feed(line); } catch (e) { log(`⚠️ 处理 claude 事件出错（已跳过这条）: ${(e && e.stack) || e}`); } }
     }
   });
 
@@ -928,7 +939,25 @@ export async function startRun(item) {
     emit({ type: "error", message: tr(LAST_LANG, tz("无法启动 claude：{err}", { err: e.message })) });
     endRun(run, { failed: true });
   });
-  child.on("close", finish);
+  // 收尾出错也要把这一轮结束掉，不然车道永远占着（0.6.9 审计 P1-6）
+  let closed = false;
+  const finishSafe = (code, signal) => {
+    if (closed) return;
+    closed = true;
+    try { finish(code, signal); }
+    catch (e) { log(`⚠️ 收尾出错: ${(e && e.stack) || e}`); try { endRun(run, { failed: true }); } catch {} }
+  };
+  child.on("close", finishSafe);
+  // claude 已经退出、但另开进程组的子孙还攥着它的 stdout / stderr 时，close 永远不来：退出 5 秒后还没 close 就自己收尾（0.6.9 审计 195-T.1，同 terminal.mjs）
+  child.on("exit", (code, signal) => {
+    const t = setTimeout(() => {
+      if (closed) return;
+      log("claude 已退出，输出管道还被别的进程占着，强制收尾");
+      try { child.stdout.destroy(); child.stderr.destroy(); } catch {}
+      finishSafe(code, signal);
+    }, 5000);
+    t.unref?.();
+  });
 }
 
 // ── 路由：/api/perm/answer /api/perm/mode /api/task/stop /api/abort ──
