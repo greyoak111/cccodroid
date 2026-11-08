@@ -6,6 +6,8 @@ import { beginBridgeSwitch, bridgeSwitching, setBridgeUpstream } from "./claude.
 import { MAX_PARALLEL_CAP, RUNS, maxParallel } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { customRefresh } from "./custom.mjs";
+import { clearFollowingModels } from "./projects.mjs";
+import { clearFollowingTaskModels } from "./sched.mjs";
 import { idleDisarmAll, publishState, pump, setPermMode, strList } from "./queue.mjs";
 
 export { SETTINGS, saveSettings } from "./settings-store.mjs";
@@ -120,6 +122,9 @@ export async function routeSettings(req, res, u, p) {
           try {
             SETTINGS.provider = want;
             SETTINGS.model = null;          // 别把上一家的模型名带过去
+            // 跟着全局接口走的项目、定时任务也一样（195-E.1：以前它们留着旧厂商的型号，在新接口上回落或 400）
+            const np = clearFollowingModels(), nt = clearFollowingTaskModels();
+            if (np || nt) log(`换接口：清掉 ${np} 个项目、${nt} 个定时任务里旧接口的模型名`);
             applyProvider();
             // 上游热切 —— 不重启桥，也就没有断流窗口
             await setBridgeUpstream(CFG.upstream);

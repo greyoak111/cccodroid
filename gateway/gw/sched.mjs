@@ -76,6 +76,13 @@ const save = () => {
   pushNext();
   return ok;
 };
+/** 换了全局接口：没单独指定接口的定时任务，模型名是给原来那家的，清掉（195-E.1）。返回清了几个 */
+export function clearFollowingTaskModels() {
+  let n = 0;
+  for (const t of DB.tasks) if (t.model && !t.provider) { t.model = ""; n++; }
+  if (n) save();
+  return n;
+}
 // 最近一次要跑的时刻（毫秒，0 = 没有）→ 外壳的系统闹钟。只在变了的时候报
 const NEXT_FILE = path.join(CFG.home, "ccapp-sched-next");
 let lastNext = -1;

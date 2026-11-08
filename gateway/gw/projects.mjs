@@ -53,6 +53,13 @@ export function projectOfDir(dir) {
   return best;
 }
 /** 项目的默认值（空串 = 跟随全局） */
+/** 换了全局接口：没单独指定接口的项目，模型名是给原来那家的，跟全局的 SETTINGS.model 一样清掉（0.6.9 审计 195-E.1）。返回清了几个 */
+export function clearFollowingModels() {
+  let n = 0;
+  for (const p of PROJECTS) if (p.model && !SAME.includes(p.model) && SAME.includes(p.provider || "")) { p.model = ""; n++; }
+  if (n && !save()) log("⚠️ 项目清单没保存上（换接口时清旧模型名）");
+  return n;
+}
 export function projectDefaults(p) {
   if (!p) return {};
   const v = (x) => (SAME.includes(x || "") ? undefined : x);
