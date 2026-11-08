@@ -5,7 +5,7 @@
 import "../gw/config.mjs";   // 放最前：没走 scripts/test.mjs 就在这里拦下
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -80,4 +80,24 @@ test("随机数照常收到：proof 用「令牌 + 启动随机数」派生的�
     const want = crypto.createHmac("sha256", k).update(`proof:${NONCE}:${boot}:127.0.0.2`).digest("hex");
     assert.equal(got, want, "proof 不是按启动随机数派生的钥匙算的");
   } finally { fs.closeSync(wfd); }
+});
+
+test("Node 自己起的子进程：stdin 是 socketpair，也读得到随机数", () => {
+  // spawnSync 的 input 给的是 socketpair，/proc/self/fd/0 打不开（antibreach 那条测试就是这么起子进程的）。
+  // 重开失败时退回阻塞读，不能把交来的随机数丢了，不然派生钥匙对不上、界面认不出网关。
+  const key = crypto.randomBytes(32).toString("hex");
+  const script = `import fs from "node:fs";
+    const { proof } = await import(${JSON.stringify(ACCESS)});
+    const token = fs.readFileSync(${JSON.stringify(TOKEN_FILE)}, "utf8").trim();
+    console.log(JSON.stringify({ proof: proof(${JSON.stringify(NONCE)}, "127.0.0.2"), token }));
+  `;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    env: { ...process.env, CCAPP_SPAWN_KEY: "stdin" }, input: key + "\n", encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const j = JSON.parse(r.stdout.trim().split("\n").pop());
+  const [boot, got] = String(j.proof || "").split(" ");
+  const k = crypto.createHmac("sha256", j.token).update("spawn:" + key).digest("hex");
+  const want = crypto.createHmac("sha256", k).update(`proof:${NONCE}:${boot}:127.0.0.2`).digest("hex");
+  assert.equal(got, want, "socketpair 上的随机数没读到，退回令牌了");
 });
