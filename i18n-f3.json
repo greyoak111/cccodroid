@@ -1,0 +1,26 @@
+[
+  {
+    "zh": "安全模式下不问人的几档不生效，现在是「逐项确认」",
+    "en": "In safe mode the modes that skip asking don't apply; it's now “Ask each time”",
+    "ja": "セーフモードでは確認を省くモードは反映されず、現在は「毎回確認」です",
+    "ko": "안전 모드에서는 묻지 않는 모드는 적용되지 않으며, 현재는 '매번 확인'입니다",
+    "zh-Hant": "安全模式下不問人的幾檔不生效，現在是「逐項確認」",
+    "es": "En modo seguro, los modos que no preguntan no se aplican; ahora es «Preguntar cada vez»",
+    "fr": "En mode sécurisé, les modes qui ne posent pas de question ne s'appliquent pas ; c'est maintenant « Demander à chaque fois »",
+    "ru": "В безопасном режиме режимы без запроса не действуют; сейчас — «Спрашивать каждый раз»",
+    "id": "Dalam mode aman, mode yang tidak bertanya tidak berlaku; sekarang «Tanya setiap kali»",
+    "ar": "في الوضع الآمن لا تُطبَّق الأوضاع التي لا تسأل؛ الآن «السؤال في كل مرة»"
+  },
+  {
+    "zh": "设置没保存上，重启后会回到原来的权限模式",
+    "en": "Settings weren't saved; the previous permission mode will return after restart",
+    "ja": "設定を保存できませんでした。再起動すると元の権限モードに戻ります",
+    "ko": "설정이 저장되지 않았습니다. 다시 시작하면 이전 권한 모드로 돌아갑니다",
+    "zh-Hant": "設定沒儲存上，重新啟動後會回到原來的權限模式",
+    "es": "No se guardó la configuración; al reiniciar volverá el modo de permisos anterior",
+    "fr": "Les paramètres n'ont pas été enregistrés ; l'ancien mode d'autorisation reviendra après redémarrage",
+    "ru": "Настройки не сохранены; после перезапуска вернётся прежний режим разрешений",
+    "id": "Pengaturan tidak tersimpan; mode izin sebelumnya akan kembali setelah mulai ulang",
+    "ar": "لم تُحفظ الإعدادات؛ سيعود وضع الأذونات السابق بعد إعادة التشغيل"
+  }
+]

@@ -527,16 +527,16 @@
     }
     try {
       const r = await api("/api/perm/mode", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode }) });
-      // 安全模式下网关会把这几档退回 default（gw/claude.mjs safeModePerm）：chip 要显示实际生效的那档，
-      // 不能拿请求值冒充（0.6.9 审计 #194 P1-12 / 195-B.6 前端半）
-      const eff = state.safeMode && ["bypassPermissions", "auto", "acceptEdits"].includes(r.mode) ? "default" : r.mode;
-      state.settings.permissionMode = r.mode;   // 全局设置记原值；chip / 下拉显示实际生效的
+      // 网关回的是实际生效的 mode（安全模式下会自动退回 default）和用户选的 wanted（0.6.9 审计 195-A.6 / P1-12）
+      const eff = r.mode || r.wanted || mode;
+      state.settings.permissionMode = r.wanted || r.mode || mode;   // 全局设置记用户选的；chip / 下拉显示实际生效的
       setPermChip(eff);
       $("set-perm").value = eff;
       for (const x of srv.runs) if (x.permMode) x.permMode = eff;   // 同 perm_mode 事件：等着的计划卡跟着重排（#175-2）
       refreshPlanActs();
-      if (eff !== r.mode) toast(t("安全模式里「{m}」会按「逐项确认」生效", { m: modeLabel(r.mode) }));
-      else toast(r.live ? t("已切到「{m}」，这一轮当场生效", { m: modeLabel(r.mode) }) : t("已切到「{m}」", { m: modeLabel(r.mode) }));
+      if (eff !== mode) toast(t("安全模式下不问人的几档不生效，现在是「逐项确认」"));
+      else if (r.saved === false) toast(t("设置没保存上，重启后会回到原来的权限模式"), true);
+      else toast(r.live ? t("已切到「{m}」，这一轮当场生效", { m: modeLabel(eff) }) : t("已切到「{m}」", { m: modeLabel(eff) }));
     } catch (err) {
       // 保存失败：下拉框回到全局设置，别停在新值让人以为切了（0.6.9 审计 196-显示.1）
       $("set-perm").value = state.settings.permissionMode || state.permissionMode;
