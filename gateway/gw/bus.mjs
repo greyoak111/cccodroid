@@ -77,22 +77,38 @@ export async function routeBus(req, res, u, p) {
     const resume = since >= 0 && since <= BUS.seq && (since === BUS.seq || (first && first.seq <= since + 1));
     // 要补发的先按条取成快照（这一刻的样子；之后的增量走下面的队列），再按对端的接收速度逐条写：
     // 以前拼成一整个字符串一次写出，整轮重放几十 MB 时就是双份内存，对端不收还全堆在缓冲里（审查 v0513b 低-4）
-    const lines = ["retry: 1500\n\n" + `data: ${JSON.stringify({ type: "hello", boot: BOOT, resume, uiTag: uiTag(), ...snapshot() })}\n\n`];
+    const head = "retry: 1500\n\n" + `data: ${JSON.stringify({ type: "hello", boot: BOOT, resume, uiTag: uiTag(), ...snapshot() })}\n\n`;
+    const tail = `id: ${BOOT}.${BUS.seq}\ndata: {"type":"sync"}\n\n`;
+    let lines;
     if (resume) {
+      lines = [head];
       for (const r of BUS.ring) if (r.seq > since) lines.push(r.line);
+      lines.push(tail);
     } else {
-      // 续不上（网关重启过 / 断得太久）：把正在跑的每一轮从头重放（前端按会话自己认领）
-      for (const r of runList().sort((a, b) => a.startedAt - b.startedAt)) for (const ev of r.log) lines.push(`data: ${JSON.stringify(ev)}\n\n`);
+      // 续不上（网关重启过 / 断得太久）：把正在跑的每一轮从头重放（前端按会话自己认领）。
+      // 边写边序列化，不先整轮 JSON.stringify 成一个数组（那等于把 run.log 再复制一份，0.6.9 审计 195-T.3）。
+      // 这一刻的条数先记下，之后新来的走下面的队列；最后一条会被后到的增量就地续写，先按此刻的样子定下来，免得和队列里的重复
+      const logs = runList().sort((a, b) => a.startedAt - b.startedAt).map((r) => {
+        const n = r.log.length;
+        return { log: r.log, n, last: n ? `data: ${JSON.stringify(r.log[n - 1])}\n\n` : null };
+      });
+      lines = (function* () {
+        yield head;
+        for (const { log, n, last } of logs) {
+          for (let i = 0; i < n - 1; i++) yield `data: ${JSON.stringify(log[i])}\n\n`;
+          if (last) yield last;
+        }
+        yield tail;
+      })();
     }
-    lines.push(`id: ${BOOT}.${BUS.seq}\ndata: {"type":"sync"}\n\n`);
     // 同时连着的事件流有上限：一直开新连接不关的，最早那条让位
     if (BUS.clients.size >= CLIENTS_MAX) { const old = BUS.clients.values().next().value; BUS.clients.delete(old); try { old.destroy(); } catch {} }
     res.__q = [];                     // 补发期间新来的事件先排在这里，补完接着发，顺序不乱
     BUS.clients.add(res);
     (async () => {
-      for (let i = 0; i < lines.length; i++) {
+      for (const l of lines) {
         if (res.destroyed) return;
-        const w = writePaced(res, lines[i]); lines[i] = null;
+        const w = writePaced(res, l);
         if (w) await w;
       }
       // 补发期间排着的也按对端速度一批批写，写的时候新来的接着排；排空了才转成直接写。

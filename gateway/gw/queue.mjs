@@ -11,7 +11,7 @@ import { isLoginMode } from "./models.mjs";
 import { findSessionFile } from "./sessions.mjs";
 import { killTree, safeModePerm } from "./claude.mjs";
 import { goalCheck, tasksCheck } from "./goal.mjs";
-import { LAST_SESSION, RUNS, TRASH_HOOKS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
+import { LAST_SESSION, RUNS, SESSIONS, TRASH_HOOKS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { BOOT, publish } from "./bus.mjs";
 import { execIntent, lostProvider, pickProvider, startRun } from "./run.mjs";
@@ -214,6 +214,22 @@ export function flushPend(run) {
   const p = run.pend; run.pend = null;
   if (p) { record(run, p); publish(p); }
 }
+/** 记进 run.log 的工具入参：长字符串截到 LOG_STR_MAX。实时推送的事件照旧带全文，只有断线重放看到截短的（标 inputCut）。
+ *  以前 Write / Edit 的全文原样留着，一轮写几十个大文件就是几十上百 MB 常驻，重连时再复制一份（0.6.9 审计 195-T.3） */
+const LOG_STR_MAX = 64 << 10;
+function trimInput(v, st, d = 0) {
+  if (typeof v === "string") { if (v.length <= LOG_STR_MAX) return v; st.cut = true; return v.slice(0, LOG_STR_MAX) + "…"; }
+  if (!v || typeof v !== "object" || d > 8) return v;
+  if (Array.isArray(v)) return v.map((x) => trimInput(x, st, d + 1));
+  const o = {};
+  for (const k of Object.keys(v)) o[k] = trimInput(v[k], st, d + 1);
+  return o;
+}
+function logCopy(ev) {
+  if (ev.type !== "tool_use" || !ev.input || typeof ev.input !== "object") return { ...ev };
+  const st = { cut: false }, input = trimInput(ev.input, st);
+  return st.cut ? { ...ev, input, inputCut: true } : { ...ev };
+}
 /** 这一轮的完整事件记录 —— 断线太久环形缓冲续不上时，靠它把整轮重放给前端。
  *  相邻增量就地合并，一轮再长也只有"块数"那么多条。 */
 function record(run, ev) {
@@ -223,7 +239,7 @@ function record(run, ev) {
   else if (last && last.type === "phase" && ev.type === "phase") run.log[run.log.length - 1] = { ...ev };
   // 本轮输出 token 每秒一条，夹在增量中间合并不到：只留一条、原地改成最新的数（重放只要最后的值）
   else if (ev.type === "run_tokens" && run.tokAt != null && run.log[run.tokAt]?.type === "run_tokens") run.log[run.tokAt] = { ...ev };
-  else { if (ev.type === "run_tokens") run.tokAt = run.log.length; run.log.push({ ...ev }); }
+  else { if (ev.type === "run_tokens") run.tokAt = run.log.length; run.log.push(logCopy(ev)); }
 }
 
 /** 开跑前的最后一道核对（定时任务：入队后任务被删 / 被关就不跑）。返回 false = 丢掉这条 */
@@ -334,9 +350,10 @@ export function pump() {
     const q = QUEUE[i];
     if (q.held) { i++; continue; }                  // 停止时挂起的不自动发，也不挡后面新发的
     if (!startable(q)) { QUEUE.splice(i, 1); publishState(); continue; }
-    // 会话文件已经不在了（别的途径删的）：同启动恢复那道检查，不拿它去 --resume（195-W.1）
+    // 会话文件已经不在了（别的途径删的）：同启动恢复那道检查，不拿它去 --resume（195-W.1）。
+    // 这次运行里起过的会话不算：claude 写记录文件比 init 晚，刚开的会话接着排的消息不能当成删了
     const qsid = sidForItem(q);
-    if (qsid && sessionGone(qsid)) { log(`  会话 ${qsid} 已不在，丢掉它排着的一条消息`); QUEUE.splice(i, 1); saveRunMark(); publishState(); continue; }
+    if (qsid && !SESSIONS.has(qsid) && sessionGone(qsid)) { log(`  会话 ${qsid} 已不在，丢掉它排着的一条消息`); QUEUE.splice(i, 1); saveRunMark(); publishState(); continue; }
     const lane = laneOfItem(q), key = sidOfLane(lane) || lane;
     if (blocked.has(key) || laneRun(lane)) { blocked.add(key); i++; continue; }
     blocked.add(key);

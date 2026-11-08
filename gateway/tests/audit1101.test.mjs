@@ -206,6 +206,10 @@ test("B05 定时任务不塞进同一会话里空闲着的手动轮次", async (
   const { RUNS } = await import("../gw/runs.mjs");
   let injected = 0;
   const sid = crypto.randomUUID();
+  // 会话文件得在：不在的会话排着的消息会被 pump 丢掉（195-W.1）
+  const { PATHS } = await import("../gw/config.mjs");
+  const tf = path.join(PATHS.projects, "-b05", sid + ".jsonl");
+  fs.mkdirSync(path.dirname(tf), { recursive: true }); fs.writeFileSync(tf, "");
   RUNS.set("b05-manual", { id: "b05-manual", text: "", startedAt: Date.now(), log: [], sessionId: sid, idle: true, ended: false, inputOpen: true, provider: "x", lane: "s:" + sid, inject: () => { injected++; return true; }, pendingInject: [] });
   try {
     const it = enqueue({ internal: true, message: "定时任务正文", sessionId: sid, sched: { taskId: "t", key: "k" }, unattended: true, timeoutMs: 60000 });
@@ -214,7 +218,7 @@ test("B05 定时任务不塞进同一会话里空闲着的手动轮次", async (
     const i = QUEUE.findIndex((q) => q.id === it.id);
     assert.ok(i >= 0, "排在队里等那一轮结束");
     QUEUE.splice(i, 1);
-  } finally { RUNS.delete("b05-manual"); }
+  } finally { RUNS.delete("b05-manual"); fs.rmSync(path.dirname(tf), { recursive: true, force: true }); }
 });
 
 test("B16/B17 一次性任务到点排队：计时不把它当过期关掉；排队中被删，醒来后不再入队", async (t) => {

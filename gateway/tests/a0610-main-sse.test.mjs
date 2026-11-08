@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import net from "node:net";
 
-const { routeBus, publish } = await import("../gw/bus.mjs");
+const { routeBus, publish, onPublish } = await import("../gw/bus.mjs");
+const { runEmit } = await import("../gw/queue.mjs");
 const { RUNS } = await import("../gw/runs.mjs");
 const { startStreamFix, fixedBaseUrl, STREAMFIX } = await import("../gw/streamfix.mjs");
 
@@ -89,4 +90,40 @@ test("#193：streamfix 下游不读 → 停读上游，不把整条流吸进响�
   sock.destroy();
   // 一条流约 49MB；修之前下游不读也整条吸完（本机 49MB 全推出去），修之后只有两段回环的内核缓冲那么多（本机约 11MB）
   assert.ok(sent < 24 << 20, `下游不读，上游却推出去了 ${sent} 字节`);
+});
+
+test("T.3：run.log 里的工具入参截短，实时推送照旧全文", async () => {
+  const run = { id: "a0610-t3", log: [], pend: null, ended: false, startedAt: Date.now() };
+  const big = "w".repeat(1 << 20);
+  let live = null;
+  const off = onPublish((ev) => { if (ev.type === "tool_use" && ev.id === "tu1") live = ev; });
+  runEmit(run, { type: "tool_use", id: "tu1", name: "Write", input: { file_path: "/x", content: big } });
+  runEmit(run, { type: "tool_use", id: "tu2", name: "Read", input: { file_path: "/y" } });
+  off();
+  assert.equal(live.input.content.length, big.length, "实时事件不截");
+  const [a, b] = run.log;
+  assert.ok(a.input.content.length < 70 << 10, `记录里还是 ${a.input.content.length} 字`);
+  assert.equal(a.inputCut, true); assert.equal(a.input.file_path, "/x");
+  assert.equal(b.inputCut, undefined); assert.deepEqual(b.input, { file_path: "/y" });
+});
+
+test("T.3：整轮重放边写边序列化；重放途中最后一条被续写，续上的只从队列来一次", async () => {
+  const log = [];
+  for (let i = 0; i < 5; i++) log.push({ type: "tool_result", runId: "a0610-sse", id: "r" + i, text: "z".repeat(4 << 20) }, { type: "phase", runId: "a0610-sse", i });
+  log.push({ type: "delta", runId: "a0610-sse", text: "甲" });
+  const run = { id: "a0610-sse", text: "", log, pend: null, ended: false, startedAt: Date.now(), perms: null };
+  RUNS.set("a0610-sse", run);
+  const c = connect(busPort, "/api/events", 600);
+  await new Promise((r) => setTimeout(r, 100));          // 补发还卡在前面几条大的上
+  runEmit(run, { type: "delta", text: "乙" });
+  await new Promise((r) => setTimeout(r, 80));           // 40ms 攒批后记进 log、推给队列
+  assert.equal(log[log.length - 1].text, "甲乙", "log 里就地续写了");
+  const ok = await c.wait((b) => b.includes('"text":"乙"'), 30000);
+  const got = c.got();
+  c.sock.destroy();
+  RUNS.delete("a0610-sse");
+  assert.ok(ok, "队列里的增量没到");
+  assert.equal((got.match(/"text":"甲"/g) || []).length, 1, "最后一条按连上那一刻的样子重放");
+  assert.equal((got.match(/甲乙/g) || []).length, 0, "续写的部分不能在重放里再出现一次");
+  assert.equal((got.match(/"type":"tool_result"/g) || []).length, 5);
 });

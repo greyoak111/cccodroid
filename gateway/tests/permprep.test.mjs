@@ -56,7 +56,7 @@ test("准备期间收紧：新进程按逐项确认起，这一轮记的也是�
   const run = RUNS.get("rpp-1");
   await until(() => fs.existsSync(started));
   assert.ok(run && !run.child, "还没起进程");
-  assert.equal(setPermMode("default"), true);
+  assert.equal(setPermMode("default").mode, "default");   // 0.6.10 起回 { mode, saved }（195-A.6）
   fs.writeFileSync(release, "");
   await p;
   assert.equal(await modeArg(), "default");
