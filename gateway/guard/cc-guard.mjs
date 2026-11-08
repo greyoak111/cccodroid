@@ -14,7 +14,12 @@ import fs from "node:fs";
 const SECRETS = [
   [/\.gateway-token\b|\bCCAPP_TOKEN_FILE\b/, "gateway token"],
   // 空格 / 引号拼接改形（红队 r8 11-08）：cat ~/.gate way-token、cat ~/.gate''way-token 这类也要问
-  [/\.gate[\s"']*way[\s"']*-?[\s"']*token\b/, "gateway token (split spelling)"],
+  // 复核 r8（11-08）：点拆分（\x2e 转义还原成 .gate.way-token）也归这里
+  [/\.gate[\s."']*way[\s."']*-?[\s."']*token\b/, "gateway token (split spelling)"],
+  // 复核 r8（11-08）：通配符与波浪号变量改形实测也能解析到令牌路径；\xHH 转义改形走 normCmd 还原后落回上面这条
+  [/\.gat[*?][\w-]*token\b/, "gateway token (wildcard split)"],
+  [/\.gate[*?][^\s"';&|]*(?=$|[\s"';&|)<>])/, "gateway token (bare wildcard)"],
+  [/~\/\.?\$[A-Za-z_][\w]*/, "tilde + shell variable (possible token path)"],
   [/ccapp-(?:providers|config|seed)[\w.-]*\.json/, "provider API keys"],
   [/\.cache\/(?:ccapp-key|llama-api-key)/, "API key file"],
   [/(?:^|[\/\s"'=~@<>:])\.ssh(?:\/|\b)/, "SSH keys"],
@@ -112,10 +117,18 @@ function strings(tool, inp) {
 
 // 命令归一（只给 judge 用，不落盘、不回显）：base64 段解出来是可读文本就还原；去掉 '' / "" 引号拼接与反斜杠续词；
 // $(echo token) / ${HOME} 这类 shell 展开成字面——命令写得绕一点也认得（红队 r8 11-08：三条绕过里两条真能读到令牌）
+// 复核 r8（11-08）再补：$(echo X | base64 -d) 整构先解（分块拼接的两段解码后相邻拼回完整路径）；\xHH 转义还原（\x2e → .）
 const B64_RUN = /\b[A-Za-z0-9+/]{12,}={0,2}\b/g;
 function normCmd(s) {
   let t = s;
   try {
+    t = t.replace(/\$\s*\(\s*echo\s+(?:-n\s+)?['"]?([A-Za-z0-9+/]{2,}={0,2})['"]?\s*\|\s*base64\s+(?:-d\b|--decode\b|-D\b|decode\b)\s*\)/g, (m, b) => {
+      try {
+        const d = Buffer.from(b, "base64").toString("utf8").trimEnd();
+        // 分块拼接的尾段可能只有两三个字符（ZW4= → en），门槛放宽到 2
+        return /^[\x20-\x7e]{2,}$/.test(d) ? d : m;
+      } catch { return m; }
+    });
     t = t.replace(B64_RUN, (m) => {
       try {
         const d = Buffer.from(m, "base64").toString("utf8").trimEnd();
@@ -124,6 +137,7 @@ function normCmd(s) {
     });
   } catch {}
   return t
+    .replace(/\\x([0-9a-fA-F]{2})/g, (m, h) => { const c = String.fromCharCode(parseInt(h, 16)); return c >= " " && c <= "~" ? c : m; })
     .replace(/["']{2}/g, "")
     .replace(/\\(?=[A-Za-z])/g, "")
     .replace(/\$\s*\(\s*echo\s+(?:-n\s+)?['"]?([^'")]+)['"]?\s*\)/g, "$1")

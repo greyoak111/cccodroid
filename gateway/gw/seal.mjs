@@ -412,7 +412,9 @@ export function scanMemory(dir) {
     if (!st.isFile()) continue;
     const t = st.size > MAX_TEXT * 4 ? null : readSmallFile(f, MAX_TEXT * 4);
     // 太大不读也不进上下文：跳过+提示，不整轮拦（同 materialize 的 2MiB 口径）
-    if (t == null) { skipped.push(f); continue; }
+    // 复核 r8（11-08）：但记忆目录是 claude 直接读的原目录——跳过扫描后文件还在原地，下一轮召回照样读到，
+    // 等于留了活口。改名移出 .md 命名（加 .ccapp-skip 后缀，去掉后缀可恢复），notes 里说明
+    if (t == null) { skipped.push(f); try { fs.renameSync(f, f + ".ccapp-skip"); } catch {} continue; }
     parts.push(f + "\0" + sha(t));
     const r = scanText(t);
     if (r.blocked) found.push({ name: f, hits: r.hits });

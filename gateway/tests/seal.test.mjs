@@ -208,24 +208,31 @@ test("输出风格：用户目录的那份在合成插件里叫 user:<名字>", 
   assert.equal(sealPrepare({ cwd: W(), runId: 5, outputStyle: "nope" }).settings.outputStyle, undefined);
 });
 
-// 拍板 11-08「别影响正常用户」：超 2MiB 的 skill 文件跳过+提示，不整轮拦
-test("超大 skill 文件：跳过+提示，不整轮拦", () => {
+// 拍板 11-08「别影响正常用户」：超 2MiB 的 skill 文件跳过+提示，不整轮拦；
+// 复核 r8（11-08）：跳过的不进上下文——合成插件副本里不许有它（安全不变量）
+test("超大 skill 文件：跳过+提示，不整轮拦，且副本里没有它", () => {
   fresh();
   put(H(".claude/skills/big/SKILL.md"), "---\nname: big\ndescription: b\n---\n正常开头\n");
   put(H(".claude/skills/big/data.md"), "x".repeat((2 << 20) + 100));
   const p = sealPrepare({ cwd: W(), runId: 9 });
   assert.equal(p.block, null);
   assert.ok((p.notes || []).some((n) => n.includes("太大没回填")));
-  assert.ok(p.args.includes("--plugin-dir"));
+  const d = at(p.args, "--plugin-dir")[0];
+  assert.ok(d && fs.existsSync(path.join(d, "skills/big/SKILL.md")));
+  assert.ok(!fs.existsSync(path.join(d, "skills/big/data.md")), "超大文件不许进副本");
 });
 
-// 拍板 11-08：超过 1MiB 的记忆文件跳过+提示，不整轮拦
-test("超大记忆文件：跳过+提示，不整轮拦", () => {
+// 拍板 11-08：超过 1MiB 的记忆文件跳过+提示，不整轮拦；
+// 复核 r8（11-08）：记忆目录是 claude 直接读的原目录，跳过的不许留在原地——改名 .ccapp-skip 移出 .md 命名
+test("超大记忆文件：跳过+提示，改名移出，不整轮拦", () => {
   fresh();
   const m = memoryDir(W());
-  put(path.join(m, "BIG.md"), "x".repeat((256 << 10) * 4 + 100));
+  const big = path.join(m, "BIG.md");
+  put(big, "x".repeat((256 << 10) * 4 + 100));
   put(path.join(m, "MEMORY.md"), "- 正常记忆\n");
   const p = sealPrepare({ cwd: W(), runId: 9 });
   assert.equal(p.block, null);
   assert.ok((p.notes || []).some((n) => n.includes("记忆文件太大没回填")));
+  assert.ok(!fs.existsSync(big), "超大记忆文件不许留在记忆目录");
+  assert.ok(fs.existsSync(big + ".ccapp-skip"), "改名移出的文件在");
 });
