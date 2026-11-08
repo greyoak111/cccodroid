@@ -912,11 +912,14 @@ function compSwitch(id, b, tree) {
     if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
   } catch (e) {
     // 回滚：备份原样放回、撤掉这次新放进去的文件、记录退回旧版
+    let restored = true;
     for (const r of backed.reverse()) {
-      try { fs.mkdirSync(path.dirname(path.join(PREFIX, r)), { recursive: true }); fs.renameSync(path.join(bak, r), path.join(PREFIX, r)); } catch {}
+      try { fs.mkdirSync(path.dirname(path.join(PREFIX, r)), { recursive: true }); fs.renameSync(path.join(bak, r), path.join(PREFIX, r)); } catch { restored = false; }
     }
     for (const r of moved) if (!replaceable.has(r)) { try { fs.unlinkSync(path.join(PREFIX, r)); } catch {} }
-    try { fs.rmSync(bak, { recursive: true, force: true }); } catch {}
+    // 还有没放回去的备份就先留着，别把旧版文件最后一份也删了
+    if (restored) try { fs.rmSync(bak, { recursive: true, force: true }); } catch {}
+    else log(`[comp] ${id}：回滚时有备份没放回去，先留在 ${bak}`);
     if (old && !compWriteRecord(id, old)) log(`[comp] ${id}：回滚后旧记录没写回去，界面会显示装到一半`);
     throw e;
   }
