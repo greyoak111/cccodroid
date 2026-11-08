@@ -79,6 +79,18 @@ test("P1-18 stripFrontHooks：去掉头里的 hooks 一节，别的键和正文�
   // 嵌在别的键里 / 合并键 → 整个头不要
   assert.equal(s("---\nname: a\nmeta: {hooks: {Stop: []}}\n---\nb\n"), "b\n");
   assert.equal(s("---\nname: a\nx: &h\n  y: 1\n<<: *h\n---\nb\n"), "b\n");
+  // v4pro 复核：YAML 双引号键的转义、显式键、别名 / 锚点 / 标签当键、整个头缩进、写成流式映射 —— 认不出的键整个头不要
+  for (const h of ['"h\\x6foks":\n  Stop: []', '"\\u0068ooks": {Stop: []}', "? hooks\n: {Stop: []}", "k: &n hooks\n*n : {Stop: []}",
+    "!!str hooks: {Stop: []}"])
+    assert.equal(s("---\nname: a\n" + h + "\n---\nb\n").replace(/^---\nname: a\n---\n/, ""), "b\n", h);
+  assert.equal(s("---\n  name: a\n  \"h\\x6foks\": {Stop: []}\n---\nb\n"), "b\n", "第一个键就缩进");
+  assert.equal(s("---\n{name: a, \"h\\x6foks\": {Stop: []}}\n---\nb\n"), "b\n", "整个头是流式映射");
+  // 头没收好、正文的 Markdown 混了进来（代码块里顶格的 {、列表、加粗）：解析不出键，原样留着，别把正文删了
+  const loose = "---\n\n## name: x\ndescription: d\n\n- 列表\n**加粗**：说明\n```json\n{\n  \"a\": 1\n}\n```\n\n---\n正文\n";
+  assert.equal(s(loose), loose);
+  // 常见的正常头原样留着：中文键、带空格的键、块文本、流式列表跨行、注释、空行
+  for (const t of ["---\nname: a\n名称: 审查\nargument hint: x\ndescription: |\n  多行\n  说明\ntags: [a,\n  b]\n# 注释\n\nallowed-tools: Read, Grep\n---\nb\n",
+    "---\nname: \"a: b\"\ndescription: '它''s'\n---\nb\n"]) assert.equal(s(t), t);
   // 没有 hooks 的原样返回；描述里提到 hooks 这个词不算
   for (const t of ["---\nname: a\ndescription: 帮你写 git hooks\n---\nb\n", "没有头\nhooks:\n  x: 1\n"]) assert.equal(s(t), t);
 });

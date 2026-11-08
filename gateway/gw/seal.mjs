@@ -243,9 +243,25 @@ function cleanManifest(buf) {
  *  原生的用户 / 项目风格本来就没有强制这一说 */
 const FRONT_RE = /^(\uFEFF?---[ \t]*\r?\n)([\s\S]*?)(\r?\n---[ \t]*(?:\r?\n|$))/;
 const HOOKS_KEY = /^["']?hooks["']?[ \t]*:/i, STYLE_KEY = /^["']?(?:hooks|force-for-plugin)["']?[ \t]*:/i;
+// 能变出键名、正则却认不出的顶格写法：YAML 双引号键能写转义（"h\x6foks" 解析出来就是 hooks）、? 显式键、*别名当键、
+// &锚点 / !标签开头、整个头写成 { } 流式映射（只看第一行）；还有第一个键就缩进（整个映射都在那一层，后面同样缩进的也是顶层键）。
+// 有这些就整个头不要（v4pro 复核 0.6.10，P1-18 转义键绕过）。别的认不出的行（头没收好、混进了正文的 Markdown）解析不出键，不算
+const ODD_TOP = /^(?:"[^"\n]*\\|\?(?:[ \t]|$)|\*[^\s*]+[ \t]*:|&\S+[ \t]|!\S*[ \t])/;
+const flowDepth = (l, d) => { for (const c of l.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "")) d += c === "[" || c === "{" ? 1 : c === "]" || c === "}" ? -1 : 0; return d; };
+function oddTopKeys(head) {
+  let depth = 0, first = true;
+  for (const l of head.split(/\r?\n/)) {
+    if (/^\s*(#.*)?$/.test(l)) continue;
+    if (first && /^[ \t{]/.test(l)) return true;   // { 只在开头才是整个头的流式映射，夹在中间是解析错误
+    first = false;
+    if (depth === 0 && ODD_TOP.test(l)) return true;
+    depth = Math.max(0, flowDepth(l, depth));
+  }
+  return false;
+}
 export function stripFrontHooks(buf, style = false) {
   const s = buf.toString("utf8"), m = FRONT_RE.exec(s), KEY = style ? STYLE_KEY : HOOKS_KEY;
-  if (!m || !/hooks|<<|force-for-plugin/i.test(m[2])) return buf;
+  if (!m || (!/hooks|<<|force-for-plugin/i.test(m[2]) && !oddTopKeys(m[2]))) return buf;
   const lines = m[2].split(/\r?\n/), keep = [];
   for (let i = 0; i < lines.length; i++) {
     if (!KEY.test(lines[i])) { keep.push(lines[i]); continue; }
@@ -257,7 +273,7 @@ export function stripFrontHooks(buf, style = false) {
     while (i + 1 < lines.length && (depth > 0 || /^[ \t]/.test(lines[i + 1]) || /^\s*(#.*)?$/.test(lines[i + 1]))) count(lines[++i]);
   }
   let head = keep.join(m[2].includes("\r\n") ? "\r\n" : "\n");
-  if (/(^|[\s{,\[])["']?hooks["']?[ \t]*:|<<[ \t]*:/im.test(head) || (style && /force-for-plugin/i.test(head))) head = null;
+  if (/(^|[\s{,\[])["']?hooks["']?[ \t]*:|<<[ \t]*:/im.test(head) || (style && /force-for-plugin/i.test(head)) || oddTopKeys(head)) head = null;
   const rest = s.slice(m[0].length);
   return Buffer.from(head == null ? rest : m[1] + head + m[3] + rest);
 }
