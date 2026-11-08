@@ -53,6 +53,9 @@
    *  15 秒还没来（连接断在重放中途、再没续上）就按到头收尾，别让用量一直攒着不上屏、新回复不吐字 */
   function beginReplay() {
     busReplay = true;
+    // 新一轮重放开始：上一代没等到 sync 的用量缓冲作废。留着的话下一次 sync 会把旧值当成
+    // 「刚更新的实时用量」写进视图，还把随后正确的历史用量挡在外面（0.6.9 #191-3）
+    replayCtx = null;
     liveEl.classList.add("replaying");
     clearTimeout(endReplay.guard); clearTimeout(endReplay.guard2);
     endReplay.guard = setTimeout(() => liveEl.classList.remove("replaying"), 2500);
@@ -123,12 +126,29 @@
   }
 
   // ── 会话切换 / 历史翻页 ────────────────────────────────────────────
+  /** 历史首屏加载占位：大会话慢的时候不再整块空白像「会话空了」（0.6.9 审计 195-Q.9） */
+  function histLoading() {
+    const el = document.createElement("div");
+    el.className = "tiny hist-loading";
+    el.textContent = t("正在读取会话…");
+    histEl.appendChild(el);
+  }
+  function histLoadFailed(msg) {
+    histEl.querySelector(".hist-loading")?.remove();
+    const el = document.createElement("div");
+    el.className = "tiny err hist-err";
+    el.textContent = t("读取历史失败：{msg} ", { msg });
+    const b = document.createElement("button");
+    b.className = "btn ghost sm"; b.dataset.histRetry = "1"; b.textContent = t("重试");
+    el.appendChild(b);
+    histEl.appendChild(el);
+  }
   function resetView(sessionId, keepPendingModel = false) {
     const prevSid = view.sessionId;
     view.sessionId = sessionId || null;
     // 换了会话：上一个会话的上下文用量不能挂在这个会话名下，先归零，等历史 / 事件流报这个会话自己的（#89）
     view.ctxAt = 0;
-    if (view.sessionId !== prevSid) { replayCtx = null; updateCtx(0, state.ctxTotal); }
+    if (view.sessionId !== prevSid) { replayCtx = null; view.cwd = null; updateCtx(0, state.ctxTotal); }
     // 同一个未发送的新会话重连：hello 不能冲掉刚选的接口；显式打开 / 新建仍清空。
     if (view.sessionId || !keepPendingModel) state.pendingModel = null;
     refreshSessModel();                      // 模型标签换成这个会话自己的（打开、启动、重连都经过这里）
@@ -141,6 +161,7 @@
     view.loading = false;
     view.runIds = new Set();
     view.cids = new Set();
+    view.cidRuns = new Map();
     view.lastRunId = null;
     view.projectId = null;
     view.pendingMerge = null;
@@ -159,7 +180,10 @@
     const wel = !view.sessionId && histEl.childElementCount === 1 ? histEl.querySelector(":scope > .msg.welcome") : null;
     welKeep = wel || null;
     histEl.innerHTML = "";
+    // typeof 守卫：bridge-config-ui 的测试单独切 resetView 出来跑，那里没有 histLoading
+    if (view.sessionId && typeof histLoading === "function") histLoading();
     liveEl.innerHTML = "";
+    if (view.sessionId !== prevSid) view.firstSend = null;   // 换会话了：上一页的「首条已发出」不跟过来（0.6.9 审计 196-聊天.7）
     for (const rv of runViews.values()) { rv.timer?.stop(); rv.av?.remove(); }   // av.remove 连阶段提示的每秒定时器一起停（审查 #49 P3-7）
     runViews.clear();
     TOOL_CARDS.clear();
@@ -200,6 +224,7 @@
       OV.closeAll();                   // 型号面板、回退确认这类浮层是上一个会话的：开着就会把选择写进新会话（#174-2）
     }
     if (!opts.keepPage) closePage();
+    view.pendNav = null;      // 用户明确打开某一页：上一次在途的锚点 / 续读意图不再适用
     resetView(id);
     if (!id) showWelcome();   // 新会话当场画首屏，不等重连回来——中间空着那一下就是闪
     view.jumpQ = id && jumpQ ? jumpQ : "";   // 从搜索结果点进来：历史加载完后跳到命中的那条
@@ -306,6 +331,9 @@
     const q = new URLSearchParams({ limit: initial ? "40" : "60" });
     const anchor = initial ? view.anchor : "", resume = initial ? view.resume : null, before = view.cursor;
     if (initial) { view.anchor = ""; view.resume = null; }
+    // 锚点 / 续读的意图记在视图外面：请求在途时整轮重连会 resetView，清掉的这些得能再发一遍，
+    // 不然目标章节无声丢、退回最新页（0.6.9 #191-2）
+    if (initial && (anchor || resume != null)) view.pendNav = { sid: id, anchor: anchor || "", resume };
     const fwd = !!anchor || resume != null;
     // 锚点：章节是压缩消息 uuid（字符串）；书签 / 上次读到是 { uuid, off, para, quiet }
     const aObj = anchor && typeof anchor === "object" ? anchor : null;
@@ -327,29 +355,37 @@
       olderEl.textContent = t("加载更早的消息");
       // 只有「会话在、那个位置没了」才退回最新；会话本身不在了走下面（以前先误报「没找到这一章」再重试一遍，#173-6）
       if (anchor && e.status === 404 && (!e.body || e.body.error === "anchor not found")) {
+        view.pendNav = null;     // 位置确实没了：别再在重连时重试
         // 那一章 / 书签的位置找不到了（记录被改写过、回退截掉了）：退回最新；「上次读到」找不到就悄悄打开到最新
         if (!aObj || !aObj.quiet) toast(aObj ? t("没找到书签的位置，已打开到最新") : t("没找到这一章的位置，已打开到最新"), true);
         return loadOlder(true);
       }
       if (e.status === 404 && initial) {
         // 记着的会话已经不在了（删掉了 / 清过数据）：当新会话处理，回到欢迎页，别挂一条让人摸不着头脑的提示
+        view.pendNav = null;
         view.sessionId = null;
         view.title = ""; paintTitle(); renderSessions();   // 标题、侧栏高亮也别还挂着那个会话（审查 #48 S08-04）
+        // 会话已经没了：上下文用量、钉住的型号跟着清零，别带进新对话还跨重启保存（0.6.9 审计 196-本地状态.1）
+        updateCtx(0, state.ctxTotal);
+        state.pendingModel = null;
+        refreshSessModel();
         saveUiState();
         // 中断记录指着的会话没了：那张「继续」卡在这里点下去会在空会话里续，上下文全丢——收掉，回欢迎页（#173-5）
         $("intr-card")?.remove();
         if (!liveEl.childElementCount) showWelcome();
         if (view.userOpen === id) goneNotice(id, !!(e.body && e.body.trashed));
         view.userOpen = null;
-      } else toast(t("读取历史失败：{msg}", { msg: e.message }), true);
+      } else if (initial) histLoadFailed(e.message);
+      else toast(t("读取历史失败：{msg}", { msg: e.message }), true);
       return;
     }
     if (gen !== view.gen) return;
     view.loading = false;
-    if (initial) view.histOk = true;
+    if (initial) { view.histOk = true; view.pendNav = null; }
     view.cursor = r.cursor;
     if (initial) view.next = fwd && r.next < r.size ? r.next : null;
     view.title = r.title || "";
+    if (r.cwd) view.cwd = r.cwd;   // 旧会话不在最近 150 条里时，项目 chip 靠它认（0.6.9 审计 196-显示.3）
     // 请求在途时事件流已经送来更新的目标 / 清单：历史里的是旧快照，不许盖回去（审查 #50 S2-07）
     const fresh = view.liveAt < sent;
     if (initial && fresh && "goal" in r) { view.goal = r.goal || null; renderRunStrip(); }
@@ -428,6 +464,12 @@
     (hit.querySelector("mark.jump-hit") || msg).scrollIntoView({ block: "center" });
   }
   olderEl.addEventListener("click", () => loadOlder(false));
+  histEl.addEventListener("click", (e) => {
+    if (!e.target.closest("[data-hist-retry]")) return;
+    histEl.querySelector(".hist-err")?.remove();
+    histLoading();
+    loadOlder(true);
+  });
   chatScrollHooks.push(() => {
     if (chatEl.scrollTop < 240 && view.cursor && !view.loading && histEl.childElementCount) loadOlder(false);
     else if (view.next != null && !view.loading && chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 240) loadNewer();
@@ -568,6 +610,8 @@
 
   let busDownAt = 0, busKick = 0;
   function connectBus(resume) {
+    // 新的连接已经由用户在开头：把上一轮排着的重连定时器取消，否则 2 秒后它会把刚建好的连接再断一次（0.6.9 审计 195-P.6）
+    clearTimeout(busWatch); busWatch = 0;
     if (es) { try { es.close(); } catch {} }
     // 换视图要整轮重放：旧视图的游标作废，免得重拨时又带着它续传，新视图缺东西（审查 #50 S2-05）
     if (!resume) lastEventId = "";
@@ -578,7 +622,7 @@
       let ev; try { ev = JSON.parse(m.data); } catch { return; }
       try { onBus(ev); } catch (e) { console.error(e); }
     };
-    es.onopen = () => { busDownAt = 0; setConn(true); };
+    es.onopen = () => { clearTimeout(busWatch); busWatch = 0; busDownAt = 0; setConn(true); };
     es.onerror = () => {
       setConn(false);
       // 一直连不上：多半是通知栏点了「停止」、网关服务没了，界面还开着就请壳把它拉起来（11-05 报告；服务在跑时壳那边什么也不做）
@@ -666,6 +710,7 @@
       case "run_start": {
         if (!belongs(ev)) return;
         view.runIds.add(ev.runId);
+        if (ev.cid) view.cidRuns.set(ev.cid, ev.runId);
         view.lastRunId = ev.runId;
         if (runViews.has(ev.runId)) return;
         if (ev.auto !== "idle") { renderUser(ev.text, liveEl); tagRun(liveEl.lastElementChild, ev.runId); }
@@ -678,14 +723,15 @@
         av.phase({ phase: "connect" });
         runViews.set(ev.runId, { av, startedAt: ev.startedAt, timer, out: 0 });
         statLive(ev.runId);
-        scrollDown(true);
+        // 只有本窗口刚发的消息才强制回到底部；别的会话 / 别的窗口开始的轮次别把正在翻历史的人拽走（0.6.9 审计 196-聊天.4）
+        scrollDown(!busReplay && !!ev.cid && view.cids.has(ev.cid));
         return;
       }
       case "inject": {
         // 插话送达：在它被吃进去的位置画出这条消息，之后的回复另起一个气泡，时间顺序才对
         const rv = runViews.get(ev.runId);
         if (!rv) return;
-        if (ev.cid) view.cids.add(ev.cid);
+        if (ev.cid) { view.cids.add(ev.cid); view.cidRuns.set(ev.cid, ev.runId); }
         rv.av.finish();
         if (rv.av.empty) rv.av.remove();
         renderUser(ev.text, liveEl); tagRun(liveEl.lastElementChild, ev.runId);
@@ -695,7 +741,7 @@
         if (rv.idle) { rv.idle = false; rv.timer = RunTimer(Date.now()); }   // 空闲时发来的消息：算新的一轮
         rv.timer?.attach(rv.av);          // 计时算整轮的，跟着最新的气泡走
         rv.av.phase({ phase: "connect" });
-        scrollDown(true);
+        scrollDown(!busReplay && !!ev.cid && view.cids.has(ev.cid));   // 同上：非本窗口发的插话不强制到底
         return;
       }
       case "run_idle": {
@@ -719,6 +765,8 @@
       }
       case "init": {
         if (!view.runIds.has(ev.runId)) return;
+        // 本页已经属于 A，这个 run 却 init 成 B：它是聚合认回来的另一条草稿，从这里摘出去（0.6.9 #191-1）
+        if (view.sessionId && ev.sessionId && ev.sessionId !== view.sessionId) return detachRun(ev.runId);
         if (!view.sessionId && ev.sessionId) { view.sessionId = ev.sessionId; draftAdopt(ev.sessionId); adoptPendingModel(); saveUiState(); }
         if (ev.model) { state.model = ev.model; paintModel(ev.model); }
         if (ev.permissionMode) setPermChip(ev.permissionMode);
@@ -781,6 +829,10 @@
 
   function onHello(ev) {
     helloCount++;
+    // 网关重启而 WebView 没刷新时 helloCount>1：boot 变了，按「刚打开」处理被中断的会话，
+    // 否则「继续」卡只在会话列表里，眼前这页什么也没有（0.6.9 审计 195 恢复链）
+    const bootRestart = helloCount > 1 && !!ev.boot && !!view.gwBoot && ev.boot !== view.gwBoot;
+    if (ev.boot) view.gwBoot = ev.boot;
     if (ev.uiTag && uiTag != null && ev.uiTag !== uiTag) {
       // 新界面已经部署了：生成在网关里不受影响，放心刷新
       setStatus(t("界面已更新，正在刷新…"), "warn");
@@ -798,8 +850,9 @@
 
     // 续不上（首次连接 / 网关重启过 / 断太久）：本视图从头来 —— 历史重新取，
     // 正在跑的那一轮紧接着会被网关整轮重放过来
-    if (helloCount === 1 && ev.run && !ev.run.ended) {
-      // 刚打开界面时网关正忙：直接跟上那一轮（这才是用户最后在干的事）
+    if (helloCount === 1 && ev.run && !ev.run.ended && !view.sessionId) {
+      // 刚打开界面时网关正忙、本地又不知道看哪条（没有上次的会话号）：直接跟上那一轮。
+      // 本地记着会话号时不再改道：以前会覆盖用户最后查看的会话并交换草稿（0.6.9 审计 195-P.7）
       const sid1 = ev.run.sessionId || null;
       // 自动跟到别的会话也要按每会话草稿的契约交接（#120-3）：A 没发的字和附件留在 A，输入框换成 B 自己的草稿；
       // 不然 A 的草稿会顶着 B 的会话号发出去
@@ -807,7 +860,7 @@
       view.sessionId = sid1;
       if (!sid1) view.runIds.add(ev.run.id);
       saveUiState();
-    } else if (helloCount === 1 && !ev.run && !view.sessionId && intrList(ev.interrupted).pop()?.sessionId) {
+    } else if ((helloCount === 1 || bootRestart) && !ev.run && !view.sessionId && intrList(ev.interrupted).pop()?.sessionId) {
       // 刚打开、上一轮是被系统杀掉的：直接回到最近开始的那个会话，「继续」卡就挂在它底下；其余的在会话列表里标着
       // （最近那轮还没建会话就留在新会话页，「重发」卡在这里）
       const sid1 = intrList(ev.interrupted).pop().sessionId;
@@ -815,14 +868,26 @@
       view.sessionId = sid1;
       saveUiState();
     }
-    const keepRuns = new Set(view.runIds), keepCids = new Set(view.cids);
+    const keepRuns = new Set(view.runIds), keepCids = new Set(view.cids), keepCidRuns = new Map(view.cidRuns);
     const sid = view.sessionId, keepProj = view.projectId, keepMerge = view.pendingMerge;   // 重连会重置视图：新会话已挑的项目、汇合来源留着
+    // 锚点 / 续读请求还在途（view.anchor 已被 loadOlder 取走）：整轮重连后按原目标再发一次，
+    // 不能因为 view.next 还没有值就退回最新页（0.6.9 #191-2）
+    const pend = view.pendNav && view.pendNav.sid === sid ? view.pendNav : null;
+    // 「上次读到」：启动时（浏览器刚打开、helloCount=1）直接落回上次的位置，不用等到切会话才记；
+    // 网关重启但页面没刷新时，正在上翻的位置也先记下来再恢复（0.6.9 审计 195-AA.4 / 196-本地状态.2）
+    if (sid && !view.anchor && !pend && (helloCount === 1 ? !view.userOpen : !stick)) {
+      if (helloCount > 1 && sid === view.sessionId && typeof saveLastRead === "function") saveLastRead();
+      // typeof 守卫：hello-draft-v062 的测试单独切 onHello 出来跑，那里没有 18d 的 lastReadOf
+      const lr = typeof lastReadOf === "function" ? lastReadOf(sid) : null;
+      if (lr) view.anchor = lr;
+    }
     const resume = sid && view.next != null && !view.anchor ? view.cursor : null;   // 正看着中间某一段：重连后接着那段
     resetView(sid, !sid);
-    if (resume != null) view.resume = resume;
+    if (pend) { view.anchor = pend.anchor || ""; view.resume = pend.resume ?? null; }
+    else if (resume != null) view.resume = resume;
     if (!sid && keepProj) { view.projectId = keepProj; paintProjChip(); }
     if (!sid) view.pendingMerge = keepMerge || null;
-    view.runIds = keepRuns; view.cids = keepCids;
+    view.runIds = keepRuns; view.cids = keepCids; view.cidRuns = keepCidRuns;
     // 没建会话的轮次（停在启动前确认卡上、或刚起还没拿到会话号）：发它的草稿页切走后 cid 对不上，哪页都认不出来。
     // 认领时全部接回新对话页（不只 latestRun 那一条，#172-1），卡片和过程随整轮重放画出来
     let adopted = false;
@@ -841,6 +906,15 @@
 
   // 这一轮画出来的消息记下 run 号；收尾时标上存没存稳（加书签时数「后面同样的话」要用，审查 #52 S2-02）
   function tagRun(el, runId) { if (el && el.classList.contains("msg")) el.dataset.run = runId; }
+  // #live 只增不减：连聊几十轮 DOM 一直涨（0.6.9 审计 195-Q.8）。贴底时把已收尾的旧消息裁掉，
+  // 更早的内容重开会话时照样从会话记录读回来；用户正在往上翻就不动，免得脚下被抽走
+  const LIVE_MAX = 80;
+  function trimLive() {
+    if (!stick) return;
+    const done = [...liveEl.children].filter((el) => el.classList.contains("msg") && el.dataset.done);
+    if (done.length <= LIVE_MAX) return;
+    for (const m of done.slice(0, done.length - LIVE_MAX)) { dropCards(m); m.remove(); }
+  }
   function onRunEnd(ev) {
     // retired：答完了、只剩后台任务，用户点了停止 / 立即发送把它整轮结束——回答是完整的，不算中断
     const cut = ev.aborted && !ev.retired;
@@ -875,9 +949,10 @@
       // 压缩线的刻度在 loadModels 里刷（以前只有切模型才会调它，所以设完要切一次模型才看得到）
       if (ev.localCommand === "autocompact") loadModels();
     } else {
-      av.finish(cut);
+      const bad = !!(ev.failed || ev.isError);
+      av.finish(cut, bad);
       if (cut) { av.note(t("已中断")); agStopAll(ev.at); }
-      else if (ev.retired) agStopAll(ev.at);   // 后台子代理随进程一起停了
+      else if (ev.retired || bad) agStopAll(ev.at);   // 后台子代理随进程一起停了 / 这一轮失败
       const st = statBits(ev, rv.out);
       if (st) { statEl.textContent = st; statSave(view.sessionId || ev.sessionId, st); }
     }
@@ -885,6 +960,8 @@
     if (ev.failed || ev.isError) setStatus(t("失败"), "err");
     else if (cut) setStatus(t("已中断"), "warn");
     else setStatus(t("就绪"), "ok");
+    if (rv) srSay(ev.failed || ev.isError ? t("回复出错") : cut ? t("已中断") : t("回复完成"));
+    trimLive();
     scrollDown();
     loadSessions();
     if (!state.caps?.slashCommands?.length) loadCaps();
@@ -930,6 +1007,10 @@
     const elsewhere = srv.runs.filter((r) => r !== srv.run && r.perms && r.perms.length);
     // 还没建会话的（启动前的确认卡）不在会话列表里，指到侧栏的草稿入口——点了会把它们认回新对话页（#171/#172）
     if (elsewhere.length) setStatus(elsewhere.every((r) => !r.sessionId) ? t("有个新对话在等你确认 · 侧栏「没建会话的新对话」里查看") : t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
+    // 没有任何一轮在等确认时回「就绪」：权限在别的会话解决后，状态栏以前会一直挂着「等你确认」直到下一轮（0.6.9 审计 195-B.10）。
+    // 网关断开时不碰，留给 setConn 的重连提示（195-BB.2）
+    else if (srv.connected && !srv.runs.some((r) => r.perms && r.perms.length)
+      && !isBusy() && !srv.run?.idle && !srv.runs.some((r) => !r.idle)) setStatus(t("就绪"), "ok");
     askNotice(srv.runs.flatMap((r) => (r.perms || []).map((p) => ({ id: p.id, runId: r.id }))));
     const live = srv.runs.map((r) => (r.sessionId || "") + (r.perms && r.perms.length ? "!" : "") + (r.idle ? "~" : "")).join(",") + "|" + srv.intr.map((e) => e.sessionId || "").join(",")
       + "|" + srv.queueAll.filter((q) => !q.sessionId).map((q) => q.id).join(",") + "|" + (view.sessionId || "");
@@ -992,6 +1073,19 @@
     // 跟着的那一轮已经结束（确认卡超时、被停掉）的也一样：不然它留在队列里，哪页都看不见、撤不回（#172-2）
     if (!view.sessionId && (q.intr || !(q.follow && srv.runs.some((r) => r.id === q.follow)))) return true;
     return view.runIds.has(q.id) || (!!q.follow && view.runIds.has(q.follow)) || (!!q.cid && view.cids.has(q.cid));
+  }
+  /** 把属于别的会话的一轮从当前视图摘掉（0.6.9 #191-1）：聚合认回的无会话号草稿在 init 后各自有了会话号，
+   *  留在本页会让标题/发送指向 A、停止和正文却是 B。DOM、索引、cid 一起摘，摘完重挑当前轮 */
+  function detachRun(runId) {
+    view.runIds.delete(runId);
+    for (const [cid, rid] of view.cidRuns) if (rid === runId) { view.cidRuns.delete(cid); view.cids.delete(cid); }
+    const rv = runViews.get(runId);
+    if (rv) { rv.timer?.stop(); rv.av?.remove(); runViews.delete(runId); }
+    for (const m of chatEl.querySelectorAll(`.msg[data-run="${CSS.escape(runId)}"]`)) m.remove();
+    for (const [id, it] of PERMS) if (it.runId === runId) { it.el?.remove(); PERMS.delete(id); }
+    if (srv.run?.id === runId) { srv.run = null; pickViewRun(); }
+    renderPermBar(); renderRunStrip(); renderQueue(); syncInterject();
+    loadSessions();          // B 已经是独立会话了，让它出现在列表里
   }
   function pickViewRun() {
     srv.run = srv.runs.filter(runInView).sort((a, b) => b.startedAt - a.startedAt)[0] || null;

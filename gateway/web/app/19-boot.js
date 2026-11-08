@@ -15,6 +15,10 @@
     bottomH = chatEl.scrollHeight;
   }
   const queueBottomSync = () => { if (!bottomRaf) bottomRaf = requestAnimationFrame(syncBottomBtn); };
+  // 软键盘 / 窗口压矮时没有 scroll 事件：↓ 按钮要当场重算；原本贴底的跟着新视口继续贴底（0.6.9 审计 195-R.6）
+  const onViewportResize = () => { queueBottomSync(); if (stick && !touching) scrollDown(true); };
+  addEventListener("resize", onViewportResize);
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", onViewportResize);
   chatScrollHooks.push(syncBottomBtn);
   // 内容长高才需要重算（以前盯整棵子树的每个字符变化，计时器每秒跳一下也触发）
   const bottomRO = new ResizeObserver(queueBottomSync);
@@ -66,7 +70,8 @@
     requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("tb-still")));
     more.addEventListener("click", () => set(!root.classList.contains("tb-open")));
   })();
-  $("btn-palette").addEventListener("click", () => { openCmdPalette(""); inputEl.focus(); });
+  // 命令面板靠输入框里的 / 文本过滤：整页盖着输入框时先退回对话，不然字打在看不见的输入框里（0.6.9 审计 195-R.7）
+  $("btn-palette").addEventListener("click", () => { if (curPage) closePage(); openCmdPalette(""); inputEl.focus(); });
   $("btn-close-drawer").addEventListener("click", () => { if (window.CCLayout && CCLayout.docked()) CCLayout.collapse(); closeDrawer(true); });
   drawerEl.addEventListener("click", (e) => { if (e.target === drawerEl) closeDrawer(); });
   // 刷新失败要说失败（审查 B-OBSERVED-1）
@@ -154,8 +159,10 @@
   // ── 状态 ──────────────────────────────────────────────────────────
   let uiTag = null;              // 网关报的前端版本戳，变了就说明有新界面
   async function refreshStatus() {
+    const ok = latest("status");   // 迟到的旧快照不许把厂商 / 安全模式 / 状态文字画回去（0.6.9 审计 195-BB.3）
     try {
       const s = await api("/api/status");
+      if (!ok()) return;
       if (uiTag != null && s.uiTag && s.uiTag !== uiTag) {
         // v3 起生成不归页面管，随时刷新都安全
         setStatus(t("界面已更新，正在刷新…"), "warn");
@@ -170,6 +177,7 @@
         state.serverStatus = s; qbLoad(false).catch(() => {});
       }
       state.serverStatus = s;
+      state.safeMode = !!s.safeMode;      // 权限下拉按它算实际生效的那档（0.6.9 审计 P1-12 前端半）
       paintAcct(s);
       paintSafeMode(s.safeMode);
       recheckSetup();
@@ -190,11 +198,17 @@
         `${t("模型")}     ${s.model || t("(由 claude 决定)")}\n` +
         `${t("生成")}     ${s.busy ? t("进行中") : t("空闲")}${s.queued ? t(" · 排队 {n} 条", { n: s.queued }) : ""}\n` +
         `${t("工作区")}   ${s.workspace}`;
-      if (!s.busy) {
-        setStatus(s.ready && s.hasKey ? (srv.connected ? t("就绪") : t("已连接网关")) : s.hasKey ? t("运行时缺失") : t("需要配置密钥"),
+      if (es && !srv.connected) {
+        // SSE 断了但 HTTP 还通：这里以前画成「就绪」，把「正在重连」盖掉（0.6.9 审计 195-BB.2）。
+        // 同时用 /api/state 补一份快照，别让徽标、权限条、工具卡冻结在断线前
+        setStatus(t("与网关断开，正在重连…（生成不受影响）"), "warn");
+        api("/api/state").then(applyState).catch(() => {});
+      } else if (!s.busy) {
+        setStatus(s.ready && s.hasKey ? t("就绪") : s.hasKey ? t("运行时缺失") : t("需要配置密钥"),
           s.ready && s.hasKey ? "ok" : "warn");
       }
     } catch (e) {
+      if (!ok()) return;
       $("status-box").textContent = t("无法连接网关：{msg}", { msg: e.message });
       setStatus(t("网关离线"), "err");
     }
@@ -230,7 +244,7 @@
       if (d && !inputEl.value) { inputEl.value = d; inputEl.dispatchEvent(new Event("input")); }
     } catch {}
     // 普通的重新载入（切语言、换执行方式、刷新状态）也一样：页面卸掉前把没发的草稿记下（审查 #49 待确认-3）
-    addEventListener("pagehide", () => { try { if (inputEl.value) sessionStorage.setItem(FZ_DRAFT, inputEl.value); } catch {} });
+    addEventListener("pagehide", () => { try { draftPersist(); if (inputEl.value) sessionStorage.setItem(FZ_DRAFT, inputEl.value); } catch {} });
     function unfreeze(why) {
       try {
         const log = JSON.parse(localStorage.getItem(FZ_LOG) || "[]");
@@ -338,7 +352,9 @@
       g = null;
       if (e.touches.length !== 1 || !drawerEl.classList.contains("hidden") || !$("pages").classList.contains("hidden")) return;
       if ((window.CCLayout && CCLayout.docked()) || OV.top() || document.querySelector("#sheet:not(.hidden), #popup:not(.hidden)")) return;
-      if (e.target.closest("textarea,input,select,.xterm") || String(getSelection() || "").length || hScrollable(e.target)) return;
+      // 输入区的按钮 / 附件卡起手不算抽屉手势：从发送、附加这些键上滑过去时别被抽屉抢走（0.6.9 审计 196-移动.2）
+      if (e.target.closest("textarea,input,select,.xterm") || e.target.closest("#composer button,#composer .att,#composer .chip,#composer [role=button]")
+        || String(getSelection() || "").length || hScrollable(e.target)) return;
       const p = e.touches[0];
       g = { x: p.clientX, y: p.clientY, t: performance.now(), on: false, w: 0, dx: 0, lastX: p.clientX, lastT: performance.now(), v: 0 };
     };
@@ -489,18 +505,29 @@
   // ── 启动 ──────────────────────────────────────────────────────────
   (async function boot() {
     view.sessionId = loadUiState();      // 上次的会话号与用量，先捞回来
+    draftLoad(view.sessionId);           // 进程被杀前没发的草稿也捞回来（0.6.9 审计 195-D.3）
     updateCtx(state.ctxUsed, state.ctxTotal);
     setStatus(t("正在连接网关…"));
 
     await refreshStatus();
     // 本地不知道用哪条，就问网关「最近真正跑过哪条会话」—— 总比默默开个新会话强
     if (!view.sessionId && state.serverStatus?.lastSessionId) {
+      // 走草稿交接：新对话没发的字留在新对话名下，不跟着进上一条会话（0.6.9 审计 195-R.5）
+      draftSwap(view.sessionId, state.serverStatus.lastSessionId);
       view.sessionId = state.serverStatus.lastSessionId;
       saveUiState();
     }
     connectBus(false);                   // hello 到了就会去取历史 / 接上正在跑的那一轮
 
     await Promise.all([loadSettings(), loadCaps(), loadSessions()]);
+    // 启动时网关没起来 / 接口闪断：loadSettings 自己把错吞了，基础设置会长期停在默认值。
+    // 隔一会儿看一眼，没拿到设置就补拉，最多三次（0.6.9 审计 195-N.3）
+    const ensureSettings = (left) => setTimeout(async () => {
+      if (Object.keys(state.settings || {}).length) return;
+      await loadSettings();
+      if (left > 1) ensureSettings(left - 1);
+    }, 4000);
+    ensureSettings(3);
     uiSync(); loadFonts();               // 界面定制（ccapp-ui.json）、导入字体的清单，各和本地缓存对一下（换过机、清过缓存时补回来）
     updateCtx(state.ctxUsed, state.ctxTotal);   // 别把恢复回来的用量抹成 0
     // 后台时不轮询（#56），切回前台补一次

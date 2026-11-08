@@ -137,7 +137,9 @@
       // 命中的会话不在本地这 150 条里时，拿命中结果自带的字段去筛，别绕过当前的置顶 / 项目筛选（审查 B-05）
       const list = (sess.hits || state.sessions.filter((s) => s.title.toLowerCase().includes(q.toLowerCase()))).filter((h) => keep(state.sessions.find((x) => x.id === h.id) || h));
       sess.visible = list.map((x) => x.id); pruneSel(); renderSessBar();
-      box.innerHTML = (sess.hits ? "" : `<div class="tiny">${t("正在搜索对话内容…")}</div>`)
+      box.innerHTML = (sess.hitsErr
+          ? `<div class="tiny err">${esc(t("搜索失败：{msg}", { msg: sess.hitsErr }))} <button class="btn ghost sm" data-sess-search-retry>${esc(t("重试"))}</button></div>`
+          : sess.hits ? "" : `<div class="tiny">${t("正在搜索对话内容…")}</div>`)
         + (list.length ? list.map(item).join("") : sess.hits ? `<div class="tiny">${t("没有找到包含「{q}」的会话。", { q: esc(q) })}</div>` : "")
         + (sess.hits && sess.hitsTotal > sess.hits.length ? `<div class="tiny">${t("只显示前 {n} 个，一共命中 {m} 个，换个更具体的词试试", { n: sess.hits.length, m: sess.hitsTotal })}</div>` : "");
       return;
@@ -185,17 +187,22 @@
     const list = state.sessions.filter((s) => s.misc && !s.pinned && !busy.has(s.id) && (sess.misc || []).includes(s.id));
     if (!list.length || !confirm(t("把杂项里的 {n} 个会话移进回收站？", { n: list.length }))) return;
     const done = new Set();
-    let n = 0;
-    for (const s of list) { try { await api(`/api/session/${encodeURIComponent(s.id)}`, { method: "DELETE" }); n++; done.add(s.id); } catch {} }
+    let n = 0, failed = 0, lastErr = "";
+    for (const s of list) {
+      try { await api(`/api/session/${encodeURIComponent(s.id)}`, { method: "DELETE" }); n++; done.add(s.id); }
+      catch (e) { failed++; lastErr = e.message || String(e); }   // 以前逐条吞错，只说「已移进回收站」（0.6.9 审计 195-N.5）
+    }
     if (done.has(view.sessionId)) newConversation();
     loadSessions();
-    toast(t("已移进回收站 {n} 个（{d} 天内可恢复）", { n, d: sess.keepDays }));
+    if (failed) toast(n ? t("已移进回收站 {n} 个，{m} 个失败：{msg}", { n, m: failed, msg: lastErr })
+      : t("没有删成：{msg}", { msg: lastErr }), true);
+    else toast(t("已移进回收站 {n} 个（{d} 天内可恢复）", { n, d: sess.keepDays }));
   }
 
   // 搜索：输完停 300ms 再问网关；过时的回复丢掉
   let sessQT = 0, sessQN = 0;
   $("sess-q").addEventListener("input", (e) => {
-    sess.q = e.target.value; sess.hits = null;
+    sess.q = e.target.value; sess.hits = null; sess.hitsErr = ""; sess.hitsTotal = 0;
     clearTimeout(sessQT);
     renderSessions();
     const q = sess.q.trim();
@@ -204,8 +211,11 @@
     sessQT = setTimeout(async () => {
       try {
         const r = await api("/api/sessions/search?q=" + encodeURIComponent(q));
-        if (n === sessQN && sess.q.trim() === q) { sess.hits = r.results || []; sess.hitsTotal = r.total || sess.hits.length; renderSessions(); }
-      } catch (err) { if (n === sessQN) { sess.hits = []; renderSessions(); toast(err.message, true); } }
+        if (n === sessQN && sess.q.trim() === q) { sess.hits = r.results || []; sess.hitsTotal = r.total || sess.hits.length; sess.hitsErr = ""; renderSessions(); }
+      } catch (err) {
+        // 失败和「没有匹配」分开：以前失败也画成「没有找到」，还沿用上一次的命中数（0.6.9 审计 196-会话.2）
+        if (n === sessQN) { sess.hits = null; sess.hitsErr = err.message || String(err); renderSessions(); }
+      }
     }, 300);
   });
   // 刷新列表时搜索结果也跟着重查
@@ -372,6 +382,7 @@
 
   $("session-list").addEventListener("click", async (e) => {
     if (e.target.closest("[data-misc-clear]")) return clearMisc();
+    if (e.target.closest("[data-sess-search-retry]")) return resessSearch();
     if (e.target.closest("[data-sess-retry]")) return sess.mode === "trash" ? loadTrash() : loadSessions();
     if (e.target.closest("[data-sess-more]")) { state.sessLimit = (state.sessLimit || 150) + 150; return loadSessions(); }
     const grp = e.target.closest(".sess-grp[data-g]");
@@ -400,6 +411,8 @@
     // 大小是本地 .jsonl 的体积，常被当成上下文用量（#35）：点一下说清楚
     if (a === "size") return popMenu(b, [{ head: t("本地记录大小") }, { head: t("这条会话存在设备上的记录文件有多大，含聊天内容和工具调用。不是模型当前的上下文长度，也不是 token 用量或费用；压缩上下文后原始记录仍会保留，所以它会一直变大。") }], null, "ss-size-tip");
     if (a === "restore") {
+      if (b.disabled) return;
+      b.disabled = true;   // 连点两次的第二次会撞「同名会话已存在」（0.6.9 审计 196-会话.4）
       const r = await post("/api/trash/restore", { ids: [id] }).catch((err) => ({ failed: [{ error: err.message }] }));
       if (r.failed && r.failed.length) toast(t("恢复失败：{msg}", { msg: r.failed[0].error === "exists" ? t("同名会话已存在") : r.failed[0].error }), true);
       else toast(t("已恢复"));
@@ -430,6 +443,8 @@
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ title: name }),
         });
+        // 会话不在最近 150 条里时，列表刷新也不会带回它，顶栏自己改过来（0.6.9 审计 196-会话.3）
+        if (id === view.sessionId) { view.title = name; paintTitle(); }
       } catch (err) { toast(err.message, true); }
       loadSessions();
       return;

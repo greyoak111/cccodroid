@@ -64,6 +64,14 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       const ok = document.execCommand("copy"); ta.remove(); return ok;
     } catch { return false; }
   }
+  // 读屏播报：整块聊天区不再当 live region（流式每帧都改 DOM，TalkBack 会一直念），
+  // 只在轮次结束时往这个专用节点里放一句话（0.6.9 审计 195-L.7）。先清空再放，同样的话也能再播一次
+  const srEl = document.getElementById("sr-status");
+  function srSay(msg) {
+    if (!srEl) return;
+    srEl.textContent = "";
+    setTimeout(() => { srEl.textContent = msg; }, 30);
+  }
   // ── 浮层统一管理：弹出菜单、下拉菜单、速览卡、权限菜单、型号 / 版本面板、项目弹层都登记在这里 ──
   // kind "menu"：轻浮层，同时只开一个；点外面就关（按在锚点上不算，留给锚点自己的 click 去切换）
   // kind "modal"：弹层，开它先关掉所有浮层；点外面不管（各自的遮罩自己处理）
@@ -629,9 +637,12 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
   const EXT_OK = new Set();
   function extImg(u) {
     if (!/^https?:/i.test(u) || EXT_OK.has(u) || uiGet("extImg") === "auto") return null;
-    let host = "";
-    try { host = new URL(u).hostname; } catch { host = u.slice(0, 40); }
-    if (host === location.hostname || host === "localhost" || /^127\./.test(host) || host === "[::1]") return null;
+    // 本机地址不一律放行（0.6.9 审计 196-前端注入.7）：同源的 /api/* 会带着 Cookie 被图片标签自动 GET，
+    // 像 /api/cli?cmd=doctor、/api/components?refresh=1 这类有副作用的接口，不点也会被触发。
+    // 只有明确只读的文件接口和页面自己的静态资源免点；其余（含别的端口的 127.*、localhost）都走「点一下加载」
+    let url = null, host = "";
+    try { url = new URL(u); host = url.hostname; } catch { host = u.slice(0, 40); }
+    if (url && url.origin === location.origin && /^\/(?:api\/file(?:\/|$)|vendor\/|fonts\/)/.test(url.pathname)) return null;
     return { ext: 1, src: u, host, label: t("外链图片 · {host} · 点一下加载", { host }), ok: () => EXT_OK.add(u) };
   }
   document.addEventListener("click", (e) => {
@@ -661,7 +672,23 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
   // ── Markdown 渲染 ─────────────────────────────────────────────────
   // 本机绝对路径：回复里出现就变成可点的链接，点了在应用内查看器打开（目录则开文件面板）。
   // 只认这几个根，免得把 "/api/file" 这类接口名、"1/2" 这类分数当成路径。可带 ":行号" 尾巴（file.js:12）。
-  const PATH_RE = /(^|[\s(（:：,，、;'"`“])((?:\/storage|\/sdcard|\/data|\/mnt)(?:\/[\w.\-+@%~=\u4e00-\u9fff]+)+\/?)(:\d+(?::\d+)?)?/g;
+  // 路径可用字符：中文、emoji 及其连接符 / 皮肤色（0.6.9 审计 195-C.1）
+  // 用 IIFE 自带字符集：pathnote.test.mjs 从这一行切到 inlineMd 末尾单独跑，不能引用上面的变量
+  const PATH_RE = (() => {
+    const C = "\\w.\\-+@%~=#?&" + String.fromCharCode(0x4e00) + "-" + String.fromCharCode(0x9fff)
+      + String.fromCodePoint(0x1f300) + "-" + String.fromCodePoint(0x1faff)
+      + String.fromCodePoint(0x200d) + String.fromCodePoint(0xfe0f)
+      + String.fromCodePoint(0x1f3fb) + "-" + String.fromCodePoint(0x1f3ff);
+    return new RegExp("(^|[\\s(（:：,，、;'\"`“])((?:\\/storage|\\/sdcard|\\/data|\\/mnt)(?:\\/[" + C + "]+)+\\/?)(:\\d+(?::\\d+)?)?", "gu");
+  })();
+  const PCH = "\\w.\\-+@%~=#?&" + String.fromCharCode(0x4e00) + "-" + String.fromCharCode(0x9fff)
+    + String.fromCodePoint(0x1f300) + "-" + String.fromCodePoint(0x1faff)
+    + String.fromCodePoint(0x200d) + String.fromCodePoint(0xfe0f)
+    + String.fromCodePoint(0x1f3fb) + "-" + String.fromCodePoint(0x1f3ff);
+  const PCHS = PCH + " ";
+  // 带空格的路径（0.6.9 审计 195-C.1）：只认「以扩展名结尾」的最后一段，并且跨空格时只允许路径常用字符，
+  // 免得把空格后面的正文一起吞进来；比它更宽松的 PATH_RE 放在后面跑
+  const PATH_SPACE_RE = new RegExp("(^|[\\s(（:：,，、;'\"`“])((?:\\/storage|\\/sdcard|\\/data|\\/mnt)(?:\\/[" + PCHS + "]+)*\\/[" + PCHS + "]+?\\.[A-Za-z0-9]{1,8})(:\\d+(?::\\d+)?)?(?=$|[\\s)）:：,，、;*”。！？!?&]|\\.(?:\\s|$))", "gu");
   // 本会话写过 / 改过的文件（Write、Edit…）：回复里只写了文件名或相对路径时也能点。模型常偷懒不写全路径，
   // 网关会提醒它（gw/pathnote.mjs），这里兜底。键是文件名和各级尾部路径；同名不同路径的记 null，不猜
   const WROTE = new Map();
@@ -710,6 +737,16 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       return (out + seg.slice(i0)).replace(/\\\$/g, "$");   // \$ 是转义，显示成 $
     }).join("");
   }
+  // 图片地址只认 http(s)、本页相对路径和图片类型的 data:（0.6.9 审计 196-前端注入.10）：
+  // data:text/html、javascript: 这类将来若被别处拿去当活动内容就是现成的注入面，这里先卡死
+  const SAFE_IMG_DATA = /^data:image\/(?:png|jpe?g|gif|webp|avif|bmp);base64,[a-z0-9+/=\s]+$/i;
+  function safeImgSrc(s) {
+    s = String(s || "");
+    const sch = (s.match(/^([a-z][a-z0-9+.-]*):/i) || [])[1];
+    if (!sch) return s.startsWith("//") ? "" : s;                 // 相对路径（协议相对 //host 会带 Cookie，不认）
+    const k = sch.toLowerCase();
+    return k === "http" || k === "https" || k === "blob" || (k === "data" && SAFE_IMG_DATA.test(s)) ? s : "";
+  }
   function inlineMd(s) {
     const maths = [];
     s = String(s).replace(/[\u0000\u0001]/g, "");   // 占位符用的控制字符：原文里自带的先去掉，免得和占位符撞上、把别的片段顶进来（审查 v0.5.5 W-L4）
@@ -723,17 +760,20 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (all, alt, u) =>
         { if (!mdImg) return all;
           const r = mdImg(u.replace(/&amp;/g, "&"));
-          return hold(typeof r === "object"
-            ? `<button type="button" class="md-img-ext" data-src="${esc(r.src)}" data-alt="${alt}">${esc(r.label)}</button>`
-            : `<img class="md-img" src="${esc(r)}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer">`); })
+          if (typeof r === "object") return hold(`<button type="button" class="md-img-ext" data-src="${esc(r.src)}" data-alt="${alt}">${esc(r.label)}</button>`);
+          const src = safeImgSrc(r);
+          return src ? hold(`<img class="md-img" src="${esc(src)}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer">`) : all; })
       .replace(/`([^`\n]+)`/g, (_, c) => {
-        const m = c.match(/^((?:\/storage|\/sdcard|\/data|\/mnt)(?:\/[^\s:]+)+\/?)(:\d+(?::\d+)?)?$/);
+        const m = c.match(/^((?:\/storage|\/sdcard|\/data|\/mnt)(?:\/[^\n]*?))(:\d+(?::\d+)?)?$/);
         const w = !m && wroteOf(c);
         return hold(m ? `<code>${pathLink(m[1], m[2], c)}</code>` : w ? `<code>${pathLink(w, "", c)}</code>` : `<code>${c}</code>`);
       })
-      .replace(/\[([^\]]+)\]\((\/[^)\s]+)\)/g, (_, l, p) => hold(pathLink(p.replace(/:\d+(?::\d+)?$/, ""), "", l)))
-      .replace(/\[([^\]]+)\]\(file:\/\/(\/[^)\s]+)\)/g, (all, l, u) => { const p = fileUrlPath(u); return p ? hold(pathLink(p, "", l)) : all; })
-      .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, (_, l, u) => hold(`<a class="weblink" href="${u}" target="_blank" rel="noopener">${l}</a>`))
+      // 链接里的路径按完整括号配平来取（0.6.9 审计 195-C.1），%xx 解码后进 data-path；
+      // 带空格/括号的路径用 Markdown 的尖括号写法：[说明](</sdcard/My Files/a.pdf>)
+      .replace(/\[([^\]]+)\]\(&lt;(\/[^\n]*?)&gt;\)/g, (all, l, u) => { const p = fileUrlPath(u); return p ? hold(pathLink(p, "", l)) : all; })
+      .replace(/\[([^\]]+)\]\((\/(?:[^()\s]|\([^()\s]*\))+)\)/g, (all, l, u) => { const p = fileUrlPath(u); return p ? hold(pathLink(p, "", l)) : all; })
+      .replace(/\[([^\]]+)\]\(file:\/\/(\/(?:[^()\s]|\([^()\s]*\))+)\)/g, (all, l, u) => { const p = fileUrlPath(u); return p ? hold(pathLink(p, "", l)) : all; })
+      .replace(/\[([^\]]+)\]\((https?:\/\/(?:[^()\s]|\([^()\s]*\))+)\)/g, (_, l, u) => hold(`<a class="weblink" href="${u}" target="_blank" rel="noopener">${l}</a>`))
       // 裸网址也能点（本机开发服务 http://127.0.0.1:端口 最常见）；句末标点不算
       .replace(/https?:\/\/[^\s<>"'`）)】」，。；、\u0000]+/g, (u) => {
         // 结尾的 * 也不算：**http://…** 这种加粗包着的网址，不然 ** 会进链接、点开 404
@@ -746,6 +786,10 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
         const tail = (u.match(/[.,;:*]+$/) || [""])[0], body = u.slice(0, u.length - tail.length);
         const p = fileUrlPath(body);
         return p ? pre + hold(pathLink(p, (body.match(/:\d+(?::\d+)?$/) || [""])[0])) + tail : all;
+      })
+      .replace(PATH_SPACE_RE, (_, pre, p, line) => {
+        const tail = line ? "" : (p.match(/[.]+$/) || [""])[0];
+        return pre + hold(pathLink(p.slice(0, p.length - tail.length), line)) + tail;
       })
       .replace(PATH_RE, (_, pre, p, line) => {
         const tail = line ? "" : (p.match(/[.]+$/) || [""])[0];     // 句末的点不算路径
@@ -795,7 +839,10 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
     };
 
     for (const raw of lines) {
-      const fence = raw.match(/^\s*```\s*([\w+#.-]*)\s*$/);
+      // 围栏后面可以带 info string（```js title="x"）：只把第一个词当语言，别因为后面还有字就认不出围栏，
+      // 否则正文会被当成代码、收尾围栏又把后面的正文吞进代码块（0.6.9 审计 196-聊天.6）。
+      // 代码块里只有不带 info 的围栏才算收尾，否则代码里以 ``` 开头的一行会被当成结束
+      const fence = (inCode ? /^\s*```\s*$/ : /^\s*```\s*([^\s`]*)(?:\s+.*)?$/).exec(raw);
       if (fence && !inMath) {
         if (inCode) {
           out += codeBlock(codeLang, codeBuf);
@@ -997,7 +1044,15 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       return toast(e.status === 403 ? t("这个位置受保护，不能在界面里打开：{p}", { p }) :
         e.status === 404 ? t("文件不存在：{p}", { p }) : t("打不开：{msg}", { msg: e.message }));
     }
-    if (r.dir) return openFiles(r.path);
+    if (r.dir) {
+      // 查看器盖着文件页（窄屏两页都铺满、查看器 z 更高）：先关查看器，不然文件页开在它底下（0.6.9 审计 195-C.17）
+      const vw = $("viewer");
+      if (vw && !vw.classList.contains("hidden")) {
+        closeViewer();
+        if (VW.dirty) return;    // 弹了「有未保存的修改」后选了不丢弃：留在查看器里
+      }
+      return openFiles(r.path);
+    }
     openViewer(r.path, r.kind, r.size);
   }
   const onPathLink = (e) => {

@@ -259,6 +259,8 @@
   function onPermRequest(ev) {
     const old = PERMS.get(ev.id);
     if (old && old.el && old.el.isConnected) return;      // 重放来的重复事件
+    // 缺 input 的事件：preview、权限条、提问卡都会读 p.input.*，以前一处抛错就整张卡 busy 卡死（0.6.9 审计 196-前端注入.1）
+    if (!ev.input || typeof ev.input !== "object" || Array.isArray(ev.input)) ev = Object.assign({}, ev, { input: {} });
     const it = { p: ev, runId: ev.runId, el: null, done: false, form: old && old.form };
     PERMS.set(ev.id, it);
     it.el = PermCard(ev, ev.runId);
@@ -274,15 +276,26 @@
   /** 整页盖着对话时有新的确认请求：权限条和状态栏都被盖住了，弹一条带「查看」的提示，别让这一轮无声等着（#175-1）。
    *  每个请求只提醒一次；点「查看」收起整页，是别的会话的就打开那个会话 */
   const ASK_SEEN = new Set();
+  // 聊天区此刻是否被设置 / 查看器 / 文件 / 终端 / 整页盖着（0.6.9 审计 195-B.2）：
+  // 盖着时权限条和状态栏都看不见，必须弹提示；只认 curPage 的话设置层盖着就不弹了
+  const COVER_IDS = ["set-ov", "viewer", "files", "term", "git", "lightbox", "term-textview", "pages"];
+  // typeof 守卫：perm-visible-175 的测试单独切这一段出来跑，那里没有 $ / DOM
+  const chatCovered = () => typeof $ === "function" && COVER_IDS.some((id) => { const el = $(id); return el && !el.classList.contains("hidden"); });
+  function revealChat() {
+    // 逐层收（返回键同一套顺序）：查看器有未保存修改时会先问，那是用户该回答的
+    for (let n = 0; n < 8 && chatCovered(); n++) if (!window.__ccBack || !window.__ccBack()) break;
+  }
   function askNotice(list) {
     let first = null;
-    for (const x of list) { if (ASK_SEEN.has(x.id)) continue; ASK_SEEN.add(x.id); first = first || x; }
+    for (const x of list) { if (ASK_SEEN.has(x.id)) continue; first = first || x; }
     if (ASK_SEEN.size > 500) for (const id of [...ASK_SEEN].slice(0, 250)) ASK_SEEN.delete(id);
-    if (!first || !curPage) return;
+    if (!first || !(curPage || chatCovered())) return;
+    // 一次只登记这一条：以前把同批全部记成「已提醒」，后面的卡再也不弹（0.6.9 审计 195-B.8）
+    ASK_SEEN.add(first.id);
     const r = srv.runs.find((y) => y.id === first.runId);
     toastAct(t("Claude 在等你确认"), t("查看"), () => {
-      if (r && r.sessionId && r.sessionId !== view.sessionId) return openSession(r.sessionId);
-      closePage();
+      if (r && r.sessionId && r.sessionId !== view.sessionId) { revealChat(); return openSession(r.sessionId); }
+      revealChat();
     });
   }
 
@@ -428,7 +441,8 @@
       permWaiting = false;
       return;
     }
-    const f = list[0].p, simple = (it) => it.p.tool !== "ExitPlanMode" && it.p.tool !== "AskUserQuestion";
+    // 敏感卡（guard）不能当成 simple：底部条的「允许」不带风险说明、还会顺带「始终允许」，必须点开卡再答（0.6.9 审计 195-B.3）
+    const f = list[0].p, simple = (it) => !it.p.guard && it.p.tool !== "ExitPlanMode" && it.p.tool !== "AskUserQuestion";
     const what = f.tool === "Bash" ? f.input.command : (f.input.file_path || f.input.url || f.input.query || "");
     permBar.innerHTML = `
       <div class="pb-main">
@@ -507,18 +521,27 @@
     // 不能只看标签一样就不发：标签可能是旧的（重放过旧事件），用户要收紧时必须真送到网关（安全通告 GHSA-2w6p）
     if (!mode || (mode === state.permissionMode && mode === "bypassPermissions")) return;
     if (mode === "bypassPermissions" && !confirm(t("切到「全部放行」？\n\nClaude 将不再询问，可以直接改写、删除文件，运行任意命令，访问网络。只在你信任当前任务、且出了事能承受的时候用。"))) {
-      $("set-perm").value = state.permissionMode;
+      // 取消：下拉框回到全局设置，不能被 chip 的运行模式带跑（0.6.9 审计 195-B.9）
+      $("set-perm").value = state.settings.permissionMode || state.permissionMode;
       return;
     }
     try {
       const r = await api("/api/perm/mode", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode }) });
-      state.settings.permissionMode = r.mode;
-      setPermChip(r.mode);
-      $("set-perm").value = r.mode;
-      for (const x of srv.runs) if (x.permMode) x.permMode = r.mode;   // 同 perm_mode 事件：等着的计划卡跟着重排（#175-2）
+      // 安全模式下网关会把这几档退回 default（gw/claude.mjs safeModePerm）：chip 要显示实际生效的那档，
+      // 不能拿请求值冒充（0.6.9 审计 #194 P1-12 / 195-B.6 前端半）
+      const eff = state.safeMode && ["bypassPermissions", "auto", "acceptEdits"].includes(r.mode) ? "default" : r.mode;
+      state.settings.permissionMode = r.mode;   // 全局设置记原值；chip / 下拉显示实际生效的
+      setPermChip(eff);
+      $("set-perm").value = eff;
+      for (const x of srv.runs) if (x.permMode) x.permMode = eff;   // 同 perm_mode 事件：等着的计划卡跟着重排（#175-2）
       refreshPlanActs();
-      toast(r.live ? t("已切到「{m}」，这一轮当场生效", { m: modeLabel(r.mode) }) : t("已切到「{m}」", { m: modeLabel(r.mode) }));
-    } catch (err) { toast(err.message, true); }
+      if (eff !== r.mode) toast(t("安全模式里「{m}」会按「逐项确认」生效", { m: modeLabel(r.mode) }));
+      else toast(r.live ? t("已切到「{m}」，这一轮当场生效", { m: modeLabel(r.mode) }) : t("已切到「{m}」", { m: modeLabel(r.mode) }));
+    } catch (err) {
+      // 保存失败：下拉框回到全局设置，别停在新值让人以为切了（0.6.9 审计 196-显示.1）
+      $("set-perm").value = state.settings.permissionMode || state.permissionMode;
+      toast(err.message, true);
+    }
   }
 
   // 回复底下的「复制 / 转发」：只取正文（Markdown 原文，多段之间空一行），思考和工具调用不算。
@@ -535,11 +558,11 @@
       (sys ? "" : (hasText ? actBtn("fork", t("从这里分叉")) + actBtn("mark", t("书签")) : "") + actBtn("del", t("删除")));
     acts.addEventListener("click", (e) => {
       const a = e.target.closest("button")?.dataset.a, text = getText();
-      if (a === "copy") { copyText(text); toast(t("已复制")); }
+      if (a === "copy") copyText(text).then((ok) => toast(ok ? t("已复制") : t("复制失败"), !ok));
       if (a === "share") {
         if (window.CCApp && CCApp.shareText) CCApp.shareText(text);
         else if (navigator.share) navigator.share({ text }).catch(() => {});
-        else { copyText(text); toast(t("这里没有系统分享，已复制到剪贴板")); }
+        else copyText(text).then((ok) => toast(ok ? t("这里没有系统分享，已复制到剪贴板") : t("复制失败"), !ok));
       }
       if (a === "fork") forkFrom(msgEl);
       if (a === "mark") toggleMark(msgEl);
@@ -838,12 +861,13 @@
         undot(); last = null;
         bubble.insertAdjacentHTML("beforeend", `<p class="run-note" data-k="${esc(k)}">${esc(t)}</p>`); keepTail();
       },
-      finish(aborted) {
+      finish(aborted, failed) {
         if (ended) return;
         phClear();
         ended = true;
         liveTail?.remove();
-        for (const b of blocks) { b.finish && b.finish(); if (aborted && b.stop) b.stop(); }
+        // 失败的一轮也要把还在跑的卡收口：优先「失败」，没有 fail 的（老块）退回 stop（0.6.9 审计 195-BB.1）
+        for (const b of blocks) { b.finish && b.finish(); if (failed && b.fail) b.fail(); else if ((aborted || failed) && b.stop) b.stop(); }
         undot();
         if (!any && live && !aborted) bubble.innerHTML = '<p class="muted">' + t("（无输出）") + '</p>';
         replyActs(msgEl, () => blocks.filter((b) => b.kind === "text").map((b) => b.text.trim()).filter(Boolean).join("\n\n"));

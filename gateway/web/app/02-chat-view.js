@@ -15,6 +15,7 @@
     loading: false,
     runIds: new Set(),   // 属于本视图的 run（新会话在拿到会话号前靠它认亲）
     cids: new Set(),     // 本窗口发出的消息号
+    cidRuns: new Map(),  // 消息号 → run 号：聚合草稿 init 后要按会话拆开时，连 cid 一起摘掉（#191-1）
     lastRunId: null,
     title: "",
     goal: null,          // 本会话的 /goal 状态（网关从会话记录里推出来的，见 goalStateOf）
@@ -158,11 +159,15 @@
   // 气泡里照样画成文件卡片（不出缩略图）
   //   认准后面那段固定文字（05-composer.js attRef），路径按最短匹配取：文件名里带「 · 」「]」也不截错
   const BIG_REF = "\\[附件：(\\/[^\\n]+?) · [^\\n·，\\]]+，文件较大没有直接读入，需要时按路径读取\\]";
-  const REF1 = "(?:@\\/\\S+|" + BIG_REF + ")", REF_TAIL = new RegExp(REF1 + "(?:\\s+" + REF1 + ")*\\s*$");
+  // 文件名带空白时发送端写成 @"…"（05-composer.js attAt）：这里也要当成一条引用拆出来，
+  // 否则气泡里会露出一串 @路径，文件卡片也没有（0.6.9 审计 195-D.2）
+  const AT_REF = '@"(?:[^"\\\\]|\\\\.)*"';
+  const REF1 = "(?:" + AT_REF + "|@\\/\\S+|" + BIG_REF + ")", REF_TAIL = new RegExp(REF1 + "(?:\\s+" + REF1 + ")*\\s*$");
   function splitRefs(text) {
     const m = REF_TAIL.exec(text || "");
     if (!m) return [text, []];
-    const refs = [...m[0].matchAll(new RegExp(REF1, "g"))].map(([r, big]) => r[0] === "@" ? { p: r.slice(1) } : { p: big, big: true });
+    const refs = [...m[0].matchAll(new RegExp(REF1, "g"))].map(([r, big]) =>
+      big ? { p: big, big: true } : r.startsWith('@"') ? { p: r.slice(2, -1).replace(/\\(.)/g, "$1") } : { p: r.slice(1) });
     return [text.slice(0, m.index).trimEnd(), refs];
   }
   function refsHtml(refs) {
@@ -195,7 +200,7 @@
       const a = e.target.closest("button")?.dataset.a;
       // 复制只要说的话：附件那几行 @/data/user/0/…/uploads/… 是给模型读文件用的，粘到别处只是一串长路径（群友 10-31）。
       // 只发了附件没打字的，才照原样复制路径；重发照旧带上附件
-      if (a === "copy") { copyText(body.trim() || text); toast(t("已复制")); }
+      if (a === "copy") copyText(body.trim() || text).then((ok) => toast(ok ? t("已复制") : t("复制失败"), !ok));
       if (a === "resend") { inputEl.value = text; autoGrow(); inputEl.focus(); }
       if (a === "rewind") rewindTo(b.parentElement);
       if (a === "mark") toggleMark(b.parentElement);
@@ -245,7 +250,7 @@
     const frozen = document.createElement("div"), tail = document.createElement("div");
     el.append(frozen, tail);
     parent.appendChild(el);
-    let text = "", fz = 0, timer = 0, shown = 0, ending = false;
+    let text = "", fz = 0, timer = 0, shown = 0, ending = false, hlAt = 0;
     el._src = () => text;   // 书签：没有 uuid 时按正文开头去文件里认领
 
     function paint(final) {
@@ -265,7 +270,9 @@
           fz = idx;
           sl.into = c;
         }
-        tail.innerHTML = renderMd(vis.slice(fz)); enhanceMd(tail);   // 光标不跟在每段正文后面：整条回复只留一个，见 AssistantView 的 liveTail
+        tail.innerHTML = renderMd(vis.slice(fz));   // 光标不跟在每段正文后面：整条回复只留一个，见 AssistantView 的 liveTail
+        // 流式时每帧重高亮长代码块很贵（实测 1000 行单帧 179ms）：最多每 300ms 做一次，收尾时一定补上（0.6.9 审计 195-Q.1）
+        if (Date.now() - hlAt > 300) { hlAt = Date.now(); enhanceMd(tail); }
         sl();
       } else {
         const sl = keepX();
@@ -387,8 +394,8 @@
     const calls = [];
     const c = { lazy: true, id, name, input, live, calls, isAgent: name === "Agent" || name === "Task",
                 state: live ? "run" : "ok", summary: summarizeTool(name, input), onChange: null };
-    for (const k of ["result", "subText", "subProgress", "subDone", "stop", "finish", "subLazy"]) {
-      c[k] = (...a) => { calls.push([k, a]); if (k === "result") c.state = a[0] ? "ok" : "err"; if (k === "stop" && c.state === "run") c.state = "err"; };
+    for (const k of ["result", "subText", "subProgress", "subDone", "stop", "fail", "finish", "subLazy"]) {
+      c[k] = (...a) => { calls.push([k, a]); if (k === "result") c.state = a[0] ? "ok" : "err"; if ((k === "stop" || k === "fail") && c.state === "run") c.state = "err"; };
     }
     c.sub = (sid, sn, si) => { const n = LazyCard(sid, sn, si, live); n.host = c.host; calls.push(["sub", [sid, sn, si, n]]); if (sid) TOOL_CARDS.set(sid, n); return n; };
     return c;
@@ -531,6 +538,15 @@
         if (!result || api.state === "run") { api.state = "err"; st.className = "tool-state err"; st.textContent = t("中断"); if (sub) sub.now.textContent = ""; api.onChange && api.onChange(); }
         if (sub) { for (const c of sub.queue) c.stop(); for (const c of (sub.older || []).flat()) c.stop(); for (const k of sub.kids) k.stop(); }
       },
+      // 这一轮失败（不是用户中断）：还在转圈的卡收成「失败」，别一直亮着「运行中」（0.6.9 审计 195-BB.1）
+      fail() {
+        if (!result && api.state === "run") { api.state = "err"; st.className = "tool-state err"; st.textContent = t("失败"); if (sub) sub.now.textContent = ""; api.onChange && api.onChange(); }
+        if (sub) {
+          for (const c of sub.queue) c.fail ? c.fail() : c.stop();
+          for (const c of (sub.older || []).flat()) c.fail ? c.fail() : c.stop();
+          for (const k of sub.kids) k.fail ? k.fail() : k.stop();
+        }
+      },
       finish() { if (!result && !live) { st.textContent = "—"; } },
       isAgent,
       // 子代理的一步：嵌套工具卡（注册进 TOOL_CARDS，结果和权限卡照常按 id 找到它）
@@ -672,6 +688,7 @@
       addThink(b) { inner.push(b); if (b.el.parentNode !== body) body.appendChild(b.el); },
       finish() { for (const b of inner) b.finish && b.finish(); refresh(); },
       stop() { for (const m of members) m.stop(); },
+      fail() { for (const m of members) m.fail ? m.fail() : m.stop(); refresh(); },
     };
   }
   function toolResult(id, ok, text) {
