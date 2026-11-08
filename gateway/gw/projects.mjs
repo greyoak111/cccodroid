@@ -153,12 +153,19 @@ export function moveSession(sid, projectId) {
   }
   // 同名目录（子代理记录、超长工具结果）搬不过去就整个不搬：删掉刚写的新记录、原会话原样留着，报错（#98 03-003）。
   // 以前吞掉这个错接着删原记录，附件留在旧目录，新位置的会话读不到子代理过程
-  const side = path.join(path.dirname(found.file), sid);
-  if (isDir(side)) {
-    try { fs.renameSync(side, path.join(dir, sid)); }
+  const side = path.join(path.dirname(found.file), sid), sideDst = path.join(dir, sid);
+  const sideMoved = isDir(side);
+  if (sideMoved) {
+    try { fs.renameSync(side, sideDst); }
     catch (e) { fs.rmSync(dst, { force: true }); throw new Error(tz("会话附带的文件没搬过去，会话留在原处：{err}", { err: e.code || e.message })); }
   }
-  fs.rmSync(found.file, { force: true });
+  // 原记录删不掉（只读、EBUSY…）：两边各一份，列表里同一个会话出现两次。整个退回去：附件搬回、新记录删掉，报错（0.6.9 审计 200-8-06）
+  try { fs.rmSync(found.file, { force: true }); }
+  catch (e) {
+    if (sideMoved) try { fs.renameSync(sideDst, side); } catch (e2) { log(`⚠️ 会话 ${sid.slice(0, 8)} 的附件没能搬回：${e2.code || e2.message}`); }
+    fs.rmSync(dst, { force: true });
+    throw new Error(tz("原来的会话记录删不掉，会话留在原处：{err}", { err: e.code || e.message }));
+  }
   resealAfterEdit(sid, dst, dirty);
   PEEK_CACHE.delete(found.file); lineageForget(sid);
   log(`📁 会话 ${sid.slice(0, 8)} → ${p ? "项目 " + p.name : "工作区"}`);

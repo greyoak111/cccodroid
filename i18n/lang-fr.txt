@@ -2964,3 +2964,4 @@
 2964	1 jour
 2965	3 jours
 2966	7 jours
+2967	Impossible de supprimer l’enregistrement d’origine de la session ; elle reste à sa place : {err}

@@ -2964,3 +2964,4 @@
 2964	1 hari
 2965	3 hari
 2966	7 hari
+2967	Catatan sesi asli tidak bisa dihapus, jadi sesi tetap di tempat semula: {err}

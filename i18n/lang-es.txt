@@ -2964,3 +2964,4 @@
 2964	1 día
 2965	3 días
 2966	7 días
+2967	No se pudo borrar el registro original de la sesión; la sesión se queda donde estaba: {err}

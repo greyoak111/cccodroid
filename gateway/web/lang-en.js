@@ -3001,5 +3001,6 @@ window.I18N_DICT.en = {
   "4 小时": "4 hours",
   "1 天": "1 day",
   "3 天": "3 days",
-  "7 天": "7 days"
+  "7 天": "7 days",
+  "原来的会话记录删不掉，会话留在原处：{err}": "Couldn't delete the original session record, so the session stays where it was: {err}"
 };

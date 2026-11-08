@@ -2967,4 +2967,5 @@ window.I18N_DICT["id"] = {
   "1 天": "1 hari",
   "3 天": "3 hari",
   "7 天": "7 hari",
+  "原来的会话记录删不掉，会话留在原处：{err}": "Catatan sesi asli tidak bisa dihapus, jadi sesi tetap di tempat semula: {err}",
 };

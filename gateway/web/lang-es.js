@@ -2967,4 +2967,5 @@ window.I18N_DICT["es"] = {
   "1 天": "1 día",
   "3 天": "3 días",
   "7 天": "7 días",
+  "原来的会话记录删不掉，会话留在原处：{err}": "No se pudo borrar el registro original de la sesión; la sesión se queda donde estaba: {err}",
 };
