@@ -134,7 +134,13 @@ async function gitGate(root, body) {
   if (!risks.length) return null;
   const fp = crypto.createHash("sha256").update(root + "\0" + src).digest("hex").slice(0, 24);
   if (GIT_TRUST.get(root) === fp) return null;
-  if (body && body.trust === fp) { GIT_TRUST.set(root, fp); log(`[git] 用户确认信任仓库配置 @ ${root}`); return null; }
+  if (body && body.trust === fp) {
+    GIT_TRUST.set(root, fp);
+    // 打开过的仓库只增不减：最多留最近 200 个（200-6-05）
+    if (GIT_TRUST.size > 200) GIT_TRUST.delete(GIT_TRUST.keys().next().value);
+    log(`[git] 用户确认信任仓库配置 @ ${root}`);
+    return null;
+  }
   return { error: "untrusted", fp, risks, message: tz("这个仓库自己的配置会在这一步执行命令。只有信得过这个仓库时才继续。") };
 }
 // GIT_LITERAL_PATHSPECS：前端给的都是确切文件名，report[1].txt 不能当通配把 report1.txt 一起撤销 / 提交（审查 B03）
@@ -160,7 +166,7 @@ function gitRun(cwd, args, { input, timeout = 30000, max = GIT_MAX } = {}, extra
       const errOut = Buffer.concat(errs).toString("utf8");
       const err = timedOut ? tz("git 超时（{s} 秒），已结束它和它启动的钩子", { s: Math.round(timeout / 1000) })
         : spawnErr ? (spawnErr.code === "ENOENT" ? "找不到 git" : spawnErr.message) : over ? "输出太长" : errOut;
-      resolve({ code: timedOut || spawnErr || over ? (code || 1) : (code ?? 1), out: Buffer.concat(out).toString("utf8"), err: String(err || "").trim() });
+      resolve({ code: timedOut || spawnErr || over ? (code || 1) : (code ?? 1), out: Buffer.concat(out).toString("utf8"), err: String(err || "").trim(), over });
     });
     c.stdin.on("error", () => {});
     if (input != null) c.stdin.end(input); else c.stdin.end();
@@ -241,7 +247,9 @@ async function gitRenames(root) {
 }
 
 async function gitStatus(root) {
-  const r = await git(root, ["status", "--porcelain=v1", "-z", "-b", "--untracked-files=all"]);
+  // 未跟踪文件很多时 status 输出会超过默认 768KB，被当成“输出太长”整块失败（196 Git 域第 2 条）。
+  // 这里放宽到 16MB，解析仍然只留前 1000 项并标 truncated
+  const r = await git(root, ["status", "--porcelain=v1", "-z", "-b", "--untracked-files=all"], { max: 16 << 20 });
   if (r.code) return { error: r.err };
   const parts = r.out.split("\0");
   const out = { root, branch: "", upstream: "", ahead: 0, behind: 0, files: [] };
@@ -303,7 +311,13 @@ async function handleGit(req, res, p, u) {
     log(`[git] 新建仓库 ${repo.dir}`);
     return sendJson(res, r.code ? 500 : 200, r.code ? { error: r.err } : { ok: true, root: repo.dir });
   }
-  if (repo.error) return sendJson(res, repo.status || (repo.notRepo ? 200 : 400), { error: repo.error, notRepo: !!repo.notRepo, dir: repo.dir });
+  if (repo.error) {
+    // status 照旧 200 + notRepo，面板好显示“在这里建仓库”；其它动作（推送/提交/丢弃/切换）回 409。
+    // 以前一律 200，api() 当成成功，界面会提示“完成”（196 Git 域第 4 条）
+    const code = repo.status || (repo.notRepo ? (act === "status" ? 200 : 409) : 400);
+    return sendJson(res, code, { error: repo.error, notRepo: !!repo.notRepo, dir: repo.dir,
+      message: repo.notRepo && act !== "status" ? tz("这个文件夹已经不是 git 仓库了") : undefined });
+  }
   const root = repo.root;
 
   if (act === "status") return sendJson(res, 200, await gitStatus(root));
@@ -329,15 +343,20 @@ async function handleGit(req, res, p, u) {
       }
       if (r.code === 1 && r.out) r.code = 0;            // --no-index 有差异时退出码是 1
     }
-    if (r.code) return sendJson(res, 500, { error: r.err });
-    return sendJson(res, 200, { root, file, commit, diff: r.out.slice(0, GIT_MAX), truncated: r.out.length > GIT_MAX });
+    // 输出太大被中途杀掉时，把已经拿到的部分按截断返回：以前直接 500，“只显示前一部分”的提示永远走不到（196 Git 域第 10 条）
+    if (r.code && !r.over) return sendJson(res, 500, { error: r.err });
+    return sendJson(res, 200, { root, file, commit, diff: r.out.slice(0, GIT_MAX), truncated: !!r.over || r.out.length > GIT_MAX });
   }
 
   if (act === "log") {
     const n = Math.min(200, Math.max(1, +q("n") || 50)), skip = Math.max(0, +q("skip") || 0);
     const file = q("file") ? gitRel(root, q("file")) : "";
     const r = await git(root, ["log", `-n${n}`, `--skip=${skip}`, "--format=%H%x1f%h%x1f%an%x1f%at%x1f%s%x1f%D%x1e", ...(file ? ["--follow", "--", file] : [])]);
-    if (r.code) return sendJson(res, 200, { root, commits: [], error: /does not have any commits/.test(r.err) ? "" : r.err });
+    if (r.code) {
+      // 真的是还没有提交才回空列表；仓库坏了、没权限这类失败不能画成“还没有提交记录”（196 Git 域第 3 条）
+      if (/does not have any commits|no commits yet/i.test(r.err)) return sendJson(res, 200, { root, commits: [], more: false });
+      return sendJson(res, 500, { error: r.err || tz("读不出提交历史") });
+    }
     const commits = r.out.split("\x1e").map((s) => s.trim()).filter(Boolean).map((s) => {
       const [hash, short, author, at, subject, refs] = s.split("\x1f");
       return { hash, short, author, at: +at * 1000, subject, refs: refs || "" };
@@ -351,8 +370,16 @@ async function handleGit(req, res, p, u) {
     const meta = await git(root, ["show", "-s", "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%B", c]);
     if (meta.code) return sendJson(res, 404, { error: meta.err });
     const [hash, author, email, at, message] = meta.out.split("\x1f");
-    const ns = await git(root, ["show", "--format=", "--numstat", "-M", "-z", c]);
-    const nm = await git(root, ["show", "--format=", "--name-status", "-M", "-z", c]);
+    // 合并提交用 show 默认只给组合 diff（常常是空的），历史详情就成了“没有文件”。
+    // 有父提交就按第一父比较；普通提交这样与 show 等价（196 Git 域第 7 条）
+    const par = await git(root, ["rev-parse", "-q", "--verify", c + "^1"]);
+    const base = par.code ? "" : par.out.trim();
+    const ns = base ? await git(root, ["diff", "--numstat", "-M", "-z", base, c])
+      : await git(root, ["show", "--format=", "--numstat", "-M", "-z", c]);
+    const nm = base ? await git(root, ["diff", "--name-status", "-M", "-z", base, c])
+      : await git(root, ["show", "--format=", "--name-status", "-M", "-z", c]);
+    // 文件列表读失败不能静默画成“没有文件”（196 Git 域第 11 条）
+    if (ns.code || nm.code) return sendJson(res, 500, { error: tz("读不出这次提交的文件列表") });
     const files = [];
     const a = nm.out.split("\0").filter((x) => x !== "");
     for (let i = 0; i < a.length; i++) {
@@ -436,6 +463,8 @@ async function handleGit(req, res, p, u) {
     if (!name || name.startsWith("-") || /[\s~^:?*\[\\]|\.\.|@\{|\/\/|\.lock$|\/$|\.$/.test(name)) return sendJson(res, 400, { error: tz("分支名不合法") });
     const create = !!body.create;
     const st = await gitStatus(root);
+    // status 失败时 st.files 不存在，以前这里抛 TypeError 变成 500（196 Git 域第 9 条）
+    if (st.error) return sendJson(res, 500, { error: st.error });
     if (st.files.some((f) => f.kind === "conflict")) return sendJson(res, 409, { error: tz("还有没解决的冲突，先处理完再切换。") });
     let r;
     if (create) r = await git(root, ["switch", "-c", name]);
@@ -505,6 +534,8 @@ async function handleGit(req, res, p, u) {
     const file = gitRel(root, String(body.file || ""));
     if (!file) return sendJson(res, 400, { error: "file required" });
     const st = await git(root, ["status", "--porcelain=v1", "-z", "--", file]);
+    // git 失败时 out 也是空的：以前当成“没有改动”假报成功（196 Git 域第 9 条）
+    if (st.code) return sendJson(res, 500, { error: st.err || tz("读不出这个文件的状态") });
     if (!st.out) return sendJson(res, 200, { ok: true, message: tz("没有改动") });
     if (st.out.startsWith("??")) {
       try { fs.rmSync(path.join(root, file), { force: true }); } catch (e) { return sendJson(res, 500, { error: e.message }); }

@@ -30,6 +30,7 @@
   async function openGit(dir, opts = {}) {
     Object.assign(GIT, { dir, root: "", tab: opts.tab || "changes", status: null, file: opts.file || "", view: opts.file ? (opts.tab === "history" ? { kind: "log" } : { kind: "diff" }) : null });
     GIT.sel = new Set(); GIT.known = null;    // 重开和第一次一样默认全选（审查 C-010）
+    GIT.status = null; gitSyncBar();          // 先收起上一个仓库的同步栏；加载失败也不能留着它（196 Git 域第 12 条）
     if (GIT.msgRoot !== dir) GIT.msg = "";   // 提交说明草稿只在同一个仓库面板里留着
     MO.cancel(gitEl); gitEl.classList.remove("hidden"); window.CCLayout && CCLayout.raise("git");
     $("git-name").textContent = String(dir).split("/").pop();
@@ -50,9 +51,17 @@
     // 先开 A 仓库再开 B：A 的状态迟到不许盖上来，不然显示的是 A、撤销提交却作用于 B（审查 #49 P2-2）
     const ok = latest("git"), dir = GIT.dir;
     let s;
-    try { s = await gapi("status"); } catch (e) { if (ok()) $("git-body").innerHTML = `<div class="vw-empty">${esc(e.message)}</div>`; return; }
+    try { s = await gapi("status"); }
+    catch (e) {
+      if (ok()) {
+        GIT.status = null; gitSyncBar(); $("git-info").textContent = "";   // 别留着上一个仓库的同步栏和分支（196 Git 域第 12 条）
+        $("git-body").innerHTML = `<div class="vw-empty">${esc(e.message)}</div>`;
+      }
+      return;
+    }
     if (!ok() || GIT.dir !== dir) return;
     if (s.notRepo) {
+      GIT.status = null;
       $("git-info").textContent = "";
       $("git-sync").classList.add("hidden");
       $("git-body").innerHTML = `<div class="vw-empty"><div>${t("这个文件夹还不是 git 仓库。")}</div>
@@ -64,7 +73,11 @@
       };
       return;
     }
-    if (s.error) { $("git-body").innerHTML = `<div class="vw-empty">${esc(s.error)}</div>`; return; }
+    if (s.error) {
+      GIT.status = null; gitSyncBar(); $("git-info").textContent = "";   // status 失败同样不能沿用上一个仓库的同步栏
+      $("git-body").innerHTML = `<div class="vw-empty">${esc(s.error)}</div>`;
+      return;
+    }
     GIT.status = s; GIT.root = s.root;
     // 默认全选；刷新时保留用户的取舍，新冒出来的文件默认选上
     const known = GIT.known || new Set();
@@ -122,7 +135,7 @@
     }
     GIT_BUSY.delete(dir);
     if (GIT.dir !== dir) return;
-    GIT.known = null;
+    // 不再把 known 清空：抓取/拉取/推送后保留用户的勾选，只有新冒出来的文件默认选上（196 Git 域第 6 条）
     gitLoad();
   });
 
@@ -167,6 +180,8 @@
       if (ck != null) {
         const f = s.files[+ck]; e.target.checked ? GIT.sel.add(f.path) : GIT.sel.delete(f.path);
         const b = $("git-do"); b.disabled = !GIT.sel.size; b.textContent = t("提交选中的 {n} 个文件", { n: GIT.sel.size });
+        // “全选”框跟着单个勾选走：以前取消一个文件后全选框还是勾着的，再点一次反而清空（196 Git 域第 5 条）
+        const all = $("git-all"); if (all) all.checked = GIT.sel.size === s.files.length;
         return;
       }
       if (op) { GIT.file = s.files[+op.dataset.open].path; GIT.view = { kind: "diff" }; return gitRender(); }
@@ -696,16 +711,21 @@
   /** 统一 diff → Map(新文件行号 → { type, old:[原来的行] }) */
   function gutMarks(diff) {
     const m = new Map();
-    let n = 0, dels = [], adds = [];
+    let n = 0, dels = [], adds = [], inHunk = false;
     const flush = () => {
       if (adds.length) adds.forEach((ln, i) => m.set(ln, { type: dels.length ? "mod" : "add", old: i === 0 ? dels : null, first: i === 0 }));
       else if (dels.length) m.set(n, { type: "del", old: dels });
       dels = []; adds = [];
     };
     for (const line of String(diff || "").split("\n")) {
+      // 只在 hunk 里认正文。以前用 /^(---|\+\+\+) / 排除文件头，正文里以 "-- " / "++ " 开头的行
+      // 会被当成文件头跳过，后面的行号整体偏移（196 Git 域第 8 条）
+      if (line.startsWith("diff --git ") || line.startsWith("diff --cc ") || line.startsWith("diff --combined ")) {
+        flush(); inHunk = false; continue;
+      }
       const h = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (h) { flush(); n = +h[1]; continue; }
-      if (!n || /^(\+\+\+|---) /.test(line) || line.startsWith("\\")) continue;
+      if (h) { flush(); n = +h[1]; inHunk = true; continue; }
+      if (!inHunk || line.startsWith("\\")) continue;
       if (line[0] === "-") { if (adds.length) flush(); dels.push(line.slice(1)); }
       else if (line[0] === "+") { adds.push(n++); }
       else if (line[0] === " ") { flush(); n++; }
