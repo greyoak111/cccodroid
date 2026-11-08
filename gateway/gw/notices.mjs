@@ -112,7 +112,9 @@ export async function routeNotices(req, res, u, p) {
     const lang = (u.searchParams.get("lang") || "zh").startsWith("zh") ? "zh" : "en";
     const seen = readSeen(), all = active(lang);
     const items = u.searchParams.get("all") === "1" ? all.map((n) => ({ ...n, seen: seen.has(n.id) })) : all.filter((n) => !seen.has(n.id));
-    return sendJson(res, 200, { ok: true, items, error: lastError, at: fetchedAt });
+    // fetching：还在取（前端 8 秒等不到时能看到「正在取」而不是当成没有通知）；
+    // cached：手上有验过签的旧数据。error 非空就是这次没取到（0.6.9 审计 195-R.8）
+    return sendJson(res, 200, { ok: true, items, error: lastError, at: fetchedAt, fetching: !!busy, cached: !!data });
   }
   if (p === "/api/notices/dismiss" && req.method === "POST") {
     let id = "";

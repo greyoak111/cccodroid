@@ -31,10 +31,14 @@ const one = (x, n = 260) => String(x == null ? "" : x).replace(/[\u0000-\u001f\u
 
 const exists = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
 const readLines = (f) => { try { return fs.readFileSync(f, "utf8").split("\n").filter(Boolean); } catch { return null; } };
-/** 一串相对 $PREFIX 的路径里不在磁盘上的（软链只看链本身，指向哪里不管） */
+/** 软链要指向真东西才算在：86 个组件文档软链指向不存在的 usr/LICENSES，只看 lstat 永远显示正常（0.6.9 审计 真机数据） */
+const present = (f) => {
+  try { const st = fs.lstatSync(f); if (st.isSymbolicLink()) { fs.statSync(f); } return true; } catch { return false; }
+};
+/** 一串相对 $PREFIX 的路径里不在磁盘上的（软链跟到目标） */
 function missingOf(rels) {
   const out = [];
-  for (const r of rels) if (!exists(path.join(PREFIX, r))) out.push(r);
+  for (const r of rels) if (!present(path.join(PREFIX, r))) out.push(r);
   return out;
 }
 const badRel = (r) => typeof r !== "string" || !r || r.startsWith("/") || r.split("/").includes("..");
@@ -49,7 +53,9 @@ export function reconcileNow() {
   const add = (key, level, k, v, fix, samples) => F.push({ key, level, k, v: v || null, fix: fix || "", ...(samples && samples.length ? { samples: samples.slice(0, 8) } : {}) });
   const dk = devkitIdentity();
   if (!dk) add("devkit", "error", tz("找不到工具包的安装标记（.devkit-ok），工具包可能没装完"), null, tz("设置 → 更新：修复工具包"));
-  if (PATHS.claude && !fs.existsSync(PATHS.claude)) add("claude", "error", tz("找不到 Claude Code 程序"), null, tz("设置 → 更新：重装 Claude Code"), [PATHS.claude]);
+  // 用户主动卸载 Claude Code 会留 files/.claude-uninstalled：这是正常状态，别再报红教人重装（0.6.9 审计 195-M.7）
+  const claudeUninstalled = PREFIX && exists(path.join(path.dirname(PREFIX), ".claude-uninstalled"));
+  if (PATHS.claude && !fs.existsSync(PATHS.claude) && !claudeUninstalled) add("claude", "error", tz("找不到 Claude Code 程序"), null, tz("设置 → 更新：重装 Claude Code"), [PATHS.claude]);
 
   // ── 组件 ──
   let recs = [];
@@ -65,6 +71,10 @@ export function reconcileNow() {
     const gone = missingOf(files.filter((r) => !badRel(r)));
     if (binsGone.length) add("comp-bin:" + id, "error", tz("组件「{id}」的命令不在了：{cmds}"), { id, cmds: binsGone.join(" ") }, tz("到 扩展 页重新安装这个组件"));
     if (gone.length) add("comp-files:" + id, "error", tz("组件「{id}」少了 {n} 个文件（共 {total} 个）"), { id, n: gone.length, total: files.length }, tz("到 扩展 页重新安装这个组件"), gone);
+    // 共享文件被别的卸载删掉时，组件自己的 bin 还在、状态仍是 ok：这里补一道（0.6.9 审计 #185）
+    const shared = (Array.isArray(rec.shared) ? rec.shared : []).filter((r) => !badRel(r));
+    const sharedGone = missingOf(shared);
+    if (sharedGone.length) add("comp-shared:" + id, "error", tz("组件「{id}」依赖的 {n} 个共享文件被删了"), { id, n: sharedGone.length }, tz("到 扩展 页重新安装这个组件"), sharedGone);
   }
 
   // ── 包清单 ──

@@ -26,15 +26,15 @@
 ### #195 G 登录、启动与网关地址（后端部分）
 | # | 条目 | 状态 |
 |---|---|---|
-| 9 | G.2 登录状态 unknown 被当未登录（后端部分） | 待办 |
-| 10 | G.3 顶栏「就绪/官方登录态」只看文件存在（caps 后端部分） | 待办 |
-| 11 | G.4 登录启动 20 秒拿不到 URL 就失败，不杀子进程、晚到 URL 不读 | 待办 |
-| 12 | G.8 登录成功后轮询并发拉多个 `claude auth status` | 待办 |
+| 9 | G.2 登录状态 unknown 被当未登录（后端部分） | 移交 f1（后端已给 unknown/stale） |
+| 10 | G.3 顶栏「就绪/官方登录态」只看文件存在（caps 后端部分） | 已修（`/api/status.auth`；UI 移交 f1） |
+| 11 | G.4 登录启动 20 秒拿不到 URL 就失败，不杀子进程、晚到 URL 不读 | 已修（后端 pending+url；UI 移交 f1/f2） |
+| 12 | G.8 登录成功后轮询并发拉多个 `claude auth status` | 已修 |
 
 ### #195 I 组件、模块与 pkg
 | # | 条目 | 状态 |
 |---|---|---|
-| 13 | I.1 `pkg uninstall/upgrade` 删组件正在用的同名文件（pkg.mjs + components.mjs） | 待办 |
+| 13 | I.1 `pkg uninstall/upgrade` 删组件正在用的同名文件（pkg.mjs + components.mjs） | 已修 |
 | 14 | I.2 失败安装暂存残留 / 空间预检重复计入已下载字节（P3） | 已修 |
 | 15 | I.3 启动 60 秒后 reconcile 同步扫约 14.4 万路径，阻塞 3.9–12.3 秒 | 待办 |
 | 16 | I.4 装完工具包模块后组件卡不刷新（前端） | 移交 f2 |
@@ -42,20 +42,20 @@
 | 18 | I.6 下载完成后不复核组件 `requires`，可装出「已装但缺依赖」 | 已修 |
 | 19 | I.7 索引无对应构建时卡片写「需重新安装」但无安装按钮（后端部分） | 移交 f2 |
 | 20 | I.8 大组件解压阶段进度条固定 0% | 已修 |
-| 21 | I.9 `pkg update` 部分仓库失败/用旧索引仍打印「仓库索引已更新」 | 待办 |
+| 21 | I.9 `pkg update` 部分仓库失败/用旧索引仍打印「仓库索引已更新」 | 已修 |
 
 ### #195 M 升级、自检与环境实况（后端部分）
 | # | 条目 | 状态 |
 |---|---|---|
-| 22 | M.1 自检结果只在工具包/TAG/模块集合变化时重跑，失败项永久注入；无重新自检入口 | 待办 |
-| 23 | M.2 断网时 5 个联网项被记成设备失败（cccodroid-selftest） | 待办 |
-| 24 | M.3 工具包换版后环境实况仍把旧组件列为已装 | 待办 |
-| 25 | M.4 `claude --version` 被当会话参数走封口（edition 部分） | 待办 |
-| 26 | M.5 环境实况永不显示工具包版本（envfacts/feedback） | 待办 |
+| 22 | M.1 自检结果只在工具包/TAG/模块集合变化时重跑，失败项永久注入；无重新自检入口 | 已修（后端；重检按钮移交 f2） |
+| 23 | M.2 断网时 5 个联网项被记成设备失败（cccodroid-selftest） | 已修 |
+| 24 | M.3 工具包换版后环境实况仍把旧组件列为已装 | 已修 |
+| 25 | M.4 `claude --version` 被当会话参数走封口（edition 部分） | 已修（guard 补核部分移交主会话） |
+| 26 | M.5 环境实况永不显示工具包版本（envfacts/feedback） | 已修 |
 | 27 | M.6 「核对记录」第一次点击只收起（前端） | 移交 f2 |
-| 28 | M.7 首装/主动卸载 Claude Code 后对账报红色 error | 待办 |
+| 28 | M.7 首装/主动卸载 Claude Code 后对账报红色 error | 已修 |
 | 29 | M.8 更新状态取不到时「更新」分类静默消失（前端） | 移交 f2 |
-| 30 | M.9 自检文件合法 JSON 但缺 `fail`/`info` 时反馈接口 500 | 待办 |
+| 30 | M.9 自检文件合法 JSON 但缺 `fail`/`info` 时反馈接口 500 | 已修 |
 | 31 | M.10 版本选单 64 秒/更新日志/修复超时（前端+Java 为主） | 移交 |
 
 ### #195 P 后台、锁屏、通知与工作岛
@@ -69,8 +69,8 @@
 ### #195 R
 | # | 条目 | 状态 |
 |---|---|---|
-| 36 | R.8 安全通知取不到时完全静默（notices 后端部分） | 待办 |
-| 37 | R.9 登录不完成永久挂（`claude auth login` 无超时） | 待办 |
+| 36 | R.8 安全通知取不到时完全静默（notices 后端部分） | 已修（fetching/cached 字段；UI 移交 f1） |
+| 37 | R.9 登录不完成永久挂（`claude auth login` 无超时） | 已修 |
 
 ### #195 T
 | # | 条目 | 状态 |
@@ -81,7 +81,7 @@
 | # | 条目 | 状态 |
 |---|---|---|
 | 39 | Z.11 组件记录读不出/超 1MB/解析失败 → `absent` 而非 damaged | 已修 |
-| 40 | 真机：组件文档软链悬空、`compState` 只看 `rec.bin` 仍显示 ok | 待办 |
+| 40 | 真机：组件文档软链悬空、`compState` 只看 `rec.bin` 仍显示 ok | 已修（对账检测悬空软链/共享文件；列表状态仍只看 bin，见待定） |
 | 41 | 真机：`leftover-kept` 有 1 条死进程 | 待办 |
 
 ### #196（主要位置在本车道文件的）
@@ -103,7 +103,7 @@
 | 55 | 网关安全.7 端侧模型从 `/sdcard` 加载时不复核哈希 | 待办 |
 | 56 | 上游.4 登录 20 秒不杀子进程（同 G.4） | 待办 |
 | 57 | 上游.8 本地桥上游 429/超时/网络错误一律回 HTTP 400 | 待办 |
-| 58 | 首装.4 `pkg` 升级中断窗口里旧记录仍 `state:"ok"` 但文件已删 | 待办 |
+| 58 | 首装.4 `pkg` 升级中断窗口里旧记录仍 `state:"ok"` 但文件已删 | 已修 |
 | 59 | 组件市场.1 装完工具包模块后组件卡不刷新（前端） | 移交 f2 |
 
 ### #199 OpenAI 桥 5 条
@@ -150,6 +150,23 @@
 | #186 | （本轮） | 组件/模块空间预检扣掉暂存区里已保留的压缩包，并先清掉上次失败留下的解包树 | `a0610-b1-local-comp.test.mjs` 的 `modSpaceNeed`（无包 1650、有包 550） |
 | 200-10-08 | （本轮） | `modManifest()`：空/缺失 MANIFEST 直接拒绝；条目必须是包内相对路径，`..`/绝对路径拒绝 | `a0610-b1-local-comp.test.mjs`：三种情况都覆盖 |
 | 200-14-06 | （本轮） | 模块 first-run 失败不再写 `.ok`，抛出错误让模块显示「没装」并可重试 | 手工：让 first-run 返回非 0 后看模块状态 |
+| 195-I.1 | （本轮） | pkg 删文件前先收集组件记录（ok/installing，当前工具包）与已装模块 FILES 里的路径，这些一律不删 | `pkg` 语法检查；手工：装 gh 组件后 `pkg uninstall gh` 应保留组件文件 |
+| 195-I.9 | （本轮） | `loadRepo` 记每个仓库这次是刷新成功、用旧索引还是失败；`pkg update` 按结果说明，不再一律报「已更新」 | 手工：断一个镜像后看输出 |
+| 196 首装.4 | （本轮） | `pkg install <已记录 ok 的包>` 先按记录核文件，缺了就改成 installing 重装 | 手工：删掉包内一个文件后再 `pkg install` |
+| 195-G.3 | （本轮） | `/api/status` 增加 `auth`（来自真实的 `claude auth status` 缓存，含 unknown/stale） | `a0610-b1-env-login.test.mjs`：status 返回 auth 字段 |
+| 195-G.4 | （本轮） | 20 秒没地址但子进程还在：返回 `pending:true` 不判失败；`/api/login/status` 补 `url`，晚到的地址可取 | 语法检查 + 手工：断网启动登录后看状态接口 |
+| 195-G.8 | （本轮） | 先把 `reported` 置真再 await `authStatus`，并发轮询不再各拉一次 | 语法检查 |
+| 195-R.9 | （本轮） | 登录子进程加 15 分钟超时（killTree 整棵结束），到点把 done 结掉 | 语法检查 |
+| 195-M.1 | （本轮） | key 加入已装组件 id@版本；结果超过 7 天重跑；超时强杀不再把半份输出写盘 | `a0610-b1-env-login.test.mjs`：组件版本变 key 变 |
+| 195-M.2 | （本轮） | 自检的 python https / pip×2 / node https / npm install 改用 `tn`，网络不通时记 INFO 网络而不是 FAIL | `bash -n`；手工：断网跑自检 |
+| 195-M.3 | （本轮） | 环境实况列组件时要求 `rec.base` 等于当前工具包，且 bin 至少有一个还在 | 语法检查 |
+| 195-M.4 | （本轮） | `subcommand()` 认 `--version` / MGMT 加 version，`claude --version` 不走封口补核 | `a0610-b1-env-login.test.mjs`：`sealArgv(["--version"])` 原样 |
+| 195-M.5 | （本轮） | `devkitVersion()` 从 `.devkit-ok.base` 的 Release 名取版本，环境实况与反馈都用它 | `a0610-b1-env-login.test.mjs` |
+| 195-M.7 | （本轮） | 有 `files/.claude-uninstalled` 时不再报「找不到 Claude Code」红错 | `a0610-b1-env-login.test.mjs` |
+| 195-M.9 | （本轮） | 反馈接口对自检 JSON 的 pass/fail/info 做形状归整，缺字段不再 500 | `a0610-b1-env-login.test.mjs` |
+| 195-R.8 | （本轮） | `/api/notices` 增加 `fetching` / `cached`，取不到时前端能区分 | 语法检查 |
+| 196 端侧.5 | （本轮） | 反馈预填的两次 `privCall` 改为并行，最坏等待从 ~10 秒减半 | 语法检查 |
+| 真机 40 | （本轮） | 对账的 `missingOf` 跟软链目标（悬空算缺失）；组件补 `rec.shared` 缺失检查 | `a0610-b1-env-login.test.mjs`：悬空软链与共享缺失都会报 |
 
 ## 不成立
 
@@ -172,6 +189,12 @@
 | 195-I.7 / 196 组件.4 | web/app/08-extensions.js（f2） | `state=outdated && !available` 时没有安装按钮：改成提示「先更新工具包」或给「检查更新」入口 |
 | 195-T.4（office 部分） | gw/office.mjs（f2） | Office 转换的 detached 子进程照 components.mjs 的 `.runs` 标记做，或复用 `markChild` 思路 |
 | 200-14-07 | android/java/.../Updater.java（主会话） | `identifyDevkit` 顺序抓 8 个 release 的 lock/sig，加总预算与取消 |
+| 195-G.2 | web/app/04-session-flow.js（f1） | 把 `unknown:true` / `stale:true` 当作「还不知道」，首屏别收起输入框，`pending:false` 但 unknown 时继续轮询 |
+| 195-G.4（UI） | web/app/09-settings.js（f2） | 登录启动返回 `pending:true` 时继续轮询；从 `/api/login/status.url` 读晚到的授权地址并打开 |
+| 195-G.3（UI） | web/app/19-boot.js（f1） | 顶栏登录态用 `/api/status.auth`，退出登录后刷新 |
+| 195-R.8（UI） | web/app/04-session-flow.js（f1） | 通知接口 `error` 非空时显示「暂时取不到安全通知」，`fetching` 时显示加载 |
+| 195-M.1（UI） | web/app/08-extensions.js（f2） | 增加「重新自检」按钮（可调 `/api/reconcile?run=1` 或后续加的自检接口） |
+| 195-M.4（guard 部分） | gateway/guard/cc-seal.mjs（主会话） | pending 时同步补核最长 600 秒，`--version` 不再触发补核 |
 | 195-M.6 | web/app/08-extensions.js（f2） | 核对记录按钮：已有结果时第一次点击应是重核，不是收起 |
 | 195-M.8 | web/app/10-settings-device.js、15-pages.js（f2） | 更新状态取不到时保留「更新」分类并提示 |
 | 195-M.10 | web/app + Updater.java（f2/主会话） | 版本选单超时、更新日志当前版本标记、修复超时 |

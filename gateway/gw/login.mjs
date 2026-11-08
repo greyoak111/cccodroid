@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, PATHS, log, tz } from "./config.mjs";
 import { isLoginMode, noteLoggedIn } from "./models.mjs";
-import { claudeArgv, claudeBlocked, claudeEnv } from "./claude.mjs";
+import { claudeArgv, claudeBlocked, claudeEnv, killTree } from "./claude.mjs";
 import { RUNS } from "./runs.mjs";
 import { providerById } from "./providers.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
@@ -34,7 +34,7 @@ function authEnv() {
 async function loginStart(flag) {
   const blocked = await claudeBlocked();
   if (blocked) return { ok: false, message: blocked };
-  if (LOGIN && LOGIN.child.exitCode === null) try { LOGIN.child.kill("SIGKILL"); } catch {}
+  if (LOGIN && LOGIN.child.exitCode === null) try { killTree(LOGIN.child); } catch {}
   fs.mkdirSync(LOGIN_DIR, { recursive: true });
   const urlFile = path.join(LOGIN_DIR, "url");
   const browser = path.join(LOGIN_DIR, "browser.sh");
@@ -42,18 +42,28 @@ async function loginStart(flag) {
   fs.writeFileSync(browser, '#!/system/bin/sh\nprintf "%s\\n" "$1" > "' + urlFile + '"\n', { mode: 0o700 });
   const env = { ...authEnv(), BROWSER: browser };
   const child = spawn(PATHS.claudeLoader, claudeArgv(["auth", "login", flag]), { cwd: CFG.home, env, stdio: ["ignore", "pipe", "pipe"] });
-  const L = LOGIN = { child, out: "", startedAt: Date.now(), done: false, ok: false, flag };
+  const L = LOGIN = { child, out: "", startedAt: Date.now(), done: false, ok: false, flag, urlFile };
+  // 登录不完成不能永久挂：设备码流程最多 15 分钟，到点收掉子进程并把状态结掉（0.6.9 审计 195-R.9）
+  const expire = setTimeout(() => {
+    if (L.done) return;
+    L.done = true; L.ok = false; L.out += "\n" + tz("登录超时（15 分钟）");
+    try { killTree(child); } catch {}
+    log("登录：超时");
+  }, 15 * 60e3);
+  expire.unref?.();
   const onData = (d) => { L.out += String(d); };
   child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
   child.stdout.on("data", onData); child.stderr.on("data", onData);
   // loader 起不来（缺失/无权限/EAGAIN）只发 error：不接会把整个网关带走（#102 04-005）。runAuth 早就接了，这里补上
   child.on("error", (e) => {
+    clearTimeout(expire);
     if (L.done) return;
     L.done = true; L.ok = false; L.out += "\n" + (e.code || e.message);
     log("登录：没起来（" + (e.code || e.message) + "）");
   });
   child.on("close", (code) => {
-    if (L.done) return;   // error 之后可能还会补一个 close，已经结过账了
+    clearTimeout(expire);
+    if (L.done) return;   // error / 超时之后可能还会补一个 close，已经结过账了
     L.done = true;
     L.ok = code === 0 && /success/i.test(L.out);
     log("登录：" + (L.ok ? "成功" : "结束（退出码 " + code + "）"));
@@ -68,9 +78,11 @@ async function loginStart(flag) {
       const manual = (L.out.match(/https:\/\/\S+/) || [""])[0];
       if ((auto && manual) || L.done || Date.now() - L.startedAt > 20000) {
         clearInterval(tick);
-        resolve(auto || manual
-          ? { ok: true, url: auto || manual, manualUrl: manual, auto: !!auto }
-          : { ok: false, message: tz("没拿到登录地址"), output: L.out.slice(-1500) });
+        if (auto || manual) return resolve({ ok: true, url: auto || manual, manualUrl: manual, auto: !!auto });
+        // 20 秒还没拿到地址，但 claude 还在跑：别判失败（晚到的地址还能从 /api/login/status 取），
+        // 交给界面继续轮询；真退出了才算失败（0.6.9 审计 195-G.4）
+        if (!L.done) return resolve({ ok: true, pending: true, url: null, message: tz("登录还在进行，拿到授权地址后会打开") });
+        resolve({ ok: false, message: tz("没拿到登录地址"), output: L.out.slice(-1500) });
       }
     }, 200);
   });
@@ -85,7 +97,7 @@ async function runAuth(args, timeoutMs = 20000) {
     let out = "", stdout = "";
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
     child.stdout.on("data", (d) => { out += d; stdout += d; }); child.stderr.on("data", (d) => (out += d));
-    const t = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, timeoutMs);
+    const t = setTimeout(() => { try { killTree(child); } catch {} }, timeoutMs);
     child.on("close", (code) => { clearTimeout(t); resolve({ code, out, stdout }); });
     child.on("error", (e) => { clearTimeout(t); resolve({ code: -1, out: e.message, stdout: "" }); });
   });
@@ -143,17 +155,25 @@ export async function routeLogin(req, res, u, p) {
     return sendJson(res, 200, await loginStart(b.method === "console" ? "--console" : "--claudeai"));
   }
   if (req.method === "GET" && p === "/api/login/status") {
-    const st = await authStatus(u.searchParams.get("refresh") === "1" || (LOGIN && LOGIN.done && !LOGIN.reported));
+    // 先置 reported 再 await：并发请求以前会各拉一次 claude auth status（0.6.9 审计 195-G.8）
+    const need = !!(LOGIN && LOGIN.done && !LOGIN.reported);
     if (LOGIN && LOGIN.done) LOGIN.reported = true;
+    const st = await authStatus(need || u.searchParams.get("refresh") === "1");
+    let url = "";
+    if (LOGIN && !LOGIN.done) {
+      try { url = fs.readFileSync(LOGIN.urlFile, "utf8").trim(); } catch {}
+      if (!url) url = (LOGIN.out.match(/https:\/\/\S+/) || [""])[0];
+    }
     return sendJson(res, 200, {
       ...st,
       pending: !!(LOGIN && !LOGIN.done),
+      url: url || null,          // 20 秒后才拿到的授权地址，界面轮询时补开（0.6.9 审计 195-G.4）
       limits: st.loggedIn && RATE_LIMITS && (!RATE_LIMITS.email || RATE_LIMITS.email === st.email) ? RATE_LIMITS : null,
       last: LOGIN && LOGIN.done ? { ok: LOGIN.ok, output: LOGIN.ok ? "" : LOGIN.out.slice(-800) } : null,
     });
   }
   if (req.method === "POST" && p === "/api/login/cancel") {
-    if (LOGIN && !LOGIN.done) try { LOGIN.child.kill("SIGKILL"); } catch {}
+    if (LOGIN && !LOGIN.done) try { killTree(LOGIN.child); } catch {}
     return sendJson(res, 200, { ok: true });
   }
   if (req.method === "POST" && p === "/api/login/logout") {

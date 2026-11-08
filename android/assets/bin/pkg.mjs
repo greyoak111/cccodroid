@@ -232,10 +232,12 @@ function owners() {
 
 
 // ── 仓库索引（缓存一天）───────────────────────────────────────────────
+// 每个仓库这次刷新成没成：`pkg update` 别在失败/用旧索引时也报「仓库索引已更新」（0.6.9 审计 195-I.9）
+const REPO_STATUS = new Map();
 function loadRepo(repo) {
   const cf = path.join(STATE, "index", repo.name + ".json");
   const c = readJson(cf, null);
-  if (c && !FORCE_UPDATE && Date.now() - c.at < 86400e3) return c;
+  if (c && !FORCE_UPDATE && Date.now() - c.at < 86400e3) { REPO_STATUS.set(repo.name, { ok: true, stale: false }); return c; }
   let lastErr;
   for (const base of [repo.base, ...repo.mirrors]) {
     try {
@@ -259,10 +261,12 @@ function loadRepo(repo) {
       }
       const out = { at: Date.now(), date: (rel.match(/^Date: (.+)$/m) || [])[1] || "", from: base, pkgs };
       writeJson(cf, out);
+      REPO_STATUS.set(repo.name, { ok: true, stale: false });
       return out;
     } catch (e) { lastErr = e; }
   }
-  if (c) { console.error(`pkg：仓库 ${repo.name} 刷新失败（${lastErr.message}），先用旧索引`); return c; }
+  if (c) { console.error(`pkg：仓库 ${repo.name} 刷新失败（${lastErr.message}），先用旧索引`); REPO_STATUS.set(repo.name, { ok: true, stale: true }); return c; }
+  REPO_STATUS.set(repo.name, { ok: false, stale: false, error: lastErr });
   throw lastErr;
 }
 let FORCE_UPDATE = false, IDX = null;
@@ -622,6 +626,15 @@ function install(names, { unverified = false, auto = false, upgrade = false } = 
     if (!real) { const near = [...ix.pkgs.keys()].filter((k) => k.includes(n)).slice(0, 6); die(`仓库里没有 ${n}${near.length ? "。相近的：" + near.join(" ") : ""}`); }
     if (EXCLUDE.has(real)) die(`${real} 是给 Termux App 本身用的，在 cccodroid 里没有意义`);
     if (have.has(real) && !mine[real]) { console.log(`${real} 已在工具包里（${baseVersions().get(real) || "版本未知"}），不用装`); continue; }
+    // 上次升级在「删旧文件」和「写新记录」之间被打断：记录还是 ok，文件已经没了。
+    // 以前普通 pkg install 会当成已装跳过，修不好（0.6.9 审计 196 首装.4）
+    if (mine[real] && mine[real].state === "ok") {
+      const gone = (mine[real].files || []).some((r) => { try { fs.lstatSync(path.join(PREFIX, r)); return false; } catch { return true; } });
+      if (gone) {
+        console.log(`${real} 的记录说装好了，但文件不全，重新装一遍`);
+        const d = db(); d.pkgs[real].state = "installing"; writeJson(DB, d); mine[real].state = "installing";
+      }
+    }
     if (have.has(real) && mine[real] && mine[real].state !== "ok") console.log(`${real} 上次没装完，接着装`);
     else if (have.has(real) && mine[real] && !upgrade) {
       // 之前是作为依赖装上的、这次用户点名要装：改记成手动装的，卸原来那个包时别把它一起清掉（#134）
@@ -684,11 +697,36 @@ function install(names, { unverified = false, auto = false, upgrade = false } = 
 }
 
 // ── 卸 ─────────────────────────────────────────────────────────────────
-/** 删掉 rec 里归这个包的文件；别的包（.list）也认领的、或 keep 里的留下 */
+/** 组件和已装模块正在用的文件：pkg 卸载/升级时不能删，否则组件会变成 damaged
+ *  （本机实测 gh 包 241 个文件与 gh 组件 246 个重合；0.6.9 审计 195-I.1） */
+let GUARDED = null;
+function guardedPaths() {
+  if (GUARDED) return GUARDED;
+  GUARDED = new Set();
+  const dk = devkitId(), comps = path.join(FILES, "components");
+  let list = []; try { list = fs.readdirSync(comps); } catch {}
+  for (const f of list) {
+    if (!f.endsWith(".json")) continue;
+    const r = readJson(path.join(comps, f), null);
+    if (!r || typeof r !== "object" || (r.state !== "ok" && r.state !== "installing")) continue;
+    if (dk && dk.sha256 && r.base && r.base !== dk.sha256) continue;   // 装在旧工具包上的组件，文件已经不在
+    for (const rel of [...(Array.isArray(r.files) ? r.files : []), ...(Array.isArray(r.shared) ? r.shared : [])])
+      if (typeof rel === "string" && rel) GUARDED.add(rel);
+  }
+  const mj = readJson(path.join(PREFIX, "libexec/devkit", "modules.json"), null);
+  for (const m of (mj && Array.isArray(mj.modules) ? mj.modules : [])) {
+    if (!m || typeof m !== "object" || m.kind === "base" || typeof m.dir !== "string") continue;
+    const d = path.join(PREFIX, m.dir);
+    if (!fs.existsSync(path.join(d, ".ok")) || !fs.existsSync(path.join(d, "MANIFEST"))) continue;
+    try { for (const rel of fs.readFileSync(path.join(d, "FILES"), "utf8").split("\n").filter(Boolean)) GUARDED.add(rel); } catch {}
+  }
+  return GUARDED;
+}
+/** 删掉 rec 里归这个包的文件；别的包（.list）也认领的、组件/模块在用的、或 keep 里的留下 */
 function removeFiles(name, rec, own, keep = new Set()) {
-  const dirs = new Set();
+  const dirs = new Set(), guarded = guardedPaths();
   for (const r of rec.files || []) {
-    if (keep.has(r) || (own.get(r) || []).some((o) => o !== name)) continue;
+    if (keep.has(r) || guarded.has(r) || (own.get(r) || []).some((o) => o !== name)) continue;
     try { fs.rmSync(path.join(PREFIX, r), { force: true }); } catch {}
     dirs.add(path.dirname(r));
   }
@@ -820,7 +858,15 @@ try {
       for (const f of r.files) console.log(path.join(PREFIX, f));
       break;
     }
-    case "update": FORCE_UPDATE = true; index(); console.log("仓库索引已更新"); break;
+    case "update": {
+      FORCE_UPDATE = true; IDX = null; REPO_STATUS.clear(); index();
+      const failed = [...REPO_STATUS].filter(([, s]) => !s.ok).map(([n]) => n);
+      const stale = [...REPO_STATUS].filter(([, s]) => s.stale).map(([n]) => n);
+      if (failed.length || stale.length)
+        console.log(`仓库索引部分更新${failed.length ? "，取不到：" + failed.join("、") : ""}${stale.length ? "，先用旧索引：" + stale.join("、") : ""}`);
+      else console.log("仓库索引已更新");
+      break;
+    }
     case "upgrade": case "full-upgrade": {
       FORCE_UPDATE = sub === "upgrade" && !args.length;
       const d = db().pkgs, ix = index();
