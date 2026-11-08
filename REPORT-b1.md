@@ -136,6 +136,8 @@
 
 ## 已修
 
+提交列「（本轮）」表示在本工作树的 77e5ebe / ecc02e7 / 604d19a / 991a8c8 / b64ce26 五个提交里（按 `git log --stat` 对应到文件）。
+
 | 条目 | 提交 | 怎么修的（一句） | 怎么验的 |
 |---|---|---|---|
 | 198 P1-19 | （本轮） | `modulesInfo()` 校形状：`modules` 非数组返回 null，逐项只留 `id`/`dir` 都是非空字符串的条目；`envFactsTick` 与自检子进程 data/close 回调包 `guarded` | `gateway/tests/a0610-b1-modules-shape.test.mjs`：坏形状不再抛，合法表照旧；去掉修复后测试失败 |
@@ -175,7 +177,7 @@
 | 195-P.4 / 196 日志考古.2 | （本轮） | am 报 `invalid source`/Permission Denial 时停止订阅与发送（不再每 1.5 秒重试），检测阶段也把这类当用不了 | `a0610-b1-island.test.mjs` 覆盖核心；am 行为手工验 |
 | 195-P.5 | （本轮） | 并行换轮时按当前轮 `startedAt` 计时；启动/状态快照里有 `run.perms` 就显示「等你确认」 | `a0610-b1-island.test.mjs`：计时 0 秒、等待态 |
 | 199-OB-06 | （本轮） | retire 时若注册的 `runtimeDir` 已不存在，launch 失败后降级为清注册，不再卡住组件卸载；其它失败照旧保注册 | `managed-bridge.test.mjs` 29 项全过（含「合法失败保留注册」） |
-| 196 上游.8 | （本轮） | 本地桥模型接口按错误码回 429/504/502/401/403/404，其余仍 400 | `bridge-config` 相关测试通过；语法检查 |
+| 196 上游.8 | 7fa5ec7 | 本地桥模型接口按错误码回 429/504/502/401/403/404，其余仍 400 | `bridge-models.test.mjs` 64 项全过。原断言把「一律 400」锁死（正是本条审计的缺陷），按 README 第 93 行的例外同步更新期望值，在此写明 |
 | 真机 41 | （本轮） | `loadKept()` 发现死条目就顺手 `saveKept()` 清盘 | 手工：重启后看 `ccapp-leftover-kept.json` |
 | 196 补充.11 | （本轮） | 应用文件自愈改成临时文件 + rename，不再先 `rm` 再写 | `appfiles.test.mjs` 通过 |
 
@@ -221,4 +223,7 @@
 
 ## 全量测试
 
-（最后更新）
+2026-11-08，`env -u CCAPP_RUN node scripts/test.mjs`（工作树 w0610-b1，HEAD 7fa5ec7）：
+**tests 917 / pass 916 / fail 0 / skipped 1**，用时 558746 ms。
+
+首轮全量 6 项失败全部在 `bridge-models.test.mjs`，原因见「已修」196 上游.8：旧断言把「上游错误一律 400」锁死。同步更新期望后单文件 64/64 通过，重跑全量全过。`merge.test.mjs` 本轮未出现偶发失败。
