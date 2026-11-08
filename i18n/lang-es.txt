@@ -3036,3 +3036,24 @@
 3036	Restablecer ajustes
 3037	Para cuando una configuración rota hace que cada turno se rechace o no responda y no puedes arreglarlo: la configuración de usuario de Claude Code (CLAUDE.md, habilidades, plugins, hooks, MCP, memoria), los ajustes de cccodroid y los archivos de inicio del shell vuelven al estado recién instalado, y los archivos de la app se reinstalan desde el paquete. Todo se mueve a ~/.ccapp-reset como copia, no se borra; las conversaciones, el espacio de trabajo y el kit se mantienen, y las claves se conservan por defecto. Antes aparece un cuadro de confirmación del sistema.
 3038	No apareció el cuadro de confirmación
+3039	Reinstalar este componente (se descarga de nuevo)
+3040	Reinstalar este módulo del kit de herramientas (se descarga de nuevo)
+3041	Reparar el kit de herramientas: volver a descargar esta versión y reinstalarla; el servicio se pausa 1–2 minutos durante la instalación
+3042	Reinstalar Claude Code
+3043	Reparar todo
+3044	Reparar
+3045	En espera
+3046	En curso…
+3047	Enviado a la app
+3048	Reparando. Cerrar esta página no lo detiene; al terminar se vuelve a comprobar automáticamente:
+3049	Reparación terminada:
+3050	Sigue los pasos enviados a la app en Ajustes → Actualizar y, cuando terminen, toca «Comprobar registros» otra vez.
+3051	Reparación terminada; {n} paso(s) fallaron
+3052	Reparación terminada
+3053	Se reparará en este orden y luego se volverá a comprobar automáticamente:
+3054	Reparar este elemento:
+3055	La reinstalación descarga desde internet; tus archivos, conversaciones y ajustes no se ven afectados. ¿Continuar?
+3056	El índice no superó la verificación de firma; no se pueden instalar componentes
+3057	La versión del índice ({v}) es más antigua que la instalada ({now}); se rechazó la degradación
+3058	Ya hay una reparación o comprobación en curso; inténtalo cuando termine
+3059	No hay problemas que se puedan reparar automáticamente

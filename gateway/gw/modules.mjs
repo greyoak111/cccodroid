@@ -137,7 +137,19 @@ function modList() {
 }
 
 // ── 装 ────────────────────────────────────────────────────────────────
-async function modInstall(id) {
+async function modInstall(id) { return (await modInstallJob(id)).r; }
+/** 核对记录的「修补」（reconcile.mjs）：已装的这块也重装一遍 —— modRunInstall 本来就原地覆盖、.ok 最后写。
+ *  done 在任务结束时给出错误信息（成功是 ""），只给网关内部等，不出 HTTP */
+export async function modRepair(id) {
+  const { r, job } = await modInstallJob(id, { repair: true });
+  return { ...r, done: job ? job.done.then(() => job.error || (job.cancelled ? tz("已取消") : "")) : Promise.resolve("") };
+}
+/** 返回 { r: 给界面的结果, job: 真起了安装任务才有 } */
+async function modInstallJob(id, { repair = false } = {}) {
+  const x = await modStart(id, repair);
+  return x.job ? x : { r: x, job: null };
+}
+async function modStart(id, repair) {
   if (!PREFIX) return { ok: false, message: "only available in cccodroid" };
   const mj = modulesInfo();
   if (!mj) return { ok: false, message: tz("当前是整包工具包，没有模块可装") };
@@ -146,6 +158,7 @@ async function modInstall(id) {
   for (const j of MOD_JOBS.values()) if (!j.finished) return { ok: false, message: tz("另一个模块正在装，等它结束再试") };
   let chain;
   try { chain = missingChain(mj, id); } catch (e) { return { ok: false, message: e.message }; }
+  if (repair && !chain.includes(id)) chain.push(id);
   if (!chain.length) return { ok: true, already: true };
   const dk = devkitIdentity() || {};
   if (!dk.base) return { ok: false, message: tz("工具包是从本地文件装的，不知道该去哪个 Release 下载模块。请先在设置里更新一次工具包") };
@@ -161,7 +174,7 @@ async function modInstall(id) {
   try { const st = fs.statfsSync(path.dirname(PREFIX)); const free = st.bavail * st.bsize; if (free < need) return { ok: false, message: tz("存储空间不够：需要约 {need} MB，只剩 {free} MB", { need: Math.ceil(need / 1048576), free: Math.floor(free / 1048576) }) }; } catch {}
   const job = { phase: "downloading", done: 0, total: 0, queue: chain, current: chain[0], finished: false };
   for (const c of chain) MOD_JOBS.set(c, job);
-  (async () => {
+  job.done = (async () => {
     try {
       for (const c of chain) { job.current = c; await modRunInstall(mj, blockOf(mj, c), dk.base, job); }
       log(`[mod] 已装：${chain.join(" → ")}`);
@@ -177,7 +190,7 @@ async function modInstall(id) {
       for (const c of chain) if (!job.error || c !== job.current) MOD_JOBS.delete(c);
     }
   })();
-  return { ok: true, chain };
+  return { r: { ok: true, chain }, job };
 }
 
 /** 这条链还要多少空间（压缩包 + 解开后的大小，留 10%）：暂存区里大小对得上的压缩包不再重复要（0.6.9 审计 #186） */

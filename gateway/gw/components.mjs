@@ -623,7 +623,14 @@ function compRemoveFiles(id, rec, keep = null) {
   compSweepDanglingDocs();
 }
 
-async function compInstall(id) {
+async function compInstall(id) { const x = await compStart(id); return x.job ? x.r : x; }
+/** 核对记录的「修补」（reconcile.mjs）：同版本原地重装；done 在任务结束时给出错误信息（成功是 ""），只给网关内部等 */
+export async function compRepair(id) {
+  const x = await compStart(id);
+  return x.job ? { ...x.r, done: x.job.done.then(() => x.job.error || (x.job.cancelled ? tz("已取消") : "")) } : { ...x, done: Promise.resolve("") };
+}
+/** 起安装任务：起了返回 { r, job }，没起返回给界面的结果 */
+async function compStart(id) {
   if (!PREFIX) return { ok: false, message: "only available in cccodroid" };
   const cur = COMP_JOBS.get(id);
   if (cur && !cur.finished) return { ok: false, message: "busy" };
@@ -668,7 +675,7 @@ async function compInstall(id) {
   const job = { phase: "downloading", done: 0, total: b.bytes, error: "", child: null, cancelled: false, finished: false,
     baseDeps: (Array.isArray(b.baseDeps) ? b.baseDeps : []).map((d) => (typeof d === "string" ? d : d && d.name)).filter(Boolean) };
   COMP_JOBS.set(id, job);
-  compRunInstall(id, b, job).then(
+  job.done = compRunInstall(id, b, job).then(
     () => { job.finished = true; log(`[comp] ${id} ${b.version} 装好了`); },
     (e) => {
       // 取消、校验失败都走这里：解包树（chromium 约 1GB）只在成功路径里清，失败就留在私有目录、没有入口再删（审查 11-05）。
@@ -676,7 +683,7 @@ async function compInstall(id) {
       if (/^[a-z0-9][a-z0-9-]*$/.test(id)) try { fs.rmSync(path.join(COMP_DIR, ".staging", id), { recursive: true, force: true }); } catch {}
       job.finished = true; job.error = job.cancelled ? "" : e.message; log(`[comp] ${id} 安装失败：${e.message}`);
     });
-  return { ok: true };
+  return { r: { ok: true }, job };
 }
 
 /** 把组件带的 skill 目录拷进 ~/.claude/skills。skill 路径相对 files/（以 usr/ 开头），PREFIX 已经是 files/usr */

@@ -3036,3 +3036,24 @@
 3036	Réinitialiser les réglages
 3037	Quand une configuration cassée fait refuser chaque tour ou ne donne plus de réponse et que vous ne pouvez pas réparer : la configuration utilisateur de Claude Code (CLAUDE.md, compétences, plugins, hooks, MCP, mémoire), les réglages de cccodroid et les fichiers de démarrage du shell reviennent à l'état d'une installation neuve, et les fichiers de l'app sont réinstallés depuis le paquet. Tout est déplacé dans ~/.ccapp-reset en sauvegarde, rien n'est supprimé ; conversations, espace de travail et boîte à outils restent, les clés sont conservées par défaut. Une boîte de confirmation système s'affiche d'abord.
 3038	La boîte de confirmation ne s'est pas affichée
+3039	Réinstaller ce composant (nouveau téléchargement)
+3040	Réinstaller ce module de la boîte à outils (nouveau téléchargement)
+3041	Réparer la boîte à outils : retélécharger cette version et la réinstaller ; le service est suspendu 1 à 2 minutes pendant l'installation
+3042	Réinstaller Claude Code
+3043	Tout réparer
+3044	Réparer
+3045	En attente
+3046	En cours…
+3047	Confié à l'application
+3048	Réparation en cours. Fermer cette page ne l'arrête pas ; une nouvelle vérification se fait automatiquement à la fin :
+3049	Réparation terminée :
+3050	Suivez les étapes confiées à l'application dans Paramètres → Mettre à jour, puis touchez « Vérifier les enregistrements » une fois terminées.
+3051	Réparation terminée, {n} étape(s) en échec
+3052	Réparation terminée
+3053	Réparation dans cet ordre, puis nouvelle vérification automatique :
+3054	Réparer cet élément :
+3055	La réinstallation télécharge depuis Internet ; vos fichiers, conversations et réglages ne sont pas touchés. Continuer ?
+3056	L'index n'a pas passé la vérification de signature ; impossible d'installer des composants
+3057	La version de l'index ({v}) est plus ancienne que celle installée ({now}) ; rétrogradation refusée
+3058	Une réparation ou une vérification est déjà en cours ; réessayez quand elle sera terminée
+3059	Aucun problème réparable automatiquement

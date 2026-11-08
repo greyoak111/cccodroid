@@ -1302,20 +1302,63 @@
     } finally { delete b.dataset.busy; b.disabled = false; }
   });
   // 状态对账：组件 / 模块 / 包清单 / 自定义组件的记录和磁盘对一遍（网关启动后自动核过一次，这里看结果或再核）
+  // 能自动修的条目带「修补」，顶部「全部修补」：网关按顺序重装组件 / 模块、等做完，工具包和 Claude Code 交给应用，最后自动再核（用户 11-09）
+  const fixWhat = (a) => ({ comp: t("重新安装这个组件（会重新下载）"), mod: t("重新安装这个工具包模块（会重新下载）"),
+    devkit: t("修复开发工具包：重新下载当前这一版并重装，装的时候暂停服务 1–2 分钟"), claude: t("重新安装 Claude Code") }[a] || "");
+  let fixTimer = 0;
   function paintReconcile(r, always) {
     const box = $("reconcile-box"), bad = (r.findings || []).filter((f) => f.level !== "info");
     if (!r.supported || (!always && !bad.length)) return box.classList.add("hidden");
-    const head = r.at ? `<div class="tiny">${esc(bad.length ? t("记录和磁盘有 {n} 处对不上：", { n: bad.length }) : t("记录和磁盘一致"))} · ${esc(new Date(r.at).toLocaleString())}</div>` : "";
+    const fixable = bad.filter((f) => f.act);
+    const head = r.at ? `<div class="rc-head"><div class="tiny">${esc(bad.length ? t("记录和磁盘有 {n} 处对不上：", { n: bad.length }) : t("记录和磁盘一致"))} · ${esc(new Date(r.at).toLocaleString())}</div>
+        ${fixable.length > 1 ? `<button class="btn sm" data-rcfix="all">${esc(t("全部修补"))}</button>` : ""}</div>` : "";
     box.innerHTML = head + (r.findings || []).map((f) => `<div class="item ledger ${f.level === "info" ? "" : "bad"}">
         <div class="it-title wrap">${uiI(f.level === "error" ? "x" : f.level === "warn" ? "warn" : "info", "lv-" + f.level)}${esc(f.msg)}</div>
         ${f.fix ? `<div class="tiny">${esc(t("怎么办："))}${esc(f.fix)}</div>` : ""}
         ${f.samples.length ? `<div class="tiny mono">${f.samples.slice(0, 5).map(esc).join("<br>")}</div>` : ""}
+        ${f.act && f.level !== "info" ? `<div class="rc-act"><button class="btn sm ghost" data-rcfix="${esc(f.key)}" data-act="${esc(f.act)}" data-msg="${esc(f.msg)}">${esc(t("修补"))}</button></div>` : ""}
       </div>`).join("");
+    box._fixable = fixable;
     box.classList.remove("hidden");
   }
+  const STEP = () => ({ wait: t("等待"), run: t("进行中…"), ok: t("完成"), fail: t("失败"), handed: t("已交给应用") });
+  function paintFix(j) {
+    const box = $("reconcile-box"), S = STEP();
+    box.innerHTML = `<div class="tiny">${esc(j.running ? t("正在修补，关掉这一页也不影响，做完会自动再核对：") : t("修补结束："))}</div>` + j.steps.map((s) => `<div class="item ledger ${s.state === "fail" ? "bad" : ""}">
+        <div class="it-title wrap">${uiI(s.state === "ok" || s.state === "handed" ? "check" : s.state === "fail" ? "x" : "info", "lv-" + (s.state === "fail" ? "error" : "info"))}${esc(s.msg)}</div>
+        <div class="tiny">${esc(fixWhat(s.act))} · <b>${esc(S[s.state] || s.state)}</b>${s.note ? " · " + esc(s.note) : ""}</div>
+      </div>`).join("") + (j.steps.some((s) => s.state === "handed") ? `<div class="tiny">${esc(t("交给应用的那几步在「设置 → 更新」里看进度，做完后再点「核对记录」。"))}</div>` : "");
+    box.classList.remove("hidden");
+  }
+  async function followFix() {
+    clearTimeout(fixTimer);
+    const j = await api("/api/reconcile/fix").catch(() => null);
+    if (!j || !j.ok) return;
+    paintFix(j);
+    if (j.running) { fixTimer = setTimeout(followFix, 1500); return; }
+    const failed = j.steps.filter((s) => s.state === "fail").length;
+    toast(failed ? t("修补结束，有 {n} 步没成", { n: failed }) : t("修补结束"), !!failed);
+    // 结果停留几秒给人看清，再换回最新的核对结果（网关已经自动再核过）
+    fixTimer = setTimeout(() => loadReconcile(false).then((r) => r && paintReconcile(r, true)), failed ? 8000 : 3000);
+  }
+  $("reconcile-box").addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-rcfix]");
+    if (!b || b.disabled) return;
+    const all = b.dataset.rcfix === "all", box = $("reconcile-box");
+    const list = all ? (box._fixable || []) : [{ msg: b.dataset.msg, act: b.dataset.act }];
+    const plan = [...new Set(list.map((f) => "· " + f.msg + "\n   → " + fixWhat(f.act)))].join("\n");
+    if (!confirm((all ? t("按下面的顺序修补，做完自动再核对一次：") : t("修补这一项：")) + "\n\n" + plan + "\n\n" + t("重装要联网下载；你自己的文件、会话和设置不受影响。继续？"))) return;
+    b.disabled = true;
+    const r = await post("/api/reconcile/fix", { keys: all ? "all" : [b.dataset.rcfix] }).catch((err) => ({ ok: false, message: err.message }));
+    if (!r.ok) { b.disabled = false; return toast(r.message || t("失败"), true); }
+    paintFix(r);
+    fixTimer = setTimeout(followFix, 1000);
+  });
   async function loadReconcile(run) {
     const r = await api("/api/reconcile" + (run ? "?run=1" : "")).catch(() => null);
     if (r) paintReconcile(r, run);
+    // 修补还在跑（比如关掉设置再打开）：接着显示进度
+    if (r && r.supported) api("/api/reconcile/fix").then((j) => { if (j && j.ok && j.running) followFix(); }).catch(() => {});
     return r;
   }
   $("btn-reconcile").addEventListener("click", async () => {

@@ -3036,3 +3036,24 @@
 3036	Kembalikan pengaturan awal
 3037	Untuk saat konfigurasi rusak membuat setiap giliran ditolak atau tidak menjawab dan tidak bisa Anda perbaiki: konfigurasi tingkat pengguna Claude Code (CLAUDE.md, skill, plugin, hook, MCP, memori), pengaturan cccodroid, dan file awal shell kembali seperti baru dipasang, dan file aplikasi dipasang ulang dari paket. Semuanya dipindah ke ~/.ccapp-reset sebagai cadangan, tidak dihapus; percakapan, ruang kerja, dan toolkit tetap, dan kunci disimpan secara bawaan. Dialog konfirmasi sistem muncul lebih dulu.
 3038	Dialog konfirmasi tidak muncul
+3039	Pasang ulang komponen ini (diunduh lagi)
+3040	Pasang ulang modul devkit ini (diunduh lagi)
+3041	Perbaiki devkit: unduh ulang versi ini dan pasang ulang; layanan dijeda 1–2 menit selama pemasangan
+3042	Pasang ulang Claude Code
+3043	Perbaiki semua
+3044	Perbaiki
+3045	Menunggu
+3046	Sedang berjalan…
+3047	Diserahkan ke aplikasi
+3048	Sedang memperbaiki. Menutup halaman ini tidak menghentikannya; setelah selesai akan diperiksa ulang otomatis:
+3049	Perbaikan selesai:
+3050	Pantau langkah yang diserahkan ke aplikasi di Pengaturan → Pembaruan, lalu ketuk “Periksa catatan” lagi setelah selesai.
+3051	Perbaikan selesai, {n} langkah gagal
+3052	Perbaikan selesai
+3053	Akan diperbaiki dengan urutan ini, lalu diperiksa ulang otomatis:
+3054	Perbaiki item ini:
+3055	Pemasangan ulang mengunduh dari internet; file, percakapan, dan pengaturan Anda tidak terpengaruh. Lanjutkan?
+3056	Indeks gagal verifikasi tanda tangan, jadi komponen tidak bisa dipasang
+3057	Versi di indeks ({v}) lebih lama dari yang terpasang ({now}); penurunan versi ditolak
+3058	Perbaikan atau pemeriksaan sedang berjalan; coba lagi setelah selesai
+3059	Tidak ada masalah yang bisa diperbaiki otomatis
