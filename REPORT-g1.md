@@ -18,8 +18,8 @@
 | 196-供应链.4 | `devkit.lock.json` 仅靠 TLS、无签名且长期缓存，却参与依赖版本判定 | `android/assets/bin/pkg.mjs` | 已修 |
 | 196-供应链.5 | 技能 zip 导入无条目数上限，逐条同步写可阻塞事件循环 | `gw/extensions.mjs`（sessionops.mjs 半 移交） | 已修（extensions.mjs 半）/ 移交（sessionops.mjs 半） |
 | 197-9.6 F8 | 组件升级先删旧版再搬新版，中途失败旧版没了 | `gw/components.mjs` | 已修 |
-| 200-14-06 | 模块 `first-run` 失败仍写 `.ok` | `gw/modules.mjs` | 待核实（疑似已修） |
-| 200-14-07 | 本地文件安装时 `identifyDevkit` 顺序抓 8 个 release 的 lock/sig，无总预算/取消 | 实际在 `android/java/cc/codroid/Updater.java`（主会话名下） | 待办（移交） |
+| 200-14-06 | 模块 `first-run` 失败仍写 `.ok` | `gw/modules.mjs` | 已修（第一轮 ecc02e7；本条补回归测试） |
+| 200-14-07 | 本地文件安装时 `identifyDevkit` 顺序抓 8 个 release 的 lock/sig，无总预算/取消 | 实际在 `android/java/cc/codroid/Updater.java`（主会话名下） | 移交 |
 
 ## 已修
 
@@ -36,6 +36,7 @@
 | 196-供应链.4 | 本条 | 新增 `android/assets/bin/lockcheck.mjs`（build.sh 会随 `assets/bin/*` 一起打包）：`verifyLock` 对原始字节验 ed25519 签名，并核 `lock.release === tagOf(base)`（与 `Updater.lockSigned` 同口径），公钥与 APK 的 `INDEX_PUBKEY_B64` 同一把。`pkg` 取 lock 后先验签；磁盘缓存改存 `{_for, body, sig}`（原始正文 + 签名），读回来当场复核，旧格式解析对象和 `base` 不明时都不认 | `gateway/tests/a0610-g1-lock-sig.test.mjs`：公钥与 SPKI 尾部一致；改正文 / 错签名 / 旧 tag 重放 / 缺 release 全拒；tagOf 与 Java 正则一致；pkg 接线（下载后验签、缓存原文复核、旧写法已消失）源码断言。`pkg-lock-v062`、`harden-v2b` 7 条全过 |
 | 196-供应链.5 | 本条 | `importSkill` 在解压前按 zip 目录尾记录核对条目总数，超过 4096 直接拒绝（不先 inflate 几万个小条目）；解出的文件从 `mkdirSync`/`writeFileSync` 改成 `fs.promises` 逐条 `await` 写，长包不再整段占住事件循环；路由改成 `await importSkill(...)`，导入完成才回包。新提示语（含 9 种译文）在 `i18n-g1.json` | `gateway/tests/a0610-g1-skill-zip.test.mjs`：4097 条目的包被拒且不留目录；正常包与单个 SKILL.md 都落位；导入期间 `setImmediate` 能转（旧的全同步写计数为 0）；源码断言路由 await 与异步写。临时去掉两处修改实测 3 条变红，还原后 5 条全过 |
 | 197-9.6 F8 | 本条 | 把切换段从 `compRunInstall` 抽成 `compSwitch`（仍在 `compFsExclusive` 里）：升级时旧版同路径文件先挪进 `<暂存树>.old` 备份，新版全部搬完才算提交点；提交后才删旧版独有的文件（`compRemoveFiles` 新增 `keep` 参数，新版还要的路径不删、共用文件仍转记），旧技能也在此时清。搬运中途失败把备份原样放回、撤掉新放的文件、安装记录退回旧版，用户看到的还是能用的旧版本，而不是 damaged。`_compForTest` 导出 `compSwitch` 供测试 | `gateway/tests/a0610-g1-comp-upgrade.test.mjs`：升级成功覆盖同名、删旧版独有、共用文件保留并转记；把新版一个文件放进只读目录让 rename 失败 → 旧版两个文件内容原样、记录 state 退回 ok/版本 1.0.0、备份目录消失；首次安装照常。临时还原「先删旧版」行为实测 2 条变红，还原后 3 条全过；components/pkg 相关 54 条全过 |
+| 200-14-06 | ecc02e7（第一轮） | 复核 `modRunInstall`：first-run 非 0 退出时 catch 里直接抛「首次配置没跑完…再装一次会重试」，不再往下走；`.ok` 是最后一行才写。修复本身没动，本条补回归测试把行为钉住 | `gateway/tests/a0610-g1-mod-firstrun.test.mjs`：造真 tar.gz（MANIFEST + `exit 3` 的 first-run.sh）放进暂存区安装；任务结束、`job.error` 命中「首次配置没跑完」、`.ok` 不存在、文件已搬进 `$PREFIX`。临时把 throw 换成 log 实测变红，还原后通过 |
 
 ## 不成立
 
@@ -53,6 +54,7 @@
 | 195-G.6 | `gateway/server.mjs`（启动日志，约 190 行） | `log(\`claude-apk 网关 v3 已启动  http://127.0.0.1:${CFG.port}\`)` 公布的是原生地址，手机浏览器打开只会看到 403。建议改打印界面地址，或补一句「界面请从 cccodroid 应用打开」 |
 | 196-供应链.2（custom.mjs 半） | `gateway/gw/custom.mjs`：`CUSTOM_STAGES`（27 行）、`customAnalyze`（223-236 行）、启动入口 | 分析暂存目录 `~/.cccodroid/custom/.stage-*` 只记在内存 map 里：TTL 清理要等下一次分析才跑，网关重启后 map 清空，目录永久留下。建议在 `customAnalyze` 开头（或启动时）先扫一遍 `CUSTOM_DIR`，把名字匹配 `.stage-*`、且不在当前 map 里的目录删掉（重启后 map 必空，全删即可；同进程内超 1 小时的已有逻辑不动）。失败路径 236 行 `fail()` 和安装成功 530 行已经会删，不用改 |
 | 196-供应链.5（sessionops.mjs 半） | `gateway/gw/sessionops.mjs`：`zipRead`（646-680 行） | 解压本身仍是逐条 `inflateRawSync`，同步跑在事件循环上；本次在技能导入入口按 EOCD 条目数卡了 4096、总解压量仍有 200 MB 上限，但单个大条目 inflate 期间照样卡住网关。要彻底异步化得把 `zipRead` 改成先读中央目录、逐条 `inflateRaw`（异步）或用 worker，涉及导出/导入等所有调用方，不在本车道文件范围 |
+| 200-14-07 | `android/java/cc/codroid/Updater.java`：`identifyDevkit`（320-343 行）、`lockSigned`（612-622 行）、`fetchDevkitFile`（624-630 行）；`Installer.httpGetSmall` / `open`（`Installer.java:265-275,431-437`）；调用点 `MainActivity.java:1006` | 本地文件装工具包时，认不出钉子里的版本就顺序翻最多 8 个 `devkit-*` release：每个先 `httpGetSmall(devkit.lock.json)`，再 `lockSigned` 抓 `.sig`（GitHub 失败还要换 `dl.cccodroid.net` 镜像）。单次请求 connect 20 秒、read 60 秒，最坏是 8×(20+60)×2 个来源，没有总预算、界面上也没法取消。建议：给整段加总时长预算（如 20 秒，`System.nanoTime()` 掐表），进循环前和每轮 fetch 后检查；预算法改成向 `httpGetSmall` 传更短的超时，或新增带 timeout 参数的重载；拿到命中或超预算立即返回 null（调用方按「认不出」处理，已有兜底）。真机验：把网络限速/断掉，从本地文件装工具包，看 logcat `Updater` 标签、识别耗时不超过预算、界面不再长时间卡在识别中 |
 
 ## 行为变化（发版说明用）
 
