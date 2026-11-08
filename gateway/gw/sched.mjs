@@ -503,7 +503,8 @@ END_HOOKS.push((run, f) => {
 });
 
 // ── 计时 ──
-function tick() {
+/** alarmAt：外壳的系统闹钟响时带的计划时刻（没有 = 0）。Doze 把它推迟了几分钟时，这次计划照常执行（0.6.9 审计 13-04） */
+function tick(alarmAt = 0) {
   const now = Date.now();
   followSysTz(now);
   const gap = DB.lastTick ? now - DB.lastTick : 0;
@@ -522,8 +523,12 @@ function tick() {
     }
     if (t.nextAt > now) continue;
     const late = now - t.nextAt;
+    // 这次闹钟正是按这个计划时刻叫醒的：Doze 推迟几分钟（精确闹钟在深睡里也会被系统押后）不等于应用没在跑，
+    // 按到点执行（0.6.9 审计 13-04）。推迟超过 30 分钟多半是关机 / 强制停止前留下的旧闹钟，仍按错过处理
+    const byAlarm = alarmAt > 0 && t.nextAt === alarmAt && late <= 30 * 60000;
+    if (byAlarm && late > 3 * 60000) log(`⏰ 定时任务「${t.name}」的闹钟被系统推迟了 ${Math.round(late / 60000)} 分钟，仍按到点执行`);
     // 晚了 3 分钟以上：应用没在跑 / 机器睡死了 —— 按「错过了」的设置来，不默默补跑
-    if (late > 3 * 60000 && gap > 3 * 60000 || late > 15 * 60000) {
+    if (!byAlarm && (late > 3 * 60000 && gap > 3 * 60000 || late > 15 * 60000)) {
       const when = t.nextAt;
       if (t.missed === "run") {
         // 「跳过下一次」指的正是这次错过的计划：消费掉标记，别让再下一次 due 被跳
@@ -631,8 +636,12 @@ export async function routeSched(req, res, u, p) {
     log(`⏰ 新定时任务「${t.name}」 下次 ${t.nextAt ? new Date(t.nextAt).toLocaleString() : "—"}`);
     return sendJson(res, 200, { ok: true, task: summary(t) });
   }
-  // 外壳的闹钟响了：立刻查一遍（不用等下一个 30 秒）
-  if (p === "/api/sched/tick" && req.method === "POST") { tick(); return sendJson(res, 200, { ok: true, next: lastNext }); }
+  // 外壳的闹钟响了：立刻查一遍（不用等下一个 30 秒）。新外壳带上闹钟的计划时刻，Doze 推迟时据此照常执行（0.6.9 审计 13-04）
+  if (p === "/api/sched/tick" && req.method === "POST") {
+    const b = await body();
+    tick(Number(b.at) || 0);
+    return sendJson(res, 200, { ok: true, next: lastNext });
+  }
   if (p === "/api/sched/allow-login" && req.method === "PUT") {
     const b = await body(), before = DB.allowLogin; DB.allowLogin = !!b.on;
     if (!save()) { DB.allowLogin = before; return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }

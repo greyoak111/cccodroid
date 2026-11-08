@@ -22,10 +22,12 @@ import java.nio.file.Files;
 public class SchedAlarm extends BroadcastReceiver {
     static final String TAG = "cccodroid";
     static final String ACTION = "cc.codroid.SCHED_ALARM";
+    /** 这次闹钟按哪个计划时刻设的：响的时候交给网关，Doze 推迟几分钟也按「到点」执行（0.6.9 审计 13-04） */
+    static final String EXTRA_AT = "at";
     private static long lastAt = -1;
 
-    private static PendingIntent pi(Context c) {
-        Intent i = new Intent(c, SchedAlarm.class).setAction(ACTION);
+    private static PendingIntent pi(Context c, long at) {
+        Intent i = new Intent(c, SchedAlarm.class).setAction(ACTION).putExtra(EXTRA_AT, at);
         return PendingIntent.getBroadcast(c, 70, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
@@ -34,7 +36,7 @@ public class SchedAlarm extends BroadcastReceiver {
         if (at == lastAt) return;
         AlarmManager am = c.getSystemService(AlarmManager.class);
         if (am == null) return;
-        PendingIntent p = pi(c);
+        PendingIntent p = pi(c, at);
         if (at <= 0) {
             try { am.cancel(p); lastAt = at; Log.i(TAG, "定时任务闹钟：已取消"); }
             catch (Exception e) { lastAt = -1; Log.w(TAG, "定时任务闹钟取消失败", e); }
@@ -92,17 +94,22 @@ public class SchedAlarm extends BroadcastReceiver {
 
     @Override public void onReceive(Context c, Intent i) {
         if (!ACTION.equals(i.getAction())) return;
-        Log.i(TAG, "定时任务闹钟响了");
+        // 闹钟原定的时刻：Doze 推迟几分钟时网关据此照常执行这次计划，不当成「错过」（0.6.9 审计 13-04）
+        final long at = i.getLongExtra(EXTRA_AT, 0);
+        Log.i(TAG, "定时任务闹钟响了（计划 " + new java.util.Date(at) + "）");
         synchronized (SchedAlarm.class) { lastAt = -1; }   // 已经响过，下次报来的同一时刻也要重新定
         try { GatewayService.start(c); } catch (Exception e) { Log.w(TAG, "定时任务闹钟：拉起服务失败", e); }
         // 挂住广播（后台广播最多约 60 秒）：等网关能接请求了让它立刻查一遍；网关刚启动的话它 5 秒后也会自己查
+        final byte[] payload = ("{\"at\":" + at + "}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
         PendingResult pr = goAsync();
         new Thread(() -> {
             try {
                 for (int n = 0; n < 20; n++) {
                     try {
-                        HttpURLConnection h = Env.gateway("POST", "/api/sched/tick", null);
+                        HttpURLConnection h = Env.gateway("POST", "/api/sched/tick", payload);
                         h.setConnectTimeout(2000); h.setReadTimeout(5000);
+                        h.setDoOutput(true);
+                        try (java.io.OutputStream o = h.getOutputStream()) { o.write(payload); }
                         int code = h.getResponseCode();
                         h.disconnect();
                         if (code == 200) { Log.i(TAG, "定时任务闹钟：网关已查过"); return; }
