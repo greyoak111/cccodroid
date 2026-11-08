@@ -102,3 +102,19 @@ test("195-AA.3：被系统结束的定时任务轮次 → 补记一次失败，�
     assert.equal(mine().length, 1, "同一轮不重复记");
   } finally { const i = S.DB.tasks.indexOf(task); if (i >= 0) S.DB.tasks.splice(i, 1); }
 });
+
+test("195-A.8：被结束的那轮按标记里拍的底重新封签——只往后追加的照常干净，前面被改的标 edited", async () => {
+  reset();
+  const { sealSession, checkSession, sessionAnchor } = await import("../gw/integrity.mjs");
+  const { PATHS } = await import("../gw/config.mjs");
+  const crypto = await import("node:crypto");
+  const dir = path.join(PATHS.projects, "-a8"); fs.mkdirSync(dir, { recursive: true });
+  const mk = () => { const sid = crypto.randomUUID(), f = path.join(dir, sid + ".jsonl"); fs.writeFileSync(f, JSON.stringify({ type: "user", sessionId: sid, message: { role: "user", content: "一" } }) + "\n"); sealSession(sid, f); return { sid, f, base: sessionAnchor(f) }; };
+  const a = mk(), b = mk();
+  fs.appendFileSync(a.f, "{\"type\":\"assistant\"}\n");                       // claude 跑到一半写的
+  fs.writeFileSync(b.f, fs.readFileSync(b.f, "utf8").replace("一", "壹") + "{\"type\":\"assistant\"}\n");
+  fs.writeFileSync(MARK, JSON.stringify({ runs: [{ id: "a8a", sessionId: a.sid, text: "x", startedAt: 1, sealBase: a.base }, { id: "a8b", sessionId: b.sid, text: "y", startedAt: 2, sealBase: b.base }], queue: [] }));
+  Q.recoverRunMark();
+  assert.equal(checkSession(a.sid, a.f), null, "只追加：不提醒模型");
+  assert.equal(checkSession(b.sid, b.f), "edited");
+});

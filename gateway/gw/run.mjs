@@ -516,6 +516,7 @@ export async function startRun(item) {
   // 同时拍底，收尾时核这一轮只是往后追加
   if (!integ) { integ = checkSession(run.sessionId, sfile()); if (integ) integNote = isCmd || P.local ? "" : integrityNote(integ); }
   run.sealBase = run.sessionId ? { sid: run.sessionId, ...sessionAnchor(sfile()) } : null;
+  if (run.sealBase) saveRunMark();     // 底要进运行标记：这一轮被系统结束时，下次启动凭它重新封签（195-A.8）
   if (run.aborted || run.ended) { log("⏹ 起进程前已停止"); return endRun(run, { durationMs: 0 }); }
   const [cmd0, args0] = claudeCmd(argv);
   // 外面套着 seccomp 监督器时，claude 是监督器的子进程：监督器把它的 pid 从 fd 3 报上来（不可转储的 claude 在 /proc 里看不见，作证要用，见 privWitness）

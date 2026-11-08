@@ -9,6 +9,7 @@ import { effectiveModel } from "./sessmodel.mjs";
 const runProvider = (sid) => providerById(effectiveModel(sid).provider) || PROVIDER;
 import { isLoginMode } from "./models.mjs";
 import { findSessionFile } from "./sessions.mjs";
+import { sealSession } from "./integrity.mjs";
 import { killTree, safeModePerm } from "./claude.mjs";
 import { goalCheck, tasksCheck } from "./goal.mjs";
 import { LAST_SESSION, RUNS, SESSIONS, TRASH_HOOKS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
@@ -108,6 +109,7 @@ export function saveRunMark() {
       // 现在存到 64K（更长的标 textCut，界面要说），连同发送参数 req、定时任务身份 sched（AA.3）
       runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, text: r.text.slice(0, TEXT_KEEP), ...(r.text.length > TEXT_KEEP ? { textCut: true } : {}),
         startedAt: r.startedAt, ...(r.req && Object.keys(r.req).length ? { req: r.req } : {}), ...(r.sched ? { sched: r.sched } : {}),
+        ...(r.sealBase?.hash && r.sealBase.sid === r.sessionId ? { sealBase: { size: r.sealBase.size, hash: r.sealBase.hash } } : {}),
         ...(r.idle && !r.bgTasks ? { done: true } : {}) })),
       // 已经写进 stdin、claude 还没吃进去的插话也算排队的：一起留下
       // 新会话首条还没拿到会话号时跟着发的（只有 follow）：首条已经结束、不在 runs 里了，重启后就认不出属于哪个会话。
@@ -167,6 +169,12 @@ export function recoverRunMark() {
     return;
   }
   if (!m || typeof m !== "object") { keepBad(RUN_MARK, "形状不对，中断记录没恢复"); return; }
+  // 被结束的那几轮没走收尾，会话记录没重新封签：下一轮会被当成「在应用外被改过」去提醒模型（0.6.9 审计 195-A.8）。
+  // 起进程时拍的底存在标记里：记录只是在那之后往后追加了（claude 自己写的），照常封签；前面被改了才标 edited
+  for (const r of Array.isArray(m.runs) ? m.runs : []) {
+    if (!r || !r.sessionId || !r.sealBase || !Number.isFinite(r.sealBase.size) || typeof r.sealBase.hash !== "string") continue;
+    try { const f = findSessionFile(String(r.sessionId))?.file; if (f) sealSession(String(r.sessionId), f, { base: r.sealBase }); } catch (e) { log(`[封签] ${e.message}`); }
+  }
   // 并行时可能同时断了好几轮：每个会话各记一条，各挂各的「继续」卡
   const runs = (Array.isArray(m.runs) ? m.runs : m.run ? [m.run] : []).filter((r) => r && r.id && !r.done).sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
   for (const r of runs) {
