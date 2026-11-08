@@ -18,15 +18,15 @@ import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "
 import { TASKS_HINT, contextWindowOf, toolsHint, translate, hookBlocked } from "./stream.mjs";
 import { archiveHint } from "./archive.mjs";
 import { autoTitle } from "./autotitle.mjs";
-import { SUBAGENT_HINT, agentBook, takeAgentNote, onShared, privateAgentsBase } from "./agents.mjs";
+import { SUBAGENT_HINT, agentBook, takeAgentNote, putAgentNote, onShared, privateAgentsBase } from "./agents.mjs";
 import { findSessionFile, peekSession } from "./sessions.mjs";
 import { projectById, projectDefaults, projectOfDir } from "./projects.mjs";
 import { sessLostProvider, sessModel, sessProvider, setSessModel } from "./sessmodel.mjs";
 import { inlineImages, inlineImagesSync, wantsInline } from "./inlineimg.mjs";
-import { pathWatch, previewHint, settlePathNote, takePathNote } from "./pathnote.mjs";
+import { pathWatch, previewHint, putPathNote, settlePathNote, takePathNote } from "./pathnote.mjs";
 import { claudeSeal, sealStillValid } from "./claudeseal.mjs";
 import { gwRuntimeBlocked } from "./gwpin.mjs";
-import { tamperNote, tamperRecord } from "./tamper.mjs";
+import { tamperNote, tamperRecord, tamperRetell } from "./tamper.mjs";
 import { SPOOF_NOTE, checkSession, integrityHint, integrityNote, neutralizeMarkers, sealSession, sessionAnchor } from "./integrity.mjs";
 import { ruleblockHint } from "./ruleblock.mjs";
 import { recordExtra } from "./lineage-store.mjs";
@@ -39,7 +39,7 @@ import { holdsPrivate } from "./pathguard.mjs";
 import { guarded } from "./crashguard.mjs";
 // 权限确认等多久没人答就按拒绝收掉（0.6.9 审计 P1-4）。测试可用 CCAPP_PERM_WAIT_MS 改短
 const PERM_WAIT_MS = Number(process.env.CCAPP_PERM_WAIT_MS) > 0 ? Number(process.env.CCAPP_PERM_WAIT_MS) : 30 * 60e3;
-import { UC_SEALED, ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "./userconf.mjs";
+import { UC_SEALED, ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucPutNote, ucRevert, ucSetRevertNote, ucTakeNote } from "./userconf.mjs";
 import { keepProcs, killProcs, leftoverProcs, nowTicks, procStart } from "./leftover.mjs";
 import { localAddr, witnessMac } from "./access.mjs";
 import { sealed } from "./edition.mjs";
@@ -546,17 +546,30 @@ export async function startRun(item) {
   // 子代理汇总也是这样跟着用户的消息进去（见 takeAgentNote），不单独叫醒主会话
   // 图片块（见 inlineimg.mjs）排在用户原话后面、提醒前面
   // 用户原话里冒充系统的标签（<system-reminder> 之类）先换成全角，只有网关自己加的提醒是真标签（见 integrity.mjs）
+  // 取走的提醒先记着：这一轮没送到模型（没起来、出错、没答完）就放回去，下一轮再带（0.6.9 审计 200-S-10：以前取用即销毁）
+  const back = { tamper: [], path: "", uc: "", agent: [] };
+  run.giveNotesBack = () => {
+    run.giveNotesBack = null;
+    if (back.tamper.length) tamperRetell(back.tamper);
+    putPathNote(run.sessionId, back.path);
+    ucPutNote(back.uc);
+    if (back.agent.length) putAgentNote(run.cwd, run.sessionId, back.agent.join("\n"));
+    if (back.tamper.length || back.path || back.uc || back.agent.length) log("这一轮没送到模型：提醒放回去，下一轮再带");
+  };
   const withNotes = (msg0, extra, imgs = []) => {
     const msg = neutralizeMarkers(msg0);
     if (P.local || msg.trim().startsWith("/")) return msg;
-    const notes = [msg !== msg0 ? SPOOF_NOTE : "", extra, takeAgentNote(run.cwd, run.sessionId)].filter(Boolean);
+    const an = takeAgentNote(run.cwd, run.sessionId);
+    if (an) back.agent.push(an);
+    const notes = [msg !== msg0 ? SPOOF_NOTE : "", extra, an].filter(Boolean);
     return notes.length || imgs.length ? [{ type: "text", text: msg }, ...imgs, ...notes.map((n) => ({ type: "text", text: `<system-reminder>\n${n}\n</system-reminder>` }))] : msg;
   };
   // 上一轮只写了文件名没写全路径：这一轮的消息带上提醒（见 pathnote.mjs）。命令那轮不带（带了也包不进去，提醒会白白丢掉）
-  const pathNote = isCmd || P.local ? "" : takePathNote(run.sessionId);
+  const pathNote = back.path = isCmd || P.local ? "" : takePathNote(run.sessionId);
   // 应用文件被改过、已还原（tamper.mjs）：告诉模型一次，别再去改回来
-  const tamperN = isCmd || P.local ? "" : tamperNote();
-  const ucN = isCmd || P.local ? "" : ucTakeNote();
+  // 这两条不分会话：没人看着的（定时任务）不取，留给用户下一次自己发的那轮
+  const tamperN = isCmd || P.local || run.unattended ? "" : tamperNote(back.tamper);
+  const ucN = back.uc = isCmd || P.local || run.unattended ? "" : ucTakeNote();
   writeUser(withNotes(message, [tamperN, ucN, integNote, arch?.note, pathNote, refN].filter(Boolean).join("\n\n"), imgs0));
   run.inputOpen = true;
   run.pendingInject = [];      // 已写进 stdin、还没被 claude 吃进去的插话
@@ -905,6 +918,7 @@ export async function startRun(item) {
     run.meter.close();                   // 中断 / 被杀也走这里：子代理记录最后扫一遍
     try { run.agents?.close(); } catch (e) { log("子代理收尾出错: " + e.message); }
     // claude 已经退出，这时的记录就是下一轮的基准；提醒这一轮已经交出去（正常答完）才清掉标记
+    if (!lastResult || lastResult.is_error) run.giveNotesBack?.();
     try { sealSession(run.sessionId, sfile(), { clear: !!integNote && !run.aborted && !!lastResult && !lastResult.is_error, base: run.sealBase?.sid === run.sessionId && run.sealBase.hash ? run.sealBase : null }); } catch (e) { log(`[封签] ${e.message}`); }
     run.inputOpen = false;
     run.perms.clear();                // 卡片随 run_end 一起作废（前端按 run_end 收起）
@@ -962,6 +976,7 @@ export async function startRun(item) {
 
   child.on("error", (e) => {
     log(`spawn 出错: ${e.message}`);
+    run.giveNotesBack?.();
     emit({ type: "error", message: tr(LAST_LANG, tz("无法启动 claude：{err}", { err: e.message })) });
     endRun(run, { failed: true });
   });

@@ -61,6 +61,13 @@ export function takeAgentNote(cwd, sessionId) {
   try { const t = fs.readFileSync(f, "utf8").trim(); fs.unlinkSync(f); return t; } catch { return ""; }
 }
 
+/** 这一轮没送到模型：取走的汇总放回去，排在这期间新攒的前面 */
+export function putAgentNote(cwd, sessionId, text) {
+  if (!cwd || !sessionId || !text) return;
+  const f = path.join(agentsDir(cwd, sessionId), NOTE);
+  try { let cur = ""; try { cur = fs.readFileSync(f, "utf8"); } catch {} fs.writeFileSync(f, text.trim() + "\n" + cur); } catch {}
+}
+
 /** 一轮 run 的联络簿。feed(ev) 吃 claude 的原始事件；emit 推界面 */
 export function agentBook(run, { emit }) {
   const byTask = new Map();     // agentId(task_id) → agent

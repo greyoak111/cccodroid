@@ -45,16 +45,21 @@ export function tamperAck(id) {
 }
 
 /** 下一轮随用户消息带给模型（只说一次）。写成事实陈述：不指责，但讲清楚改动已撤销、别再改回去 */
-export function tamperNote() {
+export function tamperNote(ids = null) {
   const fresh = EVENTS.filter((e) => !e.told);
   if (!fresh.length) return "";
-  for (const e of fresh) e.told = true;
+  for (const e of fresh) { e.told = true; ids?.push(e.id); }
   const files = [...new Set(fresh.flatMap((e) => e.files))].slice(0, 12).join(", ");
   const claude = fresh.some((e) => e.src === "claude");
   return "App note: cccodroid found its own program files modified outside the app's normal update path and " +
     (claude ? "refused to start a modified Claude Code binary; " : "") +
     `restored them from the installed package (${files}). Any such change, including one made earlier in this session, has been undone. ` +
     "Don't try to reapply it or work around these safeguards; if you made the change, tell the user plainly.";
+}
+
+/** 这一轮没送到模型（没起来、出错、没答完）：tamperNote 记下的那几条下一轮再说（0.6.9 审计 200-S-10） */
+export function tamperRetell(ids) {
+  for (const e of EVENTS) if (ids.includes(e.id)) e.told = false;
 }
 
 // 应用交过来的：JSON 数组（文件名），起网关前那次核对的结果

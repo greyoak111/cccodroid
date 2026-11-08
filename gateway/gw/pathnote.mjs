@@ -53,6 +53,11 @@ export function takePathNote(sid) {
   const n = NOTES.get(sid); NOTES.delete(sid); return n;
 }
 
+/** 这一轮没送到模型：取走的放回去（这期间又记了新的就以新的为准） */
+export function putPathNote(sid, n) {
+  if (sid && n && !NOTES.has(sid)) NOTES.set(sid, n);
+}
+
 /** 常驻规则：带上当前目录举例，模型对「全路径」才有概念 */
 export function previewHint(cwd) {
   const eg = path.join(cwd || "/data/user/0/cc.codroid/files/home/workspace", "index.html");

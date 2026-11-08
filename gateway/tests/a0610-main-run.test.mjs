@@ -92,10 +92,14 @@ test("199 11-07：敏感操作批准一次只放行同一个目标——同类�
   const s = crypto.randomUUID();
   const g = (id, cat, what, tool = "Read") => ({ type: "control_request", request_id: id, request: { subtype: "can_use_tool", tool_name: tool, input: { file_path: "/x" }, tool_use_id: "tu-" + id,
     decision_reason_type: "hook", decision_reason: `cccodroid-guard|${cat}|${what}` } });
-  script([init(s), g("k-a", "secret:keys", "keys: a.json"), { sleep: 0.6 }, g("k-c", "secret:keys", "keys: a.json"), g("k-b", "secret:keys", "keys: b.json"), { sleep: 0.2 },
-    g("d-a", "device:screen", "screen_tap", "mcp__device__screen_tap"), { sleep: 0.6 }, g("d-b", "device:screen", "screen_read", "mcp__device__screen_read"), { sleep: 1.2 }, result], 0);
+  // 等 stdin 上的回应再发下一条（以前按 sleep 卡时间，全量跑负载高时批准还没落就发了下一条）：
+  // 读到带那条请求号的回应为止
+  const rd = (id) => ({ raw: `while read l; do case "$l" in *'"${id}"'*) break;; esac; done` });
+  script([init(s), g("k-a", "secret:keys", "keys: a.json"), rd("k-a"), g("k-c", "secret:keys", "keys: a.json"), g("k-b", "secret:keys", "keys: b.json"), rd("k-b"),
+    g("d-a", "device:screen", "screen_tap", "mcp__device__screen_tap"), rd("d-a"), g("d-b", "device:screen", "screen_read", "mcp__device__screen_read"), rd("d-b"), result], 0);
   await startRun({ id: "a0610-guardkey", message: "fixture", cwd: root, permissionMode: "default" });
-  const asked = (id) => events.some((e) => e.type === "perm_request" && e.id === id);
+  // 只看这一轮的：上一条测试插话排进队列的那轮也在跑同一个假 CLI，请求号一样
+  const asked = (id) => events.some((e) => e.type === "perm_request" && e.id === id && e.runId === "a0610-guardkey");
   await until(() => asked("k-a"));
   RUNS.get("a0610-guardkey").answerPerm("k-a", { behavior: "allow" });
   await until(() => asked("d-a"), 5000);
@@ -104,6 +108,24 @@ test("199 11-07：敏感操作批准一次只放行同一个目标——同类�
   assert.equal(asked("k-c"), false, "同一个目标不再问");
   assert.equal(asked("k-b"), true, "同类别的另一个密钥要问");
   assert.equal(asked("d-b"), false, "读屏点按一连串按类别放行");
+});
+
+test("200-S-10：提醒没送到模型（没答完就退出）放回去，下一轮再带；定时任务不取不分会话的提醒；答完才算交出去", async () => {
+  const { tamperNote, tamperRecord } = await import("../gw/tamper.mjs");
+  const { putPathNote, takePathNote } = await import("../gw/pathnote.mjs");
+  tamperNote();                                      // 清掉别的测试留下的
+  tamperRecord("runtime", ["s10-probe.json"]);
+  const sid = crypto.randomUUID();
+  putPathNote(sid, "Path note: s10");
+  script([init(sid)], 1);                            // 起来了、没出 result 就退出
+  await startRun({ id: "a0610-s10a", message: "fixture", cwd: root, sessionId: sid });
+  await until(() => endOf("a0610-s10a"));
+  assert.equal(endOf("a0610-s10a").failed, true);
+  script([init(sid), result], 0);
+  await startRun({ id: "a0610-s10b", message: "fixture", cwd: root, sessionId: sid, unattended: true });
+  await until(() => endOf("a0610-s10b"));
+  assert.equal(takePathNote(sid), "", "同一会话的路径提醒：定时任务那轮答完就交出去了");
+  assert.match(tamperNote(), /s10-probe\.json/, "失败那轮放回来了，定时任务那轮没取");
 });
 
 // 放最后：它留下的后台 sleep 30 还活着时，后面的轮次会先弹「用户配置」确认卡

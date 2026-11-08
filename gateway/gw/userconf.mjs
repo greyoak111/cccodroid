@@ -484,6 +484,8 @@ export function ucSetRevertNote(rels, procs) {
   REVERT_NOTE = parts.length ? "App note: before this turn the user " + parts.join(" and ") + ". Don't recreate them or work around this check; if you made them, tell the user plainly." : "";
 }
 export function ucTakeNote() { const n = REVERT_NOTE; REVERT_NOTE = ""; return n; }
+/** 这一轮没送到模型：放回去 */
+export function ucPutNote(n) { if (n) REVERT_NOTE = REVERT_NOTE ? n + " " + REVERT_NOTE : n; }
 
 /** 测试用：清掉内存里的状态 */
 export function _ucReset() {
