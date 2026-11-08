@@ -13,7 +13,7 @@
 | 13-09 | 安装确认通知用了 `Updater.CH` 频道，新进程里频道可能不存在 | 移交（`Updater.ensureChannel` 已加；`Events.java` 一行调用待主会话） |
 | 13-10 | 台账里没找到原文 | 不成立（未找到） |
 | 13-11 | `ccapp-sched-next` 直接覆盖 / 撕裂写 → 下次开机没闹钟 | 已修（撕裂部分第一轮 b7706bc 已改 writeAtomic，本轮补写失败重试与读侧） |
-| 14-02 | 工具包升级只保留 pip / npm -g，其他用户内容被静默删除 | 待办 |
+| 14-02 | 工具包升级只保留 pip / npm -g，其他用户内容被静默删除 | 已修 |
 | 14-03 | 降级保护只在 `checkDevkit` 网络路径，本地文件 / 暂存 / 修复路径能装旧版 | 待办 |
 | 14-04 | APK 手动降级没有版本检查；24h 内任何 TAG 变化都被当成「升级」 | 待办 |
 | 1-03（GatewayService 半） | 只探测 127.0.0.2:8791；127.0.0.1:8791 被占 → 重启循环 | 待办 |
@@ -29,6 +29,7 @@
 | 13-01 | 见 git log | 新增 `ACTION_ALARM` / `startAlarm()`：闹钟和系统粘性重建拉起时置 `closeWhenIdle`，给 30 拍（约 60 秒）宽限等网关起来、任务进队列，之后按「三次空闲」退出；界面在前台时每拍把 `closeWhenIdle` 清掉（闹钟叫醒时界面开着、随后按 Home 不会误退）；`SchedAlarm` 改用 `startAlarm()` | `javac` 全量通过。真机：① 关掉界面，设一个 1 分钟后的任务，到点让它跑完，再等约 1 分钟，通知栏「正在运行」应消失（`adb shell dumpsys activity services cc.codroid | grep GatewayService` 查不到）；② 打开界面停在聊天页再按 Home（不划掉），等 2 分钟服务仍应在；③ 后台跑任务时划掉界面，任务跑完后服务才停 |
 | 13-02（含 1-07、13-12） | 见 git log | ① `alive()`：自己拉起的网关进程还活着也要过 `/__proof`，起来 20 秒宽限内除外；超时证明不了自己就 `killGateway()` 重起，不再盲目认活进程。② `squatted()`：找到本应用残留网关的 pid 后先 SIGTERM（15）请它自己收尾（它的退出处理会连带结束正在跑的 claude 进程树），最多等 3 秒，不退出才 SIGKILL（9）；之后**不再提前 return**，一律再扫一遍 `CCAPP_TOKEN_FILE` 环境变量清理网关留下的进程（被 SIGKILL 的网关没机会收尾，claude 子树靠这段兜底） | `javac` 全量通过。真机：① 打开应用跑一条长任务，`adb shell ps -A -o PID,PPID,ARGS \| grep -E "server.mjs\|input-type=module"` 找到网关 pid；只杀应用 Java 进程（`adb shell kill -9 <界面/服务进程 pid>`，别用 force-stop，那样整个包都杀了）模拟服务重启，再打开界面：logcat `cccodroid` 应看到「端口上是本应用的残留网关 pid=…，请它退出」，随后新网关启动；正常情况下不应看到「强制结束」（SIGKILL 兜底）；`ps` 里旧的 claude 进程应消失。② 关掉界面再打开，频繁几次不应出现「端口 8791 被别的应用占着」或重启循环 |
 | 13-05 | 见 git log | `GatewayService.start()` 改成返回系统收没收下启动请求，`startAlarm()` 返回该值；`SchedAlarm.onReceive` 拿到 false（targetSdk 31+ 后台起前台服务被拒）时发一条「定时任务没有在后台跑」通知，点开进应用；新文案进 `i18n-j2-java.json`，新建独立「定时任务」通知渠道。到点请求的 tick 重试循环不变：用户快点开通知还能赶上前 50 秒的补跑 | `javac` 全量通过；`i18n-j2-java.json` JSON 校验通过（5 键 × 10 语言）。本机 targetSdk 28 不会走这条路径，需 targetSdk 36 的包真机验：① `adb shell appops set cc.codroid SCHEDULE_EXACT_ALARM deny`（或设置里关「闹钟和提醒」）；② 设一个 2 分钟后的任务，退回桌面锁屏；③ 到点看通知栏应出现「定时任务没有在后台跑」，logcat `cccodroid` 有「拉起网关服务被系统拒绝」→「系统不让后台起服务，已发通知请用户打开应用」；④ 点通知进应用，网关启动后任务补跑或界面提示「错过」 |
+| 14-02 | 见 git log | `Installer.carryOver` 从「只扫 bin / lib/node_modules / site-packages」改成遍历整个旧 `$PREFIX`：凡是旧工具包任何一份清单都不认领的文件都搬。认主名单对齐网关 `gw/orphans.mjs baseOwnedPaths`——dpkg `.list`、底座 `.devkit-manifest` / `libexec/devkit/FILES` / `MANIFEST`、各模块 `FILES` / `MANIFEST` / `MANIFEST.local`、组件 `MANIFEST` 与 `files/components/*.json` 的 `files`+`shared`。整棵没人认领、新包又没有同名的目录一次 `renameTo`；同名目录下钻只搬多出来的。不搬：`tmp`、`.devkit-ok` / `.devkit-manifest` / `.devkit-relocated`、`var/lib/dpkg`、`libexec/devkit/modules.json` 与模块的 `.ok` / `MANIFEST.local`、以及解释器小版本不同的 `lib/python3.X` | `javac` 全量通过。只读扫描真机现有 `$PREFIX`（50721 个文件）核对认主名单：上述全部来源合并后「没人认领」只剩 1023 个，其中 971 个是 `lib/python3.14` 的 `__pycache__`/.pyc，其余是 ssh host key、`etc/pip.conf`、`glibc/etc/hosts`、gdk-pixbuf / graphviz / mandoc 缓存、`var/lib/dbus/machine-id`——没有旧工具包文件混进来。规则另用一份同逻辑的 JS 对照模拟跑过（自建 mock 树：用户的 bin / etc / share / opt、组件文件、`.ok` / `tmp` / dpkg、同名目录下钻），全部断言通过。真机验：① 终端里 `mkdir -p $PREFIX/share/mytest && echo hi > $PREFIX/share/mytest/a.txt`，记下 `sha256sum $PREFIX/etc/ssh/ssh_host_ed25519_key`；② 设置 → 开发工具包 → 换一个版本安装；③ 装完 `cat $PREFIX/share/mytest/a.txt` 内容还在、ssh host key 的 sha256 不变；④ `ls $PREFIX/libexec/devkit/modules/*/.ok` 的时间戳是这次升级后的（旧 `.ok` 没搬过来），`$PREFIX/tmp` 里没有旧内容 |
 
 ## 不成立
 
@@ -53,6 +54,7 @@
 - 13-01：系统闹钟叫醒（以及系统粘性重建）的服务不再常驻：跑完到点的任务后，约 60 秒宽限 + 6 秒空闲即退出；界面在前台时不算空闲。用户感知：定时任务跑完后，后台通知与 WakeLock 会在约一分钟内消失（以前一直挂着），下次闹钟 / 打开界面会再拉起。
 - 13-02：服务重启遇到自己的残留网关时，最多多等约 3 秒让它自己收尾（原先直接 SIGKILL），启动会略慢一点；残留网关退出时如果正在跑任务，那一轮会被结束（SIGTERM 收尾本来就会结束 claude 树），这是有意的——接不了存活网关就不接管它的会话。`alive()` 现在要求自己拉起的网关也能证明自己：起来 20 秒后仍答不出 `/__proof` 会被结束重起（以前一直当它活着）。
 - 13-05：targetSdk 31+ 且没给「闹钟和提醒」权限时，非精确闹钟在后台被系统拒绝拉起服务后，会多一条「定时任务没有在后台跑」通知（新渠道「定时任务」）；点开应用后任务补跑或提示错过。targetSdk 28 的现有包无感知。
+- 14-02：工具包升级改为遍历整个旧 `$PREFIX`（手机上一轮约 5 万个文件）再搬，升级耗时比只扫三个目录多一些；保留的用户内容范围扩大到 etc / share / var / opt 等处（`tmp`、dpkg 数据库、安装器标记、解释器小版本不同的 `lib/python3.X` 除外）。用 `pkg` / `apt` 装的包仍按旧工具包文件算、不搬（升级后照旧按提示 `pkg restore`）。旧工具包若缺少清单（0.3.9 及以前），认主不全，仍可能把个别旧文件当用户内容搬过来；现网版本都带清单。
 
 ## 全量测试
 

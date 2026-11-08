@@ -48,6 +48,18 @@
     "ar": "لم تعمل المهمة المجدولة في الخلفية"
   },
   {
+    "zh": "保留了你自己装进工具包的 {0} 项",
+    "en": "Kept {0} items you installed into the devkit yourself",
+    "ja": "ご自身で開発ツールキットに入れた {0} 件を残しました",
+    "ko": "직접 개발 도구 키트에 설치한 {0}개 항목을 유지했습니다",
+    "zh-Hant": "保留了你自己裝進工具包的 {0} 項",
+    "es": "Se conservaron {0} elementos que instalaste tú mismo en el kit de desarrollo",
+    "fr": "Conservé {0} éléments que vous avez installés vous-même dans la boîte à outils",
+    "ru": "Сохранено {0} элементов, установленных вами в девкит",
+    "id": "Menyimpan {0} item yang Anda pasang sendiri ke devkit",
+    "ar": "تم الاحتفاظ بـ {0} عناصر قمت بتثبيتها بنفسك في مجموعة أدوات التطوير"
+  },
+  {
     "zh": "刚刚",
     "en": "just now",
     "ja": "たった今",
