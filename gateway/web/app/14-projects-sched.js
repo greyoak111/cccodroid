@@ -175,8 +175,10 @@
     ]);
   }
   async function openTermAt(dir) {
-    await openTerm();
-    if (TERM.list.some((x) => x.alive)) await newTerm({ cwd: dir });
+    // 一个终端都没有时，openTerm 直接把第一个开在目标目录；已经有终端的才另开一个（195-H.6）
+    const had = TERM.list.some((x) => x.alive);
+    await openTerm(had ? {} : { cwd: dir });
+    if (had) await newTerm({ cwd: dir });
   }
 
   // ── 弹层：宽屏居中（宽 560、高不过宽×φ），窄屏整页推入；返回键先关它 ──
