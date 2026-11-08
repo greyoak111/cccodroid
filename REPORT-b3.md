@@ -54,4 +54,4 @@
 
 ## 全量测试
 
-（尚未跑）
+`env -u CCAPP_RUN node scripts/test.mjs`：**tests 1090 / pass 1089 / fail 0 / skipped 1**（duration 591 s）。
