@@ -7,6 +7,7 @@ import fs from "node:fs";
 const read = (p) => fs.readFileSync(new URL(`../web/${p}`, import.meta.url), "utf8");
 const src03 = read("app/03-perm-status.js");
 const src04 = read("app/04-session-flow.js");
+const src05 = read("app/05-composer.js");
 const src09 = read("app/09-settings.js");
 const src11 = read("app/11-usage.js");
 const src13 = read("app/13-nav-menus.js");
@@ -90,6 +91,13 @@ test("A9 195-F.4：手动放入 / 直链下好的模型能在应用里删除", (
   assert.ok(src09.includes("data-del=\"${esc(m.id)}\""), "模型列表带删除按钮");
   assert.ok(src09.includes("post(\"/api/local/model\", { op: \"remove\", id })"), "调用网关的 remove");
   assert.ok(src09.includes("删掉模型「{id}」？文件会从模型目录里删除。"), "删除前确认");
+});
+
+test("A10 195-C.18：0 字节文件照传，失败原因读网关回的 message / error", () => {
+  assert.ok(!src05.includes("if (!f.size)"), "不再在本地拦 0 字节文件");
+  assert.ok(src05.includes("0 字节也照传：网关现在收空文件"), "写明为什么不再拦");
+  assert.ok(src05.includes("j && (j.message || j.error)"), "非 2xx 读网关原因，不只报状态码");
+  assert.ok(src05.includes("r.status === 507 ? t(\"存储空间不够了\")"), "网关没给原因时按状态给本地化原因");
 });
 
 test("C28 195-O.5–O.7 / 197-5.12：跨午夜 / 换时区重算，补算进度也重画，清除本月不误删邻月", () => {
