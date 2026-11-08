@@ -4,7 +4,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import zlib from "node:zlib";
-import { sseRepairer, startStreamFix, fixedBaseUrl, STREAMFIX } from "../gw/streamfix.mjs";
+import { sseRepairer, startStreamFix, fixedBaseUrl, STREAMFIX, SWALLOW_HOOKS } from "../gw/streamfix.mjs";
 
 const ev = (o, name = o?.type) => `event: ${name}\ndata: ${JSON.stringify(o)}\n\n`;
 const START = ev({ type: "message_start", message: { id: "m", usage: { input_tokens: 1, output_tokens: 0 } } });
@@ -45,4 +45,22 @@ test("200-9-06：SSE 的 4xx/5xx 错误流、压缩过的 SSE → 原样转给�
   route = (req, res) => { res.writeHead(200, { "content-type": "text/event-stream" }); res.end("data: {\"choices\":[]}\n\n"); };
   const r3 = await fetch(base + "/v1/messages", { method: "POST", body: "{}" });
   assert.equal(await r3.text(), "data: {\"choices\":[]}\n\n");
+});
+
+test("195-U.4：说完后才来的 error 照旧补成说完，但报给发起的会话（请求头里的会话号）", async () => {
+  const got = [];
+  const h = (sid, msg) => got.push([sid, msg]);
+  SWALLOW_HOOKS.push(h);
+  try {
+    const base = fixedBaseUrl(`http://127.0.0.1:${up.address().port}/s`);
+    const body = START + ev({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })
+      + ev({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "说完了" } }) + ev({ type: "content_block_stop", index: 0 })
+      + ev({ type: "error", error: { type: "api_error", message: "upstream hiccup" } });
+    route = (req, res) => { res.writeHead(200, { "content-type": "text/event-stream" }); res.end(body); };
+    const r = await fetch(base + "/v1/messages", { method: "POST", body: "{}", headers: { "X-Claude-Code-Session-Id": "sid-u4" } });
+    const out = await r.text();
+    assert.match(out, /"stop_reason":"end_turn"/);
+    assert.doesNotMatch(out, /upstream hiccup/);
+    assert.deepEqual(got, [["sid-u4", "upstream hiccup"]]);
+  } finally { SWALLOW_HOOKS.splice(SWALLOW_HOOKS.indexOf(h), 1); }
 });

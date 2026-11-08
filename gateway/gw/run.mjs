@@ -9,6 +9,7 @@ import { claudeAtLeast, claudeCmd, claudeEnv, currentModelInfo, ensureBridge, sa
 import { tasksCheck } from "./goal.mjs";
 import { setLastInit } from "./caps.mjs";
 import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
+import { SWALLOW_HOOKS } from "./streamfix.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { END_HOOKS, INTERRUPTED, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, publishState, runEmit, saveRunMark, setInterrupted, setPermMode, sidForItem } from "./queue.mjs";
 import { LOCAL_CMD_RE, handleLocalCommand } from "./modelcmd.mjs";
@@ -207,6 +208,12 @@ export function lostProvider(item, sid0, pdef0) {
   if (pdef0 && gone(pdef0.provider)) return tz("项目默认的接口「{id}」已经删掉了，这一轮没有发出去。到项目设置里重新选个接口。", { id: pdef0.provider });
   return "";
 }
+
+// streamfix 吞掉了「说完之后才来的报错」（195-U.4）：按请求头里的会话号找到那一轮，留一句提示，回答真被截断时用户看得见、能让它继续
+SWALLOW_HOOKS.push((sid, msg) => {
+  const run = sid && runList().find((r) => r.sessionId === sid && !r.ended);
+  if (run) runEmit(run, { type: "note", key: "sfx-swallow", text: tz("上游在回答结尾报了错（{msg}），已按说完处理；如果回答不完整，发一句「继续」", { msg }) });
+});
 
 export async function startRun(item) {
   const { sid0, pdef0, P } = pickProvider(item);
@@ -748,7 +755,8 @@ export async function startRun(item) {
     noteTokens(run.provider, r.usage);
     // 定时任务的单次花费上限：后台回报 / 插话会在同一进程里接着花，每出一个 result 就核一次，超了当场停（#98 03-010）。
     // 一轮之内 claude 不报花费，这一轮本身超出的部分只能在它答完时发现
-    run.costSeen = Math.max(run.costSeen || 0, Number(r.total_cost_usd) || 0);
+    // 只有官方（nativeModels）的价目对得上：第三方端口按 Anthropic 价目估出来能高一二十倍，不计花费，金额上限 / 每日预算对它不生效（0.6.9 审计 195-U.3、197-5.8，用户定）
+    if (P.nativeModels) run.costSeen = Math.max(run.costSeen || 0, Number(r.total_cost_usd) || 0);
     if (item.limitCost > 0 && run.costSeen > item.limitCost && !run.overBudget) {
       run.overBudget = true;
       // 本来就要收尾的（没有插话、没有后台任务）让它正常结束，留下回复；还要接着干的当场停
@@ -932,7 +940,7 @@ export async function startRun(item) {
         // 本地命令（/context /cost …）的结果正文在这里
         localCommand: localCmd,
         resultText: localCmd ? String(lastResult.result || "") : "",
-        ...(run.sched ? { finalText: String(lastResult.result || "").slice(0, 4000), costRaw: Number(lastResult.total_cost_usd || 0) } : {}),
+        ...(run.sched ? { finalText: String(lastResult.result || "").slice(0, 4000), costRaw: P.nativeModels ? Number(lastResult.total_cost_usd || 0) : 0 } : {}),
       });
     }
     const hint = code !== 0 || signal ? exitHint(code, signal) : tz("生成结束但没有返回结果");

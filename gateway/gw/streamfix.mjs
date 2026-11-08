@@ -36,8 +36,11 @@ export function fixedBaseUrl(baseUrl) {
   return `http://127.0.0.1:${STREAMFIX.port}/u/${id}`;
 }
 
-/** SSE 修补状态机：feed 进上游原文，吐出要发给 claude 的文本；finish 在上游结束时调用，返回补的尾巴或 null（= 该断就断） */
-export function sseRepairer() {
+/** 结尾的 error 被吞掉时通知谁（run.mjs 挂：按会话号找到那一轮，在界面上留一条提示）。参数 (会话号|"", 报错文字) */
+export const SWALLOW_HOOKS = [];
+/** SSE 修补状态机：feed 进上游原文，吐出要发给 claude 的文本；finish 在上游结束时调用，返回补的尾巴或 null（= 该断就断）。
+ *  onSwallow(报错文字)：说完之后才来的 error 被吞掉时调用 */
+export function sseRepairer({ onSwallow } = {}) {
   let buf = "", cr = "", started = false, gotStop = false, gotMsgStop = false, outTokens = 0;
   const open = new Set(), kinds = new Map();
   let hasOutput = false, hasTool = false;
@@ -64,7 +67,13 @@ export function sseRepairer() {
     const t = j?.type || event;
     if (t === "error") {
       // 说完之后才来的报错：不让它把整条回答作废
-      if (done()) { log(`streamfix: 吞掉结尾的 error 事件 ${JSON.stringify(j).slice(0, 200)}`); return tail(); }
+      // 两头兼顾（0.6.9 审计 195-U.4）：照旧补成说完了——第三方端口常在说完后多塞一个假报错，交给 claude 会整段撤回重答、厂商记两次；
+      // 但不再悄悄吞：报给发起的那一轮，界面上留一句「结尾报了错，回答可能不完整，可以让它继续」，真截断了用户看得见
+      if (done()) {
+        log(`streamfix: 吞掉结尾的 error 事件 ${JSON.stringify(j).slice(0, 200)}`);
+        try { onSwallow?.(String(j.error?.message || j.message || j.error?.type || "error").slice(0, 300)); } catch {}
+        return tail();
+      }
       return raw + "\n\n";
     }
     if (gotMsgStop) return "";                        // message_stop 之后的东西一律不要
@@ -145,7 +154,8 @@ function handle(req, res) {
     const h = { ...ur.headers };
     delete h["content-length"]; delete h["content-encoding"]; delete h["transfer-encoding"];
     res.writeHead(ur.statusCode || 200, h);
-    const fix = sseRepairer();
+    const sid = String(req.headers["x-claude-code-session-id"] || "").slice(0, 64);
+    const fix = sseRepairer({ onSwallow: (msg) => { for (const h of SWALLOW_HOOKS) { try { h(sid, msg); } catch {} } } });
     let ended = false;
     const end = () => {
       if (ended) return; ended = true;

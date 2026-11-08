@@ -15,6 +15,8 @@ const providerFile = path.join(home, "ccapp-providers.json");
 const PID = "custom-run0520";
 fs.writeFileSync(providerFile, JSON.stringify({ active: PID, providers: {
   [PID]: { label: "Fixture", baseUrl: "https://fixture.example.invalid", apiKey: "fixture-only", authStyle: "bearer", defaultModel: "fixture-model", fallbackModels: [{ id: "fixture-model" }] },
+  // 花费上限只对官方价目生效（195-U.3）：那条用例钉到官方 API Key 这家
+  "anthropic-key": { apiKey: "fixture-only" },
 } }));
 const cli = path.join(root, "fake-cli.sh");
 const sh = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
@@ -89,8 +91,17 @@ test("03-010 单次花费上限：同一进程接着还要干时，超了当场�
   const s = sid();
   script([init(s), bg(1), result(10, 1, 0.5), { sleep: 6 }, mainStart, result(10, 1, 0.9)], 0);
   const t0 = Date.now();
-  await startRun({ id: "r0520-cost", message: "fixture", cwd: root, limitCost: 0.1 });
+  await startRun({ id: "r0520-cost", message: "fixture", cwd: root, limitCost: 0.1, provider: "anthropic-key", model: "claude-sonnet-4-5" });
   await until(() => endOf("r0520-cost"));
   assert.equal(endOf("r0520-cost").aborted, true);
   assert.ok(Date.now() - t0 < 5000, "没等假 CLI 跑完就停了");
+});
+
+test("195-U.3 第三方端口：claude 按 Anthropic 价目估的花费不算数，单次上限不触发、不报 costRaw", async () => {
+  const s = sid();
+  script([init(s), result(10, 1, 0.5)], 0);
+  await startRun({ id: "r0520-cost3", message: "fixture", cwd: root, limitCost: 0.1, sched: { taskId: "t-u3", key: "k-u3" } });
+  await until(() => endOf("r0520-cost3"));
+  assert.equal(!!endOf("r0520-cost3").aborted, false);
+  assert.equal(endOf("r0520-cost3").costRaw || 0, 0);
 });

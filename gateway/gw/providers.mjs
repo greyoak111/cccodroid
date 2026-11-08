@@ -528,6 +528,8 @@ export function modelsUrlOk(p) {
     const m = new URL(p.modelsUrl), b = new URL(p.baseUrl);
     const h = m.hostname.toLowerCase().replace(/\.$/, "");
     if (h !== b.hostname.toLowerCase().replace(/\.$/, "")) return false;
+    // 端口也要一样：同主机的别的端口可能是另一个服务（本机回环上尤其如此），不能把 Key 带过去（0.6.9 审计 196-凭据.2）
+    if (m.port !== b.port) return false;
     // 本机跑的 llama-server / LiteLLM 多半是 http：回环地址出不了本机，https 要求没有意义（10-31 三轮复核）
     const loop = h === "localhost" || h === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(h);
     return m.protocol === "https:" || (loop && m.protocol === "http:");

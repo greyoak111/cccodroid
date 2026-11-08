@@ -1,4 +1,38 @@
 [
-  { "zh": "地址回了 {s}，但不是预期的格式，没法确认密钥有效：{what}", "en": "The endpoint returned {s}, but not in the expected format, so the key can't be confirmed: {what}", "ja": "エンドポイントは {s} を返しましたが、想定した形式ではないためキーの有効性を確認できません：{what}", "ko": "엔드포인트가 {s}을(를) 반환했지만 예상한 형식이 아니어서 키가 유효한지 확인할 수 없습니다: {what}", "zh-Hant": "位址回了 {s}，但不是預期的格式，沒法確認金鑰有效：{what}", "es": "El endpoint devolvió {s}, pero no con el formato esperado, así que no se puede confirmar la clave: {what}", "fr": "Le point d'accès a renvoyé {s}, mais pas au format attendu : impossible de confirmer la clé : {what}", "ru": "Адрес вернул {s}, но не в ожидаемом формате, поэтому подтвердить ключ нельзя: {what}", "id": "Endpoint mengembalikan {s}, tetapi formatnya tidak sesuai, jadi kunci tidak bisa dipastikan: {what}", "ar": "أعادت نقطة النهاية {s} لكن ليس بالتنسيق المتوقع، لذا لا يمكن تأكيد صلاحية المفتاح: {what}" },
-  { "zh": "（空）", "en": "(empty)", "ja": "（空）", "ko": "(비어 있음)", "zh-Hant": "（空）", "es": "(vacío)", "fr": "(vide)", "ru": "(пусто)", "id": "(kosong)", "ar": "(فارغ)" }
+ {
+  "zh": "地址回了 {s}，但不是预期的格式，没法确认密钥有效：{what}",
+  "en": "The endpoint returned {s}, but not in the expected format, so the key can't be confirmed: {what}",
+  "ja": "エンドポイントは {s} を返しましたが、想定した形式ではないためキーの有効性を確認できません：{what}",
+  "ko": "엔드포인트가 {s}을(를) 반환했지만 예상한 형식이 아니어서 키가 유효한지 확인할 수 없습니다: {what}",
+  "zh-Hant": "位址回了 {s}，但不是預期的格式，沒法確認金鑰有效：{what}",
+  "es": "El endpoint devolvió {s}, pero no con el formato esperado, así que no se puede confirmar la clave: {what}",
+  "fr": "Le point d'accès a renvoyé {s}, mais pas au format attendu : impossible de confirmer la clé : {what}",
+  "ru": "Адрес вернул {s}, но не в ожидаемом формате, поэтому подтвердить ключ нельзя: {what}",
+  "id": "Endpoint mengembalikan {s}, tetapi formatnya tidak sesuai, jadi kunci tidak bisa dipastikan: {what}",
+  "ar": "أعادت نقطة النهاية {s} لكن ليس بالتنسيق المتوقع، لذا لا يمكن تأكيد صلاحية المفتاح: {what}"
+ },
+ {
+  "zh": "（空）",
+  "en": "(empty)",
+  "ja": "（空）",
+  "ko": "(비어 있음)",
+  "zh-Hant": "（空）",
+  "es": "(vacío)",
+  "fr": "(vide)",
+  "ru": "(пусто)",
+  "id": "(kosong)",
+  "ar": "(فارغ)"
+ },
+ {
+  "zh": "上游在回答结尾报了错（{msg}），已按说完处理；如果回答不完整，发一句「继续」",
+  "en": "The upstream reported an error at the end of the reply ({msg}); it was treated as finished. If the reply looks incomplete, send “continue”.",
+  "ja": "上流が回答の最後でエラーを返しました（{msg}）。完了として扱いました。回答が途中で切れていれば「続けて」と送ってください",
+  "ko": "업스트림이 답변 끝에서 오류를 보냈습니다({msg}). 완료로 처리했습니다. 답변이 불완전하면 「계속」이라고 보내세요",
+  "zh-Hant": "上游在回答結尾報了錯（{msg}），已按說完處理；如果回答不完整，傳一句「繼續」",
+  "es": "El servidor devolvió un error al final de la respuesta ({msg}); se dio por terminada. Si parece incompleta, envía «continúa».",
+  "fr": "L’amont a signalé une erreur à la fin de la réponse ({msg}) ; elle a été considérée comme terminée. Si elle semble incomplète, envoyez « continue ».",
+  "ru": "Сервер сообщил об ошибке в конце ответа ({msg}); ответ считается завершённым. Если он неполный, отправьте «продолжай».",
+  "id": "Upstream melaporkan galat di akhir jawaban ({msg}); dianggap selesai. Jika jawaban belum lengkap, kirim “lanjutkan”.",
+  "ar": "أبلغ الخادم عن خطأ في نهاية الرد ({msg})؛ عُدّ الرد مكتملاً. إن بدا ناقصاً فأرسل «تابع»."
+ }
 ]
