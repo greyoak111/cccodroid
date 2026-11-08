@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { CFG, LAST_LANG, PATHS, log, tr, tz, permModeAction } from "./config.mjs";
 import { SETTINGS, capList, settingsDiskCheck } from "./settings-store.mjs";
-import { PERM_MODES, PROVIDER, billAfterRun, keyOf, noteTokens, providerById, providersDiskCheck } from "./providers.mjs";
+import { PERM_MODES, PROVIDER, billAfterRun, keyOf, noteTokenDelta, providerById, providersDiskCheck } from "./providers.mjs";
 import { ALIAS_SEEN, effortLevelsOf, fetchModels, isLoginMode, modelsCached, normEffort } from "./models.mjs";
 import { bridgeSwitching, claudeAtLeast, claudeCmd, claudeEnv, currentModelInfo, ensureBridge, safeModePerm, settingsArgs } from "./claude.mjs";
 import { tasksCheck } from "./goal.mjs";
@@ -610,6 +610,7 @@ export async function startRun(item) {
   run.meter = usageMeter({ sid: () => run.sessionId, model: () => run.usageModel, start: Date.now(),   // token 边跑边记（见 usage.mjs）
     add: (d, sid, model) => {
       usageAdd(d, sid, model);   // 使用统计关着时它自己不记，这里的累计照算
+      noteTokenDelta(run.provider, d);   // 接口账本也按这个记：含子代理、中断的那轮、按实际发生的小时（195-O.1/O.3/O.4）
       if (d.o > 0) { run.outTok += d.o; if (!outTimer) { outTimer = setTimeout(outEmit, 1000); outTimer.unref?.(); } }
     },
     subDir: () => subDir || (subDir = sfile()?.replace(/\.jsonl$/, "/subagents") || null) });
@@ -790,8 +791,6 @@ export async function startRun(item) {
     }
     run.lastSlash = !!slashDone;
     run.meter.result(r, !isCmd && !slashDone);   // 斜杠命令不算一轮对话，但 /compact 这类真花了的 token 照记
-    // 接口账本每个 result 各记各的：同一进程后台回报、插话会出好几个 result，只在结束时记最后一个会少记（#102 04-008）
-    noteTokens(run.provider, r.usage);
     // 定时任务的单次花费上限：后台回报 / 插话会在同一进程里接着花，每出一个 result 就核一次，超了当场停（#98 03-010）。
     // 一轮之内 claude 不报花费，这一轮本身超出的部分只能在它答完时发现
     // 只有官方（nativeModels）的价目对得上：第三方端口按 Anthropic 价目估出来能高一二十倍，不计花费，金额上限 / 每日预算对它不生效（0.6.9 审计 195-U.3、197-5.8，用户定）

@@ -172,6 +172,21 @@ test("195-K.1：指定的工作目录不在了 → 这一轮不跑、报出来�
   assert.equal(fs.existsSync(path.join(root, "ran-k1")), false);
 });
 
+test("195-O.1/O.4：接口账本跟着运行中的计量记——没出 result 就被结束的那轮、子代理的都记上", async () => {
+  const P = await import("../gw/providers.mjs");
+  const tok = () => P._billForTest.billOf(PID).tok.reduce((a, r) => [a[0] + r[1], a[1] + r[2], a[2] + r[3]], [0, 0, 0]);
+  const t0 = tok();
+  const se = (event, parent = null) => ({ type: "stream_event", event, parent_tool_use_id: parent, session_id: "x" });
+  script([init(crypto.randomUUID()),
+    se({ type: "message_start", message: { id: "mm1", usage: { input_tokens: 100, cache_read_input_tokens: 40, output_tokens: 1 } } }),
+    se({ type: "message_delta", usage: { output_tokens: 30 } }),
+    se({ type: "message_start", message: { id: "sub1", model: "m", usage: { input_tokens: 7, output_tokens: 5 } } }, "tu-agent")], 1);
+  await startRun({ id: "a0610-o1", message: "fixture", cwd: root });
+  await until(() => endOf("a0610-o1"));
+  const t1 = tok();
+  assert.deepEqual([t1[0] - t0[0], t1[1] - t0[1], t1[2] - t0[2]], [107, 35, 40]);
+});
+
 // 放最后：它留下的后台 sleep 30 还活着时，后面的轮次会先弹「用户配置」确认卡
 test("195-T.1：claude 退出了、后台子孙还攥着输出管道 → 5 秒后自己收尾，不永远「生成中」", async () => {
   script([init(crypto.randomUUID()), result, { raw: `${SLEEP} 30 &` }], 0);

@@ -780,9 +780,19 @@ function noteBalance(id, cur, bal, acct) {
 /** 一轮结束记 token（按小时合并） */
 export function noteTokens(id, u) {
   if (!id || !u) return;
+  noteAdd(id, [u.input_tokens || 0, u.output_tokens || 0, (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)]);
+}
+/** 运行中的计量（usage.mjs usageMeter）每涨一次记一笔：d.i 是含缓存的输入、d.c 是其中读缓存的、d.o 输出。
+ *  以前等 result 才按 result.usage 记：子代理的不在里面、中断的那轮没有 result、跨小时的全算到结束那个小时（0.6.9 审计 195-O.1/O.3/O.4）。
+ *  写缓存的那部分并进输入（计量里分不出来） */
+export function noteTokenDelta(id, d) {
+  if (!id || !d) return;
+  const add = [Math.max(0, (d.i || 0) - (d.c || 0)), d.o || 0, d.c || 0];
+  if (add[0] || add[1] || add[2]) noteAdd(id, add);
+}
+function noteAdd(id, add) {
   const b = billOf(id);
   const hour = Math.floor(Date.now() / 3600e3) * 3600e3;
-  const add = [u.input_tokens || 0, u.output_tokens || 0, (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)];
   const last = b.tok[b.tok.length - 1];
   if (last && last[0] === hour) for (let i = 0; i < 3; i++) last[i + 1] += add[i];
   else b.tok.push([hour, ...add]);
