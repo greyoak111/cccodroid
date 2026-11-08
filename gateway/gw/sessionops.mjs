@@ -14,6 +14,7 @@ import { checkSession, neutralizeMarkers, resealAfterEdit, sealSession, isInject
 import { ucPending } from "./userconf.mjs";
 import { forEachLine, lineWriter, writeAll, zipEntries, zipExtract, zipToFile } from "./bigfile.mjs";
 import { archiveDb, archiveImport, saveArchive } from "./archive-store.mjs";
+import { isObj, loadState, saveState, writeAtomic } from "./statefile.mjs";
 
 // ── 会话管理：回收站 / 导出 / 导入 ─────────────────────────────────────
 // 回收站放在 claude 的 projects 目录之外（它看不见，--resume 也就找不回来），同一文件系统，挪进挪出都是 rename。
@@ -92,7 +93,9 @@ export function forkSession(id, userText, after, { before = false, uuid = "", la
   const dir = path.dirname(found.file);
   const dirty = checkSession(id, found.file);          // 原会话不干净（导入的、在别处改过的），分出来的也带着标记
   let at = null;   // 分叉点：抄过去的最后一条链上消息（脉络的主父记录用）
-  const w = lineWriter(path.join(dir, nid + ".jsonl"));
+  // 先写临时文件，抄完再换名：写到一半被杀不会在列表里留下一个 UUID 合法、内容只到一半的新会话（195-Y.6）
+  const finalFile = path.join(dir, nid + ".jsonl"), tmpFile = path.join(dir, nid + ".jsonl.part-" + process.pid);
+  const w = lineWriter(tmpFile);
   try {
     forEachLine(found.file, (line, i) => {
       if (i >= cut) return false;
@@ -102,7 +105,12 @@ export function forkSession(id, userText, after, { before = false, uuid = "", la
       try { const ev = JSON.parse(line); if (ev.sessionId === id) ev.sessionId = nid; w.write(JSON.stringify(ev)); }
       catch { w.write(line); }
     });
-  } finally { w.close(); }
+  } catch (e) {
+    try { w.close(); } catch {}
+    try { fs.rmSync(tmpFile, { force: true }); } catch {}
+    throw e;
+  }
+  w.close();
   // 同名目录里是子代理记录、超长工具结果：一起抄过去，引用它们的路径照旧有效
   // 抄不全就不分叉：分出来的会话读不到子代理过程，还报成功（#98 03-003 同类）。原会话没动，删掉抄了一半的
   const side = path.join(dir, id);
@@ -110,10 +118,12 @@ export function forkSession(id, userText, after, { before = false, uuid = "", la
   if (sideDir) try { fs.cpSync(side, path.join(dir, nid), { recursive: true }); }
   catch (e) {
     fs.rmSync(path.join(dir, nid), { recursive: true, force: true });
-    fs.rmSync(path.join(dir, nid + ".jsonl"), { force: true });
+    fs.rmSync(tmpFile, { force: true });
     return { ok: false, status: 500, message: tz("会话附带的文件没抄过去，没有分叉：{err}", { err: e.code || e.message }) };
   }
-  sealSession(nid, path.join(dir, nid + ".jsonl"), { flag: dirty || undefined });
+  try { fs.renameSync(tmpFile, finalFile); }
+  catch (e) { fs.rmSync(path.join(dir, nid), { recursive: true, force: true }); fs.rmSync(tmpFile, { force: true }); return { ok: false, status: 500, message: tz("分叉的会话没能落盘：{err}", { err: e.code || e.message }) }; }
+  sealSession(nid, finalFile, { flag: dirty || undefined });
   const title = (NAMES[id] || peekSession(found.file).title || "").slice(0, 100);
   NAMES[nid] = title + " · " + tr(LAST_LANG, before ? tz("回退") : tz("分叉")); saveNames();
   recordPrimary(nid, id, at, before ? "rewind" : "fork");
@@ -128,7 +138,40 @@ export function forkSession(id, userText, after, { before = false, uuid = "", la
 const EDITS_DIR = path.join(TRASH_DIR, ".edits");
 const UNDO = new Map();
 // UNDO：会话号 → 最近一次删消息的 { backup, size, mtime }：撤销前核对文件没再变过
-const ORPHAN_HEADS = new Map();   // 会话号 → 提问被删掉的那几轮回复的第一行 uuid（见 deleteMessage 里的 B04）
+// ORPHAN_HEADS：会话号 → 提问被删掉的那几轮回复的第一行 uuid（见 deleteMessage 里的 B04）。
+// 以前只在内存里：网关重启后守卫失效，删那条合并气泡会把上一轮的回复一起删掉（195-A.1）。落盘保存
+const ORPHAN_FILE = path.join(CFG.home, "ccapp-session-orphans.json");
+const ORPHAN_HEADS = new Map();
+{
+  const r = loadState(ORPHAN_FILE, {
+    shape: (j) => {
+      if (!isObj(j)) return undefined;
+      const o = {};
+      for (const [k, v] of Object.entries(j)) if (Array.isArray(v)) o[k] = v.filter((x) => typeof x === "string").slice(-200);
+      return o;
+    },
+    fallback: () => ({}),
+  });
+  for (const [k, v] of Object.entries(r.data)) if (v.length) ORPHAN_HEADS.set(k, new Set(v));
+}
+function saveOrphans() {
+  const o = {};
+  for (const [k, s] of ORPHAN_HEADS) if (s.size) o[k] = [...s].slice(-200);
+  const keys = Object.keys(o);
+  for (const k of keys.slice(0, Math.max(0, keys.length - 3000))) delete o[k];   // 只增不减（200-6-05）
+  return saveState(ORPHAN_FILE, o, { pretty: false });
+}
+// 删消息的整份备份会越攒越多（本机 63 MB）：每个会话只留最近 20 份、全局最多 300 份（195-A.10）
+const EDITS_PER_SID = 20, EDITS_MAX_FILES = 300;
+function pruneEdits(sid) {
+  let names = [];
+  try { names = fs.readdirSync(EDITS_DIR); } catch { return; }
+  const mine = names.filter((n) => n.startsWith(sid + ".")).sort();
+  for (const n of mine.slice(0, Math.max(0, mine.length - EDITS_PER_SID))) { try { fs.rmSync(path.join(EDITS_DIR, n), { force: true }); } catch {} }
+  if (names.length <= EDITS_MAX_FILES) return;
+  const old = names.map((n) => { let t = 0; try { t = fs.statSync(path.join(EDITS_DIR, n)).mtimeMs; } catch {} return { n, t }; }).sort((a, b) => a.t - b.t);
+  for (const { n } of old.slice(0, names.length - EDITS_MAX_FILES)) { try { fs.rmSync(path.join(EDITS_DIR, n), { force: true }); } catch {} }
+}
 const CHAIN_TYPES = new Set(["user", "assistant", "system", "progress", "attachment"]);
 export function deleteMessage(id, userText, after, which, uuid = "", replyUuid = "", offs = []) {
   if (runOfSession(id)) return { ok: false, status: 409, message: tz("这个会话正在生成中，等它答完再删。") };
@@ -183,7 +226,12 @@ export function deleteMessage(id, userText, after, which, uuid = "", replyUuid =
       put(ch ? JSON.stringify(ev) : l);
     });
     for (; k < want.length; k++) moved[want[k]] = newAt;
-  } catch (e) { w.close(); fs.rmSync(tmp, { force: true }); throw e; }
+  } catch (e) {
+    // 清理自身别再抛：否则原始错误被盖住、临时文件也留在原处（200-8-04）
+    try { w.close(); } catch {}
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    throw e;
+  }
   w.close();
   fs.renameSync(tmp, found.file);
   resealAfterEdit(id, found.file, dirty);
@@ -196,8 +244,9 @@ export function deleteMessage(id, userText, after, which, uuid = "", replyUuid =
       if (head || i <= from || i >= to || !l.trim()) return head ? false : undefined;
       try { const ev = JSON.parse(l); if (ev.uuid && CHAIN_TYPES.has(ev.type) && !ev.isSidechain) head = ev.uuid; } catch {}
     });
-    if (head) { if (!ORPHAN_HEADS.has(id)) ORPHAN_HEADS.set(id, new Set()); ORPHAN_HEADS.get(id).add(head); }
+    if (head) { if (!ORPHAN_HEADS.has(id)) ORPHAN_HEADS.set(id, new Set()); ORPHAN_HEADS.get(id).add(head); saveOrphans(); }
   }
+  pruneEdits(id);
   const st = fs.statSync(found.file);
   UNDO.set(id, { backup, size: st.size, mtime: st.mtimeMs });
   log(`删消息 ${id.slice(0, 8)}：第 ${best + 1} 轮的${which === "user" ? "提问" : "回复"}，${drop.size} 行`);
@@ -222,7 +271,7 @@ export function undoDelete(id, backup) {
   resealAfterEdit(id, found.file, dirty);
   PEEK_CACHE.delete(found.file);
   UNDO.delete(id);
-  ORPHAN_HEADS.delete(id);   // 抄回删之前的样子：提问回来了，界面也整份重开
+  ORPHAN_HEADS.delete(id); saveOrphans();   // 抄回删之前的样子：提问回来了，界面也整份重开
   log(`撤销删消息 ${id.slice(0, 8)}`);
   return { ok: true };
 }
@@ -350,12 +399,36 @@ export function rewindFixup(sessionFile, sid, uuid, files) {
       fs.mkdirSync(path.dirname(want), { recursive: true });
       // 建完上级再按真实路径判一次（中途换成软链的），最后一段不跟软链
       if (!rewindTargetOk(want, roots)) { failed++; continue; }
-      const fd = fs.openSync(want, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o644);
-      try { writeAll(fd, data); } finally { fs.closeSync(fd); }
-      fixed++;
+      // 直接 O_TRUNC 写目标：满盘/写入中断会留下半截或空文件，原内容不在目标路径（195-Y.5）。
+      // 先写同目录临时文件，写完 fsync 再换名；目标本身是软链/目录就不碰
+      let mode = 0o644; try { const st = fs.lstatSync(want); if (!st.isFile()) { failed++; continue; } mode = st.mode & 0o777; } catch {}
+      const tmp = path.join(path.dirname(want), `.rewind-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 6)}`);
+      let fd = null;
+      try {
+        fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, mode);
+        writeAll(fd, data); fs.fsyncSync(fd); fs.closeSync(fd); fd = null;
+        if (!rewindTargetOk(want, roots)) throw new Error("target changed");
+        try { if (!fs.lstatSync(want).isFile()) throw new Error("not a file"); } catch (e) { if (e.code !== "ENOENT") throw e; }
+        fs.renameSync(tmp, want);
+        fixed++;
+      } catch (e) { try { if (fd != null) fs.closeSync(fd); } catch {} try { fs.rmSync(tmp, { force: true }); } catch {} throw e; }
     } catch (e) { failed++; log(`回退补救失败 ${want}: ${e.message}`); }
   }
   return { fixed, failed };
+}
+
+/** 目录里所有普通文件的大小（不跟软链）：回收站界面按 meta.total 报占用，附件目录以前没算（196-真机.2） */
+function dirBytes(dir) {
+  let total = 0, ents = [];
+  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return 0; }
+  for (const e of ents) {
+    const f = path.join(dir, e.name);
+    try {
+      if (e.isDirectory()) total += dirBytes(f);
+      else total += fs.lstatSync(f).size;
+    } catch {}
+  }
+  return total;
 }
 
 export function trashSession(id) {
@@ -366,14 +439,17 @@ export function trashSession(id) {
   fs.rmSync(slot, { recursive: true, force: true });
   fs.mkdirSync(slot, { recursive: true });
   const st = fs.statSync(found.file);
-  // 先写 meta 再挪文件：反过来的话，挪完、写 meta 之前被杀，回收站里就是个没 meta 的孤儿——列不出、恢复不了、过期也不清（审查 中3）。
-  // 这样被杀在中间，原会话还在原处，回收站这格没有 jsonl，listTrash 不列它，下次删同一个会话时整格重建
-  fs.writeFileSync(path.join(slot, "meta.json"), JSON.stringify({
-    id, project: found.project, title: NAMES[id] || meta.title, renamed: !!NAMES[id], pinned: PINS[id] || 0,
-    cwd: meta.cwd, mtime: st.mtimeMs, size: st.size, deletedAt: Date.now(),
-  }));
-  fs.renameSync(found.file, path.join(slot, id + ".jsonl"));
   const side = path.join(PATHS.projects, found.project, id);
+  const sideSize = dirBytes(side);
+  // 先写 meta 再挪文件：反过来的话，挪完、写 meta 之前被杀，回收站里就是个没 meta 的孤儿——列不出、恢复不了、过期也不清（审查 中3）。
+  // 这样被杀在中间，原会话还在原处，回收站这格没有 jsonl，listTrash 不列它，下次删同一个会话时整格重建。
+  // meta 用临时文件 + fsync + 换名：掉电后整条会话列不出/恢复不了/永不清（195-A.14）
+  const metaFile = path.join(slot, "meta.json");
+  if (!writeAtomic(metaFile, JSON.stringify({
+    id, project: found.project, title: NAMES[id] || meta.title, renamed: !!NAMES[id], pinned: PINS[id] || 0,
+    cwd: meta.cwd, mtime: st.mtimeMs, size: st.size, sideSize, total: st.size + sideSize, deletedAt: Date.now(),
+  }))) { fs.rmSync(slot, { recursive: true, force: true }); return { ok: false, error: "write_failed" }; }
+  fs.renameSync(found.file, path.join(slot, id + ".jsonl"));
   if (fs.existsSync(side)) fs.renameSync(side, path.join(slot, "dir"));
   if (PINS[id]) { delete PINS[id]; savePins(); }
   PEEK_CACHE.delete(found.file);
@@ -392,9 +468,34 @@ export function listTrash() {
   const out = [];
   for (const id of ids) {
     if (!fs.existsSync(path.join(TRASH_DIR, id, id + ".jsonl"))) continue;   // 删到一半被打断的空格子
-    try { out.push(JSON.parse(fs.readFileSync(path.join(TRASH_DIR, id, "meta.json"), "utf8"))); } catch {}
+    try {
+      const m = JSON.parse(fs.readFileSync(path.join(TRASH_DIR, id, "meta.json"), "utf8"));
+      if (m && typeof m === "object") out.push({ ...m, size: m.total != null ? m.total : m.size });   // 老条目没有 total，仍报主记录大小
+    } catch {}
   }
   return out.sort((a, b) => b.deletedAt - a.deletedAt);
+}
+
+const isDirPath = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
+/** 把会话记录里的 cwd 改写成当前工作区（恢复 / 导入用来让 --resume 找得到）。临时文件 + 换名；改完重新封签 */
+function rewriteCwd(file, cwd, sid) {
+  const dirty = checkSession(sid, file);
+  const tmp = file + ".cwd-" + process.pid;
+  const w = lineWriter(tmp);
+  try {
+    forEachLine(file, (l) => {
+      if (!l.includes('"cwd"')) return w.write(l);
+      try { const e = JSON.parse(l); if (e && typeof e.cwd === "string") e.cwd = cwd; w.write(JSON.stringify(e)); }
+      catch { w.write(l); }
+    });
+  } catch (e) {
+    try { w.close(); } catch {}
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    throw e;
+  }
+  w.close();
+  fs.renameSync(tmp, file);
+  resealAfterEdit(sid, file, dirty);
 }
 
 export function restoreSession(id) {
@@ -404,11 +505,25 @@ export function restoreSession(id) {
   try { meta = JSON.parse(fs.readFileSync(path.join(slot, "meta.json"), "utf8")); } catch { return { ok: false, error: "not found" }; }
   const sideIn = path.join(slot, "dir"), hasSide = fs.existsSync(sideIn);
   const done = findSessionFile(id);
+  // 标题/置顶先落盘：以前挪完文件再 saveNames/savePins，写失败也把 meta.json 删了，标题和置顶从此无法恢复（195-Y.2）
+  const n0 = NAMES[id], p0 = PINS[id];
+  if (meta.renamed && meta.title) NAMES[id] = meta.title;
+  if (meta.pinned) PINS[id] = meta.pinned;
+  let saved = true;
+  if (meta.renamed && meta.title) saved = saveNames() && saved;
+  if (meta.pinned) saved = savePins() && saved;
+  if (!saved) {
+    if (n0 === undefined) delete NAMES[id]; else NAMES[id] = n0;
+    if (p0 === undefined) delete PINS[id]; else PINS[id] = p0;
+    return { ok: false, error: "write_failed" };
+  }
+  let target = null;
   if (done) {
     // 旧版先放回主记录、附件没放回去就报错的半截：主记录已在、回收站这格只剩附件 —— 把附件补回去收尾（#98 03-014）
     const tail = !fs.existsSync(path.join(slot, id + ".jsonl")) && hasSide && !fs.existsSync(path.join(path.dirname(done.file), id));
-    if (!tail) return { ok: false, error: "exists" };
+    if (!tail) { if (n0 === undefined) delete NAMES[id]; else NAMES[id] = n0; if (p0 === undefined) delete PINS[id]; else PINS[id] = p0; saveNames(); savePins(); return { ok: false, error: "exists" }; }
     fs.renameSync(sideIn, path.join(path.dirname(done.file), id));
+    target = done.file;
   } else {
     const dir = path.join(PATHS.projects, SID_RE.test(meta.project || "") ? meta.project : projectSlug(realWorkspace()));
     fs.mkdirSync(dir, { recursive: true });
@@ -416,30 +531,67 @@ export function restoreSession(id) {
     if (hasSide) fs.renameSync(sideIn, path.join(dir, id));
     try { fs.renameSync(path.join(slot, id + ".jsonl"), path.join(dir, id + ".jsonl")); }
     catch (e) { if (hasSide) try { fs.renameSync(path.join(dir, id), sideIn); } catch {} throw e; }
+    target = path.join(dir, id + ".jsonl");
   }
-  if (meta.renamed && meta.title) { NAMES[id] = meta.title; saveNames(); }
-  if (meta.pinned) { PINS[id] = meta.pinned; savePins(); }
+  // 原来的 cwd 已经不在了（项目目录被删/拔卡）：恢复出来的会话能读、--resume 却找不到（195-2.2）。
+  // 和导入一样把 cwd 改写到当前工作区，写临时文件再换名
+  if (target && meta.cwd && !(isDirPath(meta.cwd))) {
+    try { rewriteCwd(target, realWorkspace(), id); } catch (e) { log(`恢复会话：cwd 改写失败（${e.code || e.message}），保留原 cwd`); }
+  }
   fs.rmSync(slot, { recursive: true, force: true });
   return { ok: true };
 }
 
-export function purgeTrash(ids) {
+/** 彻底删掉一个会话时把它散在别处的数据一起清掉：删消息备份、file-history、子代理联络簿、档案、书签、会话模型、封签、脉络 */
+async function forgetSessionData(id, meta) {
+  try { for (const f of fs.readdirSync(EDITS_DIR)) if (f.startsWith(id + ".")) fs.rmSync(path.join(EDITS_DIR, f), { force: true }); } catch {}
+  try { fs.rmSync(path.join(CFG.home, ".claude", "file-history", id), { recursive: true, force: true }); } catch {}
+  const cwd = meta && meta.cwd;
+  if (cwd) {
+    try { fs.rmSync(path.join(cwd, ".cccodroid", "agents", String(id).slice(0, 8)), { recursive: true, force: true }); } catch {}
+    try { const { agentsDir } = await import("./agents.mjs"); fs.rmSync(agentsDir(cwd, id), { recursive: true, force: true }); } catch {}
+  }
+  forgetChild(id);
+  // 动态 import：sessionops 不能在这些模块的顶层再引它们（会和 sessions / sessionops 绕成环）
+  await Promise.all([
+    import("./archive-store.mjs").then((m) => m.archiveForget(id)).catch(() => {}),
+    import("./sessmodel.mjs").then((m) => m.forgetSessModel(id)).catch(() => {}),
+    import("./bookmarks.mjs").then((m) => m.forgetBookmarks(id)).catch(() => {}),
+    import("./integrity.mjs").then((m) => m.forgetSeal(id)).catch(() => {}),
+  ]);
+}
+
+export async function purgeTrash(ids) {
   let n = 0;
   for (const id of ids) {
     if (!SID_RE.test(id)) continue;
     const slot = path.join(TRASH_DIR, id);
-    if (fs.existsSync(slot)) { fs.rmSync(slot, { recursive: true, force: true }); forgetChild(id); n++; }
+    if (!fs.existsSync(slot)) continue;
+    let meta = {}; try { meta = JSON.parse(fs.readFileSync(path.join(slot, "meta.json"), "utf8")); } catch {}
+    fs.rmSync(slot, { recursive: true, force: true });
+    await forgetSessionData(id, meta);
+    n++;
   }
   return n;
 }
 
 /** 回收站里放满 30 天的自动清掉（网关启动时跑一次） */
-export function expireTrash() {
-  const cut = Date.now() - TRASH_KEEP_DAYS * 86400000;
-  const old = listTrash().filter((m) => m.deletedAt < cut).map((m) => m.id);
-  if (old.length) log(`回收站：清掉 ${purgeTrash(old)} 个放满 ${TRASH_KEEP_DAYS} 天的会话`);
-  // 删消息留的备份也一样
-  try { for (const f of fs.readdirSync(EDITS_DIR)) { const p = path.join(EDITS_DIR, f); if (fs.statSync(p).mtimeMs < cut) fs.rmSync(p, { force: true }); } } catch {}
+export async function expireTrash() {
+  try {
+    // 老条目没有 total：启动时补算一次整格占用（含附件），界面不再少报（196-真机.2）
+    try {
+      for (const id of fs.readdirSync(TRASH_DIR)) {
+        const mp = path.join(TRASH_DIR, id, "meta.json");
+        let m; try { m = JSON.parse(fs.readFileSync(mp, "utf8")); } catch { continue; }
+        if (m && m.total == null) { m.total = dirBytes(path.join(TRASH_DIR, id)); writeAtomic(mp, JSON.stringify(m)); }
+      }
+    } catch {}
+    const cut = Date.now() - TRASH_KEEP_DAYS * 86400000;
+    const old = listTrash().filter((m) => m.deletedAt < cut).map((m) => m.id);
+    if (old.length) log(`回收站：清掉 ${await purgeTrash(old)} 个放满 ${TRASH_KEEP_DAYS} 天的会话`);
+    // 删消息留的备份也一样
+    try { for (const f of fs.readdirSync(EDITS_DIR)) { const p = path.join(EDITS_DIR, f); if (fs.statSync(p).mtimeMs < cut) fs.rmSync(p, { force: true }); } } catch {}
+  } catch (e) { log("回收站清理失败: " + (e.code || e.message)); }
 }
 
 /** claude 给 cwd 起项目目录名的规则：非字母数字一律换成 -。
@@ -549,16 +701,22 @@ export async function exportSessions(ids) {
   if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(tz("导出目录是个软链接，不往里写"));
   if (freeBytes(dir) < (256 << 20)) throw new Error(tz("存储空间不够了"));
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
-  // 同一秒导出两次别互相覆盖（审查 v0513b 低-11）：用 wx 先把名字占住，并发的两次也各拿各的
-  // 占名用的 fd 直接拿去写，不跟软链（11-03 审查 L-1：以前占完名关掉再按名字重开，中间能被换成软链）
-  let file = null, fd;
+  // 先写同目录临时文件，写完再换名：写到一半失败不会在导出目录里留下半截 zip，也不会毁掉同名旧导出（197-9.9）。
+  // 临时文件用 O_EXCL + O_NOFOLLOW，不跟软链（11-03 审查 L-1）
+  let file = null, tmp = null, fd;
   const C = fs.constants;
   for (let k = 1; !file && k < 100; k++) {
     const f = path.join(dir, k === 1 ? `sessions-${stamp}.zip` : `sessions-${stamp}-${k}.zip`);
-    try { fd = fs.openSync(f, C.O_WRONLY | C.O_CREAT | C.O_EXCL | (C.O_NOFOLLOW || 0), 0o644); file = f; } catch (e) { if (e.code !== "EEXIST") throw e; }
+    if (fs.existsSync(f)) continue;
+    const t = f + ".part-" + process.pid + "-" + Math.random().toString(16).slice(2, 6);
+    try { fd = fs.openSync(t, C.O_WRONLY | C.O_CREAT | C.O_EXCL | (C.O_NOFOLLOW || 0), 0o600); file = f; tmp = t; } catch (e) { if (e.code !== "EEXIST") throw e; }
   }
   if (!file) throw new Error(tz("导出目录里同名文件太多了"));
-  const bytes = await zipToFile(file, entries, fd);
+  let bytes;
+  try {
+    bytes = await zipToFile(tmp, entries, fd);
+    fs.renameSync(tmp, file);
+  } catch (e) { try { fs.rmSync(tmp, { force: true }); } catch {} throw e; }
   return { file, count: list.length, bytes };
 }
 
@@ -601,7 +759,9 @@ export async function importSessions(file) {
     if (!SID_RE.test(id)) continue;
     const main = byName.get(`sessions/${id}.jsonl`);
     if (!main) continue;
-    if (findSessionFile(id) || fs.existsSync(path.join(TRASH_DIR, id))) { res.skipped.push(id); continue; }
+    // 同号的会话在回收站里：先恢复它，再按「已存在」跳过。以前直接跳过，提示已存在、列表里却看不到（195-A.5）
+    if (!findSessionFile(id) && fs.existsSync(path.join(TRASH_DIR, id))) { try { restoreSession(id); } catch {} }
+    if (findSessionFile(id)) { res.skipped.push(id); continue; }
     const dst = path.join(dir, id + ".jsonl"), side = path.join(dir, id), hadSide = fs.existsSync(side);
     try {
       // 先解到临时名，整条会话（含子代理记录）都解完再改名：中途失败不留半截会话
@@ -621,7 +781,9 @@ export async function importSessions(file) {
       if (!hadSide) fs.rmSync(side, { recursive: true, force: true });
       throw err;
     }
-    if (s.mtime) try { fs.utimesSync(dst, new Date(), new Date(s.mtime)); } catch {}
+    // 导入的会话按 mtime 排：沿用包里的旧时间会被排到最近 150 条之外、折进旧月份，用户看不到（196-会话.5）。
+    // 改成「现在导入的」，列表里立刻能看到
+    try { const now = new Date(); fs.utimesSync(dst, now, now); } catch {}
     sealSession(id, dst, { flag: "imported" });   // 包里的历史谁都能写：第一次接着聊时提醒模型（见 integrity.mjs）
     if (s.renamed && s.title) NAMES[id] = String(s.title).slice(0, 120);
     if (archiveImport(id, s.archive)) archDirty = true;
