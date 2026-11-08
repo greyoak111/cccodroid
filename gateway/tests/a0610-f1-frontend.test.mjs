@@ -180,15 +180,13 @@ test("app.js 加载失败时静态壳给重试提示（#182 S-02 网页端半）
   assert.ok(indexHtml.includes("location.reload()"));
 });
 
-test("i18n-f1.json：新增文案九种语言齐全", () => {
-  const j = JSON.parse(fs.readFileSync(new URL("../../i18n-f1.json", import.meta.url), "utf8"));
-  assert.ok(Array.isArray(j), "i18n-f1.json 应当是数组");
+test("f1 新增文案：九种语言的词典里都有（暂存的 i18n-f1.json 已灌进词典、移出仓库）", () => {
   const need = ["回复完成", "回复出错", "界面脚本没能加载，点这里重试"];
-  for (const k of need) {
-    const row = j.find((x) => x.zh === k);
-    assert.ok(row, "缺少词条：" + k);
-    for (const lang of ["zh", "en", "ja", "ko", "zh-Hant", "es", "fr", "ru", "id", "ar"]) {
-      assert.ok(row[lang], `${k} 缺 ${lang}`);
+  for (const lang of ["en", "ja", "ko", "zh-Hant", "es", "fr", "ru", "id", "ar"]) {
+    const src = fs.readFileSync(new URL(`../web/lang-${lang}.js`, import.meta.url), "utf8");
+    for (const k of need) {
+      const m = src.match(new RegExp("\\n  " + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ': "([^"]+)"'));
+      assert.ok(m && m[1], `${k} 缺 ${lang}`);
     }
   }
 });
