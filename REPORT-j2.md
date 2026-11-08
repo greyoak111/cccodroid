@@ -5,7 +5,7 @@
 | 条目 | 内容 | 状态 |
 |---|---|---|
 | 13-01 | 闹钟 / 粘性重建拉起的服务没有空闲退出，前台服务 + WakeLock 常驻 | 已修 |
-| 13-02（含 1-07、13-12） | 接不了存活网关：`squatted()` 直接 SIGKILL 自己的网关、漏杀 claude 子树；`alive()` 不认证明失败 | 待办 |
+| 13-02（含 1-07、13-12） | 接不了存活网关：`squatted()` 直接 SIGKILL 自己的网关、漏杀 claude 子树；`alive()` 不认证明失败 | 已修 |
 | 13-03 | `.run-active` 写失败 / 被第二个网关清掉 → `busy()` 在实际有轮次时返回 false | 已修 |
 | 13-04 | Doze 推迟的闹钟被当成「错过」 | 已修 |
 | 13-05 | targetSdk 36 上精确闹钟被拒 → 非精确后备在后台起不了前台服务 | 待办 |
@@ -27,6 +27,7 @@
 | 13-11 | 见 git log | 撕裂写本身第一轮已由 b7706bc 改成 `writeAtomic`；本轮补两处：`pushNext` 改成写成功才记 `lastNext`（写失败下次 tick 的 `save()` 会补写），写失败也照发 `sched_next` 让在线外壳先定上；`SchedAlarm.fromFile` 只接受 ≤32 字节的普通文件、内容必须是纯数字，半截 / 坏文件不拿去过期时刻登记 | 新测试 `gateway/tests/a0610-j2-sched-next.test.mjs`（同名目录挡住写入，下一拍 tick 补写成功）通过；`javac` 全量通过。真机：给一个任务设 2 分钟后的时间，`adb shell ls -l files/home/ccapp-sched-next` 内容为毫秒时刻；杀掉 App 再开机，logcat `cccodroid` 应看到「定时任务闹钟：…（精确）」 |
 | 13-04 | 见 git log | 闹钟的 PendingIntent 里带上计划时刻（`SchedAlarm.EXTRA_AT`），响时 POST `/api/sched/tick` 带 `{"at":…}`；`tick(alarmAt)` 对 `nextAt === alarmAt` 且推迟 ≤30 分钟的计划直接按到点执行，并记一条「被系统推迟 N 分钟」日志；不带时刻（旧外壳）或推迟超过 30 分钟仍是原来的错过逻辑 | 新测试 `gateway/tests/a0610-j2-sched-alarm.test.mjs`（不带时刻按错过 / 带时刻晚 10 分钟按到点 / 晚 40 分钟按错过）通过；`javac` 全量通过。真机：设一个 2 分钟后的任务，息屏等 Doze（或 `adb shell dumpsys deviceidle force-idle`），到点后看 logcat `cccodroid`：应出现「定时任务闹钟响了（计划 …）」与网关日志「被系统推迟了 N 分钟，仍按到点执行」，任务运行记录不是「错过」 |
 | 13-01 | 见 git log | 新增 `ACTION_ALARM` / `startAlarm()`：闹钟和系统粘性重建拉起时置 `closeWhenIdle`，给 30 拍（约 60 秒）宽限等网关起来、任务进队列，之后按「三次空闲」退出；界面在前台时每拍把 `closeWhenIdle` 清掉（闹钟叫醒时界面开着、随后按 Home 不会误退）；`SchedAlarm` 改用 `startAlarm()` | `javac` 全量通过。真机：① 关掉界面，设一个 1 分钟后的任务，到点让它跑完，再等约 1 分钟，通知栏「正在运行」应消失（`adb shell dumpsys activity services cc.codroid | grep GatewayService` 查不到）；② 打开界面停在聊天页再按 Home（不划掉），等 2 分钟服务仍应在；③ 后台跑任务时划掉界面，任务跑完后服务才停 |
+| 13-02（含 1-07、13-12） | 见 git log | ① `alive()`：自己拉起的网关进程还活着也要过 `/__proof`，起来 20 秒宽限内除外；超时证明不了自己就 `killGateway()` 重起，不再盲目认活进程。② `squatted()`：找到本应用残留网关的 pid 后先 SIGTERM（15）请它自己收尾（它的退出处理会连带结束正在跑的 claude 进程树），最多等 3 秒，不退出才 SIGKILL（9）；之后**不再提前 return**，一律再扫一遍 `CCAPP_TOKEN_FILE` 环境变量清理网关留下的进程（被 SIGKILL 的网关没机会收尾，claude 子树靠这段兜底） | `javac` 全量通过。真机：① 打开应用跑一条长任务，`adb shell ps -A -o PID,PPID,ARGS \| grep -E "server.mjs\|input-type=module"` 找到网关 pid；只杀应用 Java 进程（`adb shell kill -9 <界面/服务进程 pid>`，别用 force-stop，那样整个包都杀了）模拟服务重启，再打开界面：logcat `cccodroid` 应看到「端口上是本应用的残留网关 pid=…，请它退出」，随后新网关启动；正常情况下不应看到「强制结束」（SIGKILL 兜底）；`ps` 里旧的 claude 进程应消失。② 关掉界面再打开，频繁几次不应出现「端口 8791 被别的应用占着」或重启循环 |
 
 ## 不成立
 
@@ -47,6 +48,7 @@
 
 - 13-03：从最近任务划掉界面且没有任务时，服务停止前会多问一次网关的 `/api/status`（最多约 4 秒超时），所以「划掉即停」偶尔会晚几秒。网关挂着没起来时不受影响（探测失败按空闲停）。标记文件里记的 pid 被别的进程复用时，服务会当作「还有任务」继续留着（方向偏保守，不至于把正在跑的任务停掉）。
 - 13-01：系统闹钟叫醒（以及系统粘性重建）的服务不再常驻：跑完到点的任务后，约 60 秒宽限 + 6 秒空闲即退出；界面在前台时不算空闲。用户感知：定时任务跑完后，后台通知与 WakeLock 会在约一分钟内消失（以前一直挂着），下次闹钟 / 打开界面会再拉起。
+- 13-02：服务重启遇到自己的残留网关时，最多多等约 3 秒让它自己收尾（原先直接 SIGKILL），启动会略慢一点；残留网关退出时如果正在跑任务，那一轮会被结束（SIGTERM 收尾本来就会结束 claude 树），这是有意的——接不了存活网关就不接管它的会话。`alive()` 现在要求自己拉起的网关也能证明自己：起来 20 秒后仍答不出 `/__proof` 会被结束重起（以前一直当它活着）。
 
 ## 全量测试
 

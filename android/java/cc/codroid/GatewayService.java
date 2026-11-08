@@ -42,6 +42,8 @@ public class GatewayService extends Service {
     // 守护线程里赋值、界面线程（划掉 / 停止 / 更新工具包）里读：不 volatile 时那边可能拿到 null，
     // 该杀的网关没杀，留下一个占着端口的孤儿（0.6.9 审计 13-06）
     private volatile Process proc;
+    /** 这次网关起于何时：刚起来的那几秒还答不了身份证明，alive() 据此给宽限 */
+    private volatile long spawnedAt;
     private PowerManager.WakeLock wake;
     private volatile boolean stopping;
     /** 界面被划掉时还有任务在跑：跑完再停（重新打开界面就作罢）。闹钟 / 粘性重建拉起的也用它（0.6.9 审计 13-01） */
@@ -351,6 +353,7 @@ public class GatewayService extends Service {
         Env.spawnKey = ks.toString();
         Env.resetBoot();
         proc = pb.start();
+        spawnedAt = System.currentTimeMillis();
         gwBlocked = null;
         try (java.io.OutputStream o = proc.getOutputStream()) { o.write((ks + "\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII)); }
         catch (java.io.IOException e) { Log.w(TAG, "启动随机数没交过去：" + e.getMessage()); }
@@ -367,7 +370,18 @@ public class GatewayService extends Service {
     /** 端口上已经有活的网关（比如服务重建前留下的那个）就别再起一个。
      *  只认证明得了自己的（审查 S1）：以前任何答 200 的都算，探活时还把令牌头带过去了 */
     private boolean alive() {
-        if (proc != null && proc.isAlive()) { Env.proveGateway(); return true; }   // 顺手核一下：网关换过了，Cookie 跟着换
+        Process p = proc;
+        if (p != null && p.isAlive()) {
+            // 自己拉起的进程还活着：也要有证明。刚起的几秒网关还没监听好，给一段宽限；
+            // 过了宽限还证明不了自己（卡死、端口被别人接了）就结束它重起 —— 以前根本不看证明结果（0.6.9 审计 13-02）
+            if (Env.proveGateway()) return true;
+            if (System.currentTimeMillis() - spawnedAt < 20000) return true;
+            Log.w(TAG, "网关进程还活着但证明不了自己，结束重起");
+            killGateway();
+            return false;
+        }
+        // 没有自己拉起的进程：端口上那个必须证明得了自己。接管不了 —— 启动随机数只在原进程内存里（Env.key），
+        // 认不出来的只能请它退出重起，不能把令牌交给一个证明不了身份的进程（0.6.9 审计 13-02）
         return Env.proveGateway();
     }
 
@@ -378,12 +392,23 @@ public class GatewayService extends Service {
         return cmd.contains("\0--input-type=module\0-e\0") && cmd.endsWith("\0" + app + "\0" + Env.PORT + "\0");
     }
 
-    /** 端口有人占着、又证明不了自己。本应用自己的残留网关（旧版没有 /__proof，或令牌换过）就杀掉、返回 false 照常起；
-     *  杀不着的是别的应用 —— 不起网关，也不往那儿交任何东西 */
+    private static boolean alivePid(int pid) {
+        try { android.system.Os.stat("/proc/" + pid); return true; } catch (Exception e) { return false; }
+    }
+    private static boolean anyAlive(java.util.List<Integer> pids) {
+        for (int p : pids) if (alivePid(p)) return true;
+        return false;
+    }
+
+    /** 端口有人占着、又证明不了自己。本应用自己的残留网关（旧版没有 /__proof，或令牌换过）就请它退出、返回 false 照常起；
+     *  杀不着的是别的应用 —— 不起网关，也不往那儿交任何东西。
+     *  前提是 Env.portBusy() 把 127.0.0.1 和 127.0.0.2 都算上（199-1-03 的 Env 半，j1 车道改）；
+     *  只探 127.0.0.2 的话，127.0.0.1 被占时这里看不出来，网关会起不来又反复重启 */
     private boolean squatted() {
         if (!Env.portBusy()) return false;
         int me = android.os.Process.myUid(), killed = 0;
         File[] ps = new File("/proc").listFiles();
+        java.util.List<Integer> gw = new java.util.ArrayList<>();
         for (File d : ps == null ? new File[0] : ps) {
             String name = d.getName();
             if (!name.matches("\\d+")) continue;
@@ -391,15 +416,23 @@ public class GatewayService extends Service {
                 if (android.system.Os.stat(d.getPath()).st_uid != me) continue;
                 String cmd = new String(java.nio.file.Files.readAllBytes(new File(d, "cmdline").toPath()), java.nio.charset.StandardCharsets.UTF_8);
                 if (!isGatewayCmd(cmd, env.app.getPath())) continue;   // 只认本应用的网关，用户自己的 server.mjs 不碰
-                Log.w(TAG, "端口上是本应用的残留网关 pid=" + name + "，杀掉重起");
-                android.os.Process.sendSignal(Integer.parseInt(name), 9);
-                killed++;
+                gw.add(Integer.parseInt(name));
             } catch (Exception ignored) {}
         }
-        if (killed > 0) { sleep(1000); return false; }
+        if (!gw.isEmpty()) {
+            // 先礼后兵：SIGTERM 让网关自己收尾（它退出时会连带结束正在跑的 claude 进程树）。
+            // 以前直接 SIGKILL：收尾没跑，claude 成了孤儿；而且这里就 return 了，下面的兜底清理也不做（0.6.9 审计 13-02）
+            for (int pid : gw) { Log.w(TAG, "端口上是本应用的残留网关 pid=" + pid + "，请它退出"); android.os.Process.sendSignal(pid, 15); }
+            long until = System.currentTimeMillis() + 3000;
+            while (System.currentTimeMillis() < until && anyAlive(gw)) sleep(100);
+            for (int pid : gw) if (alivePid(pid)) { Log.w(TAG, "残留网关没退出，强制结束 pid=" + pid); android.os.Process.sendSignal(pid, 9); }
+            killed += gw.size();
+            sleep(500);
+        }
         // 再看一遍：网关拉起的进程（claude、钩子、终端里跑的东西）环境里都带着 CCAPP_TOKEN_FILE。网关已经不在了，
         // 它们占着端口、又证明不了自己，多半是会话里起的冒牌网关（反破甲 11-03，DeepSeek 复核必修 2）：杀掉再起。
-        // 把这个变量摘掉再起的认不出来；那种情况强行停止应用（整个 uid 的进程一起结束）就能恢复
+        // 把这个变量摘掉再起的认不出来；那种情况强行停止应用（整个 uid 的进程一起结束）就能恢复。
+        // 上面刚把网关杀掉时更要走这里：被 SIGKILL 的网关没机会收尾，它的 claude 子树就靠这一段兜底（0.6.9 审计 13-02）
         int mine = android.os.Process.myPid();
         for (File d : ps == null ? new File[0] : ps) {
             String name = d.getName();
