@@ -3531,3 +3531,33 @@ html[data-motion="on"] .lin-prof .mo-ghost .mo-st,html[data-motion="on"] .lin-pr
 html[data-skin="goucheng"] #bridge-config-panel .bc-card{box-shadow:4px 4px 0 var(--gc-hard)}
 @media (max-width:420px){#bridge-config-panel .bc-card{padding:18px}#bridge-config-panel h2{font-size:19px}#bridge-config-panel .bc-summary > div{gap:10px}}
 .sc-full{margin-top:6px;font-size:13px;white-space:normal;overflow-wrap:anywhere}
+
+/* ── 0.6.10 f1 ── 只在本块内追加，不改上面的原有规则 ─────────────────────── */
+/* L.7 读屏专用节点：只播一句话结果，聊天区本身不再当 live region */
+.sr-only{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+/* L.2 图片查看器恒为黑底：浅色主题下说明文字和按钮也要用浅色（原先是 --fg2 深灰压在黑底上） */
+#lightbox-cap{color:#e9e4d8}
+#lightbox .btn.ghost{color:#f2eee5;border-color:#7a7469}
+/* L.3 RTL 下返回箭头、设置分类箭头要镜像 */
+html[dir="rtl"] #set-back svg,html[dir="rtl"] .pj-back svg,html[dir="rtl"] .set-cats .chev{transform:scaleX(-1)}
+/* L.4 RTL 下权限菜单文字靠右（原规则写死 text-align:left） */
+html[dir="rtl"] #perm-menu button{text-align:right}
+/* L.6 正文字号「特大」也作用于代码块 / 表格 / 思考块 / 工具卡：按 --fs-chat 换算，默认字号下大小不变 */
+#chat pre code{font-size:calc(var(--fs-chat)*.862)}
+#chat table{font-size:calc(var(--fs-chat)*.862)}
+#chat .think summary{font-size:calc(var(--fs-chat)*.828)}
+#chat .think .think-body{font-size:calc(var(--fs-chat)*.869)}
+#chat .tg-head,#chat .tool-head{font-size:calc(var(--fs-chat)*.862)}
+#chat .tool-name{font-size:calc(var(--fs-chat)*.828)}
+#chat .tool-arg{font-size:calc(var(--fs-chat)*.793)}
+#chat .tool-state{font-size:calc(var(--fs-chat)*.759)}
+/* L.9 辅助文字对比度：深色主题提亮到 ≥4.5:1，浅色主题压深；自定义皮肤自己定义 --fg3，不受影响 */
+:root{--fg3:#8a857a}
+html[data-theme="light"]{--fg3:#6f6a60}
+/* L.11 触控目标：用量条视觉仍 16px，命中区向下扩到 48px；chip 用透明伪元素外扩，视觉不变 */
+#ctxbar{overflow:visible}
+#ctxbar::after{content:"";position:absolute;left:0;right:0;top:0;height:48px}
+#hint-row #model-chip .chip,#hint-row #perm-chip,#hint-row #draft-chip{position:relative}
+#hint-row #model-chip .chip::after,#hint-row #perm-chip::after,#hint-row #draft-chip::after{content:"";position:absolute;left:-4px;right:-4px;top:50%;height:48px;margin-top:-24px}
+/* 200-12-10 RTL 下上下文进度条的双色文字分界要跟着从右往左，和填充方向一致 */
+html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270deg,#111 var(--p,0%),var(--fg) var(--p,0%))}

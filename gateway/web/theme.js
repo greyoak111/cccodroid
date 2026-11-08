@@ -75,8 +75,9 @@
     const s = document.getElementById("set-theme");
     if (s && s.value !== pref) s.value = pref;
     // 设置里的两组分段（外观 / 深浅）是 pref 的两半
-    document.querySelectorAll("#seg-skin [data-sk]").forEach((b) => b.classList.toggle("on", b.dataset.sk === skin));
-    document.querySelectorAll("#seg-mode [data-md]").forEach((b) => b.classList.toggle("on", b.dataset.md === mode));
+    // aria-pressed 和 .on 一起同步：读屏原本不知道分段按钮选了哪一个（0.6.9 审计 195-L.5）
+    document.querySelectorAll("#seg-skin [data-sk]").forEach((b) => { const on = b.dataset.sk === skin; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
+    document.querySelectorAll("#seg-mode [data-md]").forEach((b) => { const on = b.dataset.md === mode; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
     return name;
   }
 
@@ -336,7 +337,7 @@
     const SEG = { uifont: ["#seg-uifont", "uf"], readfont: ["#seg-readfont", "rf"], fs: ["#seg-fs", "fs"] };
     for (const k in SEG) {
       const [sel, d] = SEG[k], v = typePref[k].startsWith("u:") ? "pick" : typePref[k];
-      document.querySelectorAll(`${sel} [data-${d}]`).forEach((b) => b.classList.toggle("on", b.dataset[d] === v));
+      document.querySelectorAll(`${sel} [data-${d}]`).forEach((b) => { const on = b.dataset[d] === v; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
     }
   }
   function setType(k, v) {
