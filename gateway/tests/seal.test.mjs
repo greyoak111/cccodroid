@@ -94,7 +94,7 @@ test("任何一处命中破甲特征：整轮不跑，列出文件", () => {
     ["@ 引用的文件", () => (put(H(".claude/CLAUDE.md"), "见 @inc.md\n"), H(".claude/inc.md"))],
     ["rules", () => H(".claude/rules/a.md")],
     ["项目 CLAUDE.local.md", () => path.join(W(), "CLAUDE.local.md")],
-    ["上级目录的 CLAUDE.md", () => path.join(CFG.home, "CLAUDE.md")],
+    // 「上级目录的 CLAUDE.md」：P1-14 起工作区外、没登记的目录不再往上读（不进上下文也就不用扫），见 a0610-main-seal.test.mjs
     ["skill", () => H(".claude/skills/x/SKILL.md")],
     ["项目里的命令", () => path.join(W(), ".claude/commands/c.md")],
     ["子代理", () => H(".claude/agents/a.md")],

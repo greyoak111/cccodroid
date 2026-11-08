@@ -984,8 +984,10 @@ export async function routeRun(req, res, u, p) {
   }
   if (req.method === "POST" && p === "/api/perm/mode") {
     const b = JSON.parse((await readBody(req)) || "{}");
-    if (!setPermMode(String(b.mode || ""))) return sendJson(res, 400, { error: "bad mode" });
-    return sendJson(res, 200, { ok: true, mode: SETTINGS.permissionMode, live: RUNS.size > 0 });
+    const r = setPermMode(String(b.mode || ""));
+    if (!r) return sendJson(res, 400, { error: "bad mode" });
+    // mode 是实际生效的（安全模式下可能被退回 default），wanted 是用户选的；saved=false 时这次切换重启后会丢（195-A.6）
+    return sendJson(res, 200, { ok: true, mode: r.mode, wanted: SETTINGS.permissionMode, saved: r.saved, live: RUNS.size > 0 });
   }
   if (req.method === "POST" && p === "/api/task/stop") {
     const b = JSON.parse((await readBody(req)) || "{}");

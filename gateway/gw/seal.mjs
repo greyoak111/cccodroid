@@ -17,6 +17,7 @@ import { CFG, log, tz } from "./config.mjs";
 import { sealed } from "./edition.mjs";
 import { scanText, describe } from "./breach.mjs";
 import { readSmallFile } from "./saferead.mjs";
+import { sameFile } from "./pathguard.mjs";
 
 const MAX_TEXT = 256 << 10;            // 单个说明文件上限（超过的不回填，记一笔）
 const MAX_CTX = 1 << 20;               // 拼出来的说明总长
@@ -85,12 +86,29 @@ function imports(text, base) {
   }
   return out;
 }
+/** 项目级说明 / skill 从哪几级目录读：只认「信得过的根」到工作目录这一段，不再一路往上到 /。
+ *  共享存储谁都能写：/sdcard/CLAUDE.md、/sdcard/.claude/rules 能被别的应用放进去，而封口模式下不走项目信任，
+ *  直接进了系统提示（0.6.9 审计 P1-14）。根：工作区（在工作区里）、登记过的项目目录（在项目里）；都不是就只认工作目录本身 */
+function projectChain(cwd) {
+  const all = ancestors(cwd);
+  let i = all.findIndex((d) => sameFile(d, CFG.workspace));
+  if (i < 0) i = all.findIndex((d) => registeredRoots().some((r) => sameFile(d, r)));   // 最外层那个登记目录
+  return i >= 0 ? all.slice(i) : all.slice(-1);
+}
+/** 登记过的项目目录。直接读 ccapp-projects.json，不 import projects.mjs：
+ *  终端里的 claude 经 guard/cc-seal.mjs 也走这里，那边不该拉起会话、终端那一整套模块 */
+function registeredRoots() {
+  try {
+    const j = JSON.parse(readSmallFile(path.join(home(), "ccapp-projects.json"), 4 << 20) || "[]");
+    return Array.isArray(j) ? j.filter((p) => p && typeof p.path === "string" && path.isAbsolute(p.path)).map((p) => p.path) : [];
+  } catch { return []; }
+}
 function contextSources(cwd) {
   const list = [];
   const add = (file, kind) => list.push({ file, kind });
   add(path.join(userClaude(), "CLAUDE.md"), "user");
   for (const f of mdUnder(path.join(userClaude(), "rules"))) add(f, "user");
-  for (const d of ancestors(cwd)) {
+  for (const d of projectChain(cwd)) {
     add(path.join(d, "CLAUDE.md"), "project");
     add(path.join(d, ".claude", "CLAUDE.md"), "project");
     for (const f of mdUnder(path.join(d, ".claude", "rules"))) add(f, "project");
@@ -130,9 +148,7 @@ function renderContext(items) {
 // ── 合成插件「user」：skill / 命令 / 子代理 / 输出风格 ──
 /** 拷进插件的文件清单：[{ src, rel }]（rel 相对插件根）。后面的同名项（离工作目录近的项目）盖前面的 */
 function projectDirs(cwd) {
-  const h = realOr(home()), all = ancestors(cwd);
-  // 工作目录在 home 底下：取 home 以下那几级；不在 home 底下（共享存储上的项目）：只取工作目录本身
-  return realOr(cwd).startsWith(h + "/") ? all.filter((d) => d.startsWith(h + "/")) : [realOr(cwd)];
+  return projectChain(cwd);      // 同说明文件：信得过的根到工作目录这一段（P1-14）
 }
 function userPluginFiles(cwd) {
   const roots = [userClaude(), ...projectDirs(cwd).map((d) => path.join(d, ".claude"))];
@@ -209,6 +225,32 @@ function cleanManifest(buf) {
   return Buffer.from(JSON.stringify(j, null, 2));
 }
 
+/** skill / 命令 / 子代理 .md 开头的 YAML 头里可以写 hooks:，claude 用到它时就执行里面的命令——
+ *  不经任何确认，也不受封口设置里的钩子管（合成插件把它原样带进去了，0.6.9 审计 P1-18）。
+ *  副本里把头里的 hooks 一节去掉，正文、name、description、allowed-tools 这些照留。
+ *  头里去掉之后还像有 hooks（嵌在别的写法里、或用 YAML 合并键 << 引进来）：整个头不要，只留正文 */
+const FRONT_RE = /^(\uFEFF?---[ \t]*\r?\n)([\s\S]*?)(\r?\n---[ \t]*(?:\r?\n|$))/;
+const HOOKS_KEY = /^["']?hooks["']?[ \t]*:/i;
+export function stripFrontHooks(buf) {
+  const s = buf.toString("utf8"), m = FRONT_RE.exec(s);
+  if (!m || !/hooks|<</i.test(m[2])) return buf;
+  const lines = m[2].split(/\r?\n/), keep = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!HOOKS_KEY.test(lines[i])) { keep.push(lines[i]); continue; }
+    // 这一节：后面缩进的行、空行、注释行都属于它，直到下一个顶格的键；
+    // 流式写法（[ / { 开头）没收口的，续行可以顶格写，数括号数到收口为止
+    let depth = 0;
+    const count = (l) => { for (const c of l.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "")) depth += c === "[" || c === "{" ? 1 : c === "]" || c === "}" ? -1 : 0; };
+    count(lines[i].replace(HOOKS_KEY, ""));
+    while (i + 1 < lines.length && (depth > 0 || /^[ \t]/.test(lines[i + 1]) || /^\s*(#.*)?$/.test(lines[i + 1]))) count(lines[++i]);
+  }
+  let head = keep.join(m[2].includes("\r\n") ? "\r\n" : "\n");
+  if (/(^|[\s{,\[])["']?hooks["']?[ \t]*:|<<[ \t]*:/im.test(head)) head = null;
+  const rest = s.slice(m[0].length);
+  return Buffer.from(head == null ? rest : m[1] + head + m[3] + rest);
+}
+const isMd = (rel) => /\.md$/i.test(rel);
+
 /**
  * 按清单拷成一个插件目录（私有、按指纹复用）。拷的时候查文字（.md 一类）；命中返回 { found }。
  * 复用前核对每个文字文件的哈希，副本被动过就重拷。
@@ -221,6 +263,7 @@ function expectedBytes(rel, f, manifest) {
     let buf = readSmallFile(f.src, 64 << 20, "");
     if (buf == null) return null;
     if (rel === ".claude-plugin/plugin.json") buf = cleanManifest(buf);
+    else if (isMd(rel)) buf = stripFrontHooks(buf);
     return buf;
   } catch { return null; }
 }
@@ -307,6 +350,7 @@ function materialize(name, files, manifest) {
     // 扫描只看前 2MB，但副本写的是全文：超过扫描上限的文本直接拒绝，别只扫开头就放行（审查 11-05）
     if (buf.length > (2 << 20)) { found.push({ name: f.src, hits: [{ cat: "toolarge", strong: true, line: 0, excerpt: "" }] }); continue; }
     if (rel === ".claude-plugin/plugin.json") { buf = cleanManifest(buf); if (!buf) continue; }
+    else if (isMd(rel)) buf = stripFrontHooks(buf);
     if (!isPluginData(rel)) {
       const r = scanText(buf.toString("utf8"));
       if (r.blocked) found.push({ name: f.src, hits: r.hits });
