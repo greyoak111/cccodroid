@@ -15,7 +15,7 @@
 | 196-供应链.1 | 组件安装只按 id 锁，跨组件并发共享文件可被删/覆盖；`compRecords()` 看不到 installing | `gw/components.mjs` | 已修 |
 | 196-供应链.2 | 模块/自定义组件暂存清理缺口：devkit-stage 失败不删；`.stage-*` 重启后永久孤儿 | `gw/modules.mjs`（custom.mjs 半 移交） | 已修（模块半）/ 移交（custom.mjs 半） |
 | 196-供应链.3 | `pkg uninstall/upgrade` 与 `modRemove` 按可写记录删文件，未做 safeRel | `android/assets/bin/pkg.mjs`；`gw/modules.mjs` | 已修 |
-| 196-供应链.4 | `devkit.lock.json` 仅靠 TLS、无签名且长期缓存，却参与依赖版本判定 | `android/assets/bin/pkg.mjs` | 待办 |
+| 196-供应链.4 | `devkit.lock.json` 仅靠 TLS、无签名且长期缓存，却参与依赖版本判定 | `android/assets/bin/pkg.mjs` | 已修 |
 | 196-供应链.5 | 技能 zip 导入无条目数上限，逐条同步写可阻塞事件循环 | `gw/extensions.mjs`（sessionops.mjs 半 移交） | 待办 |
 | 197-9.6 F8 | 组件升级先删旧版再搬新版，中途失败旧版没了 | `gw/components.mjs` | 待办 |
 | 200-14-06 | 模块 `first-run` 失败仍写 `.ok` | `gw/modules.mjs` | 待核实（疑似已修） |
@@ -33,6 +33,7 @@
 | 196-供应链.1 | 本条 | 加 `compFsExclusive` 串行链：安装的切换（删旧版、写 installing 记录、搬文件）和收尾（技能、共享文件复核、写 ok），以及卸载的「读记录→删文件→删记录→清暂存」都排进同一条链；首启脚本留在锁外，排队中的安装仍可取消。卸载改成退役桥之后、进锁再读记录，不再拿旧快照删文件。`compRecords()` 收录 installing 是第一轮 ecc02e7 已修的（复核确认） | `gateway/tests/a0610-g1-comp-lock.test.mjs`：串行顺序与失败不堵链、installing 组件要用的共享文件在别的组件卸载后仍在且留在它名下；`components` 等 5 个相关测试文件 38 条全过 |
 | 196-供应链.2 | 本条 | `modRunInstall` 把解包树记到 `job.stageTree`；`modInstall` 的失败分支当场删掉它（压缩包仍按原逻辑处理）。以前只有下次重装开头才清，用户不再重试就一直占着 | `gateway/tests/a0610-g1-mod-stage.test.mjs`：暂存区放一份校验和对得上、但不是 tar.gz 的文件，让解包失败；任务结束后 `devkit-stage/modx` 必须不存在。去掉清理那行后该测试失败（已实测红/绿） |
 | 196-供应链.3 | 本条 | `pkg` 的 `removeFiles` 只遍历 `safeRel` 通过的记录路径（普通相对路径，无 `..` / 反斜杠 / 绝对路径，`rec.files` 非数组也不炸）；`modulesInfo` 用 `modDirOk` 丢掉 dir 不安全的模块条目（卸载会对它整个 `rmSync`），`filesOf` 过滤 FILES 里不安全的行 | `gateway/tests/a0610-g1-path-safety.test.mjs`：坏 dir 条目被丢弃；modRemove 删掉 `bin/safe0610` 但 `../escape0610`、绝对路径、穿越路径都还在；pkg 的 safeRel 抽取求值，十种坏路径全拒、三种正常路径放行 |
+| 196-供应链.4 | 本条 | 新增 `android/assets/bin/lockcheck.mjs`（build.sh 会随 `assets/bin/*` 一起打包）：`verifyLock` 对原始字节验 ed25519 签名，并核 `lock.release === tagOf(base)`（与 `Updater.lockSigned` 同口径），公钥与 APK 的 `INDEX_PUBKEY_B64` 同一把。`pkg` 取 lock 后先验签；磁盘缓存改存 `{_for, body, sig}`（原始正文 + 签名），读回来当场复核，旧格式解析对象和 `base` 不明时都不认 | `gateway/tests/a0610-g1-lock-sig.test.mjs`：公钥与 SPKI 尾部一致；改正文 / 错签名 / 旧 tag 重放 / 缺 release 全拒；tagOf 与 Java 正则一致；pkg 接线（下载后验签、缓存原文复核、旧写法已消失）源码断言。`pkg-lock-v062`、`harden-v2b` 7 条全过 |
 
 ## 不成立
 
