@@ -118,6 +118,9 @@ export async function routeSettings(req, res, u, p) {
           }
           SETTINGS.provider = want;
           SETTINGS.model = null;          // 别把上一家的模型名带过去
+          // 自动起名的型号同理：界面上还补进新清单显示选中，autotitle 却因为型号不在这一家的清单里静默不用
+          // （0.6.9 审计 195-E.6）。清掉后回落到本轮模型，用户要就重新选
+          SETTINGS.titleModel = null;
           applyProvider();
           // 上游热切 —— 不重启桥，也就没有断流窗口
           await setBridgeUpstream(CFG.upstream);

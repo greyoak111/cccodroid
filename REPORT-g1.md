@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 195-G.5 | 启动随机数 stdin 阻塞读，5 秒超时对无数据管道无效，网关在 listen 前挂住 | `gw/access.mjs:85-99` | 已修 |
 | 195-G.6 | 手机浏览器打开 127.0.0.1:8791 静态页能开、`/api/*` 全 403，前端标「网关离线」 | `gw/access.mjs`；提示文案在前端 | 移交 |
-| 195-E.6 | 切接口后 `titleModel` 残留旧厂商型号，设置页显示选中、实际静默不用 | `gw/settings.mjs:116-117`；`gw/autotitle.mjs:88-90` | 待办 |
+| 195-E.6 | 切接口后 `titleModel` 残留旧厂商型号，设置页显示选中、实际静默不用 | `gw/settings.mjs:116-117`；`gw/autotitle.mjs:88-90` | 已修 |
 | 195-V.1 | 组件索引无防回滚，`compState` 只比 sha256；UI 不显示待装版本 | `gw/components.mjs`；`web/app/08-extensions.js` | 待办 |
 | 195-V.2 | `use-local-index` 是私有目录里的文件开关，可把来源换成 `file://` 且不校验新鲜度 | `gw/components.mjs` | 待办 |
 | 195-V.3 | 索引磁盘缓存未验签，同 uid 可伪造条目绕过整条验签链并执行 `first-run.sh` | `gw/components.mjs` | 待办 |
@@ -26,6 +26,7 @@
 | 条目 | 提交 | 怎么修的（一句） | 怎么验的（测试文件 / 手动步骤） |
 |---|---|---|---|
 | 195-G.5 | 本条 | 经 `/proc/self/fd/0` 重开一份带 `O_NONBLOCK` 的描述符再读，没数据时拿 EAGAIN，5 秒期限才真正生效；重开不了就不读，宁可认不出这个网关也不在 listen 前挂死 | `gateway/tests/a0610-g1-spawn-stdin.test.mjs`：FIFO 模拟应用给的阻塞管道。旧代码 12 秒超时失败，新代码 5.3 秒正常导入；另用真随机数验 proof 按派生钥匙算 |
+| 195-E.6 | 本条 | 切厂商时和 `model` 一样把 `SETTINGS.titleModel` 清空，界面不再显示一个实际不用的旧型号 | `gateway/tests/a0610-g1-titlemodel.test.mjs`：旧代码失败、新代码通过；POST 切到另一家后内存与磁盘上的 `titleModel`/`model` 都是 null |
 
 ## 不成立
 
