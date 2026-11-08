@@ -3060,4 +3060,6 @@ window.I18N_DICT["id"] = {
   "索引里的版本（{v}）比已装的（{now}）旧，已拒绝降级": "Versi di indeks ({v}) lebih lama dari yang terpasang ({now}); penurunan versi ditolak",
   "正在修补或核对，等它结束再试": "Perbaikan atau pemeriksaan sedang berjalan; coba lagi setelah selesai",
   "没有能自动修补的问题": "Tidak ada masalah yang bisa diperbaiki otomatis",
+  "还有步骤在应用里进行：": "Masih ada langkah yang berjalan di aplikasi:",
+  "交给应用的步骤还在进行，做完后再点「核对记录」": "Langkah yang diserahkan ke aplikasi masih berjalan; ketuk “Periksa catatan” setelah selesai",
 };

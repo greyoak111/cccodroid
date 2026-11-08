@@ -3057,3 +3057,5 @@
 3057	La version de l'index ({v}) est plus ancienne que celle installée ({now}) ; rétrogradation refusée
 3058	Une réparation ou une vérification est déjà en cours ; réessayez quand elle sera terminée
 3059	Aucun problème réparable automatiquement
+3060	Des étapes sont encore en cours dans l'application :
+3061	Les étapes confiées à l'application sont encore en cours ; touchez « Vérifier les enregistrements » une fois terminées

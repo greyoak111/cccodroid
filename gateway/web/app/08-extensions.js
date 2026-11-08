@@ -1324,8 +1324,8 @@
   const STEP = () => ({ wait: t("等待"), run: t("进行中…"), ok: t("完成"), fail: t("失败"), handed: t("已交给应用") });
   function paintFix(j) {
     const box = $("reconcile-box"), S = STEP();
-    box.innerHTML = `<div class="tiny">${esc(j.running ? t("正在修补，关掉这一页也不影响，做完会自动再核对：") : t("修补结束："))}</div>` + j.steps.map((s) => `<div class="item ledger ${s.state === "fail" ? "bad" : ""}">
-        <div class="it-title wrap">${uiI(s.state === "ok" || s.state === "handed" ? "check" : s.state === "fail" ? "x" : "info", "lv-" + (s.state === "fail" ? "error" : "info"))}${esc(s.msg)}</div>
+    box.innerHTML = `<div class="tiny">${esc(j.running ? t("正在修补，关掉这一页也不影响，做完会自动再核对：") : j.steps.some((s) => s.state === "handed") ? t("还有步骤在应用里进行：") : t("修补结束："))}</div>` + j.steps.map((s) => `<div class="item ledger ${s.state === "fail" ? "bad" : ""}">
+        <div class="it-title wrap">${uiI(s.state === "ok" ? "check" : s.state === "fail" ? "x" : "info", "lv-" + (s.state === "fail" ? "error" : "info"))}${esc(s.msg)}</div>
         <div class="tiny">${esc(fixWhat(s.act))} · <b>${esc(S[s.state] || s.state)}</b>${s.note ? " · " + esc(s.note) : ""}</div>
       </div>`).join("") + (j.steps.some((s) => s.state === "handed") ? `<div class="tiny">${esc(t("交给应用的那几步在「设置 → 更新」里看进度，做完后再点「核对记录」。"))}</div>` : "");
     box.classList.remove("hidden");
@@ -1337,6 +1337,8 @@
     paintFix(j);
     if (j.running) { fixTimer = setTimeout(followFix, 1500); return; }
     const failed = j.steps.filter((s) => s.state === "fail").length;
+    // 交给应用的还在做：网关没再核（核了也是旧结果），进度留在这里，不换回旧的核对结果（0.6.11 真机）
+    if (j.steps.some((s) => s.state === "handed")) return toast(t("交给应用的步骤还在进行，做完后再点「核对记录」"), !!failed);
     toast(failed ? t("修补结束，有 {n} 步没成", { n: failed }) : t("修补结束"), !!failed);
     // 结果停留几秒给人看清，再换回最新的核对结果（网关已经自动再核过）
     fixTimer = setTimeout(() => loadReconcile(false).then((r) => r && paintReconcile(r, true)), failed ? 8000 : 3000);

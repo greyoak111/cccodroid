@@ -3057,3 +3057,5 @@
 3057	La versión del índice ({v}) es más antigua que la instalada ({now}); se rechazó la degradación
 3058	Ya hay una reparación o comprobación en curso; inténtalo cuando termine
 3059	No hay problemas que se puedan reparar automáticamente
+3060	Aún hay pasos en curso en la app:
+3061	Los pasos enviados a la app siguen en curso; toca «Comprobar registros» cuando terminen

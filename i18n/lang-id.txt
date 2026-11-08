@@ -3057,3 +3057,5 @@
 3057	Versi di indeks ({v}) lebih lama dari yang terpasang ({now}); penurunan versi ditolak
 3058	Perbaikan atau pemeriksaan sedang berjalan; coba lagi setelah selesai
 3059	Tidak ada masalah yang bisa diperbaiki otomatis
+3060	Masih ada langkah yang berjalan di aplikasi:
+3061	Langkah yang diserahkan ke aplikasi masih berjalan; ketuk “Periksa catatan” setelah selesai

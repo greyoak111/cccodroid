@@ -3094,5 +3094,7 @@ window.I18N_DICT.en = {
   "索引没有通过验签，不能安装组件": "The index failed signature verification, so components can't be installed",
   "索引里的版本（{v}）比已装的（{now}）旧，已拒绝降级": "The version in the index ({v}) is older than the installed one ({now}); downgrade refused",
   "正在修补或核对，等它结束再试": "A fix or check is already running; try again when it finishes",
-  "没有能自动修补的问题": "There's nothing that can be fixed automatically"
+  "没有能自动修补的问题": "There's nothing that can be fixed automatically",
+  "还有步骤在应用里进行：": "Some steps are still running in the app:",
+  "交给应用的步骤还在进行，做完后再点「核对记录」": "Steps handed to the app are still running; tap “Check records” again when they finish"
 };

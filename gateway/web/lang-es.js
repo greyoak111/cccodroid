@@ -3060,4 +3060,6 @@ window.I18N_DICT["es"] = {
   "索引里的版本（{v}）比已装的（{now}）旧，已拒绝降级": "La versión del índice ({v}) es más antigua que la instalada ({now}); se rechazó la degradación",
   "正在修补或核对，等它结束再试": "Ya hay una reparación o comprobación en curso; inténtalo cuando termine",
   "没有能自动修补的问题": "No hay problemas que se puedan reparar automáticamente",
+  "还有步骤在应用里进行：": "Aún hay pasos en curso en la app:",
+  "交给应用的步骤还在进行，做完后再点「核对记录」": "Los pasos enviados a la app siguen en curso; toca «Comprobar registros» cuando terminen",
 };

@@ -38,10 +38,30 @@ const one = (x, n = 260) => String(x == null ? "" : x).replace(/[\u0000-\u001f\u
 
 const exists = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
 const readLines = (f) => { try { return fs.readFileSync(f, "utf8").split("\n").filter(Boolean); } catch { return null; } };
-/** 软链要指向真东西才算在：86 个组件文档软链指向不存在的 usr/LICENSES，只看 lstat 永远显示正常（0.6.9 审计 真机数据） */
-const present = (f) => {
-  try { const st = fs.lstatSync(f); if (st.isSymbolicLink()) { fs.statSync(f); } return true; } catch { return false; }
-};
+/** 这一轮核对里「有人负责的路径」：各包清单、模块 FILES、组件记录里的全部相对路径（reconcileNow 开头收一遍） */
+let OWNED = null;
+/** 断掉的软链算不算缺：软链要跟到目标（86 个组件文档软链指向不存在的 usr/LICENSES，只看 lstat 永远显示正常，0.6.9 审计），
+ *  但只有目标有人负责、却被删了才算缺。谁都不负责的目标（termux-services 的 svlogger、不随工具包分发的 termux-open……）
+ *  是打包时就断的，重装也还是断的：以前照报，「修补」会白白重装整个工具包（0.6.11 真机） */
+function linkTargetOwned(rel, link) {
+  if (!OWNED) return true;
+  let t;
+  if (link.startsWith("/")) {
+    const m = /^\/data\/(?:data|user\/\d+)\/[^/]+\/files\/usr\/(.+)$/.exec(link);
+    if (m) t = m[1];
+    else if (link.startsWith(PREFIX + "/")) t = link.slice(PREFIX.length + 1);
+    else return false;                         // 指到工具包外面：不归任何清单管
+  } else t = path.posix.normalize(path.posix.join(path.posix.dirname(rel), link));
+  return !t.startsWith("../") && OWNED.has(t);
+}
+/** 这条相对路径算不算缺：不在磁盘上，或是目标有人负责却已经没了的断链 */
+function gone(rel) {
+  const f = path.join(PREFIX, rel);
+  let st; try { st = fs.lstatSync(f); } catch { return true; }
+  if (!st.isSymbolicLink()) return false;
+  try { fs.statSync(f); return false; }
+  catch { let l; try { l = fs.readlinkSync(f); } catch { return true; } return linkTargetOwned(rel, l); }
+}
 /** share/doc/ 下的是文档（Termux 包的 copyright 多是指向不在包里的 LICENSES 的断链，components.mjs 装完还会清掉）：
  *  缺了不影响任何功能，不算缺。以前照算，排障页报「模块少了 N 个文件」、提示重装也修不好（0.6.11 真机） */
 const isDoc = (r) => /(^|\/)share\/doc\//.test(r);
@@ -51,12 +71,31 @@ async function missingOf(rels) {
   const out = [];
   let n = 0;
   for (const r of rels) {
-    if (!isDoc(r) && !present(path.join(PREFIX, r))) out.push(r);
+    if (!isDoc(r) && gone(r)) out.push(r);
     if ((++n & 255) === 0) await breathe();
   }
   return out;
 }
 const badRel = (r) => typeof r !== "string" || !r || r.startsWith("/") || r.split("/").includes("..");
+
+/** 收「有人负责的路径」：包清单（不管前缀对不对，取 files/usr/ 之后那段）、模块 FILES、组件记录的 files 与 shared */
+async function ownedPaths() {
+  const s = new Set();
+  const info = path.join(PREFIX, "var/lib/dpkg/info");
+  let lists = []; try { lists = fs.readdirSync(info).filter((f) => f.endsWith(".list")); } catch {}
+  for (const f of lists) {
+    for (const l of readLines(path.join(info, f)) || []) { const i = l.indexOf("/files/usr/"); if (i >= 0 && l.length > i + 11) s.add(l.slice(i + 11)); }
+    await breathe();
+  }
+  const mj = modulesInfo();
+  for (const m of (mj && mj.modules) || []) if (m.dir && !badRel(m.dir)) for (const r of readLines(path.join(PREFIX, m.dir, "FILES")) || []) s.add(r);
+  let recs = []; try { recs = fs.readdirSync(COMP_DIR).filter((f) => f.endsWith(".json")); } catch {}
+  for (const f of recs) {
+    const rec = compRecord(f.slice(0, -5));
+    for (const k of ["files", "shared"]) if (rec && Array.isArray(rec[k])) for (const r of rec[k]) if (typeof r === "string") s.add(r);
+  }
+  return s;
+}
 
 // 本应用的包名（清单前缀要对得上的那个）：/data/user/0/<包>/files/usr 或 /data/data/<包>/files/usr
 const OWN = PREFIX ? (/\/data\/(?:data|user\/\d+)\/([^/]+)\/files\/usr\/?$/.exec(PREFIX) || [])[1] || "" : "";
@@ -66,6 +105,7 @@ const comp = (id) => ({ t: "comp", id }), mod = (id) => ({ t: "mod", id }), DEVK
 /** 核一遍，返回 { at, findings:[{key, level:error|warn|info, k, v, fix, samples, act}] }。k/v 是 tz 的原句和变量，出门时再翻 */
 export async function reconcileNow() {
   const F = [];
+  OWNED = await ownedPaths();
   // k、fix 用 tz() 包着：不带变量时原样返回，只是让 i18n/scan.mjs 把它们收进词典
   const add = (key, level, k, v, fix, samples, act) => F.push({ key, level, k, v: v || null, fix: fix || "", ...(samples && samples.length ? { samples: samples.slice(0, 8) } : {}), act: act && actOk(act) ? act : null });
   const dk = devkitIdentity();
@@ -145,6 +185,7 @@ export async function reconcileNow() {
     for (const lib of r.libs || []) if (lib.startsWith(CUSTOM_DIR) && !exists(lib)) gone.push(lib);
     if (gone.length) add("custom-files:" + d, "error", tz("自定义组件「{id}」的程序或库不在了"), { id: r.name || d }, tz("到 扩展 → 自定义组件 删掉重新导入"), gone);
   }
+  OWNED = null;
   return { at: Date.now(), devkit: dk ? dk.sha256 || dk.tag || "" : "", findings: F };
 }
 
@@ -226,7 +267,9 @@ async function fixRun(steps) {
     catch (e) { st.state = "fail"; st.msg = String(e && e.message || e).slice(0, 300); }
   }
   ledger("repair", steps.every((s) => s.state !== "fail"), `核对记录修补：${steps.map((s) => `${stepKey(s.act)} ${s.state}`).join("，")}`);
-  await reconcileRun();
+  // 交给应用的（工具包修复、重装 Claude Code）这时才刚开始：马上再核只会核出旧结果，看着像「修完还是坏的」（0.6.11 真机）。
+  // 工具包修复装完网关会重启，启动 1 分钟后自动再核；界面提示做完后再点「核对记录」
+  if (!steps.some((s) => s.state === "handed")) await reconcileRun();
   fixJob.running = false; fixJob.end = Date.now();
 }
 const fixView = (lang) => !fixJob ? { running: false, steps: [] } : {

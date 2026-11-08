@@ -57,12 +57,14 @@ test("对账：组件依赖的共享文件被删会报出来（#185）", async (
   assert.ok(r.findings.some((f) => f.key === "comp-shared:sharedgone"), JSON.stringify(r.findings));
 });
 
+// 0.6.11 起：断链只有目标有人负责（记在某个清单里）却没了才算缺；目标谁都不负责的是打包时就断的，
+// 见 a0611-reconcile-links。这里的目标记在组件自己的清单里、被删了，照旧要报
 test("对账：悬空软链不再算「文件在」（真机 86 个）", async () => {
   fs.writeFileSync(path.join(PREFIX, ".devkit-ok"), JSON.stringify({ sha256: "abc" }));
   fs.mkdirSync(path.join(PREFIX, "share"), { recursive: true });
   try { fs.rmSync(path.join(PREFIX, "share/dangling"), { force: true }); } catch {}
   fs.symlinkSync(path.join(PREFIX, "share/does-not-exist"), path.join(PREFIX, "share/dangling"));
-  writeComp("dangle", { id: "dangle", state: "ok", base: "abc", files: ["share/dangling"], shared: [], bin: [] });
+  writeComp("dangle", { id: "dangle", state: "ok", base: "abc", files: ["share/dangling", "share/does-not-exist"], shared: [], bin: [] });
   const r = await reconcileNow();
   assert.ok(r.findings.some((f) => f.key === "comp-files:dangle"), JSON.stringify(r.findings));
 });
