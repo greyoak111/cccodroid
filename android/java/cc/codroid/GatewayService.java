@@ -37,7 +37,9 @@ public class GatewayService extends Service {
     }
 
     private Env env;
-    private Process proc;
+    // 守护线程里赋值、界面线程（划掉 / 停止 / 更新工具包）里读：不 volatile 时那边可能拿到 null，
+    // 该杀的网关没杀，留下一个占着端口的孤儿（0.6.9 审计 13-06）
+    private volatile Process proc;
     private PowerManager.WakeLock wake;
     private volatile boolean stopping;
     /** 界面被划掉时还有任务在跑：跑完再停（重新打开界面就作罢） */
