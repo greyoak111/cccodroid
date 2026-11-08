@@ -76,12 +76,15 @@ export function contextWindowOf(result, p, model) {
  *  设这个值有两条路：网关设置面板（进 SETTINGS，靠环境变量下发），
  *  或者在对话里打 `/autocompact 400k`（那条命令写进的是 Claude Code 自己的
  *  ~/.claude/settings.json，网关这边看不见）。两条都要认，否则界面上的刻度会失真。 */
+// claude 2.1.311 只认 100k～1M 的压缩线，越界的按边界算（H3t：below_minimum → 1e5）。界面照这个显示，别按 20k 画满格（195-O.2）
+export const AC_BOUNDS = [1e5, 1e6];
+export const clampAutoCompact = (n) => Math.min(AC_BOUNDS[1], Math.max(AC_BOUNDS[0], Math.round(n)));
 export function effectiveAutoCompact() {
-  if (SETTINGS.autoCompactWindow) return SETTINGS.autoCompactWindow;
+  if (SETTINGS.autoCompactWindow) return clampAutoCompact(SETTINGS.autoCompactWindow);
   try {
     const j = JSON.parse(fs.readFileSync(path.join(CFG.home, ".claude", "settings.json"), "utf8"));
     const n = Number(j.autoCompactWindow);
-    if (Number.isFinite(n) && n > 0) return Math.round(n);
+    if (Number.isFinite(n) && n > 0) return clampAutoCompact(n);
   } catch {}
   return null;
 }

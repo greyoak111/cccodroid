@@ -27,3 +27,16 @@ test("只清没单独指定接口的；指定了接口的、本来就跟随的�
   const at = src.indexOf("SETTINGS.model = null;");
   assert.ok(at > 0 && src.slice(at, at + 400).includes("clearFollowingModels()") && src.slice(at, at + 400).includes("clearFollowingTaskModels()"));
 });
+
+test("195-O.2：压缩线按 claude 实际认的 100k～1M 夹住（旧设置里存的 20k 显示成 100k）", async () => {
+  const { effectiveAutoCompact, clampAutoCompact } = await import("../gw/stream.mjs");
+  const { SETTINGS } = await import("../gw/settings-store.mjs");
+  const prev = SETTINGS.autoCompactWindow;
+  try {
+    SETTINGS.autoCompactWindow = 20000;
+    assert.equal(effectiveAutoCompact(), 100000);
+    SETTINGS.autoCompactWindow = 5e6;
+    assert.equal(effectiveAutoCompact(), 1e6);
+    assert.equal(clampAutoCompact(400000), 400000);
+  } finally { SETTINGS.autoCompactWindow = prev; }
+});

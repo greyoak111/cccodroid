@@ -12,6 +12,7 @@ import { idleDisarmAll, publishState, pump, setPermMode, strList } from "./queue
 
 export { SETTINGS, saveSettings } from "./settings-store.mjs";
 import { SETTINGS, saveSettings, outputStyles } from "./settings-store.mjs";
+import { clampAutoCompact } from "./stream.mjs";
 
 
 
@@ -99,7 +100,7 @@ export async function routeSettings(req, res, u, p) {
       // 自动压缩窗口：数字就设，空/0 就清除（交回给 claude 自己决定）
       if ("autoCompactWindow" in b) {
         const n = Number(b.autoCompactWindow);
-        SETTINGS.autoCompactWindow = Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+        SETTINGS.autoCompactWindow = Number.isFinite(n) && n > 0 ? clampAutoCompact(n) : null;   // 存 claude 实际会用的值（195-O.2）
       }
 
       // ── 换厂商 ──
