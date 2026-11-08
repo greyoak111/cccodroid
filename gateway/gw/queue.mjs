@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CFG, LAST_LANG, log, tr, tz } from "./config.mjs";
 import { SETTINGS, saveSettings, capList } from "./settings-store.mjs";
+import { keepBad, writeAtomic } from "./statefile.mjs";
 import { PERM_MODES, PROVIDER, keyOf, providerById } from "./providers.mjs";
 import { effectiveModel } from "./sessmodel.mjs";
 // 这个会话真跑时用哪家：钉的 → 项目默认 → 全局（和 run.mjs 的 pickProvider 一致；只看钉的会漏掉项目，#102 04-004）
@@ -98,9 +99,9 @@ export function saveRunMark() {
   // 「有任务」标记跟着同步：在跑的，加上排着、会自己发出去的（挂起等 ⚡ 的不算）。外壳据此判断划掉时能不能停服务（审查 0601b）
   runFlag(RUNS.size > 0 || QUEUE.some((q) => !q.held));
   try {
-    if (!RUNS.size && !QUEUE.length) return fs.rmSync(RUN_MARK, { force: true });
+    if (!RUNS.size && !QUEUE.length) { fs.rmSync(RUN_MARK, { force: true }); return true; }
     const live = runList().filter((r) => !r.ended);
-    fs.writeFileSync(RUN_MARK + ".tmp", JSON.stringify({
+    return writeAtomic(RUN_MARK, JSON.stringify({
       // done：已经答完、只是进程还留着等后台任务回报，而且任务也都清零了 —— 这时被结束不算中断
       runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, text: r.text.slice(0, 4000), startedAt: r.startedAt, ...(r.idle && !r.bgTasks ? { done: true } : {}) })),
       // 已经写进 stdin、claude 还没吃进去的插话也算排队的：一起留下
@@ -109,9 +110,8 @@ export function saveRunMark() {
       // 送进去还没等到结果的斜杠命令也留下，挂起（可能已经办了一半，等用户点 ⚡ 再发）
       queue: [...live.flatMap((r) => [...(r.pendingInject || []).map((it) => ({ ...it, injected: false })), ...(r.slashFlight || []).map((it) => ({ ...it, injected: false, held: true }))]), ...QUEUE]
         .map((q) => { const sid = q.sessionId || sidForItem(q); return sid ? { ...q, sessionId: sid } : q; }),
-    }), { mode: 0o600 });
-    fs.renameSync(RUN_MARK + ".tmp", RUN_MARK);
-  } catch {}
+    }));
+  } catch { return false; }
 }
 // 中断记录是个列表：并行时一次会断好几轮，每个会话都要有自己的「继续」卡（群友 Yhaizg 11-01：升级时三个会话在跑，只提示了一个）
 // 旧版本存的是单条对象，读的时候包成列表
@@ -122,13 +122,13 @@ export let INTERRUPTED = (() => {
   try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))).filter((e) => { try { return !e.sessionId || !!findSessionFile(e.sessionId); } catch { return true; } }); } catch {}
   return [];
 })();
+/** 落盘成功回 true（写到一半被杀不留半个 JSON：临时文件 + fsync + 换名） */
 export function setInterrupted(list) {
   INTERRUPTED = intrList(list);
   try {
-    if (!INTERRUPTED.length) return fs.rmSync(INTR_FILE, { force: true });
-    fs.writeFileSync(INTR_FILE + ".tmp", JSON.stringify(INTERRUPTED), { mode: 0o600 });   // 写到一半被杀不留半个 JSON
-    fs.renameSync(INTR_FILE + ".tmp", INTR_FILE);
-  } catch {}
+    if (!INTERRUPTED.length) { fs.rmSync(INTR_FILE, { force: true }); return true; }
+    return writeAtomic(INTR_FILE, JSON.stringify(INTERRUPTED));
+  } catch { return false; }
 }
 /** 这个会话又跑起来了：去掉它的中断记录。没建立会话的（sid 为空）互相分不清，一律不在这里清 ——
  *  界面「重发」「忽略」时按记录 id 单独清（/api/interrupted/dismiss）。以前空会话号会把别的未建会话的中断记录一起清掉（#149-2） */
@@ -144,11 +144,17 @@ TRASH_HOOKS.push((id) => {
   publish({ type: "session_gone", id });
   publishState();
 });
-/** 启动时调一次：上一任留下的标记 → 中断记录 + 挂起的队列 */
+/** 启动时调一次：上一任留下的标记 → 中断记录 + 挂起的队列。
+ *  标记是唯一的来源：中断记录和队列都落了盘才把它换掉 / 删掉。以前一读完就删，
+ *  这时再被系统结束（或中断记录没写上），没建会话的那几轮和排着的消息就都没了（0.6.9 审计 #183）。
+ *  写好了但标记没来得及删、下次又读一遍：按记录 id、消息 id 去重，不会出两张卡、两条消息 */
 export function recoverRunMark() {
   let m;
-  try { m = JSON.parse(fs.readFileSync(RUN_MARK, "utf8")); } catch { return; }
-  finally { try { fs.rmSync(RUN_MARK, { force: true }); } catch {} }
+  try { m = JSON.parse(fs.readFileSync(RUN_MARK, "utf8")); } catch (e) {
+    if (e.code !== "ENOENT") keepBad(RUN_MARK, `读不了（${e.code || "JSON 坏了"}），中断记录没恢复`);
+    return;
+  }
+  if (!m || typeof m !== "object") { keepBad(RUN_MARK, "形状不对，中断记录没恢复"); return; }
   // 并行时可能同时断了好几轮：每个会话各记一条，各挂各的「继续」卡
   const runs = (Array.isArray(m.runs) ? m.runs : m.run ? [m.run] : []).filter((r) => r && r.id && !r.done).sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
   for (const r of runs) {
@@ -158,17 +164,26 @@ export function recoverRunMark() {
   if (runs.length) {
     const now = Date.now(), fresh = runs.map((r) => ({ ...r, at: now }));
     // 上次没处理的中断记录留着；同一个会话以这次的为准
-    const sids = new Set(fresh.map((r) => r.sessionId || ""));
-    setInterrupted([...INTERRUPTED.filter((e) => !sids.has(e.sessionId || "")), ...fresh]);
+    const sids = new Set(fresh.map((r) => r.sessionId).filter(Boolean)), ids = new Set(fresh.map((r) => r.id));
+    if (!setInterrupted([...INTERRUPTED.filter((e) => !ids.has(e.id) && !(e.sessionId && sids.has(e.sessionId))), ...fresh])) {
+      log("⚠️ 中断记录没写上，运行标记留着，下次启动再恢复");
+      return restoreQueue(m, false);
+    }
   }
+  restoreQueue(m, true);
+}
+function restoreQueue(m, commit) {
   for (const q of Array.isArray(m.queue) ? m.queue : []) {
     if (!q || !q.id || typeof q.message !== "string") continue;
     if (!q.sessionId && q.follow && RUN_SESSIONS.get(q.follow)) q.sessionId = RUN_SESSIONS.get(q.follow);
     // 会话已经删了（进了回收站）：这条再也看不到、点不了 ⚡，留着只会让 queued 一直不为 0，工具包更新永远等「任务结束」（群友 10-31）
     if (q.sessionId && !findSessionFile(q.sessionId)) { log(`  会话 ${q.sessionId} 已不在，丢掉它排着的一条消息`); continue; }
+    if (QUEUE.some((x) => x.id === q.id)) continue;
     QUEUE.push({ ...q, held: true, intr: true });   // intr：前端据此说「被系统中断」而不是「点了停止」
   }
-  if (QUEUE.length) { log(`  排队的 ${QUEUE.length} 条消息已放回队列（挂起，等用户点 ⚡）`); saveRunMark(); }
+  if (QUEUE.length) log(`  排队的 ${QUEUE.length} 条消息已放回队列（挂起，等用户点 ⚡）`);
+  // 中断记录已落盘：标记换成只剩排队消息的新版本（没有排队的就删掉）；写不上就留着旧的，下次再来
+  if (commit && !saveRunMark()) log("⚠️ 运行标记没更新上，下次启动会再恢复一次（按 id 去重）");
 }
 
 // 逐字增量太碎：攒 40ms 合成一条再发，其它事件到来前先冲掉，保证顺序不乱
