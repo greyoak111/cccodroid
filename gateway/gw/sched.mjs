@@ -8,10 +8,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { CFG, LIVE, log, tz } from "./config.mjs";
+import { isObj, loadState, saveState, writeAtomic } from "./statefile.mjs";
+import { guarded } from "./crashguard.mjs";
 import { dec, NEXT, readBody, sendJson } from "./http.mjs";
 import { END_HOOKS, QUEUE, START_GUARDS, enqueue } from "./queue.mjs";
 import { capList } from "./settings-store.mjs";
-import { RUNS, TRASH_HOOKS } from "./runs.mjs";
+import { RUNS, TRASH_HOOKS, maxParallel } from "./runs.mjs";
 import { publish } from "./bus.mjs";
 import { NAMES, findSessionFile, saveNames } from "./sessions.mjs";
 import { trashSession } from "./sessionops.mjs";
@@ -25,8 +27,11 @@ import { providerById, usdCny } from "./providers.mjs";
 // 按系统设置取的就要跟着系统变：出差、手动改时区后，每天 09:00 要按新时区的 09:00（#107 06-012）。tick 里隔几分钟再问一次
 const sysTz = () => { try { return execFileSync("getprop", ["persist.sys.timezone"], { encoding: "utf8", timeout: 2000 }).trim(); } catch { return ""; } };
 let TZ_FROM_PROP = false, TZ_CHECKED = 0;
-if (!process.env.TZ && Intl.DateTimeFormat().resolvedOptions().timeZone === "UTC") {
-  const z = sysTz(); if (z) { process.env.TZ = z; TZ_FROM_PROP = true; }
+// 以前只在「node 解析成 UTC」时才记下系统时区并开启跟随：本机解析对了 Asia/Shanghai，followSysTz 就永远不执行，
+// 出差 / 手动改时区后「每天 09:00」还按旧时区跑（197-5.2）。拿到 getprop 的值就跟随，启动时 TZ 没设的顺手设上
+{
+  const z = sysTz();
+  if (z) { if (!process.env.TZ) process.env.TZ = z; TZ_FROM_PROP = true; }
 }
 function followSysTz(now) {
   if (!TZ_FROM_PROP || now - TZ_CHECKED < 5 * 60000) return;
@@ -40,13 +45,37 @@ function followSysTz(now) {
 
 const FILE = path.join(CFG.home, "ccapp-sched.json");
 const RUNS_FILE = path.join(CFG.home, "ccapp-sched-runs.json");
-const DB = { tasks: [], dailyBudget: 0, missed: [], sids: [], lastTick: 0, allowLogin: false, spent: {} };   // dailyBudget：美元，0 = 不限
+const schedDefault = () => ({ tasks: [], dailyBudget: 0, missed: [], sids: [], lastTick: 0, allowLogin: false, spent: {}, monthly: {}, monthlySeeded: false });   // dailyBudget：美元，0 = 不限
 // allowLogin：用订阅账户（官方登录态）跑定时任务。默认关——无人值守使用以 Anthropic 条款为准，要用户自己确认后打开
-try { Object.assign(DB, JSON.parse(fs.readFileSync(FILE, "utf8"))); } catch {}
-if (!DB.spent || typeof DB.spent !== "object" || Array.isArray(DB.spent)) DB.spent = {};
-let RUNLOG = [];
-try { RUNLOG = JSON.parse(fs.readFileSync(RUNS_FILE, "utf8")); if (!Array.isArray(RUNLOG)) RUNLOG = []; } catch {}
-const save = () => { try { fs.writeFileSync(FILE + ".tmp", JSON.stringify(DB, null, 1)); fs.renameSync(FILE + ".tmp", FILE); } catch (e) { log("定时任务保存失败: " + e.message); } pushNext(); };
+// tasks 必须是数组：是 {} / 字符串时 tick 每 30 秒抛一次，5 秒后启动的那次就把网关带走，重启再崩（P1-11）
+const schedShape = (j) => {
+  if (!isObj(j)) return undefined;
+  if (j.tasks !== undefined && !Array.isArray(j.tasks)) return undefined;
+  const d = { ...schedDefault(), ...j };
+  d.tasks = (Array.isArray(j.tasks) ? j.tasks : []).filter((t) => isObj(t) && typeof t.id === "string" && (t.freq === undefined || isObj(t.freq)));
+  d.missed = Array.isArray(j.missed) ? j.missed.filter((m) => isObj(m) && typeof m.taskId === "string") : [];
+  d.sids = Array.isArray(j.sids) ? j.sids.filter((x) => typeof x === "string") : [];
+  d.spent = isObj(j.spent) ? j.spent : {};
+  d.monthly = isObj(j.monthly) ? j.monthly : {};
+  d.dailyBudget = Number.isFinite(+j.dailyBudget) ? Math.max(0, +j.dailyBudget) : 0;
+  d.lastTick = Number.isFinite(+j.lastTick) ? +j.lastTick : 0;
+  d.allowLogin = !!j.allowLogin;
+  d.monthlySeeded = !!j.monthlySeeded;
+  return d;
+};
+const DB = loadState(FILE, { shape: schedShape, fallback: schedDefault }).data;
+// 运行记录也按形状过一遍：数组里混进 null 时 tick 里的 byId(RUNLOG[i].taskId) 会抛
+let RUNLOG = loadState(RUNS_FILE, {
+  shape: (j) => Array.isArray(j) ? j.filter((r) => isObj(r) && typeof r.taskId === "string") : undefined,
+  fallback: () => [],
+}).data;
+/** 返回这次是否写成；调用方要据它回 500，别写失败了还回 ok（195-N.1） */
+const save = () => {
+  const ok = saveState(FILE, DB);
+  if (!ok) log("定时任务保存失败（存储满了或没有权限）");
+  pushNext();
+  return ok;
+};
 // 最近一次要跑的时刻（毫秒，0 = 没有）→ 外壳的系统闹钟。只在变了的时候报
 const NEXT_FILE = path.join(CFG.home, "ccapp-sched-next");
 let lastNext = -1;
@@ -54,10 +83,10 @@ function pushNext() {
   const at = DB.tasks.reduce((m, t) => (t.on && t.nextAt && (!m || t.nextAt < m) ? t.nextAt : m), 0);
   if (at === lastNext) return;
   lastNext = at;
-  try { fs.writeFileSync(NEXT_FILE, String(at)); } catch {}
+  writeAtomic(NEXT_FILE, String(at));
   publish({ type: "sched_next", at });
 }
-const saveRuns = () => { RUNLOG = RUNLOG.slice(-500); try { fs.writeFileSync(RUNS_FILE + ".tmp", JSON.stringify(RUNLOG)); fs.renameSync(RUNS_FILE + ".tmp", RUNS_FILE); } catch {} };
+const saveRuns = () => { RUNLOG = RUNLOG.slice(-500); return writeAtomic(RUNS_FILE, JSON.stringify(RUNLOG)); };
 const byId = (id) => DB.tasks.find((t) => t.id === id) || null;
 // 失败后的重试定时器（按任务 id）：用户关掉、暂停、删除时要撤掉，否则到点照跑（审查 H4）。
 // 不能在 fire 里看 t.on 拦：「只跑一次」「跑满次数」的任务失败那一刻 on 已经是 false，重试本来就该跑
@@ -65,21 +94,32 @@ const RETRY = new Map();
 const cancelRetry = (id) => { clearTimeout(RETRY.get(id)); RETRY.delete(id); };
 
 // ── 下次什么时候跑 ──
-const hm = (s, d = "09:00") => { const m = String(s || d).match(/^(\d{1,2}):(\d{2})$/) || String(d).match(/^(\d{1,2}):(\d{2})$/); return [+m[1], +m[2]]; };
+// 时/分要在范围内：以前 99:99 能过正则，setHours 会自己进位成错误时间（200-16-04）。解析数据时按默认值兜底，保存时另用 hmOk 拒绝
+const hmParse = (s) => {
+  const m = String(s || "").match(/^(\d{1,2}):(\d{2})$/); if (!m) return null;
+  const h = +m[1], mi = +m[2];
+  return h >= 0 && h <= 23 && mi >= 0 && mi <= 59 ? [h, mi] : null;
+};
+const hm = (s, d = "09:00") => hmParse(s) || hmParse(d) || [9, 0];
+const hmOk = (s) => hmParse(s) !== null;
 const at = (base, h, mi) => { const d = new Date(base); d.setHours(h, mi, 0, 0); return d; };
 function cronField(spec, lo, hi) {
   const set = new Set();
   for (const part of String(spec).split(",")) {
-    const [rng, stepS] = part.split("/"); const step = Math.max(1, +stepS || 1);
+    const [rng, stepS] = part.split("/");
+    // 步长非法时以前 Math.max(1, +stepS || 1) 静默改成 1：*/0 保存后变成每分钟跑一次（199-16-01）
+    if (stepS !== undefined && (!/^\d+$/.test(stepS) || +stepS < 1)) throw new Error(tz("cron 的步长不对：{f}", { f: String(part) }));
+    if (!/^(\*|\d+)(-\d+)?$/.test(rng)) throw new Error(tz("cron 的字段值不对：{f}", { f: String(part) }));
+    const step = stepS !== undefined ? +stepS : 1;
     let a = lo, b = hi;
     if (rng !== "*") { const m = rng.split("-"); a = +m[0]; b = m.length > 1 ? +m[1] : (stepS ? hi : a); }
-    if (!Number.isFinite(a) || !Number.isFinite(b)) throw new Error("bad cron");
+    if (!Number.isFinite(a) || !Number.isFinite(b)) throw new Error(tz("cron 的字段值不对：{f}", { f: String(part) }));
     // 先夹到 [lo, hi] 再循环：「1-999999999999」这种范围原样循环会同步空转几十分钟，把网关整个卡死（审查 M1）
     a = Math.max(lo, a); b = Math.min(hi, b);
     for (let v = a; v <= b; v += step) if (v >= lo && v <= hi) set.add(v);
   }
   // 「5-3」这种反向范围或越界值展开是空的：保存时就报错，别存下一个永远不跑的任务（审查 v0.5.3 B6）
-  if (!set.size) throw new Error("bad cron");
+  if (!set.size) throw new Error(tz("cron 的字段值超出了范围：{f}", { f: String(spec) }));
   return set;
 }
 export function parseCron(expr) {
@@ -93,7 +133,7 @@ export function nextAt(task, from = Date.now()) {
   const fq = task.freq || {}, now = new Date(from);
   const after = (d) => d.getTime() > from;
   if (fq.kind === "once") {
-    const [h, mi] = hm(fq.time, "02:00"); const d = new Date((fq.date || "") + "T00:00:00"); if (isNaN(d)) return null;
+    const [h, mi] = hm(fq.time, "09:00"); const d = new Date((fq.date || "") + "T00:00:00"); if (isNaN(d)) return null;   // 缺省与界面 freqText 的 09:00 对齐（200-16-07）
     d.setHours(h, mi, 0, 0); return after(d) ? d.getTime() : null;
   }
   if (fq.kind === "cron") {
@@ -114,7 +154,7 @@ export function nextAt(task, from = Date.now()) {
   for (let k = 0; k < 400; k++) {
     const day = new Date(now); day.setDate(now.getDate() + k);
     if (fq.kind === "every") {
-      const [h0, m0] = hm(fq.from, "08:00"), [h1, m1] = hm(fq.to, "23:00"), step = Math.max(1, +fq.hours || 2) * 60;
+      const [h0, m0] = hm(fq.from, "00:00"), [h1, m1] = hm(fq.to, "23:59"), step = Math.max(1, +fq.hours || 2) * 60;   // 缺省与 freqText 对齐（200-16-07）
       for (let t = h0 * 60 + m0; t <= h1 * 60 + m1; t += step) { const d = at(day, Math.floor(t / 60), t % 60); if (after(d)) return d.getTime(); }
       continue;
     }
@@ -133,6 +173,26 @@ export function nextAt(task, from = Date.now()) {
 }
 function refreshNext(t, from = Date.now()) {
   t.nextAt = t.on ? nextAt(t, Math.max(from, t.pausedUntil || 0)) : null;
+}
+// 盘上的 nextAt 可能是旧时区算的：启动时按当前时区把未来的时刻重新排一遍（197-5.3）。
+// 已经到点的不动，交给 tick 按「错过了」处理
+{
+  const now = Date.now();
+  let changed = false;
+  for (const t of DB.tasks) if (t.on && t.nextAt != null && t.nextAt > now) { refreshNext(t, now); changed = true; }
+  if (changed) save();
+}
+// 月度统计不再被 RUNLOG 的 500 条上限截断（197-5.11）：第一次启动用现有运行记录补种，之后由 addRun 累加
+function monthKey(ms) { const d = new Date(ms); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); }
+if (!DB.monthlySeeded) {
+  const m = {};
+  for (const r of RUNLOG) {
+    const b = m[monthKey(+r.at || 0)] || (m[monthKey(+r.at || 0)] = { cost: 0, runs: 0, ok: 0, err: 0, skip: 0 });
+    if (r.st === "skip") b.skip++; else b.runs++;
+    if (r.st === "ok") b.ok++; else if (r.st === "err") b.err++;
+    b.cost += +r.cost || 0;
+  }
+  DB.monthly = m; DB.monthlySeeded = true; save();
 }
 
 // ── 条件：充电 / 电量 / Wi-Fi ──
@@ -185,7 +245,18 @@ export function schedSessions() {
   }
   return out;
 }
-function addRun(rec) { RUNLOG.push(rec); saveRuns(); publish({ type: "sched", op: "run", taskId: rec.taskId }); return rec; }
+function addRun(rec) {
+  RUNLOG.push(rec);
+  // 月度聚合单独存：RUNLOG 只留最近 500 条，跳过也会占名额，月度统计会被截断（197-5.11）
+  const k = monthKey(rec.at);
+  const b = DB.monthly[k] || (DB.monthly[k] = { cost: 0, runs: 0, ok: 0, err: 0, skip: 0 });
+  if (rec.st === "skip") b.skip++; else b.runs++;
+  if (rec.st === "ok") b.ok++; else if (rec.st === "err") b.err++;
+  b.cost = Math.round(((b.cost || 0) + (+rec.cost || 0)) * 1e6) / 1e6;
+  saveRuns(); save();
+  publish({ type: "sched", op: "run", taskId: rec.taskId });
+  return rec;
+}
 function note(t, title, text, sessionId, ok) { publish({ type: "sched_note", taskId: t.id, title, text: String(text || "").slice(0, 200), sessionId: sessionId || null, ok: !!ok }); }
 
 // 这个任务跑起来会用哪家：直接用 run.mjs 的 pickProvider，入参和下面 enqueue 的一致——
@@ -227,6 +298,12 @@ async function fireNow(t, { reason, attempt, trial }) {
     if (!trial) note(t, tz("定时任务已跳过"), tz("「{n}」指定的接口已经删掉了：编辑任务重新选个接口", { n: t.name }), null, false);
     return;
   }
+  // 每日预算也管试跑：以前试跑跳过这道检查、花掉的钱也不进 DB.spent（197-5.10）
+  if (DB.dailyBudget > 0 && costToday() >= DB.dailyBudget) {
+    skip(tz("今天的花费已到上限"));
+    if (!trial) note(t, tz("定时任务已跳过"), tz("「{n}」：今天的花费已到上限", { n: t.name }), null, false);
+    return;
+  }
   if (!trial) {
     if (t.until?.kind === "date" && t.until.date && Date.now() > new Date(t.until.date + "T23:59:59").getTime()) { t.on = false; refreshNext(t); save(); return skip(tz("已过有效期，任务已关")); }
     if (t.skipNext && reason === "due" && (!t.skipAt || t.skipAt <= t.nextAt)) { t.skipNext = false; t.skipAt = 0; save(); return skip(tz("按设置跳过这一次")); }
@@ -235,7 +312,6 @@ async function fireNow(t, { reason, attempt, trial }) {
       note(t, tz("定时任务已跳过"), tz("「{n}」要用订阅账户跑：到定时任务页底部「订阅账户」里打开（无人值守使用以 Anthropic 条款为准），或给任务换一个用 API Key 的接口", { n: t.name }), null, false);
       return;
     }
-    if (DB.dailyBudget > 0 && costToday() >= DB.dailyBudget) { skip(tz("今天的花费已到上限")); note(t, tz("定时任务已跳过"), tz("「{n}」：今天的花费已到上限", { n: t.name }), null, false); return; }
     const c = t.cond || {};
     if (c.wifi || c.charging || c.battery) {
       const st = await deviceState();
@@ -245,13 +321,14 @@ async function fireNow(t, { reason, attempt, trial }) {
       if (c.battery && st.battery != null && st.battery < c.battery) return skip(tz("电量 {b}%，低于 {m}%", { b: st.battery, m: c.battery }));
     }
   }
-  const busy = [...RUNS.values()].some((r) => !r.idle);
+  // 并行槽和 queue.pump 用同一口径：idle 轮也占一个槽，以前这里按 !idle 判定，任务会在队里干等（197-5.6）
+  const busy = RUNS.size >= maxParallel();
   if (busy && !trial) {
     if (t.busy === "skip") return skip(tz("有对话在跑"));
     if (t.busy !== "run") {
       // 排队：每 30 秒看一次，最多等 30 分钟
       const deadline = Date.now() + 30 * 60000;
-      while ([...RUNS.values()].some((r) => !r.idle)) {
+      while (RUNS.size >= maxParallel()) {
         if (Date.now() > deadline) return skip(tz("有对话在跑，排队 30 分钟仍没轮到"));
         if (byId(t.id) !== t || (reason === "due" && !t.on)) return skip(tz("排队时任务被关掉或删了"));
         await new Promise((r) => setTimeout(r, 30000));
@@ -266,6 +343,16 @@ async function fireNow(t, { reason, attempt, trial }) {
     skip(tz("任务所在的项目已经删掉了：编辑任务重新选个项目"));
     if (!trial) note(t, tz("定时任务已跳过"), tz("「{n}」所在的项目已经删掉了：编辑任务重新选个项目", { n: t.name }), null, false);
     return;
+  }
+  // 项目记录还在、目录没了（改名/拔卡/被删）：run.cwdOf 会静默回落到工作区，权限和型号却还按项目套（195-K.1）。
+  // 这里挡下来，别让任务在用户没选过的目录里跑
+  if (p) {
+    let isDir = false; try { isDir = fs.statSync(p.path).isDirectory(); } catch {}
+    if (!isDir) {
+      skip(tz("任务所在的项目目录已经不在了：编辑任务重新选个项目或目录"));
+      if (!trial) note(t, tz("定时任务已跳过"), tz("「{n}」所在的项目目录已经不在了：编辑任务重新选个项目或目录", { n: t.name }), null, false);
+      return;
+    }
   }
   // 接着同一个对话、可那个对话已经删了：--resume 必失败（每次到点都失败、重试也一样，#173-3）。
   // 放下它，这次新开一个；任务详情里标出来
@@ -347,8 +434,9 @@ END_HOOKS.push((run, f) => {
   const ctx = RUNNING.get(run.sched.key); RUNNING.delete(run.sched.key);
   if (!ctx) return;
   const t = byId(run.sched.taskId), cost = Number(f.costRaw || f.costUsd || 0);
-  // 跑着的时候任务被删了：已经花掉的钱照样记进当天的预算日桶，不然后面的任务会在超额以后继续跑（#149-1）
-  if (!t) { if (!ctx.trial && cost > 0) { spend(ctx.startedAt, cost); save(); } return; }
+  // 跑着的时候任务被删了：已经花掉的钱照样记进当天的预算日桶，不然后面的任务会在超额以后继续跑（#149-1）。
+  // 试跑也记（197-5.10）
+  if (!t) { if (cost > 0) { spend(ctx.startedAt, cost); save(); } return; }
   const dur = Date.now() - ctx.startedAt;
   const text = String(f.finalText || "").trim();
   let st = "ok", msg = text.split("\n").find((l) => l.trim()) || tz("（没有回复）");
@@ -362,18 +450,24 @@ END_HOOKS.push((run, f) => {
   const sid = run.sessionId || null;
   if (sid) {
     const d = new Date(ctx.startedAt), stamp = `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    // 试跑是新对话：用带时间的名字，也不写回任务的 lastSid（#119-4）
-    NAMES[sid] = t.session === "same" && !ctx.trial ? t.name : `${t.name} · ${stamp}`; saveNames();
+    // 试跑是新对话：用带时间的名字，也不写回任务的 lastSid（#119-4）。
+    // 用户手动改过名的不覆盖：只改「还是任务名 / 任务名 · 时间」的（195-A.4）
+    const want = t.session === "same" && !ctx.trial ? t.name : `${t.name} · ${stamp}`;
+    const cur = NAMES[sid];
+    if (!cur || cur === t.name || cur.startsWith(t.name + " · ")) { NAMES[sid] = want; saveNames(); }
     if (!DB.sids.includes(sid)) DB.sids.push(sid);
+    if (DB.sids.length > 2000) DB.sids = DB.sids.slice(-2000);   // 只增不减（200-6-05）
     if (t.session === "same" && !ctx.trial) { t.lastSid = sid; delete t.lostSid; }
   }
+  // 试跑花的钱也进日桶（197-5.10），再走原来的通知/提前返回
+  spend(ctx.startedAt, cost); save();
   if (ctx.trial) { note(t, tz("试跑完成"), msg, sid, st === "ok"); return; }
   // 这次成功了：之前失败排的 2 分钟重试作废，别再重复跑一遍（手动/计划成功都算）
   if (st === "ok") cancelRetry(t.id);
-  spend(ctx.startedAt, cost);   // 每日预算的独立日桶（#119-3）
   // 不存成对话：这次的会话随后进回收站。运行记录和通知就别再指向它了（点了只会 404，#173-1）；完整结果看 full（#173-2）。
-  // 接着同一个对话的不回收：下一次还要接着它，回收了就 --resume 失败（#173-3）
-  const drop = !!sid && t.saveSession === false && st === "ok" && t.session !== "same";
+  // 接着同一个对话的不回收：下一次还要接着它，回收了就 --resume 失败（#173-3）。
+  // 失败轮次也算：saveSession=false 说好的「只留运行记录」，以前失败时仍把会话留在主列表（197-2.5）
+  const drop = !!sid && t.saveSession === false && t.session !== "same";
   addRun({ taskId: t.id, at: ctx.startedAt, st, msg: msg.slice(0, 300), full: text.slice(0, 2000), cost, dur, sid: drop ? null : sid, attempt: ctx.attempt });
   t.runsDone = (t.runsDone || 0) + 1;
   if (t.until?.kind === "count" && t.runsDone >= (+t.until.count || 1)) t.on = false;
@@ -387,7 +481,7 @@ END_HOOKS.push((run, f) => {
   // 超了花费上限不重试：重试就是再花一遍（#98 03-010）
   if (st === "err" && !over && ctx.attempt < (+t.retry || 0)) {
     clearTimeout(RETRY.get(t.id));
-    RETRY.set(t.id, setTimeout(() => { RETRY.delete(t.id); if (byId(t.id) === t) fire(t, { reason: "retry", attempt: ctx.attempt + 1 }); }, 2 * 60000));
+    RETRY.set(t.id, setTimeout(guarded("sched 重试", () => { RETRY.delete(t.id); if (byId(t.id) === t) fire(t, { reason: "retry", attempt: ctx.attempt + 1 }).catch((e) => log("定时任务重试出错：" + e.message)); }), 2 * 60000));
   }
 });
 
@@ -402,8 +496,9 @@ function tick() {
     if (t.nextAt == null) {
       // 正排队或正在跑：只跑一次的任务这时 nextAt 已是空的，别当成「时间已过」把它关掉记一笔跳过（审查 B17）
       if (WAITING.has(t.id) || live.has(t.id)) continue;
-      // 只跑一次、时间已过还没跑过：关掉并记一笔，免得界面一直显示启用却永远不跑（审查 v0.5.3 B7）
-      if (t.freq?.kind === "once" && !t.pausedUntil) { t.on = false; addRun({ taskId: t.id, at: now, st: "skip", msg: tz("只跑一次的时间已过，任务已关") }); continue; }
+      // 只跑一次、时间已过还没跑过：关掉并记一笔，免得界面一直显示启用却永远不跑（审查 v0.5.3 B7）。
+      // 暂停过（pausedUntil 留着旧值）也要能关，以前它永远不等于 0，任务就永远关不掉（200-16-05）
+      if (t.freq?.kind === "once" && (!t.pausedUntil || t.pausedUntil <= now)) { t.on = false; t.pausedUntil = 0; addRun({ taskId: t.id, at: now, st: "skip", msg: tz("只跑一次的时间已过，任务已关") }); continue; }
       // 排不出下次的（如 2 月 31 日）每 30 秒重算一遍要扫满一年：一小时看一次就够
       if (now - (NULL_AT.get(t.id) || 0) < 3600e3) continue;
       NULL_AT.set(t.id, now); refreshNext(t, now); continue;
@@ -427,7 +522,7 @@ function tick() {
   DB.lastTick = now;
   save();
 }
-if (LIVE) setTimeout(() => { tick(); setInterval(tick, 30000); }, 5000);
+if (LIVE) setTimeout(guarded("sched 首次 tick", () => { tick(); setInterval(guarded("sched tick", tick), 30000); }), 5000);
 
 // ── 校验 / 整理前端交来的任务 ──
 const KINDS = ["daily", "weekly", "monthly", "every", "once", "cron"];
@@ -438,19 +533,34 @@ function clean(b, old = {}) {
   if ("projectId" in b) t.projectId = b.projectId && projectById(b.projectId) ? b.projectId : null;
   if (b.freq && KINDS.includes(b.freq.kind)) {
     const f = b.freq, o = { kind: f.kind };
-    if (/^\d{1,2}:\d{2}$/.test(f.time || "")) o.time = f.time;
-    if (Array.isArray(f.days)) o.days = f.days.map(Number).filter((x) => x >= 1 && x <= 7);
-    if (f.day === "last" || (+f.day >= 1 && +f.day <= 28)) o.day = f.day === "last" ? "last" : +f.day;
-    if (+f.hours >= 1 && +f.hours <= 24) o.hours = +f.hours;
-    if (/^\d{1,2}:\d{2}$/.test(f.from || "")) o.from = f.from;
-    if (/^\d{1,2}:\d{2}$/.test(f.to || "")) o.to = f.to;
+    // 以前非法字段逐项静默丢掉：monthly 29–31 变成 1 号、weekly 空/小数永不跑、daily 99:99 归一成错时间（200-16-04）。
+    // 只校验给了的字段，没给的那项仍沿用 old / 默认
+    if ("time" in f) { if (!hmOk(f.time)) throw new Error(tz("时间要填 0–23 时、0–59 分")); o.time = f.time; }
+    if ("days" in f) {
+      if (!Array.isArray(f.days) || !f.days.length || !f.days.every((x) => Number.isInteger(+x) && +x >= 1 && +x <= 7))
+        throw new Error(tz("星期要选 1–7 之间的整数值，至少一天"));
+      o.days = [...new Set(f.days.map(Number))].sort((a, b2) => a - b2);
+    }
+    if ("day" in f) {
+      if (f.day !== "last" && !(Number.isInteger(+f.day) && +f.day >= 1 && +f.day <= 31)) throw new Error(tz("每月几号要填 1–31 或「最后一天」"));
+      o.day = f.day === "last" ? "last" : +f.day;
+    }
+    if ("hours" in f) { if (!(Number.isInteger(+f.hours) && +f.hours >= 1 && +f.hours <= 24)) throw new Error(tz("每隔几小时要填 1–24 的整数")); o.hours = +f.hours; }
+    if ("from" in f) { if (!hmOk(f.from)) throw new Error(tz("开始时间要填 0–23 时、0–59 分")); o.from = f.from; }
+    if ("to" in f) { if (!hmOk(f.to)) throw new Error(tz("结束时间要填 0–23 时、0–59 分")); o.to = f.to; }
     if (f.kind === "every" && o.from && o.to) {
       const [a, b] = hm(o.from), [c, d] = hm(o.to);
       // 22:00–02:00 这种跨午夜窗口在 nextAt 的每日循环里永远不命中：保存时就拒绝，别存下一个永不跑的任务
       if (a * 60 + b > c * 60 + d) throw new Error(tz("「每隔几小时」的开始时间要早于结束时间；跨午夜请拆成两个任务"));
     }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(f.date || "")) o.date = f.date;
-    if (typeof f.cron === "string") { parseCron(f.cron); o.cron = f.cron.trim(); }
+    if (f.kind === "once") {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(f.date || "") || isNaN(new Date(f.date + "T00:00:00"))) throw new Error(tz("只跑一次要填一个日期"));
+      o.date = f.date;
+    } else if ("date" in f) { if (!/^\d{4}-\d{2}-\d{2}$/.test(f.date || "")) throw new Error(tz("日期格式是 YYYY-MM-DD")); o.date = f.date; }
+    if (f.kind === "cron") {
+      if (typeof f.cron !== "string" || !f.cron.trim()) throw new Error(tz("cron 表达式要填五段：分 时 日 月 周"));
+      parseCron(f.cron); o.cron = f.cron.trim();
+    } else if ("cron" in f && typeof f.cron === "string") { parseCron(f.cron); o.cron = f.cron.trim(); }
     t.freq = o;
   }
   const pick = (k, opts) => { if (opts.includes(b[k])) t[k] = b[k]; };
@@ -476,10 +586,8 @@ function summary(t) {
   return { ...t, last: last && { st: last.st, at: last.at, msg: last.msg, sid: last.sid }, runs: runs.length };
 }
 function monthStats() {
-  const now = new Date(), m0 = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  const rs = RUNLOG.filter((r) => r.at >= m0);
-  return { cost: rs.reduce((s, r) => s + (r.cost || 0), 0), runs: rs.filter((r) => r.st !== "skip").length,
-    ok: rs.filter((r) => r.st === "ok").length, err: rs.filter((r) => r.st === "err").length, skip: rs.filter((r) => r.st === "skip").length };
+  const b = DB.monthly[monthKey(Date.now())] || { cost: 0, runs: 0, ok: 0, err: 0, skip: 0 };
+  return { cost: b.cost || 0, runs: b.runs || 0, ok: b.ok || 0, err: b.err || 0, skip: b.skip || 0 };
 }
 
 // ── 路由：/api/sched ──
@@ -501,19 +609,22 @@ export async function routeSched(req, res, u, p) {
     try { t = clean(b, { ...DEFAULTS, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), created: Date.now(), runsDone: 0 }); }
     catch (e) { return sendJson(res, 400, { error: e.message }); }
     if (!t.name || !t.prompt) return sendJson(res, 400, { error: tz("名称和要做的事都要填") });
-    refreshNext(t); DB.tasks.push(t); save();
+    refreshNext(t); DB.tasks.push(t);
+    if (!save()) { DB.tasks.pop(); pushNext(); return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
     log(`⏰ 新定时任务「${t.name}」 下次 ${t.nextAt ? new Date(t.nextAt).toLocaleString() : "—"}`);
     return sendJson(res, 200, { ok: true, task: summary(t) });
   }
   // 外壳的闹钟响了：立刻查一遍（不用等下一个 30 秒）
   if (p === "/api/sched/tick" && req.method === "POST") { tick(); return sendJson(res, 200, { ok: true, next: lastNext }); }
   if (p === "/api/sched/allow-login" && req.method === "PUT") {
-    const b = await body(); DB.allowLogin = !!b.on; save();
+    const b = await body(), before = DB.allowLogin; DB.allowLogin = !!b.on;
+    if (!save()) { DB.allowLogin = before; return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
     log(`⏰ 用订阅账户跑定时任务：${DB.allowLogin ? "已打开（用户确认了条款提示）" : "已关闭"}`);
     return sendJson(res, 200, { ok: true, allowLogin: DB.allowLogin });
   }
   if (p === "/api/sched/budget" && req.method === "PUT") {
-    const b = await body(); DB.dailyBudget = Math.max(0, Math.min(1000, +b.daily || 0)); save();
+    const b = await body(), before = DB.dailyBudget; DB.dailyBudget = Math.max(0, Math.min(1000, +b.daily || 0));
+    if (!save()) { DB.dailyBudget = before; return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
     return sendJson(res, 200, { ok: true });
   }
   if (p === "/api/sched/missed" && req.method === "POST") {
@@ -547,17 +658,21 @@ export async function routeSched(req, res, u, p) {
   if (!sub && req.method === "PATCH") {
     const b = await body();
     try { clean(b, {}); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const before = { ...t };
     Object.assign(t, clean(b, t));
     if (b.on === true) { t.pausedUntil = 0; t.skipNext = false; t.skipAt = 0; }
     if (b.on === false) cancelRetry(t.id);
-    refreshNext(t); save();
+    refreshNext(t);
+    if (!save()) { for (const k of Object.keys(t)) delete t[k]; Object.assign(t, before); refreshNext(t); return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
     return sendJson(res, 200, { ok: true, task: summary(t) });
   }
   if (!sub && req.method === "DELETE") {
     // 正在跑：删了的话这一次的记录、命名、通知、不存对话的回收都没人做了（#178-8）
     if (runningNow().some((x) => x.taskId === t.id)) return sendJson(res, 409, { error: tz("任务正在跑：等它跑完，或先在对话里停掉，再删") });
     cancelRetry(t.id);
-    DB.tasks = DB.tasks.filter((x) => x.id !== t.id); DB.missed = DB.missed.filter((x) => x.taskId !== t.id); save();
+    const tasks0 = DB.tasks, missed0 = DB.missed;
+    DB.tasks = DB.tasks.filter((x) => x.id !== t.id); DB.missed = DB.missed.filter((x) => x.taskId !== t.id);
+    if (!save()) { DB.tasks = tasks0; DB.missed = missed0; return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
     log(`⏰ 删除定时任务「${t.name}」`);
     return sendJson(res, 200, { ok: true });
   }
@@ -573,12 +688,13 @@ export async function routeSched(req, res, u, p) {
     return sendJson(res, 200, { ok: !!item, id: item && item.id });
   }
   if (sub === "/pause" && req.method === "POST") {
-    const b = await body();
+    const b = await body(), before = { ...t };
     t.skipNext = b.mode === "skip";
     t.skipAt = t.skipNext ? (t.nextAt || 0) : 0;   // 绑定到当前这一次计划，之后的补跑/改期不会误消费
     t.pausedUntil = b.mode === "1d" ? Date.now() + 864e5 : b.mode === "1w" ? 7 * 864e5 + Date.now() : 0;
     if (t.pausedUntil) cancelRetry(t.id);
-    refreshNext(t); save();
+    refreshNext(t);
+    if (!save()) { for (const k of Object.keys(t)) delete t[k]; Object.assign(t, before); refreshNext(t); return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
     return sendJson(res, 200, { ok: true, task: summary(t) });
   }
   return NEXT;
