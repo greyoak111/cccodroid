@@ -415,6 +415,9 @@ export function enqueue(body) {
 
 function tryInject(run, item) {
   if (!run.inject) return false;
+  // 定时任务 / 无人值守的条目只能自己单跑一轮：塞进别人的轮次，它的工具限制、预算、时长上限、收尾钩子全不生效（审查 B05；
+  // ⚡ 插队走 promote 也到这里，以前只在 enqueue 拦了，0.6.9 审计 199-7-02）
+  if (item.sched || item.unattended) return false;
   // 斜杠命令：这一轮答完、只剩后台任务在跑时直接送进 claude（stdin 上照样认 /compact /context 这类，11-05 实测：
   // 就地压缩、后台任务不受影响）。还在生成时照旧排队等这一轮结束；网关自己处理的（/model 等）得自己单跑一轮
   const msg = item.message.trim();
