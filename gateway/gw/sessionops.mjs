@@ -24,6 +24,15 @@ export const TRASH_KEEP_DAYS = 30;
 // 只当单个目录名用：不许全是点（「.」「..」拼进路径就跳出了所在目录，回收站清理曾因此删掉整个 home）
 //  也不许是 __proto__ 这类：会话 id 要当对象的键用（封签表、标题表），会改到原型上（11-03 审查 L-2）
 export const SID_RE = /^(?!\.+$)(?!(__proto__|constructor|prototype)$)[A-Za-z0-9._-]{1,200}$/;
+/** 技能目录名（0.6.9 审计 195-J.5）：技能目录可以是中文或带空格的目录名，列得出来却删不掉。
+ *  SID_RE 是为会话 id / 会话文件定的 ASCII 形状，不能拿来卡技能名；这里另起一条：
+ *  只收 skills/ 下这次真列出来的那个名字（精确匹配），且必须是单个目录名——
+ *  路径分隔符、NUL、「.」「..」一律不收（拼进路径会跳出 skills 目录）。 */
+export function skillDirOk(dir, listed) {
+  const s = typeof dir === "string" ? dir : "";
+  if (!s || s.length > 200 || s === "." || s === ".." || /[/\\\0]/.test(s)) return false;
+  return Array.isArray(listed) && listed.includes(s);
+}
 
 // ── 分叉：从某一轮之后另起一个会话 ──
 // 把 transcript 从头抄到「这一轮的最后一行」（下一条用户消息之前），换个会话号写成新文件。

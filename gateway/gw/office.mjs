@@ -7,6 +7,7 @@ import { ensureShell, killTree } from "./claude.mjs";
 import { NEXT, rangeOf, readBody, sendJson } from "./http.mjs";
 import { safeFilePath } from "./files.mjs";
 import { termEnv } from "./terminal.mjs";
+import { markChild, unmarkChild } from "./components.mjs";
 const OFFICE_ENV_DENY = /^(ANTHROPIC_|OPENAI_|GH_|GITHUB_|GITLAB_|GITEE_|AWS_|AZURE_|GOOGLE_|GCP_|HF_|HUGGING|NPM_|DEEPSEEK_|MOONSHOT_|DASHSCOPE_|ZHIPU|ARK_|XAI_|OPENROUTER_|CLAUDE_CODE_OAUTH)|_(KEY|KEYS|TOKEN|TOKENS|SECRET|SECRETS|PASSWORD|PASSWD|PWD|PASS|PASSPHRASE|AUTH|CREDENTIAL|CREDENTIALS|COOKIE|SESSION)(_FILE)?$|^(PASSWORD|PASSWD|TOKEN|SECRET|API_KEY|APIKEY)$/i;
 
 // ── Office 文档：docx / xlsx 前端自己渲染；ppt / pptx / doc / odt… 交给 LibreOffice 转成 PDF 再看 ──
@@ -99,13 +100,18 @@ function officeConvert(file, key, out) {
     const argv = [ensureShell(), "-c", 'exec "$0" "$@"', ...(fs.existsSync(nice) ? [nice, "-n", "5"] : []), sofficePath(), ...args];
     const t0 = Date.now();
     const c = spawn(argv[0], argv.slice(1), { env, cwd: work, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    // 和组件安装共用同一套运行标记（0.6.9 审计 195-T.4）：网关被 SIGKILL 后这个 detached 的 soffice
+    // 会被 init 收养、继续写 work 目录；下一任网关启动时 reapComponentRuns() 按标记把它清掉。
+    // 标记里记 soffice 的路径（不是 shell 包装），reap 按 /proc/<pid>/cmdline 认领时才认得出
+    const mark = markChild(c, sofficePath(), args);
     let log2 = "";
     const grab = (d) => { if (log2.length < 8192) log2 += d; };
     c.stdout.on("data", grab); c.stderr.on("data", grab);
     const timer = setTimeout(() => { try { killTree(c); } catch {} }, 4 * 60e3);
-    c.on("error", (e) => { clearTimeout(timer); reject(e); });
+    c.on("error", (e) => { clearTimeout(timer); unmarkChild(mark); reject(e); });
     c.on("close", (code) => {
       clearTimeout(timer);
+      unmarkChild(mark);
       // 这里跑在事件回调里：statSync/renameSync 抛错没人接，会直接带走整个网关（199-8-01）
       try {
         const pdf = path.join(work, "in.pdf");

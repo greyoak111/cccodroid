@@ -13,6 +13,7 @@ import { SKILLS_DIR } from "./extensions.mjs";
 import { archiveProblem, parseTarListing, zipEntries } from "./archive-check.mjs";
 import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 import { pathBlocked } from "./files.mjs";
+import { loadState, writeAtomic } from "./statefile.mjs";
 
 // ── 自定义组件：用户自己导入的 Linux arm64 程序（不经市场，来源由用户负责） ─────────────────
 // 放在 ~/.cccodroid/custom/<id>/（app/ 原样解开的程序，deps/ 自动补的 glibc 库），不进 $PREFIX：换工具包不会被冲掉。
@@ -151,7 +152,7 @@ function customCmdClash(cmd, selfId) {
 }
 
 /** 测试用：直接看命令名预留和冲突判断（#122-4） */
-export const _customForTest = { CMD_RESERVED, CUSTOM_STAGES, customCmdClash, customSkill, rmTree, runCapped, headOf };
+export const _customForTest = { CMD_RESERVED, CUSTOM_STAGES, customCmdClash, customSkill, rmTree, runCapped, headOf, customRecords, CUSTOM_DIR };
 
 const GZ_MAX = 256 << 20, DEB_MAX = 512 << 20;
 // Termux glibc 仓库的 Contents（文件 → 包）与 Packages（包 → 下载地址、sha256），缓存一天。
@@ -557,7 +558,9 @@ async function customInstall(b) {
       dir, at: Date.now(), entries, libs, deps: got, unresolved: [...s.report.unresolved, ...still], readme: s.report.readme,
       bytes: s.report.bytes,
     };
-    fs.writeFileSync(path.join(dir, CUSTOM_REC), JSON.stringify(rec, null, 1));
+    // 临时文件 + fsync + 换名：以前直接覆盖写，掉电 / 写满留下半截 JSON，整条记录被丢掉，
+    // 列表里没了但 bin 入口还在（195-Z.10）。写不进去就抛，交给下面的 catch 回滚并把失败报给界面
+    if (!writeAtomic(path.join(dir, CUSTOM_REC), JSON.stringify(rec, null, 1))) throw new Error(tz("组件记录没写进去（存储满了或没有权限），这次安装没有完成"));
     const sk = path.join(SKILLS_DIR, "custom-" + id), ucb = ucAppBegin();
     fs.mkdirSync(sk, { recursive: true });
     fs.writeFileSync(path.join(sk, "SKILL.md"), customSkill(rec));
@@ -591,16 +594,35 @@ export function customRefresh() {
     }
   }
 }
+/** 组件记录的形状：至少得是个带合法 id、entries 是数组的普通对象 */
+const customRecShape = (j) => (!j || typeof j !== "object" || Array.isArray(j) ||
+  typeof j.id !== "string" || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(j.id) || !Array.isArray(j.entries)) ? undefined : j;
+/** 读记录：loadState 把「没有」（missing）和「坏了」（bad）分开；坏记录的原文件会被留底成 .bad-*。
+ *  坏记录不能从列表里消失——bin 里的入口还在，界面得还能卸载 / 重装（195-Z.10）：
+ *  装好过的目录一定有 app/（安装时整个根目录搬到那里），记录没了也按 damaged 列出来；
+ *  记录坏了但连 app/ 都没有的半截目录同样列出来，好让用户清掉。 */
 function customRecords() {
   const out = [];
-  try { for (const d of fs.readdirSync(CUSTOM_DIR)) { if (d.startsWith(".")) continue; try { out.push(JSON.parse(fs.readFileSync(path.join(CUSTOM_DIR, d, CUSTOM_REC), "utf8"))); } catch {} } } catch {}
-  return out.sort((a, b) => b.at - a.at);
+  let list = []; try { list = fs.readdirSync(CUSTOM_DIR); } catch { return out; }
+  for (const d of list) {
+    if (d.startsWith(".")) continue;
+    const dir = path.join(CUSTOM_DIR, d);
+    let isDir = false; try { isDir = fs.lstatSync(dir).isDirectory(); } catch {}
+    if (!isDir) continue;
+    const { data, missing, bad } = loadState(path.join(dir, CUSTOM_REC), { shape: customRecShape, fallback: () => null });
+    if (!missing && !bad && data && data.id === d) { out.push(data); continue; }
+    let hasApp = false; try { hasApp = fs.lstatSync(path.join(dir, "app")).isDirectory(); } catch {}
+    if (bad || hasApp) out.push({ id: d, name: d, desc: "", source: "", at: 0, bytes: 0, entries: [], libs: [], deps: [], unresolved: [], damaged: true });
+  }
+  return out.sort((a, b) => (b.at || 0) - (a.at || 0));
 }
 function customList() {
   if (!PREFIX) return { supported: false };
   return { supported: true, gpu: fs.existsSync(path.join(PREFIX, "bin", "lgpu-run")), items: customRecords().map((r) => ({
     id: r.id, name: r.name, desc: r.desc, source: r.source, at: r.at, bytes: r.bytes, unresolved: r.unresolved || [],
     deps: (r.deps || []).length, entries: r.entries.map((e) => ({ cmd: e.cmd, kind: e.kind, gpu: e.gpu, patchelf: e.patchelf, ok: fs.existsSync(path.join(CUSTOM_BIN, e.cmd)) })),
+    // 记录坏了 / 装到一半：照样列出来（能卸），前端可以据此提示「记录损坏，建议重装」
+    damaged: !!r.damaged,
   })) };
 }
 /** 这个技能目录是不是我们给自定义组件生成的：真目录（不是软链），SKILL.md 是普通文件、开头是我们的模板 */

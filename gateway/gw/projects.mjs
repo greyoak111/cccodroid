@@ -33,7 +33,7 @@ function save() {
   syncGitSafe(PROJECTS.map((p) => p.path));    // git 只信任登记过的项目目录（P1-10）
   return saveState(FILE, PROJECTS, { mode: 0o644 });
 }
-const SAVE_FAIL = () => ({ error: "save_failed", message: tz("项目清单没保存上（存储满了或不可写），重启后这次改动会丢") });
+const SAVE_FAIL = () => ({ ok: false, error: "save_failed", message: tz("项目清单没保存上（存储满了或不可写），重启后这次改动会丢") });
 
 const real = (d) => { try { return fs.realpathSync(d); } catch { return path.resolve(String(d || "")); } };
 const isDir = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
