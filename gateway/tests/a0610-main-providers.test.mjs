@@ -69,3 +69,22 @@ test("P1-8：老配置没有 nextCustom、最大号被删过，但会话钉选�
   assert.equal(r.rc, 0, r.err);
   assert.deepEqual(JSON.parse(r.out), { id: "custom-4" });
 });
+
+test("195-Z.5：账本语法坏了 → 留底，不当空账本整份写回", () => {
+  const bad = '{"deepseek":{"since":1,"spends":[[1,2]]';
+  const r = scenario({ "ccapp-billing.json": bad }, `P._billForTest.noteTokens?.("deepseek", { input_tokens: 1, output_tokens: 1 }); await new Promise((r) => setTimeout(r, 800)); console.log("{}");`);
+  assert.equal(r.rc, 0, r.err);
+  const bads = fs.readdirSync(r.home).filter((f) => f.startsWith("ccapp-billing.json.bad-"));
+  assert.equal(bads.length, 1);
+  assert.equal(fs.readFileSync(path.join(r.home, bads[0]), "utf8"), bad);
+});
+
+test("195-Z.1：设置文件坏了 → 留底；之后保存写的是新文件，坏的那份还在", () => {
+  const bad = '{"model":"keep-me","addDirs":["/x"]';
+  const r = scenario({ "ccapp-settings.json": bad }, `const S = await import(${JSON.stringify(path.join(GW, "settings-store.mjs"))}); console.log(JSON.stringify({ saved: S.saveSettings(), model: S.SETTINGS.model ?? null }));`);
+  assert.equal(r.rc, 0, r.err);
+  assert.deepEqual(JSON.parse(r.out), { saved: true, model: null });
+  const bads = fs.readdirSync(r.home).filter((f) => f.startsWith("ccapp-settings.json.bad-"));
+  assert.equal(bads.length, 1);
+  assert.equal(fs.readFileSync(path.join(r.home, bads[0]), "utf8"), bad);
+});

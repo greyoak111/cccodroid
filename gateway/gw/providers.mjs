@@ -8,7 +8,8 @@ import { MODEL_ID_RE, dropModelCache, extraModelsOf, normalizeModels } from "./m
 import { RUNS } from "./runs.mjs";
 import { NEXT, fetchText, readBody, sendJson } from "./http.mjs";
 import { readSmallFile } from "./saferead.mjs";
-import { isObj, loadState } from "./statefile.mjs";
+import { isObj, loadState, saveState } from "./statefile.mjs";
+import { onShutdown } from "./crashguard.mjs";
 
 // ── 厂商配置（不写死任何一家）─────────────────────────────────────────
 // 端点 / 认证风格 / 模型清单来源 全部来自 ccapp-providers.json。
@@ -614,14 +615,13 @@ function billShape(j) {
   return j;
 }
 // 账本用无原型对象：provider id 为 __proto__ 时不能把 since/spends/tok 写到 Object.prototype
-let BILL = (() => { const out = Object.create(null); try { const raw = readSmallFile(BILL_FILE, 8 << 20); if (raw != null) Object.assign(out, billShape(JSON.parse(raw))); } catch {} return out; })();
+// 语法坏了 / 太大：原文件留底成 .bad-*，不再当空账本、500ms 后整份写回把消费历史清零（0.6.9 审计 195-Z.5）
+let BILL = (() => { const out = Object.create(null); Object.assign(out, loadState(BILL_FILE, { shape: (j) => (isObj(j) ? billShape(j) : undefined) }).data); return out; })();
 let billSaveT = null;
-const saveBill = () => { clearTimeout(billSaveT); billSaveT = setTimeout(() => {
-  // 直接写目标文件会先截断：写一半被杀/满盘就把整个账本毁了，下次启动只能当空账本。先写临时文件再 rename。
-  const tmp = BILL_FILE + ".tmp-" + process.pid;
-  try { fs.writeFileSync(tmp, JSON.stringify(BILL), { mode: 0o600 }); fs.renameSync(tmp, BILL_FILE); }
-  catch { try { fs.rmSync(tmp, { force: true }); } catch {} }
-}, 500); };
+// 直接写目标文件会先截断：写一半被杀/满盘就把整个账本毁了，下次启动只能当空账本。临时文件 + fsync + 换名
+const flushBill = () => { if (!billSaveT) return; clearTimeout(billSaveT); billSaveT = null; saveState(BILL_FILE, BILL, { pretty: false }); };
+const saveBill = () => { clearTimeout(billSaveT); billSaveT = setTimeout(flushBill, 500); };
+onShutdown("账本", flushBill);   // SIGTERM 时防抖还没到点的也写下去（195-W.2）
 const billOf = (id) => {
   const b = (BILL[id] ||= {});
   b.since ||= Date.now(); b.spends ||= []; b.spentOld ||= 0; b.tok ||= []; b.tokOld ||= { in: 0, out: 0, cache: 0 };

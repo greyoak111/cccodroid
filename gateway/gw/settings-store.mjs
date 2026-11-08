@@ -5,6 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { CFG, PATHS, PERM_MODES, log } from "./config.mjs";
 import { readHeadFile, readSmallFile } from "./saferead.mjs";
+import { isObj, loadState, writeAtomic } from "./statefile.mjs";
 
 // ── 设置（模型 / 权限模式 / 目录 …）──────────────────────────────────
 export const SETTINGS = {
@@ -57,13 +58,13 @@ export function capList(a, n, len, total = Infinity) {
 let DISK_H = null;
 const hashOf = (s) => crypto.createHash("sha256").update(s).digest("hex");
 function loadSettings() {
-  let had = false;
-  try {
-    const raw = readSmallFile(PATHS.settings, 4 << 20);
-    DISK_H = hashOf(raw);
-    Object.assign(SETTINGS, JSON.parse(raw));
-    had = true;
-  } catch {}
+  // 读坏了（语法错、不是对象、太大）原文件留底成 .bad-*：以前静默回落默认，下一次保存就把模型、附加目录、权限模式这些全盖掉（0.6.9 审计 195-Z.1 / Y.7）
+  const st = loadState(PATHS.settings, { shape: (j) => (isObj(j) ? j : undefined), max: 4 << 20 });
+  const had = !st.missing && !st.bad;
+  if (had) {
+    Object.assign(SETTINGS, st.data);
+    try { DISK_H = hashOf(readSmallFile(PATHS.settings, 4 << 20)); } catch {}
+  }
   // 旧版没限过：已经存进去的超长列表在这里截住，别让它每一轮把 claude 的命令行撑爆（审查 v0513b 低-3）
   // 条数、每条长度之外还要管总长：64×4096 加上工具名单能超过 ARG_MAX（128 KB），每轮 spawn 都 E2BIG（10-31 复核）
   const cap = (a, n, len, total) => (Array.isArray(a) ? capList(a, n, len, total) : a);
@@ -101,12 +102,10 @@ export function saveSettings() {
     fs.mkdirSync(path.dirname(PATHS.settings), { recursive: true });
     // 先写临时文件再换名：写到一半被杀，下次读到半个 JSON 会回落默认，下一次保存就把密钥覆盖没了（审查 中1）
     const out = JSON.stringify(SETTINGS, null, 2);
-    fs.writeFileSync(PATHS.settings + ".tmp", out, { mode: 0o600 });
-    fs.renameSync(PATHS.settings + ".tmp", PATHS.settings);
+    if (!writeAtomic(PATHS.settings, out)) return false;    // fsync 后再换名，失败已记日志
     DISK_H = hashOf(out);
     return true;
   } catch (e) {
-    try { fs.rmSync(PATHS.settings + ".tmp", { force: true }); } catch {}
     log(`保存设置失败: ${e.message}`);
     return false;
   }
