@@ -20,7 +20,9 @@ const GIT_MAX = 768 * 1024;
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const EMPTY_TREE_256 = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
 const GIT_RO = new Set(["status", "diff", "show", "log", "for-each-ref", "rev-parse", "remote", "branch"]);
-const GIT_PRE = ["-c", "core.quotePath=false", "-c", "color.ui=false", "-c", "core.fsmonitor=false", "-c", "protocol.ext.allow=never"];
+// safe.directory=*：全局那条已经撤了（P1-10），面板自己的调用照样要能开共享存储上没登记的仓库（/sdcard 上的属主是媒体 uid，
+// git 一律当「属主可疑」拒跑）。放开是安全的：只读命令已经把仓库配置中和掉，会执行仓库配置的操作先过 gitGate 让用户确认
+const GIT_PRE = ["-c", "safe.directory=*", "-c", "core.quotePath=false", "-c", "color.ui=false", "-c", "core.fsmonitor=false", "-c", "protocol.ext.allow=never"];
 function gitArgs(args, tree = EMPTY_TREE) {
   if (!GIT_RO.has(args[0])) return [...GIT_PRE, ...args];
   const extra = args[0] === "diff" || args[0] === "show" || args[0] === "log" ? ["--no-ext-diff", "--no-textconv"] : [];
@@ -33,7 +35,8 @@ function gitArgs(args, tree = EMPTY_TREE) {
  *  一律记 odd，调用方按「看不懂」处理（DeepSeek 复核 11-03）。读失败 ok=false，同样不能当成「没有配置」 */
 function gitConfigList(cwd) {
   return new Promise((resolve) => {
-    execFile("git", ["config", "--list", "--null", "--show-scope"], { cwd, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", LC_ALL: "C.UTF-8" }, timeout: 10000, maxBuffer: 4 << 20, encoding: "utf8" },
+    // 也要 safe.directory=*：不带时属主可疑的仓库 config --list 照样退出 0，却一条本地配置都不列——风险检查会当成「没有」漏报（P1-10）
+    execFile("git", ["-c", "safe.directory=*", "config", "--list", "--null", "--show-scope"], { cwd, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", LC_ALL: "C.UTF-8" }, timeout: 10000, maxBuffer: 4 << 20, encoding: "utf8" },
       (err, out) => {
         const a = String(out || "").split("\0"), list = [];
         let odd = 0;

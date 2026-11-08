@@ -1,31 +1,36 @@
-// git safe.directory 只信任登记过的项目目录（gw/gitsafe.mjs，0.6.9 审计 P1-10）
+// P1-10 后续：全局 safe.directory=* 撤掉后，「属主可疑」的仓库（共享存储上的都是）面板照样能开，风险检查也不漏报。
+// 用 git 自带的 GIT_TEST_ASSUME_DIFFERENT_OWNER 模拟属主不同
 import "../gw/config.mjs";
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { CFG, PREFIX } from "../gw/config.mjs";
-import { syncGitSafe } from "../gw/gitsafe.mjs";
+import { CFG } from "../gw/config.mjs";
+import { NEXT } from "../gw/http.mjs";
+import { routeGit } from "../gw/git.mjs";
 
-const gc = path.join(CFG.home, ".gitconfig");
-const safeDirs = () => { try { return execFileSync("git", ["config", "--file", gc, "--get-all", "safe.directory"], { encoding: "utf8" }).trim().split("\n").filter(Boolean); } catch { return []; } };
-const hasGit = (() => { try { execFileSync("git", ["--version"]); return true; } catch { return false; } })();
+const srv = http.createServer(async (req, res) => { const u = new URL(req.url, "http://x"); if ((await routeGit(req, res, u, u.pathname)) === NEXT) res.writeHead(404).end(); });
+await new Promise((ok) => srv.listen(0, "127.0.0.1", ok));
+after(() => { srv.close(); delete process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER; });
+const call = async (p, body) => { const r = await fetch(`http://127.0.0.1:${srv.address().port}${p}`, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }); return { status: r.status, body: await r.json() }; };
+{ const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim(), bin = path.join(process.env.CCAPP_PREFIX, "bin", "git");
+  if (!fs.existsSync(bin)) fs.symlinkSync(real, bin); }
 
-test("旧版写的 directory = * 去掉，用户自己的配置原样留着；登记的项目目录（含子目录）列进去", { skip: (!PREFIX || !hasGit) && "要前缀布局和 git" }, () => {
-  const saved = fs.existsSync(gc) ? fs.readFileSync(gc, "utf8") : null;
+test("属主可疑的仓库：status 能开；仓库自带的过滤器照样被认出来、提交前要确认", async () => {
+  const d = path.join(CFG.workspace, "gitsafe");
+  fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true });
+  const g = (...a) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd: d, encoding: "utf8" });
+  g("init", "-q"); fs.writeFileSync(path.join(d, "f.txt"), "a\n"); g("add", "f.txt"); g("commit", "-qm", "i");
+  g("config", "filter.px.clean", "cat");
+  process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = "1";
   try {
-    fs.writeFileSync(gc, '[user]\n\tname = me\n[safe]\n\tdirectory = *\n[credential "https://github.com"]\n\thelper = x\n');
-    syncGitSafe(["/storage/emulated/0/proj", "/sdcard/a/", "/bad\npath", 'q"x']);
-    assert.deepEqual(safeDirs(), ["/storage/emulated/0/proj", "/storage/emulated/0/proj/*", "/sdcard/a", "/sdcard/a/*"]);
-    const txt = fs.readFileSync(gc, "utf8");
-    assert.match(txt, /name = me/);
-    assert.match(txt, /helper = x/);
-    // 再同步一次：托管块整个换掉，不重复堆
-    syncGitSafe(["/sdcard/b"]);
-    assert.deepEqual(safeDirs(), ["/sdcard/b", "/sdcard/b/*"]);
-    syncGitSafe([]);
-    assert.deepEqual(safeDirs(), []);
-    assert.match(fs.readFileSync(gc, "utf8"), /name = me/);
-  } finally { if (saved == null) fs.rmSync(gc, { force: true }); else fs.writeFileSync(gc, saved); }
+    const st = await call("/api/git/status?dir=" + encodeURIComponent(d));
+    assert.equal(st.status, 200, JSON.stringify(st.body));
+    fs.writeFileSync(path.join(d, "f.txt"), "b\n");
+    const c = await call("/api/git/commit", { dir: d, message: "m" });
+    assert.equal(c.status, 409, JSON.stringify(c.body));
+    assert.ok(c.body.risks.some((x) => x.startsWith("filter.px.clean")), "本地配置要读得到：" + JSON.stringify(c.body.risks));
+  } finally { delete process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER; fs.rmSync(d, { recursive: true, force: true }); }
 });
