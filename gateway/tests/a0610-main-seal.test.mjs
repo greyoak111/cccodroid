@@ -153,3 +153,20 @@ test("199 11-05：项目的输出风格顶替不了内置风格、用户的同�
   for (const i of [970, 971]) sealCleanup(i);
   fs.rmSync(path.join(WS, ".claude"), { recursive: true, force: true });
 });
+
+test("199 S-03：弱特征分两类拆进两份说明文件 → 按拼好的整份查，照样拦；只一类的不拦", () => {
+  _setSealed(true);
+  fs.rmSync(path.join(CFG.home, ".claude"), { recursive: true, force: true });
+  // 两类弱特征样例取自 breach.test.mjs「弱特征跨两类才拦」
+  const [A, B1, B2] = ["不要拒绝", "不问用途", "无" + "限制"];
+  const rule = path.join(WS, ".claude", "rules", "r.md");
+  put(path.join(WS, "CLAUDE.md"), `项目说明\n${A}\n`);
+  put(rule, `规则\n${B1}\n`);
+  assert.match(ctxOf(WS), new RegExp(B1), "同一类：不拦");
+  put(rule, `规则\n${B2}\n`);
+  const p = sealPrepare({ cwd: WS, runId: 980 });
+  assert.ok(p.block, "两类拆开也要拦");
+  assert.match(p.block.found[0].name, /合起来/);
+  fs.rmSync(path.join(WS, ".claude"), { recursive: true, force: true });
+  fs.rmSync(path.join(WS, "CLAUDE.md"), { force: true });
+});

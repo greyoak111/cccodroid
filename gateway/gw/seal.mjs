@@ -450,6 +450,12 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   // 说明文件
   const ctx = collectContext(cwd);
   for (const it of ctx.items) { const r = scanText(it.text); if (r.blocked) found.push({ name: it.file, hits: r.hits }); }
+  // 说明文件是拼成一份系统提示交给模型的：逐份都过了，再按拼好的整份查一遍——
+  // 弱特征分两类拆到 CLAUDE.md 和 rules 里，逐份看各只一类，合起来就够拦（0.6.9 审计 199 S-03）
+  if (!found.length && ctx.items.length > 1) {
+    const r = scanText(renderContext(ctx.items));
+    if (r.blocked) found.push({ name: `说明文件合起来（${ctx.items.slice(0, 4).map((it) => it.file).join(", ")}${ctx.items.length > 4 ? " …" : ""}）`, hits: r.hits });
+  }
   if (ctx.skipped.length) notes.push(`说明文件太大或读不了，没回填：${ctx.skipped.slice(0, 4).join(", ")}`);
 
   // skill / 命令 / 子代理 / 输出风格
