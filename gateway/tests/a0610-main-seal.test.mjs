@@ -107,3 +107,49 @@ test("P1-18：合成插件里的 skill / 子代理副本不带 hooks；复用前
   assert.doesNotMatch(fs.readFileSync(sk, "utf8"), /hooks|pwned/);
   for (const i of [960, 961, 962]) sealCleanup(i);
 });
+
+test("199 11-08：项目说明的 @ 引用只许落在项目根以内；用户级说明的照旧展开", () => {
+  _setSealed(true);
+  const H = (r) => path.join(CFG.home, r);
+  fs.rmSync(H(".claude"), { recursive: true, force: true });
+  put(H(".claude/projects/x/memory/m.md"), "别的项目记忆-M\n");
+  put(H("a0610-note.md"), "家目录笔记-N\n");
+  put(path.join(WS, "CLAUDE.md"), "项目说明-W\n@~/.claude/projects/x/memory/m.md\n@../../a0610-note.md\n@docs/in.md\n");
+  put(path.join(WS, "docs/in.md"), "项目内引用-I\n");
+  let c = ctxOf(WS);
+  assert.match(c, /项目说明-W/); assert.match(c, /项目内引用-I/);
+  assert.doesNotMatch(c, /别的项目记忆-M|家目录笔记-N/);
+  // 软链指到项目外也不行
+  fs.symlinkSync(H("a0610-note.md"), path.join(WS, "docs/ln.md"));
+  put(path.join(WS, "CLAUDE.md"), "项目说明-W\n@docs/ln.md\n");
+  assert.doesNotMatch(ctxOf(WS), /家目录笔记-N/);
+  // 用户级：照旧
+  put(H(".claude/CLAUDE.md"), "用户说明-U\n@~/a0610-note.md\n");
+  c = ctxOf(WS);
+  assert.match(c, /用户说明-U/); assert.match(c, /家目录笔记-N/);
+  fs.rmSync(H("a0610-note.md"), { force: true });
+  fs.rmSync(path.join(WS, "docs"), { recursive: true, force: true });
+  fs.rmSync(path.join(WS, "CLAUDE.md"), { force: true });
+});
+
+test("199 11-05：项目的输出风格顶替不了内置风格、用户的同名风格，也强制不了", () => {
+  _setSealed(true);
+  const H = (r) => path.join(CFG.home, r);
+  fs.rmSync(H(".claude"), { recursive: true, force: true });
+  put(path.join(WS, ".claude/output-styles/Explanatory.md"), "---\nname: Explanatory\n---\n项目顶替内置\n");
+  let p = sealPrepare({ cwd: WS, runId: 970, outputStyle: "Explanatory" });
+  assert.equal(p.block, null);
+  assert.equal(p.settings?.outputStyle, undefined, "内置风格不换成插件里的同名文件");
+  put(H(".claude/output-styles/Mine.md"), "---\nname: Mine\n---\n用户自己的风格\n");
+  put(path.join(WS, ".claude/output-styles/Mine.md"), "---\nname: Mine\n---\n项目冒充用户的\n");
+  put(path.join(WS, ".claude/output-styles/Force.md"), "---\nname: Force\nforce-for-plugin: true\ndescription: x\n---\n强制风格\n");
+  p = sealPrepare({ cwd: WS, runId: 971, outputStyle: "Mine" });
+  assert.equal(p.settings.outputStyle, "user:Mine");
+  const plug = at(p.args, "--plugin-dir")[0];
+  assert.match(fs.readFileSync(path.join(plug, "output-styles/Mine.md"), "utf8"), /用户自己的风格/);
+  assert.equal(fs.readFileSync(path.join(plug, "output-styles/Force.md"), "utf8"), "---\nname: Force\ndescription: x\n---\n强制风格\n");
+  // skill 里写 force-for-plugin 不相干，不动
+  assert.equal(stripFrontHooks(Buffer.from("---\nforce-for-plugin: true\n---\nb\n")).toString(), "---\nforce-for-plugin: true\n---\nb\n");
+  for (const i of [970, 971]) sealCleanup(i);
+  fs.rmSync(path.join(WS, ".claude"), { recursive: true, force: true });
+});

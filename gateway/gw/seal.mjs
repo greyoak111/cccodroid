@@ -119,9 +119,15 @@ function contextSources(cwd) {
 /** 读出全部说明文件（含引用），去重。返回 [{ file, kind, text, from? }] 与跳过的 */
 function collectContext(cwd) {
   const seen = new Set(), out = [], skipped = [];
+  // 项目级 / 本地级说明是仓库带来的、不可信：它的 @ 引用只许落在项目根以内。以前能 @~/.claude/projects/<别的项目>/memory/…
+  // 把别的项目的自动记忆、home 下任意文本读进系统提示（0.6.9 审计 199 11-08）。Claude Code 原生对项目外的引用要先问，封口时没人问，就不收。
+  // 用户级（自己的全局说明）照旧不限
+  const root = realOr(projectChain(cwd)[0] || cwd);
+  const within = (p) => { const r = realOr(p); return r === root || r.startsWith(root + path.sep); };
   const visit = (file, kind, depth, from) => {
     const rp = realOr(file);
     if (seen.has(rp)) return;
+    if (from && kind !== "user" && !within(file)) { log(`[封口] 项目说明的 @ 引用在项目之外，不展开：${String(file).slice(0, 200)}`); return; }
     seen.add(rp);
     const text = readSmall(file);
     if (text == null) { if (fs.existsSync(file)) skipped.push(file); return; }
@@ -154,6 +160,7 @@ function userPluginFiles(cwd) {
   const roots = [userClaude(), ...projectDirs(cwd).map((d) => path.join(d, ".claude"))];
   const files = new Map();
   let n = 0, bytes = 0, over = false;
+  let isUser = false, sub = "";
   const walk = (src, rel, depth) => {
     let ents; try { ents = fs.readdirSync(src, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
@@ -164,7 +171,9 @@ function userPluginFiles(cwd) {
       if (st.isDirectory()) { if (depth < 6) walk(s, r, depth + 1); continue; }
       if (!st.isFile()) continue;
       if (++n > MAX_TREE_FILES || (isText(r) && (bytes += st.size) > MAX_TREE_BYTES)) { over = true; log(`[封口] skill 等目录太大，没回填全`); return; }
-      files.set(r, { src: s, size: st.size, mtime: st.mtimeMs, mode: st.mode & 0o777 });
+      // 输出风格：用户目录里有的，项目里的同名文件不许盖（0.6.9 审计 199 11-05）。skill / 命令 / 子代理照旧离工作目录近的优先
+      if (sub === "output-styles" && !isUser && files.get(r)?.user) continue;
+      files.set(r, { src: s, size: st.size, mtime: st.mtimeMs, mode: st.mode & 0o777, ...(isUser ? { user: true } : {}) });
     }
   };
   const seenRoot = new Set();
@@ -172,7 +181,8 @@ function userPluginFiles(cwd) {
     const rr = realOr(root);
     if (seenRoot.has(rr)) continue;
     seenRoot.add(rr);
-    for (const sub of ["skills", "commands", "agents", "output-styles"]) walk(path.join(root, sub), sub, 0);
+    isUser = root === userClaude();
+    for (sub of ["skills", "commands", "agents", "output-styles"]) walk(path.join(root, sub), sub, 0);
   }
   return files;
 }
@@ -228,24 +238,26 @@ function cleanManifest(buf) {
 /** skill / 命令 / 子代理 .md 开头的 YAML 头里可以写 hooks:，claude 用到它时就执行里面的命令——
  *  不经任何确认，也不受封口设置里的钩子管（合成插件把它原样带进去了，0.6.9 审计 P1-18）。
  *  副本里把头里的 hooks 一节去掉，正文、name、description、allowed-tools 这些照留。
- *  头里去掉之后还像有 hooks（嵌在别的写法里、或用 YAML 合并键 << 引进来）：整个头不要，只留正文 */
+ *  头里去掉之后还像有 hooks（嵌在别的写法里、或用 YAML 合并键 << 引进来）：整个头不要，只留正文
+ *  输出风格（style）另去掉 force-for-plugin：插件风格写了它就强行生效、盖过用户选的，项目带一份就能顶替（199 11-05）；
+ *  原生的用户 / 项目风格本来就没有强制这一说 */
 const FRONT_RE = /^(\uFEFF?---[ \t]*\r?\n)([\s\S]*?)(\r?\n---[ \t]*(?:\r?\n|$))/;
-const HOOKS_KEY = /^["']?hooks["']?[ \t]*:/i;
-export function stripFrontHooks(buf) {
-  const s = buf.toString("utf8"), m = FRONT_RE.exec(s);
-  if (!m || !/hooks|<</i.test(m[2])) return buf;
+const HOOKS_KEY = /^["']?hooks["']?[ \t]*:/i, STYLE_KEY = /^["']?(?:hooks|force-for-plugin)["']?[ \t]*:/i;
+export function stripFrontHooks(buf, style = false) {
+  const s = buf.toString("utf8"), m = FRONT_RE.exec(s), KEY = style ? STYLE_KEY : HOOKS_KEY;
+  if (!m || !/hooks|<<|force-for-plugin/i.test(m[2])) return buf;
   const lines = m[2].split(/\r?\n/), keep = [];
   for (let i = 0; i < lines.length; i++) {
-    if (!HOOKS_KEY.test(lines[i])) { keep.push(lines[i]); continue; }
+    if (!KEY.test(lines[i])) { keep.push(lines[i]); continue; }
     // 这一节：后面缩进的行、空行、注释行都属于它，直到下一个顶格的键；
     // 流式写法（[ / { 开头）没收口的，续行可以顶格写，数括号数到收口为止
     let depth = 0;
     const count = (l) => { for (const c of l.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "")) depth += c === "[" || c === "{" ? 1 : c === "]" || c === "}" ? -1 : 0; };
-    count(lines[i].replace(HOOKS_KEY, ""));
+    count(lines[i].replace(KEY, ""));
     while (i + 1 < lines.length && (depth > 0 || /^[ \t]/.test(lines[i + 1]) || /^\s*(#.*)?$/.test(lines[i + 1]))) count(lines[++i]);
   }
   let head = keep.join(m[2].includes("\r\n") ? "\r\n" : "\n");
-  if (/(^|[\s{,\[])["']?hooks["']?[ \t]*:|<<[ \t]*:/im.test(head)) head = null;
+  if (/(^|[\s{,\[])["']?hooks["']?[ \t]*:|<<[ \t]*:/im.test(head) || (style && /force-for-plugin/i.test(head))) head = null;
   const rest = s.slice(m[0].length);
   return Buffer.from(head == null ? rest : m[1] + head + m[3] + rest);
 }
@@ -263,7 +275,7 @@ function expectedBytes(rel, f, manifest) {
     let buf = readSmallFile(f.src, 64 << 20, "");
     if (buf == null) return null;
     if (rel === ".claude-plugin/plugin.json") buf = cleanManifest(buf);
-    else if (isMd(rel)) buf = stripFrontHooks(buf);
+    else if (isMd(rel)) buf = stripFrontHooks(buf, rel.startsWith("output-styles/"));
     return buf;
   } catch { return null; }
 }
@@ -350,7 +362,7 @@ function materialize(name, files, manifest) {
     // 扫描只看前 2MB，但副本写的是全文：超过扫描上限的文本直接拒绝，别只扫开头就放行（审查 11-05）
     if (buf.length > (2 << 20)) { found.push({ name: f.src, hits: [{ cat: "toolarge", strong: true, line: 0, excerpt: "" }] }); continue; }
     if (rel === ".claude-plugin/plugin.json") { buf = cleanManifest(buf); if (!buf) continue; }
-    else if (isMd(rel)) buf = stripFrontHooks(buf);
+    else if (isMd(rel)) buf = stripFrontHooks(buf, rel.startsWith("output-styles/"));
     if (!isPluginData(rel)) {
       const r = scanText(buf.toString("utf8"));
       if (r.blocked) found.push({ name: f.src, hits: r.hits });
@@ -423,6 +435,8 @@ export function scanMemory(dir) {
  *   block：{ found } —— 有说明文件 / skill / 记忆命中，整轮不跑
  *   args：要加给 claude 的旗标；settings：并进 --settings 的键（sealArgv 会把几份合成一份）
  */
+// claude 2.1.311 自带的输出风格（名字不分大小写）
+const BUILTIN_STYLES = new Set(["default", "concise", "explanatory", "learning", "proactive"]);
 export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   if (!sealed()) return { args: [], settings: null, block: null };
   const args = [], settings = userSettings(), notes = [];
@@ -452,7 +466,8 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
     if (m.found) found.push(...m.found); else plugDirs.push(m.dir);
   }
   // 输出风格：用户目录里的那份在插件里叫 user:<名字>
-  if (outputStyle && uf.has(`output-styles/${outputStyle}.md`)) settings.outputStyle = "user:" + outputStyle;
+  // 选的是内置风格：不换成插件里的同名文件——项目放一个 Explanatory.md 就能顶替内置风格（199 11-05）
+  if (outputStyle && !BUILTIN_STYLES.has(String(outputStyle).toLowerCase()) && uf.has(`output-styles/${outputStyle}.md`)) settings.outputStyle = "user:" + outputStyle;
 
   // 自动记忆
   const memDir = memoryDir(cwd);
