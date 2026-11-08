@@ -12,7 +12,7 @@
 | 13-06 | `GatewayService.proc` 不是 volatile | 已修 |
 | 13-09 | 安装确认通知用了 `Updater.CH` 频道，新进程里频道可能不存在 | 待办 |
 | 13-10 | 台账里没找到原文 | 待办（拟写「未找到」） |
-| 13-11 | `ccapp-sched-next` 直接覆盖 / 撕裂写 → 下次开机没闹钟 | 待办 |
+| 13-11 | `ccapp-sched-next` 直接覆盖 / 撕裂写 → 下次开机没闹钟 | 已修（撕裂部分第一轮 b7706bc 已改 writeAtomic，本轮补写失败重试与读侧） |
 | 14-02 | 工具包升级只保留 pip / npm -g，其他用户内容被静默删除 | 待办 |
 | 14-03 | 降级保护只在 `checkDevkit` 网络路径，本地文件 / 暂存 / 修复路径能装旧版 | 待办 |
 | 14-04 | APK 手动降级没有版本检查；24h 内任何 TAG 变化都被当成「升级」 | 待办 |
@@ -24,6 +24,7 @@
 |---|---|---|---|
 | 13-06 | 见 git log | `GatewayService.proc` 加 `volatile`：守护线程赋值、界面线程读，不 volatile 可能拿到 null 漏杀网关 | `javac` 全量通过。真机：替换工具包（设置 → 开发工具包 → 换一个版本）时看 logcat 标签 `cccodroid`，不应出现端口被自己残留网关占住；旧现象是偶发「端口 8791 被别的应用占着」 |
 | 13-03 | 见 git log | `runs.mjs` 改用 `writeAtomic` 写标记，写 / 删失败按退避重试；删标记前看主人：只删自己的或主人已死的残留，不动另一个活网关的。`GatewayService` 在「划掉后要停服务」的决定前再问一次网关（`Updater.gatewayBusy()`），问不到才停；`onTaskRemoved` 的这次询问放后台线程并复查界面是否又打开 | 新测试 `gateway/tests/a0610-j2-runflag.test.mjs`（3 条：活网关标记不删 / 死残留删 / 写失败重试成功）连同原 `runflag.test.mjs` 4 条全过；`javac` 全量通过。真机：后台跑一条任务时从最近任务划掉界面，logcat `cccodroid` 应看到「任务跑完再停」且任务结束后服务才停；任务跑完划掉应立即停（最多多等一次 `/api/status` 往返） |
+| 13-11 | 见 git log | 撕裂写本身第一轮已由 b7706bc 改成 `writeAtomic`；本轮补两处：`pushNext` 改成写成功才记 `lastNext`（写失败下次 tick 的 `save()` 会补写），写失败也照发 `sched_next` 让在线外壳先定上；`SchedAlarm.fromFile` 只接受 ≤32 字节的普通文件、内容必须是纯数字，半截 / 坏文件不拿去过期时刻登记 | 新测试 `gateway/tests/a0610-j2-sched-next.test.mjs`（同名目录挡住写入，下一拍 tick 补写成功）通过；`javac` 全量通过。真机：给一个任务设 2 分钟后的时间，`adb shell ls -l files/home/ccapp-sched-next` 内容为毫秒时刻；杀掉 App 再开机，logcat `cccodroid` 应看到「定时任务闹钟：…（精确）」 |
 
 ## 不成立
 

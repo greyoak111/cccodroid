@@ -78,13 +78,16 @@ const save = () => {
 };
 // 最近一次要跑的时刻（毫秒，0 = 没有）→ 外壳的系统闹钟。只在变了的时候报
 const NEXT_FILE = path.join(CFG.home, "ccapp-sched-next");
-let lastNext = -1;
+let lastNext = -1;   // 上一次真正写进文件的值
+let lastPub = -1;    // 上一次报给外壳的值（写失败也照报：在线的外壳先定上，落盘下次 save 再试）
 function pushNext() {
   const at = DB.tasks.reduce((m, t) => (t.on && t.nextAt && (!m || t.nextAt < m) ? t.nextAt : m), 0);
-  if (at === lastNext) return;
-  lastNext = at;
-  writeAtomic(NEXT_FILE, String(at));
-  publish({ type: "sched_next", at });
+  if (at !== lastNext) {
+    // 写失败不记账：tick 每 30 秒 save 一次，下次接着试。以前先记账后写，一次失败以后这个值就再也不写了，
+    // 下次启动读到的还是旧时刻（0.6.9 审计 13-11）
+    if (writeAtomic(NEXT_FILE, String(at))) lastNext = at;
+  }
+  if (at !== lastPub) { lastPub = at; publish({ type: "sched_next", at }); }
 }
 const saveRuns = () => { RUNLOG = RUNLOG.slice(-500); return writeAtomic(RUNS_FILE, JSON.stringify(RUNLOG)); };
 const byId = (id) => DB.tasks.find((t) => t.id === id) || null;

@@ -79,7 +79,12 @@ public class SchedAlarm extends BroadcastReceiver {
         try {
             File f = new File(new Env(c).home, "ccapp-sched-next");
             if (!f.exists()) return;
-            set(c, Long.parseLong(new String(Files.readAllBytes(f.toPath()), "UTF-8").trim()));
+            // 只认正常大小的普通文件：旧版是直接覆盖写，断电 / 崩溃留下半截时，半个数字也会 parse 成
+            // 一个过去的时刻，立刻叫醒一次；FIFO / 目录更会卡住读取（0.6.9 审计 13-11）
+            if (!f.isFile() || f.length() > 32) { Log.w(TAG, "定时任务闹钟：文件不对（" + (f.isFile() ? f.length() + " 字节" : "不是普通文件") + "），先不登记"); return; }
+            String s = new String(Files.readAllBytes(f.toPath()), "UTF-8").trim();
+            if (!s.matches("\\d{1,16}")) { Log.w(TAG, "定时任务闹钟：文件内容不是时刻，先不登记"); return; }
+            set(c, Long.parseLong(s));
         } catch (Exception e) {
             Log.w(TAG, "定时任务闹钟：读文件失败", e);
         }
