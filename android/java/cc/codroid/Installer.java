@@ -699,7 +699,7 @@ final class Installer {
         JSONObject p;
         try { p = new JSONObject(new String(java.nio.file.Files.readAllBytes(pend.toPath()), StandardCharsets.UTF_8)); }
         catch (Exception e) { p = new JSONObject(); }
-        if (old.isDirectory()) carryOverOnce(old);
+        if (old.isDirectory()) carryOverOnce(old, sameDevkit(old, p));
         new File(env.usr, "tmp").mkdirs();
         env.home.mkdirs();
 
@@ -729,13 +729,27 @@ final class Installer {
     boolean carrySkipped;
 
     /**
+     * 新旧是不是同一版工具包（修复、核对页「修补」都是同版本重装）：看旧目录 .devkit-ok 与这次 .devkit-pending 的 sha256。
+     * 同一版时组件照样能用，要跟着搬过去；以前一律当工具包的东西删掉，组件记录却还认这一版是「已装好」，
+     * 核对页就报组件缺几千个文件，再点修补又重装工具包、又删一遍（0.6.11 真机）
+     */
+    static boolean sameDevkit(File old, JSONObject pending) {
+        String neu = pending.optString("sha256", "");
+        if (neu.isEmpty()) return false;
+        try {
+            JSONObject ok = new JSONObject(new String(java.nio.file.Files.readAllBytes(new File(old, ".devkit-ok").toPath()), StandardCharsets.UTF_8));
+            return neu.equals(ok.optString("sha256", ""));
+        } catch (Exception e) { return false; }
+    }
+
+    /**
      * carryOver 只试一次（群友报修，0.4.17 魅族 18 / Flyme）：有的机器上 f2fs 的 rename 会卡在内核里不返回（D 状态，
      * 同一时间别的应用的 rename 也卡），进程杀不掉、成了僵尸，App 再也打不开；而 .devkit-pending 还在，下次启动 recover()
      * 又从 carryOver 开始，又卡 —— 自己把自己锁死。rename 没法设超时，所以改成：进去之前落个标记，上一次带着标记死了，
      * 这次就不搬了 —— 旧目录整个换名留给用户（一次顶层 rename），工具包照常装完。搬的只是用户自己 pip / npm -g 装的包，
      * 跳过不影响工具包本身能用。
      */
-    private void carryOverOnce(File old) throws IOException {
+    private void carryOverOnce(File old, boolean keepComponents) throws IOException {
         File tryF = new File(env.files, CARRY_TRY);
         if (tryF.exists()) {
             carrySkipped = true;
@@ -751,7 +765,7 @@ final class Installer {
             o.write(("{\"at\":" + System.currentTimeMillis() + "}\n").getBytes(StandardCharsets.UTF_8));
             o.getFD().sync();                          // 要在卡住之前落到盘上，否则下次看不见
         }
-        carryOver(old, env.usr);
+        carryOver(old, env.usr, keepComponents);
         tryF.delete();
     }
 
@@ -922,7 +936,7 @@ final class Installer {
      * 口径照网关的 gw/orphans.mjs baseOwnedPaths：旧工具包的文件一个都不能当用户内容搬进新版。
      * Python 小版本变了就不搬 lib/python3.X（编译过的扩展对不上新解释器）；tmp 与安装器自己的标记不搬。
      */
-    private void carryOver(File old, File neu) {
+    private void carryOver(File old, File neu, boolean keepComponents) {
         java.util.Set<String> owned = new java.util.HashSet<>();
         // dpkg 清单：写的是 /data/data/<包名>/files/usr/…，而 env.usr 是 /data/user/0/…：只比 usr/ 之后的相对路径。
         // 0.3.9 及以前直接拿绝对路径比，一条都对不上，旧工具包和旧组件 bin/ 下的东西全被当成用户的搬了过来
@@ -942,7 +956,17 @@ final class Installer {
             addPaths(owned, new File(m, "FILES"));
             for (String f : new String[]{"MANIFEST", "MANIFEST.local"}) addManifest(owned, new File(m, f));
         }
-        // 已装组件：包内 MANIFEST 加上界面那边的安装记录（files/components/<id>.json 的 files / shared）
+        // 已装组件：包内 MANIFEST 加上界面那边的安装记录（files/components/<id>.json 的 files / shared）。
+        // 同一版工具包重装时不认领：组件的文件当成要搬的，新工具包里已有的同名文件照旧不覆盖
+        if (!keepComponents) addComponents(owned, old);
+        // 整棵都没人认领的目录一次 rename 搬走，不用逐个文件走（lib / share 下动辄几万个文件）
+        java.util.Set<String> ownedDirs = new java.util.HashSet<>();
+        for (String rel : owned) for (int i = rel.lastIndexOf('/'); i > 0; i = rel.lastIndexOf('/', i - 1)) ownedDirs.add(rel.substring(0, i));
+        int n = moveUser(old, neu, "", owned, ownedDirs);
+        if (n > 0) ui.step(Tr.f("保留了你自己装进工具包的 {0} 项", n));
+    }
+
+    private void addComponents(java.util.Set<String> owned, File old) {
         File[] cs = new File(old, "libexec/devkit/components").listFiles();
         if (cs != null) for (File cmp : cs) addManifest(owned, new File(cmp, "MANIFEST"));
         File[] recs = new File(env.files, "components").listFiles((d, n) -> n.endsWith(".json"));
@@ -955,11 +979,6 @@ final class Installer {
                 }
             } catch (Exception ignored) {}
         }
-        // 整棵都没人认领的目录一次 rename 搬走，不用逐个文件走（lib / share 下动辄几万个文件）
-        java.util.Set<String> ownedDirs = new java.util.HashSet<>();
-        for (String rel : owned) for (int i = rel.lastIndexOf('/'); i > 0; i = rel.lastIndexOf('/', i - 1)) ownedDirs.add(rel.substring(0, i));
-        int n = moveUser(old, neu, "", owned, ownedDirs);
-        if (n > 0) ui.step(Tr.f("保留了你自己装进工具包的 {0} 项", n));
     }
 
     /** 清单里的一行 → 相对 $PREFIX 的路径：绝对路径取出 /files/usr/ 之后的部分，去掉 ./ 与结尾的 / */
