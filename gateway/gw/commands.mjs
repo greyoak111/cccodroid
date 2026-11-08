@@ -18,7 +18,17 @@ const MAX_BODY = 64 * 1024;
 const MAX_FILE = MAX_BODY + 4096;
 
 function cmdDir(scope, dir) {
-  if (scope === "user") return path.join(process.env.HOME || CFG.home, ".claude", "commands");
+  if (scope === "user") {
+    // 用户级目录本身也不能是软链：指到哪儿就读写哪儿，等于把 commands 功能借给别人用（197-1.4）
+    let h = process.env.HOME || CFG.home;
+    try { h = fs.realpathSync(h); } catch {}
+    const cd = path.join(h, ".claude", "commands");
+    for (const p of [path.join(h, ".claude"), cd]) {
+      let rp = null; try { rp = fs.realpathSync(p); } catch {}
+      if (rp && rp !== p) throw new Error("user commands dir is a link: " + p);
+    }
+    return cd;
+  }
   if (scope !== "project") throw new Error("bad scope");
   const d = path.resolve(String(dir || CFG.workspace));
   let ok = false, real = d; try { real = fs.realpathSync(d); ok = fs.statSync(real).isDirectory(); } catch {}
@@ -84,7 +94,8 @@ export function listCmds(scope, dir) {
   const items = [];
   for (const f of names) {
     const name = f.slice(0, -3);
-    let txt = ""; try { const st = fs.statSync(path.join(d, f)); if (!st.isFile() || st.size > MAX_FILE) continue; txt = fs.readFileSync(path.join(d, f), "utf8"); } catch { continue; }
+    // 只认普通文件：一个名为 xxx.md 的软链也能指向密钥文件，跟着读就把别处的内容当指令正文交出去（197-1.4）
+    let txt = ""; try { const p = path.join(d, f), st = fs.lstatSync(p); if (!st.isFile() || st.size > MAX_FILE) continue; txt = fs.readFileSync(p, "utf8"); } catch { continue; }
     const c = parseCmd(txt);
     items.push({ name, description: c.description, hint: c.hint, body: c.body, extra: c.extra, editable: CMD_NAME_RE.test(name) });
   }
@@ -116,11 +127,21 @@ function saveCmd(b, builtin) {
   const hint = String(b.hint || "").replace(/[\r\n]+/g, " ").trim().slice(0, 80);
   // 改名 / 编辑时把我们不管的 frontmatter 项（allowed-tools 等）带过去
   let extra = "";
-  try { extra = parseCmd(fs.readFileSync(path.join(d, (old || name) + ".md"), "utf8")).extra; } catch {}
+  try {
+    const p = path.join(d, (old || name) + ".md"), lst = fs.lstatSync(p);
+    if (lst.isFile()) extra = parseCmd(fs.readFileSync(p, "utf8")).extra;   // 软链不跟（197-1.4）
+  } catch {}
   const text = formatCmd({ description: desc, hint, body, extra });
   if (Buffer.byteLength(text) > MAX_FILE) return { ok: false, message: "指令内容太长了（上限 64 KB）" };
-  fs.writeFileSync(file + ".tmp", text);
-  fs.renameSync(file + ".tmp", file);
+  // 临时名带进程号 + 随机：固定 .tmp 被人先放一个软链就能顺着写到别处；wx 不覆盖，rename 也不跟目标软链
+  const tmp = file + ".tmp-" + process.pid + "-" + Math.random().toString(16).slice(2, 8);
+  try {
+    fs.writeFileSync(tmp, text, { flag: "wx", mode: 0o644 });
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    throw e;
+  }
   if (old) { try { fs.unlinkSync(path.join(d, old + ".md")); } catch {} }
   if (scope === "user") ucAppWrote([d], ucb);   // 用户在常用指令页自己存的：认下（见 userconf.mjs）
   log(`[commands] 保存 /${name}（${scope}）${old ? "，原名 /" + old : ""}`);

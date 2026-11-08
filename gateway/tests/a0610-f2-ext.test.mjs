@@ -99,3 +99,30 @@ test("J.7 hooks 试运行按界面的默认 60 秒、上限 600 秒（源码）"
   const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "gw", "extensions.mjs"), "utf8");
   assert.match(src, /Math\.min\(600, Number\(timeout\) \|\| 60\)/);
 });
+
+test("197-1.4 用户 commands 目录里的 .md 软链不会被当成指令读出来", async () => {
+  const dir = path.join(CFG.home, ".claude", "commands");
+  fs.mkdirSync(dir, { recursive: true });
+  const secret = path.join(CFG.home, "secret-note.md");
+  fs.writeFileSync(secret, "SECRET-BODY");
+  fs.symlinkSync(secret, path.join(dir, "leak.md"));
+  fs.writeFileSync(path.join(dir, "ok.md"), "---\ndescription: fine\n---\nhello\n");
+  const r = await go.get("/api/commands");
+  assert.equal(r.status, 200);
+  const user = r.body.scopes.find((s) => s.scope === "user");
+  assert.ok(user.items.some((i) => i.name === "ok"));
+  assert.ok(!user.items.some((i) => i.name === "leak"), "软链指令被列出来了");
+  assert.doesNotMatch(JSON.stringify(r.body), /SECRET-BODY/);
+});
+
+test("197-2.9 内置 hook 脚本装不上时接口回 ok:false，前端不再当已保存", async () => {
+  const p = path.join(CFG.home, ".claude", "hooks");
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  try { fs.rmSync(p, { recursive: true, force: true }); } catch {}
+  fs.writeFileSync(p, "占住路径");   // 让 mkdirSync 失败
+  const r = await go.post("/api/ext/hooks/scripts", {});
+  assert.equal(r.body.ok, false);
+  assert.ok(r.body.message);
+  const src = fs.readFileSync(path.join(APP, "08-extensions.js"), "utf8");
+  assert.match(src, /内置脚本没装上：\{msg\}，规则没有保存/);
+});

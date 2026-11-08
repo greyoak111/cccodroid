@@ -879,7 +879,13 @@
   async function hkRunTest(box, ev, cmd, matcher, timeout, input) {
     if (!cmd) return toast(t("命令是空的"), true);
     box.innerHTML = `<div class="tiny">${t("运行中…")}</div>`;
-    if (/\$HOME\/\.claude\/hooks\/cc-/.test(cmd)) await api("/api/ext/hooks/scripts", { method: "POST", body: "{}" }).catch(() => {});
+    // 内置脚本没装上时试运行必然失败：以前把这个错误吞了，用户只看到“命令跑不起来”（197-2.9）
+    if (/\$HOME\/\.claude\/hooks\/cc-/.test(cmd)) {
+      let inst;
+      try { inst = await api("/api/ext/hooks/scripts", { method: "POST", body: "{}" }); }
+      catch (e) { box.innerHTML = `<div class="tiny warn">${esc(t("内置脚本没装上：{msg}", { msg: e.message }))}</div>`; return; }
+      if (inst.ok === false) { box.innerHTML = `<div class="tiny warn">${esc(t("内置脚本没装上：{msg}", { msg: inst.message || "?" }))}</div>`; return; }
+    }
     try {
       const res = await api("/api/ext/hooks/test", { method: "POST", body: JSON.stringify({ command: cmd, event: ev, matcher, timeout, input, dir: HK.data.dir }) });
       if (res.ok === false) throw new Error(res.message);
@@ -942,7 +948,13 @@
     if (a === "f-save") {
       const v = hkFormVal();
       if (!v.command) return toast(t("命令是空的"), true);
-      if (/\$HOME\/\.claude\/hooks\/cc-/.test(v.command)) await api("/api/ext/hooks/scripts", { method: "POST", body: "{}" }).catch(() => {});
+      // 内置脚本装不上就别保存规则：以前吞掉错误，界面提示“已保存”，实际这条规则永远跑不起来（197-2.9）
+      if (/\$HOME\/\.claude\/hooks\/cc-/.test(v.command)) {
+        let inst;
+        try { inst = await api("/api/ext/hooks/scripts", { method: "POST", body: "{}" }); }
+        catch (e) { return toast(t("内置脚本没装上：{msg}，规则没有保存", { msg: e.message }), true); }
+        if (inst.ok === false) return toast(t("内置脚本没装上：{msg}，规则没有保存", { msg: inst.message || "?" }), true);
+      }
       const h = hkClone();
       const entry = { type: "command", command: v.command };
       if (v.timeout) entry.timeout = v.timeout;
