@@ -423,7 +423,7 @@ export async function startRun(item) {
   if (!isCmd && wantsInline(P)) { const env = claudeEnv({ model, provider: P }); imgs0 = await inlineImages(message, P, { tmpDir: env.TMPDIR, env }); }
   // 会话封签（见 integrity.mjs）：上一轮之后记录在应用外被改过、或是导入的，这一轮告诉模型别把那段历史当成自己说过的。
   // 起进程前核对：claude --resume 一起来就可能往文件里写
-  const sfile = () => run.sessionId ? findSessionFile(String(run.sessionId))?.file : null;
+  const sfile = () => run.sessionId ? findSessionFile(String(run.sessionId), run.cwd)?.file : null;   // 按这一轮的目录找（F8）
   let integ = checkSession(run.sessionId, sfile());
   let integNote = isCmd || P.local ? "" : integrityNote(integ);
   // 消息里提到档号（0ab2·61）：附上那一章的压缩摘要（见 merge.mjs refNote）。读不出来就算了，不挡这一轮

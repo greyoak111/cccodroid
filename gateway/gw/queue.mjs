@@ -131,7 +131,7 @@ export function saveRunMark() {
       // done：已经答完、只是进程还留着等后台任务回报，而且任务也都清零了 —— 这时被结束不算中断
       // text 以前截 4000 字、别的都不存：没建会话的「重发」长消息后半截悄悄没了，项目 / 模型 / 权限也回落全局（195-AA.5）。
       // 现在存到 64K（更长的标 textCut，界面要说），连同发送参数 req、定时任务身份 sched（AA.3）
-      runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, text: r.text.slice(0, TEXT_KEEP), ...(r.text.length > TEXT_KEEP ? { textCut: true } : {}),
+      runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, ...(r.cwd ? { cwd: r.cwd } : {}), text: r.text.slice(0, TEXT_KEEP), ...(r.text.length > TEXT_KEEP ? { textCut: true } : {}),
         startedAt: r.startedAt, ...(r.req && Object.keys(r.req).length ? { req: r.req } : {}), ...(r.sched ? { sched: r.sched } : {}),
         // 还没起进程（等确认卡、等桥、核验程序…）：claude 根本没收到这条，恢复后只能「重发」不能「继续」（195-P.3）
         ...(r.preSpawn ? { unstarted: true } : {}),
@@ -199,7 +199,7 @@ export function recoverRunMark() {
   // 起进程时拍的底存在标记里：记录只是在那之后往后追加了（claude 自己写的），照常封签；前面被改了才标 edited
   for (const r of Array.isArray(m.runs) ? m.runs : []) {
     if (!r || !r.sessionId || !r.sealBase || !Number.isFinite(r.sealBase.size) || typeof r.sealBase.hash !== "string") continue;
-    try { const f = findSessionFile(String(r.sessionId))?.file; if (f) sealSession(String(r.sessionId), f, { base: r.sealBase }); } catch (e) { log(`[封签] ${e.message}`); }
+    try { const f = findSessionFile(String(r.sessionId), typeof r.cwd === "string" ? r.cwd : undefined)?.file; if (f) sealSession(String(r.sessionId), f, { base: r.sealBase }); } catch (e) { log(`[封签] ${e.message}`); }
   }
   // 并行时可能同时断了好几轮：每个会话各记一条，各挂各的「继续」卡
   const runs = (Array.isArray(m.runs) ? m.runs : m.run ? [m.run] : []).filter((r) => r && r.id && !r.done).sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));

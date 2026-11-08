@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import readline from "node:readline";
 import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
 import { SID_RE, TRASH_KEEP_DAYS, inTrash, exportSessions, deleteMessage, forkSession, importSessions, listTrash, locateUserTurn, purgeTrash, realWorkspace, restoreSession, rewindFiles, rewindFixup, trashSession, undoDelete } from "./sessionops.mjs";
@@ -316,8 +317,19 @@ async function searchSessionsNow(q) {
   return { q, results: results.slice(0, 100), total: results.length, ms };
 }
 
-export function findSessionFile(id) {
+// claude 按工作目录（真实路径）把会话存进 projects/<编码>/：非字母数字换成 -，过长截断加哈希（和 seal.mjs 的记忆目录同一算法）
+const projEnc = (p) => { const s = p.replace(/[^a-zA-Z0-9]/g, "-"); return s.length <= 200 ? s : s.slice(0, 200) + "-" + crypto.createHash("sha256").update(p).digest("hex").slice(0, 8); };
+/** 找会话记录。给了 cwd（这一轮实际在哪跑）就先找 claude 按这个目录会去读的那份：同一个会话号出现在
+ *  两个项目目录里（手工拷会话）时，封签核对的和 --resume 读的才是同一份（0.6.9 审计 200-S-07，F8）。没给或那里没有，照旧按目录顺序取第一份 */
+export function findSessionFile(id, cwd) {
   if (!SID_RE.test(id)) return null;   // 防目录穿越
+  if (cwd && typeof cwd === "string") {
+    let real = cwd; try { real = fs.realpathSync(cwd); } catch {}
+    for (const name of new Set([projEnc(real), projEnc(path.resolve(cwd))])) {
+      const full = path.join(PATHS.projects, name, id + ".jsonl");
+      if (fs.existsSync(full)) return { file: full, project: name };
+    }
+  }
   let dirs = [];
   try {
     dirs = fs.readdirSync(PATHS.projects, { withFileTypes: true }).filter((d) => d.isDirectory());
