@@ -3035,4 +3035,5 @@ window.I18N_DICT["id"] = {
   "已解压到 {path}": "Diekstrak ke {path}",
   "已压缩为 {path}": "Dikompres menjadi {path}",
   "多选": "Pilih",
+  "系统提示没写成文件，这一轮没有启动：{msg}": "Prompt sistem tidak bisa ditulis ke file, jadi giliran ini tidak dimulai: {msg}",
 };

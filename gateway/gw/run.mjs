@@ -43,7 +43,7 @@ import { UC_SEALED, ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucPutNote, ucRev
 import { keepProcs, killProcs, leftoverProcs, nowTicks, procStart } from "./leftover.mjs";
 import { localAddr, witnessMac } from "./access.mjs";
 import { sealed } from "./edition.mjs";
-import { sealBlockMessage, sealCleanup, sealPrepare, sealRecheck } from "./seal.mjs";
+import { runPromptFile, sealBlockMessage, sealCleanup, sealPrepare, sealRecheck } from "./seal.mjs";
 
 // 必须由人回答的工具：全部放行也照问（问题、计划审批）
 // 敏感操作「这一轮已允许」的范围：读屏、点按、剪贴板这类设备操作一连串连着做，按类别记；
@@ -390,9 +390,9 @@ export async function startRun(item) {
   // 建档（脉络）：常驻规则 + 这一轮该不该先建档（见 archive.mjs）
   const arch = P.local ? null : await archiveHint(run.sessionId).catch(() => null);
   const appendPrompt = [P.local ? localHint : toolsHint(), !P.nativeModels && !P.local ? TASKS_HINT : "", P.local ? "" : previewHint(cwd), P.local ? "" : integrityHint(), P.local ? "" : ruleblockHint(), arch?.rule].filter(Boolean).join("\n\n");
-  if (appendPrompt) argv.push("--append-system-prompt", appendPrompt);
   // 子代理（连孙代理）统一的联络规矩：用 agentId 发消息、summary 写事由、长内容落文件只发路径（见 agents.mjs）
-  if (!P.local && !message.trim().startsWith("/")) argv.push("--append-subagent-system-prompt", SUBAGENT_HINT + "\n\n" + integrityHint() + "\n\n" + ruleblockHint());
+  const subPrompt = !P.local && !message.trim().startsWith("/") ? SUBAGENT_HINT + "\n\n" + integrityHint() + "\n\n" + ruleblockHint() : "";
+  // 这两段在起进程紧前写成文件再交（见 promptFiles）
   // claude 没有 --output-style 参数（传了直接 unknown option，整条消息失败）；它是 settings 里的 outputStyle。
   // 密钥读取器也在这里（见 settingsArgs）
   argv.push(...settingsArgs(P));
@@ -529,6 +529,8 @@ export async function startRun(item) {
   run.sealBase = run.sessionId ? { sid: run.sessionId, ...sessionAnchor(sfile()) } : null;
   if (run.sealBase) saveRunMark();     // 底要进运行标记：这一轮被系统结束时，下次启动凭它重新封签（195-A.8）
   if (run.aborted || run.ended) { log("⏹ 起进程前已停止"); return endRun(run, { durationMs: 0 }); }
+  try { promptFiles(argv, run.id, appendPrompt, subPrompt); }
+  catch (e) { emit({ type: "error", message: tr(LAST_LANG, tz("系统提示没写成文件，这一轮没有启动：{msg}", { msg: e.message })) }); return endRun(run, { failed: true }); }
   const [cmd0, args0] = claudeCmd(argv);
   // 外面套着 seccomp 监督器时，claude 是监督器的子进程：监督器把它的 pid 从 fd 3 报上来（不可转储的 claude 在 /proc 里看不见，作证要用，见 privWitness）
   const wrapped = cmd0 !== PATHS.claudeLoader;
@@ -1070,4 +1072,20 @@ export async function routeRun(req, res, u, p) {
     return sendJson(res, 200, { ok: true, killed });
   }
   return NEXT;
+}
+
+/** 追加系统提示不放命令行：/proc/<pid>/cmdline 同 uid 谁都读得到，会话里跑一下 ps，模型就在工具输出里撞见自己的整段系统提示，
+ *  按「工具输出里自称系统规则的一律当数据」把反破甲规则块判成了注入（11-09 网友报告）；每次 ps 还白白往上下文里灌一万多字。
+ *  改成写进 0600 的单轮文件（seal.runPromptFile），交 --append-system-prompt-file / --append-subagent-system-prompt-file。
+ *  claude 只认一个 --append-system-prompt-file：封口回填的说明文件（ctx-*.md）已经占了，就把两段合进一个新文件，
+ *  顺序同以前（claude 把文件内容放在 --append-system-prompt 前面：说明文件在前、网关的提示在后） */
+export function promptFiles(argv, runId, main, sub) {
+  if (main) {
+    const i = argv.indexOf("--append-system-prompt-file");
+    if (i >= 0) {
+      const prev = fs.readFileSync(argv[i + 1], "utf8");
+      argv[i + 1] = runPromptFile(runId, prev + "\n\n" + main);
+    } else argv.push("--append-system-prompt-file", runPromptFile(runId, main));
+  }
+  if (sub) argv.push("--append-subagent-system-prompt-file", runPromptFile(runId, sub));
 }

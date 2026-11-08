@@ -3035,4 +3035,5 @@ window.I18N_DICT["es"] = {
   "已解压到 {path}": "Extraído en {path}",
   "已压缩为 {path}": "Comprimido en {path}",
   "多选": "Seleccionar",
+  "系统提示没写成文件，这一轮没有启动：{msg}": "No se pudo escribir el prompt del sistema en un archivo; este turno no se inició: {msg}",
 };

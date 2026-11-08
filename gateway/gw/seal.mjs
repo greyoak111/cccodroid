@@ -460,10 +460,7 @@ const BUILTIN_STYLES = new Set(["default", "concise", "explanatory", "learning",
 export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   if (!sealed()) return { args: [], settings: null, block: null };
   const args = [], settings = userSettings(), notes = [];
-  // 缓存根不能是软链：被换成指向 /sdcard 的链接后，别的应用也能改插件副本
-  try { const st = fs.lstatSync(ROOT()); if (st.isSymbolicLink() || !st.isDirectory()) fs.rmSync(ROOT(), { recursive: true, force: true }); } catch {}
-  fs.mkdirSync(ROOT(), { recursive: true, mode: 0o700 });
-  try { fs.chmodSync(ROOT(), 0o700); } catch {}
+  ensureRoot();
   prune();
   const found = [];
 
@@ -554,6 +551,23 @@ function prune() {
 }
 /** 复用的插件副本：摸一下，别被当成七天没用 */
 function touch(dir) { try { const t = new Date(); fs.utimesSync(dir, t, t); } catch {} }
+
+/** 缓存根不能是软链：被换成指向 /sdcard 的链接后，别的应用也能改插件副本 */
+function ensureRoot() {
+  try { const st = fs.lstatSync(ROOT()); if (st.isSymbolicLink() || !st.isDirectory()) fs.rmSync(ROOT(), { recursive: true, force: true }); } catch {}
+  fs.mkdirSync(ROOT(), { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(ROOT(), 0o700); } catch {}
+}
+
+/** 网关给这一轮的追加系统提示写成单轮文件（0600、随机名、O_EXCL 新建），交 --append-system-prompt-file 一类旗标用。
+ *  发行版、开发版都走这里；一轮结束 sealCleanup 按 ctx-<runId>- 前缀删，没结束的（被杀）一天后 prune 清 */
+export function runPromptFile(runId, text) {
+  ensureRoot();
+  const id = String(runId).replace(/[^\w.-]/g, "_");
+  const f = path.join(ROOT(), `ctx-${id}-p${crypto.randomBytes(6).toString("hex")}.md`);
+  fs.writeFileSync(f, text, { mode: 0o600, flag: "wx" });
+  return f;
+}
 
 /** 一轮结束：删掉这一轮的临时文件 */
 export function sealCleanup(runId) {

@@ -19,7 +19,7 @@ const MGMT = new Set(["mcp", "plugin", "plugins", "config", "doctor", "update", 
 const WITH_VALUE = new Set(["--model", "--resume", "-r", "--settings", "--setting-sources", "--permission-mode", "--input-format", "--output-format",
   "--append-system-prompt", "--append-system-prompt-file", "--system-prompt", "--system-prompt-file", "--mcp-config", "--add-dir", "--effort",
   "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools", "--tools", "--plugin-dir", "--agents", "--session-id",
-  "--permission-prompt-tool", "--append-subagent-system-prompt", "--fallback-model", "--max-turns", "--debug"]);
+  "--permission-prompt-tool", "--append-subagent-system-prompt", "--append-subagent-system-prompt-file", "--fallback-model", "--max-turns", "--debug"]);
 
 function subcommand(argv) {
   // 管理子命令（mcp / plugin / config…）只认跳过了已知带值全局旗标后遇到的第一个位置参数。

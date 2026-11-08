@@ -3032,3 +3032,4 @@
 3032	Diekstrak ke {path}
 3033	Dikompres menjadi {path}
 3034	Pilih
+3035	Prompt sistem tidak bisa ditulis ke file, jadi giliran ini tidak dimulai: {msg}

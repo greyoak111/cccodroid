@@ -3035,4 +3035,5 @@ window.I18N_DICT["fr"] = {
   "已解压到 {path}": "Extrait vers {path}",
   "已压缩为 {path}": "Compressé dans {path}",
   "多选": "Sélection",
+  "系统提示没写成文件，这一轮没有启动：{msg}": "Impossible d'écrire l'invite système dans un fichier ; ce tour n'a pas démarré : {msg}",
 };

@@ -3069,5 +3069,6 @@ window.I18N_DICT.en = {
   "压缩中": "Compressing",
   "已解压到 {path}": "Extracted to {path}",
   "已压缩为 {path}": "Compressed to {path}",
-  "多选": "Select"
+  "多选": "Select",
+  "系统提示没写成文件，这一轮没有启动：{msg}": "Couldn't write the system prompt to a file, so this turn didn't start: {msg}"
 };

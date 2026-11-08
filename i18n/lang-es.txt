@@ -3032,3 +3032,4 @@
 3032	Extraído en {path}
 3033	Comprimido en {path}
 3034	Seleccionar
+3035	No se pudo escribir el prompt del sistema en un archivo; este turno no se inició: {msg}

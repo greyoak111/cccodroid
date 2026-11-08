@@ -3032,3 +3032,4 @@
 3032	Extrait vers {path}
 3033	Compressé dans {path}
 3034	Sélection
+3035	Impossible d'écrire l'invite système dans un fichier ; ce tour n'a pas démarré : {msg}

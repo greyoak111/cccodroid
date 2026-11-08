@@ -50,7 +50,8 @@ if (!sealed()) { process.stdout.write([...ours, ...user].map(q).join(" ") + "\n"
 
 // 能往上下文 / 配置里塞东西的旗标：发行版终端不认（用户的 --settings 能挂 SessionStart 钩子注入，--system-prompt 能整个换掉系统提示）
 const DENY = ["--settings", "--setting-sources", "--plugin-dir", "--plugin-url", "--append-system-prompt", "--append-system-prompt-file",
-  "--system-prompt", "--system-prompt-file", "--agents", "--mcp-config", "--bare", "--safe-mode", "--append-subagent-system-prompt"];
+  "--system-prompt", "--system-prompt-file", "--agents", "--mcp-config", "--bare", "--safe-mode", "--append-subagent-system-prompt",
+  "--append-subagent-system-prompt-file"];
 // 管理子命令（mcp / plugin / config…）不开会话，照常
 const probe = sealArgv(user);
 const isSession = probe !== user;
