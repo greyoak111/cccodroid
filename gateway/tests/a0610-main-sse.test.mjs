@@ -143,3 +143,16 @@ test("#188：整轮重放带 focus → 正在看的会话先放，别的会话�
     }
   } finally { RUNS.delete("a0610-other"); RUNS.delete("a0610-mine"); }
 });
+
+test("200-H-3：事件环按字节封顶，中文事件不会让 32MB 的环实际装下近百 MB", async () => {
+  const c0 = connect(busPort, "/api/events");
+  await c0.wait((b) => b.includes('"type":"sync"'));
+  const id = /id: ([0-9a-z]+\.\d+)\ndata: \{"type":"sync"\}/.exec(c0.got())[1];
+  c0.sock.destroy();
+  for (let i = 0; i < 12; i++) publish({ type: "a0610h3", i, text: "中".repeat(1 << 20) });   // 每条约 3MB 字节、1M 字符
+  const c = connect(busPort, "/api/events?since=" + id);
+  await c.wait((b) => b.includes('"type":"hello"'));
+  const hello = JSON.parse(/data: (\{"type":"hello".*?)\n\n/s.exec(c.got())[1]);
+  c.sock.destroy();
+  assert.equal(hello.resume, false, "36MB 的中文事件超过了 32MB 的环，最早的应当被挤掉");
+});

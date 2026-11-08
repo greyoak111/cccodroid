@@ -33,18 +33,19 @@ export function onPublish(fn) {
 
 export function publish(ev) {
   const seq = ++BUS.seq;
-  const line = `id: ${BOOT}.${seq}\ndata: ${JSON.stringify(ev)}\n\n`;
+  // 环里直接存字节：上限按字节算（以前按 UTF-16 字符数，中文一字三字节，32MB 的线实际放进去近百 MB，0.6.9 审计 200-H-3），推给各连接也不用每次再转
+  const line = Buffer.from(`id: ${BOOT}.${seq}\ndata: ${JSON.stringify(ev)}\n\n`);
   BUS.ring.push({ seq, line }); BUS.bytes += line.length;
   let drop = 0;
   while (drop < BUS.ring.length - 1 && (BUS.ring.length - drop > RING_MAX || BUS.bytes > RING_BYTES)) BUS.bytes -= BUS.ring[drop++].line.length;
   if (drop) BUS.ring.splice(0, drop);
   for (const fn of SUBSCRIBERS) { try { fn(ev); } catch {} }
-  if (BUS.clients.size) { const buf = Buffer.from(line); for (const c of BUS.clients) busWrite(c, buf); }
+  if (BUS.clients.size) for (const c of BUS.clients) busWrite(c, line);
 }
 function busWrite(res, line) {
   try {
     if (res.__q) {                    // 还在补发：先排队；排太多说明对端根本不收，断掉让它重连
-      res.__q.push(line); res.__qb = (res.__qb || 0) + line.length;
+      res.__q.push(line); res.__qb = (res.__qb || 0) + (typeof line === "string" ? Buffer.byteLength(line) : line.length);
       if (res.__qb > REPLAY_MAX) { BUS.clients.delete(res); res.destroy(); }
       return;
     }
