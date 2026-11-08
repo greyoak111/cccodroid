@@ -9,6 +9,7 @@ const src03 = read("app/03-perm-status.js");
 const src04 = read("app/04-session-flow.js");
 const src09 = read("app/09-settings.js");
 const src11 = read("app/11-usage.js");
+const src14 = read("app/14-projects-sched.js");
 
 test("A1 195-A.6 / P1-12：权限切档以网关回的 mode 为准，全局设置记 wanted", () => {
   assert.ok(src03.includes("state.settings.permissionMode = r.wanted || r.mode || mode"), "全局设置要记用户选的 wanted");
@@ -51,6 +52,17 @@ test("C25 197-5.7：额度超过 100% 时数字如实显示，只把条子画满
 test("C27 195-L.10：改强调色后重画月报", () => {
   assert.ok(src11.includes("getElementById(\"user-accent\")"), "盯住 theme.js 写强调色的那段 style");
   assert.ok(src11.includes("new MutationObserver(usRepaint).observe(el"), "style 内容变了就重画");
+});
+
+test("A4 195-K.4：新建项目指令没写进去要提示，并留在指令框里", () => {
+  assert.ok(src14.includes("r.instrSkipped ? t(\"项目已创建；目录里已有 CLAUDE.md，填的指令没写进去\")"), "instrSkipped 要提示");
+  assert.ok(src14.includes("PJ.instrDraft = { id: r.project.id, text: body.instr.trim() }"), "填的指令先留着");
+  assert.ok(src14.includes("if (PJ.instrDraft && PJ.instrDraft.id === id)"), "项目页把草稿并进指令框");
+});
+
+test("A4 195-N.1：改 / 删项目失败显示网关回的 message，不当成功", () => {
+  assert.ok(src14.includes("catch (err) { e.target.value = p[k] || \"\"; toast(err.message, true); }"), "PATCH 失败显示 message 并回退下拉");
+  assert.ok(src14.includes("catch (err) { return toast(err.message, true); }"), "DELETE 失败显示 message");
 });
 
 test("C28 195-O.5–O.7 / 197-5.12：跨午夜 / 换时区重算，补算进度也重画，清除本月不误删邻月", () => {

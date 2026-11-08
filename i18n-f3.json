@@ -82,5 +82,17 @@
     "ru": "Время сброса прошло; обновится после следующего сообщения",
     "id": "Waktu reset sudah lewat; akan diperbarui setelah pesan berikutnya",
     "ar": "انقضى وقت إعادة الضبط؛ سيُحدَّث بعد الرسالة التالية"
+  },
+  {
+    "zh": "项目已创建；目录里已有 CLAUDE.md，填的指令没写进去",
+    "en": "Project created; the folder already had a CLAUDE.md, so the instructions you entered weren't written",
+    "ja": "プロジェクトを作成しました。フォルダに既に CLAUDE.md があったため、入力した指示は書き込まれていません",
+    "ko": "프로젝트를 만들었습니다. 폴더에 이미 CLAUDE.md가 있어 입력한 지침은 기록되지 않았습니다",
+    "zh-Hant": "專案已建立；目錄裡已有 CLAUDE.md，填的指令沒寫進去",
+    "es": "Proyecto creado; la carpeta ya tenía un CLAUDE.md, así que las instrucciones no se escribieron",
+    "fr": "Projet créé ; le dossier contenait déjà un CLAUDE.md, vos instructions n'ont pas été écrites",
+    "ru": "Проект создан; в папке уже был CLAUDE.md, поэтому введённые инструкции не записаны",
+    "id": "Proyek dibuat; folder sudah berisi CLAUDE.md, jadi instruksi yang Anda isi tidak ditulis",
+    "ar": "تم إنشاء المشروع؛ كان المجلد يحتوي على CLAUDE.md بالفعل، لذا لم تُكتب التعليمات التي أدخلتها"
   }
 ]

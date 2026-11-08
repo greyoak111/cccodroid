@@ -111,6 +111,13 @@
     const syncSave = () => box.querySelector(".pj-save").classList.toggle("hidden", !!d.instrErr || ta.value === (d.instr || ""));
     ta.addEventListener("input", syncSave);
     if (keepDraft != null) { ta.value = keepDraft; syncSave(); }
+    // 新建时选的目录里本来就有 CLAUDE.md，填的指令没写进去：把用户填的内容并进指令框当草稿，
+    // 「保存」按钮亮着由他决定要不要合并，别跟着弹窗一起丢掉（0.6.9 审计 195-K.4）
+    if (PJ.instrDraft && PJ.instrDraft.id === id) {
+      const draft = PJ.instrDraft.text;
+      PJ.instrDraft = null;
+      if (!d.instrErr && draft) { ta.value = (d.instr ? d.instr.replace(/\n+$/, "") + "\n\n" : "") + draft; syncSave(); }
+    }
   }
   $("tab-projects").addEventListener("click", async (e) => {
     const box = $("tab-projects");
@@ -251,7 +258,15 @@
       const body = { name: name.value.trim(), mode, path: o.querySelector("#np-dir").value.trim(), url: o.querySelector("#np-url").value.trim(), instr: o.querySelector("#np-instr").value };
       if (!body.name) return toast(t("项目名不能为空"), true);
       b.disabled = true; b.textContent = mode === "git" ? t("正在克隆…") : t("创建中…");
-      try { const r = await jsend("/api/projects", body); OV.close(o); await loadProjects(); toast(t("已创建项目")); openProject(r.project.id); }
+      try {
+        const r = await jsend("/api/projects", body);
+        OV.close(o);
+        await loadProjects();
+        // 选了已有目录、里面本来就有 CLAUDE.md：填的指令没写进去，要说一声，并且别让填的内容跟着弹窗一起丢（0.6.9 审计 195-K.4）
+        if (r.instrSkipped && body.instr.trim()) PJ.instrDraft = { id: r.project.id, text: body.instr.trim() };
+        toast(r.instrSkipped ? t("项目已创建；目录里已有 CLAUDE.md，填的指令没写进去") : t("已创建项目"));
+        openProject(r.project.id);
+      }
       catch (err) { b.disabled = false; b.textContent = t("创建"); toast(err.message, true); }
     });
   }
