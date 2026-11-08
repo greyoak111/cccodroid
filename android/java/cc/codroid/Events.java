@@ -51,6 +51,7 @@ public class Events extends BroadcastReceiver {
             confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             // 界面在前台就直接弹；在后台时安卓 10+ 不让后台弹界面，改发通知让用户点
             if (MainActivity.appForeground()) { try { c.startActivity(confirm); return; } catch (Exception ignored) {} }
+            Updater.ensureChannel(c);   // 新进程里 Updater 可能从没构造过，渠道不在时安卓 8+ 会丢掉这条通知（200-13-09）
             PendingIntent pi = PendingIntent.getActivity(c, 40, confirm, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
             c.getSystemService(NotificationManager.class).notify(40, new Notification.Builder(c, Updater.CH)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
