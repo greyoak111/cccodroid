@@ -200,10 +200,15 @@
   // 更新状态取不到时不能把整个分类藏掉（用户会以为没有更新功能）；明确说失败、给重试（195-M.8）
   function updFailed(msg) {
     $("upd-field").classList.remove("hidden");
-    if (!lastUpd) $("upd-items").innerHTML = `<div class="tiny err">${esc(t("取不到更新状态：{msg}", { msg }))}</div>
-      <div class="it-acts"><button class="btn ghost sm" id="upd-retry">${t("重试")}</button></div>`;
+    // 还没有成功过：画错误和重试；已经有旧结果就留着旧行，但底部补一个重试
+    if (!lastUpd.items) {
+      $("upd-items").innerHTML = `<div class="tiny err">${esc(t("取不到更新状态：{msg}", { msg }))}</div>
+        <div class="it-acts"><button class="btn ghost sm" id="upd-retry">${t("重试")}</button></div>`;
+    } else if (!$("upd-retry")) {
+      $("upd-items").insertAdjacentHTML("beforeend", `<div class="it-acts"><button class="btn ghost sm" id="upd-retry">${t("重试")}</button></div>`);
+    }
     $("upd-last").textContent = "✗ " + msg;
-    $("upd-retry")?.addEventListener("click", loadUpd);
+    const rt = $("upd-retry"); if (rt) rt.onclick = loadUpd;   // 反复失败也只挂一个监听
   }
   async function loadUpd() {
     let st;

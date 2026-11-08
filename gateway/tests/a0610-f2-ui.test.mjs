@@ -18,7 +18,8 @@ test("195-N.7/M.8/O.8 原生跳转失败回 200+ok:false 要提示；更新状�
   const s = src("10-settings-device.js");
   has(s, /const appPost = async \(url, body\) => \{[\s\S]*?r\.ok === false[\s\S]*?toast\(t\("操作失败：\{msg\}"/, "appPost 检查 ok:false");
   has(s, /if \(act === "appsettings"\) appPost\("\/api\/app\/open_app_settings"\);/, "打开系统设置走 appPost");
-  has(s, /function updFailed\(msg\)[\s\S]*?取不到更新状态：\{msg\}[\s\S]*?upd-retry/, "更新状态失败给重试");
+  has(s, /function updFailed\(msg\)[\s\S]*?if \(!lastUpd\.items\)[\s\S]*?取不到更新状态：\{msg\}[\s\S]*?upd-retry/, "首次失败就要给重试");
+  has(s, /\} else if \(!\$\("upd-retry"\)\)[\s\S]*?upd-retry/, "有旧结果时也补重试");
   has(s, /if \(r && r\.ok === false\) toast\(r\.message \|\| t\("检查更新失败"\)/, "检查更新检查 ok:false");
   has(s, /Math\.abs\(b\.currentUa\) \/ 1000/, "电流按微安换算");
   assert.doesNotMatch(s, /> 20000 \? 1000 : 1/, "旧的按阈值猜单位已移除");
