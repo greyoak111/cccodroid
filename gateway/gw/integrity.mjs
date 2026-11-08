@@ -14,6 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { CFG, log } from "./config.mjs";
+import { isObj, loadState, saveState } from "./statefile.mjs";
 
 // ── 1. 冒充系统的标记 ──────────────────────────────────────
 const MARKERS = "system-reminder|system|command-name|command-message|command-args|command-contents|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr|task-notification|user-prompt-submit-hook|ide_selection|ide_opened_file|ide_diagnostics";
@@ -39,18 +40,38 @@ export function integrityHint() {
 // ── 2. 会话封签 ────────────────────────────────────────────
 // 同步读：会话文件一般几 MB，起一轮前、收尾时各读一遍；sessionops 删消息本来就整份读进内存
 const SEAL_FILE = () => path.join(CFG.home, "ccapp-session-seals.json");
+// 封签表：坏文件留底成 .bad-* 再从空的起；以前语法坏就静默清空，旧会话的封签全丢（195-Z.3）
+const sealsShape = (j) => {
+  if (!isObj(j)) return undefined;
+  const out = Object.create(null);
+  for (const [k, v] of Object.entries(j)) {
+    if (!isObj(v) || !Number.isFinite(+v.size) || typeof v.hash !== "string") continue;
+    out[k] = { size: +v.size, hash: v.hash, at: Number.isFinite(+v.at) ? +v.at : 0, ...(v.flag ? { flag: String(v.flag) } : {}) };
+  }
+  return out;
+};
 let SEALS = null;
 function seals() {
   if (SEALS) return SEALS;
-  try { SEALS = JSON.parse(fs.readFileSync(SEAL_FILE(), "utf8")); } catch { SEALS = {}; }
-  if (!SEALS || typeof SEALS !== "object" || Array.isArray(SEALS)) SEALS = {};
+  const r = loadState(SEAL_FILE(), { shape: sealsShape, fallback: () => Object.create(null) });
+  SEALS = r.data;
   SEALS = Object.assign(Object.create(null), SEALS);   // 没有原型：键是会话 id，撞不上 __proto__（11-03 审查 L-2）
   return SEALS;
 }
 function saveSeals() {
   const keys = Object.keys(SEALS);
   if (keys.length > 5000) for (const k of keys.sort((a, b) => (SEALS[a].at || 0) - (SEALS[b].at || 0)).slice(0, keys.length - 5000)) delete SEALS[k];
-  try { fs.writeFileSync(SEAL_FILE() + ".tmp", JSON.stringify(SEALS), { mode: 0o600 }); fs.renameSync(SEAL_FILE() + ".tmp", SEAL_FILE()); } catch (e) { log(`[封签] 写不进：${e.message}`); }
+  const ok = saveState(SEAL_FILE(), SEALS);
+  if (!ok) log("[封签] 写不进：存储满了或没有权限");
+  return ok;
+}
+/** 会话彻底删掉时清掉它的封签（196-真机.1） */
+export function forgetSeal(sid) {
+  if (!sid) return true;
+  const s = seals();
+  if (!(sid in s)) return true;
+  delete s[sid];
+  return saveSeals();
 }
 
 /** 会话文件的 sha256：分块读，不整个读进内存（导入上限 512 MB，每轮开头结尾各算一次）。

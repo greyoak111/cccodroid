@@ -3,39 +3,62 @@
 // 格式：{ v: 1, sessions: { <会话>: { title, misc, miscBy, chapters: { <章序>: { title, status, same, by, at, spec, locked, hist: [ { title, at, by } ] } } } } }
 //   title：最新一章（卷）的题名，交档时算好存着，会话列表直接用
 //   misc：归入杂项（测试、试模型这类用完即弃的会话）；miscBy：ai / user —— 用户定过的，AI 不再改
-import fs from "node:fs";
 import path from "node:path";
-import { CFG, log } from "./config.mjs";
+import { CFG } from "./config.mjs";
+import { isObj, loadState, saveState } from "./statefile.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-archive.json");
 let DB = null;
 
+// sessions 得是普通对象：数组也是 object，可往里放会话号键，JSON.stringify 时全丢（#98 03-011）。
+// 语法坏 / sessions 不是普通对象：留底成 .bad-* 再从空的起（P1-9：以前解析失败不留底，下一次建档把全部题名盖掉）。
+// 单个会话条目坏了就地丢掉，不让它把交档 / 杂项接口打成 500（200-5-06）
+const archiveShape = (j) => {
+  if (!isObj(j) || !isObj(j.sessions)) return undefined;
+  const sessions = {};
+  for (const [id, e] of Object.entries(j.sessions)) {
+    if (!isObj(e)) continue;
+    const chapters = {};
+    if (isObj(e.chapters)) for (const [k, c] of Object.entries(e.chapters)) {
+      if (!/^\d{1,4}$/.test(k) || !isObj(c)) continue;
+      chapters[k] = {
+        ...c,
+        title: typeof c.title === "string" ? c.title : null,
+        hist: Array.isArray(c.hist) ? c.hist.filter(isObj).slice(-20) : [],
+      };
+    }
+    sessions[id] = { ...e, title: typeof e.title === "string" ? e.title : null, chapters };
+  }
+  return { ...j, v: 1, sessions };
+};
+
 export function archiveDb() {
   if (DB) return DB;
-  try { DB = JSON.parse(fs.readFileSync(FILE, "utf8")); } catch { DB = null; }
-  // sessions 得是普通对象：数组也是 object，可往里放会话号键，JSON.stringify 时全丢（#98 03-011）。
-  // 坏了的原文件先留个底再从空的起，别下一次保存把它盖掉
-  if (!DB || typeof DB !== "object" || Array.isArray(DB) || !DB.sessions || typeof DB.sessions !== "object" || Array.isArray(DB.sessions)) {
-    if (DB) { try { fs.copyFileSync(FILE, FILE + ".bad-" + Date.now()); log("档案文件格式不对，已另存一份，从空的开始"); } catch {} }
-    DB = { v: 1, sessions: {} };
-  }
+  DB = loadState(FILE, { shape: archiveShape, fallback: () => ({ v: 1, sessions: {} }) }).data;
   return DB;
 }
 
 /** 返回写成没有：调用方要据此报错，别写失败了还回 ok（网关一重启内存里的就没了 —— 审查 中2） */
 export function saveArchive() {
-  try {
-    fs.writeFileSync(FILE + ".tmp", JSON.stringify(DB), { mode: 0o600 });
-    fs.renameSync(FILE + ".tmp", FILE);
-    return true;
-  } catch (e) { log("写档案失败: " + e.message); return false; }
+  return saveState(FILE, DB ?? { v: 1, sessions: {} });
+}
+
+/** 会话彻底删掉时清掉它的档案（195-A.7 / Y.3） */
+export function archiveForget(id) {
+  const db = archiveDb();
+  if (!db.sessions[id]) return true;
+  delete db.sessions[id];
+  return saveArchive();
 }
 
 /** 会话包里带来的档案（导出时随会话一起放进 manifest，#98 03-001）：只收认得的字段、按类型过一遍；
  *  本机已经有这条会话的档案就不动。返回收没收 */
 export function archiveImport(id, e) {
   const db = archiveDb();
-  if (db.sessions[id] || !e || typeof e !== "object" || Array.isArray(e) || !e.chapters || typeof e.chapters !== "object" || Array.isArray(e.chapters)) return false;
+  if (!e || typeof e !== "object" || Array.isArray(e) || !e.chapters || typeof e.chapters !== "object" || Array.isArray(e.chapters)) return false;
+  // 旧条目只有个空壳（没题名、没有一章有题名）时照样收包里的：彻底删除没清档案时，导入同 ID 的包会被它挡住（195-Y.3）
+  const old = db.sessions[id];
+  if (old && (old.title || Object.values(old.chapters || {}).some((c) => c && c.title))) return false;
   const str = (v, n) => (typeof v === "string" ? v.slice(0, n) : null);
   const chapters = {};
   for (const [k, c] of Object.entries(e.chapters).slice(0, 500)) {

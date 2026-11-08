@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { CFG, PATHS, log } from "./config.mjs";
+import { isObj, loadState, saveState } from "./statefile.mjs";
 import { SETTINGS } from "./settings-store.mjs";
 import { PROVIDER, fetchKeyed, keyOf, modelsUrlOk, providerBrief, providerById } from "./providers.mjs";
 import { NEXT, fetchJsonCapped, sendJson } from "./http.mjs";
@@ -108,8 +109,19 @@ export function effortLevelsOf(model, p = PROVIDER) {
 }
 
 // 从 result.modelUsage 学到的真实窗口（按模型 id 记，落盘）—— 官方账户拿不到 /models，只能这样补
-let WINDOWS = {};
-try { WINDOWS = JSON.parse(fs.readFileSync(PATHS.windows, "utf8")); } catch {}
+// 文件是合法原语（null / 数字）时以前 learnWindow 往它身上写属性直接 TypeError，在 child close 回调里把网关带走（P1-16 / 195-Z.9）
+const windowsShape = (j) => {
+  if (!isObj(j)) return undefined;
+  const out = {};
+  for (const [k, v] of Object.entries(j)) {
+    if (!isObj(v)) continue;
+    const cw = Number(v.context_window);
+    if (!Number.isFinite(cw) || cw <= 0) continue;
+    out[k] = { context_window: cw, max_output_tokens: Number(v.max_output_tokens) || 0 };
+  }
+  return out;
+};
+let WINDOWS = loadState(PATHS.windows, { shape: windowsShape, fallback: () => ({}) }).data;
 export function learnWindow(result, p = PROVIDER) {
   if (!p.nativeModels) return;
   let changed = false;
@@ -121,7 +133,7 @@ export function learnWindow(result, p = PROVIDER) {
       if (JSON.stringify(WINDOWS[k]) !== JSON.stringify(w)) { WINDOWS[k] = w; changed = true; }
     }
   }
-  if (changed) try { fs.writeFileSync(PATHS.windows, JSON.stringify(WINDOWS, null, 2)); } catch {}
+  if (changed) saveState(PATHS.windows, WINDOWS);
 }
 /** 别名（opus）学不到窗口 —— modelUsage 里记的是全名；别名就借 init 报过的那个全名 */
 export const ALIAS_SEEN = {};

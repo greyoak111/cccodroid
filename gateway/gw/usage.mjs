@@ -7,7 +7,7 @@ import { claudeEnv, readLedger } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { devPrivStatus } from "./devside.mjs";
 import { isInjected } from "./integrity.mjs";
-import { readSmallFile } from "./saferead.mjs";
+import { isObj, loadState, saveState, writeAtomic } from "./statefile.mjs";
 
 // ── 本应用耗电统计（设置页「耗电」卡）──────────────────────────────────────────
 // 应用身份能直接量的只有自己进程的 CPU 时间（/proc/<pid>/stat，同 uid 的进程才看得见）；
@@ -20,23 +20,42 @@ import { readSmallFile } from "./saferead.mjs";
 // 桶：m 消息数、t 回复轮数、tl 工具调用、i 输入 token（含缓存）、o 输出 token、s 当时用过的会话、md 各模型的轮数；x = 补算来的
 //     （0.3.13 起）c 读缓存的输入 token（i 的一部分，算缓存命中）、mt 各模型的 token（i+o）、st 各会话的 token（i+o，用量页「最费的对话」）
 const USAGE_FILE = path.join(CFG.home, "ccapp-usage.json");
-const USAGE = { v: 1, since: Date.now(), imported: null, off: false, hours: {} };
+const usageDefault = () => ({ v: 1, since: Date.now(), imported: null, off: false, hours: {} });
+const USAGE = usageDefault();
 let USAGE_UNREADABLE = false, USAGE_WARNED = false;
-try {
-  const raw = readSmallFile(USAGE_FILE, 8 << 20);
-  if (raw != null) Object.assign(USAGE, JSON.parse(raw));
-  else { try { fs.lstatSync(USAGE_FILE); USAGE_UNREADABLE = true; } catch {} }   // 文件在但读不了：别用默认值把它覆盖掉
-} catch {}
-let usageTimer = null;
-function usageSave(now) {
-  clearTimeout(usageTimer);
-  const write = () => {
-    if (USAGE_UNREADABLE) { if (!USAGE_WARNED) { USAGE_WARNED = true; log("使用统计文件读不了，暂停写盘，避免覆盖原文件"); } return; }
-    const tmp = USAGE_FILE + ".tmp";
-    try { fs.writeFileSync(tmp, JSON.stringify(USAGE)); fs.renameSync(tmp, USAGE_FILE); } catch (e) { log("使用统计写盘失败：" + e.message); }
-  };
-  if (now) write(); else usageTimer = setTimeout(write, 5000);
+// hours 必须是普通对象：是数组/字符串时 usageAdd 会往它身上写属性，在 stdout data 回调里把网关带走（P1-14）。
+// 语法坏、形状不对一律留底成 .bad-* 再按默认值起（195-Z.2；以前解析失败不加保护，下一次 5 秒防抖就把原文件盖了）
+const usageShape = (j) => {
+  if (!isObj(j)) return undefined;
+  if (j.hours !== undefined && !isObj(j.hours)) return undefined;
+  const u = { ...j, hours: j.hours || {} };
+  for (const [k, b] of Object.entries(u.hours)) if (!/^\d+$/.test(k) || !isObj(b)) delete u.hours[k];
+  u.since = Number.isFinite(+u.since) ? +u.since : Date.now();
+  u.imported = Number.isFinite(+u.imported) ? +u.imported : null;
+  u.off = !!u.off;
+  u.v = +u.v || 1;
+  return u;
+};
+{
+  let st = null; try { st = fs.lstatSync(USAGE_FILE); } catch {}
+  // 文件在但读不了（不是普通文件 / 太大）：别用默认值把它覆盖掉
+  if (st && (!st.isFile() || st.size > (8 << 20))) USAGE_UNREADABLE = true;
+  else Object.assign(USAGE, loadState(USAGE_FILE, { shape: usageShape, fallback: usageDefault, max: 8 << 20 }).data);
 }
+let usageTimer = null;
+function usageWrite() {
+  if (USAGE_UNREADABLE) { if (!USAGE_WARNED) { USAGE_WARNED = true; log("使用统计文件读不了，暂停写盘，避免覆盖原文件"); } return false; }
+  return saveState(USAGE_FILE, USAGE, { pretty: false });
+}
+/** now=true 立即写（返回是否写成）；否则 5 秒防抖（返回 true 只表示已排上） */
+function usageSave(now) {
+  clearTimeout(usageTimer); usageTimer = null;
+  if (now) return usageWrite();
+  usageTimer = setTimeout(() => { usageTimer = null; usageWrite(); }, 5000);
+  return true;
+}
+/** SIGTERM 收尾：把防抖里还没落盘的那一段写下去（server.mjs 的退出流程要调，195-W.2） */
+export function flushUsage() { clearTimeout(usageTimer); usageTimer = null; return usageWrite(); }
 if (!fs.existsSync(USAGE_FILE)) { USAGE.v = 2; usageSave(true); }
 // 0.3.13 前的数据没有 c / mt / st：启动一会儿后从会话记录补上（不动别的数）
 else if ((USAGE.v || 1) < 2 && USAGE.imported) setTimeout(() => usageImport(true).catch((e) => log("使用统计补算失败：" + e.message)), 20000);
@@ -95,7 +114,10 @@ export function usageMeter(ctx) {
       const from = subPos.get(n) || 0;
       if (st.size <= from) continue;
       let text = "";
-      try { const fd = fs.openSync(file, "r"); const b = Buffer.alloc(st.size - from); fs.readSync(fd, b, 0, b.length, from); fs.closeSync(fd); text = b.toString("utf8"); } catch { continue; }
+      let fd = null;
+      try { fd = fs.openSync(file, "r"); const b = Buffer.alloc(st.size - from); fs.readSync(fd, b, 0, b.length, from); text = b.toString("utf8"); }
+      catch { continue; }
+      finally { if (fd != null) try { fs.closeSync(fd); } catch {} }   // 读一半抛错也要关 fd（200-6-02）
       const end = text.lastIndexOf("\n");
       if (end < 0) continue;                         // 半行：等写完
       subPos.set(n, from + Buffer.byteLength(text.slice(0, end + 1)));
@@ -236,8 +258,18 @@ function usageImport(extraOnly) {
 
 const ENERGY_FILE = path.join(CFG.home, ".cache", "ccapp-energy.json");
 const ENERGY_STEP = 5 * 60e3, ENERGY_HOUR = 3600e3;
-const energy = { v: 1, last: null, hours: {}, days: {}, levels: [], sys: null };
-try { const raw = readSmallFile(ENERGY_FILE, 8 << 20); if (raw != null) Object.assign(energy, JSON.parse(raw)); } catch {}
+const energyDefault = () => ({ v: 1, last: null, hours: {}, days: {}, levels: [], sys: null });
+const energy = energyDefault();
+// hours/days/levels 形状坏会让采样永久静默失败、/api/energy 500（200-5-04）：按形状规整，坏的留底
+const energyShape = (j) => {
+  if (!isObj(j)) return undefined;
+  const e = { ...j };
+  for (const k of ["hours", "days"]) { if (e[k] !== undefined && !isObj(e[k])) return undefined; e[k] = e[k] || {}; }
+  if (!Array.isArray(e.levels)) return undefined;
+  e.levels = e.levels.filter((x) => Array.isArray(x) && x.length >= 3 && Number.isFinite(+x[0]));
+  return e;
+};
+Object.assign(energy, loadState(ENERGY_FILE, { shape: energyShape, fallback: energyDefault, max: 8 << 20 }).data);
 const MY_UID = process.getuid();
 const CLK_TCK = 100;   // 安卓内核一律 100
 
@@ -331,11 +363,7 @@ async function energySample() {
   for (const k of Object.keys(energy.hours)) if (+k < hCut) delete energy.hours[k];
   for (const k of Object.keys(energy.days)) if (k < dCut) delete energy.days[k];
   while (energy.levels.length && energy.levels[0][0] < lCut) energy.levels.shift();
-  try {
-    fs.mkdirSync(path.dirname(ENERGY_FILE), { recursive: true });
-    fs.writeFileSync(ENERGY_FILE + ".tmp", JSON.stringify(energy));
-    fs.renameSync(ENERGY_FILE + ".tmp", ENERGY_FILE);
-  } catch {}
+  saveState(ENERGY_FILE, energy, { pretty: false });
   return bat;
 }
 let energyBusy = null;
@@ -408,7 +436,7 @@ function energySystem() {
         at: Date.now(), cap, used, sinceMs: since, me,
         apps: rank.length, top: rank.slice(0, 5).map(([u, a]) => ({ name: names[u] || "uid " + u, mah: a.mah, me: +u === MY_UID })),
       };
-      try { fs.writeFileSync(ENERGY_FILE, JSON.stringify(energy)); } catch {}
+      saveState(ENERGY_FILE, energy, { pretty: false });
       resolve({ ok: true, sys: energy.sys });
     });
   });
@@ -468,16 +496,22 @@ export async function routeUsage(req, res, u, p) {
     let b; try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
     const op = p.slice(11);
     if (op === "import") return sendJson(res, 200, { ok: true, ...(await usageImport()) });
-    if (op === "set") { USAGE.off = !!b.off; usageSave(true); return sendJson(res, 200, { ok: true, off: USAGE.off }); }
+    if (op === "set") {
+      const before = USAGE.off; USAGE.off = !!b.off;
+      if (!usageSave(true)) { USAGE.off = before; return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
+      return sendJson(res, 200, { ok: true, off: USAGE.off });
+    }
     if (op === "clear") {
       usageGen++;                  // 旧补算的结果作废（#119-5）
+      const before = { hours: USAGE.hours, since: USAGE.since, imported: USAGE.imported };
       if (b.all) { USAGE.hours = {}; USAGE.since = Date.now(); USAGE.imported = Date.now(); }
       else {
         const from = Number(b.from), to = Number(b.to);
         if (!(from < to)) return sendJson(res, 400, { error: "bad range" });
+        USAGE.hours = { ...USAGE.hours };
         for (const k of Object.keys(USAGE.hours)) if (+k * 3600e3 >= from && +k * 3600e3 < to) delete USAGE.hours[k];
       }
-      usageSave(true);
+      if (!usageSave(true)) { Object.assign(USAGE, before); return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
       return sendJson(res, 200, { ok: true });
     }
     // 导出目录被换成软链、或里面放了同名软链：不跟着写到别处（11-03 审查 L-1，同 profile.saveExport）
@@ -486,9 +520,11 @@ export async function routeUsage(req, res, u, p) {
       const dir = path.join(base, "exports");
       fs.mkdirSync(dir, { recursive: true });
       if (fs.lstatSync(dir).isSymbolicLink()) return sendJson(res, 400, { error: "bad dir" });
-      const file = path.join(dir, name), C = fs.constants;
-      try { fs.writeFileSync(file, data, { flag: C.O_WRONLY | C.O_CREAT | C.O_TRUNC | (C.O_NOFOLLOW || 0) }); }
-      catch (e) { return sendJson(res, e.code === "ELOOP" ? 400 : 500, { error: e.code === "ELOOP" ? "bad target" : "write failed" }); }
+      const file = path.join(dir, name);
+      // 临时文件 + fsync + 换名：直接 O_TRUNC 写失败会把上一次的导出也毁掉（197-9.9）；权限 0600（199-3-02）。
+      // 导出目录里有人放了同名软链接：不跟过去写（换名会替换链接本身，先挡下来）
+      try { if (fs.lstatSync(file).isSymbolicLink()) return sendJson(res, 400, { error: "bad target" }); } catch {}
+      if (!writeAtomic(file, data, { mode: 0o600 })) return sendJson(res, 500, { error: "write failed" });
       return sendJson(res, 200, { ok: true, file });
     };
     // 月报图片：前端画好的 PNG 落到导出目录，再交给「保存到」/ 分享

@@ -6,22 +6,43 @@
 // 清单存在 home/ccapp-bookmarks.json；会话进回收站时书签留着（恢复就回来），彻底删了才清掉。
 import fs from "node:fs";
 import path from "node:path";
-import { CFG, log } from "./config.mjs";
+import { CFG, PATHS, log, tz } from "./config.mjs";
+import { isObj, loadState, saveState } from "./statefile.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { findSessionFile, peekSession } from "./sessions.mjs";
 import { SID_RE, listTrash } from "./sessionops.mjs";
 import { findLineOffset, transcriptItems } from "./transcript.mjs";
-import { readSmallFile } from "./saferead.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-bookmarks.json");
 const PER_SESSION = 50, TOTAL = 2000;
 const UUID_RE = /^[0-9a-f-]{8,64}$/i;
 
-let BM = [];
-try { const raw = readSmallFile(FILE, 4 << 20); const j = raw == null ? null : JSON.parse(raw); if (Array.isArray(j)) BM = j.filter((b) => b && b.id && b.sid && b.uuid); } catch {}
+// 语法坏 / 读不了 / 超过 4 MB：留底成 .bad-* 再从空的起；以前下一次添加就把整份盖掉（195-Z.8）
+const bmShape = (j) => {
+  if (!Array.isArray(j)) return undefined;
+  return j.filter((b) => isObj(b) && typeof b.id === "string" && typeof b.sid === "string" && typeof b.uuid === "string")
+    .map((b) => ({
+      id: b.id, sid: b.sid, uuid: b.uuid,
+      off: Number.isFinite(+b.off) ? +b.off : -1,
+      para: Math.max(0, Math.min(10000, Math.floor(Number(b.para) || 0))),
+      role: b.role === "user" ? "user" : "assistant",
+      excerpt: typeof b.excerpt === "string" ? b.excerpt : "",
+      at: Number.isFinite(+b.at) ? +b.at : 0,
+    }))
+    .slice(-TOTAL);
+};
+let BM = loadState(FILE, { shape: bmShape, fallback: () => [], max: 4 << 20 }).data;
 function save() {
-  try { fs.writeFileSync(FILE + ".tmp", JSON.stringify(BM)); fs.renameSync(FILE + ".tmp", FILE); }
-  catch (e) { log("书签保存失败: " + e.message); }
+  const ok = saveState(FILE, BM, { pretty: false });
+  if (!ok) log("书签保存失败（存储满了或没有权限）");
+  return ok;
+}
+/** 会话彻底删掉时清掉它的书签（195-A.7） */
+export function forgetBookmarks(sid) {
+  if (!sid) return true;
+  const n = BM.length;
+  BM = BM.filter((b) => b.sid !== sid);
+  return BM.length === n ? true : save();
 }
 
 /** 文件尾部倒着找：最后一条 role 相同、正文以 head 开头的消息 → { uuid, off }。只看最后 8 MB（刚答完的那几条） */
@@ -56,7 +77,11 @@ export async function routeBookmarks(req, res, u, p) {
     const sid = u.searchParams.get("session");
     // 会话内：只给按钮上色用，不碰文件
     if (sid) return sendJson(res, 200, { items: BM.filter((b) => b.sid === sid).map(pub) });
-    // 书签页：按会话带上标题；会话进了回收站的先藏着，彻底没了的顺手清掉
+    // 书签页：按会话带上标题；会话进了回收站的先藏着，彻底没了的顺手清掉。
+    // .claude/projects 读不出来时不能当成「会话都没了」——以前一次 EIO 就把全部书签清空（195-Y.8）
+    let canList = true;
+    try { fs.accessSync(PATHS.projects, fs.constants.R_OK); } catch { canList = false; }
+    if (!canList) return sendJson(res, 200, { items: BM.map(pub), unreadable: true });
     const trash = new Set(listTrash().map((t) => t.id)), out = [], meta = new Map();
     let gone = 0;
     for (const b of BM) {
@@ -94,17 +119,18 @@ export async function routeBookmarks(req, res, u, p) {
     if (BM.filter((x) => x.sid === sid).length >= PER_SESSION) return sendJson(res, 409, { error: "full", limit: PER_SESSION });
     const item = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), sid, uuid, off, para, role,
       excerpt: String(b.excerpt || "").replace(/\s+/g, " ").trim().slice(0, 120), at: Date.now() };
+    const before = BM.slice();
     BM.push(item);
     if (BM.length > TOTAL) BM.splice(0, BM.length - TOTAL);
-    save();
+    if (!save()) { BM = before; return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("书签没保存上：存储满了或没有权限") }); }
     return sendJson(res, 200, { ok: true, item: pub(item) });
   }
   if (req.method === "POST" && p === "/api/bookmarks/del") {
     let b; try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
     const ids = new Set((Array.isArray(b.ids) ? b.ids : [b.id]).map(String));
-    const n = BM.length;
+    const before = BM, n = BM.length;
     BM = BM.filter((x) => !ids.has(x.id));
-    if (BM.length !== n) save();
+    if (BM.length !== n && !save()) { BM = before; return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("书签没保存上：存储满了或没有权限") }); }
     return sendJson(res, 200, { ok: true, removed: n - BM.length });
   }
   return NEXT;

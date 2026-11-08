@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { CFG, log } from "./config.mjs";
+import { isObj, loadState, saveState } from "./statefile.mjs";
 import { scanText } from "./breach.mjs";
 
 const MAX = 8 << 20;   // 超过的读不全：记成风险，指纹按大小 + 修改时间
@@ -114,11 +115,16 @@ export function projectRisks(cwd) {
 
 // 认过的：{ 工作目录 realpath: { fp, at } }
 const TRUST_FILE = () => path.join(CFG.home, "ccapp-project-trust.json");
+const trustShape = (j) => {
+  if (!isObj(j)) return undefined;
+  const out = {};
+  for (const [k, v] of Object.entries(j)) if (isObj(v) && typeof v.fp === "string") out[k] = { fp: v.fp, at: Number.isFinite(+v.at) ? +v.at : 0 };
+  return out;
+};
 let TRUST = null;
 function trust() {
   if (TRUST) return TRUST;
-  try { TRUST = JSON.parse(fs.readFileSync(TRUST_FILE(), "utf8")); } catch { TRUST = {}; }
-  if (!TRUST || typeof TRUST !== "object" || Array.isArray(TRUST)) TRUST = {};
+  TRUST = loadState(TRUST_FILE(), { shape: trustShape, fallback: () => ({}) }).data;
   TRUST = Object.assign(Object.create(null), TRUST);
   return TRUST;
 }
@@ -129,8 +135,7 @@ export function trustProject(cwd, fp) {
   t[keyOf(cwd)] = { fp, at: Date.now() };
   const keys = Object.keys(t);
   if (keys.length > 500) for (const k of keys.sort((a, b) => (t[a].at || 0) - (t[b].at || 0)).slice(0, keys.length - 500)) delete t[k];
-  try { fs.writeFileSync(TRUST_FILE() + ".tmp", JSON.stringify(t), { mode: 0o600 }); fs.renameSync(TRUST_FILE() + ".tmp", TRUST_FILE()); }
-  catch (e) { log(`[项目配置] 记不下：${e.message}`); }
+  if (!saveState(TRUST_FILE(), t)) log("[项目配置] 记不下：存储满了或没有权限");
 }
 /** 用户在应用里自己改了项目的钩子 / MCP（扩展页）：改完就认，别下一轮反过来问他自己写的东西 */
 export function retrustProject(cwd) {

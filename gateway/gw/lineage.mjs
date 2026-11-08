@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { CFG, PATHS, log } from "./config.mjs";
+import { isObj, loadState, saveState } from "./statefile.mjs";
 import { NEXT, sendJson } from "./http.mjs";
 import { NAMES, NAMES_REV, PINS } from "./sessions.mjs";
 import { archiveDb, archivedTitle, miscOf } from "./archive-store.mjs";
@@ -27,19 +28,17 @@ const PROG = { done: 0, total: 0 };   // 首次整理大户要十几秒，页面
 function loadCache() {
   if (RECS) return;
   RECS = new Map();
-  try {
-    const j = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
-    if (j && j.v === 2 && Array.isArray(j.recs)) for (const r of j.recs) if (r && r.id) RECS.set(r.id, { ...emptyRecord(r.id), ...r });
-  } catch {}
+  const r = loadState(CACHE_FILE, {
+    shape: (j) => isObj(j) && j.v === 2 && Array.isArray(j.recs) ? { ...j, recs: j.recs.filter((x) => isObj(x) && typeof x.id === "string") } : undefined,
+    fallback: () => ({ v: 2, recs: [] }),
+    max: 64 << 20,
+  });
+  for (const x of r.data.recs) RECS.set(x.id, { ...emptyRecord(x.id), ...x });
 }
 function saveCache() {
   if (!dirty) return;
   dirty = false;
-  try {
-    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-    fs.writeFileSync(CACHE_FILE + ".tmp", JSON.stringify({ v: 2, recs: [...RECS.values()] }), { mode: 0o600 });
-    fs.renameSync(CACHE_FILE + ".tmp", CACHE_FILE);
-  } catch (e) { log("写脉络缓存失败: " + e.message); }
+  if (!saveState(CACHE_FILE, { v: 2, recs: [...RECS.values()] }, { pretty: false })) log("写脉络缓存失败（存储满了或没有权限）");
 }
 
 /** 列出全部会话文件：projects 下的，加回收站里的（画成幽灵节点，亲缘不断） */
@@ -146,6 +145,9 @@ const tsAt = (rec, uuid) => { const i = rec && uuid ? rec.uu.indexOf(uuid) : -1;
 /** 按会话号前缀找（档号引用用）：只看已有缓存、不刷新、不碰回收站，同步返回 —— 插话写进 stdin 的那一刻等不起整理索引 */
 export function lineageByShort(short) {
   loadCache();
+  // 网关刚重启、还没跑过 refresh 时 META 是空的：磁盘索引有记录也会被判成「找不到」（200-15-09）。
+  // 这里同步扫一遍目录补上（只 stat，不读内容）
+  if (!META.size) for (const f of listFiles()) { try { META.set(f.id, { file: f.file, project: f.project, trashed: f.trashed, mtime: fs.statSync(f.file).mtimeMs }); } catch {} }
   const adb = archiveDb().sessions, out = [];
   for (const r of RECS.values()) {
     if (!r.id.startsWith(short) || META.get(r.id)?.trashed || !META.get(r.id)) continue;

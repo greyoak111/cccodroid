@@ -5,9 +5,9 @@
 // 接口（provider）也按会话：单独选过模型（含 "" = 接口默认）的会话钉在记下的那家，全局切了接口它也照旧用那家；
 // 只选过思考强度的（model 为 null）模型和接口都跟着全局默认。记下的那家被删了，这条就当没有。
 // 存储：home/ccapp-session-models.json  { 会话号: { model, effort, provider, at } }，留最近 3000 条。
-import fs from "node:fs";
 import path from "node:path";
-import { CFG } from "./config.mjs";
+import { CFG, log, tz } from "./config.mjs";
+import { isObj, loadState, saveState } from "./statefile.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { PROVIDER, providerById } from "./providers.mjs";
 import { SETTINGS } from "./settings-store.mjs";
@@ -16,17 +16,39 @@ import { projectById, projectDefaults, projectOfDir } from "./projects.mjs";
 import { findSessionFile, peekSession } from "./sessions.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-session-models.json");
-let DB = {};
-try { DB = JSON.parse(fs.readFileSync(FILE, "utf8")) || {}; } catch {}
+// 文件是 [] 或原语时：数组写进去的键会被 JSON.stringify 丢掉（钉选全没）、原语上写属性直接抛 TypeError（195-Z.6 / 197-9.4）
+const sessShape = (j) => {
+  if (!isObj(j)) return undefined;
+  const out = {};
+  for (const [sid, r] of Object.entries(j)) {
+    if (!isObj(r)) continue;
+    out[sid] = {
+      model: typeof r.model === "string" || r.model === null ? r.model : null,
+      effort: typeof r.effort === "string" || r.effort === null ? r.effort : null,
+      provider: typeof r.provider === "string" ? r.provider : null,
+      at: Number.isFinite(+r.at) ? +r.at : 0,
+    };
+  }
+  return out;
+};
+let DB = loadState(FILE, { shape: sessShape, fallback: () => ({}) }).data;
 let saveT = 0;
-function save() {
-  clearTimeout(saveT);
-  saveT = setTimeout(() => {
-    const ids = Object.keys(DB);
-    if (ids.length > 3000) for (const id of ids.sort((a, b) => (DB[a].at || 0) - (DB[b].at || 0)).slice(0, ids.length - 3000)) delete DB[id];
-    try { fs.writeFileSync(FILE + ".tmp", JSON.stringify(DB)); fs.renameSync(FILE + ".tmp", FILE); } catch {}
-  }, 300);
+function saveNow() {
+  const ids = Object.keys(DB);
+  if (ids.length > 3000) for (const id of ids.sort((a, b) => (DB[a].at || 0) - (DB[b].at || 0)).slice(0, ids.length - 3000)) delete DB[id];
+  const ok = saveState(FILE, DB, { pretty: false });
+  if (!ok) log("会话模型记录没保存上（存储满了或没有权限）");
+  return ok;
 }
+function save() {
+  clearTimeout(saveT); saveT = 0;
+  saveT = setTimeout(() => { saveT = 0; saveNow(); }, 300);
+  return true;
+}
+/** SIGTERM 收尾：把 300ms 防抖里还没落盘的那一段写下去（server.mjs 的退出流程要调，195-W.2） */
+export function flushSessModel() { clearTimeout(saveT); saveT = 0; return saveNow(); }
+/** 会话彻底删掉时清掉它钉的模型/接口（196-真机.1） */
+export function forgetSessModel(sid) { if (sid && DB[sid]) { delete DB[sid]; return saveNow(); } return true; }
 
 /** 这个会话记下的选择；没记过、或记的那家已经不在了，返回 null */
 export function sessModel(sid) {
@@ -120,7 +142,9 @@ export async function routeSessModel(req, res, u, p) {
       if (!providerById(b.provider)) return sendJson(res, 400, { error: "provider" });
       patch.provider = b.provider;
     }
+    const before = { ...DB };
     if (b.reset) clearSessModel(String(b.id)); else setSessModel(String(b.id), patch);
+    if (!flushSessModel()) { DB = before; return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
     return sendJson(res, 200, { ok: true, ...effectiveModel(String(b.id)) });
   }
   return NEXT;

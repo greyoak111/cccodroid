@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { CFG } from "./config.mjs";
+import { writeAtomic } from "./statefile.mjs";
 import { NEXT, readBodyBuf, sendJson } from "./http.mjs";
 import { lineageFile, lineageGraph, lineageRecord, lineageStamp } from "./lineage.mjs";
 import { agentFilesOf } from "./transcript.mjs";
@@ -280,9 +281,10 @@ export function saveExport(name, data) {
   fs.mkdirSync(dir, { recursive: true });
   if (fs.lstatSync(dir).isSymbolicLink()) return { error: "bad_dir" };
   const file = path.join(dir, name);
-  // 不跟软链接：导出目录里有人放了同名链接，也写不到别处去
-  const C = fs.constants;
-  try { fs.writeFileSync(file, buf, { flag: C.O_WRONLY | C.O_CREAT | C.O_TRUNC | (C.O_NOFOLLOW || 0) }); } catch (e) { return { error: e.code === "ELOOP" ? "bad_target" : "write_failed" }; }
+  // 临时文件 + fsync + 换名：直接 O_TRUNC 同名导出，写到一半失败会把上一次的也毁掉（197-9.9）。
+  // 不跟软链接（换名会替换链接本身，但先把这种摆放挡下来）；导出是用户文件，权限 0600（199-3-02）
+  try { if (fs.lstatSync(file).isSymbolicLink()) return { error: "bad_target" }; } catch {}
+  if (!writeAtomic(file, buf, { mode: 0o600 })) return { error: "write_failed" };
   return { ok: true, file };
 }
 
