@@ -82,7 +82,7 @@ import { routeMerge } from "./gw/merge.mjs";
 import { routeProfile } from "./gw/profile.mjs";
 import { routeBackfill } from "./gw/backfill.mjs";
 import { routeArchive } from "./gw/archive.mjs";
-import { installCrashGuard, runShutdown } from "./gw/crashguard.mjs";
+import { guarded, installCrashGuard, runShutdown } from "./gw/crashguard.mjs";
 import { RUNS } from "./gw/runs.mjs";
 import { syncGitSafe } from "./gw/gitsafe.mjs";
 import { COOKIE, SESSION, UI_HOST, cookieHostOk, denyLog, denyReason, localAddr, proofFor, tokenOk } from "./gw/access.mjs";
@@ -133,7 +133,8 @@ const server = http.createServer(async (req, res) => {
   try {
     for (const r of ROUTES) if ((await r(req, res, u, p)) !== NEXT) return;
 
-    if (req.method === "GET") return serveStatic(req, res, p);
+    // HEAD 和 GET 同一条静态分发：头一样（含 content-length），Node 对 HEAD 自动不发正文（195-C.19 后半 / 196）
+    if (req.method === "GET" || req.method === "HEAD") return serveStatic(req, res, p);
 
     return sendJson(res, 404, { error: "not found" });
   } catch (e) {
@@ -203,6 +204,8 @@ server.listen(CFG.port, "127.0.0.1", () => {
   log(`  历史会话 ${listSessions(500).length} 个`);
   try { reapOrphans(); } catch (e) { log("孤儿进程清理失败: " + e.message); }
   try { expireTrash(); } catch (e) { log("回收站清理失败: " + e.message); }
+  // 只在启动时清一次的话，长期不重启的应用里过期回收站永远不清（195-A.9）；每天一次，unref 不拦着退出
+  setInterval(guarded("回收站清理", expireTrash), 24 * 3600e3).unref();
   try { customRefresh(); } catch (e) { log("自定义组件入口重写失败: " + e.message); }
   try { cleanOrphans(); } catch (e) { log("旧工具包残留清理失败: " + e.message); }
   try { startWorkIsland(); } catch (e) { log("工作岛启动失败: " + e.message); }
