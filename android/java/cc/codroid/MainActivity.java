@@ -43,20 +43,45 @@ public class MainActivity extends Activity {
 
     static final String ACTION_APPLY_DEVKIT = "cc.codroid.APPLY_DEVKIT";
     // 内部动作的口令：MainActivity 是导出的（启动器、分享要用），别的应用也能发这些 action 让我们去下 650MB 工具包、
-    // 重装 APK（审查 v0.5.5 Android-M2）。我们自己发的 Intent / PendingIntent 都带上这个随机口令，存在私有 SharedPreferences 里，
-    // 跨进程重启不变（通知里的 PendingIntent 才一直有效）；对不上的一律不理
+    // 重装 APK（审查 v0.5.5 Android-M2）。我们自己发的 Intent / PendingIntent 都带上这个口令，对不上的一律不理。
+    // 口令不再明文落盘（0.6.10 审计 200-1-06）：由 Android Keystore 里不可导出的 HMAC 密钥派生，跨进程重启 / 应用更新都不变
+    // （通知里的 PendingIntent 才一直有效）。Keystore 用不了就退回「本次启动随机、只放内存」—— 那种情况下旧通知点了不响应，
+    // 但口令无论如何不写回磁盘。旧版本存在 shared_prefs 里的明文 k 启动时删掉
     static final String IK = "cc.ik";
+    private static final String IK_ALIAS = "cc-ik";
     private static volatile String ikCache;
     static String intentKey(android.content.Context c) {
         if (ikCache != null) return ikCache;
         android.content.SharedPreferences sp = c.getSharedPreferences("intent", MODE_PRIVATE);
-        String k = sp.getString("k", null);
-        if (k == null || k.length() < 32) {
+        if (sp.contains("k")) sp.edit().remove("k").commit();   // 旧版的明文口令作废
+        String k = ikFromKeystore();
+        if (k == null) {
             byte[] b = new byte[24]; new java.security.SecureRandom().nextBytes(b);
             StringBuilder h = new StringBuilder(); for (byte x : b) h.append(String.format("%02x", x & 0xff));
-            k = h.toString(); sp.edit().putString("k", k).commit();
+            k = h.toString();
         }
         return ikCache = k;
+    }
+    /** 从 Keystore 的 HMAC 密钥派生口令；设备不支持 / 密钥损坏时返回 null，由调用方退回内存随机 */
+    private static String ikFromKeystore() {
+        try {
+            java.security.KeyStore ks = java.security.KeyStore.getInstance("AndroidKeyStore");
+            ks.load(null);
+            javax.crypto.SecretKey key = (javax.crypto.SecretKey) ks.getKey(IK_ALIAS, null);
+            if (key == null) {
+                javax.crypto.KeyGenerator g = javax.crypto.KeyGenerator.getInstance(
+                    android.security.keystore.KeyProperties.KEY_ALGORITHM_HMAC_SHA256, "AndroidKeyStore");
+                g.init(new android.security.keystore.KeyGenParameterSpec.Builder(
+                    IK_ALIAS, android.security.keystore.KeyProperties.PURPOSE_SIGN).build());
+                key = g.generateKey();
+            }
+            javax.crypto.Mac m = javax.crypto.Mac.getInstance("HmacSHA256");
+            m.init(key);
+            byte[] d = m.doFinal("cc.ik.v1".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder h = new StringBuilder();
+            for (byte x : d) h.append(String.format("%02x", x & 0xff));
+            return h.toString();
+        } catch (Throwable e) { return null; }
     }
     static Intent internal(android.content.Context c, String action) {
         return new Intent(c, MainActivity.class).setAction(action).putExtra(IK, intentKey(c));

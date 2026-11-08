@@ -9,7 +9,7 @@
 | 199-1-03 | Env.java 只探测 127.0.0.2:8791（GatewayService 那半移交 j2） | 已修（Env 半）+ 移交 |
 | 199-1-04 | MainActivity.java + 19-boot.js 伪造 SSE / onopen 无校验 | 已修（原生层）+ 移交（04 前端加强） |
 | 199-1-05 | MainActivity.java ACTION_SEND 写 workspace/uploads | 待定 |
-| 199-1-06 | MainActivity.java IK 明文存 shared_prefs | 待做 |
+| 199-1-06 | MainActivity.java IK 明文存 shared_prefs | 已修 |
 | 199-1-07 | 并入 13-02，主要位置 GatewayService/Env → 归 j2，配合项写移交 | 移交 |
 | 199-1-08 | MainActivity.java 无口令 JS 桥 whatsNew | 待做 |
 | 200-13-07 | MainActivity.java 分屏失焦也发通知 | 待做 |
@@ -23,6 +23,7 @@
 | 199-1-02 | 本条 | `chooserResult()` 增加 `ownUri()` 过滤：本应用包名下的 content authority（docs/share/shizuku）和指向应用私有目录的 file URI 一律丢弃，WebView 与浏览器窗格两处共用 | `javac` 全量编译通过。真机：在对话输入框点回形针 → 系统选择器里选 cccodroid「内部文件」里的任意文件 → 不再附加（旧版会以本应用身份读出来）；从相册 / 下载 / 云盘选正常文件照常附加；应用内浏览器网页的 `<input type=file>` 同理 |
 | 199-1-03（Env 半） | 本条 | `Env.portBusy()` 改为 `listening(127.0.0.2) \|\| listening(127.0.0.1)`：网关两个回环地址都听，主服务那个被别的应用占住时也要报「被占」，不再让 supervise 反复拉起又退出 | `javac` 全量编译通过。真机：先用别的应用/`nc -l 127.0.0.1 8791` 占住主端口，再启动 App → 应显示「端口被占」提示而不是网关反复重启；释放端口后能正常起。GatewayService 那半见「移交」 |
 | 199-1-04 | 本条 | 界面 WebView 的 `shouldInterceptRequest` 给所有指向本网关的 `/api/*` 加一道当场证明：`Env.proveGateway(true)`（不吃 3 秒缓存），核不过直接回 502，请求（连同 Cookie 和用户输入）根本不出 WebView。页面里的 `EventSource` 重连也走这里，冒牌占端口时 `onopen` 不会成立。静态资源原有的 `X-CC-Mac` 校验不变 | `javac` 全量编译通过。真机：正常打开界面、发消息、看事件总线照常；通知栏「停止」网关 → 在应用内终端 `nc -l 127.0.0.2 8791` → 切回已打开的界面，状态应显示「与网关断开，正在重连…」而不是「已连接」，输入框发消息后 nc 终端里看不到任何用户内容（只会有 `/__proof?n=…` 的探测行）；关掉 nc、等网关被拉起后界面自动接回。logcat 无专门标签，可看 `cccodroid` 日志里没有新的异常 |
+| 199-1-06 | 本条 | `MainActivity.intentKey()` 改为从 Android Keystore 的不可导出 HMAC 密钥（别名 `cc-ik`，本应用已有 Keystore 用法见 `Consent.java`）派生，不再往 shared_prefs 写明文；旧版本的明文 `k` 首次运行删掉。Keystore 不可用时退回「本次启动随机、只放内存」，绝不写盘 | `javac` 全量编译通过。真机：① 升级安装后运行一次，用应用内终端 `cat /data/user/0/cc.codrdev/shared_prefs/intent.xml` → 里面没有 `k`；② 正常使用通知动作（跑完一轮后切后台收到完成通知，点进去）照常打开对应会话；③ 重启手机后再点旧通知，仍能打开（说明 Keystore 派生的口令跨进程 / 重启稳定）；④ 若某机型 Keystore 异常，动作在进程重启后失效但界面其他功能不受影响（退回内存随机） |
 
 ## 不成立
 
@@ -49,6 +50,7 @@
 |---|---|
 | 199-1-02 | 从系统文件选择器里选 cccodroid「内部文件」里的文件作为附件 / 网页上传，现在会被忽略（工作区文件请用输入框的 `@` 文件面板引用路径）。正常应用（相册、下载、云盘）给的文件不受影响。 |
 | 199-1-04 | 网关重启后的第一个 `/api` 请求可能先失败一次（核到新启动号、Cookie 换掉之后自动恢复）；`/api` 请求每次都多一趟本机证明往返（毫秒级）。网关被杀时界面会更快显示「与网关断开」，而不是悄悄把输入发给占端口的应用。 |
+| 199-1-06 | 升级到这一版后，升级前发出去、还挂在通知栏里的旧动作通知点进去不再响应（旧口令已作废）；升级后新出现的通知不受影响。第一次运行会把 shared_prefs 里的明文口令删掉。 |
 
 ## 全量测试
 
