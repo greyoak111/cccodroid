@@ -232,7 +232,7 @@ test("超大记忆文件：跳过+提示，改名移出，不整轮拦", () => {
   put(path.join(m, "MEMORY.md"), "- 正常记忆\n");
   const p = sealPrepare({ cwd: W(), runId: 9 });
   assert.equal(p.block, null);
-  assert.ok((p.notes || []).some((n) => n.includes("记忆文件太大没回填")));
+  assert.ok((p.notes || []).some((n) => n.includes("记忆文件太大没扫") && n.includes(".ccapp-skip")));
   assert.ok(!fs.existsSync(big), "超大记忆文件不许留在记忆目录");
   assert.ok(fs.existsSync(big + ".ccapp-skip"), "改名移出的文件在");
 });

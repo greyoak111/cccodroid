@@ -17,8 +17,9 @@ const SECRETS = [
   // 复核 r8（11-08）：点拆分（\x2e 转义还原成 .gate.way-token）也归这里
   [/\.gate[\s."']*way[\s."']*-?[\s."']*token\b/, "gateway token (split spelling)"],
   // 复核 r8（11-08）：通配符与波浪号变量改形实测也能解析到令牌路径；\xHH 转义改形走 normCmd 还原后落回上面这条
-  [/\.gat[*?][\w-]*token\b/, "gateway token (wildcard split)"],
+  [/\.gat(?:[*?]|\[[^\]]+\])[\w\-\]]*token\b/, "gateway token (wildcard split)"],
   [/\.gate[*?][^\s"';&|]*(?=$|[\s"';&|)<>])/, "gateway token (bare wildcard)"],
+// 已知代价：cp ~/$file 这类普通变量用法也会问（确认卡不是拦截）；变量名限定 gate/token 会漏，保持宽口径
   [/~\/\.?\$[A-Za-z_][\w]*/, "tilde + shell variable (possible token path)"],
   [/ccapp-(?:providers|config|seed)[\w.-]*\.json/, "provider API keys"],
   [/\.cache\/(?:ccapp-key|llama-api-key)/, "API key file"],
@@ -125,8 +126,8 @@ function normCmd(s) {
     t = t.replace(/\$\s*\(\s*echo\s+(?:-n\s+)?['"]?([A-Za-z0-9+/]{2,}={0,2})['"]?\s*\|\s*base64\s+(?:-d\b|--decode\b|-D\b|decode\b)\s*\)/g, (m, b) => {
       try {
         const d = Buffer.from(b, "base64").toString("utf8").trimEnd();
-        // 分块拼接的尾段可能只有两三个字符（ZW4= → en），门槛放宽到 2
-        return /^[\x20-\x7e]{2,}$/.test(d) ? d : m;
+        // 分块拼接的尾段可能只有两三个字符（ZW4= → en），门槛放宽到 2；复核 r9：混搭切法前段解出 1 字符，降到 1
+        return /^[\x20-\x7e]{1,}$/.test(d) ? d : m;
       } catch { return m; }
     });
     t = t.replace(B64_RUN, (m) => {
@@ -138,7 +139,7 @@ function normCmd(s) {
   } catch {}
   return t
     .replace(/\\x([0-9a-fA-F]{2})/g, (m, h) => { const c = String.fromCharCode(parseInt(h, 16)); return c >= " " && c <= "~" ? c : m; })
-    .replace(/["']{2}/g, "")
+    .replace(/["']{2}/g, "").replace(/\\\n/g, "")
     .replace(/\\(?=[A-Za-z])/g, "")
     .replace(/\$\s*\(\s*echo\s+(?:-n\s+)?['"]?([^'")]+)['"]?\s*\)/g, "$1")
     .replace(/\$\{([A-Za-z_][\w]*)\}/g, "$1");

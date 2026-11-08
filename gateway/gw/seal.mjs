@@ -464,7 +464,7 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   const memDir = memoryDir(cwd);
   const mem = scanMemory(memDir);
   found.push(...mem.found);
-  if (mem.skipped.length) notes.push(`记忆文件太大没回填：${mem.skipped.slice(0, 4).join(", ")}`);
+  if (mem.skipped.length) notes.push(`记忆文件太大没扫，已改名 .ccapp-skip（去掉后缀可恢复）：${mem.skipped.slice(0, 4).join(", ")}`);
   settings.autoMemoryDirectory = memDir;
 
   if (found.length) return { args: [], settings: null, block: { found }, memDir, memFp: mem.fp, notes };

@@ -191,3 +191,22 @@ test("复核 r8 落实：令牌读取四种改形都问", () => {
     "cat ~/logs/$date.txt",
   ]) assert.equal(judge("Bash", { command: cmd }), null, cmd);
 });
+
+// 复核 r9 落实（11-08）：方括号 glob、反斜杠续行、分块 base64 混搭与极限切法都问
+test("复核 r9 落实：方括号 glob、反斜杠续行、分块混搭与极限切法都问", () => {
+  const b64 = (s) => Buffer.from(s).toString("base64");
+  // 每段解码 1 字符的极限切法：整构解码阈值 1 才认得（不依赖 B64_RUN 兜底）
+  const chunk2 = "cat " + [...".gateway-token"].map((c) => "$(echo " + b64(c) + "|base64 -d)").join("");
+  for (const cmd of [
+    "cat ~/.gat[e]way-token",
+    "cat ~/.gate\\\nway-token",
+    "cat $(echo " + b64(".") + "|base64 -d)$(echo " + b64("gateway-token") + "|base64 -d)",
+    chunk2,
+  ]) assert.ok(judge("Bash", { command: cmd }), cmd);
+  // 良性对照：普通 echo/base64 示例、普通通配、普通变量不问
+  for (const cmd of [
+    "cat $(echo hello | base64 -d)",
+    "ls ~/.config",
+    "cat file[0-9].txt",
+  ]) assert.equal(judge("Bash", { command: cmd }), null, cmd);
+});
