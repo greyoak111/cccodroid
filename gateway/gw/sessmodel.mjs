@@ -14,6 +14,7 @@ import { SETTINGS } from "./settings-store.mjs";
 import { cachedModels, effortLevelsOf, normEffort } from "./models.mjs";
 import { projectById, projectDefaults, projectOfDir } from "./projects.mjs";
 import { findSessionFile, peekSession } from "./sessions.mjs";
+import { onShutdown } from "./crashguard.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-session-models.json");
 // 文件是 [] 或原语时：数组写进去的键会被 JSON.stringify 丢掉（钉选全没）、原语上写属性直接抛 TypeError（195-Z.6 / 197-9.4）
@@ -47,6 +48,7 @@ function save() {
 }
 /** SIGTERM 收尾：把 300ms 防抖里还没落盘的那一段写下去（server.mjs 的退出流程要调，195-W.2） */
 export function flushSessModel() { clearTimeout(saveT); saveT = 0; return saveNow(); }
+onShutdown("会话模型", flushSessModel);   // 退出流程 runShutdown() 会调；不再靠 server.mjs 记得（196-状态写.2）
 /** 会话彻底删掉时清掉它钉的模型/接口（196-真机.1） */
 export function forgetSessModel(sid) { if (sid && DB[sid]) { delete DB[sid]; return saveNow(); } return true; }
 

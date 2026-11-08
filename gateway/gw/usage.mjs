@@ -8,6 +8,7 @@ import { NEXT, readBody, sendJson } from "./http.mjs";
 import { devPrivStatus } from "./devside.mjs";
 import { isInjected } from "./integrity.mjs";
 import { isObj, loadState, saveState, writeAtomic } from "./statefile.mjs";
+import { onShutdown } from "./crashguard.mjs";
 
 // ── 本应用耗电统计（设置页「耗电」卡）──────────────────────────────────────────
 // 应用身份能直接量的只有自己进程的 CPU 时间（/proc/<pid>/stat，同 uid 的进程才看得见）；
@@ -56,6 +57,7 @@ function usageSave(now) {
 }
 /** SIGTERM 收尾：把防抖里还没落盘的那一段写下去（server.mjs 的退出流程要调，195-W.2） */
 export function flushUsage() { clearTimeout(usageTimer); usageTimer = null; return usageWrite(); }
+onShutdown("用量", flushUsage);   // 退出流程 runShutdown() 会调；不再靠 server.mjs 记得（196-状态写.2）
 if (!fs.existsSync(USAGE_FILE)) { USAGE.v = 2; usageSave(true); }
 // 0.3.13 前的数据没有 c / mt / st：启动一会儿后从会话记录补上（不动别的数）
 else if ((USAGE.v || 1) < 2 && USAGE.imported) setTimeout(() => usageImport(true).catch((e) => log("使用统计补算失败：" + e.message)), 20000);
