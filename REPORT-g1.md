@@ -25,7 +25,7 @@
 
 | 条目 | 提交 | 怎么修的（一句） | 怎么验的（测试文件 / 手动步骤） |
 |---|---|---|---|
-| 195-G.5 | 本条 | 经 `/proc/self/fd/0` 重开一份带 `O_NONBLOCK` 的描述符再读，没数据时拿 EAGAIN，5 秒期限才真正生效；重开不了就不读，宁可认不出这个网关也不在 listen 前挂死 | `gateway/tests/a0610-g1-spawn-stdin.test.mjs`：FIFO 模拟应用给的阻塞管道。旧代码 12 秒超时失败，新代码 5.3 秒正常导入；另用真随机数验 proof 按派生钥匙算 |
+| 195-G.5 | 本条（补 `338731d`） | 经 `/proc/self/fd/0` 重开一份带 `O_NONBLOCK` 的描述符再读，没数据时拿 EAGAIN，5 秒期限才真正生效；重开不了就不读，宁可认不出这个网关也不在 listen 前挂死。补：全量首跑发现 Node 自己的 stdio 管道（`spawnSync` 的 `input`）是 socketpair、`/proc/self/fd/0` 打不开，重开失败且 `fstat` 是 socket 时退回阻塞读（父进程写完就关，不会像应用的真管道那样挂住），别的类型照旧不读 | `gateway/tests/a0610-g1-spawn-stdin.test.mjs`：FIFO 模拟应用给的阻塞管道。旧代码 12 秒超时失败，新代码 5.3 秒正常导入；另用真随机数验 proof 按派生钥匙算。补第 3 条：`spawnSync` 的 socketpair 上派生钥匙也对得上；去掉退路实测红、放回后该文件 3 条 + `antibreach` 全过 |
 | 195-E.6 | 本条 | 切厂商时和 `model` 一样把 `SETTINGS.titleModel` 清空，界面不再显示一个实际不用的旧型号 | `gateway/tests/a0610-g1-titlemodel.test.mjs`：旧代码失败、新代码通过；POST 切到另一家后内存与磁盘上的 `titleModel`/`model` 都是 null |
 | 195-V.1 | 本条（与 V.2/V.3 同一次提交） | 加 `compVerCmp`/`compOlder`：索引构建比已装记录旧时 `compState` 不再报「可更新」，`compInstall` 直接拒绝降级；卡片同时显示「已装 → 待装」两个版本 | `gateway/tests/a0610-g1-comp-rollback.test.mjs`：旧代码 7 条全挂（缺接口且行为不对），新代码 7 条全过；含 compState 五种版本组合与 compInstall 端到端拒装、记录不动 |
 | 195-V.2 | 本条（与 V.1/V.3 同一次提交） | 本地索引只认启动环境变量 `CCAPP_COMPONENTS_USE_LOCAL_INDEX=1`，私有目录里的 `use-local-index` 文件不再算数；与 `allow-unsigned` 同口径 | `gateway/tests/a0610-g1-comp-cache.test.mjs` 第 1 条：放旧开关文件仍走官方源；只有环境变量置 1 才认共享目录索引 |
@@ -35,7 +35,7 @@
 | 196-供应链.3 | 本条 | `pkg` 的 `removeFiles` 只遍历 `safeRel` 通过的记录路径（普通相对路径，无 `..` / 反斜杠 / 绝对路径，`rec.files` 非数组也不炸）；`modulesInfo` 用 `modDirOk` 丢掉 dir 不安全的模块条目（卸载会对它整个 `rmSync`），`filesOf` 过滤 FILES 里不安全的行 | `gateway/tests/a0610-g1-path-safety.test.mjs`：坏 dir 条目被丢弃；modRemove 删掉 `bin/safe0610` 但 `../escape0610`、绝对路径、穿越路径都还在；pkg 的 safeRel 抽取求值，十种坏路径全拒、三种正常路径放行 |
 | 196-供应链.4 | 本条 | 新增 `android/assets/bin/lockcheck.mjs`（build.sh 会随 `assets/bin/*` 一起打包）：`verifyLock` 对原始字节验 ed25519 签名，并核 `lock.release === tagOf(base)`（与 `Updater.lockSigned` 同口径），公钥与 APK 的 `INDEX_PUBKEY_B64` 同一把。`pkg` 取 lock 后先验签；磁盘缓存改存 `{_for, body, sig}`（原始正文 + 签名），读回来当场复核，旧格式解析对象和 `base` 不明时都不认 | `gateway/tests/a0610-g1-lock-sig.test.mjs`：公钥与 SPKI 尾部一致；改正文 / 错签名 / 旧 tag 重放 / 缺 release 全拒；tagOf 与 Java 正则一致；pkg 接线（下载后验签、缓存原文复核、旧写法已消失）源码断言。`pkg-lock-v062`、`harden-v2b` 7 条全过 |
 | 196-供应链.5 | 本条 | `importSkill` 在解压前按 zip 目录尾记录核对条目总数，超过 4096 直接拒绝（不先 inflate 几万个小条目）；解出的文件从 `mkdirSync`/`writeFileSync` 改成 `fs.promises` 逐条 `await` 写，长包不再整段占住事件循环；路由改成 `await importSkill(...)`，导入完成才回包。新提示语（含 9 种译文）在 `i18n-g1.json` | `gateway/tests/a0610-g1-skill-zip.test.mjs`：4097 条目的包被拒且不留目录；正常包与单个 SKILL.md 都落位；导入期间 `setImmediate` 能转（旧的全同步写计数为 0）；源码断言路由 await 与异步写。临时去掉两处修改实测 3 条变红，还原后 5 条全过 |
-| 197-9.6 F8 | 本条 | 把切换段从 `compRunInstall` 抽成 `compSwitch`（仍在 `compFsExclusive` 里）：升级时旧版同路径文件先挪进 `<暂存树>.old` 备份，新版全部搬完才算提交点；提交后才删旧版独有的文件（`compRemoveFiles` 新增 `keep` 参数，新版还要的路径不删、共用文件仍转记），旧技能也在此时清。搬运中途失败把备份原样放回、撤掉新放的文件、安装记录退回旧版，用户看到的还是能用的旧版本，而不是 damaged。`_compForTest` 导出 `compSwitch` 供测试 | `gateway/tests/a0610-g1-comp-upgrade.test.mjs`：升级成功覆盖同名、删旧版独有、共用文件保留并转记；把新版一个文件放进只读目录让 rename 失败 → 旧版两个文件内容原样、记录 state 退回 ok/版本 1.0.0、备份目录消失；首次安装照常。临时还原「先删旧版」行为实测 2 条变红，还原后 3 条全过；components/pkg 相关 54 条全过 |
+| 197-9.6 F8 | 本条 | 把切换段从 `compRunInstall` 抽成 `compSwitch`（仍在 `compFsExclusive` 里）：升级时旧版同路径文件先挪进 `<暂存树>.old` 备份，新版全部搬完才算提交点；提交后才删旧版独有的文件（`compRemoveFiles` 新增 `keep` 参数，新版还要的路径不删、共用文件仍转记），旧技能也在此时清。搬运中途失败把备份原样放回、撤掉新放的文件、安装记录退回旧版，用户看到的还是能用的旧版本，而不是 damaged。`_compForTest` 导出 `compSwitch` 供测试 | `gateway/tests/a0610-g1-comp-upgrade.test.mjs`：升级成功覆盖同名、删旧版独有、共用文件保留并转记；把新版一个文件放进只读目录让 rename 失败 → 旧版两个文件内容原样、记录 state 退回 ok/版本 1.0.0、备份目录消失；首次安装照常。临时还原「先删旧版」行为实测 2 条变红，还原后 3 条全过；components/pkg 相关 54 条全过。补 `b6f4996`：回滚时有备份放不回去就留着 `<id>.old`（日志写明位置），不删旧版最后一份 |
 | 200-14-06 | ecc02e7（第一轮） | 复核 `modRunInstall`：first-run 非 0 退出时 catch 里直接抛「首次配置没跑完…再装一次会重试」，不再往下走；`.ok` 是最后一行才写。修复本身没动，本条补回归测试把行为钉住 | `gateway/tests/a0610-g1-mod-firstrun.test.mjs`：造真 tar.gz（MANIFEST + `exit 3` 的 first-run.sh）放进暂存区安装；任务结束、`job.error` 命中「首次配置没跑完」、`.ok` 不存在、文件已搬进 `$PREFIX`。临时把 throw 换成 log 实测变红，还原后通过 |
 
 ## 不成立
@@ -64,4 +64,5 @@
 
 ## 全量测试
 
-（最后跑完补）
+- 第一次（提交 `1bcf514` + 未提交的 F8 回滚小修）：tests 1180 / pass 1178 / fail 1 / skipped 1。失败的是 `antibreach.test.mjs`「启动随机数：经 stdin 交进来，证明身份换成派生钥匙；没交就用令牌」——195-G.5 的回归（Node 自己的 stdio 管道是 socketpair，`/proc/self/fd/0` 重开不了，随机数没读到），已在 `338731d` 修掉并做过红/绿验证；不是 README 里说的 `merge.test.mjs` 偶发。
+- 第二次（最终树 `338731d`）：tests 1181 / pass 1180 / fail 0 / skipped 1。跳过的是「1.1 GB 的会话：能分叉、能导出导入」（环境条件不满足，与本车道改动无关）。
