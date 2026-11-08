@@ -22,5 +22,41 @@
     "ru": "Настройки не сохранены; после перезапуска вернётся прежний режим разрешений",
     "id": "Pengaturan tidak tersimpan; mode izin sebelumnya akan kembali setelah mulai ulang",
     "ar": "لم تُحفظ الإعدادات؛ سيعود وضع الأذونات السابق بعد إعادة التشغيل"
+  },
+  {
+    "zh": "原消息太长，只恢复了前 6.5 万字",
+    "en": "The original message was too long; only the first 65,000 characters were restored",
+    "ja": "元のメッセージが長すぎるため、先頭の 6.5 万字だけ復元しました",
+    "ko": "원본 메시지가 너무 길어 앞부분 6.5만 자만 복원했습니다",
+    "zh-Hant": "原訊息太長，只恢復了前 6.5 萬字",
+    "es": "El mensaje original era demasiado largo; solo se restauraron los primeros 65 000 caracteres",
+    "fr": "Le message d'origine était trop long ; seuls les 65 000 premiers caractères ont été restaurés",
+    "ru": "Исходное сообщение слишком длинное; восстановлены только первые 65 000 символов",
+    "id": "Pesan asli terlalu panjang; hanya 65.000 karakter pertama yang dipulihkan",
+    "ar": "كانت الرسالة الأصلية طويلة جدًا؛ تمت استعادة أول 65,000 حرف فقط"
+  },
+  {
+    "zh": "暂时取不到安全通知",
+    "en": "Couldn't fetch security notices right now",
+    "ja": "現在セキュリティ通知を取得できません",
+    "ko": "지금은 보안 알림을 가져올 수 없습니다",
+    "zh-Hant": "暫時取不到安全通知",
+    "es": "No se pueden obtener los avisos de seguridad ahora",
+    "fr": "Impossible de récupérer les avis de sécurité pour le moment",
+    "ru": "Сейчас не удаётся получить уведомления о безопасности",
+    "id": "Sementara tidak dapat mengambil pemberitahuan keamanan",
+    "ar": "لا يمكن جلب إشعارات الأمان الآن"
+  },
+  {
+    "zh": "正在获取安全通知…",
+    "en": "Fetching security notices…",
+    "ja": "セキュリティ通知を取得しています…",
+    "ko": "보안 알림을 가져오는 중…",
+    "zh-Hant": "正在取得安全通知…",
+    "es": "Obteniendo avisos de seguridad…",
+    "fr": "Récupération des avis de sécurité…",
+    "ru": "Получаем уведомления о безопасности…",
+    "id": "Mengambil pemberitahuan keamanan…",
+    "ar": "جارٍ جلب إشعارات الأمان…"
   }
 ]

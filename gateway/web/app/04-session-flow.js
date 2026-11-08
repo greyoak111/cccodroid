@@ -553,7 +553,15 @@
     let s = null;
     try { s = await api("/api/status"); } catch { return null; }
     let ready = !!(s.keyMode === "key" || s.otherKey);
-    if (s.keyMode === "login") { try { ready = !!(await api("/api/login/status")).loggedIn; } catch {} }
+    if (s.keyMode === "login") {
+      // 问不出登录状态（claude auth status 起不来 / 解析不了）时不能当成「未登录」：首屏会收起输入框，
+      // 让人以为登录丢了。unknown / stale 都是「还不知道」（0.6.9 审计 195-G.2）
+      try {
+        const st = await api("/api/login/status");
+        if (st && (st.unknown || st.stale)) return null;
+        ready = !!(st && st.loggedIn);
+      } catch { return null; }
+    }
     return ready;
   }
   // 还没接上模型时，首屏不放输入框（什么都没配，打了也发不出去）：问候和两条路的卡片铺开（html.wel-setup）
@@ -647,11 +655,16 @@
   // 这次打开弹了更新说明，通知就顺延到下一次打开 / 切回来，两张卡片不叠在一起。
   // 内容是纯文本；链接只认 https（网关已筛）。点「知道了」= 卡片里这几条都记为看过。
   let noticeHold = false;
+  let noticeErrShown = false, noticeFetchShown = false;   // 取不到 / 还在取只提示一次：每次切回前台都弹太吵，正常取到一次就复位（195-R.8）
   async function loadNotices() {
     if (noticeHold || document.getElementById("whatsnew") || document.getElementById("notice-pop")) return;
     let r;
     try { r = await api("/api/notices?lang=" + encodeURIComponent(I18N.lang || "zh")); } catch { return; }
     const list = r.items || [];
+    // 「取不到」不能和「没有通知」一样安静：没有可显示的内容时明说一句（0.6.9 审计 195-R.8）
+    if (!list.length && r.error) { if (!noticeErrShown) { noticeErrShown = true; toast(t("暂时取不到安全通知"), true); } return; }
+    if (!list.length && r.fetching) { if (!noticeFetchShown) { noticeFetchShown = true; toast(t("正在获取安全通知…")); } return; }
+    noticeErrShown = noticeFetchShown = false;
     if (!list.length || noticeHold || document.hidden || document.getElementById("whatsnew") || document.getElementById("notice-pop")) return;
     const el = document.createElement("div");
     el.id = "notice-pop";
@@ -660,7 +673,8 @@
       <div class="wn-body">${list.map((n, i) => `<section class="np-${n.level === "warn" ? "warn" : "info"}">
         <div class="wn-ver">${esc(n.date)}</div><div class="np-title">${esc(n.title)}</div>
         ${n.body ? `<div class="np-body">${esc(n.body)}</div>` : ""}
-        ${n.link ? `<button class="btn sm" data-open="${i}">${esc(n.linkText || t("查看详情"))}</button>` : ""}</section>`).join("")}</div>
+        ${n.link ? `<button class="btn sm" data-open="${i}">${esc(n.linkText || t("查看详情"))}</button>` : ""}</section>`).join("")}
+        ${r.fetching ? `<div class="tiny">${esc(t("正在获取安全通知…"))}</div>` : ""}</div>
       <div class="wn-foot"><button class="btn" data-act="ok">${esc(t("知道了"))}</button></div></div>`;
     el.addEventListener("click", async (e) => {
       const o = e.target.closest("[data-open]");
@@ -1053,7 +1067,19 @@
       if (!a) return;
       el.remove();
       if (a === "go" && cont) return send(t("上一轮被系统中断了，请从断开的地方接着做完。"));
-      if (a === "go") { inputEl.value = it.text || ""; autoGrow(); inputEl.focus(); }
+      if (a === "go") {
+        // 重发要按原样发：运行标记里记了当时的项目、钉的模型和汇合来源（0.6.9 审计 195-AA.5）。
+        // 面板都在别的段里，用它们的公开设置（view.projectId + paintProjChip / state.pendingModel + refreshSessModel），别另写一套
+        const req = it.req || {};
+        if (!view.sessionId) {
+          if (req.projectId) { view.projectId = req.projectId; paintProjChip(); }
+          if (req.pin) { state.pendingModel = req.pin; refreshSessModel(); }
+          if (req.mergeFrom) view.pendingMerge = req.mergeFrom;
+        }
+        inputEl.value = it.text || "";
+        autoGrow(); inputEl.focus();
+        if (it.textCut) toast(t("原消息太长，只恢复了前 6.5 万字"));
+      }
       api("/api/interrupted/dismiss", { method: "POST", body: JSON.stringify({ id: it.id }) }).catch(() => {});
     });
     scrollDown(true);
