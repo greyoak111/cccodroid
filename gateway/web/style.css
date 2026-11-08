@@ -3583,3 +3583,8 @@ html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270
 .arc-quick .btn,.arc-acts .btn{width:auto;margin:0}
 .arc-acts{justify-content:flex-end;gap:8px;margin-top:12px}
 .arc-hn{margin:2px 0 6px}
+/* 0.6.11 溢出探针：根目录长路径的 chip、压缩包预览头（多两个按钮）、解压对话框里的长名字快捷按钮，窄屏下都别出界 */
+.fs-roots .chip{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;box-sizing:border-box}
+.fs-prev-head{flex-wrap:wrap;row-gap:6px}
+.fs-prev-head .mono{flex:1 1 140px}
+.arc-quick .btn{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

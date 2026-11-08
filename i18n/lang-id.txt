@@ -3033,3 +3033,6 @@
 3033	Dikompres menjadi {path}
 3034	Pilih
 3035	Prompt sistem tidak bisa ditulis ke file, jadi giliran ini tidak dimulai: {msg}
+3036	Kembalikan pengaturan awal
+3037	Untuk saat konfigurasi rusak membuat setiap giliran ditolak atau tidak menjawab dan tidak bisa Anda perbaiki: konfigurasi tingkat pengguna Claude Code (CLAUDE.md, skill, plugin, hook, MCP, memori), pengaturan cccodroid, dan file awal shell kembali seperti baru dipasang, dan file aplikasi dipasang ulang dari paket. Semuanya dipindah ke ~/.ccapp-reset sebagai cadangan, tidak dihapus; percakapan, ruang kerja, dan toolkit tetap, dan kunci disimpan secara bawaan. Dialog konfirmasi sistem muncul lebih dulu.
+3038	Dialog konfirmasi tidak muncul

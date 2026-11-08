@@ -471,6 +471,14 @@ final class Priv {
                     break;
                 }
                 case "share_logs": resp = Share.send(ctx, Share.bundleLogs(ctx), "application/zip"); break;
+                case "factory_reset": {
+                    // 设置页「恢复初始设置」：这里只请界面弹原生确认框（MainActivity.askFactoryReset），执行要用户在框里点；
+                    // 谁发来的请求都一样，脚本发了也只是弹个框。界面不在前台就不弹
+                    if (!foreground()) { resp = new JSONObject().put("ok", false).put("message", Tr.t("请先把 cccodroid 切到前台")); break; }
+                    ctx.startActivity(MainActivity.internal(ctx, MainActivity.ACTION_FACTORY_RESET).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    resp = new JSONObject().put("ok", true).put("asked", true);
+                    break;
+                }
                 case "share_file": {
                     // 查看器、用量月报都走这里：工作区和 /sdcard 上的文件先拷到导出目录再分享
                     try {

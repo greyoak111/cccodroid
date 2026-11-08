@@ -1282,6 +1282,11 @@
     const r = await post("/api/app/share_logs").catch((e) => ({ ok: false, message: e.message }));
     if (!r.ok) toast(t("没分享成：{msg}", { msg: r.message || "" }), true);
   });
+  // 恢复初始设置：网关只请应用弹原生确认框（说明、勾选、执行都在那边，见 FactoryReset.java）
+  $("btn-factory-reset").addEventListener("click", async () => {
+    const r = await post("/api/app/factory_reset").catch((e) => ({ ok: false, message: e.message }));
+    if (!r.ok) toast(r.message || t("没弹出确认框"), true);
+  });
   // 到 GitHub 反馈：网关拼好链接（设备、ROM、自检、组件），先给用户看要填进去的内容，再用外部浏览器打开
   $("btn-issue").addEventListener("click", async () => {
     const b = $("btn-issue");

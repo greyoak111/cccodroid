@@ -808,6 +808,10 @@
             <div class="sl"><b data-i18n>到 GitHub 反馈</b><p class="clamp" id="issue-hint" data-i18n>「到 GitHub 反馈」会打开一个新建 Issue 的页面，机型、系统版本、自检结果都已经填好，你只要写遇到了什么。需要 GitHub 账号；不放日志和对话。</p></div>
             <div class="sc"><button class="btn sm" id="btn-issue" data-i18n>到 GitHub 反馈</button></div>
           </div>
+          <div class="srow">
+            <div class="sl"><b data-i18n>恢复初始设置</b><p class="clamp" data-i18n>改坏了配置、每轮都被拒或不出回答、自己救不回来时用：Claude Code 的用户级配置（CLAUDE.md、技能、插件、钩子、MCP、记忆）、cccodroid 设置和 shell 启动文件恢复成刚装好的样子，应用文件按安装包重铺。原来的都挪进 ~/.ccapp-reset 留底，不删；会话记录、工作区、工具包不动，密钥默认保留。会弹系统确认框。</p></div>
+            <div class="sc"><button class="btn sm" id="btn-factory-reset" data-i18n>恢复初始设置</button></div>
+          </div>
           <div class="srow hidden" id="envfacts-row">
             <div class="sl"><b data-i18n>本机自检</b><p class="clamp" data-i18n>把工具包里的编译器、Python、Node、git 等逐项跑一遍，结果会告诉 Claude 这台设备上什么能用、什么不能用。工具包或应用更新后会自动重测；修好了什么、想马上让 Claude 知道，就点重新自检。</p><div class="tiny" id="envfacts-state"></div></div>
             <div class="sc"><button class="btn sm ghost" id="btn-envfacts" data-i18n>重新自检</button></div>

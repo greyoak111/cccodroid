@@ -3036,4 +3036,7 @@ window.I18N_DICT["es"] = {
   "已压缩为 {path}": "Comprimido en {path}",
   "多选": "Seleccionar",
   "系统提示没写成文件，这一轮没有启动：{msg}": "No se pudo escribir el prompt del sistema en un archivo; este turno no se inició: {msg}",
+  "恢复初始设置": "Restablecer ajustes",
+  "改坏了配置、每轮都被拒或不出回答、自己救不回来时用：Claude Code 的用户级配置（CLAUDE.md、技能、插件、钩子、MCP、记忆）、cccodroid 设置和 shell 启动文件恢复成刚装好的样子，应用文件按安装包重铺。原来的都挪进 ~/.ccapp-reset 留底，不删；会话记录、工作区、工具包不动，密钥默认保留。会弹系统确认框。": "Para cuando una configuración rota hace que cada turno se rechace o no responda y no puedes arreglarlo: la configuración de usuario de Claude Code (CLAUDE.md, habilidades, plugins, hooks, MCP, memoria), los ajustes de cccodroid y los archivos de inicio del shell vuelven al estado recién instalado, y los archivos de la app se reinstalan desde el paquete. Todo se mueve a ~/.ccapp-reset como copia, no se borra; las conversaciones, el espacio de trabajo y el kit se mantienen, y las claves se conservan por defecto. Antes aparece un cuadro de confirmación del sistema.",
+  "没弹出确认框": "No apareció el cuadro de confirmación",
 };

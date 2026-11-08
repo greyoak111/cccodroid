@@ -91,6 +91,8 @@ public class MainActivity extends Activity {
         return k != null && java.security.MessageDigest.isEqual(k.getBytes(), intentKey(this).getBytes());
     }
     static final String ACTION_UPDATE = "cc.codroid.UPDATE";
+    /** 设置页「恢复初始设置」：网关只能请求弹框（Priv 的 factory_reset），执行要用户在这里点 */
+    static final String ACTION_FACTORY_RESET = "cc.codroid.FACTORY_RESET";
     static final String ACTION_SHIZUKU = "cc.codroid.SHIZUKU";
     static final String ACTION_A11Y_OK = "cc.codroid.A11Y_OK";
     static final String ACTION_PRIV_OK = "cc.codroid.PRIV_OK";
@@ -539,6 +541,7 @@ public class MainActivity extends Activity {
                 android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show();
         }
         else if (ACTION_SHIZUKU.equals(a)) ShizukuSetup.get(this).activate();
+        else if (ACTION_FACTORY_RESET.equals(a)) askFactoryReset();
         else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false));
         else if (ACTION_CONSENT.equals(a)) Consent.runNext(this);
         else if (ACTION_PRIV_OK.equals(a)) confirmPriv(i.getStringExtra("id"), i.getStringExtra("cmd"), i.getStringExtra("who"), i.getBooleanExtra("trust", false), i.getBooleanExtra("sess", false), "noask".equals(i.getStringExtra("kind")));
@@ -1491,6 +1494,7 @@ public class MainActivity extends Activity {
                 try { Share.send(this, Share.bundleLogs(this), "application/zip"); }
                 catch (Exception e) { say(Tr.t("✗ 诊断包没打成：") + e.getMessage()); }
             }, "stuck").start())
+            .setNeutralButton(Tr.t("恢复初始设置"), (d, w) -> askFactoryReset())
             .setNegativeButton(Tr.t("取消"), null).show());
         chooser = new LinearLayout(this);
         chooser.setOrientation(LinearLayout.VERTICAL);
@@ -1659,6 +1663,9 @@ public class MainActivity extends Activity {
                 return shouldOverrideUrlLoading(v, req.getUrl().toString());
             }
             @Override public boolean shouldOverrideUrlLoading(WebView v, String url) {
+                // 网关起不来时的等待页 / 拦截页上的两个自救链接（页面不许跑脚本，只能靠跳转）。都只是弹原生对话框，谁点的都一样要用户确认
+                if (RESCUE_RESET.equals(url)) { askFactoryReset(); return true; }
+                if (RESCUE_LOGS.equals(url)) { stuck.performClick(); return true; }
                 if (isOwnGateway(url)) return false;
                 // 预览没开「联网」时，网页自己整页跳到外站（top.location、target=_blank）会落到这里，
                 // 交给外部浏览器就等于把地址里夹带的内容送了出去。拦截那层管不到整页跳转，这里先问一句（10-31 复核补）
@@ -1984,7 +1991,7 @@ public class MainActivity extends Activity {
     private android.webkit.WebResourceResponse waitingPage() {
         boolean night = systemNight();
         String html = "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><body style=\"margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font:15px sans-serif;"
-            + (night ? "background:#1b1b1b;color:#bbb" : "background:#fafafa;color:#555") + "\">" + android.text.TextUtils.htmlEncode(Tr.t("等待网关…")) + "</body>";
+            + (night ? "background:#1b1b1b;color:#bbb" : "background:#fafafa;color:#555") + "\"><div style=\"text-align:center\">" + android.text.TextUtils.htmlEncode(Tr.t("等待网关…")) + rescueLinks(night ? "#8fb4ff" : "#2a5db0") + "</div></body>";
         java.util.Map<String, String> h = new java.util.HashMap<>();
         h.put("Cache-Control", "no-store");
         h.put("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");   // 页面只有一行字：不许脚本、不许任何子请求
@@ -2026,11 +2033,64 @@ public class MainActivity extends Activity {
         String why = GatewayService.gwBlocked;
         String html = "<meta name=viewport content=\"width=device-width\"><body style=\"font:16px/1.6 sans-serif;padding:32px;background:"
             + css(BrowserPane.pal(this, dark, "bg")) + ";color:" + css(BrowserPane.pal(this, dark, "fg")) + "\">"
-            + android.text.TextUtils.htmlEncode(why != null ? why : Tr.f("端口 {0} 被别的应用占着，网关起不来。重启手机，或卸载最近装的可疑应用", Env.PORT)).replace("\n", "<br>") + "</body>";
+            + android.text.TextUtils.htmlEncode(why != null ? why : Tr.f("端口 {0} 被别的应用占着，网关起不来。重启手机，或卸载最近装的可疑应用", Env.PORT)).replace("\n", "<br>")
+            + rescueLinks(dark ? "#8fb4ff" : "#2a5db0") + "</body>";
         web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
         squatShown = true;
     }
     private boolean squatShown;
+
+    // ── 恢复初始设置（FactoryReset）：入口在设置页排障栏、启动页「我卡住了」、网关起不来时的等待页 ──
+    private static final String RESCUE_RESET = "cccodroid-rescue:reset", RESCUE_LOGS = "cccodroid-rescue:logs";
+    private static String rescueLinks(String color) {
+        String a = "style=\"color:" + color + ";display:inline-block;margin:10px 12px 0\"";
+        return "<p style=\"font-size:14px;margin-top:28px\"><a " + a + " href=\"" + RESCUE_LOGS + "\">" + android.text.TextUtils.htmlEncode(Tr.t("我卡住了：分享诊断")) + "</a>"
+            + "<a " + a + " href=\"" + RESCUE_RESET + "\">" + android.text.TextUtils.htmlEncode(Tr.t("恢复初始设置")) + "</a></p>";
+    }
+    private volatile boolean resetting;
+    /** 原生确认框：说清会挪走什么、留什么、留底在哪；勾上才连厂商配置和密钥一起挪。按钮一秒后才能点（guard） */
+    void askFactoryReset() {
+        if (resetting || isFinishing()) return;
+        android.widget.CheckBox keys = new android.widget.CheckBox(this);
+        keys.setText(Tr.t("同时清除厂商配置和密钥（恢复后要重新填）"));
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        android.widget.FrameLayout box = new android.widget.FrameLayout(this);
+        box.setPadding(pad, pad / 2, pad, 0);
+        box.addView(keys);
+        android.app.AlertDialog d = new android.app.AlertDialog.Builder(this)
+            .setTitle(Tr.t("恢复初始设置？"))
+            .setMessage(Tr.t("把配置恢复成刚装好的样子，用于改坏了配置、每轮都被拒或不出回答、自己救不回来的时候。") + "\n\n"
+                + Tr.t("会清掉：Claude Code 的用户级配置（CLAUDE.md、rules、技能、插件、命令、子代理、输出风格、钩子和 settings、MCP、自动记忆）、cccodroid 的设置、端侧模式配置、shell 启动文件（.bashrc 等），并退出安全模式；应用自带的文件按安装包重新铺一遍。") + "\n\n"
+                + Tr.t("不会删：清掉的东西都挪进 ~/.ccapp-reset/<时间> 留底，可以照原路径拷回去。会话记录、工作区、开发工具包和组件、ssh 与 git 配置都不动。") + "\n\n"
+                + Tr.t("期间网关会停一下，正在跑的任务会被中断。"))
+            .setView(box)
+            .setPositiveButton(Tr.t("恢复"), (x, w) -> doFactoryReset(keys.isChecked()))
+            .setNegativeButton(Tr.t("取消"), null)
+            .create();
+        guard(d, android.content.DialogInterface.BUTTON_POSITIVE);
+    }
+    private void doFactoryReset(boolean keys) {
+        if (resetting) return;
+        resetting = true;
+        say(Tr.t("正在恢复初始设置…"));
+        android.widget.Toast.makeText(this, Tr.t("正在恢复初始设置…"), android.widget.Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            String msg;
+            try { File bak = FactoryReset.run(this, keys); msg = Tr.f("已恢复初始设置。原来的配置留底在 {0}", bak.getPath()); }
+            catch (FactoryReset.Partial e) { msg = Tr.f("已恢复初始设置，但有几项没挪成：{0}。留底在 {1}", e.getMessage(), e.backup.getPath()); }
+            catch (Exception e) { android.util.Log.e("cccodroid-reset", "恢复初始设置失败", e); msg = Tr.t("恢复初始设置失败：") + e.getMessage(); }
+            say(msg);
+            final String m = msg;
+            if (!GatewayService.serviceUp()) GatewayService.start(this);
+            try { waitGateway(false); } catch (InterruptedException ignored) {}
+            ui.post(() -> {
+                resetting = false;
+                if (isFinishing()) return;
+                new android.app.AlertDialog.Builder(this).setMessage(m).setPositiveButton(Tr.t("好"), null).show();
+                if (booted && web != null) { squatShown = false; loadUi(); }
+            });
+        }, "factory-reset").start();
+    }
     private static String css(int c) { return String.format("#%06x", c & 0xffffff); }
 
     /** 预览里的网页弹的对话框标明出处：别让它冒充 cccodroid 要密钥、要密码（审查 v0513b 低-22） */

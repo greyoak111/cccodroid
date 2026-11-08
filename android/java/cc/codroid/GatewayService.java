@@ -32,7 +32,11 @@ public class GatewayService extends Service {
     /** 替换工具包期间停住网关（它跑的 node 就在要被换掉的目录里） */
     private static volatile boolean paused;
     private static volatile GatewayService self;
-    static void pause(boolean on) {
+    /** 停住期间通知栏上写什么；null 按更新工具包说 */
+    private static volatile String pauseWhy;
+    static void pause(boolean on) { pause(on, null); }
+    static void pause(boolean on, String why) {
+        pauseWhy = on ? why : null;
         paused = on;
         GatewayService s = self;
         if (on && s != null) s.killGateway();
@@ -225,7 +229,7 @@ public class GatewayService extends Service {
         long backoff = 1000;
         String why = null;
         while (!stopping) {
-            if (paused) { update(Tr.t("正在更新开发工具包…")); sleep(1000); continue; }
+            if (paused) { String w = pauseWhy; update(w != null ? w : Tr.t("正在更新开发工具包…")); sleep(1000); continue; }
             if (!env.devkitReady()) { update(Tr.t("工具链未安装")); sleep(3000); continue; }
             // 走到这里的是接手的网关（不是本服务拉起的，拉起的在下面 waitFor 里，一退出就作废核身份缓存）：
             // 2 秒看一次，缩短它挂掉到发现端口换了人之间的空档（审查 10-30 第九份 中5）

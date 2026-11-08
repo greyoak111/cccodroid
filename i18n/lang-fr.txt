@@ -3033,3 +3033,6 @@
 3033	Compressé dans {path}
 3034	Sélection
 3035	Impossible d'écrire l'invite système dans un fichier ; ce tour n'a pas démarré : {msg}
+3036	Réinitialiser les réglages
+3037	Quand une configuration cassée fait refuser chaque tour ou ne donne plus de réponse et que vous ne pouvez pas réparer : la configuration utilisateur de Claude Code (CLAUDE.md, compétences, plugins, hooks, MCP, mémoire), les réglages de cccodroid et les fichiers de démarrage du shell reviennent à l'état d'une installation neuve, et les fichiers de l'app sont réinstallés depuis le paquet. Tout est déplacé dans ~/.ccapp-reset en sauvegarde, rien n'est supprimé ; conversations, espace de travail et boîte à outils restent, les clés sont conservées par défaut. Une boîte de confirmation système s'affiche d'abord.
+3038	La boîte de confirmation ne s'est pas affichée

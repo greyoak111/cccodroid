@@ -3070,5 +3070,8 @@ window.I18N_DICT.en = {
   "已解压到 {path}": "Extracted to {path}",
   "已压缩为 {path}": "Compressed to {path}",
   "多选": "Select",
-  "系统提示没写成文件，这一轮没有启动：{msg}": "Couldn't write the system prompt to a file, so this turn didn't start: {msg}"
+  "系统提示没写成文件，这一轮没有启动：{msg}": "Couldn't write the system prompt to a file, so this turn didn't start: {msg}",
+  "恢复初始设置": "Reset settings",
+  "改坏了配置、每轮都被拒或不出回答、自己救不回来时用：Claude Code 的用户级配置（CLAUDE.md、技能、插件、钩子、MCP、记忆）、cccodroid 设置和 shell 启动文件恢复成刚装好的样子，应用文件按安装包重铺。原来的都挪进 ~/.ccapp-reset 留底，不删；会话记录、工作区、工具包不动，密钥默认保留。会弹系统确认框。": "For when a broken configuration makes every turn get refused or produce no answer and you can't fix it yourself: Claude Code user-level configuration (CLAUDE.md, skills, plugins, hooks, MCP, memory), cccodroid settings and shell startup files go back to a fresh install, and the app's files are reinstalled from the package. Everything is moved to ~/.ccapp-reset as a backup, not deleted; conversations, the workspace and the toolkit stay, and keys are kept by default. A system confirmation dialog appears first.",
+  "没弹出确认框": "The confirmation dialog didn't appear"
 };

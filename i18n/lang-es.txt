@@ -3033,3 +3033,6 @@
 3033	Comprimido en {path}
 3034	Seleccionar
 3035	No se pudo escribir el prompt del sistema en un archivo; este turno no se inició: {msg}
+3036	Restablecer ajustes
+3037	Para cuando una configuración rota hace que cada turno se rechace o no responda y no puedes arreglarlo: la configuración de usuario de Claude Code (CLAUDE.md, habilidades, plugins, hooks, MCP, memoria), los ajustes de cccodroid y los archivos de inicio del shell vuelven al estado recién instalado, y los archivos de la app se reinstalan desde el paquete. Todo se mueve a ~/.ccapp-reset como copia, no se borra; las conversaciones, el espacio de trabajo y el kit se mantienen, y las claves se conservan por defecto. Antes aparece un cuadro de confirmación del sistema.
+3038	No apareció el cuadro de confirmación
