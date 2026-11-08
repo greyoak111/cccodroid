@@ -273,7 +273,7 @@ function dirMatches(dir, files, manifest) {
     const b = expectedBytes(rel, f, manifest);
     if (!b) return false;
     if (isText(rel) && !isPluginData(rel)) {
-      if (b.length > (2 << 20)) return false;                       // 大文本不扫描就不复用，走重建时会被 toolarge 拦下
+      if (b.length > (2 << 20)) return false;                       // 大文本不扫描就不复用，走重建时会跳过+提示
       const r = scanText(b.toString("utf8"));
       if (r.blocked) return false;
     }
@@ -330,13 +330,13 @@ function materialize(name, files, manifest) {
       if (VERIFIED.get(dir) === sig || dirMatches(dir, files, manifest)) {
         VERIFIED.set(dir, sig);
         touch(dir);
-        return { dir };
+        return { dir, skipped: [] };
       }
     }
   } catch {}
   const tmp = dir + ".tmp-" + process.pid;
   fs.rmSync(tmp, { recursive: true, force: true });
-  const found = [], text = {};
+  const found = [], skipped = [], text = {};
   for (const [rel, f] of files) {
     const d = path.join(tmp, rel);
     fs.mkdirSync(path.dirname(d), { recursive: true, mode: 0o700 });
@@ -347,8 +347,9 @@ function materialize(name, files, manifest) {
     }
     let buf; try { buf = readSmallFile(f.src, 64 << 20, ""); } catch { buf = null; }
     if (buf == null) continue;
-    // 扫描只看前 2MB，但副本写的是全文：超过扫描上限的文本直接拒绝，别只扫开头就放行（审查 11-05）
-    if (buf.length > (2 << 20)) { found.push({ name: f.src, hits: [{ cat: "toolarge", strong: true, line: 0, excerpt: "" }] }); continue; }
+    // 扫描只看前 2MB，但副本写的是全文：超过扫描上限的文本不扫也不进上下文（跳过+提示，不整轮拦——
+    // 大文件本就不回填，拦整轮只会让正常用户卡在别处；拍板 2026-11-08「别影响正常用户」）
+    if (buf.length > (2 << 20)) { skipped.push(f.src); continue; }
     if (rel === ".claude-plugin/plugin.json") { buf = cleanManifest(buf); if (!buf) continue; }
     else if (isMd(rel)) buf = stripFrontHooks(buf);
     if (!isPluginData(rel)) {
@@ -358,7 +359,7 @@ function materialize(name, files, manifest) {
     text[rel] = sha(buf);
     fs.writeFileSync(d, buf, { mode: 0o600 });
   }
-  if (found.length) { fs.rmSync(tmp, { recursive: true, force: true }); return { found }; }
+  if (found.length) { fs.rmSync(tmp, { recursive: true, force: true }); return { found, skipped }; }
   if (manifest) {
     fs.mkdirSync(path.join(tmp, ".claude-plugin"), { recursive: true, mode: 0o700 });
     fs.writeFileSync(path.join(tmp, ".claude-plugin", "plugin.json"), manifest, { mode: 0o600 });
@@ -368,7 +369,7 @@ function materialize(name, files, manifest) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.renameSync(tmp, dir);
   VERIFIED.set(dir, fileSig(dir, files, manifest));
-  return { dir };
+  return { dir, skipped };
 }
 
 // ── MCP、设置 ──
@@ -403,19 +404,20 @@ const sanitize = (p) => { const s = p.replace(/[^a-zA-Z0-9]/g, "-"); return s.le
 export function memoryDir(cwd) { return path.join(userClaude(), "projects", sanitize(realOr(cwd)), "memory"); }
 /** 记忆目录查一遍：命中返回 found；同时给出指纹（起进程紧前再比） */
 export function scanMemory(dir) {
-  const found = [], parts = [];
+  const found = [], skipped = [], parts = [];
   for (const f of mdUnder(dir, 2)) {
     let st; try { st = fs.lstatSync(f); } catch { continue; }
     // 软链不读（readSmallFile 带 O_NOFOLLOW），照旧拦下，但别记成「太大」
     if (st.isSymbolicLink()) { found.push({ name: f, hits: [{ cat: "symlink", strong: true, line: 0, excerpt: "" }] }); continue; }
     if (!st.isFile()) continue;
     const t = st.size > MAX_TEXT * 4 ? null : readSmallFile(f, MAX_TEXT * 4);
-    if (t == null) { found.push({ name: f, hits: [{ cat: "toolarge", strong: true, line: 0, excerpt: "" }] }); continue; }
+    // 太大不读也不进上下文：跳过+提示，不整轮拦（同 materialize 的 2MiB 口径）
+    if (t == null) { skipped.push(f); continue; }
     parts.push(f + "\0" + sha(t));
     const r = scanText(t);
     if (r.blocked) found.push({ name: f, hits: r.hits });
   }
-  return { found, fp: sha(parts.join("\n")) };
+  return { found, skipped, fp: sha(parts.join("\n")) };
 }
 
 /**
@@ -444,12 +446,14 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   if (uf.size) {
     const m = materialize("user", uf, JSON.stringify({ name: "user", version: "1.0.0", description: "cccodroid: your skills, commands, agents and output styles (checked copy)" }));
     if (m.found) found.push(...m.found); else userPlug = m.dir;
+    if (m.skipped.length) notes.push(`skill 文件太大没回填：${m.skipped.slice(0, 4).join(", ")}`);
   }
   // 扩展页装的插件
   const plugDirs = [];
   for (const p of enabledPlugins()) {
     const m = materialize(p.id, pluginFiles(p.dir));
     if (m.found) found.push(...m.found); else plugDirs.push(m.dir);
+    if (m.skipped.length) notes.push(`插件文件太大没回填：${m.skipped.slice(0, 4).join(", ")}`);
   }
   // 输出风格：用户目录里的那份在插件里叫 user:<名字>
   if (outputStyle && uf.has(`output-styles/${outputStyle}.md`)) settings.outputStyle = "user:" + outputStyle;
@@ -458,6 +462,7 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   const memDir = memoryDir(cwd);
   const mem = scanMemory(memDir);
   found.push(...mem.found);
+  if (mem.skipped.length) notes.push(`记忆文件太大没回填：${mem.skipped.slice(0, 4).join(", ")}`);
   settings.autoMemoryDirectory = memDir;
 
   if (found.length) return { args: [], settings: null, block: { found }, memDir, memFp: mem.fp, notes };
