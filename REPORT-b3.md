@@ -23,7 +23,8 @@
 | 条目 | 提交 | 怎么修的（一句） | 怎么验的（测试文件 / 手动步骤） |
 |---|---|---|---|
 | 2（195-J.5，sessionops 半） | 4fac136 | 不动 `SID_RE`；新增 `skillDirOk(dir, listed)`：只认 skills/ 下已列出的目录名（精确匹配），拒绝路径分隔符 / NUL / `.` / `..`，中文与空格放行 | `a0610-b3-skilldir.test.mjs`：中文、空格、精确匹配、拒绝项、超长名 4 例全过；端到端需 extensions.mjs 那一行（见移交） |
-| 4（195-T.4 office 部分） | 待填 | `components.mjs` 导出 `markChild` / `unmarkChild`（行为不变）；`office.mjs` 的 `officeConvert` 起 soffice 后按 `sofficePath()` 落 `.runs` 标记，`error` / `close` 时删掉——与组件安装共用同一套，启动时 `reapComponentRuns()` 会清上一任留下的 | `a0610-b3-office-runs.test.mjs`：假 soffice 转换期间 `.runs` 有标记、结束后消失、产物就位；修前跑该测试确认失败，修后通过 |
+| 4（195-T.4 office 部分） | 3021267 | `components.mjs` 导出 `markChild` / `unmarkChild`（行为不变）；`office.mjs` 的 `officeConvert` 起 soffice 后按 `sofficePath()` 落 `.runs` 标记，`error` / `close` 时删掉——与组件安装共用同一套，启动时 `reapComponentRuns()` 会清上一任留下的 | `a0610-b3-office-runs.test.mjs`：假 soffice 转换期间 `.runs` 有标记、结束后消失、产物就位；修前跑该测试确认失败，修后通过 |
+| 5（200-15-10） | 待填 | 书签列表标题改为与会话列表同序：`NAMES[sid]`（用户改名）→ `archivedTitle(sid)`（档案最新题名）→ `peekSession().title`（首问）。列表里的 `sessionTitle` 在 sessions.mjs 未导出、本车道不改那个文件，按同序取同样三处来源（lineage.mjs 也是这么取的） | `a0610-b3-bookmarks-title.test.mjs`：三条会话分别为改名 / 有档案题名 / 都没有，标题依次断言；修前失败（改名没盖过首问）、修后通过；`a0610-b2-bookmarks` 3 例仍过 |
 
 ## 不成立
 

@@ -9,7 +9,8 @@ import path from "node:path";
 import { CFG, PATHS, log, tz } from "./config.mjs";
 import { isObj, loadState, saveState } from "./statefile.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { findSessionFile, peekSession } from "./sessions.mjs";
+import { NAMES, findSessionFile, peekSession } from "./sessions.mjs";
+import { archivedTitle } from "./archive-store.mjs";
 import { SID_RE, listTrash } from "./sessionops.mjs";
 import { findLineOffset, transcriptItems } from "./transcript.mjs";
 
@@ -87,7 +88,9 @@ export async function routeBookmarks(req, res, u, p) {
     for (const b of BM) {
       if (!meta.has(b.sid)) {
         const f = findSessionFile(b.sid);
-        meta.set(b.sid, f ? { title: peekSession(f.file).title || "" } : trash.has(b.sid) ? { trashed: true } : null);
+        // 标题跟会话列表同一个口径：用户改名 > 最新一章的档案题名 > 第一句提问（195-200-15-10 / #50）。
+        // 会话列表的 sessionTitle 在 sessions.mjs 里没导出，本车道又不改那个文件，这里按同一顺序取三处来源
+        meta.set(b.sid, f ? { title: NAMES[b.sid] || archivedTitle(b.sid) || peekSession(f.file).title || "" } : trash.has(b.sid) ? { trashed: true } : null);
       }
       const m = meta.get(b.sid);
       if (!m) { gone++; continue; }
