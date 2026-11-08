@@ -23,12 +23,14 @@
 | 条目 | 提交 | 怎么修的（一句） | 怎么验的（测试文件 / 手动步骤） |
 |---|---|---|---|
 | 2（195-J.5，sessionops 半） | 4fac136 | 不动 `SID_RE`；新增 `skillDirOk(dir, listed)`：只认 skills/ 下已列出的目录名（精确匹配），拒绝路径分隔符 / NUL / `.` / `..`，中文与空格放行 | `a0610-b3-skilldir.test.mjs`：中文、空格、精确匹配、拒绝项、超长名 4 例全过；端到端需 extensions.mjs 那一行（见移交） |
+| 4（195-T.4 office 部分） | 待填 | `components.mjs` 导出 `markChild` / `unmarkChild`（行为不变）；`office.mjs` 的 `officeConvert` 起 soffice 后按 `sofficePath()` 落 `.runs` 标记，`error` / `close` 时删掉——与组件安装共用同一套，启动时 `reapComponentRuns()` 会清上一任留下的 | `a0610-b3-office-runs.test.mjs`：假 soffice 转换期间 `.runs` 有标记、结束后消失、产物就位；修前跑该测试确认失败，修后通过 |
 
 ## 不成立
 
 | 条目 | 理由（代码位置） |
 |---|---|
 | 1（195-C.7 后半 / 195-R.10 后半） | 已由第一轮 b1 车道修（`ecc02e7`）：`gw/local.mjs:113-114` 的 `llamaInfo().dirs` 以 `modelDir()` 返回的首个可写目录打头（`modelDir` 逐个 `mkdirSync`+`accessSync(W_OK)`，写不进就落到 `home/models`）；`web/app/09-settings.js` 显示后端 `dirs[0]`，无存储权限时显示 home/models。 |
+| 3（200-8-03 后半） | 当前代码已防护：`gw/saferead.mjs:9-11`（`readSmallFile`）与 `:28-30`（`readHeadFile`）都以 `O_RDONLY|O_NOFOLLOW|O_NONBLOCK` 打开后 `fstat`，`!st.isFile()` 直接返回 null——FIFO / 设备文件不会卡事件循环；本模块没有写打开。第一轮 b2 也复核为不成立（`REPORT-b2.md:222`）。实证：`fifo-safety`、`audit-v067-private` 全过；手工探 `/dev/zero`、`/dev/null` 均 0-1ms 返回 null。 |
 
 ## 待定（交回主会话或用户定）
 

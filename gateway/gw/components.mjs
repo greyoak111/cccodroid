@@ -280,7 +280,8 @@ export async function breathe() {
 // 组件安装 / 模块下载 / 自检这些 detached 子进程，网关被 SIGKILL 后会继续写 $PREFIX（0.6.9 审计 195-T.4）。
 // 起的时候落一份运行标记，正常退出删掉；新网关启动时按标记清掉上一任留下的。
 const COMP_RUN_DIR = PREFIX ? path.join(COMP_DIR, ".runs") : "";
-function markChild(child, cmd, args) {
+/** 落一份运行标记；office 的转换子进程也走这里（0.6.9 审计 195-T.4），别另起一套 */
+export function markChild(child, cmd, args) {
   if (!COMP_RUN_DIR || !child.pid) return "";
   try {
     fs.mkdirSync(COMP_RUN_DIR, { recursive: true });
@@ -289,7 +290,7 @@ function markChild(child, cmd, args) {
     return f;
   } catch { return ""; }
 }
-const unmarkChild = (f) => { if (f) try { fs.rmSync(f, { force: true }); } catch {} };
+export const unmarkChild = (f) => { if (f) try { fs.rmSync(f, { force: true }); } catch {} };
 /** 清掉上一任网关留下的组件子进程；只在启动时调用（正常运行时标记随子进程退出删除） */
 export function reapComponentRuns() {
   if (!COMP_RUN_DIR) return 0;
