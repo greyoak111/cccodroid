@@ -9,7 +9,9 @@ const src03 = read("app/03-perm-status.js");
 const src04 = read("app/04-session-flow.js");
 const src09 = read("app/09-settings.js");
 const src11 = read("app/11-usage.js");
+const src13 = read("app/13-nav-menus.js");
 const src14 = read("app/14-projects-sched.js");
+const src19 = read("app/19-boot.js");
 
 test("A1 195-A.6 / P1-12：权限切档以网关回的 mode 为准，全局设置记 wanted", () => {
   assert.ok(src03.includes("state.settings.permissionMode = r.wanted || r.mode || mode"), "全局设置要记用户选的 wanted");
@@ -63,6 +65,17 @@ test("A4 195-K.4：新建项目指令没写进去要提示，并留在指令框�
 test("A4 195-N.1：改 / 删项目失败显示网关回的 message，不当成功", () => {
   assert.ok(src14.includes("catch (err) { e.target.value = p[k] || \"\"; toast(err.message, true); }"), "PATCH 失败显示 message 并回退下拉");
   assert.ok(src14.includes("catch (err) { return toast(err.message, true); }"), "DELETE 失败显示 message");
+});
+
+test("A6 195-G.3：顶栏登录态用 /api/status 的 auth，退出后立即刷新", () => {
+  assert.ok(src19.includes("const auth = s.keyMode === \"login\" ? s.auth : null"), "取 /api/status 的 auth");
+  assert.ok(src19.includes("auth.unknown ? t(\"官方登录态 · 问不出登录状态\")"), "问不出时不当作未登录");
+  assert.ok(src19.includes("官方登录态 · 上次问到时已登录"), "沿用旧结果要标明是上次问到的");
+  assert.ok(src19.includes("needLogin ? t(\"需要登录账户\")"), "真实未登录时不再显示就绪");
+  assert.ok(!src19.includes("s.keyMode === \"login\" ? t(\"官方登录态\") :"), "凭据行不再只看 keyMode");
+  assert.ok(src13.includes("if (s.keyMode === \"login\" && s.auth && !s.auth.unknown) acctLogged = !!s.auth.loggedIn"), "账户菜单先用 auth 定登录与否");
+  assert.ok(src13.includes("if (r.ok) { acctLogged = false; acctEmail = \"\"; acctWeek = null; }"), "退出成功立即换回「登录账户」");
+  assert.ok(src13.includes("if (!st.unknown) acctLogged = !!st.loggedIn"), "问不出时不动上次判断");
 });
 
 test("C28 195-O.5–O.7 / 197-5.12：跨午夜 / 换时区重算，补算进度也重画，清除本月不误删邻月", () => {

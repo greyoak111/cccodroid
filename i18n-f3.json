@@ -94,5 +94,77 @@
     "ru": "Проект создан; в папке уже был CLAUDE.md, поэтому введённые инструкции не записаны",
     "id": "Proyek dibuat; folder sudah berisi CLAUDE.md, jadi instruksi yang Anda isi tidak ditulis",
     "ar": "تم إنشاء المشروع؛ كان المجلد يحتوي على CLAUDE.md بالفعل، لذا لم تُكتب التعليمات التي أدخلتها"
+  },
+  {
+    "zh": "官方登录态 · 已登录",
+    "en": "official sign-in · signed in",
+    "ja": "公式ログイン · ログイン済み",
+    "ko": "공식 로그인 · 로그인됨",
+    "zh-Hant": "官方登入態 · 已登入",
+    "es": "sesión oficial · con sesión iniciada",
+    "fr": "connexion officielle · connecté",
+    "ru": "официальный вход · вход выполнен",
+    "id": "Login resmi · sudah masuk",
+    "ar": "دخول رسمي · مسجّل للدخول"
+  },
+  {
+    "zh": "官方登录态 · 未登录",
+    "en": "official sign-in · not signed in",
+    "ja": "公式ログイン · 未ログイン",
+    "ko": "공식 로그인 · 로그인 안 됨",
+    "zh-Hant": "官方登入態 · 未登入",
+    "es": "sesión oficial · sin sesión iniciada",
+    "fr": "connexion officielle · non connecté",
+    "ru": "официальный вход · вход не выполнен",
+    "id": "Login resmi · belum masuk",
+    "ar": "دخول رسمي · غير مسجّل للدخول"
+  },
+  {
+    "zh": "官方登录态 · 问不出登录状态",
+    "en": "official sign-in · couldn't determine sign-in state",
+    "ja": "公式ログイン · ログイン状態を確認できません",
+    "ko": "공식 로그인 · 로그인 상태를 확인할 수 없음",
+    "zh-Hant": "官方登入態 · 問不出登入狀態",
+    "es": "sesión oficial · no se puede determinar el estado",
+    "fr": "connexion officielle · état de connexion indéterminable",
+    "ru": "официальный вход · не удаётся определить состояние входа",
+    "id": "Login resmi · status masuk tidak dapat dipastikan",
+    "ar": "دخول رسمي · تعذّر تحديد حالة تسجيل الدخول"
+  },
+  {
+    "zh": "官方登录态 · 上次问到时已登录",
+    "en": "official sign-in · was signed in when last checked",
+    "ja": "公式ログイン · 前回確認時はログイン済み",
+    "ko": "공식 로그인 · 마지막 확인 시 로그인됨",
+    "zh-Hant": "官方登入態 · 上次問到時已登入",
+    "es": "sesión oficial · había iniciado sesión en la última comprobación",
+    "fr": "connexion officielle · connecté lors de la dernière vérification",
+    "ru": "официальный вход · при последней проверке вход был выполнен",
+    "id": "Login resmi · saat terakhir diperiksa sudah masuk",
+    "ar": "دخول رسمي · كان مسجّلًا للدخول عند آخر فحص"
+  },
+  {
+    "zh": "官方登录态 · 上次问到时未登录",
+    "en": "official sign-in · wasn't signed in when last checked",
+    "ja": "公式ログイン · 前回確認時は未ログイン",
+    "ko": "공식 로그인 · 마지막 확인 시 로그인 안 됨",
+    "zh-Hant": "官方登入態 · 上次問到時未登入",
+    "es": "sesión oficial · no había iniciado sesión en la última comprobación",
+    "fr": "connexion officielle · non connecté lors de la dernière vérification",
+    "ru": "официальный вход · при последней проверке вход не был выполнен",
+    "id": "Login resmi · saat terakhir diperiksa belum masuk",
+    "ar": "دخول رسمي · لم يكن مسجّلًا للدخول عند آخر فحص"
+  },
+  {
+    "zh": "需要登录账户",
+    "en": "Sign in to your account",
+    "ja": "アカウントにログインしてください",
+    "ko": "계정에 로그인하세요",
+    "zh-Hant": "需要登入帳戶",
+    "es": "Inicia sesión en tu cuenta",
+    "fr": "Connectez-vous à votre compte",
+    "ru": "Войдите в аккаунт",
+    "id": "Masuk ke akun Anda",
+    "ar": "سجّل الدخول إلى حسابك"
   }
 ]
