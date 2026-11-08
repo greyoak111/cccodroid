@@ -10,6 +10,7 @@ import { CFG, log } from "./config.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { pathBlocked } from "./files.mjs";
 import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
+import { sealed } from "./edition.mjs";
 
 export const CMD_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 const MAX_BODY = 64 * 1024;
@@ -132,7 +133,9 @@ export function commandRoutes(builtinNames) {
     if (!p.startsWith("/api/commands")) return NEXT;
     if (req.method === "GET" && p === "/api/commands") {
       const dir = u.searchParams.get("dir") || CFG.workspace;
-      return sendJson(res, 200, { scopes: [listCmds("user"), listCmds("project", dir)], workspace: path.resolve(dir) });
+      // sealed：发行版把这些指令经合成插件交给 Claude，实际名字是 /user:<名字>（见 seal.mjs）；
+      // 界面插入输入框时要用带前缀的名字（195-J.6）
+      return sendJson(res, 200, { scopes: [listCmds("user"), listCmds("project", dir)], workspace: path.resolve(dir), sealed: sealed() });
     }
     let b = {}; try { b = JSON.parse((await readBody(req)) || "{}"); } catch {}
     try {
