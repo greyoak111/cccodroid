@@ -251,10 +251,11 @@ export function claudeEnv(o = {}) {
   sealEnv(env);   // 发行版：能让 claude 另找配置 / 记忆目录的变量清掉（见 edition.mjs）
   // 网关令牌文件的位置不交给 claude：Bash 里 cat "$CCAPP_TOKEN_FILE" 不带 .gateway-token 字样，再确认钩子认不出（11-03 审查 L-6）
   delete env.CCAPP_TOKEN_FILE;
-  // 自定义接口（第三方调用）垫一层流式补尾：回答说完了上游却没收尾，claude 会整段撤回重答（见 streamfix.mjs）
+  // 第三方接口（自定义的和预置的第三方厂商）垫一层流式补尾：回答说完了上游却没收尾，claude 会整段撤回重答、厂商记两次（见 streamfix.mjs）。
+  // 以前只垫自定义接口，预置的 DeepSeek / GLM… 断流照样整段重来（0.6.9 审计 195-U.6）。官方（nativeModels）、登录态、端侧不垫。
   // 用户给 claude 配了代理就不垫：本地转发是 node 发的请求，不走那个代理
   const viaProxy = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"].some((k) => env[k]);
-  if (p.custom && !p.login && !p.local && !viaProxy && env.ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = fixedBaseUrl(env.ANTHROPIC_BASE_URL);
+  if ((p.custom || p.group === "third") && !p.nativeModels && !p.login && !p.local && !viaProxy && env.ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = fixedBaseUrl(env.ANTHROPIC_BASE_URL);
 
   // 认证：按厂商声明的风格选变量，别把 key 塞进对方不认的 header。
   //   bearer    → ANTHROPIC_AUTH_TOKEN（Authorization: Bearer …）

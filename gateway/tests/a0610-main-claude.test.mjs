@@ -14,3 +14,16 @@ test("extraEnv 拒模型、各档映射、上下文窗口、压缩线；超时�
     "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"]) assert.ok(re.test(k), k);
   for (const k of ["API_TIMEOUT_MS", "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "ENABLE_TOOL_SEARCH", "CLAUDE_CODE_MAX_RETRIES"]) assert.ok(!re.test(k), k);
 });
+
+test("U.6：预置第三方厂商也走流式补尾；官方 API Key、端侧不走", async () => {
+  const { startStreamFix, STREAMFIX } = await import("../gw/streamfix.mjs");
+  const { claudeEnv } = await import("../gw/claude.mjs");
+  const { providerById } = await import("../gw/providers.mjs");
+  startStreamFix();
+  for (let i = 0; i < 100 && !STREAMFIX.port; i++) await new Promise((r) => setTimeout(r, 20));
+  const via = (id) => String(claudeEnv({ provider: providerById(id) }).ANTHROPIC_BASE_URL || "").startsWith(`http://127.0.0.1:${STREAMFIX.port}/u/`);
+  try {
+    assert.equal(via("deepseek"), true, "DeepSeek 预置");
+    assert.equal(via("anthropic-key"), false, "官方 API Key 不经本地转发");
+  } finally { STREAMFIX.server?.close(); }
+});

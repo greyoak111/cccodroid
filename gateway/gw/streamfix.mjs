@@ -8,7 +8,7 @@
 // 替它补上 message_delta（有工具调用 = tool_use，否则 end_turn）+ message_stop。块还开着就照样断开，交给 claude 自己恢复。
 // 非 JSON 的 data（OpenAI 式的 [DONE]）直接丢掉。其它请求原样转发。
 //
-// 只用于自定义接口：预置厂商没出过这事；官方账户的登录令牌按条款不能经过我们（见 claude.mjs）。
+// 只用于第三方接口（自定义的和预置的第三方厂商，0.6.9 审计 195-U.6）；官方账户的登录令牌按条款不能经过我们（见 claude.mjs）。
 import http from "node:http";
 import https from "node:https";
 import crypto from "node:crypto";
