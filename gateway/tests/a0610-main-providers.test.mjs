@@ -143,3 +143,15 @@ test("U.7：清单分页（has_more / last_id）顺着 after_id 拉完", () => {
   for (const id of ["m1", "m2", "m3", "m4", "m5"]) assert.ok(j.ids.includes(id), `少了 ${id}：${j.ids}`);
   assert.equal(j.seen.length, 3);
 });
+
+test("196-凭据.1：记着的线路已不在 → 不带旧 Key 去第一条线路，界面能看到失配", () => {
+  const r = scenario({ "ccapp-providers.json": { active: "deepseek", providers: { kimi: { apiKey: "OLD-KEY", endpoint: "gone-region" } } } },
+    `const p = P.providerById("kimi"); console.log(JSON.stringify({ lost: p.endpointLost, key: P.keyOf(p) }));`);
+  assert.equal(r.rc, 0, r.err);
+  const j = JSON.parse(r.out);
+  assert.equal(j.lost, "gone-region");
+  assert.equal(j.key, null, "旧 Key 不能带去别的线路");
+  const ok = scenario({ "ccapp-providers.json": { active: "deepseek", providers: { kimi: { apiKey: "K2" } } } },
+    `const p = P.providerById("kimi"); console.log(JSON.stringify({ lost: p.endpointLost || null, key: P.keyOf(p) }));`);
+  assert.deepEqual(JSON.parse(ok.out), { lost: null, key: "K2" });
+});

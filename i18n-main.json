@@ -34,5 +34,17 @@
   "ru": "Сервер сообщил об ошибке в конце ответа ({msg}); ответ считается завершённым. Если он неполный, отправьте «продолжай».",
   "id": "Upstream melaporkan galat di akhir jawaban ({msg}); dianggap selesai. Jika jawaban belum lengkap, kirim “lanjutkan”.",
   "ar": "أبلغ الخادم عن خطأ في نهاية الرد ({msg})؛ عُدّ الرد مكتملاً. إن بدا ناقصاً فأرسل «تابع»."
+ },
+ {
+  "zh": "{name} 原来选的线路「{ep}」已经不在了。请到设置里重选线路，并重新填这条线路的密钥。",
+  "en": "The route “{ep}” previously selected for {name} no longer exists. Pick a route again in Settings and enter the key for it.",
+  "ja": "{name} で選んでいた回線「{ep}」はもうありません。設定で回線を選び直し、その回線のキーを入力し直してください。",
+  "ko": "{name}에서 선택했던 경로 「{ep}」이(가) 더 이상 없습니다. 설정에서 경로를 다시 고르고 그 경로의 키를 다시 입력하세요.",
+  "zh-Hant": "{name} 原來選的線路「{ep}」已經不在了。請到設定裡重選線路，並重新填這條線路的金鑰。",
+  "es": "La ruta «{ep}» elegida para {name} ya no existe. Elige otra ruta en Ajustes e introduce su clave.",
+  "fr": "La ligne « {ep} » choisie pour {name} n’existe plus. Choisissez une ligne dans les réglages et saisissez sa clé.",
+  "ru": "Маршрут «{ep}», выбранный для {name}, больше не существует. Выберите маршрут в настройках и заново введите для него ключ.",
+  "id": "Jalur “{ep}” yang dipilih untuk {name} sudah tidak ada. Pilih ulang jalur di Pengaturan dan masukkan kunci untuk jalur itu.",
+  "ar": "المسار «{ep}» الذي اختير لـ {name} لم يعد موجوداً. اختر مساراً من الإعدادات وأدخل مفتاحه من جديد."
  }
 ]

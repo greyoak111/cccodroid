@@ -333,7 +333,11 @@ function composeProvider(id, raw) {
     if (!v.endpoints.length) delete v.endpoints;
   }
   if (v.endpoints && v.endpoints.length) {
-    const ep = v.endpoints.find((e) => e.id === v.endpoint) || v.endpoints[0];
+    const hit = v.endpoints.find((e) => e.id === v.endpoint);
+    // 记着的线路已经不在了（厂商目录更新删了它）：照旧显示第一条，但不带旧 Key 过去——那把 Key 是给原线路的，
+    // 新线路可能是另一个地区 / 另一家主机（0.6.9 审计 196-凭据.1）。用户重选线路、重填 Key 后恢复
+    if (v.endpoint && !hit) v.endpointLost = v.endpoint;
+    const ep = hit || v.endpoints[0];
     v.endpoint = ep.id;
     v.baseUrl = ep.baseUrl;
     v.modelsUrl = ep.modelsUrl || "";
@@ -417,7 +421,7 @@ function providerView(id, v) {
     defaultModel: v.defaultModel || null, fastModel: v.fastModel || null, inlineImages: !!v.inlineImages, contextWindow: Number(v.contextWindow) || 0,
     extraModels: v.custom ? extraModelsOf(v) : [],
     keyUrl: v.keyUrl || null, hint: v.hint || "", hintEn: v.hintEn || "",
-    hasKey: !!key, keyTail: key ? key.slice(-4) : "",
+    hasKey: !!key, keyTail: key ? key.slice(-4) : "", endpointLost: v.endpointLost || null,   // 记着的线路不在了：界面提示重选（196-凭据.1）
     active: id === PROVIDER.id,
   };
 }
@@ -817,6 +821,7 @@ export let PROVIDER = BUILTIN_PROVIDER;
 
 /** 逐级回落取密钥：生效厂商自带 → 环境变量 → 历史配置文件 */
 function loadApiKey(p) {
+  if (p && p.endpointLost) return null;   // 线路失配：哪把 Key 都不带（196-凭据.1）
   if (p && p.apiKey) return String(p.apiKey).trim();
 
   // 显式配置过的厂商（ccapp-providers.json 里有它一条），密钥就只认它自己那一条。

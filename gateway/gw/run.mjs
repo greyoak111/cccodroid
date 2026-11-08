@@ -267,6 +267,10 @@ export async function startRun(item) {
     emit({ type: "error", message: tr(LAST_LANG, lost) });
     return endRun(run, { failed: true });
   }
+  if (P.endpointLost) {
+    emit({ type: "error", message: tr(LAST_LANG, tz("{name} 原来选的线路「{ep}」已经不在了。请到设置里重选线路，并重新填这条线路的密钥。", { name: P.label || P.id, ep: P.endpointLost })) });
+    return endRun(run, { failed: true });
+  }
   if (!KEY && !P.login) {
     emit({ type: "error", message: tr(LAST_LANG, tz("未配置 API 密钥。请在设置里填入 {name} 的密钥。", { name: P.label || P.id })) });
     return endRun(run, { failed: true });
