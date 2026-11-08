@@ -317,9 +317,17 @@ public class MainActivity extends Activity {
         pushWall();
         getSystemService(android.app.NotificationManager.class).cancel(41);    // Priv.toFront 的「点此回来」
         Notify.get(this).onForeground(); }                                    // 确认卡就在眼前，通知撤掉
-    @Override protected void onPause() { ui.removeCallbacks(fpsBeat); visible = false; Battery.foreground(false); super.onPause();
+    @Override protected void onPause() { ui.removeCallbacks(fpsBeat); Battery.foreground(false); super.onPause();
         if (pane != null) pane.pause();
-        Notify.get(this).onBackground(); }                                    // 还有没答的确认：现在补发通知
+        // 分屏 / 自由窗口里换个窗口点一下也会走到 onPause，可聊天还看得见：不算到后台，也不补发通知
+        // （0.6.10 审计 200-13-07）。真正看不见了由 onStop 收尾。
+        if (!isInMultiWindowMode()) { visible = false; Notify.get(this).onBackground(); } }
+    @Override protected void onStop() {
+        super.onStop();
+        // 分屏里被整个切走 / 熄屏时 onPause 没记过账，这里补上；转屏重建不算到后台
+        boolean was = visible;
+        visible = false;
+        if (was && !isChangingConfigurations()) Notify.get(this).onBackground(); }   // 还有没答的确认：现在补发通知
 
     // ── 外观：界面（theme.js）定浅 / 深，系统夜间模式只有原生层知道 ──
     private boolean systemNight() {
