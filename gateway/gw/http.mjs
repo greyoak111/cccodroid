@@ -196,3 +196,16 @@ export function readBody(req) {
 export const NEXT = Symbol("next");
 /** 解网址里的一段：畸形的 %xx 返回空串（不抛 URIError 成 500，审查 v0513b 低-6） */
 export const dec = (s) => { try { return decodeURIComponent(s); } catch { return ""; } };
+
+// 流式响应（事件流、streamfix 代理）往外写一律写 Buffer，不写字符串：自带的 Node 26 在 HTTP/1.1 分块响应里连续写多字节（中文）字符串，
+// 写满返回 false 后 drain 可能再也不来（响应、套接字都已没有待写字节，响应却一直 needDrain），
+// 等它的那一路就停在半路（事件流的补发发不出 sync、代理暂停了上游就再也不续）；同样的字节换成 Buffer 写就正常（0.6.9 审计 #187，本机复现过）
+/** 写一条；写满了就等对端收走再回来。drain 万一不来，待写字节清空也算（同上，多一道保险），连接断了直接回 */
+export function writePaced(res, chunk) {
+  if (res.write(typeof chunk === "string" ? Buffer.from(chunk) : chunk)) return null;
+  return new Promise((r) => {
+    const go = () => { clearInterval(t); res.off("drain", go); res.off("close", go); r(); };
+    const t = setInterval(() => { if (res.destroyed || res.writableLength === 0) go(); }, 200);
+    res.once("drain", go); res.once("close", go);
+  });
+}

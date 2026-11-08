@@ -13,6 +13,7 @@ import http from "node:http";
 import https from "node:https";
 import crypto from "node:crypto";
 import { log } from "./config.mjs";
+import { writePaced } from "./http.mjs";
 
 // key：每次启动随机。地址里只放「通道号」= HMAC(key, 上游)，上游本身记在网关这张表里，不从地址里解。
 // 通道号会跟着 ANTHROPIC_BASE_URL 进 claude 的环境（模型跑一句 env 就看得到，还会进记录和导出包），
@@ -141,7 +142,12 @@ function handle(req, res) {
       res.end(t);
     };
     ur.setEncoding("utf8");
-    ur.on("data", (d) => { const o = fix.feed(d); if (o) res.write(o); });
+    // 下游（claude）读得慢就停读上游，收走了再续：以前不管 write 的返回值，上游有多少吸多少，全堆在响应缓冲里（0.6.9 审计 #193）
+    ur.on("data", (d) => {
+      const o = fix.feed(d);
+      const w = o && writePaced(res, o);
+      if (w) { ur.pause(); w.then(() => { if (!res.destroyed) ur.resume(); }); }
+    });
     ur.on("end", end);
     ur.on("error", end);
     ur.on("aborted", end);
