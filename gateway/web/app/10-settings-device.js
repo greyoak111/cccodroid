@@ -7,6 +7,14 @@
   };
   const SETUP_BUSY = ["downloading", "installing", "connecting", "pairing", "starting", "permission"];
   let privPoll = null;
+  // 这些按钮背后是原生跳转 / priv 调用：失败会回 200 + {ok:false}，以前只接网络错误，用户点了没反应（195-N.7）
+  const appPost = async (url, body) => {
+    try {
+      const r = await post(url, body);
+      if (r && r.ok === false) toast(t("操作失败：{msg}", { msg: r.message || "?" }), true);
+      return r;
+    } catch (e) { toast(e.message, true); return null; }
+  };
   // 各家系统里"允许后台运行"的位置。红魔/中兴为实测，其余是常见路径
   const BG_HOW = {
         nubia: t("红魔 / 努比亚：应用信息 → 应用的电池用量 → 电池优化 → <b>后台运行：允许</b>（<b>自启动</b>也选允许，开机激活 Shizuku、更新后自动恢复都靠它）"),
@@ -30,7 +38,7 @@
   }
   $("bg-actions").addEventListener("click", async (e) => {
     const act = e.target.dataset && e.target.dataset.act;
-    if (act === "appsettings") post("/api/app/open_app_settings").catch(() => {});
+    if (act === "appsettings") appPost("/api/app/open_app_settings");
     if (act === "ack") { const st = await post("/api/app/freeze_ack").catch(() => null); if (st) renderBg(st.frozen); }
   });
 
@@ -135,13 +143,13 @@
   $("priv-actions").addEventListener("click", async (e) => {
     const act = e.target.dataset && e.target.dataset.act;
     if (!act) return;
-    if (act === "open") await post("/api/priv/open").catch(() => {});
-    if (act === "appsettings") return post("/api/app/open_app_settings").catch(() => {});
+    if (act === "open") await appPost("/api/priv/open");
+    if (act === "appsettings") return appPost("/api/app/open_app_settings");
     if (act === "audit") return togglePrivAudit();
     // 原地换成一句确认、不重排：整段收起会让下面的开关挪到手指底下被误点。下次打开设置页才真正消失
     if (act === "bootack") { localStorage.setItem("cc.bootAck", e.target.dataset.boot); $("priv-setup").textContent = t("好的，下次开机后再检查。"); e.target.disabled = true; return; }
-    if (act === "repair") { await post("/api/app/shz_repair").catch((e2) => toast(e2.message, true)); return setTimeout(loadPriv, 500); }
-    if (act === "activate") { const r = await post("/api/app/shz_activate").catch((e2) => toast(e2.message, true)); if (r && r.ok === false && r.message) toast(r.message, true); return setTimeout(loadPriv, 500); }
+    if (act === "repair") { await appPost("/api/app/shz_repair"); return setTimeout(loadPriv, 500); }
+    if (act === "activate") { await appPost("/api/app/shz_activate"); return setTimeout(loadPriv, 500); }
     if (act === "request") {
       const r = await post("/api/priv/request").catch((e2) => ({ message: e2.message }));
       toast(r.message || t("已请求"));
@@ -189,10 +197,20 @@
       loadOrphans();
     };
   }
+  // 更新状态取不到时不能把整个分类藏掉（用户会以为没有更新功能）；明确说失败、给重试（195-M.8）
+  function updFailed(msg) {
+    $("upd-field").classList.remove("hidden");
+    if (!lastUpd) $("upd-items").innerHTML = `<div class="tiny err">${esc(t("取不到更新状态：{msg}", { msg }))}</div>
+      <div class="it-acts"><button class="btn ghost sm" id="upd-retry">${t("重试")}</button></div>`;
+    $("upd-last").textContent = "✗ " + msg;
+    $("upd-retry")?.addEventListener("click", loadUpd);
+  }
   async function loadUpd() {
     let st;
-    try { st = await api("/api/app/upd_status"); } catch { return; }
-    if (!st.ok || !st.items) return;                 // 旧版 / 开发端：没有这项
+    try { st = await api("/api/app/upd_status"); }
+    catch (e) { return updFailed(e.message || "?"); }
+    if (st && st.ok === false && st.message) return updFailed(st.message);
+    if (!st || !st.ok || !st.items) return;          // 旧版 / 开发端：确实没有这项
     lastUpd = st;
     $("upd-field").classList.remove("hidden");
     $("upd-auto").checked = !!st.auto;
@@ -355,7 +373,7 @@
     $("ntf-" + k).addEventListener("change", (e) => post("/api/app/notify_set", { [k]: e.target.checked })
       .then((j) => { if (j && j.ok === false) throw new Error(j.message || t("保存失败")); })
       .then(loadNotify, (err) => { toast(t("保存失败：{msg}", { msg: err.message || "" }), true); loadNotify(); }));
-  $("ntf-sys").addEventListener("click", () => post("/api/app/notify_settings").catch(() => {}));
+  $("ntf-sys").addEventListener("click", () => appPost("/api/app/notify_settings"));
 
   // ── 设备工具（只有 cccodroid：DeviceTools.java + A11y.java，经 device-mcp.mjs 给 Claude）──
   const devName = (n) => ({
@@ -416,7 +434,7 @@
   $("dev-on").addEventListener("change", (e) => devSet({ on: e.target.checked }));
   $("dev-a11y").addEventListener("change", (e) => devSet({ a11y: e.target.value }));
   $("dev-idle").addEventListener("change", (e) => devSet({ idle: Number(e.target.value) || 10 }));
-  $("dev-a11y-sys").addEventListener("click", () => post("/api/app/a11y_settings").catch(() => {}));
+  $("dev-a11y-sys").addEventListener("click", () => appPost("/api/app/a11y_settings"));
 
   // 打开更新页时自动查一次：正在查、正在下/装，或 20 秒内刚查过就只刷新显示
   async function updOnOpen() {
@@ -427,7 +445,10 @@
     followUpd(); setTimeout(loadUpd, 300);
   }
   $("upd-check").addEventListener("click", async () => {
-    await post("/api/app/upd_check").catch((e2) => toast(e2.message, true));
+    // 200 + {ok:false} 也是失败，以前只接网络错误，按钮像没反应（195-M.8）
+    let r = null;
+    try { r = await post("/api/app/upd_check"); } catch (e2) { return toast(e2.message, true); }
+    if (r && r.ok === false) toast(r.message || t("检查更新失败"), true);
     followUpd(); setTimeout(loadUpd, 300);
   });
   $("upd-flavor").addEventListener("change", async (e) => {
@@ -633,7 +654,10 @@
     if (!d.native) h += `<div class="tiny">${esc(t("这个版本没有原生层，只记 CPU 时间（电量、亮屏、前台时长要 cccodroid）。"))}</div>`;
     box.innerHTML = h;
     const b = d.battery;
+    // currentUa 按微安上报（Android BATTERY_PROPERTY_CURRENT_NOW 的口径）：一律 /1000 成 mA。
+    // 以前只在 >20 mA 时才除，低电流设备会把 5000 µA 显示成 5000 mA（195-O.8）
+    const ma = Number.isFinite(b && b.currentUa) && b.currentUa ? Math.abs(b.currentUa) / 1000 : null;
     $("en-bat").textContent = b ? [t("电池 {p}", { p: Math.round(b.level) + "%" }), b.charging ? t("充电中") : t("放电中"),
-      Number.isFinite(b.currentUa) && b.currentUa ? Math.round(Math.abs(b.currentUa) / (Math.abs(b.currentUa) > 20000 ? 1000 : 1)) + " mA" : ""].filter(Boolean).join(" · ") : "";
+      ma == null ? "" : (ma >= 10 ? Math.round(ma) : ma.toFixed(1)) + " mA"].filter(Boolean).join(" · ") : "";
     enCaption();
   }

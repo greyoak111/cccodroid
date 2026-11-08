@@ -56,8 +56,10 @@
       if (pageOn("lineage")) LIN.poll = setTimeout(loadLineage, 800);
       return;
     }
+    // 头一回拿到图才归位到「现在」；会话变了后的后台重取保持用户拖着的位置（195-K.8）
+    const first = !LIN.g;
     LIN.g = g; LIN.stale = false;
-    linPaint(true);
+    linPaint(first);
     linFill();
     // 第一次来：提一句「怎么看」，不强拉进导览
     if (!localStorage.getItem("cc.linTourSeen") && !LIN.hinted) { LIN.hinted = true; toast(t("第一次来？点右上「怎么看」，两分钟学会看脉络")); }

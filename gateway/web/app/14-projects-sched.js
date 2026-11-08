@@ -115,7 +115,13 @@
   $("tab-projects").addEventListener("click", async (e) => {
     const box = $("tab-projects");
     const a = e.target.closest("[data-a]")?.dataset.a;
-    if (a === "back") { PJ.cur = null; PJ.detail = null; return renderProjects(); }
+    if (a === "back") {
+      // 指令改过还没保存：先问一句，别点返回就静默丢掉（195-K.7）
+      const ta0 = box.querySelector(".pj-instr");
+      if (ta0 && !ta0.readOnly && ta0.value !== ((PJ.detail && PJ.detail.instr) || "") &&
+          !confirm(t("项目指令还没保存，返回会丢掉这次修改。确定返回？"))) return;
+      PJ.cur = null; PJ.detail = null; return renderProjects();
+    }
     if (a === "new") return newProjectDlg();
     if (a === "pj-retry") { PJ.err = ""; renderProjects(); return loadProjects(); }
     const card = e.target.closest("[data-pj]"); if (card) return openProject(card.dataset.pj);
@@ -496,10 +502,13 @@
     const models = MODELS.length ? MODELS : [];
     const effs = PJ.effLevels && PJ.effLevels.length ? PJ.effLevels : ["low", "medium", "high", "xhigh", "max"];
     const cost = [0, 0.1, 0.3, 0.5, 1, 2, 5];
+    // 任务所属项目被删了：下拉里补一条，保存时别把 projectId 悄悄清成 null 改成工作区跑（195-K.2）
+    const projOpts = [["", t("工作区")], ...PJ.list.map((p) => [p.id, t("项目：{n}", { n: p.name })])];
+    if (v.projectId && !PJ.list.some((p) => p.id === v.projectId)) projOpts.push([v.projectId, t("已删除的项目（{id}）", { id: v.projectId })]);
     const body = frow(t("名称"), `<input class="pj-field" id="t-name" value="${esc(v.name)}" placeholder="${esc(t("比如：每天早上看 CI"))}" autocomplete="off">`) +
       frow(t("要 Claude 做什么"), `<textarea class="pj-field" id="t-prompt" placeholder="${esc(t("写清楚做什么、做完怎么交代。没人在旁边：它不能问你问题。"))}">${esc(v.prompt)}</textarea>`,
         esc(t("想「没事就别吵我」：让它没发现时只回一句固定的话（比如「全绿」），下面的通知选「只在有发现时」。"))) +
-      frow(t("在哪跑"), sel("t-proj", [["", t("工作区")], ...PJ.list.map((p) => [p.id, t("项目：{n}", { n: p.name })])], v.projectId || "")) +
+      frow(t("在哪跑"), sel("t-proj", projOpts, v.projectId || "")) +
       frow(t("什么时候"), `<div class="seg-scroll">${segOf("kind", [["daily", t("每天")], ["weekly", t("每周")], ["monthly", t("每月")], ["every", t("每隔几小时")], ["once", t("仅一次")], ["cron", t("自定义")]], f.kind)}</div><div class="pj-sub-form" id="t-freq">${FREQ[f.kind]()}</div><div class="pj-hint" id="t-next"></div>`) +
       frow(t("会话"), rcards("session", [["new", t("每次新开一个对话"), esc(t("互不干扰；结果一次一个，好翻"))], ["same", t("接着同一个对话"), esc(t("带着上次的上下文（适合「和上次比有什么变化」）；越跑越长，会自动压缩"))]], v.session)) +
       frow(t("权限"), rcards("perm", [["ro", t("只读"), esc(t("能看文件、跑查询类命令，不改任何东西（先这样试几天）"))], ["proj", t("可以改项目目录里的文件"), esc(t("目录外的写入、安装软件、删除等一律当作拒绝"))], ["custom", t("自己挑允许的工具"), esc(t("比如只允许 Bash(git *) 和 WebFetch；其余一律拒绝"))]], v.perm) +
@@ -609,7 +618,10 @@
     // 接口跟随项目时换了项目：有效那家可能变了，型号清单跟着换（同一家就不动，免得清掉已选的）
     q("#t-proj").addEventListener("change", () => { if (!(q("#t-prov") ? q("#t-prov").value : "") && effProv() !== fmPid) fillModels(false); });
     if (effProv() && effProv() !== globalProv()) fillModels(true);
-    if (!MODELS.length && !PJ.mLoaded) api("/api/models").then((r) => { MODELS = r.models || []; PJ.mLoaded = true; PJ.effLevels = r.effortLevels || []; }).catch(() => {});
+    if (!MODELS.length && !PJ.mLoaded) api("/api/models").then((r) => {
+      MODELS = r.models || []; PJ.mLoaded = true; PJ.effLevels = r.effortLevels || [];
+      if (o.isConnected && q("#t-model")) fillModels(true);   // 清单晚到：把已经打开的对话框下拉补上（195-K.6）
+    }).catch(() => {});
     setTimeout(() => (edit ? null : q("#t-name").focus()), 50);
   }
 
@@ -624,6 +636,19 @@
     }
   }
 
+  // 定时任务页开着时每 5 秒补拉一次：hello 不一定来（别的会话跑完、后台状态变化），
+  // 不补拉的话“在跑”、下次时间、补跑按钮会长期停在打开那一刻的值（195-BB.4）
+  let schedPoll = 0;
+  function schedPollSet(on) {
+    clearTimeout(schedPoll); schedPoll = 0;
+    if (!on) return;
+    schedPoll = setTimeout(async () => {
+      schedPoll = 0;
+      if (!pageOn("sched")) return;
+      if (!document.hidden) { try { await loadSched(); } catch {} }
+      if (pageOn("sched")) schedPollSet(true);
+    }, 5000);
+  }
   /** 打开整页：窄屏收起侧栏、盖住对话；宽屏侧栏照旧常驻，高亮当前项 */
   function openPage(name, cat) {
     if (!PAGES[name] || name === "settings") return openSettings(cat);
@@ -658,11 +683,13 @@
     if (name === "usage") { loadQuota(); loadUsage(); loadEnergy(); loadAcctCard(false); }
     if (name === "projects") { if (prev !== name && !PJ.cur) PJ.detail = null; renderProjects(); loadProjects(); loadSched(); }
     if (name === "sched") { renderSched(); loadSched(); loadProjects(); }
+    schedPollSet(name === "sched");   // 离开就停，进来就开始补拉（195-BB.4）
     if (name === "lineage") { if (prev !== name) { linPickEnd(); linProfClose(true); } if (LIN.g) linPaint(prev !== name); else linState(t("加载中…")); loadLineage(); }   // 头一回进：图还没取回来先说一声，别空白（#38）
   }
   function closePage() {
     if (!curPage) return;
     curPage = null;
+    schedPollSet(false);
     pageTitleOv = "";
     document.documentElement.classList.remove("pg-lineage", "pg-on");
     closeTour();
