@@ -85,7 +85,7 @@ export function compRecord(id) { return compRecordInfo(id).rec; }
 function compWriteRecord(id, rec) {
   return writeAtomic(compRecFile(id), JSON.stringify(rec, null, 1));
 }
-export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile };   // 只给测试用
+export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile, compDropDanglingDocs, compSweepDanglingDocs };   // 只给测试用
 
 function compFetch(src, quick) {
   // quick：拉索引用——连不上 8 秒就放弃、只重试一次，好尽快换镜像（GitHub 被墙时以前要干等一分多钟）
@@ -366,6 +366,54 @@ function compMoveIn(stageUsr, rel = "", moved = [], skipped = [], orphans = new 
   return { moved, skipped };
 }
 
+// ── 悬空的文档软链（196-真机.3）──
+// Termux 的包把 share/doc/<包>/copyright 做成指向 ../../LICENSES/<协议>.txt 的软链，LICENSES 又不在包里：
+// 装进 $PREFIX 就是一堆断链（真机上 86 个），界面和对账都当异常。只碰 share/doc/ 下的软链，普通文件不碰。
+const DOC_PREFIX = "share/doc/";
+/** 这条相对路径是不是「share/doc/ 下、目标已经断了的软链」 */
+function docLinkDangling(rel) {
+  if (typeof rel !== "string" || !rel.startsWith(DOC_PREFIX)) return false;
+  const abs = path.join(PREFIX, rel);
+  try { if (!fs.lstatSync(abs).isSymbolicLink()) return false; } catch { return false; }
+  try { fs.statSync(abs); return false; }
+  catch (e) { return e.code === "ENOENT" || e.code === "ENOTDIR"; }
+}
+/** 安装收尾：本组件放进来的文档软链，目标不在（包里没带 LICENSES 之类）就删掉、不记进清单。
+ *  返回删掉的条数；rec.files 同步改，最后那条 ok 记录里就不会再有它们。 */
+function compDropDanglingDocs(rec) {
+  const keep = [];
+  let n = 0;
+  for (const r of rec.files || []) {
+    if (!docLinkDangling(r)) { keep.push(r); continue; }
+    try { fs.rmSync(path.join(PREFIX, r), { force: true }); n++; } catch { keep.push(r); }
+  }
+  if (n) { rec.files = keep; log(`[comp] ${rec.id}：${n} 个文档软链是断的（目标不在包里），没留`); }
+  return n;
+}
+/** 卸载 / 升级后扫一遍 share/doc/，把已经断掉的软链清掉（目标可能刚被这次卸载删了，或是旧工具包留下的）。
+ *  只删软链本身；返回清掉的条数。 */
+function compSweepDanglingDocs() {
+  const root = path.join(PREFIX, "share/doc");
+  try { if (!fs.lstatSync(root).isDirectory()) return 0; } catch { return 0; }
+  let n = 0;
+  const walk = (rel) => {
+    let list; try { list = fs.readdirSync(path.join(PREFIX, rel), { withFileTypes: true }); } catch { return; }
+    for (const d of list) {
+      const r = rel + "/" + d.name;
+      if (d.isDirectory()) { walk(r); continue; }
+      if (!d.isSymbolicLink()) continue;
+      try { fs.statSync(path.join(PREFIX, r)); }
+      catch (e) {
+        if (e.code !== "ENOENT" && e.code !== "ENOTDIR") continue;
+        try { fs.rmSync(path.join(PREFIX, r), { force: true }); n++; } catch {}
+      }
+    }
+  };
+  walk("share/doc");
+  if (n) log(`[comp] 清掉 ${n} 个悬空的文档软链`);
+  return n;
+}
+
 const PKG_LIST = /^var\/lib\/dpkg\/info\/(.+)\.list$/;
 
 /** 没人认领的文件：不在任何包的清单（工具包 + 已装组件带进来的 .list）里，也没有已装组件在用。
@@ -492,6 +540,8 @@ function compRemoveFiles(id, rec) {
   // 标记写着别的组件（那边接管了同名目录）就不删；没有标记的是旧版装的，照旧删
   let owner = sk ? (readSmall(path.join(sk, SKILL_OWNER), 512) || "").trim() : "";
   if (sk && (!owner || owner === id)) { const ucb = ucAppBegin(); fs.rmSync(sk, { recursive: true, force: true }); ucAppWrote([sk], ucb); }
+  // 这次删掉的文件可能让别的文档软链变得悬空；旧工具包留下的断链也顺手清掉（196-真机.3）
+  compSweepDanglingDocs();
 }
 
 async function compInstall(id) {
@@ -716,6 +766,8 @@ async function compRunInstall(id, b, job) {
   if (!compWriteRecord(id, rec)) throw new Error(tz("安装记录写不进去（存储满了或没有权限），这次安装没有继续"));
   const { skipped } = compMoveIn(path.join(tree, "usr"), "", [], [], orphans);
   if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
+  // 搬完再查（顺序不定，搬的时候目标可能还没就位）：目标仍然断掉的文档软链不留下（196-真机.3）
+  compDropDanglingDocs(rec);
   // 4) 首次运行配置（各包 postinst），失败不算安装失败
   const fr = path.join(PREFIX, lx, "first-run.sh");
   if (fs.existsSync(fr)) { try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); } catch (e) { log(`[comp] ${id} first-run：${e.message}`); } }
