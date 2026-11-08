@@ -200,7 +200,8 @@ test("03-007 建档存不上：内存不留没存上的题名和用户锁，AI �
   const { sid } = sessionWithSide("-a0520-arch");
   assert.equal((await fileChapter(sid, { title: "接手网关修复并验证", chapter: 1 })).ok, true);
   const before = JSON.stringify(archiveDb().sessions[sid]);
-  const r = await failRenameAsync((x) => x.endsWith("ccapp-archive.json.tmp"), () => fileChapter(sid, { title: "用户改的题名", chapter: 1, by: "user" }));
+  // 写盘改成 statefile 的原子写后，临时文件名是 `.ccapp-archive.json.tmp-<pid>-…`（0.6.10 b2）
+  const r = await failRenameAsync((x) => x.includes("ccapp-archive.json.tmp-"), () => fileChapter(sid, { title: "用户改的题名", chapter: 1, by: "user" }));
   assert.equal(r.ok, false);
   assert.equal(JSON.stringify(archiveDb().sessions[sid]), before);
   assert.equal((await fileChapter(sid, { title: "整理组件技能冲突", chapter: 1 })).ok, true);
