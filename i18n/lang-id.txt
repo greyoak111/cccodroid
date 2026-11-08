@@ -2970,3 +2970,10 @@
 2970	Folder kerja {dir} sudah tidak ada (dihapus, diganti nama, atau kartu penyimpanan dilepas), jadi giliran ini tidak dijalankan. Kembalikan foldernya, atau ubah path di pengaturan proyek, lalu kirim lagi.
 2971	Giliran ini terhenti sebelum dimulai (dikirim {when}).
 2972	Siap · tugas latar belakang selesai, sedang merapikan
+2973	Percakapan melebihi batas konteks model. Jalankan /compact lalu lanjutkan, atau mulai percakapan baru.
+2974	Endpoint menolak kunci: periksa di Pengaturan → Endpoint apakah API key sudah benar dan belum kedaluwarsa atau dinonaktifkan.
+2975	Saldo atau kuota akun habis: isi ulang atau cek kuota di konsol penyedia.
+2976	Terlalu banyak permintaan, atau batas penggunaan tercapai: tunggu sebentar lalu coba lagi.
+2977	Endpoint tidak menemukan model atau alamat ini: periksa nama model dan URL endpoint.
+2978	Penyedia mengalami galat atau kelebihan beban: coba lagi nanti. Jika terus terjadi, ganti model atau endpoint.
+2979	Tidak bisa menjangkau endpoint: periksa jaringan, atau apakah URL endpoint salah.

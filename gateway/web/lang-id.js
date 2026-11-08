@@ -2973,4 +2973,11 @@ window.I18N_DICT["id"] = {
   "工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。": "Folder kerja {dir} sudah tidak ada (dihapus, diganti nama, atau kartu penyimpanan dilepas), jadi giliran ini tidak dijalankan. Kembalikan foldernya, atau ubah path di pengaturan proyek, lalu kirim lagi.",
   "这一轮还没开始就被结束了（{when} 发的）。": "Giliran ini terhenti sebelum dimulai (dikirim {when}).",
   "就绪 · 后台任务都结束了，正在收尾": "Siap · tugas latar belakang selesai, sedang merapikan",
+  "对话太长，超过了模型的上下文上限。打 /compact 压缩一下再继续，或者开个新对话。": "Percakapan melebihi batas konteks model. Jalankan /compact lalu lanjutkan, atau mulai percakapan baru.",
+  "接口拒绝了密钥：到 设置 → 接口 检查 API Key 填得对不对、有没有过期或被停用。": "Endpoint menolak kunci: periksa di Pengaturan → Endpoint apakah API key sudah benar dan belum kedaluwarsa atau dinonaktifkan.",
+  "账户余额不足或额度用完了：到接口那边的控制台充值或查看额度。": "Saldo atau kuota akun habis: isi ulang atau cek kuota di konsol penyedia.",
+  "请求太频繁，或者用量到了上限：稍等一会儿再试。": "Terlalu banyak permintaan, atau batas penggunaan tercapai: tunggu sebentar lalu coba lagi.",
+  "接口找不到这个模型或地址：检查模型名和接口地址。": "Endpoint tidak menemukan model atau alamat ini: periksa nama model dan URL endpoint.",
+  "接口那边出错或者忙不过来：稍后再试。一直这样就换个模型或接口。": "Penyedia mengalami galat atau kelebihan beban: coba lagi nanti. Jika terus terjadi, ganti model atau endpoint.",
+  "连不上接口：检查网络，或者接口地址是不是写错了。": "Tidak bisa menjangkau endpoint: periksa jaringan, atau apakah URL endpoint salah.",
 };

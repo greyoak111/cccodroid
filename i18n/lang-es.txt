@@ -2970,3 +2970,10 @@
 2970	La carpeta de trabajo {dir} ya no existe (borrada, renombrada o se quitó la tarjeta de almacenamiento), así que este turno no se ejecutó. Vuelve a poner la carpeta o cambia la ruta en los ajustes del proyecto y envía de nuevo.
 2971	Este turno se cortó antes de empezar (enviado {when}).
 2972	Listo · las tareas en segundo plano terminaron, cerrando
+2973	La conversación supera el límite de contexto del modelo. Ejecuta /compact y continúa, o empieza una conversación nueva.
+2974	El endpoint rechazó la clave: comprueba en Ajustes → Endpoints que la API key sea correcta y no haya caducado ni esté desactivada.
+2975	La cuenta no tiene saldo o se agotó la cuota: recarga o revisa la cuota en la consola del proveedor.
+2976	Demasiadas solicitudes o se alcanzó un límite de uso: espera un poco y vuelve a intentarlo.
+2977	El endpoint no encuentra este modelo o dirección: revisa el nombre del modelo y la URL del endpoint.
+2978	El proveedor tuvo un error o está saturado: inténtalo más tarde. Si sigue pasando, cambia de modelo o de endpoint.
+2979	No se puede conectar con el endpoint: revisa la red o si la URL del endpoint está mal.

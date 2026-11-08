@@ -2970,3 +2970,10 @@
 2970	Le dossier de travail {dir} a disparu (supprimé, renommé ou carte de stockage retirée) : ce tour n’a pas été exécuté. Remettez le dossier ou changez le chemin dans les réglages du projet, puis renvoyez.
 2971	Ce tour a été interrompu avant de commencer (envoyé {when}).
 2972	Prêt · tâches d’arrière-plan terminées, finalisation
+2973	La conversation dépasse la limite de contexte du modèle. Lancez /compact puis continuez, ou ouvrez une nouvelle conversation.
+2974	Le point d’accès a refusé la clé : vérifiez dans Réglages → Points d’accès que la clé API est correcte, non expirée et non désactivée.
+2975	Solde ou quota épuisé : rechargez ou vérifiez votre quota dans la console du fournisseur.
+2976	Trop de requêtes ou limite d’usage atteinte : patientez un peu puis réessayez.
+2977	Le point d’accès ne trouve pas ce modèle ou cette adresse : vérifiez le nom du modèle et l’URL.
+2978	Le fournisseur a rencontré une erreur ou est surchargé : réessayez plus tard. Si cela persiste, changez de modèle ou de point d’accès.
+2979	Impossible de joindre le point d’accès : vérifiez le réseau ou l’URL.

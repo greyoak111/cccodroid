@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { scanText } from "./breach.mjs";
-import { CFG, HERE, PREFIX } from "./config.mjs";
+import { CFG, HERE, LAST_LANG, PREFIX, tr, tz } from "./config.mjs";
 import { SETTINGS } from "./settings-store.mjs";
 import { isLoginMode, learnWindow } from "./models.mjs";
 import { currentModelInfo } from "./claude.mjs";
@@ -79,6 +79,19 @@ export function contextWindowOf(result, p, model) {
 // claude 2.1.311 只认 100k～1M 的压缩线，越界的按边界算（H3t：below_minimum → 1e5）。界面照这个显示，别按 20k 画满格（195-O.2）
 export const AC_BOUNDS = [1e5, 1e6];
 export const clampAutoCompact = (n) => Math.min(AC_BOUNDS[1], Math.max(AC_BOUNDS[0], Math.round(n)));
+/** 上游 API 报错归个类，给一句中文的处理建议；认不出来给空串（照旧只显示原文） */
+export function apiErrorHint(raw) {
+  const s = String(raw || ""), code = Number((/\bAPI Error:?\s*(\d{3})\b/i.exec(s) || /\b(?:status|HTTP)\s*(\d{3})\b/i.exec(s) || [])[1]) || 0;
+  if (/prompt is too long|context(?:_| )length|maximum context|too many tokens/i.test(s)) return tz("对话太长，超过了模型的上下文上限。打 /compact 压缩一下再继续，或者开个新对话。");
+  if (code === 401 || code === 403 || /authentication_error|invalid (?:x-)?api[ _-]?key|permission_error|unauthori[sz]ed/i.test(s)) return tz("接口拒绝了密钥：到 设置 → 接口 检查 API Key 填得对不对、有没有过期或被停用。");
+  if (code === 402 || /insufficient[_ ](?:balance|quota|credit)|余额不足|credit balance is too low|billing/i.test(s)) return tz("账户余额不足或额度用完了：到接口那边的控制台充值或查看额度。");
+  if (code === 429 || /rate[_ ]limit|too many requests/i.test(s)) return tz("请求太频繁，或者用量到了上限：稍等一会儿再试。");
+  if (code === 404 || /not_found_error|model[^\n]{0,40}(?:not (?:found|exist)|does not exist)/i.test(s)) return tz("接口找不到这个模型或地址：检查模型名和接口地址。");
+  if (code === 529 || code >= 500 || /overloaded_error|internal server error|bad gateway|service unavailable/i.test(s)) return tz("接口那边出错或者忙不过来：稍后再试。一直这样就换个模型或接口。");
+  if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|fetch failed|socket hang up|network error|Connection error/i.test(s)) return tz("连不上接口：检查网络，或者接口地址是不是写错了。");
+  return "";
+}
+
 export function effectiveAutoCompact() {
   if (SETTINGS.autoCompactWindow) return clampAutoCompact(SETTINGS.autoCompactWindow);
   try {
@@ -295,7 +308,11 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
 
     case "result":
       onResult(ev);
-      if (ev.is_error && ev.result) sse({ type: "error", message: String(ev.result).slice(0, 1500) });
+      if (ev.is_error && ev.result) {
+        // 上游报错原文多是英文：认得出的先给一句能照着做的话，原文放 detail（0.6.9 审计 195-R.3）
+        const raw = String(ev.result).slice(0, 1500), hint = apiErrorHint(raw);
+        sse(hint ? { type: "error", message: tr(LAST_LANG, hint), detail: raw } : { type: "error", message: raw });
+      }
       break;
 
     case "rate_limit_event":

@@ -2973,4 +2973,11 @@ window.I18N_DICT["es"] = {
   "工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。": "La carpeta de trabajo {dir} ya no existe (borrada, renombrada o se quitó la tarjeta de almacenamiento), así que este turno no se ejecutó. Vuelve a poner la carpeta o cambia la ruta en los ajustes del proyecto y envía de nuevo.",
   "这一轮还没开始就被结束了（{when} 发的）。": "Este turno se cortó antes de empezar (enviado {when}).",
   "就绪 · 后台任务都结束了，正在收尾": "Listo · las tareas en segundo plano terminaron, cerrando",
+  "对话太长，超过了模型的上下文上限。打 /compact 压缩一下再继续，或者开个新对话。": "La conversación supera el límite de contexto del modelo. Ejecuta /compact y continúa, o empieza una conversación nueva.",
+  "接口拒绝了密钥：到 设置 → 接口 检查 API Key 填得对不对、有没有过期或被停用。": "El endpoint rechazó la clave: comprueba en Ajustes → Endpoints que la API key sea correcta y no haya caducado ni esté desactivada.",
+  "账户余额不足或额度用完了：到接口那边的控制台充值或查看额度。": "La cuenta no tiene saldo o se agotó la cuota: recarga o revisa la cuota en la consola del proveedor.",
+  "请求太频繁，或者用量到了上限：稍等一会儿再试。": "Demasiadas solicitudes o se alcanzó un límite de uso: espera un poco y vuelve a intentarlo.",
+  "接口找不到这个模型或地址：检查模型名和接口地址。": "El endpoint no encuentra este modelo o dirección: revisa el nombre del modelo y la URL del endpoint.",
+  "接口那边出错或者忙不过来：稍后再试。一直这样就换个模型或接口。": "El proveedor tuvo un error o está saturado: inténtalo más tarde. Si sigue pasando, cambia de modelo o de endpoint.",
+  "连不上接口：检查网络，或者接口地址是不是写错了。": "No se puede conectar con el endpoint: revisa la red o si la URL del endpoint está mal.",
 };

@@ -2973,4 +2973,11 @@ window.I18N_DICT["fr"] = {
   "工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。": "Le dossier de travail {dir} a disparu (supprimé, renommé ou carte de stockage retirée) : ce tour n’a pas été exécuté. Remettez le dossier ou changez le chemin dans les réglages du projet, puis renvoyez.",
   "这一轮还没开始就被结束了（{when} 发的）。": "Ce tour a été interrompu avant de commencer (envoyé {when}).",
   "就绪 · 后台任务都结束了，正在收尾": "Prêt · tâches d’arrière-plan terminées, finalisation",
+  "对话太长，超过了模型的上下文上限。打 /compact 压缩一下再继续，或者开个新对话。": "La conversation dépasse la limite de contexte du modèle. Lancez /compact puis continuez, ou ouvrez une nouvelle conversation.",
+  "接口拒绝了密钥：到 设置 → 接口 检查 API Key 填得对不对、有没有过期或被停用。": "Le point d’accès a refusé la clé : vérifiez dans Réglages → Points d’accès que la clé API est correcte, non expirée et non désactivée.",
+  "账户余额不足或额度用完了：到接口那边的控制台充值或查看额度。": "Solde ou quota épuisé : rechargez ou vérifiez votre quota dans la console du fournisseur.",
+  "请求太频繁，或者用量到了上限：稍等一会儿再试。": "Trop de requêtes ou limite d’usage atteinte : patientez un peu puis réessayez.",
+  "接口找不到这个模型或地址：检查模型名和接口地址。": "Le point d’accès ne trouve pas ce modèle ou cette adresse : vérifiez le nom du modèle et l’URL.",
+  "接口那边出错或者忙不过来：稍后再试。一直这样就换个模型或接口。": "Le fournisseur a rencontré une erreur ou est surchargé : réessayez plus tard. Si cela persiste, changez de modèle ou de point d’accès.",
+  "连不上接口：检查网络，或者接口地址是不是写错了。": "Impossible de joindre le point d’accès : vérifiez le réseau ou l’URL.",
 };

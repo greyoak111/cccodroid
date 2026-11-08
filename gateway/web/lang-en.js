@@ -3007,5 +3007,12 @@ window.I18N_DICT.en = {
   "这一轮没跑完：网关被关闭或重启了（{when} 开始的）。": "This turn didn't finish: the gateway was stopped or restarted (started {when}).",
   "工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。": "The working folder {dir} is gone (deleted, renamed, or the storage card was removed), so this turn didn't run. Put the folder back, or change the path in the project settings, then send again.",
   "这一轮还没开始就被结束了（{when} 发的）。": "This turn was cut off before it started (sent {when}).",
-  "就绪 · 后台任务都结束了，正在收尾": "Ready · background tasks finished, wrapping up"
+  "就绪 · 后台任务都结束了，正在收尾": "Ready · background tasks finished, wrapping up",
+  "对话太长，超过了模型的上下文上限。打 /compact 压缩一下再继续，或者开个新对话。": "The conversation is longer than the model's context limit. Run /compact and continue, or start a new conversation.",
+  "接口拒绝了密钥：到 设置 → 接口 检查 API Key 填得对不对、有没有过期或被停用。": "The endpoint rejected the key: check in Settings → Endpoints that the API key is correct and hasn't expired or been disabled.",
+  "账户余额不足或额度用完了：到接口那边的控制台充值或查看额度。": "The account is out of balance or quota: top up or check your quota in the provider's console.",
+  "请求太频繁，或者用量到了上限：稍等一会儿再试。": "Too many requests, or a usage limit was reached: wait a bit and try again.",
+  "接口找不到这个模型或地址：检查模型名和接口地址。": "The endpoint can't find this model or address: check the model name and endpoint URL.",
+  "接口那边出错或者忙不过来：稍后再试。一直这样就换个模型或接口。": "The provider had an error or is overloaded: try again later. If it keeps happening, switch to another model or endpoint.",
+  "连不上接口：检查网络，或者接口地址是不是写错了。": "Can't reach the endpoint: check your network, or whether the endpoint URL is wrong."
 };
