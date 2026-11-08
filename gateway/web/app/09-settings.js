@@ -682,6 +682,8 @@
       ${p.endpoints.length > 1 ? `<div class="tiny" id="pc-endpoint-l" style="margin:0 0 4px">${t("线路")}</div>
         <select id="pc-endpoint" aria-labelledby="pc-endpoint-l">${p.endpoints.map((e) =>
           `<option value="${esc(e.id)}" ${e.id === p.endpoint ? "selected" : ""}>${esc(pLabel(e))}</option>`).join("")}</select>` : ""}
+      ${p.endpointLost ? `<div class="tiny warn">${esc(t("原来选的线路已不在了（厂商目录更新删了它），旧 Key 不会带到新线路：请重选线路、重新填 Key 后保存。"))}</div>` : ""}
+      ${p && p.plainHttp ? `<div class="tiny warn">${esc(t("这个地址是明文 http，密钥和对话内容会不加密地发到对方机器上；能用 https 就换成 https。"))}</div>` : ""}
       <input id="pc-key" type="password" autocomplete="off"
         placeholder="${p.hasKey ? t("已保存（…{tail}），留空则不改", { tail: esc(p.keyTail) }) : t("粘贴 API Key")}">
       <div class="row-actions">
@@ -709,11 +711,15 @@
       }
       const body = { id: p.id, apiKey: $("pc-key").value.trim() };
       if ($("pc-endpoint")) body.endpoint = $("pc-endpoint").value;
+      else if (p.endpointLost) body.endpoint = p.endpoint;   // 只剩一条线路时没有下拉框，也得把新线路记下来，提示才会消失（196-凭据.1）
       // 还没 Key、输入框也空着：点保存不能说「已保存」，其实什么都没配上（审查 P3-3）
       if (act === "save" && !body.apiKey && !p.hasKey && !(body.endpoint && body.endpoint !== p.endpoint)) return toast(t("先把 API Key 粘进来再保存"), true);
       if (act === "save" || body.apiKey || body.endpoint !== p.endpoint) {
-        try { await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
+        let r;
+        try { r = await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
         $("pc-key").value = "";
+        // 线路失效后只重选、没填新 Key：网关把旧 Key 清掉了（196-凭据.1）
+        if (r && r.keyCleared) return reloadProv(t("换了线路，旧 Key 已清掉，请重新填"));
         if (act === "save") return reloadProv(t("已保存"), true);
       }
       await testAndShow(p.id);

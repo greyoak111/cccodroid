@@ -468,6 +468,12 @@ export function upsertProvider(id, b, prepare) {
   if (b.clearKey) delete cur.apiKey;
   // 图片随消息发（兼容兜底，见 inlineimg.mjs）：预置和自定义都能开
   if ("inlineImages" in b) { if (b.inlineImages === true) cur.inlineImages = true; else delete cur.inlineImages; }
+  // 记着的线路已经不在了（196-凭据.1）：重选线路时没给新 Key，旧 Key 是给原线路的，不能跟着带到新线路，清掉要用户重填
+  const eps = PRESETS[id] && Array.isArray(PRESETS[id].endpoints) ? PRESETS[id].endpoints : null;
+  if (eps && cur.endpoint && !eps.some((e) => e && e.id === cur.endpoint) && "endpoint" in b && cur.apiKey && !("apiKey" in b && str(b.apiKey))) {
+    delete cur.apiKey;
+    keyCleared = true;
+  }
   for (const k of ["endpoint", "defaultModel", "fastModel"]) if (k in b) { if (str(b[k])) cur[k] = str(b[k]); else delete cur[k]; }
   if (!PRESETS[id]) {
     for (const k of ["label", "baseUrl", "modelsUrl"]) if (k in b) cur[k] = str(b[k]);

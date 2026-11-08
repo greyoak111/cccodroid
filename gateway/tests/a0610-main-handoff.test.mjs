@@ -62,3 +62,16 @@ test("队列快照：定时任务条目带 sched，普通消息不带", () => {
   } finally {
     for (const id of fake) { RUNS.delete(id); RUN_LANE.delete(id); } for (const it of [a, b]) { const i = QUEUE.indexOf(it); if (i >= 0) QUEUE.splice(i, 1); } }
 });
+
+test("前端跟上：第三方不计花费提示、线路失配 / 明文 http 警告、定时任务排队标签", () => {
+  const src = (f) => fs.readFileSync(new URL("../web/app/" + f, import.meta.url), "utf8");
+  const s14 = src("14-projects-sched.js"), s09 = src("09-settings.js"), s11 = src("11-usage.js"), s04 = src("04-session-flow.js");
+  assert.match(s14, /id="t-costnote"/);
+  assert.match(s14, /pv\.nativeModels/, "按任务实际用的那家判断");
+  assert.match(s09, /p\.endpointLost \?/);
+  assert.match(s09, /else if \(p\.endpointLost\) body\.endpoint = p\.endpoint/, "只剩一条线路也要把线路存下");
+  assert.match(s09, /r\.keyCleared/);
+  for (const s of [s09, s11]) assert.match(s, /p\.plainHttp \?/);
+  assert.match(s11, /r\.warning/);
+  assert.match(s04, /it\.sched \? t\("定时任务"\)/);
+});

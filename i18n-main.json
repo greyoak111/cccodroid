@@ -70,5 +70,65 @@
   "ru": "Запланированные задачи выполняются отдельным ходом: задача переместится в начало и запустится сразу после текущего хода",
   "id": "Tugas terjadwal berjalan di gilirannya sendiri: dipindah ke depan dan dimulai begitu giliran saat ini selesai",
   "ar": "تعمل المهام المجدولة في دور مستقل: تُنقل إلى المقدمة وتبدأ فور انتهاء الدور الحالي"
+ },
+ {
+  "zh": "到上限后当天其余任务跳过，并通知你。只算官方接口的花费：第三方端口不计花费，每日上限对它不生效。",
+  "en": "Once the limit is reached, the rest of the day's tasks are skipped and you're notified. Only official API spend counts: third-party endpoints aren't billed here, so the daily limit doesn't apply to them.",
+  "ja": "上限に達すると当日の残りのタスクはスキップされ、通知します。公式 API の費用だけを数えます：サードパーティのエンドポイントは費用を計上しないため、1 日の上限は適用されません。",
+  "ko": "한도에 도달하면 그날 남은 작업은 건너뛰고 알려 드립니다. 공식 API 비용만 집계합니다: 서드파티 엔드포인트는 비용을 계산하지 않으므로 일일 한도가 적용되지 않습니다.",
+  "zh-Hant": "到上限後當天其餘任務跳過，並通知你。只算官方介面的花費：第三方端口不計花費，每日上限對它不生效。",
+  "es": "Al alcanzar el límite se omiten las demás tareas del día y se te avisa. Solo cuenta el gasto de la API oficial: los endpoints de terceros no computan gasto, así que el límite diario no se les aplica.",
+  "fr": "Une fois la limite atteinte, les autres tâches du jour sont ignorées et vous êtes prévenu. Seules les dépenses de l’API officielle comptent : les points d’accès tiers ne sont pas comptabilisés, la limite quotidienne ne s’y applique donc pas.",
+  "ru": "При достижении лимита остальные задачи дня пропускаются, и вы получите уведомление. Учитываются только расходы официального API: сторонние эндпоинты не тарифицируются, поэтому дневной лимит на них не действует.",
+  "id": "Setelah batas tercapai, tugas lain hari itu dilewati dan Anda diberi tahu. Hanya biaya API resmi yang dihitung: endpoint pihak ketiga tidak dihitung biayanya, jadi batas harian tidak berlaku untuknya.",
+  "ar": "عند بلوغ الحد تُتخطّى بقية مهام اليوم ويصلك إشعار. لا تُحتسب إلا تكلفة الواجهة الرسمية: نقاط النهاية الخارجية لا تُحتسب تكلفتها، لذا لا ينطبق عليها الحد اليومي."
+ },
+ {
+  "zh": "超了就停，记成失败；只对官方接口生效",
+  "en": "Stops when exceeded and counts as failed; applies to the official API only",
+  "ja": "超えたら停止し、失敗として記録します。公式 API にのみ適用",
+  "ko": "초과하면 중지하고 실패로 기록합니다. 공식 API에만 적용",
+  "zh-Hant": "超了就停，記成失敗；只對官方介面生效",
+  "es": "Se detiene al superarlo y cuenta como fallo; solo se aplica a la API oficial",
+  "fr": "S’arrête en cas de dépassement et compte comme un échec ; ne s’applique qu’à l’API officielle",
+  "ru": "При превышении останавливается и считается неудачей; действует только для официального API",
+  "id": "Berhenti jika terlampaui dan dihitung gagal; hanya berlaku untuk API resmi",
+  "ar": "يتوقف عند التجاوز ويُحتسب فشلًا؛ ينطبق على الواجهة الرسمية فقط"
+ },
+ {
+  "zh": "这个任务用的是第三方端口：不计花费，单次花费上限和每日上限对它都不生效，靠时长上限兜底。",
+  "en": "This task uses a third-party endpoint: its spend isn't counted, so neither the per-run cost limit nor the daily limit applies — the time limit is the safeguard.",
+  "ja": "このタスクはサードパーティのエンドポイントを使います：費用は計上されないため、1 回あたりの費用上限も 1 日の上限も適用されず、時間上限が歯止めになります。",
+  "ko": "이 작업은 서드파티 엔드포인트를 사용합니다: 비용이 집계되지 않아 1회 비용 한도와 일일 한도가 모두 적용되지 않으며, 시간 한도가 안전장치입니다.",
+  "zh-Hant": "這個任務用的是第三方端口：不計花費，單次花費上限和每日上限對它都不生效，靠時長上限兜底。",
+  "es": "Esta tarea usa un endpoint de terceros: su gasto no se computa, así que no se aplican ni el límite de coste por ejecución ni el diario; el límite de tiempo es la salvaguarda.",
+  "fr": "Cette tâche utilise un point d’accès tiers : ses dépenses ne sont pas comptées, ni la limite de coût par exécution ni la limite quotidienne ne s’appliquent ; la limite de durée sert de garde-fou.",
+  "ru": "Эта задача использует сторонний эндпоинт: расходы не учитываются, поэтому ни лимит стоимости за запуск, ни дневной лимит не действуют — страховкой служит лимит времени.",
+  "id": "Tugas ini memakai endpoint pihak ketiga: biayanya tidak dihitung, jadi batas biaya per jalan maupun batas harian tidak berlaku — batas waktu yang menjadi pengaman.",
+  "ar": "تستخدم هذه المهمة نقطة نهاية خارجية: لا تُحتسب تكلفتها، فلا ينطبق عليها حد التكلفة لكل تشغيل ولا الحد اليومي، ويبقى حد المدة هو الضابط."
+ },
+ {
+  "zh": "原来选的线路已不在了（厂商目录更新删了它），旧 Key 不会带到新线路：请重选线路、重新填 Key 后保存。",
+  "en": "The route you picked is gone (the provider list was updated and dropped it). The old key won't be carried over to a new route: pick a route, enter the key again, then save.",
+  "ja": "以前選んだ経路はなくなりました（プロバイダー一覧の更新で削除されました）。古いキーは新しい経路に引き継がれません：経路を選び直し、キーを入れ直して保存してください。",
+  "ko": "이전에 고른 경로가 없어졌습니다(제공업체 목록이 갱신되며 삭제됨). 이전 키는 새 경로로 넘어가지 않습니다: 경로를 다시 고르고 키를 다시 입력한 뒤 저장하세요.",
+  "zh-Hant": "原來選的線路已不在了（廠商目錄更新刪了它），舊 Key 不會帶到新線路：請重選線路、重新填 Key 後儲存。",
+  "es": "La ruta que elegiste ya no existe (la lista de proveedores se actualizó y la quitó). La clave antigua no se trasladará a otra ruta: elige una ruta, vuelve a introducir la clave y guarda.",
+  "fr": "L’itinéraire choisi n’existe plus (la liste des fournisseurs a été mise à jour et l’a retiré). L’ancienne clé ne sera pas reportée sur un nouvel itinéraire : choisissez un itinéraire, saisissez à nouveau la clé, puis enregistrez.",
+  "ru": "Выбранный маршрут больше не существует (список провайдеров обновился и удалил его). Старый ключ не перенесётся на новый маршрут: выберите маршрут, снова введите ключ и сохраните.",
+  "id": "Rute yang Anda pilih sudah tidak ada (daftar penyedia diperbarui dan menghapusnya). Kunci lama tidak dibawa ke rute baru: pilih rute, masukkan kunci lagi, lalu simpan.",
+  "ar": "المسار الذي اخترته لم يعد موجودًا (حُذف عند تحديث قائمة المزوّدين). لن يُنقل المفتاح القديم إلى مسار جديد: اختر مسارًا وأدخل المفتاح مجددًا ثم احفظ."
+ },
+ {
+  "zh": "换了线路，旧 Key 已清掉，请重新填",
+  "en": "Route changed — the old key was cleared, please enter it again",
+  "ja": "経路を変えたため古いキーを消去しました。もう一度入力してください",
+  "ko": "경로가 바뀌어 이전 키를 지웠습니다. 다시 입력하세요",
+  "zh-Hant": "換了線路，舊 Key 已清掉，請重新填",
+  "es": "Cambió la ruta: se borró la clave antigua, vuelve a introducirla",
+  "fr": "Itinéraire changé : l’ancienne clé a été effacée, saisissez-la à nouveau",
+  "ru": "Маршрут изменён — старый ключ удалён, введите его снова",
+  "id": "Rute diganti — kunci lama dihapus, silakan masukkan lagi",
+  "ar": "تغيّر المسار — حُذف المفتاح القديم، أدخله مجددًا"
  }
 ]

@@ -354,7 +354,7 @@
       `<div class="panel">${list.length ? list.map(row).join("") : emptyRow(tasks.length ? t("没有") : t("还没有定时任务。比如每天早上让它看一眼 CI。"))}</div>
       <div class="pj-sec"><span class="grow">${esc(t("花费与额度"))}</span></div>
       <div class="panel"><div class="row"><div class="grow"><b>${esc(daily ? t("今天 {a} / 每日上限 {b}", { a: costText(today), b: costText(daily) }) : t("今天 {a} · 不设每日上限", { a: costText(today) }))}</b>
-          ${daily ? `<div class="bar-mini"><i style="width:${pct.toFixed(1)}%"></i></div>` : ""}<div class="muted pj-sub">${esc(t("到上限后当天其余任务跳过，并通知你。第三方接口多数不回报花费，按 0 记。"))}</div></div><button class="btn sm ghost" data-a="budget">${esc(t("改上限"))}</button></div>
+          ${daily ? `<div class="bar-mini"><i style="width:${pct.toFixed(1)}%"></i></div>` : ""}<div class="muted pj-sub">${esc(t("到上限后当天其余任务跳过，并通知你。只算官方接口的花费：第三方端口不计花费，每日上限对它不生效。"))}</div></div><button class="btn sm ghost" data-a="budget">${esc(t("改上限"))}</button></div>
         <div class="row"><div class="grow"><b>${esc(t("本月 {c} · 跑了 {n} 次", { c: costText(m.cost || 0), n: m.runs || 0 }))}</b><div class="muted pj-sub">${esc(t("成功 {a} · 失败 {b} · 跳过 {c}", { a: m.ok || 0, b: m.err || 0, c: m.skip || 0 }))}</div></div></div></div>
       <div class="pj-sec"><span class="grow">${esc(t("订阅账户"))}</span></div>
       <div class="panel"><div class="row"><div class="grow"><b>${esc(t("允许用订阅账户跑"))}</b><div class="muted pj-sub">${esc(t("官方登录的订阅账户默认不跑定时任务。打开前请自己确认：无人值守使用以 Anthropic 条款为准。用 API Key 的接口不受影响。"))}</div>
@@ -535,7 +535,7 @@
       frow(t("型号"), `<div class="panel">${usableProvs().length > 1 || v.provider ? line(t("接口"), sel("t-prov", provChoices(t("跟随项目 / 全局"), v.provider), v.provider || "")) : ""}${line(t("型号"), sel("t-model", [["", t("跟随项目 / 全局")], ...models.map((m) => [m.id, prettyModel(m.id)]), ...(v.model && !models.some((m) => m.id === v.model) ? [[v.model, prettyModel(v.model)]] : [])], v.model || ""))}${line(t("思考强度"), sel("t-effort", [["", t("跟随项目 / 全局")], ...effs.map((e) => [e, e])], v.effort || ""))}</div>`) +
       frow(t("条件（不满足就跳过这次，记一笔）"), `<div class="panel">${line(t("只在 Wi-Fi 下"), swHtml(v.cond.wifi, 'id="t-wifi"'))}${line(t("只在充电时"), swHtml(v.cond.charging, 'id="t-chg"'))}${line(t("电量低于多少就跳过"), sel("t-bat", [[0, t("不管")], [15, "15%"], [30, "30%"], [50, "50%"]], v.cond.battery || 0))}</div>`) +
       frow(t("到点时有别的对话在跑"), segOf("busy", [["queue", t("排队等它跑完")], ["skip", t("跳过这次")], ["run", t("照跑")]], v.busy), esc(t("「照跑」占一个并行名额（设置 → 后台与并行）；排队最多等 30 分钟，等不到算跳过。"))) +
-      frow(t("限制"), `<div class="panel">${line(t("单次花费上限"), sel("t-cost", cost.map((c) => [c, c ? costText(c) : t("不限")]).concat(cost.includes(+v.limitCost) ? [] : [[v.limitCost, costText(v.limitCost)]]), v.limitCost || 0), t("超了就停，记成失败；第三方接口多数不回报花费"))}${line(t("单次时长上限"), sel("t-min", [5, 15, 30, 60, 90, 180].map((n) => [n, n < 60 ? t("{n} 分钟", { n }) : t("{n} 小时", { n: n / 60 })]), v.limitMin || 15))}${line(t("失败了"), sel("t-retry", [[0, t("不重试")], [1, t("重试 1 次")], [2, t("重试 2 次")]], v.retry || 0), t("网络断、接口报错、超上限"))}${line(t("错过了"), sel("t-missed", [["ask", t("下次打开问我")], ["run", t("开机后立刻补跑一次")], ["skip", t("跳过")]], v.missed), t("关机、被系统冻结、没网"))}</div>`) +
+      frow(t("限制"), `<div class="panel">${line(t("单次花费上限"), sel("t-cost", cost.map((c) => [c, c ? costText(c) : t("不限")]).concat(cost.includes(+v.limitCost) ? [] : [[v.limitCost, costText(v.limitCost)]]), v.limitCost || 0), t("超了就停，记成失败；只对官方接口生效"))}<div class="muted pj-sub hidden" id="t-costnote">${esc(t("这个任务用的是第三方端口：不计花费，单次花费上限和每日上限对它都不生效，靠时长上限兜底。"))}</div>${line(t("单次时长上限"), sel("t-min", [5, 15, 30, 60, 90, 180].map((n) => [n, n < 60 ? t("{n} 分钟", { n }) : t("{n} 小时", { n: n / 60 })]), v.limitMin || 15))}${line(t("失败了"), sel("t-retry", [[0, t("不重试")], [1, t("重试 1 次")], [2, t("重试 2 次")]], v.retry || 0), t("网络断、接口报错、超上限"))}${line(t("错过了"), sel("t-missed", [["ask", t("下次打开问我")], ["run", t("开机后立刻补跑一次")], ["skip", t("跳过")]], v.missed), t("关机、被系统冻结、没网"))}</div>`) +
       frow(t("跑完"), `<div class="panel">${line(t("通知"), sel("t-notify", [["all", t("每次都通知")], ["fail", t("只在失败时")], ["found", t("只在有发现时")], ["none", t("不通知")]], v.notify))}
         <div class="row${v.notify === "found" ? "" : " hidden"}" id="t-quiet-row"><div class="grow"><b>${esc(t("没发现时它回的那句话"))}</b><div class="muted pj-sub">${esc(t("回复正好是这句就不通知"))}</div></div><input class="pj-field pj-quiet" id="t-quiet" value="${esc(v.quiet || "")}" placeholder="${esc(t("全绿"))}"></div>
         ${line(t("结果存成对话"), swHtml(v.saveSession !== false, 'id="t-save"'), t("列表里带时钟标记；关掉就只记在运行记录里"))}${line(t("把上一次的结果带上"), swHtml(v.carryLast, 'id="t-carry"'), t("让它知道上次说了什么（只对「每次新开」有用）"))}</div>`) +
@@ -628,10 +628,19 @@
       msel.disabled = true;
       const ms = await provModelsOf(pid);
       if (n !== fmN || !msel.isConnected) return;
+      costNote();   // 接口清单这时才可能到齐
       msel.disabled = false;
       msel.innerHTML = [["", t("跟随项目 / 全局")], ...ms.map((m) => [m.id, prettyModel(m.id)]), ...(cur && !ms.some((m) => m.id === cur) ? [[cur, prettyModel(cur)]] : [])]
         .map(([a, b]) => `<option value="${esc(a)}"${a === cur ? " selected" : ""}>${esc(b)}</option>`).join("");
     };
+    // 第三方端口不计花费（195-U.3 用户定）：用的不是官方那家就把金额上限不生效写在旁边
+    const costNote = () => {
+      const pid = effProv() || globalProv(), pv = (state.provList || []).find((x) => x.id === pid);
+      q("#t-costnote")?.classList.toggle("hidden", !pv || !!pv.nativeModels);
+    };
+    q("#t-prov")?.addEventListener("change", costNote);
+    q("#t-proj").addEventListener("change", costNote);
+    costNote();
     q("#t-prov")?.addEventListener("change", () => fillModels(false));
     // 接口跟随项目时换了项目：有效那家可能变了，型号清单跟着换（同一家就不动，免得清掉已选的）
     q("#t-proj").addEventListener("change", () => { if (!(q("#t-prov") ? q("#t-prov").value : "") && effProv() !== fmPid) fillModels(false); });

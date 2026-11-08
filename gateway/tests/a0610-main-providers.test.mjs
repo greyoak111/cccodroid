@@ -166,3 +166,23 @@ test("199-9-02：远程明文 http 只警告不拦；本机回环、https 不警
   assert.equal(r.rc, 0, r.err);
   assert.deepEqual(JSON.parse(r.out), [[true, true, true, true], [true, false, false, false], [true, false, false, false]]);
 });
+
+test("196-凭据.1：线路失配后只重选线路、不给新 Key → 旧 Key 清掉并回 keyCleared；给了新 Key 就用新的", () => {
+  const cfg = { "ccapp-providers.json": { active: "deepseek", providers: { kimi: { apiKey: "OLD-KEY", endpoint: "gone-region" } } } };
+  const r = scenario(cfg, `
+    const a = P.upsertProvider("kimi", { id: "kimi", apiKey: "", endpoint: "intl" });
+    const p = P.providerById("kimi");
+    console.log(JSON.stringify({ ok: !!a.ok, cleared: !!a.keyCleared, lost: p.endpointLost || null, key: P.keyOf(p), ep: p.endpoint }));`);
+  assert.equal(r.rc, 0, r.err);
+  assert.deepEqual(JSON.parse(r.out), { ok: true, cleared: true, lost: null, key: null, ep: "intl" });
+  const n = scenario(cfg, `
+    const a = P.upsertProvider("kimi", { id: "kimi", apiKey: "NEW", endpoint: "cn" });
+    const p = P.providerById("kimi");
+    console.log(JSON.stringify({ cleared: !!a.keyCleared, key: P.keyOf(p) }));`);
+  assert.deepEqual(JSON.parse(n.out), { cleared: false, key: "NEW" });
+  // 线路没失配时只换线路：照旧（不清 Key，保持原行为）
+  const k = scenario({ "ccapp-providers.json": { active: "deepseek", providers: { kimi: { apiKey: "K2", endpoint: "cn" } } } }, `
+    const a = P.upsertProvider("kimi", { id: "kimi", apiKey: "", endpoint: "intl" });
+    console.log(JSON.stringify({ cleared: !!a.keyCleared, key: P.keyOf(P.providerById("kimi")) }));`);
+  assert.deepEqual(JSON.parse(k.out), { cleared: false, key: "K2" });
+});

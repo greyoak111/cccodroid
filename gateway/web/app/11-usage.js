@@ -509,6 +509,7 @@
                ${p.hasKey ? `<button class="btn sm ghost danger" data-act="clear">${t("清除 Key")}</button>` : ""}
                <button class="btn sm ghost danger" data-act="del">${t("删除")}</button>${useBtn(p)}` : ""}
       </div>
+${p && p.plainHttp ? `<div class="tiny warn">${esc(t("这个地址是明文 http，密钥和对话内容会不加密地发到对方机器上；能用 https 就换成 https。"))}</div>` : ""}
       <div class="prov-state" id="pc-result"></div>
             <div class="tiny">${t("要求对端讲 <b>Anthropic Messages</b> 协议（各家文档里写“Claude Code 接入”的那个地址）。")}
         ${t("地址末尾不要带 <code>/v1</code>，claude 会自己补 <code>/v1/messages</code>。")}
@@ -564,7 +565,9 @@
       try { r = await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
       state.provView = r.id;
       // 换了主机又没给新 Key：网关把旧 Key 清掉了，得说清楚、让用户重新填（0.6.9 审计 P1-2）
-      await reloadProv(r.keyCleared ? t("换了主机，旧 Key 已清掉，请重新填") : p ? t("已保存") : t("已添加"), true);
+      const done = p ? t("已保存") : t("已添加");
+      // 远程明文 http：只警告不拦，保存回执带 warning 就跟在「已保存」后面说（199-9-02）
+      await reloadProv(r.keyCleared ? t("换了主机，旧 Key 已清掉，请重新填") : r.warning ? done + " · " + r.warning : done, true);
     };
   }
 
