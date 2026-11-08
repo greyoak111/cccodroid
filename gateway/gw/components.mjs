@@ -54,6 +54,17 @@ function readSmall(f, max = 1 << 20) {
   } catch { return null; }
 }
 const COMP_JOBS = new Map();      // id → { phase, done, total, error, child, cancelled }
+// 跨组件的文件操作串行链。COMP_JOBS 只按组件 id 独占，两个不同组件同时装 / 卸时，
+// 各自都要「看别的组件还要用哪些文件」（compRemoveFiles 还会把共享文件转记到别的组件名下），
+// 中间隔着下载解包、首启脚本这些 await，两段能交错；两边各读一份记录再各写回去就会丢改动。
+// 会改 $PREFIX 文件清单、组件记录、技能目录的阶段都排进这条链（196-供应链.1）。
+// 链上一步失败不影响后面排队的人；返回值 / 异常原样交给调用方。
+let compFsTail = Promise.resolve();
+export function compFsExclusive(fn) {
+  const run = compFsTail.catch(() => {}).then(fn);
+  compFsTail = run.catch(() => {});
+  return run;
+}
 export let compIndexCache = { at: 0, data: null, error: "" };
 
 export function devkitIdentity() {
@@ -819,46 +830,56 @@ async function compRunInstall(id, b, job) {
   const dkNow = devkitIdentity();
   const goneReq = (b.requires || []).filter((rid) => !compDepOk(rid, compsNow, dkNow));
   if (goneReq.length) throw new Error(tz("要先装：{names}", { names: goneReq.map((rid) => compName(rid, compsNow).zh || rid).join("、") }));
-  // 3) 切换：先写"安装中"的记录（被打断就是 damaged，可以重装或卸载），再逐个搬进 $PREFIX
-  job.phase = "installing";
-  const old = compRecord(id);
-  if (old) compRemoveFiles(id, old);                // 升级 / 重装：先清掉上一版（别的组件也要用的留下）
-  const rec = { id, source: b.source || "", version: b.version, upstream: b.upstream, base: b.base, sha256: b.sha256, bin: b.bin || [],
-    requires: b.requires || [], skill: "", state: "installing", at: Date.now(), files: [], shared: [],
-    // 依赖的底座包：卸工具包模块时据此判断有没有组件在用。不记的话要靠索引，刚启动 / 离线 / 索引里这个构建没了就判断不了（#104 05-001）
-    ...(Array.isArray(b.baseDeps) ? { baseDeps: b.baseDeps.map((d) => (typeof d === "string" ? d : d && d.name)).filter(Boolean) } : {}) };
-  // 先按包内文件清单记下"将要放进去的文件"：搬到一半被杀也能按它卸干净
-  const list = [];
-  (function walk(rel) {
-    for (const d of fs.readdirSync(path.join(tree, "usr", rel), { withFileTypes: true })) {
-      const r = rel ? rel + "/" + d.name : d.name;
-      if (d.isDirectory()) walk(r); else list.push(r);
-    }
-  })("");
-  // 已经在的（工具包自带，或别的组件放进去的）不覆盖、不归我们，但记进 shared：那个组件卸载时要知道我们也在用
-  const orphans = compOrphans(list, id);
-  if (orphans.size) log(`[comp] ${id}：${orphans.size} 个没人认领的旧文件被新包覆盖（${[...orphans].slice(0, 5).join(", ")}）`);
-  for (const r of list) { let have = false; try { fs.lstatSync(path.join(PREFIX, r)); have = true; } catch {} (have && !orphans.has(r) ? rec.shared : rec.files).push(r); }
-  // 记录写不进去就不能往下搬：文件搬进 $PREFIX 却没有清单，以后既卸不干净也认领不了（195-Z.10）
-  if (!compWriteRecord(id, rec)) throw new Error(tz("安装记录写不进去（存储满了或没有权限），这次安装没有继续"));
-  const { skipped } = compMoveIn(path.join(tree, "usr"), "", [], [], orphans);
-  if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
-  // 搬完再查（顺序不定，搬的时候目标可能还没就位）：目标仍然断掉的文档软链不留下（196-真机.3）
-  compDropDanglingDocs(rec);
+  // 3) 切换：先写"安装中"的记录（被打断就是 damaged，可以重装或卸载），再逐个搬进 $PREFIX。
+  // 这一段和别的组件「按记录删文件 / 搬文件 / 写记录」互斥（196-供应链.1）；解包、首启仍在锁外，
+  // 排队的安装可以照常取消（这时 phase 还是 verifying，compCancel 放行）
+  const rec = await compFsExclusive(() => {
+    if (job.cancelled) throw new Error("cancelled");
+    job.phase = "installing";
+    const old = compRecord(id);
+    if (old) compRemoveFiles(id, old);                // 升级 / 重装：先清掉上一版（别的组件也要用的留下）
+    const rec = { id, source: b.source || "", version: b.version, upstream: b.upstream, base: b.base, sha256: b.sha256, bin: b.bin || [],
+      requires: b.requires || [], skill: "", state: "installing", at: Date.now(), files: [], shared: [],
+      // 依赖的底座包：卸工具包模块时据此判断有没有组件在用。不记的话要靠索引，刚启动 / 离线 / 索引里这个构建没了就判断不了（#104 05-001）
+      ...(Array.isArray(b.baseDeps) ? { baseDeps: b.baseDeps.map((d) => (typeof d === "string" ? d : d && d.name)).filter(Boolean) } : {}) };
+    // 先按包内文件清单记下"将要放进去的文件"：搬到一半被杀也能按它卸干净
+    const list = [];
+    (function walk(rel) {
+      for (const d of fs.readdirSync(path.join(tree, "usr", rel), { withFileTypes: true })) {
+        const r = rel ? rel + "/" + d.name : d.name;
+        if (d.isDirectory()) walk(r); else list.push(r);
+      }
+    })("");
+    // 已经在的（工具包自带，或别的组件放进去的）不覆盖、不归我们，但记进 shared：那个组件卸载时要知道我们也在用
+    const orphans = compOrphans(list, id);
+    if (orphans.size) log(`[comp] ${id}：${orphans.size} 个没人认领的旧文件被新包覆盖（${[...orphans].slice(0, 5).join(", ")}）`);
+    for (const r of list) { let have = false; try { fs.lstatSync(path.join(PREFIX, r)); have = true; } catch {} (have && !orphans.has(r) ? rec.shared : rec.files).push(r); }
+    // 记录写不进去就不能往下搬：文件搬进 $PREFIX 却没有清单，以后既卸不干净也认领不了（195-Z.10）
+    if (!compWriteRecord(id, rec)) throw new Error(tz("安装记录写不进去（存储满了或没有权限），这次安装没有继续"));
+    const { skipped } = compMoveIn(path.join(tree, "usr"), "", [], [], orphans);
+    if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
+    // 搬完再查（顺序不定，搬的时候目标可能还没就位）：目标仍然断掉的文档软链不留下（196-真机.3）
+    compDropDanglingDocs(rec);
+    return rec;
+  });
   // 4) 首次运行配置（各包 postinst），失败不算安装失败
   const fr = path.join(PREFIX, lx, "first-run.sh");
   if (fs.existsSync(fr)) { try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); } catch (e) { log(`[comp] ${id} first-run：${e.message}`); } }
-  // 5) 给 Claude 的技能
-  if (b.skill) compInstallSkill(id, b.skill, rec);
-  // 首次配置这段时间里，另一个卸载 / pkg 卸载可能把本组件依赖的共享文件删掉了：
-  // 提交 ok 之前再核一次，别报「装好了」却缺依赖（0.6.9 审计 #185）
-  const goneShared = (rec.shared || []).filter((r) => typeof r === "string" && !fs.existsSync(path.join(PREFIX, r)));
-  if (goneShared.length) throw new Error(tz("安装期间有 {n} 个共享文件被卸载删掉了，请重新安装", { n: goneShared.length }));
-  rec.state = "ok"; rec.at = Date.now();
-  // 最后一次写盘失败要如实报：磁盘上还是 installing，界面按 damaged 显示，可以重装或卸掉重来
-  if (!compWriteRecord(id, rec)) throw new Error(tz("文件已放进去了，但安装记录没写成（存储满了或没有权限），请重装或卸载"));
-  fs.rmSync(tree, { recursive: true, force: true });
-  fs.rmSync(gz, { force: true });
+  // 首启脚本在锁外跑（可能几分钟）；收尾这步重新进锁：技能目录、共享文件复核、ok 记录
+  // 和别的组件卸载时的删文件不能交错（196-供应链.1）
+  await compFsExclusive(() => {
+    // 5) 给 Claude 的技能
+    if (b.skill) compInstallSkill(id, b.skill, rec);
+    // 首次配置这段时间里，另一个卸载 / pkg 卸载可能把本组件依赖的共享文件删掉了：
+    // 提交 ok 之前再核一次，别报「装好了」却缺依赖（0.6.9 审计 #185）
+    const goneShared = (rec.shared || []).filter((r) => typeof r === "string" && !fs.existsSync(path.join(PREFIX, r)));
+    if (goneShared.length) throw new Error(tz("安装期间有 {n} 个共享文件被卸载删掉了，请重新安装", { n: goneShared.length }));
+    rec.state = "ok"; rec.at = Date.now();
+    // 最后一次写盘失败要如实报：磁盘上还是 installing，界面按 damaged 显示，可以重装或卸掉重来
+    if (!compWriteRecord(id, rec)) throw new Error(tz("文件已放进去了，但安装记录没写成（存储满了或没有权限），请重装或卸载"));
+    fs.rmSync(tree, { recursive: true, force: true });
+    fs.rmSync(gz, { force: true });
+  });
 }
 
 function compCancel(id) {
@@ -898,24 +919,28 @@ export async function compRemove(id) {
   // 停用服务需要等待子进程，期间仍占住组件槽，避免重装和第二次卸载交错。
   const removal = { phase: "removing", finished: false };
   COMP_JOBS.set(id, removal);
-  let stage = "read-record";
+  let stage = "retire-managed-bridge";
   try {
-    const { exists, rec } = compRemovalRecord(id);
-    stage = "retire-managed-bridge";
+    // 退役桥 / 清映射要等子进程；这期间别的组件可能刚把共享文件转记到这个组件名下。
+    // 所以记录等退役完、进锁之后再读，不拿退役前的旧快照删文件（196-供应链.1）
     const retired = await retireManagedBridge(id);
     stage = "clear-app-mapping";
     const unmapped = clearBridgeConfigMapping(id);
-    if (!exists && !retired && !unmapped) return { ok: false, message: "not installed" };
-    stage = "remove-files";
-    // installing / damaged 的完整记录仍有原受管文件清单，照既有管理器处理共享文件和技能。
-    if (rec) compRemoveFiles(id, rec);
-    else log(`[comp] ${id} 卸载恢复：安装记录缺失或损坏，未删除工具包内文件和技能`);
-    stage = "remove-record";
-    fs.rmSync(compRecFile(id), { force: true });
-    stage = "clear-stage";
-    compClearStage(id);
-    log(`[comp] ${id} 已卸载（${rec ? rec.files.length : 0} 个文件）`);
-    return { ok: true };
+    return await compFsExclusive(() => {
+      stage = "read-record";
+      const { exists, rec } = compRemovalRecord(id);
+      if (!exists && !retired && !unmapped) return { ok: false, message: "not installed" };
+      stage = "remove-files";
+      // installing / damaged 的完整记录仍有原受管文件清单，照既有管理器处理共享文件和技能。
+      if (rec) compRemoveFiles(id, rec);
+      else log(`[comp] ${id} 卸载恢复：安装记录缺失或损坏，未删除工具包内文件和技能`);
+      stage = "remove-record";
+      fs.rmSync(compRecFile(id), { force: true });
+      stage = "clear-stage";
+      compClearStage(id);
+      log(`[comp] ${id} 已卸载（${rec ? rec.files.length : 0} 个文件）`);
+      return { ok: true };
+    });
   } catch (e) {
     if (stage === "retire-managed-bridge" && ["retire-lock", "retire-spawn", "retire-exit", "retire-timeout"].includes(e.stage)) stage = e.stage;
     log(`[comp] ${id} 卸载失败（stage=${stage}）`);
