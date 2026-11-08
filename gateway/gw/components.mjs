@@ -97,7 +97,7 @@ function compWriteRecord(id, rec) {
   return writeAtomic(compRecFile(id), JSON.stringify(rec, null, 1));
 }
 export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile, compDropDanglingDocs, compSweepDanglingDocs,
-  compState, compVerCmp, compOlder, compInstall };   // 只给测试用
+  compState, compVerCmp, compOlder, compInstall, compSwitch };   // 只给测试用
 
 function compFetch(src, quick) {
   // quick：拉索引用——连不上 8 秒就放弃、只重试一次，好尽快换镜像（GitHub 被墙时以前要干等一分多钟）
@@ -578,8 +578,8 @@ export function compBaseDeps(id, sha, rec) {
 
 /** 删掉一个组件放进去的文件。两个组件带了同一个依赖包（浏览器和 GPU 驱动都带 mesa）时，
  *  后装的那个跳过了已存在的文件、记录里没有它们 —— 所以删之前先看别的组件要不要用：要用的留下、记到它名下，
- *  不然卸一个，另一个就悄悄坏了 */
-function compRemoveFiles(id, rec) {
+ *  不然卸一个，另一个就悄悄坏了。keep 里的路径不删：升级时新版里还有的同名文件（已经换成新内容） */
+function compRemoveFiles(id, rec, keep = null) {
   // 记录文件同 uid 可改：卸载/升级只认普通相对路径，别让 ../ 把前缀外的文件删了
   const safeRel = (r) => typeof r === "string" && r && !r.startsWith("/") && !r.split("/").includes("..");
   const files = (rec.files || []).filter(safeRel);
@@ -595,6 +595,7 @@ function compRemoveFiles(id, rec) {
   for (const r of files) {
     const keeper = others.find((o) => o.needs.has(r));
     if (keeper) { keeper.gained.push(r); continue; }
+    if (keep && keep.has(r)) continue;    // 新版里还有这个路径：已经换成新内容，别删
     if (base.has(r)) { baseKept++; continue; }
     try { fs.unlinkSync(path.join(PREFIX, r)); } catch {}
     for (let d = path.dirname(r); d && d !== "."; d = path.dirname(d)) dirs.add(d);
@@ -831,36 +832,13 @@ async function compRunInstall(id, b, job) {
   const goneReq = (b.requires || []).filter((rid) => !compDepOk(rid, compsNow, dkNow));
   if (goneReq.length) throw new Error(tz("要先装：{names}", { names: goneReq.map((rid) => compName(rid, compsNow).zh || rid).join("、") }));
   // 3) 切换：先写"安装中"的记录（被打断就是 damaged，可以重装或卸载），再逐个搬进 $PREFIX。
+  // 升级时旧版同路径文件先备份、新版全部就位后才删旧版不要的，中途失败原样放回（197-9.6 F8）。
   // 这一段和别的组件「按记录删文件 / 搬文件 / 写记录」互斥（196-供应链.1）；解包、首启仍在锁外，
   // 排队的安装可以照常取消（这时 phase 还是 verifying，compCancel 放行）
   const rec = await compFsExclusive(() => {
     if (job.cancelled) throw new Error("cancelled");
     job.phase = "installing";
-    const old = compRecord(id);
-    if (old) compRemoveFiles(id, old);                // 升级 / 重装：先清掉上一版（别的组件也要用的留下）
-    const rec = { id, source: b.source || "", version: b.version, upstream: b.upstream, base: b.base, sha256: b.sha256, bin: b.bin || [],
-      requires: b.requires || [], skill: "", state: "installing", at: Date.now(), files: [], shared: [],
-      // 依赖的底座包：卸工具包模块时据此判断有没有组件在用。不记的话要靠索引，刚启动 / 离线 / 索引里这个构建没了就判断不了（#104 05-001）
-      ...(Array.isArray(b.baseDeps) ? { baseDeps: b.baseDeps.map((d) => (typeof d === "string" ? d : d && d.name)).filter(Boolean) } : {}) };
-    // 先按包内文件清单记下"将要放进去的文件"：搬到一半被杀也能按它卸干净
-    const list = [];
-    (function walk(rel) {
-      for (const d of fs.readdirSync(path.join(tree, "usr", rel), { withFileTypes: true })) {
-        const r = rel ? rel + "/" + d.name : d.name;
-        if (d.isDirectory()) walk(r); else list.push(r);
-      }
-    })("");
-    // 已经在的（工具包自带，或别的组件放进去的）不覆盖、不归我们，但记进 shared：那个组件卸载时要知道我们也在用
-    const orphans = compOrphans(list, id);
-    if (orphans.size) log(`[comp] ${id}：${orphans.size} 个没人认领的旧文件被新包覆盖（${[...orphans].slice(0, 5).join(", ")}）`);
-    for (const r of list) { let have = false; try { fs.lstatSync(path.join(PREFIX, r)); have = true; } catch {} (have && !orphans.has(r) ? rec.shared : rec.files).push(r); }
-    // 记录写不进去就不能往下搬：文件搬进 $PREFIX 却没有清单，以后既卸不干净也认领不了（195-Z.10）
-    if (!compWriteRecord(id, rec)) throw new Error(tz("安装记录写不进去（存储满了或没有权限），这次安装没有继续"));
-    const { skipped } = compMoveIn(path.join(tree, "usr"), "", [], [], orphans);
-    if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
-    // 搬完再查（顺序不定，搬的时候目标可能还没就位）：目标仍然断掉的文档软链不留下（196-真机.3）
-    compDropDanglingDocs(rec);
-    return rec;
+    return compSwitch(id, b, tree);
   });
   // 4) 首次运行配置（各包 postinst），失败不算安装失败
   const fr = path.join(PREFIX, lx, "first-run.sh");
@@ -880,6 +858,74 @@ async function compRunInstall(id, b, job) {
     fs.rmSync(tree, { recursive: true, force: true });
     fs.rmSync(gz, { force: true });
   });
+}
+
+/** 安装切换（在 compFsExclusive 里跑）：把暂存树 tree/usr 里的新版放进 $PREFIX。
+ *  升级 / 重装时旧版同路径文件先挪进 <tree>.old 备份（别的组件也要用、底座认领的不动），
+ *  新版全部就位（提交点）后才删旧版里新版不要的文件；搬运中途失败把备份原样放回、记录退回旧版（197-9.6 F8）。
+ *  返回写好的 installing 记录；首启、技能、写 ok 在锁外另一段里做 */
+function compSwitch(id, b, tree) {
+  // 记录文件同 uid 可改：只认普通相对路径（和 compRemoveFiles 同口径）
+  const safeRel = (r) => typeof r === "string" && r && !r.startsWith("/") && !r.split("/").includes("..");
+  const old = compRecord(id);
+  const oldFiles = new Set(((old && old.files) || []).filter(safeRel));
+  const rec = { id, source: b.source || "", version: b.version, upstream: b.upstream, base: b.base, sha256: b.sha256, bin: b.bin || [],
+    requires: b.requires || [], skill: "", state: "installing", at: Date.now(), files: [], shared: [],
+    // 依赖的底座包：卸工具包模块时据此判断有没有组件在用。不记的话要靠索引，刚启动 / 离线 / 索引里这个构建没了就判断不了（#104 05-001）
+    ...(Array.isArray(b.baseDeps) ? { baseDeps: b.baseDeps.map((d) => (typeof d === "string" ? d : d && d.name)).filter(Boolean) } : {}) };
+  // 先按包内文件清单记下"将要放进去的文件"：搬到一半被杀也能按它卸干净
+  const list = [];
+  (function walk(rel) {
+    for (const d of fs.readdirSync(path.join(tree, "usr", rel), { withFileTypes: true })) {
+      const r = rel ? rel + "/" + d.name : d.name;
+      if (d.isDirectory()) walk(r); else list.push(r);
+    }
+  })("");
+  // 已经在的（工具包自带，或别的组件放进去的）不覆盖、不归我们，但记进 shared：那个组件卸载时要知道我们也在用
+  const orphans = compOrphans(list, id);
+  if (orphans.size) log(`[comp] ${id}：${orphans.size} 个没人认领的旧文件被新包覆盖（${[...orphans].slice(0, 5).join(", ")}）`);
+  // 升级时旧版本自己的文件还在：没人跟它抢的换成新版（先备份）；别的组件也要用、底座认领的留在原地当 shared
+  const othersNeed = new Set();
+  for (const [oid, orec] of compRecords()) if (oid !== id) for (const r of compNeeds(oid, orec)) othersNeed.add(r);
+  const baseNow = baseOwnedPaths(new Set(list));
+  const replaceable = new Set();
+  for (const r of list) {
+    let st = null; try { st = fs.lstatSync(path.join(PREFIX, r)); } catch {}
+    if (st && (st.isFile() || st.isSymbolicLink()) && (orphans.has(r) || (oldFiles.has(r) && !othersNeed.has(r) && !baseNow.has(r))))
+      replaceable.add(r);
+    (st && !replaceable.has(r) ? rec.shared : rec.files).push(r);
+  }
+  // 记录写不进去就不能往下搬：文件搬进 $PREFIX 却没有清单，以后既卸不干净也认领不了（195-Z.10）
+  if (!compWriteRecord(id, rec)) throw new Error(tz("安装记录写不进去（存储满了或没有权限），这次安装没有继续"));
+  // 旧版同路径文件先挪进备份：新版没全部就位前，$PREFIX 里的旧版文件一个都不删
+  const bak = path.join(path.dirname(tree), id + ".old");
+  fs.rmSync(bak, { recursive: true, force: true });
+  const backed = [], moved = [];
+  try {
+    for (const r of replaceable) {
+      const to = path.join(bak, r);
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.renameSync(path.join(PREFIX, r), to);
+      backed.push(r);
+    }
+    const { skipped } = compMoveIn(path.join(tree, "usr"), "", moved, [], orphans);
+    if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
+  } catch (e) {
+    // 回滚：备份原样放回、撤掉这次新放进去的文件、记录退回旧版
+    for (const r of backed.reverse()) {
+      try { fs.mkdirSync(path.dirname(path.join(PREFIX, r)), { recursive: true }); fs.renameSync(path.join(bak, r), path.join(PREFIX, r)); } catch {}
+    }
+    for (const r of moved) if (!replaceable.has(r)) { try { fs.unlinkSync(path.join(PREFIX, r)); } catch {} }
+    try { fs.rmSync(bak, { recursive: true, force: true }); } catch {}
+    if (old && !compWriteRecord(id, old)) log(`[comp] ${id}：回滚后旧记录没写回去，界面会显示装到一半`);
+    throw e;
+  }
+  try { fs.rmSync(bak, { recursive: true, force: true }); } catch {}
+  // 新版全部就位（提交点）：这时才删旧版里新版不要的文件，别的组件也要用的转记到它们名下，旧技能清掉
+  if (old) compRemoveFiles(id, old, new Set(list));
+  // 搬完再查（顺序不定，搬的时候目标可能还没就位）：目标仍然断掉的文档软链不留下（196-真机.3）
+  compDropDanglingDocs(rec);
+  return rec;
 }
 
 function compCancel(id) {
