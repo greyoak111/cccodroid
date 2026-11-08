@@ -243,7 +243,12 @@
       body.insertAdjacentHTML("beforeend", `<h3>${esc(t("交流群与参与"))}</h3>` + communityHtml(false));
       if (!body.dataset.cm) { body.dataset.cm = "1"; communityBind(body); }
       helpLang = lang;
-    } catch (e) { body.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+    } catch (e) {
+      // 只显示原始英文/HTTP 状态，用户既看不懂也没法重试（195-N.8）
+      body.innerHTML = `<div class="tiny err">${esc(t("帮助加载失败：{msg}", { msg: e.message }))}</div><div class="it-acts"><button class="btn ghost sm" id="help-retry">${esc(t("重试"))}</button></div>`;
+      $("help-retry").onclick = () => { helpLang = ""; loadHelp(); };
+      return;
+    }
     // 顶栏表 → 图例
     body.querySelectorAll("table").forEach((tb) => {
       const rows = [...tb.querySelectorAll("tr")].filter((tr) => tr.querySelector("td")).map((tr) => [...tr.children].map((td) => td.textContent.trim()));
@@ -366,7 +371,12 @@
       const r = await fetch("/changelog/" + lang + ".json", { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
       list = await r.json();
-    } catch (e) { body.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+    } catch (e) {
+      // 和帮助页同一口径：说清楚是哪一步失败，并给重试（195-N.8）
+      body.innerHTML = `<div class="tiny err">${esc(t("更新日志加载失败：{msg}", { msg: e.message }))}</div><div class="it-acts"><button class="btn ghost sm" id="cl-retry">${esc(t("重试"))}</button></div>`;
+      $("cl-retry").onclick = () => { CL.lang = ""; loadChangelog(); };
+      return;
+    }
     CL.lang = lang; CL.list = list; CL.h = []; CL.low = list.map((x) => ("v" + x.v + "\n" + x.md).toLowerCase());
     const cur = ((lastUpd && lastUpd.items) || []).find((x) => x.id === "app")?.current || "";
     // 估高：按这一栏能放几个字折行，再加段落间距；渲染时量出真高，差的那点在 clShow 里补回滚动位置

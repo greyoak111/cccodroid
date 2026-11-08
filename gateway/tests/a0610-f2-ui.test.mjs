@@ -57,3 +57,11 @@ test("195-K.8 脉络后台重取保持用户位置：只有头一回拿到图才
   has(s, /const first = !LIN\.g;[\s\S]*?linPaint\(first\);/, "只有首次 linPaint(true)");
   assert.doesNotMatch(s, /LIN\.g = g; LIN\.stale = false;\s*\n\s*linPaint\(true\)/, "后台重取不再强制归位");
 });
+
+test("195-N.8 帮助/更新日志加载失败说清楚是哪一步并给重试", () => {
+  const s = src("15-pages.js");
+  has(s, /帮助加载失败：\{msg\}/, "帮助失败文案");
+  has(s, /id="help-retry"[\s\S]*?loadHelp\(\);/, "帮助重试");
+  has(s, /更新日志加载失败：\{msg\}/, "更新日志失败文案");
+  has(s, /id="cl-retry"[\s\S]*?loadChangelog\(\);/, "更新日志重试");
+});

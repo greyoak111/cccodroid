@@ -418,5 +418,29 @@
     "ru": "Служба предпросмотра не вернула адрес",
     "id": "Layanan pratinjau tidak mengembalikan alamat",
     "ar": "لم تُرجع خدمة المعاينة عنوانًا"
+  },
+  {
+    "zh": "帮助加载失败：{msg}",
+    "en": "Couldn't load help: {msg}",
+    "ja": "ヘルプを読み込めません：{msg}",
+    "ko": "도움말을 불러오지 못했습니다: {msg}",
+    "zh-Hant": "幫助載入失敗：{msg}",
+    "es": "No se pudo cargar la ayuda: {msg}",
+    "fr": "Impossible de charger l'aide : {msg}",
+    "ru": "Не удалось загрузить справку: {msg}",
+    "id": "Gagal memuat bantuan: {msg}",
+    "ar": "تعذّر تحميل المساعدة: {msg}"
+  },
+  {
+    "zh": "更新日志加载失败：{msg}",
+    "en": "Couldn't load the changelog: {msg}",
+    "ja": "更新履歴を読み込めません：{msg}",
+    "ko": "변경 로그를 불러오지 못했습니다: {msg}",
+    "zh-Hant": "更新日誌載入失敗：{msg}",
+    "es": "No se pudo cargar el registro de cambios: {msg}",
+    "fr": "Impossible de charger le journal des modifications : {msg}",
+    "ru": "Не удалось загрузить журнал изменений: {msg}",
+    "id": "Gagal memuat log perubahan: {msg}",
+    "ar": "تعذّر تحميل سجلّ التغييرات: {msg}"
   }
 ]
