@@ -591,6 +591,9 @@ export async function startRun(item) {
     try { writeUser(content); } catch { return false; }
     WROTE.set(item, textOf(content));
     run.pendingInject.push(item);
+    // 空闲轮次的收尾定时器（6 秒 / IDLE_CLOSE_MS）要撤掉：claude 吃进这条、吐出第一个事件之前它到点了，
+    // 就会把 stdin 关掉，这一轮被打断、之后的工具确认也写不进去（0.6.9 审计 195-W.3）。这一轮的 result 之后照常判断收尾
+    if (run.idleClose) { clearTimeout(run.idleClose); run.idleClose = null; }
     saveRunMark();     // 马上落盘：送达前 App 被强停，下次启动它还能回到队列里，不会凭空消失
     log(`↪ 插话 ${item.message.trim().slice(0, 60).replace(/\s+/g, " ")}`);   // 压成一行：诊断包按行抹掉对话内容
     return true;

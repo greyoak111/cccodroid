@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CFG, LAST_LANG, log, tr, tz } from "./config.mjs";
+import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
 import { SETTINGS, saveSettings, capList } from "./settings-store.mjs";
 import { keepBad, writeAtomic } from "./statefile.mjs";
 import { PERM_MODES, PROVIDER, keyOf, providerById } from "./providers.mjs";
@@ -146,6 +146,10 @@ export function clearInterrupted(sid) {
 // 正开着它的界面收到 session_gone 自己退回新对话（服务端删的：项目连目录删、定时任务不存对话、别的窗口，#173-4）
 TRASH_HOOKS.push((id) => {
   clearInterrupted(id);
+  // 排着的消息也丢掉：不然名额一空就拿已删的会话号去 --resume，claude 报 No conversation found，这条消息悄悄没了（0.6.9 审计 195-W.1）
+  const n0 = QUEUE.length;
+  for (let k = QUEUE.length - 1; k >= 0; k--) if (sidForItem(QUEUE[k]) === id) QUEUE.splice(k, 1);
+  if (QUEUE.length !== n0) { log(`  会话 ${id} 进了回收站，丢掉它排着的 ${n0 - QUEUE.length} 条消息`); saveRunMark(); }
   publish({ type: "session_gone", id });
   publishState();
 });
@@ -319,12 +323,20 @@ function idleFire(sid) {
 }
 
 /** 有空位就从队列里挑能跑的：车道空闲、且是这条车道上排在最前的（同一会话不许插队、不许同时跑两轮） */
+/** 会话确实没了：会话目录读得了、里面却找不到它。目录整个读不了（存储出错）不算——那时丢消息就是误删（同 195-Y.8） */
+export function sessionGone(sid) {
+  if (findSessionFile(sid)) return false;
+  try { fs.readdirSync(PATHS.projects); return true; } catch { return false; }
+}
 export function pump() {
   const blocked = new Set();
   for (let i = 0; i < QUEUE.length && RUNS.size < maxParallel(); ) {
     const q = QUEUE[i];
     if (q.held) { i++; continue; }                  // 停止时挂起的不自动发，也不挡后面新发的
     if (!startable(q)) { QUEUE.splice(i, 1); publishState(); continue; }
+    // 会话文件已经不在了（别的途径删的）：同启动恢复那道检查，不拿它去 --resume（195-W.1）
+    const qsid = sidForItem(q);
+    if (qsid && sessionGone(qsid)) { log(`  会话 ${qsid} 已不在，丢掉它排着的一条消息`); QUEUE.splice(i, 1); saveRunMark(); publishState(); continue; }
     const lane = laneOfItem(q), key = sidOfLane(lane) || lane;
     if (blocked.has(key) || laneRun(lane)) { blocked.add(key); i++; continue; }
     blocked.add(key);
