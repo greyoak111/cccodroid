@@ -227,6 +227,18 @@ async function customAnalyze(src, displayName) {
   if (!ownStaging(sp) && pathBlocked(sp)) return { ok: false, message: tz("这个位置不能读") };
   if (!st.isFile()) return { ok: false, message: tz("要选一个文件（程序本身或压缩包）") };
   for (const [k, v] of CUSTOM_STAGES) if (Date.now() - v.at > 3600000) { rmTree(v.dir); CUSTOM_STAGES.delete(k); }
+  // 盘上的也扫：暂存表只在内存里，网关重启后表空了，没装也没丢弃的 .stage-* 就永远留着（0.6.9 审计 196-供应链.2）。
+  // 不能见一个删一个：一小时内的还能读回来接着装（195-J.4），正在分析的目录也是新的。按 report.json 的时刻、没有就按目录时间算
+  try {
+    for (const n of fs.readdirSync(CUSTOM_DIR)) {
+      if (!/^\.stage-[0-9a-f]{12}$/.test(n) || CUSTOM_STAGES.has(n.slice(7))) continue;
+      const d = path.join(CUSTOM_DIR, n);
+      let at = 0;
+      try { at = Number(JSON.parse(fs.readFileSync(path.join(d, "report.json"), "utf8")).at) || 0; } catch {}
+      if (!at) try { at = fs.lstatSync(d).mtimeMs; } catch { continue; }
+      if (Date.now() - at > 3600000) rmTree(d);
+    }
+  } catch {}
   const stage = crypto.randomBytes(6).toString("hex");
   const dir = path.join(CUSTOM_DIR, ".stage-" + stage), x = path.join(dir, "x");
   fs.mkdirSync(x, { recursive: true });
