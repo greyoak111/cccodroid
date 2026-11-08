@@ -9,6 +9,7 @@ import { SEED_FILE } from "./providers.mjs";
 import { NEXT, fileKind, mimeOf, readBody, readBodyBuf, sendJson } from "./http.mjs";
 import { toFront } from "./local.mjs";
 import { bodyToFile } from "./bigfile.mjs";
+import { holdsPrivate, zoneOf } from "./pathguard.mjs";
 
 // ── 文件收发：读图 / 读文件 / 把东西递进来 ────────────────────────────
 // /api/file   把磁盘上的文件流给界面（消息里的图片靠它显示）
@@ -32,19 +33,13 @@ const SECRET_NAMES = new Set([
 ]);
 const SECRET_RE = /(^|\/)(\.ssh|\.gnupg|\.aws|\.config\/gcloud)(\/|$)/;
 
-/** 在不在工作区里（按真实路径）。cccodroid 的工作区就在 home 下面（files/home/workspace）——
- *  只按 home 拦，工作区里的文件（附件、Claude 生成的图）就全成了 403，缩略图和查看器都打不开 */
-function inWorkspace(real) {
-  let ws; try { ws = fs.realpathSync(CFG.workspace); } catch { ws = CFG.workspace; }
-  return real === ws || real.startsWith(ws + path.sep);
-}
-
-/** 读文件和列目录共用的路径政策：home / 运行时 / 种子文件（工作区除外）和凭据目录一律不碰（真实路径） */
+/** 读文件和列目录共用的路径政策：应用私有目录（home、运行时、工具链、整个应用数据目录；工作区除外）、种子文件和凭据目录一律不碰。
+ *  私有目录按目录身份判（gw/pathguard.mjs）：/data/data/<包名> 与 /data/user/0/<包名> 这类别名一并认得（0.6.9 审计 P0-1） */
 export function pathBlocked(real) {
-  for (const root of inWorkspace(real) ? [SEED_FILE] : [CFG.home, CFG.runtime, SEED_FILE]) {
-    if (!root) continue;
-    let rr; try { rr = fs.realpathSync(root); } catch { rr = root; }
-    if (real === rr || real.startsWith(rr + path.sep)) return true;
+  if (zoneOf(real) === "private") return true;
+  if (SEED_FILE) {
+    let rr; try { rr = fs.realpathSync(SEED_FILE); } catch { rr = SEED_FILE; }
+    if (real === rr) return true;
   }
   // /proc 底下的进程目录：同 uid 的进程（claude 子进程、网关自己）的 environ、cmdline、内存映射都读得到（审查 v0513b 低-14）
   if (/^\/proc\/(self|thread-self|\d+)(\/|$)/.test(real)) return true;
@@ -77,7 +72,7 @@ export function safeFilePath(p) {
 }
 
 /** 写文件前的同一套防呆：已有文件走 safeFilePath；新文件看父目录 */
-function safeWritePath(p) {
+export function safeWritePath(p) {
   if (!p || !path.isAbsolute(String(p))) return { error: "absolute path required", status: 400 };
   const full = String(p);
   const name = path.basename(full);
@@ -92,10 +87,7 @@ function safeWritePath(p) {
   if (st) return safeFilePath(dst);          // 已有文件走只读核验：非普通文件（FIFO/设备）与软链在这里拒绝
   let ds; try { ds = fs.statSync(dir); } catch (e) { return { error: e.message, status: 400 }; }
   if (!ds.isDirectory()) return { error: "not a directory", status: 400 };
-  for (const root of inWorkspace(dir) ? [] : [CFG.home, CFG.runtime]) {
-    let rr; try { rr = fs.realpathSync(root); } catch { rr = root; }
-    if (dir === rr || dir.startsWith(rr + path.sep)) return { error: "forbidden", status: 403 };
-  }
+  if (zoneOf(dir) === "private") return { error: "forbidden", status: 403 };
   if (SECRET_NAMES.has(name) || SECRET_RE.test(dst)) return { error: "forbidden", status: 403 };
   return { file: dst, size: 0, mtime: 0, fresh: true };
 }
@@ -311,13 +303,8 @@ export async function routeFiles(req, res, u, p) {
     // 源：文件走 safeFilePath；目录借它父目录下的一个虚拟子路径过一遍 safeWritePath 的根目录检查
     const src = st.isDirectory() ? safeWritePath(path.join(from, ".probe-" + Date.now())) : safeFilePath(from);
     if (src.error) return sendJson(res, src.status || 400, { error: src.error });
-    if (st.isDirectory()) {      // 也别把装着应用私有目录的上级挪走
-      let rf; try { rf = fs.realpathSync(from); } catch { rf = from; }
-      for (const root of [CFG.home, CFG.runtime]) {
-        let rr; try { rr = fs.realpathSync(root); } catch { rr = root; }
-        if (rr && rr.startsWith(rf + path.sep)) return sendJson(res, 403, { error: "forbidden" });
-      }
-    }
+    // 也别把装着应用私有目录（或工作区）的上级挪走：按目录身份判，别名也认得
+    if (st.isDirectory() && holdsPrivate(from)) return sendJson(res, 403, { error: "forbidden" });
     const dst = safeWritePath(path.join(path.dirname(from), name));
     if (dst.error) return sendJson(res, dst.status || 400, { error: dst.error });
     if (!dst.fresh) return sendJson(res, 409, { error: "exists" });

@@ -82,6 +82,7 @@ import { routeMerge } from "./gw/merge.mjs";
 import { routeProfile } from "./gw/profile.mjs";
 import { routeBackfill } from "./gw/backfill.mjs";
 import { routeArchive } from "./gw/archive.mjs";
+import { installCrashGuard } from "./gw/crashguard.mjs";
 import { COOKIE, SESSION, UI_HOST, cookieHostOk, denyLog, denyReason, localAddr, proofFor, tokenOk } from "./gw/access.mjs";
 import { startWorkIsland, stopWorkIslandSync } from "./gw/work-island.mjs";
 
@@ -140,9 +141,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// 最后一道兜底：哪个异步分支漏了 catch，记一笔日志，别让整个网关退出。
-// 不接 uncaughtException：孤儿网关往断掉的 stdout 写日志时靠 EPIPE 异常退出，接住了它就死不掉
-process.on("unhandledRejection", (e) => log(`未处理的 Promise 拒绝: ${(e && e.stack) || e}`));
+// 最后一道兜底：漏了 catch 的异常 / Promise 拒绝记一笔日志，别让整个网关退出；stdout 断了（孤儿网关）照旧退出（gw/crashguard.mjs）
+installCrashGuard();
 
 // ── 启动 ──────────────────────────────────────────────────────────────
 try { fs.mkdirSync(CFG.workspace, { recursive: true }); } catch {}

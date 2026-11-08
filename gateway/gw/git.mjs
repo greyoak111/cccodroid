@@ -1,9 +1,9 @@
 import fs from "node:fs";
+import { holdsPrivate, isPrivate } from "./pathguard.mjs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { CFG, log, tz } from "./config.mjs";
-import { realWorkspace } from "./sessionops.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
 
@@ -215,14 +215,9 @@ async function gitRepo(p) {
   return { root, dir };
 }
 /** 仓库根落在私有目录（HOME / 运行时）里就不碰；但 cccodroid 的工作区本身就在 HOME 下面，工作区里的仓库放行 */
+// 私有目录按目录身份判（gw/pathguard.mjs）：别名、应用数据目录里的 shared_prefs 之类也算（0.6.9 审计 P0-1 / P2 R1）
 function gitPrivate(d) {
-  const under = (a, b) => { const r = path.relative(b, a); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
-  const real = (s) => { try { return fs.realpathSync(s); } catch { return s; } };
-  const priv = [CFG.home, CFG.runtime].filter(Boolean).map(real);
-  const ws = realWorkspace();
-  // 在工作区里就放行；但工作区若就是 HOME（或它的上级），这条豁免作废
-  if (ws && under(d, ws) && !priv.some((rr) => under(rr, ws))) return false;
-  return priv.some((rr) => under(d, rr) || under(rr, d));
+  return isPrivate(d) || holdsPrivate(d, { workspace: false });
 }
 /** 仓库里的相对路径：前端给的可能是绝对路径，且 /sdcard 与 /storage/emulated/0 是同一处，按真实路径比。
  *  只解析所在目录、最后一级照字面留着：它自己是符号链接时，git 条目是链接本身，跟过去会撤销 / 删掉它指向的文件（审查 B02） */

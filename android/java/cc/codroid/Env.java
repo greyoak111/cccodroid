@@ -307,6 +307,8 @@ final class Env {
         e.put("CCAPP_PREFIX", usr.getPath());
         e.put("CCAPP_HOME", home.getPath());
         e.put("CCAPP_RUNTIME", files.getPath());
+        // 整个应用数据目录（shared_prefs、app_webview… 都在里面）：网关据此把它整个当私有目录（gw/pathguard.mjs，0.6.9 审计 P0-1）
+        e.put("CCAPP_DATA_DIR", files.getParent());
         e.put("CCAPP_WORKSPACE", workspace().getPath());
         File sh = shared();
         if (sh != null) e.put("CCAPP_SHARED", sh.getPath());

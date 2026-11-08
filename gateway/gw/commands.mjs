@@ -24,7 +24,13 @@ function cmdDir(scope, dir) {
   if (!ok) throw new Error("project dir not found: " + d);
   // 项目范围不许落在应用私有目录里（home、运行时；工作区除外）：往 home 里塞一条斜杠命令，等于给用户下套（11-03 审查 L-18，同文件面板的政策）
   if (pathBlocked(real)) throw new Error("project dir is private: " + d);
-  return path.join(d, ".claude", "commands");
+  // .claude 或 commands 本身是软链、指到私有目录（或别处的 home 里）：校验过了目录、动作却顺着链走（0.6.9 审计 P2 R1）
+  const cd = path.join(real, ".claude", "commands");
+  for (const p of [path.join(real, ".claude"), cd]) {
+    let rp = null; try { rp = fs.realpathSync(p); } catch {}
+    if (rp && (pathBlocked(rp) || rp !== p)) throw new Error("project commands dir is a link or private: " + p);
+  }
+  return cd;
 }
 
 /** 拆 frontmatter：description / argument-hint 读出来给界面改，其余项原样留着。

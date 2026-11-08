@@ -17,6 +17,7 @@ import { checkSession, resealAfterEdit } from "./integrity.mjs";
 import { rewriteLines } from "./bigfile.mjs";
 import { lineageForget } from "./lineage.mjs";
 import { pathBlocked } from "./files.mjs";
+import { holdsPrivate, isPrivate } from "./pathguard.mjs";
 
 const FILE = path.join(CFG.home, "ccapp-projects.json");
 // 项目颜色：和界面强调色同一套饱和度，按顺序分配（用户可改）
@@ -196,7 +197,8 @@ export async function routeProjects(req, res, u, p) {
       dir = real(String(b.path || ""));
       if (!isDir(dir)) return sendJson(res, 400, { error: tz("目录不存在：{d}", { d: dir }) });
       // 应用私有目录（home、运行时；工作区除外）不能登记成项目：项目页会读写里面的 CLAUDE.md，会话也会在里面跑（11-03 审查 L-4，同文件面板的政策）
-      if (pathBlocked(dir)) return sendJson(res, 403, { error: tz("这个目录在应用私有目录里，不能当项目") });
+      // 装着私有目录的上级（应用数据目录、/data/data/<包名> 这类别名、home 的上级）也不行：按目录身份判（0.6.9 审计 P0-2）
+      if (pathBlocked(dir) || holdsPrivate(dir, { workspace: false })) return sendJson(res, 403, { error: tz("这个目录在应用私有目录里，不能当项目") });
     } else {
       dir = freeDir(name);
       if (b.mode === "git") {
@@ -246,10 +248,9 @@ export async function routeProjects(req, res, u, p) {
       const r = real(proj.path);
       // 先判断能不能删，再动会话（原来先把会话收进回收站、后面才拦）。拦这些（审查 10-29 低6）：
       // 工作区 / home 本身及其上级、App 私有目录里工作区以外的地方（令牌、工具包、网关本体）、存储根和它下面一级（Download、DCIM…）、太浅的路径
-      const under = (a, b) => a === b || a.startsWith(b + "/");
-      const ws = real(CFG.workspace), home = real(CFG.home), appDir = path.dirname(home);
-      const appRoots = [appDir, "/data/data/" + path.basename(appDir), "/data/user/0/" + path.basename(appDir)];
-      if (r.split("/").length < 4 || under(ws, r) || under(home, r) || (appRoots.some((d) => under(r, d)) && !(under(r, ws) && r !== ws))
+      // 私有目录按目录身份判（gw/pathguard.mjs）：以前按字符串拼保护表，还拼错了（拼成 /data/data/files），
+      // 应用数据根和它的别名都没进表，能递归删掉 shared_prefs 甚至整个 home（0.6.9 审计 P0-2）
+      if (r.split("/").length < 4 || holdsPrivate(r) || isPrivate(r)
         || /^\/storage\/(emulated\/\d+|[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}|self\/primary)(\/[^/]+)?$/.test(r) || /^\/sdcard(\/[^/]+)?$/.test(r))
         return sendJson(res, 400, { error: tz("这个目录不能删") });
       const inDir = (s) => s.cwd && (real(s.cwd) === r || real(s.cwd).startsWith(r + "/"));

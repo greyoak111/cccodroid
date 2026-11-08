@@ -12,6 +12,7 @@ import { sha256File } from "./components.mjs";
 import { SKILLS_DIR } from "./extensions.mjs";
 import { archiveProblem, parseTarListing, zipEntries } from "./archive-check.mjs";
 import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
+import { pathBlocked } from "./files.mjs";
 
 // ── 自定义组件：用户自己导入的 Linux arm64 程序（不经市场，来源由用户负责） ─────────────────
 // 放在 ~/.cccodroid/custom/<id>/（app/ 原样解开的程序，deps/ 自动补的 glibc 库），不进 $PREFIX：换工具包不会被冲掉。
@@ -218,7 +219,9 @@ async function customAnalyze(src) {
   let sp = String(src || "").trim();
   if (!sp) return { ok: false, message: tz("没给文件") };
   if (!path.isAbsolute(sp)) sp = path.join(CFG.workspace, sp);
-  let st; try { st = fs.statSync(sp); } catch { return { ok: false, message: tz("找不到文件：{p}", { p: sp }) }; }
+  let st; try { sp = fs.realpathSync(sp); st = fs.statSync(sp); } catch { return { ok: false, message: tz("找不到文件：{p}", { p: sp }) }; }
+  // 同文件面板的路径政策：应用私有目录、凭据不许拿来分析（以前这里是唯一没过 pathBlocked 的路径入口，0.6.9 审计 P2 R1）
+  if (pathBlocked(sp)) return { ok: false, message: tz("这个位置不能读") };
   if (!st.isFile()) return { ok: false, message: tz("要选一个文件（程序本身或压缩包）") };
   for (const [k, v] of CUSTOM_STAGES) if (Date.now() - v.at > 3600000) { rmTree(v.dir); CUSTOM_STAGES.delete(k); }
   const stage = crypto.randomBytes(6).toString("hex");

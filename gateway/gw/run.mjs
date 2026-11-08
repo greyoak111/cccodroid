@@ -33,6 +33,8 @@ import { refNote, refNoteSync } from "./merge.mjs";
 import { ensureManagedBridge } from "./managed-bridge.mjs";
 import { projectRisks, projectTrusted, trustProject } from "./projtrust.mjs";
 import { checkAppFiles } from "./appfiles.mjs";
+import { pathBlocked } from "./files.mjs";
+import { holdsPrivate } from "./pathguard.mjs";
 import { ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucRevert, ucSetRevertNote, ucTakeNote } from "./userconf.mjs";
 import { keepProcs, killProcs, leftoverProcs, nowTicks, procStart } from "./leftover.mjs";
 import { localAddr, witnessMac } from "./access.mjs";
@@ -369,8 +371,10 @@ export async function startRun(item) {
   const dirs = new Set();
   if (fs.existsSync(CFG.workspace) && cwd !== CFG.workspace) dirs.add(CFG.workspace);
   if (process.env.CCAPP_SHARED && fs.existsSync(process.env.CCAPP_SHARED)) dirs.add(process.env.CCAPP_SHARED);
-  for (const d of SETTINGS.addDirs || []) if (fs.existsSync(d)) dirs.add(d);
-  for (const d of item.addDirs || []) if (typeof d === "string" && fs.existsSync(d)) dirs.add(d);
+  // 附加目录同样不许是应用私有目录、或装着它的上级（按目录身份判，别名也认得；0.6.9 审计 P0-1）
+  const addOk = (d) => { try { const r = fs.realpathSync(d); return !pathBlocked(r) && !holdsPrivate(r, { workspace: false }); } catch { return false; } };
+  for (const d of SETTINGS.addDirs || []) if (addOk(d)) dirs.add(d); else if (d) log(`附加目录 ${d} 不存在或在应用私有目录里，没加`);
+  for (const d of item.addDirs || []) if (typeof d === "string" && addOk(d)) dirs.add(d);
   if (!P.local && onShared(cwd)) { const b = privateAgentsBase(cwd); try { fs.mkdirSync(b, { recursive: true }); dirs.add(b); } catch {} }
   let dirLen = 0;
   for (const d of dirs) { if ((dirLen += d.length) > 24576) { log(`--add-dir 太多，从 ${d} 起没加`); break; } argv.push("--add-dir", d); }

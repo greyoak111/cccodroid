@@ -9,6 +9,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { log } from "./config.mjs";
+import { pathBlocked } from "./files.mjs";
 
 const MAX_IMAGES = 5;
 const MAX_RAW = 3.75 * 1024 * 1024;        // base64 后 5 MB 是官方单图上限，第三方只会更紧
@@ -34,7 +35,8 @@ export function imageRefs(msg) {
   for (const m of String(msg || "").matchAll(REF)) {
     const p = m[1];
     if (out.includes(p)) continue;
-    try { if (!fs.statSync(p).isFile()) continue; } catch { continue; }
+    // 图片原样发给外部接口：应用私有目录、凭据里的不带（0.6.9 审计 P2 R1）
+    try { if (!fs.statSync(p).isFile() || pathBlocked(fs.realpathSync(p))) continue; } catch { continue; }
     out.push(p);
     if (out.length >= MAX_IMAGES) break;
   }
