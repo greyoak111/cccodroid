@@ -136,7 +136,11 @@
       el.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); el.click(); } });
       if (arc) return;
       if (!e.dir) el.addEventListener("dblclick", () => { insertFile(e); });
-      el.addEventListener("contextmenu", (ev) => { ev.preventDefault(); fsRename(e); });   // 长按 = 重命名
+      // 长按：重命名 / 压缩（以前长按直接重命名，压缩只藏在「多选」里，用户找不到，11-09）
+      el.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault();
+        popMenu(el, [{ head: e.name + (e.dir ? "/" : "") }, { label: t("重命名"), fn: () => fsRename(e) }, { label: t("压缩…"), fn: () => arcCreateDlg([e.name]) }]);
+      });
     });
 
     $("fs-insert").disabled = !state.fs.sel || !!arc;
@@ -209,7 +213,7 @@
          <span class="mono">${esc(e.name)}</span>
          <span class="tiny">${fmtSize(e.size)}</span>
          ${e.kind === "archive" ? `<button class="btn sm" data-a="arc">${t("打开压缩包")}</button><button class="btn ghost sm" data-a="unpack">${t("解压…")}</button>`
-           : `<button class="btn sm" data-a="open">${e.kind === "text" ? t("打开 / 编辑") : t("打开")}</button>`}
+           : `<button class="btn sm" data-a="open">${e.kind === "text" ? t("打开 / 编辑") : t("打开")}</button><button class="btn ghost sm" data-a="pack">${t("压缩…")}</button>`}
          <button class="btn ghost sm" data-a="insert">${t("插入 @路径")}</button>
          <button class="btn ghost sm" data-a="rename">${t("重命名")}</button>
          <a class="btn ghost sm" href="${fileUrl(full, true)}" download>⤓</a>
@@ -220,6 +224,7 @@
     box.querySelector('[data-a="open"]')?.addEventListener("click", () => openViewer(full, e.kind, e.size));
     box.querySelector('[data-a="arc"]')?.addEventListener("click", () => arcOpen(full));
     box.querySelector('[data-a="unpack"]')?.addEventListener("click", () => arcExtractDlg({ path: full, entries: null }));
+    box.querySelector('[data-a="pack"]')?.addEventListener("click", () => arcCreateDlg([e.name]));
     box.querySelector("img")?.addEventListener("click", () => openViewer(full, e.kind, e.size));
   }
 

@@ -3023,6 +3023,7 @@ window.I18N_DICT.en = {
   "压缩包：点「打开压缩包」浏览里面的文件，或直接解压": "Archive: tap “Open archive” to browse its files, or extract it directly",
   "打开压缩包": "Open archive",
   "解压…": "Extract…",
+  "压缩…": "Compress…",
   "文件名编码": "File name encoding",
   "文件名乱码就换一个编码": "If names look garbled, try another encoding",
   "{n} 个条目": "{n} entries",

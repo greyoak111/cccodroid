@@ -2988,6 +2988,7 @@ window.I18N_DICT["fr"] = {
   "压缩包：点「打开压缩包」浏览里面的文件，或直接解压": "Archive : touchez « Ouvrir l’archive » pour parcourir son contenu, ou extrayez-la directement",
   "打开压缩包": "Ouvrir l’archive",
   "解压…": "Extraire…",
+  "压缩…": "Compresser…",
   "文件名编码": "Encodage des noms",
   "文件名乱码就换一个编码": "Si les noms sont illisibles, essayez un autre encodage",
   "{n} 个条目": "{n} éléments",

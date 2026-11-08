@@ -2988,6 +2988,7 @@ window.I18N_DICT["id"] = {
   "压缩包：点「打开压缩包」浏览里面的文件，或直接解压": "Arsip: ketuk “Buka arsip” untuk melihat isinya, atau langsung ekstrak",
   "打开压缩包": "Buka arsip",
   "解压…": "Ekstrak…",
+  "压缩…": "Kompres…",
   "文件名编码": "Encoding nama file",
   "文件名乱码就换一个编码": "Jika nama rusak, coba encoding lain",
   "{n} 个条目": "{n} entri",
