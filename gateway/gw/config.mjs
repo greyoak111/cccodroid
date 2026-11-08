@@ -118,13 +118,25 @@ export function tz(k, v) {
 }
 const LANG_DICTS = new Map();
 export let LAST_LANG = "zh";
+// 词典是在网关进程里执行的脚本（复数形式是函数）：部署出来的（有 FILES）只执行按清单核过的字节，读法由 appfiles.mjs 挂进来；
+// 还没挂上就先不加载（不缓存，挂上后再读），对不上就不用这份词典、回退中文（0.6.9 审计 200-14-01：以前直接读盘执行，不在运行期完整性保护里）
+let LANG_READ = null;
+export function setLangReader(fn) { LANG_READ = fn; LANG_DICTS.clear(); }
+const DEPLOYED = fs.existsSync(path.join(HERE, "FILES"));
 function langDict(code) {
+  if (!/^[a-z]{2}(-[A-Za-z]{2,4})?$/.test(code)) return null;
   if (!LANG_DICTS.has(code)) {
+    const rel = `web/lang-${code}.js`;
+    if (DEPLOYED && !LANG_READ) return null;
     let d = null;
     try {
-      const sb = { window: {} };
-      vm.runInNewContext(fs.readFileSync(path.join(HERE, "web", `lang-${code}.js`), "utf8"), sb);
-      d = (sb.window.I18N_DICT || {})[code] || null;
+      const buf = LANG_READ ? LANG_READ(rel) : fs.readFileSync(path.join(HERE, rel));
+      if (!buf) log(`⚠️ [应用文件] ${rel} 和安装包对不上，不用这份词典`);
+      else {
+        const sb = { window: {} };
+        vm.runInNewContext(buf.toString("utf8"), sb, { timeout: 2000 });
+        d = (sb.window.I18N_DICT || {})[code] || null;
+      }
     } catch {}
     LANG_DICTS.set(code, d);
   }

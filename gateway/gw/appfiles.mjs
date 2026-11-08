@@ -10,7 +10,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import module from "node:module";
 import { pathToFileURL } from "node:url";
-import { HERE, log } from "./config.mjs";
+import { HERE, log, setLangReader } from "./config.mjs";
 import { tamperRecord } from "./tamper.mjs";
 
 // lib/ 里是子 node 经 NODE_OPTIONS --require 的 execpath.cjs（预加载的原生库 0.6.7 起搬进了 APK 原生库目录，见 build.sh）。
@@ -163,6 +163,8 @@ export const APP = appGuard(HERE, {
     idleTimer.unref?.();
   },
 });
+// 网关里翻译提示语要执行 web/lang-*.js：只给核过的字节（200-14-01）
+if (APP) setLangReader((rel) => APP.code(rel));
 // 网关自己的模块：启动时静态 import 的那批在应用核过之后马上就读完了，之后用到才 import 的（十来处）要再读盘 ——
 // 这时候盘上的可能已经被换过。挂一个加载钩子：files/app 里的代码一律用核过的字节（gw/ 等在快照里，直接用内存里那份），
 // 对不上、或安装包里根本没有的，不加载并要求重启还原
