@@ -44,9 +44,13 @@
     "native-build": t("编译原生程序"), apk: t("打 APK"), "usb-adb": t("USB 调试"), "gpu-components": t("GPU 组件（Blender、浏览器等）"),
     media: t("音视频处理"), docs: t("排版、表格分析、图片处理"),
   });
+  // 停用名单（F5）：组件、模块停用 = 不再告诉 Claude，命令文件还在
+  const extOffNow = () => api("/api/ext/off").catch(() => ({ comp: [], mod: [] }));
+  const OFF_TIP = () => t("停用后 Claude 看不到它，命令文件还在，随时可以启用。");
   async function loadModules() {
     clearTimeout(modTimer);
-    const r = await api("/api/devkit/modules").catch(() => null);
+    const [r, xoff] = await Promise.all([api("/api/devkit/modules").catch(() => null), extOffNow()]);
+    const modOff = new Set(xoff.mod || []);
     const on = !!(r && r.supported && r.modular);
     $("mod-field").classList.toggle("hidden", !on);
     if (!on) return;
@@ -95,8 +99,10 @@
         size = MB(chain.reduce((s, id) => s + byId[id].download, 0));
         acts = (m.state === "error" ? sdot("err", st) : "") + btn("install", m.id, ei("download") + (m.state === "error" ? t("重试") : t("安装")), ' class="btn sm"' + (chain.length > 1 ? ` data-chain="${esc(listOf(chain.map(nameOf)))}"` : ""));
       } else if (m.state === "downloading" || m.state === "verifying" || m.state === "installing") acts = sdot("warn", st) + (m.state === "installing" ? "" : btn("cancel", m.id, t("取消"), ' class="btn sm ghost"'));
-      else if (m.state === "ok") acts = btn("remove", m.id, t("卸载"), ' class="btn sm ghost"' + (used.length ? ' data-usedby="' + listOf(used) + '"' : ""));
-      const tag = m.required ? `<span class="tag">${ei("lock")}${t("必装")}</span>` : m.kind === "shared" ? `<span class="tag">${t("共享运行库")}</span>` : "";
+      else if (m.state === "ok") acts = btn("toggle", m.id, modOff.has(m.id) ? t("启用") : t("停用"), ` class="btn sm ghost" data-on="${modOff.has(m.id) ? 1 : 0}" title="${esc(OFF_TIP())}"`)
+        + btn("remove", m.id, t("卸载"), ' class="btn sm ghost"' + (used.length ? ' data-usedby="' + listOf(used) + '"' : ""));
+      const tag = m.required ? `<span class="tag">${ei("lock")}${t("必装")}</span>` : m.kind === "shared" ? `<span class="tag">${t("共享运行库")}</span>`
+        : m.state === "ok" && modOff.has(m.id) ? `<span class="tag">${t("已停用")}</span>` : "";
       return rowItem(esc(pickLang(m.name) || m.id) + tag, '<span class="mono">' + (m.key || []).map(esc).join(" ") + "</span>",
         '<span class="num">' + size + "</span>" + acts, { more: desc, extra: bar });
     }).join("");
@@ -110,6 +116,12 @@
     // 模块列表在扩展页里：同样是 data-c 按钮，冒泡上去会被组件的处理器当成组件再装/卸一遍（取消确认框之后也会）
     e.stopPropagation();
     const c = b.dataset.c, id = b.dataset.id;
+    if (c === "toggle") {
+      b.disabled = true;
+      const r = await post("/api/ext/off", { kind: "mod", id, on: b.dataset.on === "1" }).catch((e2) => ({ ok: false, message: e2.message }));
+      toast(r.ok ? (b.dataset.on === "1" ? t("已启用") : t("已停用") + " · " + OFF_TIP()) : t("失败：{msg}", { msg: r.message || "" }), !r.ok);
+      return loadModules();
+    }
     if (c === "remove") {
       if (b.dataset.usedby) return toast(t("{names} 要用它，先卸载那些", { names: b.dataset.usedby }), true);
       if (!confirm(t("卸载这个模块？它的命令会从工具包里删掉，别的模块和组件还在用的文件会留下。以后可以随时再装。"))) return;
@@ -198,6 +210,7 @@
     const request = ++compLoad;
     clearTimeout(compTimer);
     const r = await api("/api/components" + (refresh ? "?refresh=" + (refresh === true ? 1 : refresh) : "")).catch((e) => ({ supported: true, items: [], indexError: e.message }));
+    const compOff = new Set((await extOffNow()).comp || []);
     // 完成后的刷新比卸载中的轮询新；旧响应不能把已恢复的卡片盖回去。
     if (request !== compLoad) return "stale";
     const outcome = { err: r.indexError || "" };
@@ -270,7 +283,10 @@
       else if (c.state === "absent" && c.available) cbtn = btn("install", c.id, ei("download") + MB(c.bytes)).replace("<button ", '<button class="btn sm ghost" ');
       else if (c.state === "downloading" || c.state === "verifying") cbtn = btn("cancel", c.id, t("取消")).replace("<button ", '<button class="btn sm ghost" ');
       else if (c.state === "ok") {
-        if (c.id === "openai-bridge") cbtn = btn("configure", c.id, t("配置")).replace("<button ", '<button class="btn sm ghost" ');
+        // 停用放最前：「配置」要紧挨着「卸载」（组件卡测试约定的顺序）
+        const isOff = compOff.has(c.id);
+        cbtn = btn("toggle", c.id, isOff ? t("启用") : t("停用")).replace("<button ", `<button class="btn sm ghost" data-on="${isOff ? 1 : 0}" title="${esc(OFF_TIP())}" `);
+        if (c.id === "openai-bridge") cbtn += btn("configure", c.id, t("配置")).replace("<button ", '<button class="btn sm ghost" ');
         cbtn += btn("remove", c.id, t("卸载")).replace("<button ", '<button class="btn sm ghost" ');
       } else if (["update", "outdated", "damaged", "error"].includes(c.state)) {
         if (c.available) cbtn += btn("install", c.id, ei("download") + (c.state === "update" ? t("更新") : t("重新安装"))).replace("<button ", '<button class="btn sm" ');
@@ -658,13 +674,25 @@
     }
     $("ext-s-count").textContent = (r.items || []).length;
     // 发行版：skill 经检查后以插件「user」交给 Claude Code，斜杠调用时名字带 user: 前缀（见 gw/seal.mjs）
-    $("ext-skills").innerHTML = (r.sealed && (r.items || []).length ? `<div class="tiny">${esc(t("cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。", { name: r.items[0].name }))}</div>` : "") + (r.items || []).map((s) => extItem(esc(s.name), "",
-      `<button data-x="skill-rm" data-id="${esc(s.dir)}">${t("删除")}</button>`,
+    // 模式（F5）：开 / 只露名字（省上下文）/ 只能你用斜杠调用 / 关。发行版的技能由网关打包交给 claude，只认开 / 关
+    const modes = r.sealed ? [["on", t("开")], ["off", t("关")]] : [["on", t("开")], ["name-only", t("只露名字")], ["user-invocable-only", t("只能你调用")], ["off", t("关")]];
+    const modeSel = (s) => s.orphan ? "" : `<select class="sk-mode" data-id="${esc(s.dir)}" aria-label="${esc(t("技能模式"))}">${modes.map(([v, l]) => `<option value="${v}"${(s.mode || "on") === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+    $("ext-skills").innerHTML = (r.sealed && (r.items || []).length ? `<div class="tiny">${esc(t("cccodroid 检查过这些技能再交给 Claude Code，用斜杠调用时名字前面带 user:，比如 /user:{name}。", { name: r.items[0].name }))}</div>` : "") + (r.items || []).map((s) => extItem(esc(s.name) + (s.mode && s.mode !== "on" ? ` <span class="badge">${esc((modes.find(([v]) => v === s.mode) || [, t("已停用")])[1])}</span>` : ""), "",
+      modeSel(s) + `<button data-x="skill-rm" data-id="${esc(s.dir)}">${t("删除")}</button>`,
       `<div class="tiny ext-desc">${esc(s.orphan ? t("这个文件夹里没有 SKILL.md（可能是以前导入到一半失败留下的），可以删掉。") : !isZh() && s.descEn ? s.descEn : s.description)}</div>`, [s.component ? "comp" : s.official ? "official" : "user"])).join("")
       || `<div class="tiny">${t("~/.claude/skills 里还没有技能。插件也可能自带技能。")}</div>`;
     renderIdx("skill", [["official", t("官方")], ["comp", t("组件自带")], ["user", t("自己装的")]]);
     if ($("ext-s-catbox").open) loadSkillCat();
   }
+
+  $("ext-skills").addEventListener("change", async (e) => {
+    const sel = e.target.closest("select.sk-mode");
+    if (!sel) return;
+    sel.disabled = true;
+    const r = await post("/api/ext/skills/mode", { dir: sel.dataset.id, mode: sel.value }).catch((err) => ({ ok: false, message: err.message }));
+    toast(r.ok ? t("下一轮对话起生效") : t("失败：{msg}", { msg: r.message || "" }), !r.ok);
+    loadExtSkills();
+  });
 
   // ── Hooks（自动规则）：到某个时刻自动跑一条命令。常用规则点一下就加，也能自己写；每条都能先试运行看效果 ──
   const HK = { data: null, scope: localStorage.getItem("cc.hookScope") || "user", edit: null, recipe: null };
@@ -1017,11 +1045,12 @@
     box.innerHTML = (r.items || []).map((m) => extItem(
       esc(m.name) + (m.cloud ? ` <span class="badge">${t("账户连接器")}</span>` : ""),
       `<span class="mono">${esc(m.target)}</span>`,
-      m.cloud ? "" : `<button data-x="mcp-rm" data-id="${esc(m.name)}">${t("移除")}</button>`,
-      `<div class="tiny ext-st ${m.ok ? "ok" : "warn"}">${esc(m.status)}</div>`,
-      m.cloud ? ["cloud"] : [m.ok ? "ok" : "bad", /^https?:/i.test(m.target || "") ? "remote" : "local"])).join("")
+      m.cloud ? "" : m.disabled ? `<button data-x="mcp-on" data-id="${esc(m.name)}" data-target="${esc(m.target)}">${t("启用")}</button><button data-x="mcp-forget" data-id="${esc(m.name)}">${t("移除")}</button>`
+        : (m.user ? `<button data-x="mcp-off" data-id="${esc(m.name)}">${t("停用")}</button>` : "") + `<button data-x="mcp-rm" data-id="${esc(m.name)}">${t("移除")}</button>`,
+      m.disabled ? `<div class="tiny ext-st">${esc(t("已停用：Claude 不会连它，定义存着，点启用就加回来。"))}</div>` : `<div class="tiny ext-st ${m.ok ? "ok" : "warn"}">${esc(m.status)}</div>`,
+      m.cloud ? ["cloud"] : m.disabled ? ["off"] : [m.ok ? "ok" : "bad", /^https?:/i.test(m.target || "") ? "remote" : "local"])).join("")
       || `<div class="tiny">${esc(r.err || t("还没有 MCP 服务器。"))}</div>`;
-    renderIdx("mcp", [["ok", t("已连接")], ["bad", t("连不上")], ["cloud", t("账户连接器")], ["local", t("本地")], ["remote", t("远程")]]);
+    renderIdx("mcp", [["ok", t("已连接")], ["bad", t("连不上")], ["off", t("已停用")], ["cloud", t("账户连接器")], ["local", t("本地")], ["remote", t("远程")]]);
   }
 
   // ── 官方技能目录（anthropics/skills）：展开时才拉；装好后上面「技能」列表跟着刷新 ──
@@ -1187,6 +1216,13 @@
     if (cb && !cb.disabled) {
       const c = cb.dataset.c, id = cb.dataset.id;
       if (c === "reindex") { cb.disabled = true; return loadComponents(true); }
+      if (c === "toggle") {
+        cb.disabled = true;
+        const r = await post("/api/ext/off", { kind: "comp", id, on: cb.dataset.on === "1" }).catch((err) => ({ ok: false, message: err.message }));
+        toast(r.ok ? (cb.dataset.on === "1" ? t("已启用") : t("已停用") + " · " + OFF_TIP()) : t("失败：{msg}", { msg: r.message || "" }), !r.ok);
+        loadExtSkills();     // 组件自带的技能跟着关 / 开
+        return loadComponents();
+      }
       if (compRemoving.has(id)) return;
       if (c === "configure") {
         if (id !== "openai-bridge") return;
@@ -1234,23 +1270,28 @@
     const x = b.dataset.x, id = b.dataset.id;
     if (x === "install") return installPlugin(id, b);
     const url = { uninstall: "/api/ext/plugins/uninstall", enable: "/api/ext/plugins/enable", disable: "/api/ext/plugins/disable",
-      "skill-rm": "/api/ext/skills/delete", "mcp-rm": "/api/ext/mcp/remove", "market-rm": "/api/ext/marketplaces/remove" }[x];
+      "skill-rm": "/api/ext/skills/delete", "mcp-rm": "/api/ext/mcp/remove", "market-rm": "/api/ext/marketplaces/remove",
+      "mcp-off": "/api/ext/mcp/disable", "mcp-on": "/api/ext/mcp/enable", "mcp-forget": "/api/ext/mcp/forget" }[x];
     // 别的监听管的按钮（MCP 目录添加、技能目录重试…）也带 data-x：不认识的不归这里，以前会 POST /undefined 再报失败（审查 F-002）
     if (!url) return;
     const ask = {
       uninstall: t("卸载插件 {name}？", { name: id }),
       "skill-rm": t("删除技能 {name}？文件夹会被整个删掉。", { name: id }),
       "mcp-rm": t("移除 MCP 服务器 {name}？", { name: id }),
+      "mcp-off": t("停用 MCP 服务器 {name}？它的设置会先存起来，随时能启用。", { name: id }),
+      // 加回去的是停用名单里存着的那条：先亮给用户看，名单文件被改过也看得出来
+      "mcp-on": t("启用 MCP 服务器 {name}？会加回这条：{target}", { name: id, target: b.dataset.target || "?" }),
+      "mcp-forget": t("删掉停用着的 MCP 服务器 {name}？删了就不能一键启用了。", { name: id }),
       "market-rm": t("移除插件市场 {name}？从它装的插件也会一并卸载。", { name: id }),
     }[x];
     if (ask && !confirm(ask)) return;
     b.disabled = true;
-    const key = x === "skill-rm" ? "dir" : x === "mcp-rm" || x === "market-rm" ? "name" : "id";
+    const key = x === "skill-rm" ? "dir" : x.startsWith("mcp-") || x === "market-rm" ? "name" : "id";
     const r = await post(url, { [key]: id }).catch((err) => ({ ok: false, message: err.message }));
     toast(r.ok ? t("完成") : t("失败：{msg}", { msg: r.message || "" }), !r.ok);
     b.disabled = false;
     if (x === "skill-rm") loadExtSkills();
-    else if (x === "mcp-rm") loadExtMcp();
+    else if (x.startsWith("mcp-")) loadExtMcp();
     else if (x === "market-rm") { loadExtMarkets(); loadExtPlugins(); }
     else loadExtPlugins();
   });

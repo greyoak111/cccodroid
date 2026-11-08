@@ -12,6 +12,8 @@ import { retrustProject } from "./projtrust.mjs";
 import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 import { sealed } from "./edition.mjs";
 import { readHeadFile, readSmallFile } from "./saferead.mjs";
+import { extIdOk, extOff, saveExtOff } from "./extoff.mjs";
+import { modulesInfo } from "./modules.mjs";
 
 // ── 扩展：插件 / 技能 / MCP ───────────────────────────────────────────
 // 全部转给 claude 自己的命令行（claude plugin … / claude mcp …），网关不自己改它的配置文件 ——
@@ -133,8 +135,9 @@ async function listMcp() {
     const m = line.match(/^(.+?): (.+) - ([✔✗⚠!]|[^\s]+)\s*(.*)$/u);
     if (!m) continue;
     const name = m[1].trim();
-    out.push({ name, target: m[2].trim(), ok: m[3] === "✔", status: (m[3] + " " + m[4]).trim().slice(0, 200), cloud: name.startsWith("claude.ai ") });
+    out.push({ name, target: m[2].trim(), ok: m[3] === "✔", status: (m[3] + " " + m[4]).trim().slice(0, 200), cloud: name.startsWith("claude.ai "), user: !!userMcpDef(name) });
   }
+  for (const [name, d] of Object.entries(extOff().mcp)) if (!out.some((x) => x.name === name)) out.push({ name, target: mcpTarget(d), ok: false, status: "", disabled: true });
   return out;
 }
 
@@ -377,7 +380,7 @@ function listSkills() {
   let ents = [];
   try { ents = fs.readdirSync(SKILLS_DIR, { withFileTypes: true }); } catch { return []; }
   // 哪些是组件带来的：组件的安装记录里有 skill 名（分类索引条分「组件自带 / 自己装的」）
-  const fromComp = new Map();
+  const fromComp = new Map(), ov = skillOverrides();
   try { for (const f of fs.readdirSync(COMP_DIR)) if (f.endsWith(".json")) { const r = compRecord(f.slice(0, -5)); if (r && r.skill) fromComp.set(r.skill, f.slice(0, -5)); } } catch {}
   return ents.filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => {
     const m = skillMeta(path.join(SKILLS_DIR, d.name));
@@ -385,10 +388,115 @@ function listSkills() {
     const cid = fromComp.get(d.name) || "", ce = cid && compIndexCache.data && compIndexCache.data.components[cid];
     // 没有 SKILL.md 的目录也列出来（orphan）：官方目录里同名安装会提示「已有同名技能」，这里不列就删不掉，
     // 用户在「显示未安装 / 安装说同名」之间打转（195-J.10）
-    if (!m) return { dir: d.name, name: d.name, description: "", descEn: "", component: cid, official: false, orphan: true };
-    return { dir: d.name, name: m.name || d.name, description: m.description, descEn: (ce && ce.desc && ce.desc.en) || "", component: cid, official: (skillSource(d.name) || {}).repo === SKILL_REPO };
+    const mode = SKILL_MODES.includes(ov[d.name]) ? ov[d.name] : "on";
+    if (!m) return { dir: d.name, name: d.name, description: "", descEn: "", component: cid, official: false, orphan: true, mode };
+    return { dir: d.name, name: m.name || d.name, description: m.description, descEn: (ce && ce.desc && ce.desc.en) || "", component: cid, official: (skillSource(d.name) || {}).repo === SKILL_REPO, mode };
   }).filter(Boolean);
 }
+// ── 停用 / 启用（F5）：技能走 claude 自己认的 skillOverrides（键是技能目录名）；
+// 发行版的技能由网关打包成 user 插件交给 claude（seal.mjs），那条路只认开 / 关：关的打包时跳过 ──
+const SKILL_MODES = ["on", "name-only", "user-invocable-only", "off"];
+const USER_SETTINGS = () => hookSettingsFile("user");
+export function skillOverrides() {
+  const r = readSettingsFile(USER_SETTINGS());
+  const o = r.j && r.j.skillOverrides;
+  return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+}
+/** 改用户级 settings.json 里的 skillOverrides（和存钩子同一把锁、同一套写法：先留 .bak，换名写入，userconf 只认这一个键） */
+function writeSkillOverrides(edit) {
+  const job = EXT_LOCK.then(() => {
+    const file = USER_SETTINGS(), r = readSettingsFile(file);
+    if (r.error) throw new Error(r.badJson ? tz("~/.claude/settings.json 不是合法的 JSON，先修好它") : r.error);
+    const j = r.j, cur = j.skillOverrides && typeof j.skillOverrides === "object" && !Array.isArray(j.skillOverrides) ? { ...j.skillOverrides } : {};
+    edit(cur);
+    if (Object.keys(cur).length) j.skillOverrides = cur; else delete j.skillOverrides;
+    const ucb = ucAppBegin();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (r.exists) { try { const b = file + ".bak.tmp-" + process.pid; fs.copyFileSync(file, b); fs.renameSync(b, file + ".bak"); } catch {} }
+    const tmp = file + ".tmp-" + process.pid;
+    fs.writeFileSync(tmp, JSON.stringify(j, null, 2) + "\n"); fs.renameSync(tmp, file);
+    ucAppWrote([".claude/settings.json"], ucb, { ".claude/settings.json": ["skillOverrides"] });
+    return { ok: true };
+  });
+  EXT_LOCK = job.catch(() => {});
+  return job;
+}
+async function setSkillMode(dir, mode) {
+  if (!skillDirOk(dir, listSkills().map((x) => x.dir))) return { ok: false, message: "bad name" };
+  const allowed = sealed() ? ["on", "off"] : SKILL_MODES;
+  if (!allowed.includes(mode)) return { ok: false, message: "bad mode" };
+  await writeSkillOverrides((o) => { if (mode === "on") delete o[dir]; else o[dir] = mode; });
+  log(`技能 ${dir} → ${mode}`);
+  return { ok: true };
+}
+
+/** 用户级 MCP 定义（~/.claude.json 顶层 mcpServers，只读）；项目级、账户连接器不归这里管 */
+function userMcpDef(name) {
+  try {
+    const j = JSON.parse(readSmallFile(path.join(CFG.home, ".claude.json"), 32 << 20) || "{}");
+    const d = j && j.mcpServers && j.mcpServers[name];
+    return d && typeof d === "object" && !Array.isArray(d) ? d : null;
+  } catch { return null; }
+}
+// 启用前的确认框要看得出加回去的是什么：命令 / 地址之外，环境变量和请求头的名字也带上（值可能是密钥，不显示）
+const mcpTarget = (d) => {
+  const keys = (o) => (o && typeof o === "object" && !Array.isArray(o) ? Object.keys(o).slice(0, 12).join(", ") : "");
+  const env = keys(d.env), hdr = keys(d.headers);
+  return (String(d.url || [d.command, ...(Array.isArray(d.args) ? d.args : [])].filter((x) => x != null).join(" ")).slice(0, 300)
+    + (env ? ` [env: ${env}]` : "") + (hdr ? ` [headers: ${hdr}]` : "")).slice(0, 500);
+};
+/** 停用 = 先把定义存进停用名单，再用 claude mcp remove 拿掉；remove 失败就把名单退回去 */
+async function disableMcp(name) {
+  if (!extIdOk(name) || badArg(name)) return { ok: false, message: tz("名字格式不对") };
+  const def = userMcpDef(name);
+  if (!def) return { ok: false, message: tz("只能停用你自己加的（用户级）MCP 服务器") };
+  const off = extOff();
+  off.mcp[name] = def;
+  if (!saveExtOff(off)) return { ok: false, message: tz("停用名单写不进去") };
+  const r = await extRun(["mcp", "remove", "-s", "user", name], 60000);
+  if (r.code !== 0) { const o2 = extOff(); delete o2.mcp[name]; saveExtOff(o2); return { ok: false, message: cliMsg(r) }; }
+  log(`MCP ${name} 已停用`);
+  return { ok: true };
+}
+/** 启用 = claude mcp add-json 把存着的定义加回去，成功了才从名单里删 */
+async function enableMcp(name) {
+  const off = extOff(), def = extIdOk(name) ? off.mcp[name] : null;
+  if (!def) return { ok: false, message: tz("停用名单里没有它") };
+  const r = await extRun(["mcp", "add-json", "-s", "user", name, JSON.stringify(def)], 60000);
+  if (r.code !== 0) return { ok: false, message: cliMsg(r) };
+  const o2 = extOff(); delete o2.mcp[name]; saveExtOff(o2);
+  log(`MCP ${name} 已启用`);
+  return { ok: true };
+}
+/** 停用着的 MCP 直接删掉（不再加回） */
+function forgetMcp(name) {
+  const off = extOff();
+  if (!extIdOk(name) || !off.mcp[name]) return { ok: false, message: tz("停用名单里没有它") };
+  delete off.mcp[name];
+  return saveExtOff(off) ? { ok: true } : { ok: false, message: tz("停用名单写不进去") };
+}
+/** 组件 / 工具包模块：只记名单（命令文件不动）；组件自带的技能跟着关 / 开 */
+async function setOff(kind, id, on) {
+  if (!extIdOk(id)) return { ok: false, message: "bad id" };
+  let skill = "";
+  if (kind === "comp") {
+    const rec = compRecord(id);
+    if (!rec) return { ok: false, message: tz("没装这个组件") };
+    skill = typeof rec.skill === "string" && extIdOk(rec.skill) ? rec.skill : "";
+  } else if (kind === "mod") {
+    const mj = modulesInfo();
+    const m = mj && (mj.modules || []).find((x) => x && x.id === id);
+    if (!m || m.required || m.kind === "shared") return { ok: false, message: tz("这个模块不能停用") };
+  } else return { ok: false, message: "bad kind" };
+  const off = extOff(), set = new Set(off[kind]);
+  if (on) set.delete(id); else set.add(id);
+  off[kind] = [...set];
+  if (!saveExtOff(off)) return { ok: false, message: tz("停用名单写不进去") };
+  if (skill && fs.existsSync(path.join(SKILLS_DIR, skill))) await writeSkillOverrides((o) => { if (on) { if (o[skill] === "off") delete o[skill]; } else o[skill] = "off"; });
+  log(`${kind === "comp" ? "组件" : "模块"} ${id} ${on ? "已启用" : "已停用"}`);
+  return { ok: true };
+}
+
 function deleteSkill(dir) {
   // 只认列表里真有的目录名（中文 / 空格名字的技能也能删；195-J.5）
   if (!skillDirOk(dir, listSkills().map((x) => x.dir))) return { ok: false, message: "bad name" };
@@ -568,7 +676,7 @@ async function importSkill(buf) {
   if (!dirs.length) throw new Error(skipped.map((x) => `${x.name}：${x.why}`).join("；"));
   return { ok: true, dir: dirs.join("、"), dirs, skipped };
 }
-export const _extForTest = { importSkill, zipEntryCount };   // 只给测试用
+export const _extForTest = { importSkill, zipEntryCount, setSkillMode, disableMcp, enableMcp, forgetMcp, setOff, listSkills, listMcp };   // 只给测试用
 
 // ── 路由：/api/ext/ ──
 export async function routeExtensions(req, res, u, p) {
@@ -596,6 +704,12 @@ export async function routeExtensions(req, res, u, p) {
       if (req.method === "GET" && p === "/api/ext/mcp") return sendJson(res, 200, { items: await listMcp() });
       if (req.method === "POST" && p === "/api/ext/mcp/add") return sendJson(res, 200, await addMcp(body));
       if (req.method === "POST" && p === "/api/ext/mcp/remove") return sendJson(res, 200, await removeMcp(body.name));
+      if (req.method === "POST" && p === "/api/ext/mcp/disable") return sendJson(res, 200, await disableMcp(String(body.name || "")));
+      if (req.method === "POST" && p === "/api/ext/mcp/enable") return sendJson(res, 200, await enableMcp(String(body.name || "")));
+      if (req.method === "POST" && p === "/api/ext/mcp/forget") return sendJson(res, 200, forgetMcp(String(body.name || "")));
+      if (req.method === "POST" && p === "/api/ext/skills/mode") return sendJson(res, 200, await setSkillMode(String(body.dir || ""), String(body.mode || "")));
+      if (req.method === "GET" && p === "/api/ext/off") { const o = extOff(); return sendJson(res, 200, { comp: o.comp, mod: o.mod }); }
+      if (req.method === "POST" && p === "/api/ext/off") return sendJson(res, 200, await setOff(String(body.kind || ""), String(body.id || ""), !!body.on));
       if (req.method === "GET" && p === "/api/ext/skills") {
         if (PREFIX) await compIndex(false).catch(() => {});   // 组件技能的英文简介来自索引（有缓存，一般不联网）
         return sendJson(res, 200, { items: listSkills(), dir: SKILLS_DIR, sealed: sealed() });

@@ -11,6 +11,7 @@ import { reconcileFacts } from "./reconcile.mjs";
 import { deviceFacts } from "./device.mjs";
 import { readSmallFile } from "./saferead.mjs";
 import { guarded } from "./crashguard.mjs";
+import { extOff } from "./extoff.mjs";
 
 // ── 本机实况：TOOLS.md 是打包时在测试机上测的，这里补上「这台设备上实际怎样」 ──
 // 自检（cccodroid-selftest）在本机跑一遍，失败项和 INFO（比如有没有硬件编码器）接在 TOOLS.md 后面；
@@ -119,10 +120,14 @@ export function envFacts() {
   if (dkv) out.push(`- 工具包：${word(dkv)}`);
   // 模块化工具包：装了哪些模块；没装的模块里的命令现在用不了 —— TOOLS.md 是按全装写的，这里纠正
   const mj = modulesInfo();
+  // 扩展页「停用」的（F5）：命令文件还在，只是用户现在不想让你用 —— 不列进已装，单独说一句
+  const xo = extOff(), modOff = new Set(xo.mod), compOff = new Set(xo.comp);
   if (mj) {
     const mods = (mj.modules || []).filter((m) => m.kind !== "shared");
-    const on = mods.filter((m) => modInstalled(mj, m.id)), off = mods.filter((m) => !modInstalled(mj, m.id));
+    const inst = mods.filter((m) => modInstalled(mj, m.id)), off = mods.filter((m) => !modInstalled(mj, m.id));
+    const on = inst.filter((m) => !modOff.has(m.id)), paused = inst.filter((m) => modOff.has(m.id));
     out.push(`- 工具包模块：已装 ${on.map((m) => word((m.name && m.name.zh) || m.id)).join("、")}`);
+    if (paused.length) out.push(`- 用户停用了这些模块（别用里面的命令；用户要用会自己到 扩展 → 工具包模块 启用）：${paused.map((m) => word((m.name && m.name.zh) || m.id)).join("、")}`);
     if (off.length) {
       out.push("- **没装的模块**（下面这些命令现在不可用，TOOLS.md 里写到的也一样；用户需要时请他到 扩展 → 工具包模块 安装，别用 pkg 另装一份）：");
       for (const m of off) {
@@ -136,7 +141,7 @@ export function envFacts() {
   try {
     // 工具包换过之后，旧组件的文件已经不在：别再把它列成「已装组件」（0.6.9 审计 195-M.3）
     const comps = fs.readdirSync(COMP_DIR).filter((f) => f.endsWith(".json")).map((f) => compRecord(f.slice(0, -5)))
-      .filter((r) => r && r.state === "ok" && (!dk || r.base === dk.sha256)
+      .filter((r) => r && r.state === "ok" && !compOff.has(r.id) && (!dk || r.base === dk.sha256)
         && (!Array.isArray(r.bin) || !r.bin.length || r.bin.some((b) => fs.existsSync(path.join(PREFIX, "bin", b)))))
       .map((r) => `${word(r.id)} ${word(r.version)}${Array.isArray(r.bin) && r.bin.length ? `（命令：${r.bin.slice(0, 12).map(word).join("、")}）` : ""}`);
     if (comps.length) out.push(`- 已装组件：${comps.join("；")}`);

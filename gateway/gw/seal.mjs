@@ -187,6 +187,12 @@ function userPluginFiles(cwd) {
   return files;
 }
 
+/** 用户级 settings.json 里 skillOverrides 设成 "off" 的技能目录名 */
+function skillsOff() {
+  let o = {};
+  try { o = JSON.parse(readSmallFile(path.join(userClaude(), "settings.json"), 4 << 20) || "{}").skillOverrides || {}; } catch {}
+  return o && typeof o === "object" && !Array.isArray(o) ? Object.keys(o).filter((k) => o[k] === "off" && /^[^/\\]+$/.test(k) && k !== "." && k !== "..") : [];
+}
 /** 已启用的扩展页插件（user 范围）：[{ id, dir }] */
 function enabledPlugins() {
   let set = {}, inst = {};
@@ -477,6 +483,8 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
 
   // skill / 命令 / 子代理 / 输出风格
   const uf = userPluginFiles(cwd);
+  // 扩展页关掉的技能（skillOverrides 里写 "off"，F5）：不打进 user 插件，claude 就看不到。发行版只认开 / 关两档
+  for (const dir of skillsOff()) for (const r of [...uf.keys()]) if (r.startsWith(`skills/${dir}/`)) uf.delete(r);
   let userPlug = null;
   if (uf.size) {
     const m = materialize("user", uf, JSON.stringify({ name: "user", version: "1.0.0", description: "cccodroid: your skills, commands, agents and output styles (checked copy)" }));
