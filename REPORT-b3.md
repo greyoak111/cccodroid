@@ -1,0 +1,46 @@
+# 车道 b3 报告（第二轮）
+
+起点 1c058b1（第一轮四车道与主会话修复已合并）。只改 LANE-b3 名下的文件。
+
+## 待办（自 LANE-b3.md 抄录）
+
+1. 195-C.7 后半 / 195-R.10 后半 `local.mjs`：无「所有文件访问」时别报 `/sdcard/cccodroid/models`，按实际可写目录（home/models）返回；模型下到哪报哪。
+2. 195-J.5 `sessionops.mjs`：中文 / 空格目录名技能删除回 `bad name`；放宽成与已列出目录名精确匹配，不接受路径分隔符、`.`、`..`，不动 `SID_RE`。
+3. 200-8-03 后半 `saferead.mjs`：FIFO / 设备文件裸读或写打开同步卡住事件循环；读前 `fstat` 拒非普通文件，写打开先核类型或带 `O_NONBLOCK`。
+4. 195-T.4（office 部分）`office.mjs`：Office 转换 detached 子进程照 `components.mjs` 的 `.runs` 标记做，复用 `compRun` / `reapComponentRuns()`。
+5. 200-15-10 `bookmarks.mjs`：书签标题取 `peekSession(f.file).title`（会话首问）；改为复用会话列表的标题解析。
+6. 195-Z.10 / Z.11 `custom.mjs` / `components.mjs`：组件记录原子写（`saveState` / `writeAtomic`），读不出区分「没有」和「坏了」（`loadState` 的 `missing` / `bad`），写失败如实回报。
+7. 196-真机.3 `components.mjs`：组件文档软链悬空——安装 / 卸载时校验链接目标，悬空清掉或不建；不碰安装 / 解压 / 签名。
+8. 195-W.2 / 196-状态写.2 `usage.mjs` / `sessmodel.mjs`：SIGTERM 时防抖未落盘的写下去；各自 `onShutdown("…", flushXxx)` 注册。
+9. 200-6-05（git 那份）`git.mjs` 的 `GIT_TRUST`：只增不减，加上限 / 淘汰旧项；只改这个集合。
+10. 195-A.2 `projects.mjs` 删项目：先把会话放进回收站（复用 sessions / 回收站现有函数）。
+11. 195-N.1（projects 侧）`projects.mjs`：写盘失败回 500 + `{ ok:false, error:"save_failed", message }`。
+12. 195-C.19 后半 / 196 HTTP HEAD `server.mjs` 静态分发：补 HEAD，头同 GET、不带正文。
+13. 195-A.9 `server.mjs`：`expireTrash` 只在启动时调；加每天一次 `setInterval(...).unref()`，回调包 `guarded`。
+
+## 已修
+
+| 条目 | 提交 | 怎么修的（一句） | 怎么验的（测试文件 / 手动步骤） |
+|---|---|---|---|
+| 2（195-J.5，sessionops 半） | 4fac136 | 不动 `SID_RE`；新增 `skillDirOk(dir, listed)`：只认 skills/ 下已列出的目录名（精确匹配），拒绝路径分隔符 / NUL / `.` / `..`，中文与空格放行 | `a0610-b3-skilldir.test.mjs`：中文、空格、精确匹配、拒绝项、超长名 4 例全过；端到端需 extensions.mjs 那一行（见移交） |
+
+## 不成立
+
+| 条目 | 理由（代码位置） |
+|---|---|
+| 1（195-C.7 后半 / 195-R.10 后半） | 已由第一轮 b1 车道修（`ecc02e7`）：`gw/local.mjs:113-114` 的 `llamaInfo().dirs` 以 `modelDir()` 返回的首个可写目录打头（`modelDir` 逐个 `mkdirSync`+`accessSync(W_OK)`，写不进就落到 `home/models`）；`web/app/09-settings.js` 显示后端 `dirs[0]`，无存储权限时显示 home/models。 |
+
+## 待定（交回主会话或用户定）
+
+| 条目 | 为什么没修 / 需要谁定什么 |
+|---|---|
+
+## 移交（需要改别的车道 / 主会话的文件）
+
+| 条目 | 文件与函数 | 要做什么 |
+|---|---|---|
+| 2（195-J.5，extensions 半） | `gw/extensions.mjs` 的 `deleteSkill(dir)`（约 392 行） | 把 `if (!SID_RE.test(dir)) return { ok:false, message:"bad name" }` 换成：`const listed = listSkills().map((x) => x.dir); if (!skillDirOk(dir, listed)) return { ok:false, message:"bad name" };`，并在文件顶部 import 里加上 `skillDirOk`（extensions.mjs 已经从 sessionops.mjs import `SID_RE, zipRead`）。这样中文 / 空格目录名的技能才能删。`installCatalogSkill` 的 `SID_RE` 不用动（官方目录名是 ASCII）。 |
+
+## 全量测试
+
+（尚未跑）
