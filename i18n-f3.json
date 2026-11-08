@@ -166,5 +166,41 @@
     "ru": "Войдите в аккаунт",
     "id": "Masuk ke akun Anda",
     "ar": "سجّل الدخول إلى حسابك"
+  },
+  {
+    "zh": "登录还在进行，拿到授权地址后会自动打开。",
+    "en": "Sign-in is still in progress; the authorization link will open as soon as it arrives.",
+    "ja": "ログインは進行中です。認証アドレスが届き次第自動で開きます。",
+    "ko": "로그인이 진행 중입니다. 인증 주소가 오면 자동으로 엽니다.",
+    "zh-Hant": "登入還在進行，拿到授權位址後會自動開啟。",
+    "es": "El inicio de sesión sigue en curso; el enlace de autorización se abrirá en cuanto llegue.",
+    "fr": "La connexion est toujours en cours ; le lien d'autorisation s'ouvrira dès qu'il arrivera.",
+    "ru": "Вход ещё выполняется; ссылка для авторизации откроется, как только появится.",
+    "id": "Proses masuk masih berlangsung; tautan otorisasi akan terbuka begitu tersedia.",
+    "ar": "تسجيل الدخول ما زال جاريًا؛ سيُفتح رابط التفويض بمجرد وصوله."
+  },
+  {
+    "zh": "删掉模型「{id}」？文件会从模型目录里删除。",
+    "en": "Delete model “{id}”? The file will be removed from the models folder.",
+    "ja": "モデル「{id}」を削除しますか？モデルフォルダーからファイルが削除されます。",
+    "ko": "모델 '{id}'을(를) 삭제할까요? 모델 폴더에서 파일이 삭제됩니다.",
+    "zh-Hant": "刪掉模型「{id}」？檔案會從模型目錄裡刪除。",
+    "es": "¿Eliminar el modelo «{id}»? El archivo se borrará de la carpeta de modelos.",
+    "fr": "Supprimer le modèle « {id} » ? Le fichier sera retiré du dossier des modèles.",
+    "ru": "Удалить модель «{id}»? Файл будет удалён из папки моделей.",
+    "id": "Hapus model «{id}»? File akan dihapus dari folder model.",
+    "ar": "حذف الطراز «{id}»؟ سيُحذف الملف من مجلد الطرازات."
+  },
+  {
+    "zh": "已删除模型「{id}」",
+    "en": "Deleted model “{id}”",
+    "ja": "モデル「{id}」を削除しました",
+    "ko": "모델 '{id}'을(를) 삭제했습니다",
+    "zh-Hant": "已刪除模型「{id}」",
+    "es": "Modelo «{id}» eliminado",
+    "fr": "Modèle « {id} » supprimé",
+    "ru": "Модель «{id}» удалена",
+    "id": "Model «{id}» dihapus",
+    "ar": "تم حذف الطراز «{id}»"
   }
 ]

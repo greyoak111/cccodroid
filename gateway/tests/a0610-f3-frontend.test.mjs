@@ -78,6 +78,20 @@ test("A6 195-G.3：顶栏登录态用 /api/status 的 auth，退出后立即刷�
   assert.ok(src13.includes("if (!st.unknown) acctLogged = !!st.loggedIn"), "问不出时不动上次判断");
 });
 
+test("A7 195-G.4：登录 pending 继续轮询，晚到的授权地址补开，失败也给终端登录入口", () => {
+  assert.ok(src09.includes("if (r.url) { loginUrlOpened = r.url; openExternal(r.url); }"), "启动拿到地址就打开并记下");
+  assert.ok(src09.includes("if (st.url && st.url !== loginUrlOpened) {"), "轮询里补开晚到的地址，且只开一次");
+  assert.ok(src09.includes("openExternal(st.url);"), "补开动作");
+  assert.ok(src09.includes("paintLoginFlow(\"\", method)"), "失败分支也有流程块（终端登录入口）");
+  assert.ok(src09.includes("登录还在进行，拿到授权地址后会自动打开。"), "等待地址时说明会补开");
+});
+
+test("A9 195-F.4：手动放入 / 直链下好的模型能在应用里删除", () => {
+  assert.ok(src09.includes("data-del=\"${esc(m.id)}\""), "模型列表带删除按钮");
+  assert.ok(src09.includes("post(\"/api/local/model\", { op: \"remove\", id })"), "调用网关的 remove");
+  assert.ok(src09.includes("删掉模型「{id}」？文件会从模型目录里删除。"), "删除前确认");
+});
+
 test("C28 195-O.5–O.7 / 197-5.12：跨午夜 / 换时区重算，补算进度也重画，清除本月不误删邻月", () => {
   assert.ok(src11.includes("function usDayMoved()"), "记住本地日期与时区");
   assert.ok(src11.includes("Intl.DateTimeFormat().resolvedOptions().timeZone"), "按运行时区判断");

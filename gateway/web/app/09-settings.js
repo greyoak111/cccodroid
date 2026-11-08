@@ -126,7 +126,7 @@
         <div>· ${t("内存 {total}，可用 {avail}；上下文 {ctx} token，{n} 线程", { total: gb(j.memTotal), avail: gb(j.memAvail), ctx: (Number(j.ctx) || 0).toLocaleString(), n: Number(j.threads) || 0 })}</div>
       </div>
       <div class="tiny" style="margin:8px 0 4px">${t("模型（{dir}）", { dir: esc(j.dirs[0] || "") })}</div>
-      ${j.models.length ? `<div class="local-models">${j.models.map((m) => `<div class="tiny">· <code>${esc(m.id)}</code> ${gb(m.size)}</div>`).join("")}</div>`
+      ${j.models.length ? `<div class="local-models">${j.models.map((m) => `<div class="tiny">· <code>${esc(m.id)}</code> ${gb(m.size)} <button class="btn sm ghost lm-del" data-del="${esc(m.id)}">${t("删除")}</button></div>`).join("")}</div>`
         : `<div class="tiny dim">${t("还没有模型。到「扩展」页 llama-cpp 组件下的「下载模型」一键下载，或把 .gguf 文件放进上面的目录。")}</div>`}
       <div class="tiny" style="margin:10px 0 4px">${t("模式")}</div>
       <div class="local-mode">
@@ -146,6 +146,16 @@
         ${j.bin && j.models.length ? useBtn(p) : ""}
       </div>`;
     box.onclick = async (e) => {
+      // 手动放进目录 / 直链下好的模型也要能在应用里删（0.6.9 审计 195-F.4）
+      const del = e.target.closest ? e.target.closest("[data-del]") : null;
+      if (del) {
+        const id = del.dataset.del;
+        if (!confirm(t("删掉模型「{id}」？文件会从模型目录里删除。", { id }))) return;
+        const j = await post("/api/local/model", { op: "remove", id }).catch((e2) => ({ ok: false, message: e2.message }));
+        if (j && j.ok === false) return toast(t("删除失败：{msg}", { msg: j.message || "?" }), true);
+        toast(t("已删除模型「{id}」", { id }));
+        return renderLocalCard(box, p);
+      }
       const act = e.target.dataset && e.target.dataset.act;
       if (act === "use") return useProvider(p);
       if (act === "refresh") return renderLocalCard(box, p);
@@ -280,18 +290,18 @@
     a.href = url; a.target = "_blank"; a.rel = "noopener";
     document.body.appendChild(a); a.click(); a.remove();
   }
-  async function startLogin(p, method) {
-    const mine = $("login-state"), live = () => mine.isConnected && state.provView === p.id;   // 同 renderLoginCard（审查 #52 D-06）
-    mine.className = "prov-state";
-    mine.textContent = t("正在启动登录…");
-    let r;
-    try { r = await post("/api/login/start", { method }); } catch (e) { return toast(e.message, true); }
-    if (!r.ok) { if (live()) mine.textContent = "✗ " + (r.message || t("启动失败")); return; }
-    if (!live()) { openExternal(r.url); return watchLogin(p); }
-    openExternal(r.url);
-        $("login-flow").innerHTML = `<div class="tiny">${t("已在浏览器打开授权页。授权后浏览器会跳回本机，登录自动完成。")}
-        ${t("没自动打开？")}<a href="${esc(webUrl(r.url))}" target="_blank" rel="noopener">${t("点这里打开")}</a></div>
-      <div class="prov-manual">
+  // 这次登录流程里已经交给浏览器的授权地址：轮询拿到同一个地址别再重复开一次
+  let loginUrlOpened = "";
+  /** 登录流程的说明块：拿到地址就显示「已打开 / 点这里打开」，还在等就说会补开；
+   *  终端登录入口任何分支都给（浏览器跳不回来 / 在别的设备上授权）（0.6.9 审计 195-G.4） */
+  function paintLoginFlow(url, method) {
+    const f = $("login-flow");
+    if (!f) return;
+    f.innerHTML = (url
+      ? `<div class="tiny">${t("已在浏览器打开授权页。授权后浏览器会跳回本机，登录自动完成。")}
+        ${t("没自动打开？")}<a href="${esc(webUrl(url))}" target="_blank" rel="noopener">${t("点这里打开")}</a></div>`
+      : `<div class="tiny">${t("登录还在进行，拿到授权地址后会自动打开。")}</div>`) +
+      `<div class="prov-manual">
         <div class="tiny">${t("浏览器没跳回来（或在别的设备上授权）？在终端里登录：授权码由你直接贴给 claude，本应用不经手。")}</div>
         <button class="btn sm" id="btn-login-term">${t("在终端里登录")}</button>
       </div>`;
@@ -301,14 +311,38 @@
       closeSettings();       // 终端窗格在设置模态下面，不关设置就点不着（审查 P2-6）
       openLoginTerm(method === "console" ? "console" : "claudeai");
     };
-    watchLogin(p);
   }
-  function watchLogin(p) {
+  async function startLogin(p, method) {
+    const mine = $("login-state"), live = () => mine.isConnected && state.provView === p.id;   // 同 renderLoginCard（审查 #52 D-06）
+    mine.className = "prov-state";
+    mine.textContent = t("正在启动登录…");
+    let r;
+    try { r = await post("/api/login/start", { method }); } catch (e) { return toast(e.message, true); }
+    if (!r.ok) {
+      // 起不来 / 拿不到地址：给原因，也给终端登录入口，别让用户只剩重试（0.6.9 审计 195-G.4）
+      if (live()) { mine.textContent = "✗ " + (r.message || t("启动失败")); paintLoginFlow("", method); }
+      return;
+    }
+    // 20 秒没拿到地址时后端回 pending（不是失败）：界面继续轮询，晚到的地址补开（0.6.9 审计 195-G.4）
+    if (r.url) { loginUrlOpened = r.url; openExternal(r.url); }
+    if (live()) paintLoginFlow(r.url || "", method);
+    watchLogin(p, method);
+  }
+  function watchLogin(p, method) {
     clearInterval(state.loginTimer);
     state.loginTimer = setInterval(async () => {
       let st;
       try { st = await api("/api/login/status"); } catch { return; }
-      if (st.pending) { if (state.provView === p.id) paintLoginState(st, p); return; }
+      if (st.pending) {
+        // 20 秒后才拿到的授权地址：轮询里补开，只开一次（0.6.9 审计 195-G.4）
+        if (st.url && st.url !== loginUrlOpened) {
+          loginUrlOpened = st.url;
+          openExternal(st.url);
+          if (state.provView === p.id) paintLoginFlow(st.url, method);
+        }
+        if (state.provView === p.id) paintLoginState(st, p);
+        return;
+      }
       clearInterval(state.loginTimer);
       if (st.loggedIn) toast((st.email ? t("✓ 已登录：{email}", { email: st.email }) : t("✓ 已登录")) + (p.active ? "" : t("，点「使用这个接口」切过去")));
       else if (st.last && !st.last.ok) toast(t("登录没有完成"), true);
