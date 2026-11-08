@@ -471,11 +471,21 @@ async function handleGit(req, res, p, u) {
       if (!ren) return sendJson(res, 500, { error: tz("读不出仓库的改动列表，没有提交") });
       olds = files.filter((f) => ren.has(f)).map((f) => ren.get(f)).filter((o) => !files.includes(o));
     }
+    // 冲突没解决时不能提交：以前只有 pull/switch 查这道，提交路径会把 <<<<<<< 一起提交（0.6.10 审计 195-S.2）
+    const st = await gitStatus(root);
+    if (st.error) return sendJson(res, 500, { error: st.error });
+    if (st.files.some((f) => f.kind === "conflict")) return sendJson(res, 409, { error: "conflict", message: tz("还有没解决的冲突，先处理完再提交。") });
+    // 合并进行中不能带路径提交（git 会拒绝半截提交）。全选时按无路径提交，只选一部分则直接说清楚
+    const merging = !(await git(root, ["rev-parse", "-q", "--verify", "MERGE_HEAD"])).code;
+    if (files && merging) {
+      const sel = new Set(files);
+      if (st.files.some((f) => !sel.has(f.path))) return sendJson(res, 409, { error: "merge_partial", message: tz("合并还没提交：要么把全部改动一起提交，要么先撤销不想提交的改动。") });
+    }
     const who = await git(root, ["config", "user.email"]);
     if (!who.out.trim()) return sendJson(res, 409, { error: "no_identity", message: tz("还没设置 git 的名字和邮箱（提交记录里署名用）。") });
     const add = files ? await git(root, ["add", "-A", "--", ...files]) : await git(root, ["add", "-A"]);
     if (add.code) return sendJson(res, 500, { error: add.err });
-    const r = await git(root, ["commit", "-F", "-", ...(files ? ["--", ...files, ...olds] : [])], { input: msg + "\n" });
+    const r = await git(root, ["commit", "-F", "-", ...(files && !merging ? ["--", ...files, ...olds] : [])], { input: msg + "\n" });
     if (r.code) return sendJson(res, 500, { error: r.err || r.out.trim() });
     const h = await git(root, ["rev-parse", "--short", "HEAD"]);
     log(`[git] 提交 ${h.out.trim()} @ ${root}`);

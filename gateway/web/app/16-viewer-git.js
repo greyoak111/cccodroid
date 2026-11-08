@@ -229,12 +229,12 @@
   async function gitCommit(again) {
     const msg = ($("git-msg")?.value || "").trim();
     if (!msg) { toast(t("写一句提交说明"), true); $("git-msg")?.focus(); return; }
-    // 状态列表截断了（超过 1000 项）：全选的只是看得见的这些，照样按清单传，没显示的不能跟着提交（#106 07-002）
-    const all = GIT.sel.size === GIT.status.files.length && !GIT.status.truncated;
+    // 一律按勾选清单传：以前「全选」发 files:null，网关 add -A 把状态快照之后新冒出来的文件、子模块指针也一起提交了
+    // （0.6.10 审计 195-S.1）。列表截断时也是清单的子集，没显示的本来就不该跟着提交（#106 07-002）
     // 提交在途时面板可能已换到别的仓库：回执只收拾发起它的那个仓库，别清掉另一个仓库正在写的说明（#154-1）
     const dir = GIT.dir;
     try {
-      const r = await gpost("commit", { message: msg, files: all ? null : [...GIT.sel] });
+      const r = await gpost("commit", { message: msg, files: [...GIT.sel] });
       toast(r.message || t("已提交"));
       if (GIT.dir !== dir) return;
       GIT.sel = new Set(); GIT.known = null;
@@ -244,7 +244,8 @@
       gitLoad();
     } catch (e) {
       if (GIT.dir !== dir) return toast(e.message, true);
-      if (e.status === 409 && !again) return gitAskIdentity();
+      // 只有「还没设置署名」才弹身份表单；冲突、合并中不能只提交一部分之类也是 409，要直接说清楚（195-S.2）
+      if (e.status === 409 && e.body && e.body.error === "no_identity" && !again) return gitAskIdentity();
       toast(e.message, true);
     }
   }
