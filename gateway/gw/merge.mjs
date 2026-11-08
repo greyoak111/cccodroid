@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { neutralizeMarkers, isInjected } from "./integrity.mjs";
-import { dropExtra, recordExtra } from "./lineage-store.mjs";
+import { dropExtra, lineageSaveOk, recordExtra } from "./lineage-store.mjs";
 import { lineageByShort, lineageFile, lineageRecord } from "./lineage.mjs";
 import { findSessionFile } from "./sessions.mjs";
 
@@ -146,13 +146,16 @@ export async function routeMerge(req, res, u, p) {
     if (!SID.test(child) || !(await lineageRecord(child))) return sendJson(res, 404, { error: "not_found" });
     if (b.drop) {
       if (!SID.test(String(b.drop))) return sendJson(res, 400, { error: "bad id" });
-      dropExtra(child, String(b.drop)); return sendJson(res, 200, { ok: true });
+      if (!dropExtra(child, String(b.drop))) return sendJson(res, 500, { ok: false, error: "write_failed", message: "没保存上：存储满了或没有权限" });
+      return sendJson(res, 200, { ok: true });
     }
     // 防环（规划书 §2.2）：来源不能是自己；汇合只连已存在的会话。补记不造新会话，不查后代 —— 画图时 family() 按集合走，不会死循环
     const add = cleanMergeFrom((Array.isArray(b.add) ? b.add : []).map((x) => ({ id: x, how: "manual" })))?.filter((x) => x.id !== child && lineageFile(x.id)) || [];
     if (!add.length) return sendJson(res, 400, { error: "nothing" });
     const n = recordExtra(child, add);
     if (!n) return sendJson(res, 400, { error: "too_many" });
+    // 写盘失败不能回 ok：重启后这条补记就没了（195-2.8）
+    if (!lineageSaveOk()) return sendJson(res, 500, { ok: false, error: "write_failed", message: "没保存上：存储满了或没有权限" });
     return sendJson(res, 200, { ok: true, n });
   }
   if (p !== "/api/lineage/turns" && p !== "/api/lineage/material") return NEXT;
