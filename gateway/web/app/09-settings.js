@@ -215,6 +215,14 @@
       else if (act === "use") useProvider(p);
     };
   }
+  /** 额度窗口列表：5 小时、每周，再加分模型的周窗口（只在它成了最紧的那个窗口时报过，见 gw/stream.mjs noteRateLimit） */
+  function quotaWins(l) {
+    const mw = (l && l.modelWeek) || {}, now = Date.now() / 1000;
+    const ws = [["5h", t("5 小时"), l && l.fiveHour], ["wk", t("每周"), l && l.sevenDay]];
+    for (const [k, name] of [["opus", "Opus"], ["sonnet", "Sonnet"]])
+      if (mw[k] && (!mw[k].resetsAt || mw[k].resetsAt > now)) ws.push(["wk-" + k, t("每周 · {model}", { model: name }), mw[k]]);
+    return ws.filter((x) => x[2]);
+  }
   /** 订阅额度：claude 每轮回报一次，网关记下最近一次（不另外查接口） */
   function quotaHtml(l) {
     if (!l) return `<div class="quota tiny">${t("额度：发一条消息后显示（5 小时 / 每周）")}</div>`;
@@ -235,7 +243,7 @@
         <span class="tiny">${w.resetsAt ? t("{time} 重置", { time: esc(when(w.resetsAt)) }) : ""}</span></div>`;
     };
     const ago = Math.max(0, Math.round((Date.now() - l.at) / 60000));
-    return `<div class="quota">${row(t("5 小时"), l.fiveHour)}${row(t("每周"), l.sevenDay)}
+    return `<div class="quota">${quotaWins(l).map(([, label, w]) => row(label, w)).join("")}
       <div class="tiny">${ago < 1 ? t("额度刚刚更新") : t("额度更新于 {n} 分钟前（每轮对话后刷新）", { n: ago })}</div></div>`;
   }
   /** 用量页的额度面板：只有用 Claude 账户登录时才显示，大数字 + 进度条 + 重置时间 */
@@ -262,7 +270,7 @@
       return `<div class="q-tile ${cls}"><span class="q-l">${label}</span><b>${pct}<small>%</small></b>
         <span class="quota-bar"><i class="${cls}" style="width:${bar}%"></i></span><span class="q-r">${reset}</span></div>`;
     };
-    $("quota-tiles").innerHTML = tile(t("5 小时"), l.fiveHour) + tile(t("每周"), l.sevenDay);
+    $("quota-tiles").innerHTML = quotaWins(l).map(([, label, w]) => tile(label, w)).join("");
     const lq = $("login-state") && $("login-state").querySelector(".quota");   // 设置里登录卡片上的那两条
     if (lq) lq.outerHTML = quotaHtml(l);
     usDash.quota = l.sevenDay || null; usPaint(); paintSetUsage();
@@ -479,7 +487,7 @@
   }
   function loginBrief(l) {
     if (!l) return { text: "", lvl: 0 };
-    const ws = [[t("5 小时"), l.fiveHour], [t("每周"), l.sevenDay]].filter((x) => x[1]);
+    const ws = quotaWins(l).map(([, label, w]) => [label, w]);
     const top = Math.max(0, ...ws.map((x) => +x[1].used || 0));
     return { text: ws.map((x) => x[0] + " " + Math.round(x[1].used) + "%").join(" · "), lvl: top >= 90 ? 2 : top >= 70 ? 1 : 0 };
   }
@@ -544,8 +552,7 @@
     };
     if (cfg.quota && c.login && c.limits) {
       const l = c.limits;
-      if (l.fiveHour) win("5h:" + (l.fiveHour.resetsAt || 0), t("5 小时"), +l.fiveHour.used || 0, l.fiveHour.resetsAt * 1000);
-      if (l.sevenDay) win("wk:" + (l.sevenDay.resetsAt || 0), t("每周"), +l.sevenDay.used || 0, l.sevenDay.resetsAt * 1000);
+      for (const [k, label, w] of quotaWins(l)) win(k + ":" + (w.resetsAt || 0), label, +w.used || 0, w.resetsAt * 1000);
     }
     const b = c.bill;
     if (cfg.quota && b && Array.isArray(b.plan)) {

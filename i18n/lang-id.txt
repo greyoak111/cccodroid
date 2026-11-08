@@ -2957,3 +2957,4 @@
 2957	Swauji perangkat
 2958	Menjalankan kompiler, Python, Node, git, dan lainnya dari Devkit satu per satu; hasilnya memberi tahu Claude apa yang berfungsi di perangkat ini dan apa yang tidak. Diulang otomatis setelah Devkit atau aplikasi diperbarui; jika Anda sudah memperbaiki sesuatu dan ingin Claude segera tahu, ketuk Ulangi swauji.
 2959	Ulangi swauji
+2960	Mingguan · {model}

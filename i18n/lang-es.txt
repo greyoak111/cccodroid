@@ -2957,3 +2957,4 @@
 2957	Autoprueba del dispositivo
 2958	Ejecuta uno a uno los compiladores, Python, Node, git, etc. del kit de desarrollo; el resultado le dice a Claude qué funciona en este dispositivo y qué no. Se repite sola tras actualizar el kit o la app; si arreglaste algo y quieres que Claude lo sepa ya, pulsa Repetir autoprueba.
 2959	Repetir autoprueba
+2960	Semanal · {model}

@@ -2994,5 +2994,6 @@ window.I18N_DICT.en = {
   "没检测到「工作岛」应用：装好后点重试。": "The Work Island app wasn't detected — install it, then tap Retry.",
   "本机自检": "Device self-test",
   "把工具包里的编译器、Python、Node、git 等逐项跑一遍，结果会告诉 Claude 这台设备上什么能用、什么不能用。工具包或应用更新后会自动重测；修好了什么、想马上让 Claude 知道，就点重新自检。": "Runs the devkit's compilers, Python, Node, git and so on one by one; the results tell Claude what works on this device and what doesn't. It re-runs automatically after a devkit or app update; if you've fixed something and want Claude to know right away, tap Re-run self-test.",
-  "重新自检": "Re-run self-test"
+  "重新自检": "Re-run self-test",
+  "每周 · {model}": "Weekly · {model}"
 };

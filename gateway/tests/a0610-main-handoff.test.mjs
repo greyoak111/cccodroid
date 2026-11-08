@@ -75,3 +75,24 @@ test("前端跟上：第三方不计花费提示、线路失配 / 明文 http �
   assert.match(s11, /r\.warning/);
   assert.match(s04, /it\.sched \? t\("定时任务"\)/);
 });
+
+test("分模型周额度：成为最紧窗口时记下，之后的事件不报它也留着，过了重置时间才丢", () => {
+  const opts = { sse() {}, onInit() {}, onResult() {}, flags: {}, provider: { id: "anthropic", login: true } };
+  const fut = Math.floor(Date.now() / 1000) + 86400, past = Math.floor(Date.now() / 1000) - 10;
+  const ev = (top) => ({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", ...top, unifiedWindows: {
+    five_hour: { utilization: 0.1, resetsAt: fut }, seven_day: { utilization: 0.5, resetsAt: fut } } } });
+  stream.clearRateLimits();
+  stream.translate(ev({ rateLimitType: "seven_day_opus", utilization: 0.92, resetsAt: fut }), opts);
+  assert.deepEqual(stream.RATE_LIMITS.modelWeek, { opus: { used: 92, resetsAt: fut } });
+  stream.translate(ev({ rateLimitType: "five_hour", utilization: 0.1, resetsAt: fut }), opts);
+  assert.equal(stream.RATE_LIMITS.modelWeek.opus.used, 92, "不报它的事件里照样留着");
+  stream.translate(ev({ rateLimitType: "seven_day_sonnet", utilization: 0.81, resetsAt: past }), opts);
+  stream.translate(ev({ rateLimitType: "seven_day", utilization: 0.5, resetsAt: fut }), opts);
+  assert.deepEqual(Object.keys(stream.RATE_LIMITS.modelWeek), ["opus"], "过了重置时间的丢掉");
+  stream.clearRateLimits();
+  stream.translate(ev({ rateLimitType: "seven_day", utilization: 0.5, resetsAt: fut }), opts);
+  assert.equal(stream.RATE_LIMITS.modelWeek, undefined, "没报过就没有这个字段");
+  stream.clearRateLimits();
+  const s09 = fs.readFileSync(new URL("../web/app/09-settings.js", import.meta.url), "utf8");
+  assert.equal((s09.match(/quotaWins\(l\)/g) || []).length, 5, "定义 + 四处额度显示都列出分模型窗口");
+});

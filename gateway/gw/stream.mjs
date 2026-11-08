@@ -318,11 +318,21 @@ function noteRateLimit(info, p) {
     // utilization 是占用比例（claude 的 schema 说明：通常 0–1，真用超了会 >1）——一律换成百分数，超额度如实显示 120%（0.6.9 审计 197-5.7）
     ? { used: Math.round(+x.utilization * 1000) / 10, resetsAt: x.resetsAt || null }
     : null;
+  const now = Date.now(), email = AUTH_CACHE?.v?.email || null;
+  // 分模型的周窗口（Opus / Sonnet 各自的周额度）：unifiedWindows 里没有，只在它成了当前最紧的那个窗口时，
+  // 由事件顶层的 rateLimitType + utilization 报出来（同样是 0–1 比例）。报过就记着，到重置时间才丢；
+  // 换了账户不沿用（用户定：只用现成事件，不为此另开网络请求）
+  const prev = RATE_LIMITS && RATE_LIMITS.modelWeek && (!email || !RATE_LIMITS.email || RATE_LIMITS.email === email) ? RATE_LIMITS.modelWeek : {};
+  const modelWeek = {};
+  for (const [k, v] of Object.entries(prev)) if (v && (!v.resetsAt || v.resetsAt * 1000 > now)) modelWeek[k] = v;
+  const mk = { seven_day_opus: "opus", seven_day_sonnet: "sonnet" }[info.rateLimitType];
+  if (mk && Number.isFinite(+info.utilization)) modelWeek[mk] = { used: Math.round(+info.utilization * 1000) / 10, resetsAt: info.resetsAt || null };
   RATE_LIMITS = {
-    at: Date.now(),
-    email: AUTH_CACHE?.v?.email || null,
+    at: now,
+    email,
     status: info.status || null,
     fiveHour: win(w.five_hour), sevenDay: win(w.seven_day),
+    ...(Object.keys(modelWeek).length ? { modelWeek } : {}),
   };
   saveRateLimits();
   publish({ type: "quota" });       // 前端看得见额度的地方即时重画，不用切页面
