@@ -309,8 +309,18 @@ const cleanModel = (m) => {
 const cleanModels = (a) => Array.isArray(a) ? a.slice(0, 500).map(cleanModel).filter(Boolean) : [];
 
 /** 合成一条生效配置：目录 + 用户字段 + 所选线路 */
+// 配置文件能手改、能分享导入：这几个字段该是字符串的不是（数字、对象、数组），拼进 --model / 环境变量 / 地址时
+// 每一轮起跑就失败。先从 raw 里拿掉，内置条目就用目录 / 线路里的值，自定义条目当没填（0.6.9 审计 199-5-03）
+const STR_FIELDS = ["defaultModel", "fastModel", "endpoint", "apiKey", "apiKeyEnv", "baseUrl", "modelsUrl"];
+function cleanRaw(id, raw) {
+  if (!raw || !STR_FIELDS.some((k) => raw[k] != null && typeof raw[k] !== "string")) return raw;
+  const out = { ...raw };
+  for (const k of STR_FIELDS) if (out[k] != null && typeof out[k] !== "string") { log(`⚠️ 接口 ${id} 的 ${k} 不是字符串，不用`); delete out[k]; }
+  return out;
+}
 function composeProvider(id, raw) {
   const pre = PRESETS[id];
+  raw = cleanRaw(id, raw);
   let v;
   if (pre) {
     v = { ...pre };
