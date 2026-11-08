@@ -32,6 +32,12 @@ test("195-E.3/E.9 删除正在用的接口后强制重拉型号；自定义接�
   has(s, /if \(r && r\.ok === false\) return toast\(t\("删除失败：\{msg\}"/, "删除失败不假装成功");
 });
 
+test("195-E.8 每次打开设置页重取设置，不只吃启动时那一次", () => {
+  const s = src("15-pages.js");
+  has(s, /function openSettings\(cat\)[\s\S]*?loadSettings\(\);/, "打开设置页重载");
+  assert.doesNotMatch(s, /openSettings[\s\S]{0,800}?loadProviders\(\); loadModels\(\);/, "不再绕过 loadSettings 单独拉");
+});
+
 test("195-E.5/E.10/E.12 跟随默认看会话/项目默认；窗口未知仍显示已设压缩线；附加目录增删串行", () => {
   const s = src("12-model-caps.js");
   has(s, /const followEff = \(\) => \{[\s\S]*?state\.sessEff/, "跟随默认取有效默认");
@@ -56,6 +62,12 @@ test("195-K.8 脉络后台重取保持用户位置：只有头一回拿到图才
   const s = src("18b-lineage.js");
   has(s, /const first = !LIN\.g;[\s\S]*?linPaint\(first\);/, "只有首次 linPaint(true)");
   assert.doesNotMatch(s, /LIN\.g = g; LIN\.stale = false;\s*\n\s*linPaint\(true\)/, "后台重取不再强制归位");
+});
+
+test("196 HTTP 技能导入：超过后端 64 MB 上限的包先在界面拦住，不读进内存", () => {
+  const s = src("08-extensions.js");
+  has(s, /f\.size > 64 \* 1024 \* 1024[\s\S]*?技能包超过 64 MB/, "先查大小再 arrayBuffer");
+  assert.ok(s.indexOf("f.size > 64 * 1024 * 1024") < s.indexOf("await f.arrayBuffer()"), "大小检查在读取之前");
 });
 
 test("195-N.8 帮助/更新日志加载失败说清楚是哪一步并给重试", () => {

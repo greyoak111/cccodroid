@@ -1118,6 +1118,8 @@
     if (!list.length) return;
     const ok = [], bad = [];
     for (const f of list) {
+      // 后端整包接收上限 64 MB：先看大小，别把几百 MB 读进内存再撞 413（196 HTTP/静态/路由）
+      if (f.size > 64 * 1024 * 1024) { bad.push(`${f.name}：${t("技能包超过 64 MB，请解压后逐个导入")}`); continue; }
       const r = await api("/api/ext/skills/import", { method: "POST", headers: { "content-type": "application/octet-stream" }, body: await f.arrayBuffer() })
         .catch((err) => ({ ok: false, message: err.message }));
       if (r.ok) ok.push(...(r.dirs || [r.dir]));

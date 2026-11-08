@@ -442,5 +442,17 @@
     "ru": "Не удалось загрузить журнал изменений: {msg}",
     "id": "Gagal memuat log perubahan: {msg}",
     "ar": "تعذّر تحميل سجلّ التغييرات: {msg}"
+  },
+  {
+    "zh": "技能包超过 64 MB，请解压后逐个导入",
+    "en": "Skill package is over 64 MB; unzip it and import skills one by one",
+    "ja": "スキルパッケージが 64 MB を超えています。解凍して 1 つずつインポートしてください",
+    "ko": "스킬 패키지가 64MB를 초과합니다. 압축을 풀고 하나씩 가져오세요",
+    "zh-Hant": "技能包超過 64 MB，請解壓後逐個匯入",
+    "es": "El paquete de habilidades supera los 64 MB; descomprímelo e importa las habilidades una por una",
+    "fr": "Le paquet de compétences dépasse 64 Mo ; décompressez-le et importez les compétences une par une",
+    "ru": "Пакет навыков больше 64 МБ; распакуйте его и импортируйте навыки по одному",
+    "id": "Paket skill melebihi 64 MB; ekstrak lalu impor skill satu per satu",
+    "ar": "حزمة المهارات أكبر من 64 ميغابايت؛ فكّ ضغطها واستورد المهارات واحدة تلو الأخرى"
   }
 ]
