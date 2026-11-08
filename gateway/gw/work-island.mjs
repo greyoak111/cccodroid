@@ -33,29 +33,51 @@ function amArgs(action, title, text, since, state, extra) {
 }
 
 let warned = false;
-function amSend(action, title, text, since, state, extra) {
-  // 用绝对路径：PATH 里的包装脚本在部分环境会返回非零，实际却已经送达。
-  execFile("/system/bin/am", amArgs(action, title, text, since, state, extra), { timeout: 8000 }, (e, out, err) => {
-    if (!e) return;
-    if (!warned) {
-      warned = true;
-      log(`[work-island] am 失败（应用没装或服务未就绪？后面不再重复）：${e.message} ${String(err || "").slice(0, 120)}`);
-    }
-    // 系统不允许从应用身份起这个服务（Can't start from invalid source / Permission Denial）：
-    // 再每 1.5 秒试下去也没用，停掉发送（0.6.9 审计 195-P.4 / 196 日志考古.2）
-    if (/invalid source|not allowed|Permission Denial|SecurityException|unable to start/i.test(String(err || "") + e.message)) {
-      log("[work-island] 系统不允许启动工作岛服务，已停止发送；重新打开设置里的开关可再试");
-      fail("blocked", String(err || "").trim() || e.message);
-      started = false;
-      if (unsub) { try { unsub(); } catch {} unsub = null; }
-      if (core) { try { core.stop(true, false); } catch {} core = null; }
-    }
-  });
+// am 子进程串成一条队：同一时刻最多一个，按入队顺序送达，旧 UPDATE 不会晚于 DONE / IDLE 到（0.6.9 审计 200-13-08）
+let amQ = [];
+let amBusy = null;                               // 在途的 am 子进程
+function amSend(...args) {
+  // 排着队还没发出去的 UPDATE 被新的一条盖过：只发新的
+  if (args[0] === "UPDATE" && amQ.length && amQ[amQ.length - 1][0] === "UPDATE") amQ.pop();
+  amQ.push(args);
+  amPump();
 }
-function amSendSync(action, title, text, since, state, extra) {
-  try {
-    execFileSync("/system/bin/am", amArgs(action, title, text, since, state, extra), { timeout: 3000, stdio: "ignore" });
-  } catch {}
+function amPump() {
+  if (amBusy || !amQ.length) return;
+  const args = amQ.shift();
+  // 用绝对路径：PATH 里的包装脚本在部分环境会返回非零，实际却已经送达。
+  const child = seam.exec(amArgs(...args), 8000, (e, out, err) => {
+    if (amBusy !== child) return;                // 收尾时被杀掉的那个：不报错、不接着发
+    amBusy = null;
+    if (e) amFailed(e, err);
+    amPump();
+  });
+  amBusy = child || null;
+  if (!amBusy) amPump();
+}
+function amFailed(e, err) {
+  if (!warned) {
+    warned = true;
+    log(`[work-island] am 失败（应用没装或服务未就绪？后面不再重复）：${e.message} ${String(err || "").slice(0, 120)}`);
+  }
+  // 系统不允许从应用身份起这个服务（Can't start from invalid source / Permission Denial）：
+  // 再每 1.5 秒试下去也没用，停掉发送（0.6.9 审计 195-P.4 / 196 日志考古.2）
+  if (/invalid source|not allowed|Permission Denial|SecurityException|unable to start/i.test(String(err || "") + e.message)) {
+    log("[work-island] 系统不允许启动工作岛服务，已停止发送；重新打开设置里的开关可再试");
+    fail("blocked", String(err || "").trim() || e.message);
+    started = false;
+    amQ = [];
+    if (unsub) { try { unsub(); } catch {} unsub = null; }
+    if (core) { try { core.stop(true, false); } catch {} core = null; }
+  }
+}
+function amSendSync(...args) {
+  // 退出路径上不等在途的：排队的作废，在途的杀掉（IDLE 本来就盖过它），再同步发这一条
+  amQ = [];
+  const busy = amBusy;
+  amBusy = null;
+  if (busy) { try { busy.kill("SIGKILL"); } catch {} }
+  try { seam.execSync(amArgs(...args), 3000); } catch {}
 }
 
 let started = false;
@@ -93,8 +115,13 @@ function detectApp(cb) {
 }
 
 // 测试替身：检测和「是不是安卓」可以换掉，好在 CI（不是安卓）里按自己定的先后回调，复现开关交错（#124-1）
-const seam = { detect: (cb) => detectApp(cb), android: () => isAndroid() };
-export const _islandForTest = { seam, state: () => ({ started, detecting, core, unsub }) };
+const seam = {
+  detect: (cb) => detectApp(cb),
+  android: () => isAndroid(),
+  exec: (args, timeout, cb) => execFile("/system/bin/am", args, { timeout }, cb),
+  execSync: (args, timeout) => execFileSync("/system/bin/am", args, { timeout, stdio: "ignore" }),
+};
+export const _islandForTest = { seam, send: amSend, sendSync: amSendSync, state: () => ({ started, detecting, core, unsub, amQ: amQ.length, amBusy: !!amBusy }) };
 
 export function startWorkIsland() {
   if (started || detecting) return;
