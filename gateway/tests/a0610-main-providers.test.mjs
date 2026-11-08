@@ -155,3 +155,14 @@ test("196-凭据.1：记着的线路已不在 → 不带旧 Key 去第一条线�
     `const p = P.providerById("kimi"); console.log(JSON.stringify({ lost: p.endpointLost || null, key: P.keyOf(p) }));`);
   assert.deepEqual(JSON.parse(ok.out), { lost: null, key: "K2" });
 });
+
+test("199-9-02：远程明文 http 只警告不拦；本机回环、https 不警告", () => {
+  const cfg = { "ccapp-providers.json": { active: "deepseek", providers: {} } };
+  const r = scenario(cfg, `
+    const a = P.upsertProvider(null, { label: "a", baseUrl: "http://192.168.1.5:8080", apiKey: "K" });
+    const b = P.upsertProvider(null, { label: "b", baseUrl: "http://127.0.0.1:4000", apiKey: "K" });
+    const c = P.upsertProvider(null, { label: "c", baseUrl: "https://x.example", apiKey: "K" });
+    console.log(JSON.stringify([a, b, c].map((x) => [!!x.ok, !!x.plainHttp, !!x.warning, !!x.provider?.plainHttp])));`);
+  assert.equal(r.rc, 0, r.err);
+  assert.deepEqual(JSON.parse(r.out), [[true, true, true, true], [true, false, false, false], [true, false, false, false]]);
+});

@@ -46,5 +46,17 @@
   "ru": "Маршрут «{ep}», выбранный для {name}, больше не существует. Выберите маршрут в настройках и заново введите для него ключ.",
   "id": "Jalur “{ep}” yang dipilih untuk {name} sudah tidak ada. Pilih ulang jalur di Pengaturan dan masukkan kunci untuk jalur itu.",
   "ar": "المسار «{ep}» الذي اختير لـ {name} لم يعد موجوداً. اختر مساراً من الإعدادات وأدخل مفتاحه من جديد."
+ },
+ {
+  "zh": "这个地址是明文 http，密钥和对话内容会不加密地发到对方机器上；能用 https 就换成 https。",
+  "en": "This address uses plain http: your key and conversation are sent to the other machine unencrypted. Switch to https if you can.",
+  "ja": "このアドレスは平文の http です。キーと会話内容が暗号化されずに相手のマシンへ送られます。可能なら https に切り替えてください。",
+  "ko": "이 주소는 암호화되지 않은 http입니다. 키와 대화 내용이 암호화 없이 상대 기기로 전송됩니다. 가능하면 https로 바꾸세요.",
+  "zh-Hant": "這個位址是明文 http，金鑰和對話內容會不加密地傳到對方機器上；能用 https 就換成 https。",
+  "es": "Esta dirección usa http sin cifrar: tu clave y la conversación se envían a la otra máquina sin cifrado. Cámbiala a https si puedes.",
+  "fr": "Cette adresse utilise http non chiffré : votre clé et la conversation sont envoyées à l'autre machine sans chiffrement. Passez en https si possible.",
+  "ru": "Этот адрес использует незашифрованный http: ключ и переписка уходят на другую машину без шифрования. По возможности перейдите на https.",
+  "id": "Alamat ini memakai http tanpa enkripsi: kunci dan percakapan dikirim ke mesin lain tanpa dienkripsi. Ganti ke https jika bisa.",
+  "ar": "يستخدم هذا العنوان http غير مشفّر: يُرسل مفتاحك والمحادثة إلى الجهاز الآخر دون تشفير. انتقل إلى https إن أمكن."
  }
 ]

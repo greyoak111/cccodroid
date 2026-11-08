@@ -422,6 +422,7 @@ function providerView(id, v) {
     extraModels: v.custom ? extraModelsOf(v) : [],
     keyUrl: v.keyUrl || null, hint: v.hint || "", hintEn: v.hintEn || "",
     hasKey: !!key, keyTail: key ? key.slice(-4) : "", endpointLost: v.endpointLost || null,   // 记着的线路不在了：界面提示重选（196-凭据.1）
+    plainHttp: plainRemote(v.baseUrl),   // 远程明文 http：Key 明文过网，只警告不拦（0.6.9 审计 199-9-02，用户定）
     active: id === PROVIDER.id,
   };
 }
@@ -520,7 +521,8 @@ export function upsertProvider(id, b, prepare) {
   if (id === PROVIDER.id) applyProvider();
   dropModelCache();   // 会话可能钉在不是全局的这家上：哪家改了都清，免得清单/窗口还是旧的
   log(`[provider] 已保存 ${id}${"apiKey" in b && str(b.apiKey) ? "（含密钥）" : ""}`);
-  return { ok: true, id, provider: providerView(id, PROVIDERS_CFG.providers[id]), ...(keyCleared ? { keyCleared: true } : {}) };
+  return { ok: true, id, provider: providerView(id, PROVIDERS_CFG.providers[id]), ...(keyCleared ? { keyCleared: true } : {}),
+    ...(plainRemote(cur.baseUrl) ? { plainHttp: true, warning: tz("这个地址是明文 http，密钥和对话内容会不加密地发到对方机器上；能用 https 就换成 https。") } : {}) };
 }
 
 /** 模型清单地址能不能带密钥去问：要 https、和接口地址同一个主机（审查 10-30 第九份 存疑4、v0.5.12 中1、v0.5.13 低1）。
@@ -535,9 +537,13 @@ export function modelsUrlOk(p) {
     // 端口也要一样：同主机的别的端口可能是另一个服务（本机回环上尤其如此），不能把 Key 带过去（0.6.9 审计 196-凭据.2）
     if (m.port !== b.port) return false;
     // 本机跑的 llama-server / LiteLLM 多半是 http：回环地址出不了本机，https 要求没有意义（10-31 三轮复核）
-    const loop = h === "localhost" || h === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(h);
-    return m.protocol === "https:" || (loop && m.protocol === "http:");
+    return m.protocol === "https:" || (loopHost(h) && m.protocol === "http:");
   } catch { return false; }
+}
+const loopHost = (h) => h === "localhost" || h === "[::1]" || /^127\.\d+\.\d+\.\d+$/.test(h);
+/** 接口地址是不是发往别的机器的明文 http（Key 会明文过网）；本机回环不算 */
+export function plainRemote(u) {
+  try { const x = new URL(u); return x.protocol === "http:" && !loopHost(x.hostname.toLowerCase().replace(/\.$/, "")); } catch { return false; }
 }
 
 /** 带密钥的请求：不跟着跳到别的主机（x-api-key 这类自定义头 fetch 跨站跳转时不会替你剥掉）。
