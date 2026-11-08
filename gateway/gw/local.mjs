@@ -11,6 +11,7 @@ import { NEXT, readBody, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
 import { compIndex, compIndexCache, compRun, sha256File } from "./components.mjs";
 import { readSmallFile } from "./saferead.mjs";
+import { guarded } from "./crashguard.mjs";
 import { runEmit } from "./queue.mjs";
 import { privCall } from "./usage.mjs";
 import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
@@ -23,6 +24,8 @@ import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 const LOCAL_MODEL_DIRS = PREFIX ? ["/sdcard/cccodroid/models", path.join(CFG.home, "models")] : [];
 const LLAMA_IDLE_MS = 10 * 60e3;
 const LLAMA_LOG = path.join(CFG.home, ".cache", "llama-server.log");
+// 运行标记：网关被 SIGKILL 时 detached 的 llama-server 会被 init 收养，新网关认不回来（0.6.9 审计 195-F.1/T.4）
+const LLAMA_PID = path.join(CFG.home, ".cache", "llama-server.pid");
 const llamaBin = () => PREFIX ? path.join(PREFIX, "bin", "llama-server") : "";
 export const LL = { child: null, file: "", id: "", sig: "", gpu: false, state: "off", since: 0, lastUse: 0, err: "", run: null, loadMs: 0 };
 const LOCAL_MODE_FILE = path.join(CFG.home, ".cccodroid", "local-mode.json");
@@ -107,7 +110,9 @@ function llamaInfo() {
       tools: cust.ok ? cust.cfg.tools : "", skill: LOCAL_SKILL_FILE },
     can: !!PREFIX, bin: !!PREFIX && fs.existsSync(llamaBin()), gpu: !!PREFIX && llamaGpu(),
     ctx: llamaCtx(), threads: llamaThreads(), memTotal: memTotalKB() * 1024, memAvail: memAvailKB() * 1024,
-    dirs: LOCAL_MODEL_DIRS, models: localModels().map(({ id, size, file }) => ({ id, size, file })),
+    // 真正写得进去的那个放最前：没有存储权限时模型落在 home/models，界面不该还显示 /sdcard（0.6.9 审计 196 共享存储）
+    dirs: (() => { try { const d = modelDir(); return [d, ...LOCAL_MODEL_DIRS.filter((x) => x !== d)]; } catch { return LOCAL_MODEL_DIRS; } })(),
+    models: localModels().map(({ id, size, file }) => ({ id, size, file })),
     mode: SETTINGS.localMode === "custom" ? "custom" : "chat",
     server: { state: LL.state, model: LL.id, since: LL.since, lastUse: LL.lastUse, err: LL.err, loadMs: LL.loadMs, idleMs: LLAMA_IDLE_MS },
   };
@@ -116,12 +121,15 @@ function llamaInfo() {
 /** 确保 llama-server 跑着、载的是要的模型。note(key, text) 往当前这一轮里报进度 */
 export async function ensureLlama(want, note) {
   const list = localModels();
-  const m = list.find((x) => x.id === want) || list[0];
+  // 会话钉住的模型被删了：以前静默换成列表里最小那个，顶栏却还显示原模型（0.6.9 审计 195-F.7）
+  const m = want ? list.find((x) => x.id === want) : list[0];
+  if (want && !m) throw new Error(tz("会话钉住的端侧模型 {model} 已经不在了，请在模型面板重新选一个", { model: String(want).slice(0, 120) }));
   if (!m) throw new Error(tz("还没有端侧模型：把 .gguf 文件放进 {dir}", { dir: LOCAL_MODEL_DIRS[0] }));
   if (!fs.existsSync(llamaBin())) throw new Error(tz("没装 llama.cpp：到「扩展」页装 llama-cpp 组件"));
   LL.lastUse = Date.now();
   const sig = llamaPlan(m).sig;
   if (LL.child && LL.sig === sig && LL.state === "ready" && await llamaHealthy()) return m;
+  await verifySharedModel(m, note);
   if (llStarting && LL.sig === sig) { await llStarting; return m; }
   if (llStarting) { try { await llStarting; } catch {} }
   // 只有一个服务、一个槽：另一个会话正用着它答题时换模型，会把那边的生成掐断（#97 02-007）。这边先报错，等那边答完
@@ -131,6 +139,27 @@ export async function ensureLlama(want, note) {
   await llStarting;
   return m;
 }
+// /sdcard 上的模型别的应用也能改写：加载前按目录里记的 sha256 核一遍（没有哈希的至少核 GGUF 头），
+// 同一个文件在本进程里核过一次就记着（0.6.9 审计 196 网关安全二轮）
+const MODEL_VERIFIED = new Map();
+async function verifySharedModel(m, note) {
+  if (!/^\/sdcard\//.test(m.file)) return;
+  let st; try { st = fs.statSync(m.file); } catch { return; }
+  const key = `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
+  if (MODEL_VERIFIED.get(m.file) === key) return;
+  const e = modelCatalog().find((x) => x.id === m.id);
+  note && note("load", tz("正在核对端侧模型文件…"));
+  if (e && e.sha256) {
+    if ((await sha256File(m.file, null)) !== e.sha256) throw new Error(tz("端侧模型文件被改过（校验不符），为安全起见不加载：{file}", { file: m.id }));
+  } else {
+    const fd = fs.openSync(m.file, "r"), head = Buffer.alloc(4);
+    try { fs.readSync(fd, head, 0, 4, 0); } finally { fs.closeSync(fd); }
+    if (head.toString("latin1") !== "GGUF") throw new Error(tz("端侧模型文件不是 GGUF（可能被改过），不加载：{file}", { file: m.id }));
+  }
+  MODEL_VERIFIED.set(m.file, key);
+  if (MODEL_VERIFIED.size > 16) MODEL_VERIFIED.delete(MODEL_VERIFIED.keys().next().value);
+}
+
 /** 这次该用什么参数起服务。sig 不同（换模型、换模式、GPU 回退）就得重启 */
 function llamaPlan(m) {
   const gpu = llamaGpu(), ctx = llamaCtx();
@@ -151,6 +180,7 @@ function llamaStart(m, note) {
     log(`[local] 启动 llama-server：${m.id}（${gpu ? "GPU" : "CPU"}，上下文 ${ctx}）`);
     note && note("load", tz("正在加载端侧模型 {name}（{how}）…", { name: m.id, how: gpu ? "GPU" : "CPU" }));
     const c = spawn(argv[0], argv.slice(1), { env: termEnv(), cwd: CFG.home, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    try { fs.mkdirSync(path.dirname(LLAMA_PID), { recursive: true }); fs.writeFileSync(LLAMA_PID, JSON.stringify({ pid: c.pid, at: Date.now() }), { mode: 0o600 }); } catch {}
     Object.assign(LL, { child: c, file: m.file, id: m.id, sig, gpu, state: "loading", since: Date.now(), err: "", loadMs: 0 });
     let tail = "", lastNote = 0, listened = false;
     // 端口是固定的，别的应用能先占上它、对 /health 回 200：光看 health 会把提示词和钥匙送给它（11-04 报告）。
@@ -169,12 +199,14 @@ function llamaStart(m, note) {
         runEmit(LL.run, { type: "note", key: "prefill", text: tz("端侧模型正在读提示：{pct}%", { pct }) });
       }
     };
-    c.stdout.on("data", eat); c.stderr.on("data", eat);
+    c.stdout.on("data", guarded("llama stdout", eat)); c.stderr.on("data", guarded("llama stderr", eat));
     let done = false;
     const fail = (msg) => { if (done) return; done = true; LL.state = "error"; LL.err = msg; reject(new Error(msg)); };
-    c.on("error", (e) => fail(e.message));
-    c.on("close", (code) => {
+    c.on("error", (e) => { try { fail(e.message); } catch {} });
+    c.on("close", guarded("llama close", (code) => {
       try { fs.closeSync(logFd); } catch {}
+      // 这个进程退出了：运行标记只删自己那份（换模型时新进程可能已经写了新的）
+      try { const j = JSON.parse(fs.readFileSync(LLAMA_PID, "utf8")); if (j && j.pid === c.pid) fs.rmSync(LLAMA_PID, { force: true }); } catch {}
       const ours = LL.child === c, wasReady = LL.state === "ready";     // ours：不是网关自己停的（llamaStop 会先把 child 清掉）
       if (ours) Object.assign(LL, { child: null, state: LL.state === "error" ? "error" : "off" });
       log(`[local] llama-server 退出 rc=${code}`);
@@ -188,7 +220,7 @@ function llamaStart(m, note) {
       if (!ours) { if (!done) { done = true; reject(new Error(tz("已停止"))); } return; }
       const why = tail.split("\n").filter((l) => /error|failed|out of memory|unable/i.test(l)).pop() || "";
       fail(tz("端侧模型没起来") + (why ? "：" + why.trim().slice(0, 200) : `（rc=${code}）`));
-    });
+    }));
     const t0 = Date.now();
     (async () => {
       while (!done && Date.now() - t0 < 240e3) {
@@ -212,13 +244,29 @@ function llamaStop(why) {
   log(`[local] 停 llama-server（${why}）`);
   Object.assign(LL, { child: null, state: "off", run: null });
   try { killTree(c); } catch {}
+  try { const j = JSON.parse(fs.readFileSync(LLAMA_PID, "utf8")); if (j && j.pid === c.pid) fs.rmSync(LLAMA_PID, { force: true }); } catch {}
+}
+/** 新网关起来时：上一任留下的 llama-server 还占着端口和几 GB 内存，认准了清掉（0.6.9 审计 195-F.1） */
+function llamaReap() {
+  let j = null; try { j = JSON.parse(fs.readFileSync(LLAMA_PID, "utf8")); } catch {}
+  if (!j || !Number.isInteger(j.pid) || j.pid <= 0) { try { fs.rmSync(LLAMA_PID, { force: true }); } catch {} return; }
+  let alive = false; try { process.kill(j.pid, 0); alive = true; } catch {}
+  let mine = false; try { mine = fs.readFileSync(`/proc/${j.pid}/cmdline`, "utf8").includes("llama-server"); } catch {}
+  if (alive && mine) {
+    log(`[local] 清掉上一任网关留下的 llama-server（pid ${j.pid}）`);
+    try { killTree({ pid: j.pid }); } catch {}
+  }
+  try { fs.rmSync(LLAMA_PID, { force: true }); } catch {}
 }
 // 空闲自动停：没有在跑的会话、十分钟没用过，就把模型卸掉还内存
-if (PREFIX) setInterval(() => {
-  if (!LL.child) return;
-  if (RUNS.size) { LL.lastUse = Date.now(); return; }
-  if (Date.now() - LL.lastUse > LLAMA_IDLE_MS) llamaStop("空闲");
-}, 60e3).unref?.();
+if (PREFIX) {
+  if (LIVE) llamaReap();
+  setInterval(guarded("llama idle", () => {
+    if (!LL.child) return;
+    if (RUNS.size) { LL.lastUse = Date.now(); return; }
+    if (Date.now() - LL.lastUse > LLAMA_IDLE_MS) llamaStop("空闲");
+  }), 60e3).unref?.();
+}
 
 // ── 端侧模型下载：内置目录（llama.cpp 能跑的主流开源模型，Q4_K_M 量化，sha256 取自 HuggingFace LFS 记录），curl 断点续传 ──
 // 源：ms=1 的（Qwen 官方仓库）先走魔搭；都会试 HuggingFace 和 hf-mirror.com。超过 6B 的下载前提醒一句，不拦。
@@ -325,7 +373,8 @@ function modelFetch(e, urls) {
   if (cur && cur.phase !== "error") return;
   const dir = modelDir(), dst = path.join(dir, e.id + ".gguf"), part = dst + ".part";
   if (fs.existsSync(dst)) throw new Error(tz("已经有同名模型了"));
-  const job = { phase: "downloading", done: 0, total: e.bytes || 0, err: "", cancelled: false, child: null, url: e.url || "" };
+  const job = { phase: "downloading", done: 0, total: e.bytes || 0, err: "", cancelled: false, child: null, url: e.url || "",
+    part, meta };   // 失败后「移除」要能把半截文件和来源标记一起删掉（0.6.9 审计 195-F.3）
   MDL.set(e.id, job);
   // 半截文件只按文件名对上不够：同名换了链接（内容不同）还续传，就成了前半 A、后半 B 的拼接，GGUF 头照样过（审查 B25）。
   // 旁边记一笔来源（目录里的按 sha256，没有就按链接），对不上先删掉半截从头下
@@ -409,9 +458,16 @@ function modelFromUrl(raw) {
 function modelCancel(id) {
   const j = MDL.get(id);
   if (!j) return;
-  if (j.phase === "error") return MDL.delete(id);
+  if (j.phase === "error") {
+    // 失败后点「移除」：半截 .part 和来源标记也删掉，别留下 GB 级残留（0.6.9 审计 195-F.3）
+    try { fs.rmSync(j.part, { force: true }); fs.rmSync(j.meta, { force: true }); } catch {}
+    MDL.delete(id);
+    return;
+  }
   j.cancelled = true;
   if (j.child) { try { killTree(j.child); } catch {} }
+  // 校验中取消：界面立刻收掉，别等整文件 sha256 跑完；读流会在下一个数据块看到 cancelled 后停（195-F.5）
+  if (j.phase === "verifying") { MDL.delete(id); try { fs.rmSync(j.part, { force: true }); } catch {} }
 }
 /** 删模型：只删模型目录里的 .gguf；正在用就先卸载 */
 function modelRemove(id) {

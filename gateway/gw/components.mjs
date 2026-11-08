@@ -177,7 +177,12 @@ function compState(id, entry, dk) {
   const job = COMP_JOBS.get(id);
   if (job && !job.finished) return job.phase;
   const rec = compRecord(id);
-  if (!rec) return job && job.error ? "error" : "absent";
+  if (!rec) {
+    // 记录文件在、但读不出来（坏 JSON / 超上限 / 不是普通文件）：不能当成「没装」，
+    // 否则界面显示未装，另一组件卸载时也会当它不存在（0.6.9 审计 195-Z.11）
+    try { fs.lstatSync(compRecFile(id)); return "damaged"; } catch {}
+    return job && job.error ? "error" : "absent";
+  }
   if (rec.state !== "ok") return "damaged";
   if (!dk || rec.base !== dk.sha256) return "outdated";          // 工具包换过：组件的文件已随旧工具包一起没了
   for (const b of rec.bin || []) if (!fs.existsSync(path.join(PREFIX, "bin", b))) return "damaged";
@@ -249,12 +254,16 @@ async function compList(force) {
 const SMALL_FILE = 1 << 20;
 export function sha256File(f, job, size) {
   if (size !== undefined && size < SMALL_FILE) {
-    try { const b = fs.readFileSync(f); if (job) job.done += b.length; return Promise.resolve(crypto.createHash("sha256").update(b).digest("hex")); }
+    try {
+      if (job && job.cancelled) return Promise.reject(new Error("cancelled"));
+      const b = fs.readFileSync(f); if (job) job.done += b.length; return Promise.resolve(crypto.createHash("sha256").update(b).digest("hex"));
+    }
     catch (e) { return Promise.reject(e); }
   }
   return new Promise((resolve, reject) => {
     const h = crypto.createHash("sha256"), s = fs.createReadStream(f, { highWaterMark: 1 << 20 });
-    s.on("data", (c) => { h.update(c); if (job) job.done += c.length; });
+    // 校验中途点取消：别让整文件读完才停（0.6.9 审计 195-F.5）
+    s.on("data", (c) => { h.update(c); if (job) job.done += c.length; if (job && job.cancelled) s.destroy(new Error("cancelled")); });
     s.on("end", () => resolve(h.digest("hex")));
     s.on("error", reject);
   });
@@ -268,15 +277,49 @@ export async function breathe() {
   lastBreath = Date.now();
 }
 
+// 组件安装 / 模块下载 / 自检这些 detached 子进程，网关被 SIGKILL 后会继续写 $PREFIX（0.6.9 审计 195-T.4）。
+// 起的时候落一份运行标记，正常退出删掉；新网关启动时按标记清掉上一任留下的。
+const COMP_RUN_DIR = PREFIX ? path.join(COMP_DIR, ".runs") : "";
+function markChild(child, cmd, args) {
+  if (!COMP_RUN_DIR || !child.pid) return "";
+  try {
+    fs.mkdirSync(COMP_RUN_DIR, { recursive: true });
+    const f = path.join(COMP_RUN_DIR, `${child.pid}-${crypto.randomBytes(4).toString("hex")}.json`);
+    fs.writeFileSync(f, JSON.stringify({ pid: child.pid, cmd, args: args.map(String).join(" ").slice(0, 4000), at: Date.now() }), { mode: 0o600 });
+    return f;
+  } catch { return ""; }
+}
+const unmarkChild = (f) => { if (f) try { fs.rmSync(f, { force: true }); } catch {} };
+/** 清掉上一任网关留下的组件子进程；只在启动时调用（正常运行时标记随子进程退出删除） */
+export function reapComponentRuns() {
+  if (!COMP_RUN_DIR) return 0;
+  let files = []; try { files = fs.readdirSync(COMP_RUN_DIR); } catch { return 0; }
+  let n = 0;
+  for (const f of files) {
+    const p = path.join(COMP_RUN_DIR, f);
+    let j = null; try { j = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
+    let alive = false;
+    if (j && Number.isInteger(j.pid) && j.pid > 0) { try { process.kill(j.pid, 0); alive = true; } catch {} }
+    let mine = false;
+    if (alive) { try { mine = fs.readFileSync(`/proc/${j.pid}/cmdline`, "utf8").includes(String(j.cmd || "").split("/").pop()); } catch {} }
+    if (alive && mine) { try { killTree({ pid: j.pid }); n++; } catch {} }
+    try { fs.rmSync(p, { force: true }); } catch {}
+  }
+  if (n) log(`[comp] 清掉上一任网关留下的 ${n} 个组件子进程`);
+  return n;
+}
+if (PREFIX && LIVE) reapComponentRuns();
+
 export function compRun(job, cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { env: termEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true, ...opts });
     job.child = child;
+    const mark = markChild(child, cmd, args);
     let err = "";
     child.stdout.on("data", () => {});
     child.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
-    child.on("error", reject);
-    child.on("exit", (code) => { job.child = null; job.cancelled ? reject(new Error("cancelled")) : code === 0 ? resolve() : reject(new Error(tz("{cmd} 退出码 {code}：{err}", { cmd: path.basename(cmd), code, err: `${err.trim().split("\n").filter((l) => l.trim() && !/Exiting with failure status|Error is not recoverable/.test(l)).slice(-3).join(" · ") || err.trim().split("\n").pop() || ""}` }))); });
+    child.on("error", (e) => { job.child = null; unmarkChild(mark); reject(e); });
+    child.on("exit", (code) => { job.child = null; unmarkChild(mark); job.cancelled ? reject(new Error("cancelled")) : code === 0 ? resolve() : reject(new Error(tz("{cmd} 退出码 {code}：{err}", { cmd: path.basename(cmd), code, err: `${err.trim().split("\n").filter((l) => l.trim() && !/Exiting with failure status|Error is not recoverable/.test(l)).slice(-3).join(" · ") || err.trim().split("\n").pop() || ""}` }))); });
   });
 }
 
@@ -364,8 +407,13 @@ export function compRecords() {
   const out = new Map(), dk = devkitIdentity();
   try {
     for (const f of fs.readdirSync(COMP_DIR)) if (f.endsWith(".json")) {
-      const r = compRecord(f.slice(0, -5));
-      if (r && r.state === "ok" && dk && r.base === dk.sha256) out.set(f.slice(0, -5), r);
+      const id = f.slice(0, -5), r = compRecord(id);
+      // installing 也算：记录已经写下了它要用的文件，别的组件/模块卸载时不能当它不存在（0.6.9 审计 #185）
+      if (r && (r.state === "ok" || r.state === "installing") && dk && r.base === dk.sha256) out.set(id, r);
+      else if (!r) {
+        // 记录读不出：按包内 MANIFEST 保守认领（0.6.9 审计 195-Z.11），宁可不删
+        try { if (fs.existsSync(path.join(PREFIX, "libexec/devkit/components", id, "MANIFEST"))) out.set(id, { files: [], shared: [] }); } catch {}
+      }
     }
   } catch {}
   return out;
@@ -444,10 +492,14 @@ async function compInstall(id) {
   // 模块化工具包：组件依赖的底座包所在的模块得先装上
   const needMods = modulesMissingFor(b.baseDeps);
   if (needMods.length) return { ok: false, needModules: needMods.map((m) => m.id), message: tz("要先装工具包模块：{names}（扩展页上方「工具包模块」）", { names: needMods.map((m) => m.name.zh || m.id).join("、") }) };
-  // 空间：压缩包 + 解开后的大小，再留 10%
+  // 空间：压缩包 + 解开后的大小，再留 10%。上次失败特意留下的压缩包（大小对得上）已经占着空间了，
+  // 不再重复索要；上次失败留下的解包树先清掉（0.6.9 审计 #186 / 195-I.2）
+  const stageRoot = path.join(COMP_DIR, ".staging"), stageTree = path.join(stageRoot, id), stageGz = path.join(stageRoot, `${id}-${b.sha256.slice(0, 12)}.tar.gz`);
+  try { fs.rmSync(stageTree, { recursive: true, force: true }); } catch {}
+  let reuse = 0; try { if (fs.statSync(stageGz).size === b.bytes) reuse = b.bytes; } catch {}
   try {
     const sf = fs.statfsSync(path.dirname(PREFIX));
-    const need = (b.bytes + b.installed) * 1.1;
+    const need = (b.bytes - reuse + b.installed) * 1.1;
     if (sf.bavail * sf.bsize < need) return { ok: false, message: tz("存储空间不够：需要约 {n} MB", { n: Math.ceil(need / 1048576) }) };
   } catch {}
   // baseDeps 记在 job 上：下载、校验那几分钟里卸工具包模块，要知道这个在装的组件也在用（#134，见 modules.mjs modDependents）
@@ -577,7 +629,8 @@ async function compRunInstall(id, b, job) {
   }
   if (job.cancelled) throw new Error("cancelled");
   // 2) 解到暂存区，按包内 MANIFEST 逐个核对
-  job.phase = "verifying"; job.done = 0; job.total = b.installed || 0;
+  // 解包阶段没有可靠的字节进度：别画一个永远 0% 的条（0.6.9 审计 195-I.8），解完按清单重新给总量
+  job.phase = "verifying"; job.done = 0; job.total = 0;
   fs.rmSync(tree, { recursive: true, force: true });
   fs.mkdirSync(tree, { recursive: true });
   // 解包失败就把压缩包也删了：下次重试从头下载，不再拿同一份去撞
@@ -607,6 +660,11 @@ async function compRunInstall(id, b, job) {
   // 剩下的窗口只有「核完到搬完」这几毫秒：模块和组件两个管理器之间没有锁，真要严丝合缝得加一把（DeepSeek 复核 11-04）
   const goneMods = modulesMissingFor(b.baseDeps);
   if (goneMods.length) throw new Error(tz("要先装工具包模块：{names}（扩展页上方「工具包模块」）", { names: goneMods.map((m) => m.name.zh || m.id).join("、") }));
+  // 同一段时间里依赖的组件也可能被卸了：按当前状态再核一遍（0.6.9 审计 195-I.6）
+  const compsNow = (compIndexCache.data && compIndexCache.data.components) || {};
+  const dkNow = devkitIdentity();
+  const goneReq = (b.requires || []).filter((rid) => !compDepOk(rid, compsNow, dkNow));
+  if (goneReq.length) throw new Error(tz("要先装：{names}", { names: goneReq.map((rid) => compName(rid, compsNow).zh || rid).join("、") }));
   // 3) 切换：先写"安装中"的记录（被打断就是 damaged，可以重装或卸载），再逐个搬进 $PREFIX
   job.phase = "installing";
   const old = compRecord(id);
@@ -635,6 +693,10 @@ async function compRunInstall(id, b, job) {
   if (fs.existsSync(fr)) { try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); } catch (e) { log(`[comp] ${id} first-run：${e.message}`); } }
   // 5) 给 Claude 的技能
   if (b.skill) compInstallSkill(id, b.skill, rec);
+  // 首次配置这段时间里，另一个卸载 / pkg 卸载可能把本组件依赖的共享文件删掉了：
+  // 提交 ok 之前再核一次，别报「装好了」却缺依赖（0.6.9 审计 #185）
+  const goneShared = (rec.shared || []).filter((r) => typeof r === "string" && !fs.existsSync(path.join(PREFIX, r)));
+  if (goneShared.length) throw new Error(tz("安装期间有 {n} 个共享文件被卸载删掉了，请重新安装", { n: goneShared.length }));
   rec.state = "ok"; rec.at = Date.now();
   compWriteRecord(id, rec);
   fs.rmSync(tree, { recursive: true, force: true });
