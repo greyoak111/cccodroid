@@ -43,20 +43,45 @@ public class MainActivity extends Activity {
 
     static final String ACTION_APPLY_DEVKIT = "cc.codroid.APPLY_DEVKIT";
     // 内部动作的口令：MainActivity 是导出的（启动器、分享要用），别的应用也能发这些 action 让我们去下 650MB 工具包、
-    // 重装 APK（审查 v0.5.5 Android-M2）。我们自己发的 Intent / PendingIntent 都带上这个随机口令，存在私有 SharedPreferences 里，
-    // 跨进程重启不变（通知里的 PendingIntent 才一直有效）；对不上的一律不理
+    // 重装 APK（审查 v0.5.5 Android-M2）。我们自己发的 Intent / PendingIntent 都带上这个口令，对不上的一律不理。
+    // 口令不再明文落盘（0.6.10 审计 200-1-06）：由 Android Keystore 里不可导出的 HMAC 密钥派生，跨进程重启 / 应用更新都不变
+    // （通知里的 PendingIntent 才一直有效）。Keystore 用不了就退回「本次启动随机、只放内存」—— 那种情况下旧通知点了不响应，
+    // 但口令无论如何不写回磁盘。旧版本存在 shared_prefs 里的明文 k 启动时删掉
     static final String IK = "cc.ik";
+    private static final String IK_ALIAS = "cc-ik";
     private static volatile String ikCache;
     static String intentKey(android.content.Context c) {
         if (ikCache != null) return ikCache;
         android.content.SharedPreferences sp = c.getSharedPreferences("intent", MODE_PRIVATE);
-        String k = sp.getString("k", null);
-        if (k == null || k.length() < 32) {
+        if (sp.contains("k")) sp.edit().remove("k").commit();   // 旧版的明文口令作废
+        String k = ikFromKeystore();
+        if (k == null) {
             byte[] b = new byte[24]; new java.security.SecureRandom().nextBytes(b);
             StringBuilder h = new StringBuilder(); for (byte x : b) h.append(String.format("%02x", x & 0xff));
-            k = h.toString(); sp.edit().putString("k", k).commit();
+            k = h.toString();
         }
         return ikCache = k;
+    }
+    /** 从 Keystore 的 HMAC 密钥派生口令；设备不支持 / 密钥损坏时返回 null，由调用方退回内存随机 */
+    private static String ikFromKeystore() {
+        try {
+            java.security.KeyStore ks = java.security.KeyStore.getInstance("AndroidKeyStore");
+            ks.load(null);
+            javax.crypto.SecretKey key = (javax.crypto.SecretKey) ks.getKey(IK_ALIAS, null);
+            if (key == null) {
+                javax.crypto.KeyGenerator g = javax.crypto.KeyGenerator.getInstance(
+                    android.security.keystore.KeyProperties.KEY_ALGORITHM_HMAC_SHA256, "AndroidKeyStore");
+                g.init(new android.security.keystore.KeyGenParameterSpec.Builder(
+                    IK_ALIAS, android.security.keystore.KeyProperties.PURPOSE_SIGN).build());
+                key = g.generateKey();
+            }
+            javax.crypto.Mac m = javax.crypto.Mac.getInstance("HmacSHA256");
+            m.init(key);
+            byte[] d = m.doFinal("cc.ik.v1".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder h = new StringBuilder();
+            for (byte x : d) h.append(String.format("%02x", x & 0xff));
+            return h.toString();
+        } catch (Throwable e) { return null; }
     }
     static Intent internal(android.content.Context c, String action) {
         return new Intent(c, MainActivity.class).setAction(action).putExtra(IK, intentKey(c));
@@ -292,9 +317,17 @@ public class MainActivity extends Activity {
         pushWall();
         getSystemService(android.app.NotificationManager.class).cancel(41);    // Priv.toFront 的「点此回来」
         Notify.get(this).onForeground(); }                                    // 确认卡就在眼前，通知撤掉
-    @Override protected void onPause() { ui.removeCallbacks(fpsBeat); visible = false; Battery.foreground(false); super.onPause();
+    @Override protected void onPause() { ui.removeCallbacks(fpsBeat); Battery.foreground(false); super.onPause();
         if (pane != null) pane.pause();
-        Notify.get(this).onBackground(); }                                    // 还有没答的确认：现在补发通知
+        // 分屏 / 自由窗口里换个窗口点一下也会走到 onPause，可聊天还看得见：不算到后台，也不补发通知
+        // （0.6.10 审计 200-13-07）。真正看不见了由 onStop 收尾。
+        if (!isInMultiWindowMode()) { visible = false; Notify.get(this).onBackground(); } }
+    @Override protected void onStop() {
+        super.onStop();
+        // 分屏里被整个切走 / 熄屏时 onPause 没记过账，这里补上；转屏重建不算到后台
+        boolean was = visible;
+        visible = false;
+        if (was && !isChangingConfigurations()) Notify.get(this).onBackground(); }   // 还有没答的确认：现在补发通知
 
     // ── 外观：界面（theme.js）定浅 / 深，系统夜间模式只有原生层知道 ──
     private boolean systemNight() {
@@ -1574,6 +1607,12 @@ public class MainActivity extends Activity {
                 // HTML 预览没开「联网」时：整个界面 WebView 不许出本机（审查 v0513b 中-5）。CSP 管得住 fetch / 图片 / 脚本，
                 // 管不住预览页把自己跳到外站（地址里带着读到的文件）；iframe 的整页跳转也走这里，在这一层一起拦
                 if (pvOffline && !localHost(u.getHost())) return blocked();
+                // 界面自己的 /api/*：先当场核一次对面还是不是本应用这次拉起的网关（0.6.10 审计 199-1-04）。
+                // 页面开着的时候网关被杀、端口被同机应用占住的空档里，冒牌的一能让事件总线 onopen（页面以为连上了），
+                // 二能收走 /api/chat 里用户输入的内容。核不过就回 502，页面按断线处理；核的时候不吃 Env 的 3 秒缓存。
+                // 静态资源已由下面的 fetchStatic 按 X-CC-Mac 核过，这里把 /api 也纳入同一道证明。
+                if (isOwnGateway(u.toString()) && u.getPath() != null && u.getPath().startsWith("/api/")
+                    && !Env.proveGateway(true)) return unavailable();
                 // 界面 WebView 用不着 Service Worker；预览页要是注册一个，它发的请求不归页面的 CSP 管（10-31 复核）。注册时取脚本这一步就拦掉
                 java.util.Map<String, String> rh = req.getRequestHeaders();
                 if (rh != null) for (java.util.Map.Entry<String, String> h : rh.entrySet())
@@ -1662,7 +1701,8 @@ public class MainActivity extends Activity {
             /** 界面连不上网关（事件流一直断着）：服务被停掉了就拉起来 */
             @android.webkit.JavascriptInterface public void ensureGateway(String k) { if (!Env.bridgeOk(k)) return; ui.post(() -> recoverGateway(false)); }
             @android.webkit.JavascriptInterface public void unfreeze(String k) { if (!Env.bridgeOk(k)) return; ui.post(() -> bounce()); }
-            /** 更新说明（见 WhatsNew）：页面启动时来取，显示出来后调 whatsNewSeen */
+            /** 更新说明（见 WhatsNew）：页面启动时来取（只读、不记账，所以可以不带口令；预览页调了也压不掉更新说明，0.6.10 审计 200-1-08），
+             *  显示出来后调带口令的 whatsNewSeen 记账 */
             @android.webkit.JavascriptInterface public String whatsNew(String lang) { return WhatsNew.pending(MainActivity.this, lang); }
             @android.webkit.JavascriptInterface public void whatsNewSeen(String k) { if (!Env.bridgeOk(k)) return; WhatsNew.seen(MainActivity.this); }
             @android.webkit.JavascriptInterface public boolean nightMode() { return systemNight(); }
@@ -2170,14 +2210,14 @@ public class MainActivity extends Activity {
         }
         if (req == 7 && fileCb == null) {
             // 选文件期间界面被系统收掉重建过（审查 #105 06-010）：网页的回调没了，选的文件照大附件那样递路径 / 收进 uploads，别静默丢掉
-            Uri[] all = chooserResult(res, data);
+            Uri[] all = chooserResult(this, res, data);
             if (all != null && all.length > 0) attachBig(java.util.Arrays.asList(all), false);
             return;
         }
         if (req == 7) {
             // 附件大小门限：超过 BIG_ATTACH 的不交给网页（网页要把整个文件经 fetch 送进网关，几百 MB 时界面和网关都扛不住），
             // 在这边处理 —— 共享存储里有真实路径的只递路径，Claude 按路径自己读；没有的（云盘、别的应用私有的）在后台流式拷进 uploads/
-            Uri[] all = chooserResult(res, data);
+            Uri[] all = chooserResult(this, res, data);
             ValueCallback<Uri[]> cb = fileCb;
             fileCb = null;
             if (all == null) { cb.onReceiveValue(null); return; }
@@ -2289,16 +2329,36 @@ public class MainActivity extends Activity {
         return i;
     }
 
+    /** 本应用自己的 content URI、或指向应用私有目录的 file URI：系统选择器回来的结果里出现这两种一律不认
+     *  （0.6.10 审计 199-1-02）。恶意 ACTION_GET_CONTENT 应用可以塞回 content://cc.codroid.docs/workspace/…，
+     *  界面会以本应用身份把工作区里任意文件读出来交给页面（再随对话送去模型）。正常应用给的云盘 / 共享存储 URI 不受影响。 */
+    private static boolean ownUri(android.content.Context c, Uri u) {
+        if (u == null) return false;
+        String a = u.getAuthority(), pkg = c.getPackageName();
+        if (a != null && (a.equals(pkg) || a.startsWith(pkg + "."))) return true;
+        if ("file".equals(u.getScheme())) {
+            try {
+                String p = new File(u.getPath()).getCanonicalPath(), d = c.getDataDir().getCanonicalPath();
+                return p.equals(d) || p.startsWith(d + File.separator);
+            } catch (Exception e) { return true; }   // 路径解不开的不认
+        }
+        return false;
+    }
+
     /** 系统的 parseResult() 只读 getData()：一次选了多个时文件在 ClipData 里，它会返回空，结果一个都附加不上 */
-    static Uri[] chooserResult(int res, Intent data) {
+    static Uri[] chooserResult(android.content.Context c, int res, Intent data) {
         if (res != RESULT_OK || data == null) return null;
-        android.content.ClipData c = data.getClipData();
-        if (c != null && c.getItemCount() > 0) {
+        android.content.ClipData clip = data.getClipData();
+        if (clip != null && clip.getItemCount() > 0) {
             java.util.ArrayList<Uri> out = new java.util.ArrayList<>();
-            for (int i = 0; i < c.getItemCount(); i++) { Uri u = c.getItemAt(i).getUri(); if (u != null) out.add(u); }
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                Uri u = clip.getItemAt(i).getUri();
+                if (u != null && !ownUri(c, u)) out.add(u);
+            }
             if (!out.isEmpty()) return out.toArray(new Uri[0]);
         }
-        return data.getData() != null ? new Uri[] { data.getData() } : null;
+        Uri one = data.getData();
+        return one != null && !ownUri(c, one) ? new Uri[] { one } : null;
     }
 
     @Override public void onBackPressed() {

@@ -73,8 +73,13 @@ final class Env {
         } catch (Exception e) { return false; }
     }
 
-    static boolean proveGateway() {
-        if (System.currentTimeMillis() - provedAt < 3000) return true;    // 刚核过：别每个请求都多跑一趟
+    static boolean proveGateway() { return proveGateway(false); }
+
+    /** force：不吃 3 秒缓存。界面的 /api 请求前要用这一版（0.6.10 审计 199-1-04）：
+     *  页面加载完以后网关被杀、端口被别的应用占住的空档里，3 秒缓存正好能放过冒牌的一两个请求 ——
+     *  里面可能就是用户刚敲的话。多跑一趟本机请求（几毫秒），换来每个 /api 都当场核一次。 */
+    static boolean proveGateway(boolean force) {
+        if (!force && System.currentTimeMillis() - provedAt < 3000) return true;    // 刚核过：别每个请求都多跑一趟
         String t = key();
         if (t.isEmpty()) return false;
         try {
@@ -151,10 +156,16 @@ final class Env {
         } catch (Exception e) { return null; }
     }
 
-    /** 端口上有没有人在听（不发任何东西） */
+    /** 端口上有没有人在听（不发任何东西）。网关两个回环地址都听（server.mjs：主服务 127.0.0.1、界面 HOST=127.0.0.2），
+     *  只探 HOST 就漏掉 127.0.0.1 被别的应用占住的情况：supervise 当成「没被占」，反复拉起网关、网关反复退出
+     *  （0.6.10 审计 199-1-03）。 */
     static boolean portBusy() {
+        return listening(HOST) || listening("127.0.0.1");
+    }
+
+    private static boolean listening(String host) {
         try (java.net.Socket s = new java.net.Socket()) {
-            s.connect(new java.net.InetSocketAddress(HOST, PORT), 500);
+            s.connect(new java.net.InetSocketAddress(host, PORT), 500);
             return true;
         } catch (java.io.IOException e) { return false; }
     }

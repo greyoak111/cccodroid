@@ -82,6 +82,22 @@ public final class Docs extends DocumentsProvider {
         catch (Exception e) { return false; }
     }
 
+    /** 不通过文件访问框架交出去的文件：workspace 下的 .claude/settings(.local).json 里常放 ANTHROPIC_AUTH_TOKEN，
+     *  settings 还能挂 hooks —— 目录授权给文件管理器一次，就等于把令牌和「下次运行什么命令」一起交了出去。
+     *  只挡这两个名字，别的工作区文件照常（0.6.10 审计 199-1-01）。 */
+    private static boolean sensitive(File f) {
+        File p = f.getParentFile();
+        return p != null && ".claude".equals(p.getName()) && f.getName().matches("settings(\\.local)?\\.json");
+    }
+
+    /** 软链接按真实路径再认一遍：工作区里自己建的别名可以指向 .claude/settings.json，只看名字会漏。 */
+    private static void denySensitive(File f) throws FileNotFoundException {
+        if (sensitive(f)) throw new FileNotFoundException(Tr.t("这个文件不通过文件访问提供"));
+        try {
+            if (sensitive(f.getCanonicalFile())) throw new FileNotFoundException(Tr.t("这个文件不通过文件访问提供"));
+        } catch (java.io.IOException ignored) { /* 悬空链接：交给后面存在性 / 越界检查 */ }
+    }
+
     /** ID 用名字本身的路径（不解开软链接），越界检查照旧按真实路径（checked）。
      *  以前 ID 用真实路径：工作区里 alias.txt → target.txt，列出来名字是 alias.txt、ID 却是 target.txt，
      *  在文件管理器里删「别名」实际删掉了原文件（审查 v0.5.20 06-002） */
@@ -116,6 +132,7 @@ public final class Docs extends DocumentsProvider {
 
     /** 先算 ID 再建行：ID 算不出来（越界的链接）就整条不加，不留空行 */
     private void row(MatrixCursor c, File f) throws FileNotFoundException {
+        denySensitive(f);   // 敏感文件连列表和搜索里都不出现（0.6.10 审计 199-1-01）
         String id = idOf(f);
         MatrixCursor.RowBuilder r = c.newRow();
         r.add(Document.COLUMN_DOCUMENT_ID, id);
@@ -222,6 +239,7 @@ public final class Docs extends DocumentsProvider {
     @Override
     public ParcelFileDescriptor openDocument(String docId, String mode, CancellationSignal signal) throws FileNotFoundException {
         File target = fileOf(docId);
+        denySensitive(target);   // 读和写都不给（0.6.10 审计 199-1-01）
         // 写模式会在 open 时截断：硬链接文件有多个名字，截断前先拒绝（以前的检查在 open 之后，已经清空了）
         if (mode != null && mode.contains("w") && !mode.contains("a")) {
             try {
@@ -238,6 +256,8 @@ public final class Docs extends DocumentsProvider {
             // 硬链接不改真实路径：工作区里一个硬链接就能指到凭据文件上，和 Share 一样，普通文件有多个名字就不给（11-04 报告 A9）
             android.system.StructStat st = android.system.Os.fstat(pfd.getFileDescriptor());
             boolean linked = android.system.OsConstants.S_ISREG(st.st_mode) && st.st_nlink > 1;
+            // 打开的可能是指向 .claude/settings*.json 的软链：按 fd 的真实路径再挡一次（0.6.10 审计 199-1-01）
+            if (sensitive(new File(real))) throw new FileNotFoundException(Tr.t("这个文件不通过文件访问提供"));
             if (!linked && (real.equals(base) || real.startsWith(base + "/"))) return pfd;
         } catch (Exception e) { /* 落到下面：查不了也不给 */ }
         try { pfd.close(); } catch (java.io.IOException ignored) {}
@@ -264,6 +284,7 @@ public final class Docs extends DocumentsProvider {
             String alt = dot > 0 ? name.substring(0, dot) + " (" + n + ")" + name.substring(dot) : name + " (" + n + ")";
             f = checked(new File(parent, alt));
         }
+        denySensitive(f);   // 不许在 .claude/ 下新建 settings*.json（0.6.10 审计 199-1-01）
         try {
             if (Document.MIME_TYPE_DIR.equals(mimeType)) {
                 if (!f.mkdirs()) throw new java.io.IOException("建目录失败");
@@ -280,6 +301,7 @@ public final class Docs extends DocumentsProvider {
     @Override
     public void deleteDocument(String docId) throws FileNotFoundException {
         File f = fileOf(docId);
+        denySensitive(f);   // 看不见的文件也不给删（0.6.10 审计 199-1-01）
         // 用规范路径判根：docId 里的 "."/".." 会让未规范化的 File 不等于 home，从而递归删掉整个工作区
         try { if (f.getCanonicalFile().equals(home.getCanonicalFile())) throw new FileNotFoundException("不能删根"); }
         catch (java.io.IOException e) { throw new FileNotFoundException("不能删根"); }
@@ -315,7 +337,9 @@ public final class Docs extends DocumentsProvider {
     @Override
     public String renameDocument(String docId, String displayName) throws FileNotFoundException {
         File f = fileOf(docId);
+        denySensitive(f);   // 改名等于换个名字把内容交出去（源）；也不许把别的文件改成这个名字（目标）（0.6.10 审计 199-1-01）
         File to = checked(new File(f.getParentFile(), safeName(displayName)));
+        denySensitive(to);
         try { if (f.getCanonicalFile().equals(home.getCanonicalFile())) throw new FileNotFoundException("改名失败"); }
         catch (java.io.IOException e) { throw new FileNotFoundException("改名失败"); }
         if (to.equals(f)) return idOf(f);

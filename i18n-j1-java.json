@@ -1,0 +1,14 @@
+[
+  {
+    "zh": "这个文件不通过文件访问提供",
+    "en": "This file isn't available through file access",
+    "ja": "このファイルはファイルアクセスでは提供されません",
+    "ko": "이 파일은 파일 접근으로 제공되지 않습니다",
+    "zh-Hant": "這個檔案不透過檔案存取提供",
+    "es": "Este archivo no está disponible mediante el acceso a archivos",
+    "fr": "Ce fichier n'est pas accessible via l'accès aux fichiers",
+    "ru": "Этот файл недоступен через доступ к файлам",
+    "id": "File ini tidak tersedia melalui akses file",
+    "ar": "هذا الملف غير متاح عبر الوصول إلى الملفات"
+  }
+]
