@@ -166,6 +166,28 @@ const macHdr = (req, data) => {
   return m ? { "x-cc-mac": m } : {};
 };
 const miss404 = { at: 0, n: 0 };
+// 静态回应整份读进内存再发：一条连接上流水线堆一大串请求、却不读回应，没发出去的回应全积在内存里，
+// 不要凭据就能把网关撑到 OOM（0.6.9 审计 199 H-1）。按连接、按全局记「排着还没发完」的字节数，超了就不再接
+const STATIC_SOCK_MAX = 32 << 20, STATIC_ALL_MAX = 128 << 20;
+const staticPending = new WeakMap();   // socket → { n, rel: Set<release> }
+let staticAll = 0;
+function staticBudget(req, res, n) {
+  const s = req.socket;
+  let st = s && staticPending.get(s);
+  if (s && !st) {
+    st = { n: 0, rel: new Set() }; staticPending.set(s, st);
+    // 排着还没轮到的回应，连接断了既不 finish 也不 close：额度在这里一并收回，不然被打几次全局额度就永远占满
+    s.once("close", () => { for (const r of [...st.rel]) r(); });
+  }
+  if (st && st.n + n > STATIC_SOCK_MAX) { s.destroy(); return false; }
+  if (staticAll + n > STATIC_ALL_MAX) { sendJson(res, 503, { error: "busy" }); return false; }
+  staticAll += n; if (st) st.n += n;
+  const release = () => { if (st && !st.rel.delete(release)) return; if (!st && release.done) return; release.done = true; staticAll -= n; if (st) st.n -= n; };
+  if (st) st.rel.add(release);
+  res.on("finish", release); res.on("close", release);
+  return true;
+}
+export const _staticForTest = { pending: () => staticAll };
 export function serveStatic(req, res, urlPath) {
   let rel = urlPath === "/" ? "/index.html" : urlPath;
   rel = rel.replace(/^\/+/, "");
@@ -174,6 +196,7 @@ export function serveStatic(req, res, urlPath) {
     const data = appJs();
     if (!data && APP?.restartWanted) return sendJson(res, 503, { error: "app files modified" });
     if (data) {
+      if (!staticBudget(req, res, data.length)) return;
       res.writeHead(200, { "content-type": MIME[".js"], "content-length": data.length, "cache-control": "no-store", ...STATIC_SAFE, ...macHdr(req, data) });
       return res.end(data);
     }
@@ -188,6 +211,8 @@ export function serveStatic(req, res, urlPath) {
     else miss404.n++;
     return sendJson(res, 404, { error: "not found", path: rel });
   }
+  // 先按大小占额度，再读：超了连文件都不读
+  if (!staticBudget(req, res, fs.statSync(full).size)) return;
   const data = fs.readFileSync(full);
   if (APP && !APP.served(path.relative(path.dirname(PATHS.web), full), data, fs.statSync(full))) return sendJson(res, 503, { error: "app files modified" });
   res.writeHead(200, {
