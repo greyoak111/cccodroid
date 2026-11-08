@@ -10,7 +10,7 @@
 | 199-1-04 | MainActivity.java + 19-boot.js 伪造 SSE / onopen 无校验 | 已修（原生层）+ 移交（04 前端加强） |
 | 199-1-05 | MainActivity.java ACTION_SEND 写 workspace/uploads | 待定 |
 | 199-1-06 | MainActivity.java IK 明文存 shared_prefs | 已修 |
-| 199-1-07 | 并入 13-02，主要位置 GatewayService/Env → 归 j2，配合项写移交 | 移交 |
+| 199-1-07（13-02、13-12 并入） | 应用进程重启后接管存活网关，主要位置 GatewayService / Env → 归 j2，配合项已写移交 | 移交 |
 | 199-1-08 | MainActivity.java 无口令 JS 桥 whatsNew | 已修 |
 | 200-13-07 | MainActivity.java 分屏失焦也发通知 | 已修 |
 | 200-13-08 | MainActivity.java 工作岛 am 发送并发乱序 | 不成立（前提归属误标）+ 移交 b1 |
@@ -60,4 +60,6 @@
 
 ## 全量测试
 
-（未跑）
+2026-11-08，`env -u CCAPP_RUN node scripts/test.mjs`（工作树 w0610-j1，基线 189c1b3；工作区只有本报告的收尾改动）：
+**tests 1151 / pass 1150 / fail 0 / cancelled 0 / skipped 1 / todo 0**，用时 635999 ms（约 10.6 分钟），退出码 0。
+首次运行即全过，`merge.test.mjs` 本轮没有出现偶发失败。
