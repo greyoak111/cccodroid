@@ -1,0 +1,42 @@
+# 车道 g1 报告
+
+起点 `w0610-m@3cc95d3`。名下文件见 `LANE-g1.md`。
+
+## 待办（开工前先列全）
+
+| 条目 | 一句话 | 主要位置 | 状态 |
+|---|---|---|---|
+| 195-G.5 | 启动随机数 stdin 阻塞读，5 秒超时对无数据管道无效，网关在 listen 前挂住 | `gw/access.mjs:85-99` | 待办 |
+| 195-G.6 | 手机浏览器打开 127.0.0.1:8791 静态页能开、`/api/*` 全 403，前端标「网关离线」 | `gw/access.mjs`；提示文案在前端 | 待办 |
+| 195-E.6 | 切接口后 `titleModel` 残留旧厂商型号，设置页显示选中、实际静默不用 | `gw/settings.mjs:116-117`；`gw/autotitle.mjs:88-90` | 待办 |
+| 195-V.1 | 组件索引无防回滚，`compState` 只比 sha256；UI 不显示待装版本 | `gw/components.mjs`；`web/app/08-extensions.js` | 待办 |
+| 195-V.2 | `use-local-index` 是私有目录里的文件开关，可把来源换成 `file://` 且不校验新鲜度 | `gw/components.mjs` | 待办 |
+| 195-V.3 | 索引磁盘缓存未验签，同 uid 可伪造条目绕过整条验签链并执行 `first-run.sh` | `gw/components.mjs` | 待办 |
+| 196-供应链.1 | 组件安装只按 id 锁，跨组件并发共享文件可被删/覆盖；`compRecords()` 看不到 installing | `gw/components.mjs` | 待办 |
+| 196-供应链.2 | 模块/自定义组件暂存清理缺口：devkit-stage 失败不删；`.stage-*` 重启后永久孤儿 | `gw/modules.mjs`（custom.mjs 半 移交） | 待办 |
+| 196-供应链.3 | `pkg uninstall/upgrade` 与 `modRemove` 按可写记录删文件，未做 safeRel | `android/assets/bin/pkg.mjs`；`gw/modules.mjs` | 待办 |
+| 196-供应链.4 | `devkit.lock.json` 仅靠 TLS、无签名且长期缓存，却参与依赖版本判定 | `android/assets/bin/pkg.mjs` | 待办 |
+| 196-供应链.5 | 技能 zip 导入无条目数上限，逐条同步写可阻塞事件循环 | `gw/extensions.mjs`（sessionops.mjs 半 移交） | 待办 |
+| 197-9.6 F8 | 组件升级先删旧版再搬新版，中途失败旧版没了 | `gw/components.mjs` | 待办 |
+| 200-14-06 | 模块 `first-run` 失败仍写 `.ok` | `gw/modules.mjs` | 待核实（疑似已修） |
+| 200-14-07 | 本地文件安装时 `identifyDevkit` 顺序抓 8 个 release 的 lock/sig，无总预算/取消 | 实际在 `android/java/cc/codroid/Updater.java`（主会话名下） | 待办（移交） |
+
+## 已修
+
+（做完一条补一条）
+
+## 不成立
+
+（待补）
+
+## 待定（交回主会话或用户定）
+
+（待补）
+
+## 移交（需要改别的车道 / 主会话的文件）
+
+（待补）
+
+## 全量测试
+
+（最后跑完补）
