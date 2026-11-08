@@ -2823,3 +2823,123 @@
 2823	Le point de terminaison de la tâche a été supprimé : modifiez la tâche et choisissez-en un autre
 2824	Le point de terminaison de « {n} » a été supprimé : modifiez la tâche et choisissez-en un autre
 2825	Le texte injecté par le hook ({ev}) correspond à un motif de contournement ; ce tour a été arrêté, le texte injecté est replié ci-dessus.
+2826	Réponse terminée
+2827	Erreur lors de la réponse
+2828	En mode sécurisé, « {m} » s'applique comme « confirmer chaque étape »
+2829	{n} déplacés dans la corbeille, {m} échecs : {msg}
+2830	{n} joints, {m} échecs : {msg}
+2831	Échec de la recherche : {msg}
+2832	Impossible de lire la liste des fichiers : {msg}
+2833	Fichier trop volumineux ; le serveur ne l'a pas accepté
+2834	Le serveur n'a pas reconnu le fichier envoyé
+2835	Le serveur a renvoyé {status}
+2836	Chargement de la conversation…
+2837	Suppression impossible : {msg}
+2838	Fichier vide (0 octet)
+2839	{n} fichier(s) en cours d'envoi ; envoyez une fois terminé.
+2840	Le script de l'interface n'a pas pu se charger. Touchez ici pour réessayer.
+2841	[Le terminal est fermé ; la saisie n'a pas été envoyée]
+2842	Le script intégré n'a pas pu être installé : {msg}
+2843	Le script intégré n'a pas pu être installé : {msg} ; la règle n'a pas été enregistrée
+2844	Impossible d'obtenir l'état de mise à jour : {msg}
+2845	Seuls les 1000 premiers éléments sont affichés
+2846	La fusion n'est pas encore validée : validez toutes les modifications ensemble, ou annulez d'abord celles que vous ne voulez pas valider.
+2847	Échec de la copie ; appuyez longuement pour sélectionner le texte et le copier
+2848	Projet supprimé ({id})
+2849	Les 3000 dernières lignes ont été copiées
+2850	Défini à {line} (fenêtre du modèle inconnue ; votre valeur est utilisée)
+2851	Impossible de lire les places de marché des plugins : {msg}
+2852	Nom de fichier trop long (255 octets max ; un caractère chinois compte pour 3)
+2853	Fichier trop volumineux ({size}) pour être analysé dans l'app ; utilisez « Mise en page d'origine » pour le convertir en PDF, ou téléchargez-le et ouvrez-le dans une autre app.
+2854	Le fichier n'existe pas encore
+2855	Échec de la recherche de mises à jour
+2856	Pas d'autorisation d'accès à cet emplacement (le stockage partagé nécessite « Accès à tous les fichiers » dans les réglages système)
+2857	Pas d'autorisation d'accès à ce dossier (le stockage partagé nécessite « Accès à tous les fichiers » dans les réglages système)
+2858	Pas d'autorisation de lecture à cet emplacement (le stockage partagé nécessite « Accès à tous les fichiers » dans les réglages système)
+2859	Échec de la suppression : {msg}
+2860	Le processus du terminal est terminé ; la saisie n'a pas été envoyée
+2861	Impossible de lire la liste des composants personnalisés : {msg}
+2862	Impossible de lire l'historique des commits
+2863	Impossible de lire l'état de ce fichier
+2864	Impossible de lire la liste des fichiers de ce commit
+2865	Il reste des conflits non résolus ; terminez-les avant de valider.
+2866	Cette page n'a pas pu être rendue
+2867	Cet emplacement ne peut pas être lu
+2868	Ce dossier n'est plus un dépôt git
+2869	Ce dossier n'a pas de SKILL.md (peut-être un reste d'importation interrompue) ; vous pouvez le supprimer.
+2870	Ce tableur se décompresse trop pour être ouvert en toute sécurité.
+2871	Les informations de plage de cette feuille sont corrompues et illisibles
+2872	Les pseudo-fichiers système comme celui-ci ne peuvent pas être lus ainsi
+2873	Les instructions du projet ne sont pas enregistrées ; revenir en arrière perdra ces modifications. Revenir quand même ?
+2874	Le service d'aperçu n'a pas renvoyé d'adresse
+2875	Impossible de charger l'aide : {msg}
+2876	Impossible de charger le journal des modifications : {msg}
+2877	Le paquet de compétences dépasse 64 Mo ; décompressez-le et importez les compétences une par une
+2878	Valeur de champ cron invalide : {f}
+2879	La valeur du champ cron est hors plage : {f}
+2880	Pas de cron invalide : {f}
+2881	L'expression cron doit comporter cinq champs : minute heure jour mois jour de la semaine
+2882	« {n} » : le dossier du projet de la tâche n'existe plus. Modifiez la tâche et choisissez un autre projet ou dossier
+2883	Les signets n'ont pas été enregistrés : stockage plein ou permission refusée
+2884	Le dossier du projet de la tâche n'existe plus. Modifiez la tâche et choisissez un autre projet ou dossier
+2885	La session dérivée n'a pas pu être écrite sur le disque : {err}
+2886	Une tâche ponctuelle nécessite une date
+2887	L'heure de début doit être comprise entre 0 et 23 h, 0 et 59 min
+2888	La date doit être au format AAAA-MM-JJ
+2889	L'heure doit être comprise entre 0 et 23 h, 0 et 59 min
+2890	Choisissez au moins un jour de la semaine (entiers 1–7)
+2891	Le jour du mois doit être 1–31 ou « dernier jour »
+2892	L'intervalle doit être un entier de 1 à 24 heures
+2893	Enregistrement impossible : stockage plein ou permission refusée
+2894	L'heure de fin doit être comprise entre 0 et 23 h, 0 et 59 min
+2895	(Texte trop long ; seuls les {n} premiers caractères sont affichés)
+2896	En mode sécurisé, les modes qui ne posent pas de question ne s'appliquent pas ; c'est maintenant « Demander à chaque fois »
+2897	Les paramètres n'ont pas été enregistrés ; l'ancien mode d'autorisation reviendra après redémarrage
+2898	Le message d'origine était trop long ; seuls les 65 000 premiers caractères ont été restaurés
+2899	Impossible de récupérer les avis de sécurité pour le moment
+2900	Récupération des avis de sécurité…
+2901	L'hôte a changé, l'ancienne clé a été effacée ; saisissez-la à nouveau
+2902	L'heure de réinitialisation est passée ; actualisation après le prochain message
+2903	Projet créé ; le dossier contenait déjà un CLAUDE.md, vos instructions n'ont pas été écrites
+2904	connexion officielle · connecté
+2905	connexion officielle · non connecté
+2906	connexion officielle · état de connexion indéterminable
+2907	connexion officielle · connecté lors de la dernière vérification
+2908	connexion officielle · non connecté lors de la dernière vérification
+2909	Connectez-vous à votre compte
+2910	La connexion est toujours en cours ; le lien d'autorisation s'ouvrira dès qu'il arrivera.
+2911	Supprimer le modèle « {id} » ? Le fichier sera retiré du dossier des modèles.
+2912	Modèle « {id} » supprimé
+2913	{n} importé(s) ; échec ensuite : {msg}
+2914	La boîte à outils a été mise à jour ; aucune version compatible pour l'instant
+2915	La boîte à outils a été mise à jour et l'index des composants n'a pas encore de version adaptée. Mettez d'abord à jour la boîte à outils, ou appuyez sur « Rechercher des mises à jour » pour recharger l'index.
+2916	La ligne de compactage est au minimum de 100k ; enregistrée à 100k
+2917	Impossible d'écrire l'enregistrement d'installation (stockage plein ou permission refusée) ; cette installation ne s'est pas poursuivie
+2918	Les fichiers sont en place, mais l'enregistrement d'installation n'a pas pu être écrit (stockage plein ou permission refusée). Réinstallez ou désinstallez
+2919	Impossible d'écrire l'enregistrement du composant (stockage plein ou permission refusée) ; cette installation n'a pas été terminée
+2920	Le point d'accès a renvoyé {s}, mais pas au format attendu : impossible de confirmer la clé : {what}
+2921	(vide)
+2922	L’amont a signalé une erreur à la fin de la réponse ({msg}) ; elle a été considérée comme terminée. Si elle semble incomplète, envoyez « continue ».
+2923	La ligne « {ep} » choisie pour {name} n’existe plus. Choisissez une ligne dans les réglages et saisissez sa clé.
+2924	Cette adresse utilise http non chiffré : votre clé et la conversation sont envoyées à l'autre machine sans chiffrement. Passez en https si possible.
+2925	Les tâches planifiées s’exécutent dans leur propre tour : elle passe en tête et démarre dès la fin du tour en cours
+2926	Une fois la limite atteinte, les autres tâches du jour sont ignorées et vous êtes prévenu. Seules les dépenses de l’API officielle comptent : les points d’accès tiers ne sont pas comptabilisés, la limite quotidienne ne s’y applique donc pas.
+2927	S’arrête en cas de dépassement et compte comme un échec ; ne s’applique qu’à l’API officielle
+2928	Cette tâche utilise un point d’accès tiers : ses dépenses ne sont pas comptées, ni la limite de coût par exécution ni la limite quotidienne ne s’appliquent ; la limite de durée sert de garde-fou.
+2929	L’itinéraire choisi n’existe plus (la liste des fournisseurs a été mise à jour et l’a retiré). L’ancienne clé ne sera pas reportée sur un nouvel itinéraire : choisissez un itinéraire, saisissez à nouveau la clé, puis enregistrez.
+2930	Itinéraire changé : l’ancienne clé a été effacée, saisissez-la à nouveau
+2931	Impossible de charger l’historique : {msg} 
+2932	Pendant l’installation, une désinstallation a supprimé {n} fichiers partagés ; réinstallez
+2933	Le modèle local {model} épinglé à cette session n’existe plus ; choisissez-en un autre dans le panneau des modèles
+2934	Vérification du fichier du modèle local…
+2935	Le fichier du modèle local a été modifié (somme de contrôle différente) ; par sécurité, il n’est pas chargé : {file}
+2936	Le fichier du modèle local n’est pas au format GGUF (il a peut-être été modifié) ; il n’est pas chargé : {file}
+2937	Délai de connexion dépassé (15 minutes)
+2938	La connexion est toujours en cours ; la page d’autorisation s’ouvrira dès que son adresse arrivera
+2939	Les informations de téléchargement de ce module sont incomplètes ; mettez d’abord à jour le kit de dév.
+2940	Le paquet du module n’a pas de liste de fichiers (MANIFEST) ; par sécurité, il n’est pas installé
+2941	La liste de fichiers du paquet du module contient un chemin non valide : {file}
+2942	Le module « {name} » n’a pas terminé sa configuration initiale ({err}) ; une nouvelle installation la relancera
+2943	La liste des projets n’a pas pu être enregistrée (stockage plein ou non inscriptible) ; cette modification sera perdue au redémarrage
+2944	{n} discussions n’ont pas pu être déplacées dans la corbeille ; le dossier n’a donc pas été supprimé : {why}
+2945	{n} fichiers partagés dont dépend le composant « {id} » ont été supprimés

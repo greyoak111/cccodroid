@@ -2823,3 +2823,123 @@
 2823	Penyedia tugas sudah dihapus: edit tugas dan pilih yang lain
 2824	Penyedia untuk "{n}" sudah dihapus: edit tugas dan pilih yang lain
 2825	Teks yang disisipkan hook ({ev}) cocok dengan pola jailbreak, jadi giliran ini dihentikan; teks sisipan dilipat di atas.
+2826	Balasan selesai
+2827	Balasan error
+2828	Dalam mode aman, "{m}" berlaku sebagai "konfirmasi tiap langkah"
+2829	{n} dipindahkan ke sampah, {m} gagal: {msg}
+2830	{n} terlampir, {m} gagal: {msg}
+2831	Pencarian gagal: {msg}
+2832	Daftar file tidak terbaca: {msg}
+2833	File terlalu besar; server tidak menerimanya
+2834	Server tidak mengenali file yang diunggah
+2835	Server mengembalikan {status}
+2836	Memuat percakapan…
+2837	Gagal menghapus: {msg}
+2838	File kosong (0 byte)
+2839	Masih mengunggah {n} file; kirim setelah selesai.
+2840	Skrip antarmuka gagal dimuat. Ketuk di sini untuk mencoba lagi.
+2841	[Terminal sudah berhenti; input tidak terkirim]
+2842	Skrip bawaan gagal dipasang: {msg}
+2843	Skrip bawaan gagal dipasang: {msg}; aturan tidak disimpan
+2844	Gagal mengambil status pembaruan: {msg}
+2845	Hanya 1000 item pertama yang ditampilkan
+2846	Merge belum di-commit: commit semua perubahan sekaligus, atau batalkan dulu perubahan yang tidak ingin di-commit.
+2847	Gagal menyalin; tekan lama untuk memilih teks lalu salin
+2848	Proyek yang dihapus ({id})
+2849	3000 baris terakhir disalin
+2850	Disetel ke {line} (jendela model tidak diketahui; nilai Anda dipakai)
+2851	Gagal membaca marketplace plugin: {msg}
+2852	Nama file terlalu panjang (maks. 255 byte; satu karakter Tionghoa dihitung 3)
+2853	File terlalu besar ({size}) untuk diurai di aplikasi; gunakan “Tata letak asli” untuk mengonversinya ke PDF, atau unduh dan buka di aplikasi lain.
+2854	File belum ada
+2855	Gagal memeriksa pembaruan
+2856	Tidak ada izin mengakses lokasi ini (penyimpanan bersama memerlukan “Akses semua file” di pengaturan sistem)
+2857	Tidak ada izin mengakses folder ini (penyimpanan bersama memerlukan “Akses semua file” di pengaturan sistem)
+2858	Tidak ada izin membaca lokasi ini (penyimpanan bersama memerlukan “Akses semua file” di pengaturan sistem)
+2859	Gagal menghapus: {msg}
+2860	Proses terminal sudah berhenti; input tidak terkirim
+2861	Gagal membaca daftar komponen kustom: {msg}
+2862	Gagal membaca riwayat commit
+2863	Gagal membaca status file ini
+2864	Gagal membaca daftar file commit ini
+2865	Masih ada konflik yang belum selesai; selesaikan dulu sebelum commit.
+2866	Halaman ini gagal digambar
+2867	Lokasi ini tidak bisa dibaca
+2868	Folder ini bukan lagi repositori git
+2869	Folder ini tidak memiliki SKILL.md (mungkin sisa impor yang gagal); boleh dihapus.
+2870	Spreadsheet ini mengembang terlalu besar di dalamnya untuk dibuka dengan aman.
+2871	Informasi rentang sheet ini rusak dan tidak bisa dibaca
+2872	Pseudo-file sistem seperti ini tidak bisa dibaca dengan cara ini
+2873	Instruksi proyek belum disimpan; kembali akan membuang perubahan ini. Tetap kembali?
+2874	Layanan pratinjau tidak mengembalikan alamat
+2875	Gagal memuat bantuan: {msg}
+2876	Gagal memuat log perubahan: {msg}
+2877	Paket skill melebihi 64 MB; ekstrak lalu impor skill satu per satu
+2878	Nilai kolom cron tidak valid: {f}
+2879	Nilai kolom cron di luar rentang: {f}
+2880	Langkah cron tidak valid: {f}
+2881	Ekspresi cron harus terdiri dari lima kolom: menit jam hari bulan hari minggu
+2882	「{n}」: folder proyek tugas sudah tidak ada. Edit tugas dan pilih proyek atau folder lain
+2883	Bookmark tidak tersimpan: penyimpanan penuh atau tidak ada izin
+2884	Folder proyek tugas sudah tidak ada. Edit tugas dan pilih proyek atau folder lain
+2885	Sesi hasil percabangan tidak dapat ditulis ke disk: {err}
+2886	Tugas sekali jalan perlu tanggal
+2887	Waktu mulai harus 0–23 jam, 0–59 menit
+2888	Tanggal harus berformat YYYY-MM-DD
+2889	Waktu harus 0–23 jam, 0–59 menit
+2890	Pilih setidaknya satu hari (bilangan bulat 1–7)
+2891	Tanggal bulan harus 1–31 atau 「hari terakhir」
+2892	Interval harus bilangan bulat 1–24 jam
+2893	Gagal menyimpan: penyimpanan penuh atau tidak ada izin
+2894	Waktu selesai harus 0–23 jam, 0–59 menit
+2895	(Teks terlalu panjang; hanya menampilkan {n} karakter pertama)
+2896	Dalam mode aman, mode yang tidak bertanya tidak berlaku; sekarang «Tanya setiap kali»
+2897	Pengaturan tidak tersimpan; mode izin sebelumnya akan kembali setelah mulai ulang
+2898	Pesan asli terlalu panjang; hanya 65.000 karakter pertama yang dipulihkan
+2899	Sementara tidak dapat mengambil pemberitahuan keamanan
+2900	Mengambil pemberitahuan keamanan…
+2901	Host berubah, kunci lama telah dihapus; silakan isi ulang
+2902	Waktu reset sudah lewat; akan diperbarui setelah pesan berikutnya
+2903	Proyek dibuat; folder sudah berisi CLAUDE.md, jadi instruksi yang Anda isi tidak ditulis
+2904	Login resmi · sudah masuk
+2905	Login resmi · belum masuk
+2906	Login resmi · status masuk tidak dapat dipastikan
+2907	Login resmi · saat terakhir diperiksa sudah masuk
+2908	Login resmi · saat terakhir diperiksa belum masuk
+2909	Masuk ke akun Anda
+2910	Proses masuk masih berlangsung; tautan otorisasi akan terbuka begitu tersedia.
+2911	Hapus model «{id}»? File akan dihapus dari folder model.
+2912	Model «{id}» dihapus
+2913	{n} diimpor; lalu gagal: {msg}
+2914	Toolkit diperbarui; belum ada versi yang cocok
+2915	Toolkit diperbarui dan indeks komponen belum memiliki versi untuk toolkit saat ini. Perbarui toolkit dulu, atau ketuk «Periksa pembaruan» untuk memuat ulang indeks.
+2916	Garis pemadatan minimal 100k; disimpan sebagai 100k
+2917	Tidak bisa menulis catatan pemasangan (penyimpanan penuh atau tidak ada izin); pemasangan ini tidak dilanjutkan
+2918	Berkas sudah ditempatkan, tetapi catatan pemasangan gagal ditulis (penyimpanan penuh atau tidak ada izin). Silakan pasang ulang atau hapus
+2919	Tidak bisa menulis catatan komponen (penyimpanan penuh atau tidak ada izin); pemasangan ini tidak selesai
+2920	Endpoint mengembalikan {s}, tetapi formatnya tidak sesuai, jadi kunci tidak bisa dipastikan: {what}
+2921	(kosong)
+2922	Upstream melaporkan galat di akhir jawaban ({msg}); dianggap selesai. Jika jawaban belum lengkap, kirim “lanjutkan”.
+2923	Jalur “{ep}” yang dipilih untuk {name} sudah tidak ada. Pilih ulang jalur di Pengaturan dan masukkan kunci untuk jalur itu.
+2924	Alamat ini memakai http tanpa enkripsi: kunci dan percakapan dikirim ke mesin lain tanpa dienkripsi. Ganti ke https jika bisa.
+2925	Tugas terjadwal berjalan di gilirannya sendiri: dipindah ke depan dan dimulai begitu giliran saat ini selesai
+2926	Setelah batas tercapai, tugas lain hari itu dilewati dan Anda diberi tahu. Hanya biaya API resmi yang dihitung: endpoint pihak ketiga tidak dihitung biayanya, jadi batas harian tidak berlaku untuknya.
+2927	Berhenti jika terlampaui dan dihitung gagal; hanya berlaku untuk API resmi
+2928	Tugas ini memakai endpoint pihak ketiga: biayanya tidak dihitung, jadi batas biaya per jalan maupun batas harian tidak berlaku — batas waktu yang menjadi pengaman.
+2929	Rute yang Anda pilih sudah tidak ada (daftar penyedia diperbarui dan menghapusnya). Kunci lama tidak dibawa ke rute baru: pilih rute, masukkan kunci lagi, lalu simpan.
+2930	Rute diganti — kunci lama dihapus, silakan masukkan lagi
+2931	Gagal memuat riwayat: {msg} 
+2932	Selama pemasangan, {n} file bersama terhapus oleh pencopotan — silakan pasang ulang
+2933	Model di perangkat {model} yang disematkan ke sesi ini sudah tidak ada — pilih yang lain di panel model
+2934	Memeriksa file model di perangkat…
+2935	File model di perangkat telah diubah (checksum tidak cocok), jadi demi keamanan tidak dimuat: {file}
+2936	File model di perangkat bukan GGUF (mungkin telah diubah), jadi tidak dimuat: {file}
+2937	Waktu masuk habis (15 menit)
+2938	Proses masuk masih berjalan — halaman otorisasi akan terbuka setelah alamatnya diterima
+2939	Info unduhan modul ini tidak lengkap — perbarui Devkit dulu
+2940	Paket modul tidak memiliki daftar file (MANIFEST), jadi demi keamanan tidak dipasang
+2941	Daftar file paket modul berisi jalur yang tidak valid: {file}
+2942	Modul "{name}" belum menyelesaikan penyiapan awal ({err}); memasang ulang akan mencobanya lagi
+2943	Daftar proyek tidak dapat disimpan (penyimpanan penuh atau tidak dapat ditulis); perubahan ini akan hilang setelah dimulai ulang
+2944	{n} percakapan tidak dapat dipindahkan ke tempat sampah, jadi folder tidak dihapus: {why}
+2945	{n} file bersama yang dibutuhkan komponen "{id}" telah dihapus

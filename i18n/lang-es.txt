@@ -2823,3 +2823,123 @@
 2823	El endpoint de la tarea se eliminó: edita la tarea y elige otro
 2824	El endpoint de «{n}» se eliminó: edita la tarea y elige otro
 2825	El texto inyectado por el hook ({ev}) coincidió con un patrón de jailbreak, así que este turno se detuvo; el texto inyectado está plegado arriba.
+2826	Respuesta completada
+2827	Error en la respuesta
+2828	En modo seguro, «{m}» se aplica como «confirmar cada paso»
+2829	{n} movidos a la papelera, {m} fallaron: {msg}
+2830	Adjuntados {n}, {m} fallaron: {msg}
+2831	Error de búsqueda: {msg}
+2832	No se pudo leer la lista de archivos: {msg}
+2833	El archivo es demasiado grande; el servidor no lo aceptó
+2834	El servidor no reconoció el archivo subido
+2835	El servidor devolvió {status}
+2836	Cargando conversación…
+2837	No se eliminó: {msg}
+2838	Archivo vacío (0 bytes)
+2839	Aún se están subiendo {n} archivo(s); envía cuando terminen.
+2840	No se pudo cargar el script de la interfaz. Toca aquí para reintentar.
+2841	[La terminal se cerró; la entrada no se envió]
+2842	No se pudo instalar el script integrado: {msg}
+2843	No se pudo instalar el script integrado: {msg}; la regla no se guardó
+2844	No se pudo obtener el estado de actualización: {msg}
+2845	Solo se muestran los primeros 1000 elementos
+2846	La fusión aún no está confirmada: confirma todos los cambios juntos o descarta antes los que no quieras confirmar.
+2847	No se pudo copiar; mantén pulsado para seleccionar el texto y copiarlo
+2848	Proyecto eliminado ({id})
+2849	Se copiaron las últimas 3000 líneas
+2850	Configurado en {line} (ventana del modelo desconocida; se usa tu valor)
+2851	No se pudieron leer los mercados de plugins: {msg}
+2852	Nombre de archivo demasiado largo (máx. 255 bytes; un carácter chino cuenta como 3)
+2853	El archivo es demasiado grande ({size}) para analizarlo en la app; usa «Diseño original» para convertirlo a PDF, o descárgalo y ábrelo en otra app.
+2854	El archivo aún no existe
+2855	Error al buscar actualizaciones
+2856	Sin permiso para acceder a esta ubicación (el almacenamiento compartido requiere «Acceso a todos los archivos» en los ajustes del sistema)
+2857	Sin permiso para acceder a esta carpeta (el almacenamiento compartido requiere «Acceso a todos los archivos» en los ajustes del sistema)
+2858	Sin permiso para leer esta ubicación (el almacenamiento compartido requiere «Acceso a todos los archivos» en los ajustes del sistema)
+2859	Error al borrar: {msg}
+2860	El proceso de la terminal se cerró; la entrada no se envió
+2861	No se pudo leer la lista de componentes personalizados: {msg}
+2862	No se pudo leer el historial de confirmaciones
+2863	No se pudo leer el estado de este archivo
+2864	No se pudo leer la lista de archivos de esta confirmación
+2865	Hay conflictos sin resolver; resuélvelos antes de confirmar.
+2866	No se pudo dibujar esta página
+2867	No se puede leer esta ubicación
+2868	Esta carpeta ya no es un repositorio de git
+2869	Esta carpeta no tiene SKILL.md (quizá quede de una importación fallida); puedes eliminarla.
+2870	Esta hoja de cálculo se expande demasiado internamente para abrirla con seguridad.
+2871	La información de rango de esta hoja está dañada y no se puede leer
+2872	Los pseudoarchivos del sistema como este no se pueden leer así
+2873	Las instrucciones del proyecto no están guardadas; volver descartará estos cambios. ¿Volver de todos modos?
+2874	El servicio de vista previa no devolvió una dirección
+2875	No se pudo cargar la ayuda: {msg}
+2876	No se pudo cargar el registro de cambios: {msg}
+2877	El paquete de habilidades supera los 64 MB; descomprímelo e importa las habilidades una por una
+2878	Valor de campo cron no válido: {f}
+2879	El valor del campo cron está fuera de rango: {f}
+2880	Paso de cron no válido: {f}
+2881	La expresión cron necesita cinco campos: minuto hora día mes día de la semana
+2882	«{n}»: la carpeta del proyecto de la tarea ya no existe. Edita la tarea y elige otro proyecto o carpeta
+2883	No se guardaron los marcadores: el almacenamiento está lleno o no hay permiso
+2884	La carpeta del proyecto de la tarea ya no existe. Edita la tarea y elige otro proyecto o carpeta
+2885	No se pudo guardar la sesión bifurcada: {err}
+2886	Una tarea de una sola vez necesita una fecha
+2887	La hora de inicio debe ser 0–23 h, 0–59 min
+2888	La fecha debe tener el formato AAAA-MM-DD
+2889	La hora debe ser 0–23 h, 0–59 min
+2890	Elige al menos un día de la semana (enteros 1–7)
+2891	El día del mes debe ser 1–31 o «último día»
+2892	El intervalo debe ser un entero de 1 a 24 horas
+2893	No se pudo guardar: el almacenamiento está lleno o no hay permiso
+2894	La hora de fin debe ser 0–23 h, 0–59 min
+2895	(Texto demasiado largo; se muestran los primeros {n} caracteres)
+2896	En modo seguro, los modos que no preguntan no se aplican; ahora es «Preguntar cada vez»
+2897	No se guardó la configuración; al reiniciar volverá el modo de permisos anterior
+2898	El mensaje original era demasiado largo; solo se restauraron los primeros 65 000 caracteres
+2899	No se pueden obtener los avisos de seguridad ahora
+2900	Obteniendo avisos de seguridad…
+2901	El host cambió y se borró la clave anterior; vuelve a introducirla
+2902	Ya pasó la hora de reinicio; se actualizará tras el próximo mensaje
+2903	Proyecto creado; la carpeta ya tenía un CLAUDE.md, así que las instrucciones no se escribieron
+2904	sesión oficial · con sesión iniciada
+2905	sesión oficial · sin sesión iniciada
+2906	sesión oficial · no se puede determinar el estado
+2907	sesión oficial · había iniciado sesión en la última comprobación
+2908	sesión oficial · no había iniciado sesión en la última comprobación
+2909	Inicia sesión en tu cuenta
+2910	El inicio de sesión sigue en curso; el enlace de autorización se abrirá en cuanto llegue.
+2911	¿Eliminar el modelo «{id}»? El archivo se borrará de la carpeta de modelos.
+2912	Modelo «{id}» eliminado
+2913	Se importaron {n}; después falló: {msg}
+2914	El kit se actualizó; aún no hay una versión compatible
+2915	El kit se actualizó y el índice de componentes aún no tiene una compilación para el kit actual. Actualiza el kit primero o pulsa «Buscar actualizaciones» para volver a cargar el índice.
+2916	La línea de compactación mínima es 100k; se guardó como 100k
+2917	No se pudo escribir el registro de instalación (el almacenamiento está lleno o no hay permiso); esta instalación no continuó
+2918	Los archivos ya están colocados, pero el registro de instalación no se pudo escribir (el almacenamiento está lleno o no hay permiso). Reinstala o desinstala
+2919	No se pudo escribir el registro del componente (el almacenamiento está lleno o no hay permiso); esta instalación no se completó
+2920	El endpoint devolvió {s}, pero no con el formato esperado, así que no se puede confirmar la clave: {what}
+2921	(vacío)
+2922	El servidor devolvió un error al final de la respuesta ({msg}); se dio por terminada. Si parece incompleta, envía «continúa».
+2923	La ruta «{ep}» elegida para {name} ya no existe. Elige otra ruta en Ajustes e introduce su clave.
+2924	Esta dirección usa http sin cifrar: tu clave y la conversación se envían a la otra máquina sin cifrado. Cámbiala a https si puedes.
+2925	Las tareas programadas se ejecutan en su propio turno: se mueve al principio y empieza en cuanto termine el turno actual
+2926	Al alcanzar el límite se omiten las demás tareas del día y se te avisa. Solo cuenta el gasto de la API oficial: los endpoints de terceros no computan gasto, así que el límite diario no se les aplica.
+2927	Se detiene al superarlo y cuenta como fallo; solo se aplica a la API oficial
+2928	Esta tarea usa un endpoint de terceros: su gasto no se computa, así que no se aplican ni el límite de coste por ejecución ni el diario; el límite de tiempo es la salvaguarda.
+2929	La ruta que elegiste ya no existe (la lista de proveedores se actualizó y la quitó). La clave antigua no se trasladará a otra ruta: elige una ruta, vuelve a introducir la clave y guarda.
+2930	Cambió la ruta: se borró la clave antigua, vuelve a introducirla
+2931	No se pudo cargar el historial: {msg} 
+2932	Durante la instalación, una desinstalación borró {n} archivos compartidos; vuelve a instalar
+2933	El modelo en el dispositivo {model} fijado a esta sesión ya no existe; elige otro en el panel de modelos
+2934	Comprobando el archivo del modelo en el dispositivo…
+2935	El archivo del modelo en el dispositivo fue modificado (la suma de comprobación no coincide); por seguridad no se carga: {file}
+2936	El archivo del modelo en el dispositivo no es GGUF (puede haber sido modificado); no se carga: {file}
+2937	Se agotó el tiempo de inicio de sesión (15 minutos)
+2938	El inicio de sesión sigue en curso; la página de autorización se abrirá cuando llegue su dirección
+2939	La información de descarga de este módulo está incompleta; actualiza primero el kit de desarrollo
+2940	Al paquete del módulo le falta la lista de archivos (MANIFEST); por seguridad no se instala
+2941	La lista de archivos del paquete del módulo contiene una ruta no válida: {file}
+2942	El módulo «{name}» no terminó su configuración inicial ({err}); al instalarlo de nuevo se reintentará
+2943	No se pudo guardar la lista de proyectos (almacenamiento lleno o sin permiso de escritura); este cambio se perderá al reiniciar
+2944	No se pudieron mover {n} chats a la papelera, así que la carpeta no se borró: {why}
+2945	Se borraron {n} archivos compartidos de los que depende el componente «{id}»
