@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { Worker } from "node:worker_threads";
 import { zipReadCore } from "./zipcore.mjs";
-import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
+import { CFG, LAST_LANG, PATHS, PREFIX, log, tr, tz } from "./config.mjs";
 import { NAMES, PEEK_CACHE, PINS, findSessionFile, peekSession, saveNames, savePins } from "./sessions.mjs";
 import { claudeBlocked, claudeCmd, claudeEnv, killTree } from "./claude.mjs";
 import { sealed } from "./edition.mjs";
@@ -553,10 +553,18 @@ export function restoreSession(id) {
   return { ok: true };
 }
 
+/** claude 放后台命令输出的地方：它的 TMPDIR（claudeEnv 给的 $PREFIX/tmp）下的 claude-<uid> */
+export const claudeTmpRoot = () => path.join(PREFIX ? path.join(PREFIX, "tmp") : CFG.home, "claude-" + process.getuid());
 /** 彻底删掉一个会话时把它散在别处的数据一起清掉：删消息备份、file-history、子代理联络簿、档案、书签、会话模型、封签、脉络 */
 async function forgetSessionData(id, meta) {
   try { for (const f of fs.readdirSync(EDITS_DIR)) if (f.startsWith(id + ".")) fs.rmSync(path.join(EDITS_DIR, f), { force: true }); } catch {}
   try { fs.rmSync(path.join(CFG.home, ".claude", "file-history", id), { recursive: true, force: true }); } catch {}
+  // claude 按会话号另存的几处（2.1.311 实测）：环境快照、任务清单、调试日志，和 $TMPDIR/claude-<uid>/<项目>/<会话号> 下的后台命令输出（D10）
+  for (const rel of [["session-env", id], ["tasks", id], ["debug", id + ".txt"]]) { try { fs.rmSync(path.join(CFG.home, ".claude", ...rel), { recursive: true, force: true }); } catch {} }
+  try {
+    const t = claudeTmpRoot();
+    for (const slug of fs.readdirSync(t)) fs.rmSync(path.join(t, slug, id), { recursive: true, force: true });
+  } catch {}
   const cwd = meta && meta.cwd;
   if (cwd) {
     try { fs.rmSync(path.join(cwd, ".cccodroid", "agents", String(id).slice(0, 8)), { recursive: true, force: true }); } catch {}

@@ -414,8 +414,9 @@ function mcpConfig(cwd) {
   Object.assign(servers, proj?.mcpServers || {});
   return Object.keys(servers).length ? { mcpServers: servers } : null;
 }
-// 用户设置里照搬的：权限规则 + 不会让东西跑起来、也不进上下文的几个键
-const KEEP_KEYS = ["includeCoAuthoredBy", "includeGitInstructions", "cleanupPeriodDays", "alwaysThinkingEnabled", "respectGitignore", "attribution"];
+// 用户设置里照搬的：权限规则 + 不会让东西跑起来、也不进上下文的几个键。
+// cleanupPeriodDays 不在这里照搬：settingsArgs 每轮都带着核过的保留期（写坏的值照搬过来会压掉它，见 retention.mjs）
+const KEEP_KEYS = ["includeCoAuthoredBy", "includeGitInstructions", "alwaysThinkingEnabled", "respectGitignore", "attribution"];
 function userSettings() {
   let j = {}; try { j = JSON.parse(readSmallFile(path.join(userClaude(), "settings.json"), 4 << 20) || "{}"); } catch {}
   const out = {};

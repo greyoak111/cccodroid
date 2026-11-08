@@ -140,6 +140,13 @@ test("彻底删除清掉 archive、sessmodel、书签、封签、脉络、.edits
   fs.mkdirSync(EDITS, { recursive: true }); fs.writeFileSync(path.join(EDITS, s.sid + ".1.jsonl"), "x");
   const hist = path.join(CFG.home, ".claude", "file-history", s.sid); fs.mkdirSync(hist, { recursive: true }); fs.writeFileSync(path.join(hist, "a"), "x");
   const agentDir = path.join(cwd, ".cccodroid", "agents", s.sid.slice(0, 8)); fs.mkdirSync(agentDir, { recursive: true }); fs.writeFileSync(path.join(agentDir, "a"), "x");
+  // claude 按会话号另存的几处（D10）：环境快照、任务清单、调试日志、$TMPDIR 下的后台命令输出；别的会话的不动
+  const C = (...r) => path.join(CFG.home, ".claude", ...r), other = uid();
+  const sideDirs = [C("session-env", s.sid), C("tasks", s.sid), path.join(ops.claudeTmpRoot(), "-b2-slug", s.sid, "tasks")];
+  for (const d of sideDirs) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, "x.output"), "x"); }
+  fs.mkdirSync(C("debug"), { recursive: true }); fs.writeFileSync(C("debug", s.sid + ".txt"), "x");
+  const keep = [C("session-env", other), path.join(ops.claudeTmpRoot(), "-b2-slug", other)];
+  for (const d of keep) fs.mkdirSync(d, { recursive: true });
   assert.equal(ops.trashSession(s.sid).ok, true);
   assert.equal(await ops.purgeTrash([s.sid]), 1);
   assert.equal(fs.existsSync(path.join(CFG.home, ".ccapp-trash", s.sid)), false);
@@ -151,6 +158,9 @@ test("彻底删除清掉 archive、sessmodel、书签、封签、脉络、.edits
   assert.equal(fs.existsSync(path.join(EDITS, s.sid + ".1.jsonl")), false);
   assert.equal(fs.existsSync(hist), false);
   assert.equal(fs.existsSync(agentDir), false);
+  for (const d of sideDirs) assert.equal(fs.existsSync(d), false, d);
+  assert.equal(fs.existsSync(C("debug", s.sid + ".txt")), false);
+  for (const d of keep) { assert.equal(fs.existsSync(d), true, d); fs.rmSync(d, { recursive: true, force: true }); }
 });
 
 // ── 导出 / 导入 / 分叉 ──

@@ -20,6 +20,11 @@ case "$CCAPP_KEY_FILE" in
   ""|*[!A-Za-z0-9._/-]*) ;;
   *) [ -r "$CCAPP_KEY_FILE" ] && S="${S:+$S,}\"apiKeyHelper\":\"cat '$CCAPP_KEY_FILE'\"" ;;
 esac
+# 会话保留期（见 gateway/gw/retention.mjs）：claude 缺省 30 天就把会话连同附属数据删掉，项目目录的 settings.json 写个小数字还会压过用户级的。
+# 这里照用户级设置里的值（没写、写的不是 1 到 9 位的正整数就按 36500 天）经 --settings 带上，项目设置压不过它
+R=$(sed -n 's/.*"cleanupPeriodDays"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$HOME/.claude/settings.json" 2>/dev/null | head -n 1)
+case "$R" in ""|0*|??????????*) R=36500 ;; esac
+S="${S:+$S,}\"cleanupPeriodDays\":$R"
 # 发行版封口（见 gateway/gw/edition.mjs）：用户级 / 项目级的 Claude Code 配置不让 claude 自己读，由 guard/cc-seal.mjs 检查后经旗标回填；
 # 用户自带的 --settings、--system-prompt 这类能往上下文里塞东西的旗标不认。开发版（cccodroid-dev）把下面这行改成 0。
 SEALED=1

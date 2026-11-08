@@ -14,6 +14,7 @@ import { sealed } from "./edition.mjs";
 import { readHeadFile, readSmallFile } from "./saferead.mjs";
 import { extIdOk, extOff, saveExtOff } from "./extoff.mjs";
 import { modulesInfo } from "./modules.mjs";
+import { RETENTION_DAYS } from "./retention.mjs";
 
 // ── 扩展：插件 / 技能 / MCP ───────────────────────────────────────────
 // 全部转给 claude 自己的命令行（claude plugin … / claude mcp …），网关不自己改它的配置文件 ——
@@ -402,24 +403,41 @@ export function skillOverrides() {
   const o = r.j && r.j.skillOverrides;
   return o && typeof o === "object" && !Array.isArray(o) ? o : {};
 }
-/** 改用户级 settings.json 里的 skillOverrides（和存钩子同一把锁、同一套写法：先留 .bak，换名写入，userconf 只认这一个键） */
-function writeSkillOverrides(edit) {
+/** 改用户级 settings.json 里的一个键（和存钩子同一把锁、同一套写法：先留 .bak，换名写入，userconf 只认这一个键）。
+ *  edit(j) 就地改整份设置；返回 false 表示不用写 */
+function writeUserSetting(key, edit) {
   const job = EXT_LOCK.then(() => {
     const file = USER_SETTINGS(), r = readSettingsFile(file);
     if (r.error) throw new Error(r.badJson ? tz("~/.claude/settings.json 不是合法的 JSON，先修好它") : r.error);
-    const j = r.j, cur = j.skillOverrides && typeof j.skillOverrides === "object" && !Array.isArray(j.skillOverrides) ? { ...j.skillOverrides } : {};
-    edit(cur);
-    if (Object.keys(cur).length) j.skillOverrides = cur; else delete j.skillOverrides;
+    const j = r.j;
+    if (edit(j) === false) return { ok: true, changed: false };
     const ucb = ucAppBegin();
     fs.mkdirSync(path.dirname(file), { recursive: true });
     if (r.exists) { try { const b = file + ".bak.tmp-" + process.pid; fs.copyFileSync(file, b); fs.renameSync(b, file + ".bak"); } catch {} }
     const tmp = file + ".tmp-" + process.pid;
     fs.writeFileSync(tmp, JSON.stringify(j, null, 2) + "\n"); fs.renameSync(tmp, file);
-    ucAppWrote([".claude/settings.json"], ucb, { ".claude/settings.json": ["skillOverrides"] });
-    return { ok: true };
+    ucAppWrote([".claude/settings.json"], ucb, { ".claude/settings.json": [key] });
+    return { ok: true, changed: true };
   });
   EXT_LOCK = job.catch(() => {});
   return job;
+}
+function writeSkillOverrides(edit) {
+  return writeUserSetting("skillOverrides", (j) => {
+    const cur = j.skillOverrides && typeof j.skillOverrides === "object" && !Array.isArray(j.skillOverrides) ? { ...j.skillOverrides } : {};
+    edit(cur);
+    if (Object.keys(cur).length) j.skillOverrides = cur; else delete j.skillOverrides;
+  });
+}
+/** 网关启动时：用户级设置没写会话保留期（cleanupPeriodDays）就补成永久，写过的不动（D10，见 retention.mjs）。
+ *  文件坏了不修、不覆盖：每轮的 --settings 照样带着保留期 */
+export async function ensureSessionRetention() {
+  const r = await writeUserSetting("cleanupPeriodDays", (j) => {
+    if (j.cleanupPeriodDays !== undefined) return false;
+    j.cleanupPeriodDays = RETENTION_DAYS;
+  });
+  if (r.changed) log(`会话保留期：~/.claude/settings.json 没写 cleanupPeriodDays，已补成 ${RETENTION_DAYS} 天（claude 缺省 30 天就删会话）`);
+  return r;
 }
 async function setSkillMode(dir, mode) {
   if (!skillDirOk(dir, listSkills().map((x) => x.dir))) return { ok: false, message: "bad name" };

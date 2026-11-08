@@ -14,6 +14,7 @@ import { APP } from "./appfiles.mjs";
 import { sealArgv, sealEnv, sealed } from "./edition.mjs";
 import { claudeSeal } from "./claudeseal.mjs";
 import { gwRuntimeBlocked } from "./gwpin.mjs";
+import { sessionRetention } from "./retention.mjs";
 
 // 敏感操作再确认：PreToolUse 钩子（guard/cc-guard.mjs），碰密钥 / 读屏点按 / 往外分享时让 claude 停下来问，全部放行也一样。
 // 不设全局关闭开关：整层关掉就等于没有；旧设置里存过 guard:false 也不再认。要放行就在确认卡片上逐次「允许」。
@@ -516,7 +517,7 @@ export function descendants(root) {
   return out;
 }
 
-/** 每次起 claude 都带的 --settings：输出风格 + 密钥读取器。
+/** 每次起 claude 都带的 --settings：输出风格 + 密钥读取器 + 会话保留期。
  *  apiKeyHelper 的输出 claude 会同时放进 x-api-key 与 Authorization: Bearer，两种认证风格都覆盖。 */
 const KEY_FILE = path.join(CFG.home, ".cache", "ccapp-key");
 
@@ -563,6 +564,8 @@ export function settingsArgs(p = PROVIDER) {
     // 代价是用户在设置里关掉的钩子也会跑 —— 扩展页的「关闭全部钩子」因此改成把钩子挪进暂存键（见 extensions.mjs）
     if (g) { st.hooks.PreToolUse = g; st.disableAllHooks = false; }
   }
+  // 会话保留期：项目目录的 settings.json 写个小数字会压过用户级的，--settings 压得住它（D10，见 retention.mjs）
+  st.cleanupPeriodDays = sessionRetention().days;
   const key = keyOf(p);
   const file = p.id === PROVIDER.id ? KEY_FILE : KEY_FILE + "-" + String(p.id).replace(/[^\w.-]/g, "_");
   if (key) {

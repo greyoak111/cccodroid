@@ -67,7 +67,7 @@ import { routeLocal } from "./gw/local.mjs";
 import { routeUsage } from "./gw/usage.mjs";
 import { routeDevside } from "./gw/devside.mjs";
 import { routeFeedback } from "./gw/feedback.mjs";
-import { migrateHookPause, routeExtensions } from "./gw/extensions.mjs";
+import { ensureSessionRetention, migrateHookPause, routeExtensions } from "./gw/extensions.mjs";
 import { routeNotices } from "./gw/notices.mjs";
 import { routeReconcile } from "./gw/reconcile.mjs";
 import { PROJECTS, routeProjects } from "./gw/projects.mjs";
@@ -212,6 +212,7 @@ server.listen(CFG.port, "127.0.0.1", () => {
   try { cleanOrphans(); } catch (e) { log("旧工具包残留清理失败: " + e.message); }
   try { startWorkIsland(); } catch (e) { log("工作岛启动失败: " + e.message); }
   migrateHookPause().catch((e) => log("转换 hooks 暂停失败: " + e.message));
+  ensureSessionRetention().catch((e) => log("补会话保留期失败: " + e.message));
 });
 
 // 启动后校验一次模型名：不在清单里就落到默认。
