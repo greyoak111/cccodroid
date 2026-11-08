@@ -5,7 +5,7 @@ import { CFG, LAST_LANG, PATHS, log, tr, tz, permModeAction } from "./config.mjs
 import { SETTINGS, capList, settingsDiskCheck } from "./settings-store.mjs";
 import { PERM_MODES, PROVIDER, billAfterRun, keyOf, noteTokens, providerById, providersDiskCheck } from "./providers.mjs";
 import { ALIAS_SEEN, effortLevelsOf, fetchModels, isLoginMode, modelsCached, normEffort } from "./models.mjs";
-import { claudeAtLeast, claudeCmd, claudeEnv, currentModelInfo, ensureBridge, safeModePerm, settingsArgs } from "./claude.mjs";
+import { bridgeSwitching, claudeAtLeast, claudeCmd, claudeEnv, currentModelInfo, ensureBridge, safeModePerm, settingsArgs } from "./claude.mjs";
 import { tasksCheck } from "./goal.mjs";
 import { setLastInit } from "./caps.mjs";
 import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
@@ -284,6 +284,9 @@ export async function startRun(item) {
     return endRun(run, { failed: true });
   }
   if (run.aborted) return endRun(run, {});
+  // 正在换厂商、桥还没换完上游：等它换完再连（200-7-08）
+  const sw = bridgeSwitching();
+  if (sw) { await sw; if (run.aborted || run.ended) return endRun(run, {}); }
   run.readyAbort = new AbortController();
   try {
     await ensureManagedBridge(P, { signal: run.readyAbort.signal });

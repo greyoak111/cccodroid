@@ -161,6 +161,15 @@ function findBridgePids() {
  *  桥的上游原本是启动参数，所以换厂商必须重启桥 —— 而重启会掐断正在传输的流。
  *  新版桥开了个控制面 POST /__upstream，运行中改目标，正在跑的请求各自持有旧目标跑完。
  *  老桥不认这个面，就退回"杀掉重起"的老办法。 */
+// 换厂商时桥换上游的那一段（settings.mjs）：这期间 PROVIDER 已经是新的、桥可能还指着旧的。
+// 新起的轮次等它换完再连；第二次换厂商直接回忙（0.6.9 审计 200-7-08：以前占槽检查在 await 之前，中间进来的轮次拿新密钥敲旧上游）
+let SWITCHING = null;
+export const bridgeSwitching = () => SWITCHING;
+export function beginBridgeSwitch() {
+  let done;
+  SWITCHING = new Promise((r) => { done = r; });
+  return () => { SWITCHING = null; done(); };
+}
 export async function setBridgeUpstream(url) {
   if (!url) return false;
   const ok = await new Promise((resolve) => {

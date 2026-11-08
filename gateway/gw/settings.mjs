@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CFG, PATHS, PERM_MODES, log, tz } from "./config.mjs";
 import { API_KEY, BUILTIN_PROVIDER, PROVIDER, PROVIDERS_CFG, applyProvider } from "./providers.mjs";
-import { setBridgeUpstream } from "./claude.mjs";
+import { beginBridgeSwitch, bridgeSwitching, setBridgeUpstream } from "./claude.mjs";
 import { MAX_PARALLEL_CAP, RUNS, maxParallel } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { customRefresh } from "./custom.mjs";
@@ -110,17 +110,20 @@ export async function routeSettings(req, res, u, p) {
         if (want && !known) return sendJson(res, 400, { error: "unknown provider", provider: want });
 
         if (want !== PROVIDER.id) {
-          if (RUNS.size) {
+          if (RUNS.size || bridgeSwitching()) {
             return sendJson(res, 409, {
               error: "busy",
               message: tz("这一轮还在生成中，等它跑完再切厂商（切换会换掉正在用的密钥与模型）。"),
             });
           }
-          SETTINGS.provider = want;
-          SETTINGS.model = null;          // 别把上一家的模型名带过去
-          applyProvider();
-          // 上游热切 —— 不重启桥，也就没有断流窗口
-          await setBridgeUpstream(CFG.upstream);
+          const switched = beginBridgeSwitch();
+          try {
+            SETTINGS.provider = want;
+            SETTINGS.model = null;          // 别把上一家的模型名带过去
+            applyProvider();
+            // 上游热切 —— 不重启桥，也就没有断流窗口
+            await setBridgeUpstream(CFG.upstream);
+          } finally { switched(); }
           log(`已切换厂商 → ${PROVIDER.id}  上游 ${CFG.upstream}  ` +
               `${API_KEY ? "有密钥" : (PROVIDER.login ? "走登录态" : "无密钥")}`);
         }

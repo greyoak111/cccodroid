@@ -135,7 +135,7 @@ test("200-7-07：起进程前的等待（这里是拉另一家的模型清单）
   const prev = globalThis.fetch;
   globalThis.fetch = () => new Promise((_, rej) => { release = () => rej(new Error("late")); });
   try {
-    script([init(crypto.randomUUID()), result], 0);
+    script([{ raw: `: > ${root}/ran-707` }, init(crypto.randomUUID()), result], 0);
     const p = startRun({ id: "a0610-707", message: "fixture", cwd: root, pin: { provider: "custom-a0610slow" } });
     await until(() => release);
     const t0 = Date.now();
@@ -145,8 +145,22 @@ test("200-7-07：起进程前的等待（这里是拉另一家的模型清单）
     release();
     await p;
     assert.equal(events.filter((e) => e.type === "run_end" && e.runId === "a0610-707").length, 1);
-    assert.ok(!events.some((e) => e.type === "init" && e.runId === "a0610-707"), "等待回来后不再起进程");
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(fs.existsSync(path.join(root, "ran-707")), false, "等待回来后不再起进程");
   } finally { globalThis.fetch = prev; }
+});
+
+test("200-7-08：换厂商时桥还没换完上游 → 新起的轮次等它换完再起进程", async () => {
+  const { beginBridgeSwitch } = await import("../gw/claude.mjs");
+  const done = beginBridgeSwitch();
+  script([{ raw: `: > ${root}/ran-708` }, init(crypto.randomUUID()), result], 0);
+  const p = startRun({ id: "a0610-708", message: "fixture", cwd: root });
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(fs.existsSync(path.join(root, "ran-708")), false, "换完之前不起");
+  done();
+  await p;
+  await until(() => endOf("a0610-708"));
+  assert.equal(endOf("a0610-708").subtype, "success");
 });
 
 // 放最后：它留下的后台 sleep 30 还活着时，后面的轮次会先弹「用户配置」确认卡
