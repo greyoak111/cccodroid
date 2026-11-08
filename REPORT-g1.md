@@ -9,9 +9,9 @@
 | 195-G.5 | 启动随机数 stdin 阻塞读，5 秒超时对无数据管道无效，网关在 listen 前挂住 | `gw/access.mjs:85-99` | 已修 |
 | 195-G.6 | 手机浏览器打开 127.0.0.1:8791 静态页能开、`/api/*` 全 403，前端标「网关离线」 | `gw/access.mjs`；提示文案在前端 | 移交 |
 | 195-E.6 | 切接口后 `titleModel` 残留旧厂商型号，设置页显示选中、实际静默不用 | `gw/settings.mjs:116-117`；`gw/autotitle.mjs:88-90` | 已修 |
-| 195-V.1 | 组件索引无防回滚，`compState` 只比 sha256；UI 不显示待装版本 | `gw/components.mjs`；`web/app/08-extensions.js` | 待办 |
-| 195-V.2 | `use-local-index` 是私有目录里的文件开关，可把来源换成 `file://` 且不校验新鲜度 | `gw/components.mjs` | 待办 |
-| 195-V.3 | 索引磁盘缓存未验签，同 uid 可伪造条目绕过整条验签链并执行 `first-run.sh` | `gw/components.mjs` | 待办 |
+| 195-V.1 | 组件索引无防回滚，`compState` 只比 sha256；UI 不显示待装版本 | `gw/components.mjs`；`web/app/08-extensions.js` | 已修 |
+| 195-V.2 | `use-local-index` 是私有目录里的文件开关，可把来源换成 `file://` 且不校验新鲜度 | `gw/components.mjs` | 已修 |
+| 195-V.3 | 索引磁盘缓存未验签，同 uid 可伪造条目绕过整条验签链并执行 `first-run.sh` | `gw/components.mjs` | 已修 |
 | 196-供应链.1 | 组件安装只按 id 锁，跨组件并发共享文件可被删/覆盖；`compRecords()` 看不到 installing | `gw/components.mjs` | 待办 |
 | 196-供应链.2 | 模块/自定义组件暂存清理缺口：devkit-stage 失败不删；`.stage-*` 重启后永久孤儿 | `gw/modules.mjs`（custom.mjs 半 移交） | 待办 |
 | 196-供应链.3 | `pkg uninstall/upgrade` 与 `modRemove` 按可写记录删文件，未做 safeRel | `android/assets/bin/pkg.mjs`；`gw/modules.mjs` | 待办 |
@@ -27,6 +27,9 @@
 |---|---|---|---|
 | 195-G.5 | 本条 | 经 `/proc/self/fd/0` 重开一份带 `O_NONBLOCK` 的描述符再读，没数据时拿 EAGAIN，5 秒期限才真正生效；重开不了就不读，宁可认不出这个网关也不在 listen 前挂死 | `gateway/tests/a0610-g1-spawn-stdin.test.mjs`：FIFO 模拟应用给的阻塞管道。旧代码 12 秒超时失败，新代码 5.3 秒正常导入；另用真随机数验 proof 按派生钥匙算 |
 | 195-E.6 | 本条 | 切厂商时和 `model` 一样把 `SETTINGS.titleModel` 清空，界面不再显示一个实际不用的旧型号 | `gateway/tests/a0610-g1-titlemodel.test.mjs`：旧代码失败、新代码通过；POST 切到另一家后内存与磁盘上的 `titleModel`/`model` 都是 null |
+| 195-V.1 | 本条（与 V.2/V.3 同一次提交） | 加 `compVerCmp`/`compOlder`：索引构建比已装记录旧时 `compState` 不再报「可更新」，`compInstall` 直接拒绝降级；卡片同时显示「已装 → 待装」两个版本 | `gateway/tests/a0610-g1-comp-rollback.test.mjs`：旧代码 7 条全挂（缺接口且行为不对），新代码 7 条全过；含 compState 五种版本组合与 compInstall 端到端拒装、记录不动 |
+| 195-V.2 | 本条（与 V.1/V.3 同一次提交） | 本地索引只认启动环境变量 `CCAPP_COMPONENTS_USE_LOCAL_INDEX=1`，私有目录里的 `use-local-index` 文件不再算数；与 `allow-unsigned` 同口径 | `gateway/tests/a0610-g1-comp-cache.test.mjs` 第 1 条：放旧开关文件仍走官方源；只有环境变量置 1 才认共享目录索引 |
+| 195-V.3 | 本条（与 V.1/V.2 同一次提交） | 磁盘缓存改存每个来源的原始正文与签名，读回来当场按公钥复核（旧格式缓存按未验签处理、`at=0` 强制刷新）；`compInstall` 对未验签条目直接拒绝 | 同上文件后 3 条：真签名缓存重开不联网即用、正文被改即丢弃重拉、伪造的旧格式缓存装不了组件 |
 
 ## 不成立
 
