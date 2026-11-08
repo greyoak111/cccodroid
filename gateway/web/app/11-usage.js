@@ -181,9 +181,20 @@
     text("cccodroid.net", W - P, y + 56, font(600, 24), FG2, "right");
   }
 
-  // 换外观时重画月报（theme.js 只改 html 的 data-theme / data-skin，不发事件）
-  new MutationObserver(() => { if (us.raw && $("us-card")) usRender(); })
+  // 换外观时重画月报（theme.js 只改 html 的 data-theme / data-skin 和 <style id="user-accent"> 的内容，不发事件）
+  const usRepaint = () => { if (us.raw && $("us-card")) usRender(); };
+  new MutationObserver(usRepaint)
     .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-skin"] });
+  // 强调色只换那段 style 的文字、不碰 html 属性，得单独盯着（195-L.10）：第一次创建、之后每次改色都要重画
+  let usAccStyle = null;
+  const usWatchAccent = () => {
+    const el = document.getElementById("user-accent");
+    if (el === usAccStyle) return;
+    usAccStyle = el;
+    if (el) new MutationObserver(usRepaint).observe(el, { childList: true, characterData: true, subtree: true });
+  };
+  new MutationObserver(usWatchAccent).observe(document.head, { childList: true });
+  usWatchAccent();
 
   function usRender() {
     // 还没读回来：月份标签说明在等/失败了，翻月和保存分享先灰掉，别看着能点、点了没反应（审查 F-009）
@@ -227,13 +238,15 @@
     // 数字一排：额度（官方账户才有）、今天、本月、缓存命中
     const q = usDash.quota, kpi = [];
     if (q) {
-      const pct = Math.round(Math.max(0, Math.min(100, q.used)));
+      // 网关给的已经是百分数，超额度时会大于 100：数字如实显示，只把条子画满（197-5.7）
+      const pct = Math.round(Math.max(0, +q.used || 0)), barPct = Math.min(100, pct);
       const left = q.resetsAt ? q.resetsAt * 1000 - Date.now() : 0, gone = 1 - Math.max(0, Math.min(1, left / (7 * 86400e3)));
-      const pace = !q.resetsAt ? "" : pct <= gone * 100 + 5 ? t("按现在的速度够用") : t("照这个速度会提前用完");
+      // 重置时间已经过了、额度还没刷新：别拿旧数算「够用」，说清楚等下一轮（195-O.6）
+      const pace = !q.resetsAt ? "" : left <= 0 ? t("已过重置时间，下一轮对话后刷新") : pct <= gone * 100 + 5 ? t("按现在的速度够用") : t("照这个速度会提前用完");
       const at = q.resetsAt ? new Date(q.resetsAt * 1000) : null;
       const reset = at ? t("{time} 重置", { time: at.toLocaleDateString(I18N.lang, { weekday: "short" }) + " " + at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }) : "";
       kpi.push(`<div class="tile big${pct >= 90 ? " hot" : pct >= 70 ? " warm" : ""}"><span class="k">${esc(t("本周额度 · 官方账户"))}</span><span class="n num">${pct}%</span>
-        <div class="bar-mini"><i style="width:${pct}%"></i></div><span class="k">${esc([reset, pace].filter(Boolean).join(" · "))}</span></div>`);
+        <div class="bar-mini"><i style="width:${barPct}%"></i></div><span class="k">${esc([reset, pace].filter(Boolean).join(" · "))}</span></div>`);
     }
     // 没读成过：说读取失败、给重试，别把 0 当成真数字（审查 F-006）
     if (!us.raw && us.err) kpi.push(`<div class="tile big"><span class="k">${esc(t("用量读取失败：{msg}", { msg: us.err }))}</span><button class="btn sm ghost" id="us-retry">${esc(t("重试"))}</button></div>`);
@@ -329,13 +342,33 @@
     } catch (e) { us.err = e.message || "?"; $("us-result").textContent = "✗ " + e.message; usPaint(); if (!$("us-field").classList.contains("hidden")) usRender(); }
   }
   // 开着用量页时跟着刷新：token 现在是边跑边记的（gw/usage.mjs usageMeter），不用等这一轮结束、也不用退出重进。数没变就不重画
+  // 本地日期 / 时区变了（跨午夜、换时区、夏令时）：日、周、月的分组全得按新的算（195-O.5–O.7、197-5.12）
+  const usTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } };
+  let usSeen = usDayKey(new Date()) + "|" + usTz();
+  function usDayMoved() {
+    const s = usDayKey(new Date()) + "|" + usTz();
+    if (s === usSeen) return false;
+    usSeen = s;
+    return true;
+  }
   setInterval(async () => {
     if (curPage !== "usage" || document.hidden || us.busy || !us.raw) return;
-    let r; try { r = await api("/api/usage"); } catch { return; }
-    if (curPage !== "usage" || JSON.stringify(r.hours) === JSON.stringify(us.raw.hours)) return;
-    us.raw = r; usBuild(); usPaint();
+    let r = null; try { r = await api("/api/usage"); } catch {}
+    if (curPage !== "usage") return;
+    const moved = usDayMoved();
+    // 只比 hours 会漏掉补算进度 / 开关 / 起始时间的变化（195-O.7）
+    const sig = (x) => JSON.stringify([x.hours, x.imported, x.importing, x.off, x.since]);
+    if (!moved && (!r || sig(r) === sig(us.raw))) return;
+    if (r) us.raw = r;
+    usBuild(); usPaint();
     if (!$("us-field").classList.contains("hidden")) usRender();
   }, 20000);
+  // 从后台回来：挂后台期间可能跨了午夜 / 换了时区，按现在的本地日期重算一遍
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden || curPage !== "usage" || !us.raw) return;
+    usDayMoved(); usBuild(); usPaint();
+    if (!$("us-field").classList.contains("hidden")) usRender();
+  });
   async function usImport(auto) {
     us.busy = true;
     $("us-result").textContent = t("正在从历史会话补算…");
@@ -399,7 +432,11 @@
         if (confirm(t("按现存的会话记录重新补算 {d} 之前的统计？删掉的会话补不回来，那部分会变少。", { d: new Date(us.raw.since).toLocaleDateString(I18N.lang) }))) usImport(false);
       } else if (act === "clear-month") {
         if (!confirm(t("清除 {m} 的统计？", { m: usMonthName(y, m) }))) return;
-        await post("/api/usage/clear", { from: usMonth0(y, m).getTime(), to: usMonth0(y, m + 1).getTime() });
+        // 统计按 UTC 整点桶存、只能整桶删：区间对到整点上。半小时 / 45 分时区里本地月初月末不在整点，
+        // 不这么对会把下个月（或上个月）边界那个桶一起删掉（195-O.5）
+        const clearFrom = Math.ceil(usMonth0(y, m).getTime() / 3600e3) * 3600e3;
+        const clearTo = Math.floor(usMonth0(y, m + 1).getTime() / 3600e3) * 3600e3;
+        await post("/api/usage/clear", { from: clearFrom, to: clearTo });
         loadUsage();
       } else if (act === "clear-all") {
         if (!confirm(t("清空全部使用统计？之后从现在重新开始记。"))) return;
@@ -526,7 +563,8 @@
       let r;
       try { r = await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
       state.provView = r.id;
-      await reloadProv(p ? t("已保存") : t("已添加"), true);
+      // 换了主机又没给新 Key：网关把旧 Key 清掉了，得说清楚、让用户重新填（0.6.9 审计 P1-2）
+      await reloadProv(r.keyCleared ? t("换了主机，旧 Key 已清掉，请重新填") : p ? t("已保存") : t("已添加"), true);
     };
   }
 

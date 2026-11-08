@@ -216,11 +216,12 @@
     };
     const row = (label, w) => {
       if (!w) return "";
-      const pct = Math.max(0, Math.min(100, w.used));
+      // 网关给的已经是百分数，超额度时大于 100：数字如实显示，只把条子画满（197-5.7）
+      const pct = Math.round(Math.max(0, +w.used || 0)), bar = Math.min(100, pct);
       const cls = pct >= 90 ? " hot" : pct >= 70 ? " warm" : "";
       return `<div class="quota-row"><span class="quota-l">${label}</span>
-        <span class="quota-bar"><i class="${cls.trim()}" style="width:${pct}%"></i></span>
-        <span class="quota-v">${Math.round(pct)}%</span>
+        <span class="quota-bar"><i class="${cls.trim()}" style="width:${bar}%"></i></span>
+        <span class="quota-v">${pct}%</span>
         <span class="tiny">${w.resetsAt ? t("{time} 重置", { time: esc(when(w.resetsAt)) }) : ""}</span></div>`;
     };
     const ago = Math.max(0, Math.round((Date.now() - l.at) / 60000));
@@ -241,14 +242,15 @@
     }
     const tile = (label, w) => {
       if (!w) return "";
-      const pct = Math.max(0, Math.min(100, w.used));
+      // 超额度时数字如实显示（可能大于 100），条子只画满（197-5.7）
+      const pct = Math.round(Math.max(0, +w.used || 0)), bar = Math.min(100, pct);
       const cls = pct >= 90 ? "hot" : pct >= 70 ? "warm" : "";
       const at = w.resetsAt ? new Date(w.resetsAt * 1000) : null;
       const reset = at ? t("{time} 重置", { time: esc(at.toDateString() === new Date().toDateString()
         ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
         : at.toLocaleDateString([], { month: "numeric", day: "numeric" }) + " " + at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })) }) : "";
-      return `<div class="q-tile ${cls}"><span class="q-l">${label}</span><b>${Math.round(pct)}<small>%</small></b>
-        <span class="quota-bar"><i class="${cls}" style="width:${pct}%"></i></span><span class="q-r">${reset}</span></div>`;
+      return `<div class="q-tile ${cls}"><span class="q-l">${label}</span><b>${pct}<small>%</small></b>
+        <span class="quota-bar"><i class="${cls}" style="width:${bar}%"></i></span><span class="q-r">${reset}</span></div>`;
     };
     $("quota-tiles").innerHTML = tile(t("5 小时"), l.fiveHour) + tile(t("每周"), l.sevenDay);
     const lq = $("login-state") && $("login-state").querySelector(".quota");   // 设置里登录卡片上的那两条

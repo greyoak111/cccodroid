@@ -58,5 +58,29 @@
     "ru": "Получаем уведомления о безопасности…",
     "id": "Mengambil pemberitahuan keamanan…",
     "ar": "جارٍ جلب إشعارات الأمان…"
+  },
+  {
+    "zh": "换了主机，旧 Key 已清掉，请重新填",
+    "en": "The host changed, so the old key was cleared — please enter it again",
+    "ja": "接続先が変わったため古い API キーを消去しました。もう一度入力してください",
+    "ko": "호스트가 바뀌어 이전 키를 지웠습니다. 다시 입력해 주세요",
+    "zh-Hant": "換了主機，舊 Key 已清掉，請重新填",
+    "es": "El host cambió y se borró la clave anterior; vuelve a introducirla",
+    "fr": "L'hôte a changé, l'ancienne clé a été effacée ; saisissez-la à nouveau",
+    "ru": "Хост изменился, старый ключ удалён — введите его заново",
+    "id": "Host berubah, kunci lama telah dihapus; silakan isi ulang",
+    "ar": "تغيّر المضيف وتم مسح المفتاح القديم؛ يرجى إدخاله من جديد"
+  },
+  {
+    "zh": "已过重置时间，下一轮对话后刷新",
+    "en": "The reset time has passed; it will refresh after the next message",
+    "ja": "リセット時刻を過ぎました。次のメッセージの後に更新されます",
+    "ko": "재설정 시간이 지났습니다. 다음 대화 후에 갱신됩니다",
+    "zh-Hant": "已過重置時間，下一輪對話後刷新",
+    "es": "Ya pasó la hora de reinicio; se actualizará tras el próximo mensaje",
+    "fr": "L'heure de réinitialisation est passée ; actualisation après le prochain message",
+    "ru": "Время сброса прошло; обновится после следующего сообщения",
+    "id": "Waktu reset sudah lewat; akan diperbarui setelah pesan berikutnya",
+    "ar": "انقضى وقت إعادة الضبط؛ سيُحدَّث بعد الرسالة التالية"
   }
 ]
