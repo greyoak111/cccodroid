@@ -515,7 +515,8 @@ export async function routeSessions(req, res, u, p) {
       let r;
       try { r = trashSession(id); } catch (e) { return sendJson(res, 500, { error: e.message }); }
       if (r.ok) log(`会话进回收站 ${id.slice(0, 8)}`);
-      return sendJson(res, r.ok ? 200 : 404, r);
+      // 写不进 meta 是服务端/存储问题，别报成 404（195-N.1）
+      return sendJson(res, r.ok ? 200 : r.error === "write_failed" ? 500 : 404, r);
     }
 
     if (req.method === "POST" && action === "rename") {

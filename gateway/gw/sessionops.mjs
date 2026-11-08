@@ -448,7 +448,7 @@ export function trashSession(id) {
   if (!writeAtomic(metaFile, JSON.stringify({
     id, project: found.project, title: NAMES[id] || meta.title, renamed: !!NAMES[id], pinned: PINS[id] || 0,
     cwd: meta.cwd, mtime: st.mtimeMs, size: st.size, sideSize, total: st.size + sideSize, deletedAt: Date.now(),
-  }))) { fs.rmSync(slot, { recursive: true, force: true }); return { ok: false, error: "write_failed" }; }
+  }))) { fs.rmSync(slot, { recursive: true, force: true }); return { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }; }
   fs.renameSync(found.file, path.join(slot, id + ".jsonl"));
   if (fs.existsSync(side)) fs.renameSync(side, path.join(slot, "dir"));
   if (PINS[id]) { delete PINS[id]; savePins(); }
