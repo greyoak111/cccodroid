@@ -1053,14 +1053,16 @@
     el = b.closest(".msg"); el.id = "intr-card"; el.dataset.id = it.id; el.dataset.n = others + "/" + drafts;
     const when = new Date(it.startedAt || it.at).toLocaleString();
     // why: card —— 启动前的确认卡没人答、超时停下的（#171）：claude 根本没起，有会话也只能「重发」，不能「继续」
-    const card = it.why === "card", cont = !!it.sessionId && !card;
+    // why: unstarted —— 还没起 claude 就被结束了（等确认卡、等桥…，195-P.3）：同样只能「重发」
+    const card = it.why === "card", unstarted = it.why === "unstarted", cont = !!it.sessionId && !card && !unstarted;
     setHtml(b, `<p>${esc(card ? t("这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。", { n: 10, when })
+        : unstarted ? t("这一轮还没开始就被结束了（{when} 发的）。", { when })
         // cause：网关分得清的中断原因（195-A.11）。没有就是没打招呼就没了：系统回收、强行停止
         : it.cause === "update" ? t("这一轮没跑完：App 更新时网关重启了（{when} 开始的）。", { when })
         : it.cause === "stop" ? t("这一轮没跑完：网关被关闭或重启了（{when} 开始的）。", { when })
         : t("这一轮没跑完：App 在后台被系统结束了（{when} 开始的）。", { when }))}</p>
       <blockquote>${esc(String(it.text || "").slice(0, 300))}</blockquote>
-      <p class="perm-sub">${esc(card ? t("Claude 没收到这条消息。点「重发」把它放回输入框。")
+      <p class="perm-sub">${esc(card || unstarted ? t("Claude 没收到这条消息。点「重发」把它放回输入框。")
         : it.sessionId ? t("已经做完的部分都在会话里。点「继续」让 Claude 从断开的地方接着做。")
         : t("会话还没来得及建立，Claude 没收到这条消息。点「重发」把它放回输入框。"))}</p>
       ${others ? `<p class="perm-sub">${esc(t("另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。", { n: others }))}</p>` : ""}

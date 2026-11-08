@@ -133,6 +133,8 @@ export function saveRunMark() {
       // 现在存到 64K（更长的标 textCut，界面要说），连同发送参数 req、定时任务身份 sched（AA.3）
       runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, text: r.text.slice(0, TEXT_KEEP), ...(r.text.length > TEXT_KEEP ? { textCut: true } : {}),
         startedAt: r.startedAt, ...(r.req && Object.keys(r.req).length ? { req: r.req } : {}), ...(r.sched ? { sched: r.sched } : {}),
+        // 还没起进程（等确认卡、等桥、核验程序…）：claude 根本没收到这条，恢复后只能「重发」不能「继续」（195-P.3）
+        ...(r.preSpawn ? { unstarted: true } : {}),
         ...(r.sealBase?.hash && r.sealBase.sid === r.sessionId ? { sealBase: { size: r.sealBase.size, hash: r.sealBase.hash } } : {}),
         ...(r.idle && !r.bgTasks ? { done: true } : {}) })),
       // 已经写进 stdin、claude 还没吃进去的插话也算排队的：一起留下
@@ -207,7 +209,7 @@ export function recoverRunMark() {
   }
   if (runs.length) {
     const cause = m.app && APP_ID && m.app !== APP_ID ? "update" : m.stop ? "stop" : null;
-    const now = Date.now(), fresh = runs.map((r) => ({ ...r, at: now, ...(cause ? { cause } : {}) }));
+    const now = Date.now(), fresh = runs.map((r) => ({ ...r, at: now, ...(cause ? { cause } : {}), ...(r.unstarted && !r.why ? { why: "unstarted" } : {}) }));
     // 上次没处理的中断记录留着；同一个会话以这次的为准
     const sids = new Set(fresh.map((r) => r.sessionId).filter(Boolean)), ids = new Set(fresh.map((r) => r.id));
     if (!setInterrupted([...INTERRUPTED.filter((e) => !ids.has(e.id) && !(e.sessionId && sids.has(e.sessionId))), ...fresh])) {

@@ -2971,4 +2971,5 @@ window.I18N_DICT["fr"] = {
   "这一轮没跑完：App 更新时网关重启了（{when} 开始的）。": "Ce tour n’a pas abouti : la passerelle a redémarré pendant la mise à jour de l’app (commencé {when}).",
   "这一轮没跑完：网关被关闭或重启了（{when} 开始的）。": "Ce tour n’a pas abouti : la passerelle a été arrêtée ou redémarrée (commencé {when}).",
   "工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。": "Le dossier de travail {dir} a disparu (supprimé, renommé ou carte de stockage retirée) : ce tour n’a pas été exécuté. Remettez le dossier ou changez le chemin dans les réglages du projet, puis renvoyez.",
+  "这一轮还没开始就被结束了（{when} 发的）。": "Ce tour a été interrompu avant de commencer (envoyé {when}).",
 };

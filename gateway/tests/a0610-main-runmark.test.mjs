@@ -140,3 +140,12 @@ test("195-B.4：待批的写文件请求内容很大 → 给界面的只带前 6
   const small = { tool: "Write", input: { file_path: "/y", content: "hi" } };
   assert.equal(Q.permView(small), small);
 });
+
+test("195-P.3：还没起进程就被结束的那轮 → 中断记录标 unstarted（界面给「重发」不给「继续」）", () => {
+  reset();
+  fs.writeFileSync(MARK, JSON.stringify({ runs: [{ id: "p3", sessionId: "s-p3", text: "x", startedAt: 1, unstarted: true }], queue: [] }));
+  Q.recoverRunMark();
+  assert.equal(Q.INTERRUPTED.find((e) => e.id === "p3").why, "unstarted");
+  const src = fs.readFileSync(new URL("../web/app/04-session-flow.js", import.meta.url), "utf8");
+  assert.match(src, /cont = !!it\.sessionId && !card && !unstarted/);
+});

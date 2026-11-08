@@ -2968,3 +2968,4 @@
 2968	Ce tour n’a pas abouti : la passerelle a redémarré pendant la mise à jour de l’app (commencé {when}).
 2969	Ce tour n’a pas abouti : la passerelle a été arrêtée ou redémarrée (commencé {when}).
 2970	Le dossier de travail {dir} a disparu (supprimé, renommé ou carte de stockage retirée) : ce tour n’a pas été exécuté. Remettez le dossier ou changez le chemin dans les réglages du projet, puis renvoyez.
+2971	Ce tour a été interrompu avant de commencer (envoyé {when}).

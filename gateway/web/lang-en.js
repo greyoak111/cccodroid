@@ -3005,5 +3005,6 @@ window.I18N_DICT.en = {
   "原来的会话记录删不掉，会话留在原处：{err}": "Couldn't delete the original session record, so the session stays where it was: {err}",
   "这一轮没跑完：App 更新时网关重启了（{when} 开始的）。": "This turn didn't finish: the gateway restarted while the app was updating (started {when}).",
   "这一轮没跑完：网关被关闭或重启了（{when} 开始的）。": "This turn didn't finish: the gateway was stopped or restarted (started {when}).",
-  "工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。": "The working folder {dir} is gone (deleted, renamed, or the storage card was removed), so this turn didn't run. Put the folder back, or change the path in the project settings, then send again."
+  "工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。": "The working folder {dir} is gone (deleted, renamed, or the storage card was removed), so this turn didn't run. Put the folder back, or change the path in the project settings, then send again.",
+  "这一轮还没开始就被结束了（{when} 发的）。": "This turn was cut off before it started (sent {when})."
 };
