@@ -315,7 +315,8 @@ function noteRateLimit(info, p) {
   const w = info && info.unifiedWindows;
   if (!w || !isLoginMode(p)) return;    // 这一轮用的是登录态那家才记（全局可能是别家）
   const win = (x) => x && Number.isFinite(+x.utilization)
-    ? { used: +x.utilization <= 1 ? Math.round(+x.utilization * 1000) / 10 : +x.utilization, resetsAt: x.resetsAt || null }
+    // utilization 是占用比例（claude 的 schema 说明：通常 0–1，真用超了会 >1）——一律换成百分数，超额度如实显示 120%（0.6.9 审计 197-5.7）
+    ? { used: Math.round(+x.utilization * 1000) / 10, resetsAt: x.resetsAt || null }
     : null;
   RATE_LIMITS = {
     at: Date.now(),

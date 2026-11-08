@@ -58,5 +58,17 @@
   "ru": "Этот адрес использует незашифрованный http: ключ и переписка уходят на другую машину без шифрования. По возможности перейдите на https.",
   "id": "Alamat ini memakai http tanpa enkripsi: kunci dan percakapan dikirim ke mesin lain tanpa dienkripsi. Ganti ke https jika bisa.",
   "ar": "يستخدم هذا العنوان http غير مشفّر: يُرسل مفتاحك والمحادثة إلى الجهاز الآخر دون تشفير. انتقل إلى https إن أمكن."
+ },
+ {
+  "zh": "定时任务要单独跑一轮：挪到最前，这一轮结束后马上发出",
+  "en": "Scheduled tasks run in their own turn: this moves it to the front, and it starts as soon as the current turn ends",
+  "ja": "スケジュールタスクは単独のターンで実行されます：先頭に移動し、現在のターンが終わり次第開始します",
+  "ko": "예약 작업은 별도의 턴으로 실행됩니다: 맨 앞으로 옮기고 현재 턴이 끝나는 즉시 시작합니다",
+  "zh-Hant": "排程任務要單獨跑一輪：移到最前，這一輪結束後馬上發出",
+  "es": "Las tareas programadas se ejecutan en su propio turno: se mueve al principio y empieza en cuanto termine el turno actual",
+  "fr": "Les tâches planifiées s’exécutent dans leur propre tour : elle passe en tête et démarre dès la fin du tour en cours",
+  "ru": "Запланированные задачи выполняются отдельным ходом: задача переместится в начало и запустится сразу после текущего хода",
+  "id": "Tugas terjadwal berjalan di gilirannya sendiri: dipindah ke depan dan dimulai begitu giliran saat ini selesai",
+  "ar": "تعمل المهام المجدولة في دور مستقل: تُنقل إلى المقدمة وتبدأ فور انتهاء الدور الحالي"
  }
 ]

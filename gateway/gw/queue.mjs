@@ -80,7 +80,7 @@ export function snapshot() {
     runs: runList().map(runInfo),
     maxParallel: maxParallel(),
     tamper: tamperPending(),           // 应用文件被改过、已还原：界面提示一次（见 tamper.mjs）
-    queue: QUEUE.map((q) => ({ id: q.id, cid: q.cid, text: q.message.slice(0, 500), sessionId: q.sessionId, follow: q.follow, at: q.at, held: !!q.held, intr: !!q.intr })),
+    queue: QUEUE.map((q) => ({ id: q.id, cid: q.cid, text: q.message.slice(0, 500), sessionId: q.sessionId, follow: q.follow, at: q.at, held: !!q.held, intr: !!q.intr, ...(q.sched ? { sched: true } : {}) })),
     provider: PROVIDER.id,
     model: SETTINGS.model || PROVIDER.defaultModel || null,
     lastSessionId: LAST_SESSION ? LAST_SESSION.id : null,

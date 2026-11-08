@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { CFG, PREFIX, log, tz } from "./config.mjs";
 import { claudeBlocked, claudeCmd, claudeEnv, ensureShell, killTree } from "./claude.mjs";
-import { SID_RE, zipRead } from "./sessionops.mjs";
+import { SID_RE, skillDirOk, zipRead } from "./sessionops.mjs";
 import { NEXT, readBody, readBodyBuf, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
 import { COMP_DIR, compIndex, compIndexCache, compRecord } from "./components.mjs";
@@ -390,7 +390,8 @@ function listSkills() {
   }).filter(Boolean);
 }
 function deleteSkill(dir) {
-  if (!SID_RE.test(dir)) return { ok: false, message: "bad name" };
+  // 只认列表里真有的目录名（中文 / 空格名字的技能也能删；195-J.5）
+  if (!skillDirOk(dir, listSkills().map((x) => x.dir))) return { ok: false, message: "bad name" };
   const p = path.join(SKILLS_DIR, dir);
   let st; try { st = fs.lstatSync(p); } catch { return { ok: false, message: "not found" }; }
   // 没有 SKILL.md 的目录（导入到一半失败留下的）也要能删：列表里现在会把它列出来并说明（195-J.10）。

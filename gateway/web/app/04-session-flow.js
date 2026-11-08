@@ -1150,10 +1150,10 @@
       </div>
       ${q.map((it) => `
         <div class="msg user qitem${it.held ? " held" : ""}" data-id="${esc(it.id)}">
-          <div class="who"><span class="dot"></span>${t("你")} · <span class="q-tag">${it.held ? t("已暂停") : t("排队中")}</span></div>
+          <div class="who"><span class="dot"></span>${it.sched ? t("定时任务") : t("你")} · <span class="q-tag">${it.held ? t("已暂停") : t("排队中")}</span></div>
           <div class="bubble" dir="auto">${esc(it.text)}</div>
           <div class="q-acts">
-            <button class="q-now" title="${busy ? t("插话：递进正在跑的这一轮，不打断") : t("发出这条")}">${t("立即发送")}</button>
+            <button class="q-now" title="${!busy ? t("发出这条") : it.sched ? t("定时任务要单独跑一轮：挪到最前，这一轮结束后马上发出") : t("插话：递进正在跑的这一轮，不打断")}">${t("立即发送")}</button>
             <button class="q-x" title="${t("撤销这条")}">${t("撤销")}</button>
           </div>
         </div>`).join("")}` : "";
