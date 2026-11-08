@@ -46,6 +46,9 @@ import { sealed } from "./edition.mjs";
 import { sealBlockMessage, sealCleanup, sealPrepare, sealRecheck } from "./seal.mjs";
 
 // 必须由人回答的工具：全部放行也照问（问题、计划审批）
+// 敏感操作「这一轮已允许」的范围：读屏、点按、剪贴板这类设备操作一连串连着做，按类别记；
+// 密钥、会自动执行的文件、破甲这些，批准一次只放行同一个工具对同一个目标，不能一把解锁同类所有文件（0.6.9 审计 199 11-07）
+const guardKey = (p) => (/^device:/.test(p.guard.cat) ? p.guard.cat : `${p.tool}\0${p.guard.cat}\0${p.guard.what}`);
 const HUMAN_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 // 空闲中后台任务自己跑完、claude 却一直没起新一轮：这么久没动静才关 stdin 收尾（我们发过 stop_task 的 6 秒）。环境变量只给测试用
 const IDLE_CLOSE_MS = Number(process.env.CCAPP_IDLE_CLOSE_MS) || 120000;
@@ -632,7 +635,7 @@ export async function startRun(item) {
         ? { ...p.input, answers: Object.fromEntries(Object.entries(a.answers).map(([k, v]) => [String(k), String(v)])) }
         : p.input;
       resp = { behavior: "allow", updatedInput: input };
-      if (p.guard) (run.guardOk = run.guardOk || new Set()).add(p.guard.cat);   // 这一轮同类不再问
+      if (p.guard) (run.guardOk = run.guardOk || new Set()).add(guardKey(p));   // 这一轮同样的不再问（读屏点按按类别，其余按具体目标）
       // 「始终允许」：只认 claude 自己给的建议（规则 + 目录），前端不能塞任意规则；切模式另走 a.mode
       if (a.always) {
         const ups = (p.suggestions || []).filter((x) => x && (x.type === "addRules" || x.type === "addDirectories"));
@@ -675,7 +678,7 @@ export async function startRun(item) {
         return;
       }
       // 同一轮里这一类敏感操作已经点过允许（比如一连串读屏点按）：别每步都问
-      if (p.guard && run.guardOk?.has(p.guard.cat)) {
+      if (p.guard && run.guardOk?.has(guardKey(p))) {
         log(`✓ 敏感操作本轮已允许过，放行 ${p.tool} ${p.guard.cat || ""}`);
         writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: { behavior: "allow", updatedInput: p.input } } });
         return;
