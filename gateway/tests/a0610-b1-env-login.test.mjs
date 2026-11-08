@@ -37,27 +37,27 @@ test("envFactsKey：组件版本变了 key 就变，自检会重跑（195-M.1）
   assert.notEqual(envFactsKey(), k1);
 });
 
-test("对账：主动卸载 Claude 的标记在，就不报红（195-M.7）", () => {
+test("对账：主动卸载 Claude 的标记在，就不报红（195-M.7）", async () => {
   fs.writeFileSync(path.join(FILES, ".claude-uninstalled"), "");
-  const r = reconcileNow();
+  const r = await reconcileNow();
   assert.ok(!r.findings.some((f) => f.key === "claude" && f.level === "error"), JSON.stringify(r.findings));
   fs.rmSync(path.join(FILES, ".claude-uninstalled"), { force: true });
 });
 
-test("对账：组件依赖的共享文件被删会报出来（#185）", () => {
+test("对账：组件依赖的共享文件被删会报出来（#185）", async () => {
   fs.writeFileSync(path.join(PREFIX, ".devkit-ok"), JSON.stringify({ sha256: "abc" }));
   writeComp("sharedgone", { id: "sharedgone", state: "ok", base: "abc", files: [], shared: ["share/missing-file"], bin: [] });
-  const r = reconcileNow();
+  const r = await reconcileNow();
   assert.ok(r.findings.some((f) => f.key === "comp-shared:sharedgone"), JSON.stringify(r.findings));
 });
 
-test("对账：悬空软链不再算「文件在」（真机 86 个）", () => {
+test("对账：悬空软链不再算「文件在」（真机 86 个）", async () => {
   fs.writeFileSync(path.join(PREFIX, ".devkit-ok"), JSON.stringify({ sha256: "abc" }));
   fs.mkdirSync(path.join(PREFIX, "share"), { recursive: true });
   try { fs.rmSync(path.join(PREFIX, "share/dangling"), { force: true }); } catch {}
   fs.symlinkSync(path.join(PREFIX, "share/does-not-exist"), path.join(PREFIX, "share/dangling"));
   writeComp("dangle", { id: "dangle", state: "ok", base: "abc", files: ["share/dangling"], shared: [], bin: [] });
-  const r = reconcileNow();
+  const r = await reconcileNow();
   assert.ok(r.findings.some((f) => f.key === "comp-files:dangle"), JSON.stringify(r.findings));
 });
 

@@ -41,14 +41,18 @@ export function nowTicks() {
 function loadKept() {
   if (KEPT) return KEPT;
   KEPT = new Map();
+  let dropped = false;
   try {
     const j = JSON.parse(fs.readFileSync(KEPT_FILE(), "utf8")), boot = bootId();
     if (j && boot && j.boot === boot && j.kept && typeof j.kept === "object")
       for (const [k, cmd] of Object.entries(j.kept)) {
         const m = /^(\d+):(\d+)$/.exec(k), p = m && readProc(+m[1]);
         if (p && p.start === m[2] && p.cmd === cmd) KEPT.set(k, cmd);   // 还活着、还是那个进程才认
+        else dropped = true;
       }
   } catch {}
+  // 死掉的条目顺手从盘上清掉，别一直留在 leftover-kept.json 里（0.6.9 审计 真机数据）
+  if (dropped) saveKept();
   return KEPT;
 }
 function saveKept() {

@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CFG, LIVE, PATHS, PREFIX, log, reqLang, tr, tz } from "./config.mjs";
 import { ledger } from "./claude.mjs";
-import { COMP_DIR, compRecord, devkitIdentity } from "./components.mjs";
+import { COMP_DIR, breathe, compRecord, devkitIdentity } from "./components.mjs";
 import { modInstalled, modulesInfo } from "./modules.mjs";
 import { NEXT, sendJson } from "./http.mjs";
 
@@ -35,10 +35,15 @@ const readLines = (f) => { try { return fs.readFileSync(f, "utf8").split("\n").f
 const present = (f) => {
   try { const st = fs.lstatSync(f); if (st.isSymbolicLink()) { fs.statSync(f); } return true; } catch { return false; }
 };
-/** 一串相对 $PREFIX 的路径里不在磁盘上的（软链跟到目标） */
-function missingOf(rels) {
+/** 一串相对 $PREFIX 的路径里不在磁盘上的（软链跟到目标）。每 256 个让出一次事件循环：
+ *  本机要扫约 14.4 万路径，以前一次同步跑完，启动后头几秒的请求/SSE 全被堵住（0.6.9 审计 195-I.3） */
+async function missingOf(rels) {
   const out = [];
-  for (const r of rels) if (!present(path.join(PREFIX, r))) out.push(r);
+  let n = 0;
+  for (const r of rels) {
+    if (!present(path.join(PREFIX, r))) out.push(r);
+    if ((++n & 255) === 0) await breathe();
+  }
   return out;
 }
 const badRel = (r) => typeof r !== "string" || !r || r.startsWith("/") || r.split("/").includes("..");
@@ -47,7 +52,7 @@ const badRel = (r) => typeof r !== "string" || !r || r.startsWith("/") || r.spli
 const OWN = PREFIX ? (/\/data\/(?:data|user\/\d+)\/([^/]+)\/files\/usr\/?$/.exec(PREFIX) || [])[1] || "" : "";
 
 /** 核一遍，返回 { at, findings:[{key, level:error|warn|info, k, v, fix, samples}] }。k/v 是 tz 的原句和变量，出门时再翻 */
-export function reconcileNow() {
+export async function reconcileNow() {
   const F = [];
   // k、fix 用 tz() 包着：不带变量时原样返回，只是让 i18n/scan.mjs 把它们收进词典
   const add = (key, level, k, v, fix, samples) => F.push({ key, level, k, v: v || null, fix: fix || "", ...(samples && samples.length ? { samples: samples.slice(0, 8) } : {}) });
@@ -61,6 +66,7 @@ export function reconcileNow() {
   let recs = [];
   try { recs = fs.readdirSync(COMP_DIR).filter((f) => f.endsWith(".json")).map((f) => [f.slice(0, -5), compRecord(f.slice(0, -5))]); } catch {}
   for (const [id, rec] of recs) {
+    await breathe();
     if (!rec) { add("comp-unreadable:" + id, "warn", tz("组件「{id}」的安装记录读不出来"), { id }, tz("到 扩展 页重新安装这个组件")); continue; }
     if (rec.state !== "ok") { add("comp-partial:" + id, "warn", tz("组件「{id}」上次没装完"), { id }, tz("到 扩展 页卸载后重装")); continue; }
     if (!dk || rec.base !== dk.sha256) { add("comp-outdated:" + id, "info", tz("组件「{id}」装在旧工具包上，换工具包后它的文件已经不在"), { id }, tz("到 扩展 页重新安装（要用时再装也行）")); continue; }
@@ -68,12 +74,12 @@ export function reconcileNow() {
     const bad = files.filter(badRel);
     if (bad.length) add("comp-format:" + id, "error", tz("组件「{id}」的记录里有 {n} 个路径格式不对"), { id, n: bad.length }, tz("把诊断包发给开发者"), bad);
     const binsGone = (rec.bin || []).filter((b) => !exists(path.join(PREFIX, "bin", b)));
-    const gone = missingOf(files.filter((r) => !badRel(r)));
+    const gone = await missingOf(files.filter((r) => !badRel(r)));
     if (binsGone.length) add("comp-bin:" + id, "error", tz("组件「{id}」的命令不在了：{cmds}"), { id, cmds: binsGone.join(" ") }, tz("到 扩展 页重新安装这个组件"));
     if (gone.length) add("comp-files:" + id, "error", tz("组件「{id}」少了 {n} 个文件（共 {total} 个）"), { id, n: gone.length, total: files.length }, tz("到 扩展 页重新安装这个组件"), gone);
     // 共享文件被别的卸载删掉时，组件自己的 bin 还在、状态仍是 ok：这里补一道（0.6.9 审计 #185）
     const shared = (Array.isArray(rec.shared) ? rec.shared : []).filter((r) => !badRel(r));
-    const sharedGone = missingOf(shared);
+    const sharedGone = await missingOf(shared);
     if (sharedGone.length) add("comp-shared:" + id, "error", tz("组件「{id}」依赖的 {n} 个共享文件被删了"), { id, n: sharedGone.length }, tz("到 扩展 页重新安装这个组件"), sharedGone);
   }
 
@@ -92,8 +98,9 @@ export function reconcileNow() {
       if (!m || (OWN && m[1] !== OWN)) { foreign.set(l.slice(0, i) || "?", (foreign.get(l.slice(0, i) || "?") || 0) + 1); continue; }
       if (l.length > i + 11) rels.push(l.slice(i + 11));
     }
-    const gone = missingOf(rels);
+    const gone = await missingOf(rels);
     if (gone.length) { lacking.push(`${f.slice(0, -5)}：${gone.length}（${gone[0]}）`); lackN += gone.length; }
+    await breathe();
   }
   if (foreign.size) add("list-prefix", "error", tz("{n} 条包清单记的不是本应用的路径"), { n: [...foreign.values()].reduce((a, b) => a + b, 0) },
     tz("把诊断包发给开发者"), [...foreign].map(([p, n]) => `${p}  ×${n}`));
@@ -110,7 +117,7 @@ export function reconcileNow() {
     if (!modInstalled(mj, m.id)) continue;
     const files = readLines(path.join(d, "FILES"));
     if (!files) { add("mod-files-list:" + m.id, "warn", tz("模块「{name}」缺文件列表（FILES），卸载时会删不干净"), { name }, tz("到 扩展 → 工具包模块 重新安装")); continue; }
-    const gone = missingOf(files.filter((r) => !badRel(r)));
+    const gone = await missingOf(files.filter((r) => !badRel(r)));
     if (gone.length) add("mod-files:" + m.id, "error", tz("模块「{name}」少了 {n} 个文件（共 {total} 个）"), { name, n: gone.length, total: files.length }, tz("到 扩展 → 工具包模块 重新安装"), gone);
   }
 
@@ -133,12 +140,12 @@ const levelRank = { error: 0, warn: 1, info: 2 };
 const keysOf = (r) => (r ? r.findings.filter((f) => f.level !== "info").map((f) => f.key).sort().join("\n") : "");
 
 /** 核一遍并落盘；error / warn 这一组变了才记账（每次启动都记同样的问题会把账本刷满） */
-export function reconcileRun() {
+export async function reconcileRun() {
   if (!PREFIX) return null;
   if (busy) return last;
   busy = true;
   try {
-    const t0 = Date.now(), r = reconcileNow(), prev = last;
+    const t0 = Date.now(), r = await reconcileNow(), prev = last;
     r.ms = Date.now() - t0;
     r.findings.sort((a, b) => levelRank[a.level] - levelRank[b.level]);
     const bad = r.findings.filter((f) => f.level !== "info");
@@ -150,7 +157,7 @@ export function reconcileRun() {
     try { fs.mkdirSync(path.dirname(STATE), { recursive: true }); fs.writeFileSync(STATE, JSON.stringify(r)); } catch {}
     log(`[reconcile] ${r.ms} ms：${bad.length ? bad.map((f) => f.key).join(" ") : "无问题"}${r.findings.length > bad.length ? `（另有 ${r.findings.length - bad.length} 条提示）` : ""}`);
     return r;
-  } catch (e) { log("[reconcile] 失败：" + e.message); return last; }
+  } catch (e) { log("[reconcile] 失败：" + (e && e.message)); return last; }
   finally { busy = null; }
 }
 const tzFill = (f) => tz(f.k, f.v);
@@ -164,13 +171,13 @@ export function reconcileFacts() {
     ...bad.slice(0, 6).map((f) => `  - ${one(tzFill(f))}${f.fix ? " —— " + one(f.fix, 160) : ""}`)];
 }
 
-if (PREFIX && LIVE) setTimeout(() => reconcileRun(), 60e3).unref?.();
+if (PREFIX && LIVE) setTimeout(() => { reconcileRun().catch(() => {}); }, 60e3).unref?.();
 
 // GET /api/reconcile[?run=1][&format=selftest]
 export async function routeReconcile(req, res, u, p) {
   if (p !== "/api/reconcile" || req.method !== "GET") return NEXT;
   if (!PREFIX) return sendJson(res, 200, { ok: true, supported: false });
-  const r = u.searchParams.get("run") === "1" || !last ? reconcileRun() : last;
+  const r = u.searchParams.get("run") === "1" || !last ? await reconcileRun() : last;
   if (u.searchParams.get("format") === "selftest") {
     const lines = (r ? r.findings : []).filter((f) => f.level !== "info").map((f) => `FAIL 状态对账 :: ${tzFill(f)}${f.samples ? "：" + f.samples.slice(0, 3).join("，") : ""}`);
     if (r && !lines.length) lines.push(`PASS 状态对账 :: 记录与磁盘一致（${r.ms} ms）`);
