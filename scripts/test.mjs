@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { installRegistryFlock } from "../gateway/tests/fixtures/registry-flock.mjs";
 
@@ -37,7 +37,14 @@ installRegistryFlock(prefix, home, tmp); // 只写本轮假 PREFIX；锁协议�
 const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CCAPP_|CLAUDE_CODE_|ANTHROPIC_)/.test(k)));
 const env = { ...clean, CCAPP_TEST: "1", CCAPP_HOME: home, HOME: home, CCAPP_WORKSPACE: workspace, CCAPP_PREFIX: prefix, CCAPP_PORT: "8799", CCAPP_LOG: path.join(tmp, "gateway.log"), CCAPP_TMP: tmp };
 
-const r = spawnSync(process.execPath, ["--test", "--test-concurrency=1", ...files.map((f) => path.join(TESTS, f))], { env, stdio: "inherit", cwd: ROOT });
-if (!process.env.KEEP_TEST_TMP) fs.rmSync(tmp, { recursive: true, force: true });
-else console.log("临时目录留着：" + tmp);
-process.exit(r.status ?? 1);
+// 异步起：被 timeout / Ctrl-C / 关终端打断时也要删掉临时目录（以前用 spawnSync，信号一来整个进程直接没了，4 天攒下 29 个，D10）。
+// 收到信号先转给测试进程，等它退出再删；SIGKILL 接不住，留给存储的自动清理（$TMPDIR 里 7 天没动的）
+const child = spawn(process.execPath, ["--test", "--test-concurrency=1", ...files.map((f) => path.join(TESTS, f))], { env, stdio: "inherit", cwd: ROOT });
+let stopped = null;
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { stopped = sig; try { child.kill(sig); } catch {} });
+child.on("exit", (code, signal) => {
+  if (!process.env.KEEP_TEST_TMP) fs.rmSync(tmp, { recursive: true, force: true });
+  else console.log("临时目录留着：" + tmp);
+  if (stopped) console.error(`测试被 ${stopped} 打断，临时目录已${process.env.KEEP_TEST_TMP ? "留着" : "删掉"}`);
+  process.exit(code ?? (signal || stopped ? 130 : 1));
+});
