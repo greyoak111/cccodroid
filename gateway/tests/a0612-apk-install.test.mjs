@@ -25,6 +25,14 @@ test("应用侧：前台才受理；过分享同一道 guard；验的和装的�
   assert.match(PRIV, /static boolean confirm\(String text, String who, String key\) \{ return ask\(text, who, key, false\); \}/);
 });
 
+test("确认框按来路换成「安装应用」的标题和说明，不说成以 Shizuku 身份跑命令（11-09 真机看到的）", () => {
+  assert.match(PRIV, /!trustable && key\.startsWith\("apk:"\) \? "apk"/);
+  const ma = rd("android/java/cc/codroid/MainActivity.java");
+  assert.match(ma, /"apk"\.equals\(i\.getStringExtra\("kind"\)\)\);/);
+  assert.match(ma, /apk \? Tr\.t\("安装这个应用？"\)/);
+  assert.match(ma, /: apk \? cmd \+ "\\n\\n" \+ Tr\.t\("点「允许」后还会弹出系统的安装确认。/);
+});
+
 test("安装结果：查看器装的给一句提示，用户取消不提示；不走更新页的状态", () => {
   const ev = rd("android/java/cc/codroid/Events.java");
   const i = ev.indexOf('if ("file".equals(what)) {');
@@ -53,6 +61,7 @@ test("新文案都有 9 种译文", () => {
   for (const l of ["ar", "en", "es", "fr", "id", "ja", "ko", "ru", "zh-Hant"]) {
     const o = JSON.parse(rd(`android/assets/i18n/java-${l}.json`));
     for (const k of ["建不了暂存目录", "不是 .apk 文件", "不是有效的安装包", "cccodroid 自己的新版本请到「设置 → 更新」里装",
-      "安装应用「{0}」\n包名 {1}\n版本 {2}\n\n文件：{3}", "没有允许，没有安装", "安装应用", "已安装", "安装失败：", "请先把 cccodroid 切到前台"]) assert.ok(o[k], `${l} 缺 ${k}`);
+      "安装应用「{0}」\n包名 {1}\n版本 {2}\n\n文件：{3}", "没有允许，没有安装", "安装应用", "已安装", "安装失败：", "请先把 cccodroid 切到前台", "安装这个应用？",
+      "点「允许」后还会弹出系统的安装确认。不是你自己点的「安装」、或者不认识这个安装包，就拒绝。"]) assert.ok(o[k], `${l} 缺 ${k}`);
   }
 });

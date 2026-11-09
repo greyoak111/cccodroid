@@ -475,7 +475,7 @@ public class MainActivity extends Activity {
 
     /** 白名单以外的特权命令执行前问一句（见 Priv.ask / PrivRules）：关掉、按返回都算拒绝。
      *  按钮一秒后才能点，盖在上面的窗口挡着时不收触摸 —— 防止脚本抢在用户前面把「允许」点掉 */
-    private void confirmPriv(String id, String cmd, String who, boolean trustable, boolean sess, boolean noAskBox) {
+    private void confirmPriv(String id, String cmd, String who, boolean trustable, boolean sess, boolean noAskBox, boolean apk) {
         if (id == null) return;
         boolean clip = Tr.t("设备工具：读取剪贴板").equals(cmd);
         // 发起方是按对方进程的环境变量认的，对方能伪造：只作参考
@@ -498,8 +498,10 @@ public class MainActivity extends Activity {
         }
         final boolean[] said = { false };
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this)
-            .setTitle(clip ? Tr.t("允许读取剪贴板？") : Tr.t("允许执行这条特权命令？"))
+            .setTitle(clip ? Tr.t("允许读取剪贴板？") : apk ? Tr.t("安装这个应用？") : Tr.t("允许执行这条特权命令？"))
             .setMessage(Tr.t("发起方（自报，仅供参考）：") + by + "\n\n" + (clip ? Tr.t("剪贴板里可能有你从别的应用复制的密码、验证码。不是你让 Claude 读的就拒绝。")
+                // 装 APK：正文是 Priv 从安装包里读出的应用名、包名、版本和文件位置
+                : apk ? cmd + "\n\n" + Tr.t("点「允许」后还会弹出系统的安装确认。不是你自己点的「安装」、或者不认识这个安装包，就拒绝。")
                 : cmd + "\n\n" + Tr.t("它会以 Shizuku（shell）身份运行，能装卸应用、改权限或系统设置。不认识这条命令就拒绝。")))
             .setNegativeButton(Tr.t("拒绝"), (x, w) -> { said[0] = true; Priv.answer(id, 0); });
         // 这个会话后面的都允许（Claude 发来的才有）：勾上再点「允许」。只在内存里，应用重启就失效
@@ -544,7 +546,7 @@ public class MainActivity extends Activity {
         else if (ACTION_FACTORY_RESET.equals(a)) askFactoryReset();
         else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false));
         else if (ACTION_CONSENT.equals(a)) Consent.runNext(this);
-        else if (ACTION_PRIV_OK.equals(a)) confirmPriv(i.getStringExtra("id"), i.getStringExtra("cmd"), i.getStringExtra("who"), i.getBooleanExtra("trust", false), i.getBooleanExtra("sess", false), "noask".equals(i.getStringExtra("kind")));
+        else if (ACTION_PRIV_OK.equals(a)) confirmPriv(i.getStringExtra("id"), i.getStringExtra("cmd"), i.getStringExtra("who"), i.getBooleanExtra("trust", false), i.getBooleanExtra("sess", false), "noask".equals(i.getStringExtra("kind")), "apk".equals(i.getStringExtra("kind")));
         else if (Notify.ACTION_OPEN.equals(a)) openSession(i.getStringExtra("session"));
     }
 

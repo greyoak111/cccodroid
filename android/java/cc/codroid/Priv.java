@@ -755,7 +755,8 @@ final class Priv {
             ctx.startActivity(MainActivity.internal(ctx, MainActivity.ACTION_PRIV_OK).putExtra("id", id)
                 .putExtra("cmd", show).putExtra("who", who).putExtra("trust", trustable).putExtra("sess", sess != null)
                 // 设置页的免责框：按来路认（exec 的 key 是 JSON 数组开头，撞不上），不看正文 —— 正文是命令原文，能伪造成免责说明的样子（审查 0601 高-2）
-                .putExtra("kind", !trustable && "noask".equals(key) ? "noask" : "")
+                // 装 APK（apk_install）同理按来路认：标题和说明换成「安装应用」，别说成以 Shizuku 身份跑命令
+                .putExtra("kind", !trustable && "noask".equals(key) ? "noask" : !trustable && key.startsWith("apk:") ? "apk" : "")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             done.await(60, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception e) { Log.w(TAG, "问不了用户", e); }
