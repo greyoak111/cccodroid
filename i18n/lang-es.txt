@@ -3077,3 +3077,53 @@
 3077	No hay problemas que se puedan reparar automáticamente
 3078	Aún hay pasos en curso en la app:
 3079	Los pasos enviados a la app siguen en curso; toca «Comprobar registros» cuando terminen
+3080	Navegador integrado
+3081	Paquetes descargados por pkg
+3082	Índice del linaje
+3083	Analizando…
+3084	Esta app ocupa {app}; quedan {free} libres en el dispositivo
+3085	Último análisis: {when}
+3086	Aún no se ha analizado
+3087	{n} días, según tu ajuste
+3088	Se conservan para siempre
+3089	Última limpieza automática: {when}, liberados {size}
+3090	Aún no hubo limpieza automática
+3091	Cachés
+3092	{size} en total; se vuelven a descargar o reconstruir solos cuando hace falta
+3093	En uso
+3094	Sesión en curso
+3095	Sin cambios en 7 días
+3096	Último cambio: {when}
+3097	Eliminar lo seleccionado
+3098	Archivos temporales
+3099	{size} en total, {old} sin cambios en 7 días. Incluye la salida de comandos en segundo plano y carpetas temporales de pruebas y compilaciones
+3100	Los {n} más grandes
+3101	Limpiar los de más de 7 días
+3102	Archivos auxiliares de Claude Code
+3103	Registros de depuración, instantáneas de shell, registros MCP y copias de .claude.json: {size} en total; se pueden limpiar {n} elementos ({auto}) (más de 30 días; se conservan las 5 copias más recientes)
+3104	{n} sesiones, {size} en total. Las sesiones nunca se borran solas; elimínalas desde la lista de sesiones y primero irán a la papelera
+3105	Datos de ejecución de los componentes (~/.cccodroid)
+3106	{name} (instalado con pkg)
+3107	Carpeta compartida /sdcard/cccodroid
+3108	Programas y tus archivos
+3109	Solo tamaños; aquí no se borra nada
+3110	Papelera de sesiones
+3111	{n} elementos, {size}; se vacían solos a los 30 días
+3112	Programas que dejó un kit de herramientas antiguo
+3113	Revisar
+3114	Datos de ejecución que dejó el componente eliminado {id}
+3115	Estadísticas de uso
+3116	Otros lugares de limpieza
+3117	✓ Eliminados {n} elementos, liberados {size}
+3118	{n} elementos sin borrar (en uso o fuera de las carpetas permitidas)
+3119	No hay nada seleccionado
+3120	¿Eliminar los {n} elementos temporales seleccionados? No se puede deshacer.
+3121	¿Eliminar los datos de ejecución que dejó {id}? Al reinstalar se volverán a descargar.
+3122	✓ Eliminado
+3123	Almacenamiento
+3124	Espacio usado
+3125	Analizar
+3126	Conservación de sesiones
+3127	Por defecto, Claude Code borra las sesiones sin cambios en 30 días, junto con sus datos asociados, sin pasar por la papelera. Esta app las conserva para siempre: una sesión solo va a la papelera si la eliminas desde la lista de sesiones. Si tú pusiste cleanupPeriodDays en ~/.claude/settings.json, se usa tu número de días.
+3128	Limpieza automática
+3129	Solo limpia cachés, archivos temporales sin cambios en 7 días y archivos auxiliares de Claude Code de más de 30 días. Las sesiones, tus archivos y los programas nunca se borran solos

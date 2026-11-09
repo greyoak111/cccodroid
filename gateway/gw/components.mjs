@@ -1039,6 +1039,13 @@ async function compDataInfo(id) {
   if (!compRecordInfo(id).missing || compDataShared(id) || !compDataKnown(id)) return null;
   return { path: "~/.cccodroid/" + id, bytes: await compDuBytes(dir) };
 }
+/** 卸掉的组件留下的运行数据（存储页汇总用）：~/.cccodroid 下每个够格提议删的目录 */
+export async function compLeftovers() {
+  const out = [];
+  let ns = []; try { ns = fs.readdirSync(path.join(CFG.home, ".cccodroid")); } catch {}
+  for (const id of ns) { const i = await compDataInfo(id).catch(() => null); if (i) out.push({ id, ...i }); }
+  return out;
+}
 async function compPurgeData(id) {
   if (!compRecordInfo(id).missing) return { ok: false, message: "still installed" };
   if (compDataShared(id)) return { ok: false, message: "shared" };

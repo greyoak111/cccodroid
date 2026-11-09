@@ -3077,3 +3077,53 @@
 3077	Tidak ada masalah yang bisa diperbaiki otomatis
 3078	Masih ada langkah yang berjalan di aplikasi:
 3079	Langkah yang diserahkan ke aplikasi masih berjalan; ketuk “Periksa catatan” setelah selesai
+3080	Browser bawaan
+3081	Paket yang diunduh pkg
+3082	Indeks silsilah
+3083	Memindai…
+3084	Aplikasi ini memakai {app}; sisa di perangkat {free}
+3085	Pemindaian terakhir: {when}
+3086	Belum pernah dipindai
+3087	{n} hari, sesuai setelan Anda
+3088	Disimpan selamanya
+3089	Pembersihan otomatis terakhir: {when}, membebaskan {size}
+3090	Belum ada pembersihan otomatis
+3091	Cache
+3092	Total {size}; diunduh atau dibangun ulang otomatis bila perlu
+3093	Sedang dipakai
+3094	Sesi berjalan
+3095	Tak berubah 7 hari
+3096	Terakhir diubah: {when}
+3097	Hapus yang dipilih
+3098	File sementara
+3099	Total {size}, {old} di antaranya tak berubah 7 hari. Termasuk keluaran perintah latar belakang dan folder sementara sisa pengujian dan build
+3100	{n} terbesar
+3101	Bersihkan yang lebih dari 7 hari
+3102	File sampingan Claude Code
+3103	Log debug, snapshot shell, log MCP, dan cadangan .claude.json: total {size}; {n} item ({auto}) bisa dibersihkan (lebih dari 30 hari; 5 cadangan terbaru disimpan)
+3104	{n} sesi, total {size}. Sesi tidak pernah dihapus otomatis; hapus dari daftar sesi, dan sesi masuk ke tempat sampah dulu
+3105	Data runtime komponen (~/.cccodroid)
+3106	{name} (dipasang dengan pkg)
+3107	Folder bersama /sdcard/cccodroid
+3108	Program dan file Anda
+3109	Hanya ukuran; tidak ada yang dihapus di sini
+3110	Tempat sampah sesi
+3111	{n} item, {size}; dikosongkan otomatis setelah 30 hari
+3112	Program sisa toolkit lama
+3113	Tinjau
+3114	Data runtime sisa komponen {id} yang dihapus
+3115	Statistik penggunaan
+3116	Tempat pembersihan lain
+3117	✓ Menghapus {n} item, membebaskan {size}
+3118	{n} item tidak dihapus (sedang dipakai atau di luar folder yang diizinkan)
+3119	Tidak ada yang dipilih
+3120	Hapus {n} item sementara yang dipilih? Tidak bisa dibatalkan.
+3121	Hapus data runtime sisa {id}? Saat dipasang ulang akan diunduh lagi.
+3122	✓ Dihapus
+3123	Penyimpanan
+3124	Ruang terpakai
+3125	Pindai
+3126	Penyimpanan sesi
+3127	Secara bawaan Claude Code menghapus sesi yang tak berubah selama 30 hari beserta data terkaitnya, tanpa lewat tempat sampah. Aplikasi ini menyimpannya selamanya: sesi hanya masuk tempat sampah bila Anda menghapusnya dari daftar sesi. Jika Anda sendiri menulis cleanupPeriodDays di ~/.claude/settings.json, jumlah hari Anda yang dipakai.
+3128	Pembersihan otomatis
+3129	Hanya membersihkan cache, file sementara yang tak berubah 7 hari, dan file sampingan Claude Code yang lebih dari 30 hari. Sesi, file Anda, dan program tidak pernah dihapus otomatis

@@ -26,6 +26,8 @@ export const SETTINGS = {
   provider: null,
   // 内存管家（cc-mem）：默认关。开了才允许停别的应用；白名单是用户额外保护的包名
   memGuard: { enabled: false, whitelist: [] },
+  // 存储的自动清理（D10，见 storage.mjs）：默认开、每周；只清缓存、7 天前的临时文件、30 天前的 claude 杂物，会话永不自动删
+  autoClean: { enabled: true, every: "week" },
   // 最多同时跑几个会话（1 = 和以前一样一次只跑一轮）
   maxParallel: 3,
   // 静态程序兼容：claude 外面套 seccomp-enosys-run -f，它拉起的整棵进程树里撞 seccomp 的静态二进制

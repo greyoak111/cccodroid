@@ -90,6 +90,14 @@ export async function routeSettings(req, res, u, p) {
       // 敏感操作再确认没有关闭口子：设置接口不提供全局关掉这一层的能力，要放行走确认卡片逐次允许
       if ("idleCompaction" in b) { SETTINGS.idleCompaction = !!b.idleCompaction; if (!SETTINGS.idleCompaction) idleDisarmAll(); }
       if ("workIsland" in b) SETTINGS.workIsland = !!b.workIsland;
+      // 存储的自动清理（D10）：开关 + 频次（每天 / 每周 / 每月）
+      if (b.autoClean && typeof b.autoClean === "object") {
+        const a = SETTINGS.autoClean || {};
+        SETTINGS.autoClean = {
+          enabled: "enabled" in b.autoClean ? !!b.autoClean.enabled : a.enabled !== false,
+          every: ["day", "week", "month"].includes(b.autoClean.every) ? b.autoClean.every : (["day", "week", "month"].includes(a.every) ? a.every : "week"),
+        };
+      }
 
       if ("maxParallel" in b) {
         const n = Math.round(Number(b.maxParallel));

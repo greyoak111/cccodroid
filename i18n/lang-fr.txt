@@ -3077,3 +3077,53 @@
 3077	Aucun problème réparable automatiquement
 3078	Des étapes sont encore en cours dans l'application :
 3079	Les étapes confiées à l'application sont encore en cours ; touchez « Vérifier les enregistrements » une fois terminées
+3080	Navigateur intégré
+3081	Paquets téléchargés par pkg
+3082	Index de la généalogie
+3083	Analyse…
+3084	Cette application occupe {app} ; {free} libres sur l'appareil
+3085	Dernière analyse : {when}
+3086	Pas encore analysé
+3087	{n} jours, selon votre réglage
+3088	Conservées indéfiniment
+3089	Dernier nettoyage auto : {when}, {size} libérés
+3090	Aucun nettoyage auto pour l'instant
+3091	Caches
+3092	{size} au total ; retéléchargés ou reconstruits automatiquement si besoin
+3093	En cours d'utilisation
+3094	Session en cours
+3095	Inchangé depuis 7 jours
+3096	Dernière modification : {when}
+3097	Supprimer la sélection
+3098	Fichiers temporaires
+3099	{size} au total, dont {old} inchangés depuis 7 jours. Inclut la sortie des commandes en arrière-plan et les dossiers temporaires laissés par les tests et compilations
+3100	Les {n} plus gros
+3101	Nettoyer ceux de plus de 7 jours
+3102	Fichiers annexes de Claude Code
+3103	Journaux de débogage, instantanés shell, journaux MCP et sauvegardes de .claude.json : {size} au total ; {n} éléments ({auto}) peuvent être nettoyés (plus de 30 jours ; les 5 sauvegardes les plus récentes sont conservées)
+3104	{n} sessions, {size} au total. Les sessions ne sont jamais supprimées automatiquement ; supprimez-les depuis la liste des sessions, elles passent d'abord par la corbeille
+3105	Données d'exécution des composants (~/.cccodroid)
+3106	{name} (installé avec pkg)
+3107	Dossier partagé /sdcard/cccodroid
+3108	Programmes et vos fichiers
+3109	Tailles uniquement ; rien n'est supprimé ici
+3110	Corbeille des sessions
+3111	{n} éléments, {size} ; vidés automatiquement au bout de 30 jours
+3112	Programmes laissés par une ancienne boîte à outils
+3113	Examiner
+3114	Données d'exécution laissées par le composant supprimé {id}
+3115	Statistiques d'utilisation
+3116	Autres emplacements de nettoyage
+3117	✓ {n} éléments supprimés, {size} libérés
+3118	{n} éléments non supprimés (en cours d'utilisation ou hors des dossiers autorisés)
+3119	Rien de sélectionné
+3120	Supprimer les {n} éléments temporaires sélectionnés ? Action irréversible.
+3121	Supprimer les données d'exécution laissées par {id} ? Une réinstallation les retéléchargera.
+3122	✓ Supprimé
+3123	Stockage
+3124	Espace utilisé
+3125	Analyser
+3126	Conservation des sessions
+3127	Par défaut, Claude Code supprime les sessions inchangées depuis 30 jours, avec leurs données annexes, sans passer par la corbeille. Cette application les conserve indéfiniment : une session ne va à la corbeille que si vous la supprimez depuis la liste des sessions. Si vous avez défini cleanupPeriodDays dans ~/.claude/settings.json, votre nombre de jours est utilisé.
+3128	Nettoyage automatique
+3129	Ne nettoie que les caches, les fichiers temporaires inchangés depuis 7 jours et les fichiers annexes de Claude Code de plus de 30 jours. Les sessions, vos fichiers et les programmes ne sont jamais supprimés automatiquement

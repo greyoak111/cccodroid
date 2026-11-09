@@ -157,6 +157,7 @@
     cats.forEach((b) => b.classList.toggle("on", b.dataset.cat === setCatOpen));
     // 每次进「更新」这一类都重新查一遍（不只读上回的结果）；离开再进来才算一次
     if (setCatOpen === "update" && setCatShown !== "update") updOnOpen();
+    if (setCatOpen === "storage" && setCatShown !== "storage") stOnOpen();
     if (setCatShown !== "-" && setCatShown !== setCatOpen) {
       const cur = setCatOpen && document.querySelector(`.set-cat[data-cat="${setCatOpen}"]`);
       if (narrow) { if (cur) MO.play(cur, "mo-in-push", 1400); else if (!setCatOpen) MO.play($("set-cats"), "mo-in-back", 1400); }
