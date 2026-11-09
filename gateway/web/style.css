@@ -106,6 +106,9 @@ html.tb-still #tb-tools,html.tb-still #tb-tools *,html.tb-still #btn-more path{t
   position:relative;height:16px;background:var(--bg2);
   border-bottom:1px solid var(--line);flex:0 0 auto;overflow:hidden;
 }
+/* 顶栏、用量条、底部状态行是界面不是正文：从聊天里往上 / 往下拖选会跨过 #chat 的边界，把徽标、用量文字圈进选区，复制出来多一段（#201）。
+   和 #title-block、.tool-head 一样不让选；这三块里没有输入框 */
+#topbar,#topbar *,#ctxbar,#ctxbar *,#hint-row,#hint-row *{-webkit-user-select:none;user-select:none}
 #ctxfill{height:100%;width:0;background:linear-gradient(90deg,var(--accent-dim),var(--accent));transition:width .4s}
 /* 快满 / 满了：不换成纯黄纯红那种跳出来的色块，仍从本主题的强调色渐变过去，终点是按每套主题深浅调过的暖色 / 红色 */
 #ctxbar.warn #ctxfill{background:linear-gradient(90deg,var(--accent-dim),var(--ctx-warn))}
