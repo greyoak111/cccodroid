@@ -488,6 +488,32 @@ final class Priv {
                     } catch (Exception e) { resp = new JSONObject().put("ok", false).put("message", e.getMessage()); }
                     break;
                 }
+                case "apk_install": {
+                    // 查看器里点「安装」：只在 cccodroid 前台时受理，还要用户在应用自己的确认框里点头，之后才轮到系统安装确认。
+                    // 这条通道 Claude 和脚本也连得上：不这样拦，后台就能拿任意 APK 一遍遍弹系统安装框（11-09 用户定）
+                    int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
+                    if (!foreground()) { resp = new JSONObject().put("ok", false).put("message", Tr.t("请先把 cccodroid 切到前台")); break; }
+                    File staged = null;
+                    try {
+                        File f = new File(req.optString("path")).getCanonicalFile();
+                        if (!f.isFile() || !f.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".apk")) throw new IOException(Tr.t("不是 .apk 文件"));
+                        Share.guard(ctx, f);       // 凭据、私有目录里工作区以外的不碰，和分享同一道
+                        staged = Apk.stage(ctx, f);
+                        android.content.pm.PackageInfo pi = Apk.archiveInfo(ctx, staged);
+                        if (pi == null) throw new IOException(Tr.t("不是有效的安装包"));
+                        // 自己的新版本走「设置 → 更新」：那边核签名、记状态，这里装了更新页的状态就对不上
+                        if (ctx.getPackageName().equals(pi.packageName)) throw new IOException(Tr.t("cccodroid 自己的新版本请到「设置 → 更新」里装"));
+                        String text = Tr.f("安装应用「{0}」\n包名 {1}\n版本 {2}\n\n文件：{3}", Apk.label(ctx, pi, staged), pi.packageName, String.valueOf(pi.versionName), f.getPath());
+                        if (!confirm(text, caller(pid), "apk:" + f.getPath())) {
+                            resp = new JSONObject().put("ok", false).put("message", Tr.t("没有允许，没有安装"));
+                            break;
+                        }
+                        Apk.install(ctx, staged, "file");      // 写进安装会话后就不再读这份，下面删掉
+                        resp = new JSONObject().put("ok", true);
+                    } catch (Exception e) { resp = new JSONObject().put("ok", false).put("message", String.valueOf(e.getMessage())); }
+                    finally { if (staged != null) staged.delete(); }
+                    break;
+                }
                 case "usb_open": Usb.open(ctx, req, sock); return;   // 自己回复（fd 随回复走）
                 // 设备工具（device-mcp.mjs 调）与它的设置页
                 case "dev": {
@@ -533,7 +559,7 @@ final class Priv {
                 default: resp = new JSONObject().put("ok", false).put("message", Tr.t("未知操作 ") + op);
             }
             // 改状态的应用内操作也留痕（10-31 四轮复核：以前只有 exec 进特权命令记录）
-            if (op.startsWith("upd_") && !op.equals("upd_status") || op.startsWith("shz_") || op.equals("keepalive") || op.equals("dev_set") || op.equals("noask")) {
+            if (op.startsWith("upd_") && !op.equals("upd_status") || op.startsWith("shz_") || op.equals("keepalive") || op.equals("dev_set") || op.equals("noask") || op.equals("apk_install")) {
                 int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                 JSONObject r0 = new JSONObject(req.toString());
                 r0.remove("code");    // 配对码不进记录

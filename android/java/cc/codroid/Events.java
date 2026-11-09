@@ -55,13 +55,19 @@ public class Events extends BroadcastReceiver {
             PendingIntent pi = PendingIntent.getActivity(c, 40, confirm, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
             c.getSystemService(NotificationManager.class).notify(40, new Notification.Builder(c, Updater.CH)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
-                .setContentTitle("shizuku".equals(what) ? Tr.t("安装 Shizuku") : Tr.t("安装 cccodroid 新版本"))
+                .setContentTitle("shizuku".equals(what) ? Tr.t("安装 Shizuku") : "file".equals(what) ? Tr.t("安装应用") : Tr.t("安装 cccodroid 新版本"))
                 .setContentText(Tr.t("点此确认安装"))
                 .setContentIntent(pi).setAutoCancel(true).build());
             return;
         }
         boolean ok = st == PackageInstaller.STATUS_SUCCESS;
         String why = st == PackageInstaller.STATUS_FAILURE_ABORTED ? Tr.t("取消了") : msg;
+        if ("file".equals(what)) {
+            // 查看器里装的别的应用：系统确认页点完就关了，成没成给一句；用户自己点了取消就不吵
+            if (st != PackageInstaller.STATUS_FAILURE_ABORTED)
+                android.widget.Toast.makeText(c, ok ? Tr.t("已安装") : Tr.t("安装失败：") + why, android.widget.Toast.LENGTH_LONG).show();
+            return;
+        }
         if ("shizuku".equals(what)) ShizukuSetup.get(c).onInstalled(ok, why);
         else Updater.get(c).onInstallResult(what, ok, why);
     }

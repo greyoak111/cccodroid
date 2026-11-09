@@ -247,6 +247,7 @@ const APP_FIELDS = {
   upd_set: { auto: "boolean", channel: "string", version: "string", flavor: "string" },
   upd_verify: { full: "boolean" }, upd_repair: { full: "boolean" },
   share_file: { path: "string", mime: "string" },
+  apk_install: { path: "string" },
   shz_pair: { code: "string" }, shz_autostart: { enable: "boolean" },
   notify_set: { done: "boolean", ask: "boolean" },
   dev_set: { on: "boolean", tool: "string", enabled: "boolean", a11y: "string", idle: "number" },
@@ -289,7 +290,7 @@ export async function routeDevside(req, res, u, p) {
   // 更新（APK / 工具包 / Claude Code）与 Shizuku 一键安装激活：都在应用进程里做，这里只转话
   if (p.startsWith("/api/app/")) {
     const op = p.slice(9);
-    const OPS = ["upd_status", "upd_check", "upd_apply", "upd_set", "upd_verify", "upd_repair", "share_logs", "factory_reset", "share_file", "shz_install", "shz_activate", "shz_pair", "shz_autostart", "shz_repair", "open_app_settings", "freeze_ack", "notify_status", "notify_set", "notify_settings", "dev_status", "dev_set", "a11y_settings"];
+    const OPS = ["upd_status", "upd_check", "upd_apply", "upd_set", "upd_verify", "upd_repair", "share_logs", "factory_reset", "share_file", "apk_install", "shz_install", "shz_activate", "shz_pair", "shz_autostart", "shz_repair", "open_app_settings", "freeze_ack", "notify_status", "notify_set", "notify_settings", "dev_status", "dev_set", "a11y_settings"];
     if (!OPS.includes(op)) return sendJson(res, 404, { ok: false, message: tz("未知操作") });
     const raw = req.method === "POST" ? JSON.parse((await readBody(req)) || "{}") : {};
     // 只转各操作认的字段、认的类型：应用那头也逐项校验，这里再挡一道（11-01 独立审查低-3）
@@ -301,8 +302,8 @@ export async function routeDevside(req, res, u, p) {
       b[k] = v;
     }
     if (!PREFIX) return sendJson(res, 200, await devApp(op, b));
-    // 激活 / 打开自动激活要等用户在原生对话框里点（最多 60 秒），和 keepalive 一样放长
-    return sendJson(res, 200, await privCall({ ...b, op }, op === "shz_activate" || op === "shz_autostart" ? 65000 : undefined));
+    // 激活 / 打开自动激活要等用户在原生对话框里点（最多 60 秒），和 keepalive 一样放长；装 APK 还要先把包拷进暂存再等确认
+    return sendJson(res, 200, await privCall({ ...b, op }, op === "shz_activate" || op === "shz_autostart" ? 65000 : op === "apk_install" ? 120000 : undefined));
   }
   return NEXT;
 }

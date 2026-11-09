@@ -42,7 +42,29 @@ final class Apk {
         return hex.toString();
     }
 
-    /** @param what 回调时带回去的标记：app / shizuku */
+    /** 查看器里点「安装」的那份：先拷进私有缓存再验、再装。验的和装的是同一份，原文件在确认框开着时被换掉也装不进别的 */
+    static File stage(Context c, File src) throws IOException {
+        File dir = new File(c.getCacheDir(), "apk-install");
+        File[] old = dir.listFiles();
+        if (old != null) for (File o : old) o.delete();     // 上次没走完（进程被杀）留下的
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException(Tr.t("建不了暂存目录"));
+        File dst = new File(dir, Long.toString(System.currentTimeMillis(), 36) + ".apk");
+        java.nio.file.Files.copy(src.toPath(), dst.toPath());
+        return dst;
+    }
+
+    /** 安装包里写的应用名；读不到就用包名 */
+    static String label(Context c, PackageInfo p, File apk) {
+        try {
+            p.applicationInfo.sourceDir = apk.getPath();
+            p.applicationInfo.publicSourceDir = apk.getPath();
+            CharSequence l = p.applicationInfo.loadLabel(c.getPackageManager());
+            if (l != null && l.length() > 0) return l.toString();
+        } catch (Exception ignored) {}
+        return p.packageName;
+    }
+
+    /** @param what 回调时带回去的标记：app / shizuku / file（查看器里装的别的 APK） */
     static void install(Context c, File apk, String what) throws IOException {
         PackageInstaller pi = c.getPackageManager().getPackageInstaller();
         PackageInstaller.SessionParams p = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);

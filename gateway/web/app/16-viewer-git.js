@@ -457,6 +457,7 @@
     $("vw-body").innerHTML = `<div class="vw-empty">
       <div>${t("这种文件没有内置预览。")}</div>
       ${VW.size <= VW_EDIT_MAX && !VW_BIN_EXT.test(path) ? `<button class="btn ghost sm" data-a="astext">${t("当作文本打开")}</button>` : ""}
+      ${/\.apk$/i.test(path) && canShare() ? `<button class="btn sm" data-a="apk">${t("安装")}</button>` : ""}
       <button class="btn ghost sm" data-a="share">${shareIco()}${t("分享")}</button></div>`;
     $("vw-body").querySelector('[data-a="astext"]')?.addEventListener("click", () => { VW.kind = "text"; vwLoadText("edit"); });
   }
@@ -470,7 +471,16 @@
   }
 
   // 预览不了 / 转换失败时正文里的「分享」按钮
-  $("vw-body").addEventListener("click", (e) => { if (e.target.closest('.vw-empty [data-a="share"]')) shareFile(VW.path); });
+  $("vw-body").addEventListener("click", (e) => {
+    if (e.target.closest('.vw-empty [data-a="share"]')) shareFile(VW.path);
+    if (e.target.closest('.vw-empty [data-a="apk"]')) vwInstallApk(VW.path);
+  });
+  // APK 的「安装」：应用先弹自己的确认框（应用名、包名、版本），点了允许才轮到系统的安装确认（Priv.java apk_install）
+  async function vwInstallApk(p) {
+    let j;
+    try { j = await post("/api/app/apk_install", { path: p }); } catch (e) { return toast(t("安装失败") + "：" + e.message, true); }
+    if (!j || !j.ok) toast((j && j.message) || t("安装失败"), true);
+  }
   $("vw-acts").addEventListener("click", (e) => {
     const b = e.target.closest("[data-a]");
     if (!b) return;
