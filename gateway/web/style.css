@@ -3515,6 +3515,11 @@ html[data-motion="on"] .lin-prof .mo-ghost .mo-st,html[data-motion="on"] .lin-pr
 #bridge-config-panel .bc-model-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px;border:1px solid var(--line);border-radius:min(var(--radius),9px)}
 #bridge-config-panel .bc-model-row > span{flex:1 1 100%;min-width:0;overflow-wrap:anywhere;font-size:13px}
 #bridge-config-panel .bc-model-row .btn{flex:1 1 80px;margin:0}
+#bridge-config-panel .bc-apis{padding-bottom:20px;margin-bottom:24px;border-bottom:1px solid var(--line)}
+#bridge-config-panel .bc-apis .bc-selected{margin-top:0;margin-bottom:12px}
+#bridge-config-panel .bc-api-active{border-color:var(--accent);border-inline-start-width:3px}
+#bridge-config-panel #bc-api-title{font-size:14px;margin:0 0 20px;color:var(--fg2)}
+#bridge-config-panel #bc-api-title:empty{display:none}
 #bridge-config-panel .bc-key-wrap{position:relative}
 #bridge-config-panel .bc-key-wrap input{padding-inline-end:54px}
 #bridge-config-panel .bc-eye{position:absolute;inset-inline-end:1px;top:1px;width:46px;height:46px;display:grid;place-items:center;background:none;border:0;color:var(--fg2);cursor:pointer}

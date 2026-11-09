@@ -8,7 +8,7 @@ import { performance } from "node:perf_hooks";
 import crypto from "node:crypto";
 import { registryFlockFixture, guardRegistryFlock } from "./fixtures/registry-flock.mjs";
 import { routeComponents } from "../gw/components.mjs";
-import { normalizeBridgeEndpoint } from "../gw/bridge-config.mjs";
+import { normalizeBridgeEndpoint, saveBridgeConfig } from "../gw/bridge-config.mjs";
 import { PROVIDER, PROVIDERS_CFG, upsertProvider } from "../gw/providers.mjs";
 import { SETTINGS } from "../gw/settings-store.mjs";
 import { RUNS } from "../gw/runs.mjs";
@@ -31,16 +31,21 @@ const source = `const fs=require('node:fs'),path=require('node:path');
 const marker=${JSON.stringify(marker)},stateFile=${JSON.stringify(stateFile)},modeFile=${JSON.stringify(modeFile)},target=${JSON.stringify(target)},reg=${JSON.stringify(registration)};
 let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{
  const command=process.argv[2],mode=fs.readFileSync(modeFile,'utf8');
- fs.appendFileSync(marker,JSON.stringify({args:process.argv.slice(2),hasUpstreamEnv:!!process.env.ANTHROPIC_API_KEY||!!process.env.OPENAI_API_KEY,hasAppEnv:!!process.env.CCAPP_RUN,fields:input?Object.keys(JSON.parse(input)):[]})+'\\n');
+ fs.appendFileSync(marker,JSON.stringify({args:process.argv.slice(2),hasUpstreamEnv:!!process.env.ANTHROPIC_API_KEY||!!process.env.OPENAI_API_KEY,hasAppEnv:!!process.env.CCAPP_RUN,fields:input?Object.keys(JSON.parse(input)):[],input:input?JSON.parse(input):null})+'\\n');
  const write=(p,v)=>{fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(v),{mode:0o600});};
  if(mode==='conflict'){console.error(JSON.stringify({schema:1,id:'openai-bridge',error:{code:'RUNTIME_CONFLICT',check:'APP_PROVIDER',detail:${JSON.stringify(upstreamSecret)},message:'must not forward '+${JSON.stringify(upstreamSecret)}}}));process.exitCode=1;return;}
  let state=fs.existsSync(stateFile)?JSON.parse(fs.readFileSync(stateFile,'utf8')):null;
- const view=()=>({schema:1,id:'openai-bridge',configured:!!state,endpoint:state?.endpoint||'',model:state?.model||'',...(state?.models?{models:state.models}:{}),hasKey:!!state,localReady:!!state&&mode!=='not-ready',...(mode.startsWith('local:')?{localError:mode.slice(6)}:{}),apiKey:${JSON.stringify(upstreamSecret)},keyTail:'LEAK',connectionPath:'/untrusted/path'});
+ const view=()=>({schema:1,id:'openai-bridge',configured:!!state,endpoint:state?.endpoint||'',model:state?.model||'',...(state?.models?{models:state.models}:{}),...(mode.startsWith('multi')?{capabilities:{multiUpstream:true},...(state?.upstreams?{upstreams:state.upstreams.map((u,i)=>({...u,hasKey:true,keyTail:'LEAK',connectionPath:'/untrusted/path',...(mode==='multi-mismatch'&&i===0?{models:u.models.map((p,j)=>({...p,model:j===0?'changed-raw-model':p.model}))}:{})}))}:{})}:{}),hasKey:!!state,localReady:!!state&&mode!=='not-ready',...(mode.startsWith('local:')?{localError:mode.slice(6)}:{}),apiKey:${JSON.stringify(upstreamSecret)},keyTail:'LEAK',connectionPath:'/untrusted/path'});
  if(command==='gui-status'){const output=()=>console.log(JSON.stringify(view()));if(mode==='delay')setTimeout(output,200);else output();return;}
  if(command==='uninstall'){fs.rmSync(reg,{force:true});return;}
  if(command!=='gui-configure'){process.exitCode=2;return;}
  const body=JSON.parse(input);
- if(body.apiKey)state={...body};else state={...body,apiKey:state.apiKey};
+ if(body.upstreams){
+  const previous=state;
+  const upstreams=body.upstreams.map(u=>({...u,apiKey:u.apiKey||previous?.upstreams?.find(p=>p.name===u.name)?.apiKey||${JSON.stringify(upstreamSecret)}}));
+  state={...body,apiKey:previous?.apiKey||${JSON.stringify(upstreamSecret)},upstreams};
+ }
+ else if(body.apiKey)state={...body};else state={...body,apiKey:state.apiKey};
  write(stateFile,state);write(path.join(target,'.ccr-bridge-kit.json'),{id:'ccr-bridge-kit',target,guiManaged:true,service:{schema:1,home:process.env.HOME,instanceId:'b'.repeat(32)},settings:path.join(process.env.HOME,'.claude/settings.json'),componentEntry:process.argv[1]});write(path.join(target,'connection.json'),{baseUrl:'http://127.0.0.1:34597',apiKey:mode==='fresh'?${JSON.stringify(freshLocalSecret)}:${JSON.stringify(localSecret)},model:state.model});
  write(reg,{schema:1,id:'openai-bridge',endpoint:'http://127.0.0.1:34597',runtimeDir:target,instanceId:'b'.repeat(32)});
  fs.mkdirSync(path.join(target,'runtime-home/.claude-code-router'),{recursive:true,mode:0o700});
@@ -763,7 +768,7 @@ test("provider落盘失败且组件已换默认模型：不借旧默认窗口，
   assert.deepEqual(saved.body.models, updated); assert.equal(saved.body.localReady, true);
 });
 
-test("100个长Unicode模型可保存，超过128KiB配置拒绝且不执行组件", async () => {
+test("100个长Unicode模型可保存，超过512KiB配置拒绝且不执行组件", async () => {
   const models = Array.from({ length: 100 }, (_, i) => ({ id: String(i).padStart(3, "0") + "模".repeat(197), contextWindow: 200000 }));
   const result = await request(input({ model: models[0].id, models }));
   assert.equal(result.status, 200, JSON.stringify(result.body));
@@ -771,7 +776,155 @@ test("100个长Unicode模型可保存，超过128KiB配置拒绝且不执行组�
   const before = calls().length;
   // 195-C.19 起 readBodyBuf 不再 req.destroy()：读掉超限部分后正常回错误，前端能看见原因。
   // 这条断言原来锁的是「超必断连接」，属于被修的 bug；路由把读取失败统一归为 invalid_input（400）。
-  const over = await request(input({ apiKey: "x".repeat(128 * 1024) }));
+  // 本分支把 HTTP 配置上限提到 512KiB，超限阈值随之变化。
+  const over = await request(input({ apiKey: "x".repeat(512 * 1024) }));
   assert.equal(over.status, 400);
   assert.equal(calls().length, before);
+});
+
+const multiInput = () => ({ endpoint: "https://one.example.invalid/v1", apiKey: "", consent: true, model: "relay-2/shared",
+  models: [{ id: "relay/shared", contextWindow: 512000 }, { id: "relay-2/shared", contextWindow: 128000 }],
+  upstreams: [
+    { name: "relay", endpoint: "https://one.example.invalid/v1", apiKey: upstreamSecret, models: [{ id: "relay/shared", model: "shared" }] },
+    { name: "relay-2", endpoint: "https://two.example.invalid/v1", apiKey: upstreamSecret, models: [{ id: "relay-2/shared", model: "shared" }] },
+  ] });
+const normalizedTopology = (body) => body.upstreams.map(({ name, endpoint, models }) => ({ name, endpoint: normalizeBridgeEndpoint(endpoint), hasKey: true, models }));
+const configureCount = () => calls().filter(call => call.args[0] === "gui-configure").length;
+
+test("multi capability 在未配置时投影；旧组件不接受新增 topology，也不收到未知字段", async () => {
+  fs.writeFileSync(modeFile, "multi");
+  const fresh = await request(); assert.deepEqual(fresh.body.capabilities, { multiUpstream: true });
+  assert.equal(fresh.body.configured, false); assert.equal("upstreams" in fresh.body, false);
+  fs.writeFileSync(modeFile, "ok");
+  const legacy = await request(); assert.equal("capabilities" in legacy.body, false);
+  const unsupported = await request(multiInput());
+  assert.equal(unsupported.body.code, "UPDATE_REQUIRED"); assert.equal(configureCount(), 0);
+  assert.equal((await request(input())).status, 200);
+  assert.equal(calls().at(-1).fields.includes("upstreams"), false);
+});
+
+test("多API仅提交固定stdin，状态投影无Key/尾号/路径，App仍只有一个loopback provider", async () => {
+  fs.writeFileSync(modeFile, "multi");
+  const body = multiInput(), active = PROVIDER.id, setting = SETTINGS.provider;
+  const result = await request(body);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.deepEqual(result.body.upstreams, normalizedTopology(body));
+  assert.deepEqual(result.body.models, body.models); assert.equal(result.body.model, "relay-2/shared");
+  const call = calls().at(-1);
+  assert.deepEqual(call.args, ["gui-configure"]);
+  assert.deepEqual(call.input, { endpoint: normalizeBridgeEndpoint(body.endpoint), apiKey: "", model: body.model,
+    models: body.models.map(item => item.id), upstreams: body.upstreams.map(item => ({ ...item, endpoint: normalizeBridgeEndpoint(item.endpoint) })) });
+  const provider = PROVIDERS_CFG.providers[result.body.providerId];
+  assert.equal(provider.baseUrl, "http://127.0.0.1:34597"); assert.equal(provider.apiKey, localSecret);
+  assert.equal(provider.defaultModel, body.model);
+  assert.deepEqual(JSON.parse(Buffer.from(provider.modelsUrl.split(",")[1], "base64")).data,
+    body.models.map(item => ({ id: item.id, context_window: item.contextWindow })));
+  assert.equal(JSON.stringify(provider).includes("one.example.invalid"), false);
+  assert.equal(JSON.stringify(provider).includes(upstreamSecret), false);
+  assert.equal(PROVIDER.id, active); assert.equal(SETTINGS.provider, setting);
+  const status = await request(); assert.deepEqual(status.body.upstreams, result.body.upstreams); assert.deepEqual(status.body.models, body.models);
+});
+
+test("多API留空只匹配同名同origin，新名及换origin都在configure前拒绝；显式Key可替换", async () => {
+  fs.writeFileSync(modeFile, "multi"); await request(multiInput());
+  const blank = multiInput(); for (const item of blank.upstreams) item.apiKey = "";
+  blank.upstreams[1].endpoint = "https://two.example.invalid/private/chat/completions";
+  assert.equal((await request(blank)).status, 200);
+  const before = configureCount();
+  const renamed = structuredClone(blank); renamed.upstreams[1].name = "new-name";
+  assert.equal((await request(renamed)).body.code, "KEY_REQUIRED");
+  const changed = structuredClone(blank); changed.upstreams[1].endpoint = "https://one.example.invalid/v1";
+  assert.equal((await request(changed)).body.code, "KEY_HOST_CHANGED", "另一API保存过同origin也不能借Key");
+  assert.equal(configureCount(), before);
+  changed.upstreams[1].apiKey = upstreamSecret;
+  assert.equal((await request(changed)).status, 200);
+});
+
+test("删除primary与重排保留原name/visible ID/default/windows，复用相同provider事务", async () => {
+  fs.writeFileSync(modeFile, "multi"); const first = await request(multiInput());
+  const reverse = multiInput(); reverse.upstreams.reverse(); reverse.models.reverse(); reverse.endpoint = reverse.upstreams[0].endpoint;
+  for (const item of reverse.upstreams) item.apiKey = "";
+  const reordered = await request(reverse); assert.equal(reordered.status, 200);
+  assert.deepEqual(reordered.body.upstreams, normalizedTopology(reverse));
+  const remaining = multiInput(); remaining.upstreams.shift(); remaining.models.shift(); remaining.endpoint = remaining.upstreams[0].endpoint;
+  remaining.upstreams[0].apiKey = "";
+  const removed = await request(remaining); assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  assert.equal(removed.body.providerId, first.body.providerId);
+  assert.equal(removed.body.upstreams[0].name, "relay-2");
+  assert.deepEqual(removed.body.models, [{ id: "relay-2/shared", contextWindow: 128000 }]);
+  assert.deepEqual(calls().at(-1).input.models, ["relay-2/shared"], "单个可见ID仍随topology显式提交");
+});
+
+test("多API拒绝非法名称、raw重复、visible冲突、拓扑漏项/顺序/default、超限和额外控制字段", async () => {
+  const mutations = [
+    body => { body.upstreams = []; },
+    body => { body.upstreams[1].name = "relay"; },
+    body => { body.upstreams[1].name = "Relay"; },
+    body => { body.upstreams[1].name = "a".repeat(33); },
+    body => { body.upstreams[1].models = []; },
+    body => { body.upstreams[1].models.push({ id: "other", model: "shared" }); },
+    body => { body.upstreams[1].models[0].id = "relay/shared"; },
+    body => { body.upstreams[1].models[0].model = "two,models"; },
+    body => { body.upstreams[1].models[0].model = "x".repeat(201); },
+    body => { body.upstreams[1].models[0].model = "line\u0085break"; },
+    body => { body.models.reverse(); },
+    body => { body.models.pop(); body.model = body.models[0].id; },
+    body => { body.model = "missing-default"; },
+    body => { body.endpoint = body.upstreams[1].endpoint; },
+    body => { body.upstreams[0].dir = "/arbitrary"; },
+    body => { body.upstreams[0].models[0].contextWindow = 1024; },
+    body => { body.apiKey = upstreamSecret; },
+    body => { body.upstreams = Array.from({ length: 17 }, (_, i) => ({ ...body.upstreams[0], name: "relay-" + i })); },
+  ];
+  for (const mutate of mutations) {
+    const body = multiInput(); mutate(body);
+    assert.equal((await request(body)).status, 400);
+  }
+  assert.equal(calls().length, 0, "所有格式错误均在组件执行前拒绝");
+});
+
+test("组件返回raw拓扑不同即部分保存失败，不更新App provider，不能只比较top visible list", async () => {
+  fs.writeFileSync(modeFile, "multi"); const first = await request(multiInput());
+  const previous = structuredClone(PROVIDERS_CFG.providers[first.body.providerId]);
+  fs.writeFileSync(modeFile, "multi-mismatch");
+  const result = await request(multiInput());
+  assert.equal(result.status, 400); assert.equal(result.body.saved, true); assert.equal(result.body.code, "component_response");
+  assert.deepEqual(PROVIDERS_CFG.providers[first.body.providerId], previous);
+});
+
+test("组件status拓扑必须规范且精确覆盖top list/default，不能透传畸形清单", async () => {
+  fs.writeFileSync(modeFile, "multi"); const original = multiInput(); await request(original);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  for (const change of [
+    value => { value.upstreams[1].name = "relay"; },
+    value => { value.upstreams[1].endpoint = "https://two.example.invalid/v1"; },
+    value => { value.upstreams[1].models[0].id = "missing-visible"; },
+    value => { value.upstreams = undefined; },
+    value => { value.upstreams[0].models = []; },
+  ]) {
+    const bad = structuredClone(state); change(bad); put(stateFile, bad);
+    const result = await request(); assert.equal(result.status, 400); assert.equal(result.body.code, "component_response");
+  }
+});
+
+test("save finally清空顶层及嵌套替换Key，成功、验证失败与组件失败同样处理", async () => {
+  fs.writeFileSync(modeFile, "multi");
+  const body = multiInput(); assert.equal((await saveBridgeConfig(body)).ok, true);
+  assert.equal(body.apiKey, ""); assert.ok(body.upstreams.every(item => item.apiKey === ""));
+  const bad = multiInput(); bad.upstreams[1].name = "bad/name";
+  await assert.rejects(saveBridgeConfig(bad)); assert.ok(bad.upstreams.every(item => item.apiKey === ""));
+  fs.writeFileSync(modeFile, "conflict");
+  const failed = multiInput(); await assert.rejects(saveBridgeConfig(failed));
+  assert.ok(failed.upstreams.every(item => item.apiKey === ""));
+});
+
+test("100个Unicode显式pair加top模型清单超过旧128KiB后仍在512KiB内安全保存", async () => {
+  fs.writeFileSync(modeFile, "multi");
+  const ids = Array.from({ length: 100 }, (_, i) => String(i).padStart(3, "0") + "模".repeat(197));
+  const body = { endpoint: "https://one.example.invalid/v1", apiKey: "", consent: true, model: ids[0],
+    models: ids.map(id => ({ id, contextWindow: 200000 })), upstreams: [{ name: "relay", endpoint: "https://one.example.invalid/v1", apiKey: upstreamSecret,
+      models: ids.map(id => ({ id, model: id })) }] };
+  assert.ok(Buffer.byteLength(JSON.stringify(body)) > (128 << 10));
+  const result = await request(body); assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.deepEqual(result.body.models, body.models); assert.deepEqual(result.body.upstreams, normalizedTopology(body));
 });

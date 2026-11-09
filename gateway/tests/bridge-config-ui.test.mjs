@@ -96,7 +96,7 @@ function ui(initial = fresh()) {
         if (url.endsWith("/models")) {
           assert.equal(opts.method, "POST"); assert.equal(body.consent, true, "a models request requires explicit current consent");
           assert.equal(get("bc-model-consent").checked, true, "the body flag cannot replace the visible checked opt-in");
-          assert.deepEqual(Object.keys(body).sort(), (body.apiKey === undefined ? ["consent", "endpoint"] : ["apiKey", "consent", "endpoint"]), "model discovery sends no chat, selected model or provider mutation");
+          assert.deepEqual(Object.keys(body).sort(), ["consent", "endpoint", ...(body.apiKey === undefined ? [] : ["apiKey"]), ...(body.provider === undefined ? [] : ["provider"])].sort(), "model discovery sends only the edited API name/address/key and consent, never chat or provider mutation");
           assert.equal(opts.headers["Content-Type"], "application/json");
         }
       });
@@ -161,6 +161,12 @@ function ui(initial = fresh()) {
     async modelAction(action, id) {
       const button = get("bc-selected").children.flatMap((row) => row.children).find((el) => el.dataset.bc === action && el.dataset.model === id);
       assert.ok(button, `missing model action ${action}/${id}`);
+      if (!button.disabled) for (const fn of get("bridge-config-panel").listeners.click) fn({ target: button });
+      await flush();
+    },
+    async apiAction(action, name) {
+      const button = get("bc-api-list").children.flatMap((row) => row.children).find((el) => el.dataset.bc === action && el.dataset.api === name);
+      assert.ok(button, `missing API action ${action}/${name}`);
       if (!button.disabled) for (const fn of get("bridge-config-panel").listeners.click) fn({ target: button });
       await flush();
     },
@@ -1274,4 +1280,212 @@ test("bridge multiple models: remove default chooses a remaining model, clear-al
   await u.submit();
   assert.equal(u.configPosts().length, 0);
   assert.equal(u.get("bc-model").getAttribute("aria-invalid"), "true");
+});
+
+const multiSaved = () => saved({ capabilities: { multiUpstream: true }, endpoint: "https://one.example.com/v1/chat/completions", model: "relay-2/shared",
+  models: [{ id: "relay/shared", contextWindow: 512000 }, { id: "relay-2/shared", contextWindow: 128000 }], contextWindow: 128000,
+  upstreams: [
+    { name: "relay", endpoint: "https://one.example.com/v1/chat/completions", hasKey: true, apiKey: "never-echo-primary-key", models: [{ id: "relay/shared", model: "shared" }] },
+    { name: "relay-2", endpoint: "https://two.example.com/v1/chat/completions", hasKey: true, apiKey: "never-echo-secondary-key", models: [{ id: "relay-2/shared", model: "shared" }] },
+  ] });
+const publicReply = (body) => saved({ capabilities: { multiUpstream: true }, endpoint: body.endpoint, model: body.model,
+  models: body.models, contextWindow: body.models.find(item => item.id === body.model).contextWindow,
+  upstreams: body.upstreams.map(({ name, endpoint, models }) => ({ name, endpoint, models, hasKey: true })) });
+const freshMulti = () => ({ ...fresh(), capabilities: { multiUpstream: true } });
+
+test("multi APIs: compact raw IDs and retained empty APIs are accepted without echoing keys", async () => {
+  const data = multiSaved();
+  data.models[0].id = "unique-model"; data.upstreams[0].models = [{ id: "unique-model" }];
+  data.upstreams.push({ name: "relay-3", endpoint: "https://three.example.com/v1/chat/completions", hasKey: true, models: [] });
+  const u = ui(data); await u.open();
+  assert.equal(u.get("bc-saved").classList.contains("hidden"), false);
+  await u.click("edit");
+  assert.equal(u.get("bc-model").value, "unique-model");
+  assert.equal(u.get("bc-key").value, "");
+  assert.equal(u.configPosts().length, 0);
+});
+
+test("multi APIs: incomplete transaction keeps the legacy resave path instead of inventing topology", async () => {
+  const data = multiSaved(); delete data.upstreams;
+  data.localError = "COMPONENT_DISABLED"; data.local = { state: "error", code: "COMPONENT_DISABLED" };
+  const u = ui(data); await u.open();
+  assert.equal(u.get("bc-saved").classList.contains("hidden"), false);
+  await u.click("edit");
+  assert.equal(u.get("bc-endpoint").value, data.endpoint);
+  assert.equal(u.get("bc-model").value, data.model);
+  assert.equal(u.configPosts().length, 0);
+});
+
+test("multi APIs: old component keeps single form and Add API explains update without unsupported fields", async () => {
+  const u = ui(); await u.open(); await u.click("api-add");
+  assert.match(u.get("bc-api-hint").textContent, /需要更新桥组件/);
+  assert.match(u.get("bc-notice").textContent, /单 API 配置仍可使用/);
+  assert.equal(u.get("bc-api-list").children.length, 0);
+  fill(u); u.change(u.checkbox().id, true); await u.advance(650);
+  assert.equal("provider" in u.modelCalls()[0].body, false);
+  u.response(saved()); await u.submit();
+  assert.equal("upstreams" in u.configPosts()[0].body, false);
+});
+
+test("multi APIs: selected API shows only raw models/windows; global default and saved aliases survive editing", async () => {
+  const u = ui(multiSaved()); let used = 0; await u.open({ useNew: async () => { used++; } });
+  assert.equal(u.get("bc-saved-apis").children.length, 2);
+  await u.click("edit");
+  assert.equal(u.get("bc-api-list").children.length, 2);
+  assert.equal(u.get("bc-model").value, "shared"); assert.equal(u.get("bc-ctx").value, "512000");
+  assert.equal(u.get("bc-selected").children.length, 1);
+  assert.equal(u.get("bc-selected").textContent.includes("默认模型"), false, "default is on the other API");
+  assert.equal(u.get("bc-key").value, "");
+  await u.apiAction("api-select", "relay-2");
+  assert.equal(u.get("bc-endpoint").value, "https://two.example.com/v1/chat/completions");
+  assert.equal(u.get("bc-model").value, "shared"); assert.equal(u.get("bc-ctx").value, "128000");
+  assert.match(u.get("bc-selected").textContent, /默认模型/);
+  u.input("ctx", "256k"); await u.click("model-add");
+  await u.apiAction("api-select", "relay"); assert.equal(u.get("bc-ctx").value, "512000");
+  u.post(() => reply(publicReply(u.configPosts().at(-1).body))); await u.submit();
+  const body = u.configPosts()[0].body;
+  assert.deepEqual(body.models, [{ id: "relay/shared", contextWindow: 512000 }, { id: "relay-2/shared", contextWindow: 256000 }]);
+  assert.equal(body.model, "relay-2/shared"); assert.equal(body.apiKey, "");
+  assert.ok(body.upstreams.every(source => source.apiKey === ""));
+  assert.equal(used, 0); assert.equal(u.modelCalls().length, 0);
+  assert.equal(u.get("bridge-config-panel").textContent.includes("never-echo"), false);
+  assert.equal(u.htmlWrites.some(({ html }) => html.includes("never-echo")), false);
+});
+
+test("multi APIs: additive drafts aggregate duplicate raw IDs only at global Save, default/window stay per model", async () => {
+  const u = ui(freshMulti()); await u.open();
+  u.input("endpoint", "https://one.example.com/v1"); u.input("key", "typed-primary-key"); u.input("model", "shared"); u.input("ctx", "512k");
+  await u.click("model-add"); await u.click("api-add");
+  assert.equal(u.get("bc-api-title").textContent, "relay-2"); assert.equal(u.get("bc-endpoint").value, ""); assert.equal(u.get("bc-key").value, "");
+  assert.equal(u.get("bc-selected").children.length, 0); assert.equal(u.configPosts().length, 0);
+  u.input("endpoint", "https://two.example.com/v1"); u.input("key", "typed-secondary-key"); u.input("model", "shared"); u.input("ctx", "128k");
+  await u.click("model-add"); await u.modelAction("model-default", "shared");
+  assert.equal(u.get("bc-selected").children.length, 1, "editing never displays the aggregated list");
+  assert.equal(u.configPosts().length, 0);
+  u.post(() => reply(publicReply(u.configPosts().at(-1).body))); await u.submit();
+  assert.deepEqual(u.configPosts()[0].body, {
+    endpoint: "https://one.example.com/v1/chat/completions", apiKey: "", model: "relay-2/shared", consent: true,
+    models: [{ id: "relay/shared", contextWindow: 512000 }, { id: "relay-2/shared", contextWindow: 128000 }],
+    upstreams: [
+      { name: "relay", endpoint: "https://one.example.com/v1/chat/completions", apiKey: "typed-primary-key", models: [{ id: "relay/shared", model: "shared" }] },
+      { name: "relay-2", endpoint: "https://two.example.com/v1/chat/completions", apiKey: "typed-secondary-key", models: [{ id: "relay-2/shared", model: "shared" }] },
+    ],
+  });
+  assert.equal(u.get("bc-key").value, ""); await u.click("edit");
+  assert.equal(u.get("bc-key").value, ""); await u.apiAction("api-select", "relay-2"); assert.equal(u.get("bc-key").value, "");
+  assert.equal(u.get("bc-ctx").value, "128000");
+});
+
+test("multi APIs: API switching aborts discovery, drops late data and consent even when origins match", async () => {
+  const data = multiSaved(); data.upstreams[1].endpoint = "https://one.example.com/other/chat/completions";
+  const u = ui(data), pending = deferred(); await u.open(); await u.click("edit");
+  u.models(() => pending.promise); u.change(u.checkbox().id, true); await u.advance(650);
+  assert.deepEqual(u.modelCalls()[0].body, { endpoint: data.endpoint, consent: true, provider: "relay" });
+  await u.apiAction("api-select", "relay-2");
+  assert.equal(u.modelCalls()[0].signal.aborted, true); assert.equal(u.checkbox().checked, false); assert.equal(u.pendingTimers(), 0);
+  assert.equal(u.get("bc-key").value, "");
+  pending.resolve(reply({ ok: true, models: [{ id: "late-primary", context_window: 1048576 }], truncated: false })); await u.flush();
+  assert.deepEqual(u.modelList().children, []); assert.equal(u.get("bc-ctx").value, "128000");
+  await u.advance(1000); assert.equal(u.modelCalls().length, 1);
+  assert.match(u.get("bc-save-note").textContent, /保存不调用远端模型/);
+  u.models(() => reply({ ok: true, models: [{ id: "secondary-only" }], truncated: false }));
+  u.change(u.checkbox().id, true); await u.advance(650);
+  assert.equal(u.modelCalls().at(-1).body.provider, "relay-2");
+  assert.deepEqual(u.modelList().children.map(item => item.value), ["secondary-only"]);
+  u.input("endpoint", "https://one.example.com/third/chat/completions");
+  assert.equal(u.checkbox().checked, false, "multi-API source path changes revoke consent too");
+  await u.advance(1000); assert.equal(u.modelCalls().length, 2); assert.deepEqual(u.modelList().children, []);
+});
+
+test("multi APIs: new same-origin API cannot borrow a saved key; replacement keys and discovery stay isolated", async () => {
+  const u = ui(multiSaved()); await u.open(); await u.click("edit");
+  u.input("key", "primary-replacement-key"); await u.click("api-add");
+  assert.equal(u.get("bc-api-title").textContent, "relay-3"); assert.equal(u.get("bc-key").value, "");
+  u.input("endpoint", "https://one.example.com/v1"); u.change(u.checkbox().id, true); await u.advance(1000);
+  assert.equal(u.modelCalls().length, 0, "same origin alone cannot reuse another source's saved key");
+  u.input("key", "new-api-key"); await u.advance(650);
+  assert.equal(u.modelCalls()[0].body.provider, "relay-3"); assert.equal(u.modelCalls()[0].body.apiKey, "new-api-key");
+  await u.apiAction("api-select", "relay"); assert.equal(u.get("bc-key").value, "primary-replacement-key");
+  u.input("endpoint", "https://changed.example.com/v1");
+  assert.equal(u.get("bc-key").value, ""); assert.equal(u.checkbox().checked, false);
+  await u.apiAction("api-select", "relay-3"); assert.equal(u.get("bc-key").value, "new-api-key");
+  u.close(); await u.open(); await u.click("edit");
+  assert.equal(u.get("bc-key").value, ""); assert.equal(u.get("bc-api-list").children.length, 2, "unsaved source and all entered keys are gone");
+});
+
+test("multi APIs: remove is confirmed and staged, deleting first preserves remaining names/aliases/default", async () => {
+  const u = ui(multiSaved()); let used = 0; await u.open({ useNew: async () => { used++; } }); await u.click("edit");
+  u.consent(false); await u.apiAction("api-remove", "relay"); assert.equal(u.get("bc-api-list").children.length, 2);
+  u.consent(true); await u.apiAction("api-remove", "relay");
+  assert.equal(u.get("bc-api-list").children.length, 1); assert.equal(u.get("bc-api-title").textContent, "relay-2");
+  assert.equal(u.get("bc-ctx").value, "128000"); assert.equal(u.configPosts().length, 0); assert.equal(used, 0);
+  u.consent(false); await u.submit(); assert.equal(u.configPosts().length, 0, "global Save also needs explicit confirmation");
+  u.consent(true); u.post(() => reply(publicReply(u.configPosts().at(-1).body))); await u.submit();
+  const body = u.configPosts()[0].body;
+  assert.equal(body.endpoint, "https://two.example.com/v1/chat/completions");
+  assert.deepEqual(body.upstreams, [{ name: "relay-2", endpoint: body.endpoint, apiKey: "", models: [{ id: "relay-2/shared", model: "shared" }] }]);
+  assert.deepEqual(body.models, [{ id: "relay-2/shared", contextWindow: 128000 }]); assert.equal(body.model, "relay-2/shared"); assert.equal(used, 0);
+});
+
+test("multi APIs: removed names are not recycled in the same draft and saved IDs remain stable after adding duplicates", async () => {
+  const data = multiSaved(); data.model = "shared"; data.models[0].id = "shared"; data.upstreams[0].models[0].id = "shared";
+  const u = ui(data); await u.open(); await u.click("edit"); await u.apiAction("api-remove", "relay-2");
+  await u.click("api-add"); assert.equal(u.get("bc-api-title").textContent, "relay-3");
+  u.input("endpoint", "https://three.example.com/v1"); u.input("key", "third-key"); u.input("model", "shared"); await u.click("model-add");
+  u.post(() => reply(publicReply(u.configPosts().at(-1).body))); await u.submit();
+  assert.deepEqual(u.configPosts()[0].body.models.map(item => item.id), ["shared", "relay-3/shared"]);
+  assert.equal(u.configPosts()[0].body.model, "shared", "saved bare ID does not get renamed when a duplicate is added");
+});
+
+test("multi APIs: invalid source/key/nonempty model validation selects the affected API without posting", async () => {
+  const u = ui(multiSaved()); await u.open(); await u.click("edit"); await u.click("api-add");
+  await u.submit(); assert.equal(u.configPosts().length, 0); assert.equal(u.get("bc-endpoint").getAttribute("aria-invalid"), "true");
+  u.input("endpoint", "https://one.example.com/v1"); await u.submit();
+  assert.equal(u.get("bc-key").getAttribute("aria-invalid"), "true"); assert.equal(u.configPosts().length, 0);
+  u.input("key", "third-key"); await u.submit(); assert.equal(u.get("bc-model").getAttribute("aria-invalid"), "true");
+  u.input("model", "new-model"); await u.click("model-add");
+  await u.apiAction("api-select", "relay"); u.input("endpoint", "https://changed.example.com/v1");
+  await u.apiAction("api-select", "relay-2"); await u.submit();
+  assert.equal(u.get("bc-api-title").textContent, "relay"); assert.equal(u.get("bc-key").getAttribute("aria-invalid"), "true");
+  assert.equal(u.configPosts().length, 0);
+});
+
+test("multi APIs: max16 sources, max100 models globally, and overlong generated visible aliases fail before save", async () => {
+  const u = ui(freshMulti()); await u.open();
+  for (let n = 2; n <= 16; n++) await u.click("api-add");
+  assert.equal(u.get("bc-api-list").children.length, 16); assert.equal(u.get("bc-api-add").disabled, true);
+  await u.click("api-add"); assert.equal(u.get("bc-api-list").children.length, 16);
+  const large = multiSaved();
+  large.upstreams[0].models = Array.from({ length: 99 }, (_, n) => ({ id: "a-" + n, model: "a-" + n }));
+  large.models = [...large.upstreams[0].models.map(pair => ({ id: pair.id, contextWindow: 200000 })), large.models[1]];
+  const v = ui(large); await v.open(); await v.click("edit"); v.input("model", "extra"); await v.click("model-add");
+  assert.equal(v.get("bc-model").getAttribute("aria-invalid"), "true"); assert.equal(v.get("bc-selected").children.length, 99);
+  const w = ui(freshMulti()); await w.open(); w.input("endpoint", "https://one.example.com/v1"); w.input("key", "one-key");
+  w.input("model", "x".repeat(200)); await w.click("model-add"); await w.click("api-add");
+  w.input("endpoint", "https://two.example.com/v1"); w.input("key", "two-key"); w.input("model", "x".repeat(200)); await w.click("model-add");
+  await w.submit(); assert.equal(w.configPosts().length, 0); assert.equal(w.get("bc-api-error").classList.contains("hidden"), false);
+});
+
+test("multi APIs: discovering one source then switching keeps the list-connectivity disclosure on global Save", async () => {
+  const u = ui(multiSaved()); await u.open(); await u.click("edit");
+  u.change(u.checkbox().id, true); await u.advance(650);
+  await u.apiAction("api-select", "relay-2");
+  assert.equal(u.checkbox().checked, false);
+  assert.match(u.get("bc-save-note").textContent, /读取清单已连接服务/);
+  u.post(() => reply(publicReply(u.configPosts().at(-1).body))); await u.submit();
+  assert.match(u.get("bc-remote-state").textContent, /读取清单已连接服务.*尚未验证模型推理/);
+  u.close(); await u.open();
+  assert.equal(u.get("bc-remote-state").textContent, "模型推理尚未验证", "list connectivity is editor-session metadata, not a stored health check");
+});
+
+test("multi APIs: closing during Save clears all replacement-key drafts and ignores late success", async () => {
+  const u = ui(multiSaved()), pending = deferred(); await u.open(); await u.click("edit");
+  u.input("key", "first-typed-key"); await u.apiAction("api-select", "relay-2"); u.input("key", "second-typed-key");
+  u.post(() => pending.promise); const saving = u.submit(); await Promise.resolve();
+  assert.equal(u.configPosts().length, 1); assert.equal(u.configPosts()[0].body.upstreams[0].apiKey, "first-typed-key");
+  u.leavePage(); assert.equal(u.get("bc-key").value, "");
+  pending.resolve(reply(publicReply(u.configPosts()[0].body))); await saving;
+  assert.equal(u.get("tab-ext").classList.contains("bridge-config-open"), false);
+  u.get("tab-ext").classList.remove("hidden"); await u.open(); await u.click("edit");
+  assert.equal(u.get("bc-key").value, ""); await u.apiAction("api-select", "relay-2"); assert.equal(u.get("bc-key").value, "");
 });
