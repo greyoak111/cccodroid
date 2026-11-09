@@ -56,7 +56,7 @@ const save = () => { if (!DEV) fs.writeFileSync(SF, JSON.stringify(state, null, 
 const sh = (cmd, args, o = {}) => execFileSync(cmd, args, { encoding: "utf8", maxBuffer: 64 << 20, stdio: ["ignore", "pipe", "pipe"], ...o }).trim();
 const run = (cmd, args, o = {}) => { const r = spawnSync(cmd, args, { stdio: "inherit", ...o }); if (r.status !== 0) throw new Error(`${cmd} ${args.slice(0, 3).join(" ")} … 退出码 ${r.status}`); };
 const git = (...a) => sh("git", ["-c", "safe.directory=*", "-C", ROOT, ...a]);
-const gitc = (...a) => sh("git", ["-c", "safe.directory=*", "-c", "user.name=greyoak111", "-c", "user.email=suny96636@gmail.com", "-C", ROOT, ...a]);
+const gitc = (...a) => sh("git", ["-c", "safe.directory=*", "-c", "user.name=greyoak111", "-c", "user.email=kbai2743@gmail.com", "-C", ROOT, ...a]);
 const shaFile = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex");
 const mani = () => { const s = fs.readFileSync(MANI, "utf8"); return { code: +s.match(/android:versionCode="(\d+)"/)[1], name: s.match(/android:versionName="([^"]*)"/)[1] }; };
 // 版本比较：先比主版本号；相同时正式版 > 预发布，预发布之间按「字母 + 数字」逐段比（beta1 < beta2 < rc1）。

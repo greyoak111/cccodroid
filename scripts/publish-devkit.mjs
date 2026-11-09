@@ -55,7 +55,7 @@ const sh = (cmd, args, o = {}) => execFileSync(cmd, args, { encoding: "utf8", ma
 const run = (cmd, args, o = {}) => { const r = spawnSync(cmd, args, { stdio: "inherit", ...o }); if (r.status !== 0) throw new Error(`${cmd} ${args.slice(0, 3).join(" ")} … 退出码 ${r.status}`); };
 const gh = (...a) => sh("gh", a);
 const git = (dir, ...a) => sh("git", ["-c", "safe.directory=*", "-C", dir, ...a]);
-const gitc = (dir, ...a) => sh("git", ["-c", "safe.directory=*", "-c", "user.name=greyoak111", "-c", "user.email=suny96636@gmail.com", "-C", dir, ...a]);
+const gitc = (dir, ...a) => sh("git", ["-c", "safe.directory=*", "-c", "user.name=greyoak111", "-c", "user.email=kbai2743@gmail.com", "-C", dir, ...a]);
 const sha = (b) => crypto.createHash("sha256").update(b).digest("hex");
 const shaFile = (f) => new Promise((ok, no) => { const h = crypto.createHash("sha256"); fs.createReadStream(f).on("data", (d) => h.update(d)).on("end", () => ok(h.digest("hex"))).on("error", no); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
