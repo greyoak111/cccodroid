@@ -34,19 +34,8 @@ final class WhatsNew {
     static String pending(Context c, String lang) {
         try {
             PackageInfo p = c.getPackageManager().getPackageInfo(c.getPackageName(), 0);
-            String cur = p.versionName, seen = prefs(c).getString(KEY, null);
-            if (seen == null && p.firstInstallTime == p.lastUpdateTime) return "[]";
-            List<String> vs = new ArrayList<>();
-            String[] files = c.getAssets().list(DIR);
-            for (String f : files == null ? new String[0] : files) {
-                if (!f.startsWith("v") || !f.endsWith(".md")) continue;
-                String v = f.substring(1, f.length() - 3).replaceFirst("\\.(zh|en)$", "");
-                if (vs.contains(v) || Updater.cmpVer(v, cur) > 0) continue;
-                if (seen == null ? Updater.cmpVer(v, cur) == 0 : Updater.cmpVer(v, seen) > 0) vs.add(v);
-            }
-            Collections.sort(vs, new Comparator<String>() {
-                @Override public int compare(String a, String b) { return Updater.cmpVer(b, a); }
-            });
+            List<String> vs = pick(c.getAssets().list(DIR), p.versionName, prefs(c).getString(KEY, null), p.firstInstallTime == p.lastUpdateTime);
+            if (vs == null) return "[]";
             boolean zh = lang != null && lang.startsWith("zh");
             JSONArray out = new JSONArray();
             for (String v : vs) {
@@ -63,6 +52,28 @@ final class WhatsNew {
     static void seen(Context c) {
         try { mark(c, c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName); } catch (Exception ignored) {}
     }
+
+    /** 该显示哪几版的说明（新的在前）；全新安装返回 null。
+     *  比的是去掉预发布后缀的版本：开发版 0.6.12-dev.1 的说明文件就叫 v0.6.12，按语义化版本 0.6.12 > 0.6.12-dev.1，
+     *  以前会被当成「还没到」跳过，反倒把上一版 0.6.11（> 上次记的 0.6.11-dev.1）弹出来，开发版每次都落后一版（用户 11-09） */
+    static List<String> pick(String[] files, String curName, String seenName, boolean fresh) {
+        if (seenName == null && fresh) return null;
+        String cur = base(curName), seen = seenName == null ? null : base(seenName);
+        List<String> vs = new ArrayList<>();
+        for (String f : files == null ? new String[0] : files) {
+            if (!f.startsWith("v") || !f.endsWith(".md")) continue;
+            String v = f.substring(1, f.length() - 3).replaceFirst("\\.(zh|en)$", "");
+            if (vs.contains(v) || Updater.cmpVer(v, cur) > 0) continue;
+            if (seen == null ? Updater.cmpVer(v, cur) == 0 : Updater.cmpVer(v, seen) > 0) vs.add(v);
+        }
+        Collections.sort(vs, new Comparator<String>() {
+            @Override public int compare(String a, String b) { return Updater.cmpVer(b, a); }
+        });
+        return vs;
+    }
+
+    /** 0.6.12-dev.1 → 0.6.12；正式版的号原样 */
+    static String base(String v) { int i = v == null ? -1 : v.indexOf('-'); return i < 0 ? v : v.substring(0, i); }
 
     private static SharedPreferences prefs(Context c) { return c.getSharedPreferences("ui", Context.MODE_PRIVATE); }
     private static void mark(Context c, String v) { prefs(c).edit().putString(KEY, v).apply(); }
