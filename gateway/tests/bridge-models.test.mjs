@@ -31,6 +31,7 @@ const providers = await import("../gw/providers.mjs");
 const { SETTINGS } = await import("../gw/settings-store.mjs");
 const { CFG } = await import("../gw/config.mjs");
 const { RUNS } = await import("../gw/runs.mjs");
+const { fetchBridgeModels } = await import("../gw/bridge-config.mjs");
 const root = fs.mkdtempSync(path.join(process.env.CCAPP_WORKSPACE, "bridge-models-"));
 const target = path.join(home, ".local/share/ccr-bridge-kit");
 const registration = path.join(home, ".cccodroid/services/openai-bridge.json");
@@ -161,7 +162,7 @@ const listItem = async () => (await request(undefined, { pathname: "/api/compone
 function failed(result, code, status = 400) {
   assert.equal(result.status, status); assert.equal(result.body.ok, false);
   if (code) assert.equal(result.body.code, code);
-  assert.ok(["method", "INVALID_INPUT", "KEY_REQUIRED", "KEY_HOST_CHANGED", "RUNTIME_CONFLICT", "BUSY", "not_installed", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key",
+  assert.ok(["method", "INVALID_INPUT", "KEY_REQUIRED", "KEY_HOST_CHANGED", "RUNTIME_CONFLICT", "BUSY", "not_installed", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key", "invalid_provider",
     "MODELS_AUTH", "MODELS_FORBIDDEN", "MODELS_NOT_FOUND", "MODELS_RATE_LIMIT", "MODELS_TIMEOUT", "MODELS_NETWORK", "MODELS_INVALID_RESPONSE", "MODELS_TOO_LARGE", "MODELS_REDIRECT", "MODELS_FAILED"].includes(result.body.code), "只能返回静态白名单错误码");
   assert.equal("models" in result.body, false); assert.equal("apiKey" in result.body, false);
 }
@@ -213,8 +214,8 @@ test("models 仅允许 POST，其余 method 不读取 body 或执行组件", asy
   assert.deepEqual(calls(), []);
 });
 
-test("请求字段白名单仅 endpoint/apiKey/consent，拒绝脚本、路径、模型或旧Key注入", async () => {
-  for (const field of ["model", "dir", "port", "command", "args", "env", "component", "modelsUrl", "provider", "oldKey", "keepKey", "__proto__", "constructor"])
+test("请求字段白名单仅 endpoint/apiKey/provider/consent，拒绝脚本、路径、模型或旧Key注入", async () => {
+  for (const field of ["model", "dir", "port", "command", "args", "env", "component", "modelsUrl", "oldKey", "keepKey", "__proto__", "constructor"])
     failed(await request({ ...input(), [field]: "fixture-forbidden-value" }));
   for (const value of [null, [], "input", 1, true]) failed(await request(value));
   assert.deepEqual(calls(), []);
@@ -245,6 +246,31 @@ test("固定 gui-models 命令与 Key 只经 stdin；不带 consent，不转发 
   assert.equal(call.secretInArgv, false); assert.equal(call.secretInEnv, false);
   assert.equal(call.envNames.some((name) => /^(?:ANTHROPIC_|OPENAI_|CCAPP_)/.test(name)), false);
   assert.deepEqual(snapshot(), before, "获取模型不得保存、启动、切换 provider 或修改既有配置");
+});
+
+test("provider 只标识当前编辑的 API，一次 stdin 查询且不预检或 fanout", async () => {
+  const before = snapshot();
+  success(await request(input({ provider: "relay-2", apiKey: "" })));
+  success(await request(input({ provider: "new-source" })));
+  assert.deepEqual(calls().map(call => call.input), [
+    { endpoint: normalizedEndpoint, apiKey: "", provider: "relay-2" },
+    { endpoint: normalizedEndpoint, apiKey: upstreamSecret, provider: "new-source" },
+  ]);
+  assert.deepEqual(calls().map(call => call.args), [["gui-models"], ["gui-models"]]);
+  assert.deepEqual(snapshot(), before);
+});
+
+test("models finally在成功与验证失败时均清空新输入Key引用", async () => {
+  const body = input({ provider: "relay-2" }); await fetchBridgeModels(body); assert.equal(body.apiKey, "");
+  const invalid = input({ provider: "bad/name" }); await assert.rejects(fetchBridgeModels(invalid)); assert.equal(invalid.apiKey, "");
+  control({ mode: "error", code: "MODELS_AUTH" });
+  const failed = input({ provider: "relay" }); await assert.rejects(fetchBridgeModels(failed)); assert.equal(failed.apiKey, "");
+});
+
+test("provider 名称必须满足契约，拒绝时不执行任何组件", async () => {
+  for (const provider of [null, 1, [], {}, "", "Relay", "relay/x", "a".repeat(33), "relay,raw", "relay\n"])
+    failed(await request(input({ provider })), "invalid_provider");
+  assert.deepEqual(calls(), []);
 });
 
 test("已有桥 provider 正在会话中也只读模型，不触碰 RUNS、不启动桥或切换会话", async () => {

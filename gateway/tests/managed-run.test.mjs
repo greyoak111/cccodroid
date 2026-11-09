@@ -232,7 +232,7 @@ for (const mode of ["signature-mismatch", "overlong"]) test(`真实配置请求 
   try {
     const body = { endpoint: "https://fixture-upstream.example.invalid/v1", apiKey: "fixture-upstream-key", model: "fixture-model", consent: true };
     // 额外JSON空白使语义上仍是同一份合法输入；只有字节上限能挡住，不能靠字段校验冒充通过。
-    const raw = JSON.stringify(body) + (mode === "overlong" ? " ".repeat(128 * 1024 + 1) : "");
+    const raw = JSON.stringify(body) + (mode === "overlong" ? " ".repeat(512 * 1024 + 1) : "");
     const outcome = await new Promise((resolve) => {
       const request = http.request(`http://127.0.0.1:${server.address().port}/api/components/openai-bridge/config`, { method: "POST", headers: { "content-type": "application/json" } }, (response) => {
         let text = ""; response.setEncoding("utf8"); response.on("data", (chunk) => { text += chunk; });

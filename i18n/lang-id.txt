@@ -3127,3 +3127,12 @@
 3127	Secara bawaan Claude Code menghapus sesi yang tak berubah selama 30 hari beserta data terkaitnya, tanpa lewat tempat sampah. Aplikasi ini menyimpannya selamanya: sesi hanya masuk tempat sampah bila Anda menghapusnya dari daftar sesi. Jika Anda sendiri menulis cleanupPeriodDays di ~/.claude/settings.json, jumlah hari Anda yang dipakai.
 3128	Pembersihan otomatis
 3129	Hanya membersihkan cache, file sementara yang tak berubah 7 hari, dan file sampingan Claude Code yang lebih dari 30 hari. Sesi, file Anda, dan program tidak pernah dihapus otomatis
+3130	Atur model tiap API melalui satu jembatan lokal; semua perubahan berlaku setelah disimpan.
+3131	Daftar API
+3132	Tambah API
+3133	Perbarui komponen jembatan untuk menambah beberapa API; konfigurasi satu API yang ada tetap berfungsi.
+3134	{n} model
+3135	Edit satu API setiap kali. Penambahan, penghapusan, dan perubahan model bawaan hanya berlaku setelah menekan Simpan konfigurasi.
+3136	Hapus API “{name}” beserta modelnya? Ini hanya berlaku setelah menekan Simpan konfigurasi; percakapan saat ini tidak berubah.
+3137	ID model yang terlihat bentrok, melebihi 200 karakter, atau berjumlah lebih dari 100; sesuaikan model sebelum menyimpan.
+3138	Simpan semua konfigurasi API?\n\nSaat digunakan, percakapan, hasil alat, dan gambar akan dikirim ke layanan berikut sesuai model yang dipilih:\n{origins}\nMenyimpan tidak memanggil model jarak jauh atau mengganti percakapan saat ini.

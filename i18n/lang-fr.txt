@@ -3127,3 +3127,12 @@
 3127	Par défaut, Claude Code supprime les sessions inchangées depuis 30 jours, avec leurs données annexes, sans passer par la corbeille. Cette application les conserve indéfiniment : une session ne va à la corbeille que si vous la supprimez depuis la liste des sessions. Si vous avez défini cleanupPeriodDays dans ~/.claude/settings.json, votre nombre de jours est utilisé.
 3128	Nettoyage automatique
 3129	Ne nettoie que les caches, les fichiers temporaires inchangés depuis 7 jours et les fichiers annexes de Claude Code de plus de 30 jours. Les sessions, vos fichiers et les programmes ne sont jamais supprimés automatiquement
+3130	Configurez les modèles de chaque API via un seul pont local ; les changements prennent effet à l’enregistrement.
+3131	Liste des API
+3132	Ajouter une API
+3133	Mettez à jour le composant du pont pour ajouter plusieurs API ; la configuration existante à une seule API reste utilisable.
+3134	{n} modèles
+3135	Modifiez une API à la fois. Les ajouts, suppressions et changements du modèle par défaut prennent effet uniquement après Enregistrer la configuration.
+3136	Supprimer l’API « {name} » et ses modèles ? Cela prendra effet uniquement après Enregistrer la configuration ; la conversation actuelle reste inchangée.
+3137	Les ID visibles des modèles sont en conflit, dépassent 200 caractères ou sont plus de 100 ; ajustez les modèles avant d’enregistrer.
+3138	Enregistrer toutes les configurations d’API ?\n\nÀ l’utilisation, les conversations, résultats d’outils et images seront envoyés aux services suivants selon le modèle choisi :\n{origins}\nL’enregistrement n’appelle aucun modèle distant et ne change pas la conversation actuelle.

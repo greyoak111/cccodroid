@@ -3130,4 +3130,13 @@ window.I18N_DICT["es"] = {
   "Claude Code 默认把 30 天没动过的会话连同附属数据删掉，不进回收站。本应用把它改成永久保留：会话只有你在会话列表里删了才会进回收站。你自己在 ~/.claude/settings.json 里写了 cleanupPeriodDays 的，按你写的天数。": "Por defecto, Claude Code borra las sesiones sin cambios en 30 días, junto con sus datos asociados, sin pasar por la papelera. Esta app las conserva para siempre: una sesión solo va a la papelera si la eliminas desde la lista de sesiones. Si tú pusiste cleanupPeriodDays en ~/.claude/settings.json, se usa tu número de días.",
   "自动清理": "Limpieza automática",
   "只清缓存、7 天没动过的临时文件、30 天前的 Claude Code 杂物；会话、你的文件、程序永不自动删": "Solo limpia cachés, archivos temporales sin cambios en 7 días y archivos auxiliares de Claude Code de más de 30 días. Las sesiones, tus archivos y los programas nunca se borran solos",
+  "多个 API 分别配置模型，共用一个本地桥；保存后统一生效。": "Configura modelos por API con un único puente local; todos los cambios se aplican al guardar.",
+  "API 列表": "Lista de API",
+  "添加 API": "Añadir API",
+  "添加多个 API 需要更新桥组件；现有单 API 配置仍可使用。": "Actualiza el componente del puente para añadir varias API; la configuración de una sola API sigue funcionando.",
+  "{n} 个模型": "{n} modelos",
+  "每次只编辑一个 API；添加、移除和默认模型变更均在点击保存配置后生效。": "Edita una API a la vez. Las adiciones, eliminaciones y cambios del modelo predeterminado solo se aplican al pulsar Guardar configuración.",
+  "移除 API「{name}」及其模型？仅在点击保存配置后生效，当前会话保持不变。": "¿Eliminar la API «{name}» y sus modelos? Solo se aplicará al pulsar Guardar configuración; la conversación actual no cambiará.",
+  "模型可见 ID 冲突、超过 200 字符或总数超过 100；请调整模型后保存。": "Los ID visibles de modelo coinciden, superan los 200 caracteres o suman más de 100; ajusta los modelos antes de guardar.",
+  "保存全部 API 配置？\n\n后续使用时，对话、工具结果和图片将按模型发往以下服务：\n{origins}\n保存本身不调用远端模型，也不切换当前会话。": "¿Guardar todas las configuraciones de API?\n\nAl usarse, las conversaciones, los resultados de herramientas y las imágenes se enviarán a estos servicios según el modelo seleccionado:\n{origins}\nGuardar no llama a modelos remotos ni cambia la conversación actual.",
 };

@@ -27,6 +27,16 @@
   let modelsTimer = null, modelsDeadline = null, modelsAbort = null, modelsSeq = 0;
   let modelItems = [], modelsConnected = false, currentOrigin = "", consentOrigin = "", suggestAt = -1;
   let modelWindows = new Map(), selectedModels = [], defaultModel = "", editingModel = "", ctxManual = false;
+  const UPSTREAM_LIMIT = 16, validName = (name) => typeof name === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(name);
+  let apiDrafts = [], activeApi = "", defaultSource = "", usedNames = new Set(), connectedApis = new Set();
+  const hasDiscovered = () => modelsConnected || (multi() && connectedApis.size > 0);
+  // Only user-entered replacement keys live here, scoped to this editor session and API name.
+  // Saved secrets never arrive in the browser; drafts/topology contain no key properties.
+  const draftKeys = new Map();
+  const multi = () => snapshot?.capabilities?.multiUpstream === true;
+  const activeDraft = () => apiDrafts.find((item) => item.name === activeApi);
+  const savedSource = () => multi() ? snapshot.upstreams?.find((item) => item.name === activeApi) : snapshot;
+  function clearDraftKeys() { draftKeys.clear(); }
   const readError = (status, code) => {
     if (code === "BUSY") return t("本地桥正在使用或卸载中，请稍后重试；当前会话保持不变。");
     if (code === "RUNTIME_CONFLICT") return t("桥配置一致性检查未通过，暂不能安全读取或保存；请查看检查说明，不要先删目录或卸载。");
@@ -66,9 +76,30 @@
     const models = Array.isArray(data.models) ? data.models.slice(0, CONFIG_MODEL_LIMIT).filter((m) => m && validModel(m.id))
       .map((m) => ({ id: m.id, contextWindow: validWindow(m.contextWindow) ? m.contextWindow : DEFAULT_CTX })) : [];
     if (validModel(model) && !models.some((m) => m.id === model)) models.unshift({ id: model, contextWindow });
+    const supportsMulti = data.capabilities?.multiUpstream === true;
+    let upstreams;
+    const incomplete = supportsMulti && data.configured === true && data.upstreams === undefined && code === "COMPONENT_DISABLED";
+    if (supportsMulti && data.configured === true && !incomplete) {
+      const names = new Set(), ids = [];
+      if (!Array.isArray(data.upstreams) || !data.upstreams.length || data.upstreams.length > UPSTREAM_LIMIT) throw { code: "component_response" };
+      upstreams = data.upstreams.map((source) => {
+        const parsed = endpointOf(source?.endpoint), raw = new Set();
+        if (!source || !validName(source.name) || names.has(source.name) || parsed.error || parsed.url !== source.endpoint ||
+            source.hasKey !== true || !Array.isArray(source.models) || source.models.length > CONFIG_MODEL_LIMIT) throw { code: "component_response" };
+        names.add(source.name);
+        return { name: source.name, endpoint: parsed.url, hasKey: true, models: source.models.map((pair) => {
+          const model = pair?.model === undefined ? pair?.id : pair.model;
+          if (!pair || !validModel(pair.id) || !validModel(model) || raw.has(model)) throw { code: "component_response" };
+          ids.push(pair.id); raw.add(model); return { id: pair.id, model };
+        }) };
+      });
+      if (ids.length > CONFIG_MODEL_LIMIT || new Set(ids).size !== ids.length || !ids.includes(model) ||
+          JSON.stringify(ids) !== JSON.stringify(models.map((item) => item.id)) || upstreams[0].endpoint !== endpoint.url) throw { code: "component_response" };
+    }
     return {
       installed: data.installed === true, configured: data.configured === true && !endpoint.error && !!model && model.length <= 200 && !/[,\u0000-\u001f\u007f]/.test(model), hasKey: data.hasKey === true,
       endpoint: endpoint.error ? "" : data.endpoint, model, models,
+      ...(supportsMulti && !incomplete ? { capabilities: { multiUpstream: true } } : {}), ...(upstreams ? { upstreams } : {}),
       providerId: typeof data.providerId === "string" ? data.providerId : "",
       contextWindow: models.find((m) => m.id === model)?.contextWindow || contextWindow,
       localError: code, check: checkCode(data.check),
@@ -95,13 +126,15 @@
     panel.setAttribute("aria-labelledby", "bridge-config-title");
     panel.innerHTML = `
       <button type="button" class="bc-back" data-bc="back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>${esc(t("返回扩展"))}</button>
-      <header class="bc-heading"><h2 id="bridge-config-title" tabindex="-1">${esc(t("OpenAI API 本地协议桥"))} <span class="badge">${esc(t("预览"))}</span></h2><p>${esc(t("一个 API 可配置多个模型，上下文窗口自动填写。"))}</p></header>
+      <header class="bc-heading"><h2 id="bridge-config-title" tabindex="-1">${esc(t("OpenAI API 本地协议桥"))} <span class="badge">${esc(t("预览"))}</span></h2><p>${esc(t("多个 API 分别配置模型，共用一个本地桥；保存后统一生效。"))}</p></header>
       <section id="bc-overview" class="bc-overview" aria-label="${esc(t("桥状态"))}" aria-live="polite"><div><span>${esc(t("组件入口"))}</span><b id="bc-package-state"></b></div><div><span>${esc(t("配置检查"))}</span><b id="bc-config-state"></b></div><div><span>${esc(t("本地服务"))}</span><b id="bc-service-state"></b></div></section>
       <p class="bc-notice hidden" id="bc-notice" role="alert"></p>
       <section id="bc-issue" class="bc-card bc-issue hidden" aria-labelledby="bc-issue-title"><span class="bc-issue-label">${esc(t("需要检查"))}</span><h3 id="bc-issue-title" tabindex="-1"></h3><p id="bc-issue-detail"></p><p class="bc-hint" id="bc-issue-hint"></p><p class="bc-hint mono" id="bc-issue-code" dir="ltr"></p><div class="bc-actions"><button class="btn ghost" id="bc-check-again" type="button" data-bc="check-again">${esc(t("重新检查"))}</button></div><p class="bc-hint">${esc(t("只读取本地状态，不保存、不启动、不重置，也不连接上游。"))}</p><details id="bc-backup-help"><summary>${esc(t("什么时候需要备份？"))}</summary><p class="bc-hint">${esc(t("只有后续明确处理旧安装或迁移时才需要备份桥配置：API 地址、密钥、模型和 App 接口记录；不是聊天记录或整个手机。"))}</p><p class="bc-hint">${esc(t("本页不会创建或上传备份；含密钥的配置文件不要直接发群或公开。"))}</p></details></section>
       <div id="bc-loading" role="status">${esc(t("读取中…"))}</div>
       <form id="bc-form" class="bc-card hidden" novalidate autocomplete="off">
         <h3>${esc(t("连接你的 API"))}</h3>
+        <section class="bc-apis" aria-label="${esc(t("API 列表"))}"><div id="bc-api-list" class="bc-selected"></div><div class="bc-actions"><button type="button" class="btn ghost" id="bc-api-add" data-bc="api-add" aria-describedby="bc-api-hint">${esc(t("添加 API"))}</button></div><p class="bc-hint" id="bc-api-hint"></p><p class="bc-error hidden" id="bc-api-error" role="alert"></p></section>
+        <h4 id="bc-api-title" class="mono" dir="ltr"></h4>
         <div class="field"><label for="bc-endpoint">${esc(t("API 地址"))}</label><input id="bc-endpoint" type="url" dir="ltr" inputmode="url" enterkeyhint="next" placeholder="https://api.example.com/v1" spellcheck="false" autocapitalize="none" autocorrect="off" maxlength="2048" aria-describedby="bc-endpoint-hint bc-endpoint-error bc-endpoint-preview" required><p class="bc-hint" id="bc-endpoint-hint">${esc(t("填写服务商的 API 地址，不是官网登录页。"))}</p><p class="bc-error hidden" id="bc-endpoint-error"></p><p class="bc-hint mono hidden" id="bc-endpoint-preview" dir="ltr"></p></div>
         <div class="field"><label for="bc-key">${esc(t("API Key"))}</label><div class="bc-key-wrap"><input id="bc-key" type="password" dir="ltr" enterkeyhint="next" spellcheck="false" autocapitalize="none" autocorrect="off" autocomplete="off" maxlength="1024" aria-describedby="bc-key-hint bc-key-error"><button type="button" class="bc-eye" data-bc="eye" aria-label="${esc(t("显示密钥"))}" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div><p class="bc-hint" id="bc-key-hint"></p><p class="bc-error hidden" id="bc-key-error"></p></div>
         <div class="bc-discovery"><label class="bc-model-consent" for="bc-model-consent"><input id="bc-model-consent" type="checkbox" aria-describedby="bc-model-origin bc-model-status"><span>${esc(t("允许自动读取模型清单（会将 API Key 发往所填服务，不发送对话、不调用模型）"))}</span></label><p class="bc-hint mono" id="bc-model-origin" dir="ltr"></p><div class="bc-model-feedback"><p class="bc-hint" id="bc-model-status" role="status" aria-live="polite" aria-atomic="true"></p><button class="btn ghost sm bc-model-retry" type="button" id="bc-model-retry" data-bc="models-retry">${esc(t("重试读取清单"))}</button></div></div>
@@ -112,7 +145,7 @@
         <p class="bc-hint bc-privacy">${esc(t("对话、工具结果和图片将发往你填写的服务。"))}</p>
         <button class="btn" id="bc-save" type="submit">${esc(t("保存配置"))}</button><p class="bc-hint bc-center" id="bc-save-note" role="status">${esc(t("保存不调用远端模型，也不切换当前会话"))}</p>
       </form>
-      <section id="bc-saved" class="bc-card hidden" aria-labelledby="bc-saved-title"><h3 id="bc-saved-title" tabindex="-1">${esc(t("配置已保存"))}</h3><dl class="bc-summary"><div><dt>${esc(t("API 地址"))}</dt><dd class="mono" id="bc-saved-endpoint" dir="ltr"></dd></div><div><dt>${esc(t("API Key"))}</dt><dd>${esc(t("已设置 · 不回显"))}</dd></div><div><dt>${esc(t("模型名称"))}</dt><dd class="mono" id="bc-saved-model" dir="ltr"></dd></div><div><dt>${esc(t("上下文窗口"))}</dt><dd class="mono" id="bc-saved-ctx" dir="ltr"></dd></div></dl><div id="bc-saved-models" class="bc-selected"></div><div class="bc-status" role="status"><b id="bc-local-state"></b><span id="bc-remote-state">${esc(t("模型推理尚未验证"))}</span></div><p class="bc-hint">${esc(t("已添加到「接口与型号」。当前会话保持不变。"))}</p><div class="bc-actions"><button class="btn" type="button" id="bc-use" data-bc="use">${esc(t("新建会话使用"))}</button><button class="btn ghost" type="button" data-bc="edit">${esc(t("修改配置"))}</button></div><p class="bc-hint">${esc(t("别的会话也能用：点输入栏下的模型标签，在接口一行选它。"))}</p></section>
+      <section id="bc-saved" class="bc-card hidden" aria-labelledby="bc-saved-title"><h3 id="bc-saved-title" tabindex="-1">${esc(t("配置已保存"))}</h3><dl class="bc-summary"><div><dt>${esc(t("API 地址"))}</dt><dd class="mono" id="bc-saved-endpoint" dir="ltr"></dd></div><div><dt>${esc(t("API Key"))}</dt><dd>${esc(t("已设置 · 不回显"))}</dd></div><div><dt>${esc(t("模型名称"))}</dt><dd class="mono" id="bc-saved-model" dir="ltr"></dd></div><div><dt>${esc(t("上下文窗口"))}</dt><dd class="mono" id="bc-saved-ctx" dir="ltr"></dd></div></dl><div id="bc-saved-apis" class="bc-selected" aria-label="${esc(t("API 列表"))}"></div><div id="bc-saved-models" class="bc-selected"></div><div class="bc-status" role="status"><b id="bc-local-state"></b><span id="bc-remote-state">${esc(t("模型推理尚未验证"))}</span></div><p class="bc-hint">${esc(t("已添加到「接口与型号」。当前会话保持不变。"))}</p><div class="bc-actions"><button class="btn" type="button" id="bc-use" data-bc="use">${esc(t("新建会话使用"))}</button><button class="btn ghost" type="button" data-bc="edit">${esc(t("修改配置"))}</button></div><p class="bc-hint">${esc(t("别的会话也能用：点输入栏下的模型标签，在接口一行选它。"))}</p></section>
       <section id="bc-repair" class="bc-card bc-repair hidden" aria-labelledby="bc-repair-title"><h3 id="bc-repair-title">${esc(t("诊断与修复"))}</h3><p class="bc-hint" id="bc-repair-intro">${esc(t("先核对本机状态，再提供可确认的方案；检查本身不改配置、不启动或重置桥。"))}</p><div class="bc-actions"><button class="btn ghost" id="bc-repair-inspect" type="button" data-bc="repair-inspect">${esc(t("检查修复方案"))}</button></div><p class="bc-hint" id="bc-repair-status" role="status" aria-live="polite"></p><div id="bc-repair-plan" class="hidden"><p class="bc-hint" id="bc-repair-changes"></p><p class="bc-hint">${esc(t("仅同步已核对桥接口的模型清单、默认模型和认证样式；保留可验证窗口，缺失项使用 200,000。地址与密钥不变。"))}</p><p class="bc-hint">${esc(t("不停止或启动服务，不改上游 Key、运行文件、恢复锁或当前会话。方案仅在本页短期有效，状态改变须重新检查。"))}</p><div class="bc-actions"><button class="btn" id="bc-repair-apply" type="button" data-bc="repair-apply">${esc(t("确认同步 App 记录"))}</button><button class="btn ghost" id="bc-repair-cancel" type="button" data-bc="repair-cancel">${esc(t("取消修复方案"))}</button></div></div><details id="bc-repair-steps"><summary>${esc(t("不能自动修复时怎么做？"))}</summary><ol class="bc-hint"><li>${esc(t("先核对 App 和组件均为配套正式版本；有会话在运行时，等待结束后再检查。"))}</li><li>${esc(t("地址、密钥、归属或运行文件检查不明确时，请让设备上的 AI 按固定诊断编号做本地只读核对，不要盲删或覆盖。"))}</li><li>${esc(t("恢复预算耗尽或补丁校验失败属于另一类故障；先查诊断，不用同步 App 记录解除恢复锁。"))}</li><li>${esc(t("反馈时提供版本、诊断编号和是否更新或重装；不要上传密钥、完整配置或对话。"))}</li></ol></details></section>
       <p class="bc-hint bc-footnote">${esc(t("仅支持 OpenAI Chat Completions API，暂不支持 Responses API。"))}</p>`;
     $("tab-ext").appendChild(panel);
@@ -135,14 +168,18 @@
       else if (action === "repair-apply") applyRepair();
       else if (action === "repair-cancel") clearRepair();
       else if (action === "models-retry") scheduleModels(0);
+      else if (action === "api-add") addApi();
+      else if (action === "api-select") switchApi(b.dataset.api);
+      else if (action === "api-remove") removeApi(b.dataset.api);
       else if (action === "model-add") addModel(true);
       else if (action === "model-edit") { if (stashEditor()) { const item = selectedModels.find((m) => m.id === b.dataset.model); if (item) editModel(item); } }
-      else if (action === "model-default") { defaultModel = b.dataset.model; renderSelected(); }
+      else if (action === "model-default") { defaultModel = b.dataset.model; defaultSource = activeApi; renderSelected(); renderApis(); }
       else if (action === "model-remove") {
         selectedModels = selectedModels.filter((m) => m.id !== b.dataset.model);
-        if (defaultModel === b.dataset.model) defaultModel = selectedModels[0]?.id || "";
+        if (multi()) activeDraft().models = selectedModels;
+        if (defaultModel === b.dataset.model && (!multi() || defaultSource === activeApi)) chooseRemainingDefault();
         if (editingModel === b.dataset.model) { editingModel = ""; $("bc-model").value = ""; ctxManual = false; syncContext(); }
-        renderSelected();
+        renderSelected(); renderApis();
       }
     });
     for (const name of ["endpoint", "key", "model"]) $("bc-" + name).addEventListener("input", () => {
@@ -155,14 +192,16 @@
       cancelModels(true);
       if (name === "endpoint") {
         const endpoint = endpointOf($("bc-endpoint").value);
-        if (endpoint.origin) {
-          if (currentOrigin && currentOrigin !== endpoint.origin) {
-            hideKey(true); $("bc-model-consent").checked = false; consentOrigin = "";
-          }
-          currentOrigin = endpoint.origin;
+        // In multi-API mode even a same-origin path edit changes the source being consented to.
+        if (multi() || (currentOrigin && currentOrigin !== (endpoint.origin || ""))) {
+          $("bc-model-consent").checked = false; consentOrigin = "";
+          if (currentOrigin && currentOrigin !== (endpoint.origin || "")) { hideKey(true); draftKeys.delete(activeApi); }
         }
+        currentOrigin = endpoint.origin || "";
+        if (multi()) { connectedApis.delete(activeApi); activeDraft().endpoint = $("bc-endpoint").value; renderApis(); }
         previewEndpoint();
       }
+      if (multi() && name === "key") connectedApis.delete(activeApi);
       scheduleModels();
     });
     // 流内列表失焦收起会移动下方按钮，导致这次 click 落空；操作按钮时保持焦点，先完成点击。
@@ -203,6 +242,126 @@
       if (!consentOrigin) $("bc-model-consent").checked = false;
       scheduleModels();
     });
+  }
+  function chooseRemainingDefault() {
+    if (!multi()) { defaultModel = selectedModels[0]?.id || ""; return; }
+    const source = apiDrafts.find((item) => item.models.length);
+    defaultSource = source?.name || ""; defaultModel = source?.models[0]?.id || "";
+  }
+  function renderApis(saved = false) {
+    if (!panel) return;
+    const list = $(saved ? "bc-saved-apis" : "bc-api-list"); list.textContent = "";
+    if (!multi()) {
+      if (!saved) {
+        $("bc-api-title").textContent = "";
+        $("bc-api-hint").textContent = t("添加多个 API 需要更新桥组件；现有单 API 配置仍可使用。");
+        $("bc-api-add").disabled = busy;
+      }
+      return;
+    }
+    const sources = saved ? (snapshot.upstreams || []) : apiDrafts;
+    for (const source of sources) {
+      const row = document.createElement("div"); row.className = "bc-model-row bc-api-row";
+      if (!saved && source.name === activeApi) row.classList.add("bc-api-active");
+      const label = document.createElement("span"); label.className = "mono"; label.dir = "ltr";
+      label.textContent = source.name + " · " + (source.endpoint || "—") + " · " +
+        t("{n} 个模型", { n: source.models.length }) + (!saved && source.name === defaultSource ? " · " + t("默认模型") : "");
+      row.appendChild(label);
+      if (!saved) for (const [action, text] of [["api-select", t("编辑")], ["api-remove", t("移除")]]) {
+        const button = document.createElement("button"); button.type = "button"; button.className = "btn ghost sm";
+        button.dataset.bc = action; button.dataset.api = source.name; button.textContent = text;
+        button.setAttribute("aria-label", text + " " + source.name);
+        if (action === "api-select") button.setAttribute("aria-pressed", String(source.name === activeApi));
+        button.disabled = busy || (action === "api-remove" && sources.length === 1);
+        row.appendChild(button);
+      }
+      list.appendChild(row);
+    }
+    if (!saved) {
+      $("bc-api-title").textContent = activeApi;
+      $("bc-api-hint").textContent = t("每次只编辑一个 API；添加、移除和默认模型变更均在点击保存配置后生效。");
+      $("bc-api-add").disabled = busy || apiDrafts.length >= UPSTREAM_LIMIT;
+    }
+  }
+  function stashApi() {
+    if (!multi()) return true;
+    // Switching sources commits the current model editor to its draft, never to saved topology.
+    if ($("bc-model").value.trim()) { if (!addModel(false)) return false; }
+    else if (!stashEditor()) return false;
+    const source = activeDraft();
+    source.endpoint = $("bc-endpoint").value; source.models = selectedModels;
+    source.typedModel = $("bc-model").value; source.typedContext = $("bc-ctx").value; source.ctxManual = ctxManual;
+    if ($("bc-key").value) draftKeys.set(source.name, $("bc-key").value); else draftKeys.delete(source.name);
+    return true;
+  }
+  function loadApi(name) {
+    cancelModels(); modelItems = []; modelWindows = new Map(); modelsConnected = false;
+    consentOrigin = ""; $("bc-model-consent").checked = false; hideKey(true);
+    activeApi = name;
+    const source = activeDraft(); selectedModels = source.models;
+    ctxManual = source.ctxManual === true;
+    $("bc-endpoint").value = source.endpoint;
+    $("bc-model").value = source.typedModel ?? (source.models[0]?.id || "");
+    editingModel = source.models.some((item) => item.id === $("bc-model").value) ? $("bc-model").value : "";
+    if (source.typedContext !== undefined) $("bc-ctx").value = source.typedContext;
+    else syncContext(true);
+    $("bc-key").value = draftKeys.get(name) || "";
+    $("bc-key").placeholder = savedSource()?.hasKey ? t("已保存，留空保持不变") : t("粘贴服务商提供的密钥");
+    currentOrigin = endpointOf(source.endpoint).origin || "";
+    for (const field of ["endpoint", "key", "model", "ctx"]) {
+      $("bc-" + field).removeAttribute("aria-invalid"); $("bc-" + field + "-error").classList.add("hidden");
+    }
+    renderModels(); renderSelected(); renderApis(); previewEndpoint();
+    $("bc-model-status").textContent = t("勾选后自动读取清单，也可直接手填模型。");
+    updateSaveNote(); updateModelsControls();
+  }
+  function switchApi(name) {
+    if (!multi() || name === activeApi || !apiDrafts.some((item) => item.name === name) || !stashApi()) return;
+    loadApi(name);
+  }
+  function addApi() {
+    if (!multi()) { notice(t("添加多个 API 需要更新桥组件；现有单 API 配置仍可使用。")); return; }
+    if (apiDrafts.length >= UPSTREAM_LIMIT || !stashApi()) return;
+    let n = 1, name = "relay";
+    while (usedNames.has(name)) name = "relay-" + (++n);
+    usedNames.add(name); apiDrafts.push({ name, endpoint: "", models: [] });
+    loadApi(name); $("bc-endpoint").focus();
+  }
+  function removeApi(name) {
+    if (!multi() || apiDrafts.length <= 1 || !apiDrafts.some((item) => item.name === name)) return;
+    if (!confirm(t("移除 API「{name}」及其模型？仅在点击保存配置后生效，当前会话保持不变。", { name }))) return;
+    if (name !== activeApi && !stashApi()) return;
+    cancelModels(); draftKeys.delete(name); connectedApis.delete(name);
+    apiDrafts = apiDrafts.filter((item) => item.name !== name);
+    if (defaultSource === name) chooseRemainingDefault();
+    // Removing the primary promotes the first remaining API without renaming it or any saved model ID.
+    loadApi(name === activeApi ? apiDrafts[0].name : activeApi);
+  }
+  function aggregateApis() {
+    const counts = new Map(), reserved = new Set();
+    for (const source of apiDrafts) for (const item of source.models) {
+      counts.set(item.id, (counts.get(item.id) || 0) + 1);
+      if (item.visibleId) {
+        if (!validModel(item.visibleId) || reserved.has(item.visibleId)) return null;
+        reserved.add(item.visibleId);
+      }
+    }
+    const models = [], upstreams = []; let model = "";
+    for (const source of apiDrafts) {
+      const pairs = [];
+      for (const item of source.models) {
+        let id = item.visibleId;
+        if (!id) {
+          id = counts.get(item.id) > 1 || reserved.has(item.id) ? source.name + "/" + item.id : item.id;
+          if (!validModel(id) || reserved.has(id)) return null;
+          reserved.add(id);
+        }
+        pairs.push({ id, model: item.id }); models.push({ id, contextWindow: item.contextWindow });
+        if (source.name === defaultSource && item.id === defaultModel) model = id;
+      }
+      upstreams.push({ name: source.name, endpoint: endpointOf(source.endpoint).url, models: pairs });
+    }
+    return model && models.length <= CONFIG_MODEL_LIMIT ? { endpoint: upstreams[0].endpoint, apiKey: "", model, models, upstreams, consent: true } : null;
   }
   function hideKey(clear = false) {
     if (!panel) return;
@@ -333,6 +492,7 @@
   function errorsClear() {
     notice(""); $("bc-issue").classList.add("hidden");
     clearRepair(); $("bc-repair").classList.add("hidden");
+    $("bc-api-error").textContent = ""; $("bc-api-error").classList.add("hidden");
     for (const name of ["endpoint", "key", "model", "ctx"]) { $("bc-" + name).removeAttribute("aria-invalid"); $("bc-" + name + "-error").classList.add("hidden"); }
   }
   function error(name, text) {
@@ -344,15 +504,16 @@
     $("bc-endpoint-preview").classList.toggle("hidden", !raw || !!result.error);
     $("bc-endpoint-preview").textContent = raw && !result.error ? t("请求地址：{url}", { url: result.url }) : "";
     $("bc-model-origin").textContent = result.error ? t("目标服务：请先填写有效的 HTTPS API 地址。") : t("目标服务：{origin}", { origin: result.origin });
-    const old = snapshot && endpointOf(snapshot.endpoint);
-    const changed = snapshot && snapshot.hasKey && old && old.origin && result.origin && old.origin !== result.origin;
-    $("bc-key-hint").textContent = changed ? t("服务地址已改变，请重新填写 API Key，旧密钥不会发往新地址。") : snapshot && snapshot.hasKey ? t("不回显已保存的密钥；留空保持不变，填写新密钥可替换。") : t("密钥保存后不回显。");
-    $("bc-key").required = !(snapshot && snapshot.hasKey && old.origin === result.origin);
+    const saved = savedSource(), old = saved && endpointOf(saved.endpoint);
+    const changed = saved?.hasKey && old?.origin && result.origin && old.origin !== result.origin;
+    $("bc-key-hint").textContent = changed ? t("服务地址已改变，请重新填写 API Key，旧密钥不会发往新地址。") : saved?.hasKey ? t("不回显已保存的密钥；留空保持不变，填写新密钥可替换。") : t("密钥保存后不回显。");
+    $("bc-key").required = !(saved?.hasKey && old?.origin === result.origin);
   }
   function discoveryKeyReady(endpoint) {
-    if ($("bc-key").value.trim()) return $("bc-key").value.trim().length <= 1024 && !/[\u0000- \u007f]/.test($("bc-key").value.trim());
+    if ($("bc-key").value.trim()) return $("bc-key").value.trim().length <= 1024 && !/[\s\u0000-\u001f\u007f-\u009f]/.test($("bc-key").value.trim());
     // The server is the final authority; the client never receives the saved secret.
-    return !!snapshot && snapshot.hasKey && endpointOf(snapshot.endpoint).origin === endpoint.origin;
+    const saved = savedSource();
+    return !!saved?.hasKey && endpointOf(saved.endpoint).origin === endpoint.origin;
   }
   function discoveryAllowed(endpoint) {
     return !!snapshot && snapshot.installed && !busy && visible() && !document.hidden && !$("bc-form").classList.contains("hidden") && !endpoint.error && $("bc-model-consent").checked && consentOrigin === endpoint.origin && discoveryKeyReady(endpoint);
@@ -364,7 +525,7 @@
     $("bc-model-retry").disabled = busy || modelsTimer !== null || !!modelsAbort || !discoveryAllowed(endpoint);
   }
   function updateSaveNote(saving = false) {
-    $("bc-save-note").textContent = saving ? t("正在保存并检查本地桥，不调用远端模型…") : modelsConnected ? t("读取清单已连接服务，尚未验证模型推理；保存不调用远端模型，也不切换当前会话。") : t("保存不调用远端模型，也不切换当前会话");
+    $("bc-save-note").textContent = saving ? t("正在保存并检查本地桥，不调用远端模型…") : hasDiscovered() ? t("读取清单已连接服务，尚未验证模型推理；保存不调用远端模型，也不切换当前会话。") : t("保存不调用远端模型，也不切换当前会话");
   }
   // 输入为空或正好是清单里某一项时列全部，否则按包含过滤；太长只列前 SUGGEST_MAX 个，继续输入缩小
   function renderSuggest(open) {
@@ -410,21 +571,22 @@
     if (!validModel(id)) { error("model", t("请输入准确的模型名称，不要包含逗号或换行。")).focus(); return false; }
     if (ctx === null) { error("ctx", t("填 1024 到 16777216 之间的整数，也可以写 256k、1m；不知道就留空。")).focus(); return false; }
     let item = selectedModels.find((m) => m.id === id);
-    if (!item && selectedModels.length >= CONFIG_MODEL_LIMIT) { error("model", t("最多可添加 100 个模型。")).focus(); return false; }
+    const total = multi() ? apiDrafts.reduce((n, source) => n + source.models.length, 0) : selectedModels.length;
+    if (!item && total >= CONFIG_MODEL_LIMIT) { error("model", t("最多可添加 100 个模型。")).focus(); return false; }
     if (!item) { item = { id }; selectedModels.push(item); }
     item.contextWindow = ctx || modelWindows.get(id) || DEFAULT_CTX; item.manual = ctxManual;
-    defaultModel ||= id;
+    if (!defaultModel) { defaultModel = id; defaultSource = activeApi; }
     if (clear) { editingModel = ""; $("bc-model").value = ""; ctxManual = false; syncContext(); }
     suggestAt = -1;
-    renderSuggest(clear); renderSelected(); return true;
+    renderSuggest(clear); renderSelected(); renderApis(); return true;
   }
   function renderSelected(saved = false) {
     const list = $(saved ? "bc-saved-models" : "bc-selected"); list.textContent = "";
-    const items = saved ? snapshot.models : selectedModels, def = saved ? snapshot.model : defaultModel;
+    const items = saved ? snapshot.models : selectedModels, def = saved ? snapshot.model : (!multi() || defaultSource === activeApi ? defaultModel : "");
     for (const item of items) {
       const row = document.createElement("div"); row.className = "bc-model-row";
       const label = document.createElement("span"); label.className = "mono"; label.dir = "ltr";
-      label.textContent = item.id + " · " + item.contextWindow.toLocaleString() + (item.id === def ? " · " + t("默认模型") : "");
+      label.textContent = item.id + (!saved && item.visibleId && item.visibleId !== item.id ? " → " + item.visibleId : "") + " · " + item.contextWindow.toLocaleString() + (item.id === def ? " · " + t("默认模型") : "");
       row.appendChild(label);
       if (!saved) for (const [action, text] of [["model-edit", t("编辑")], ["model-default", t("设为默认")], ["model-remove", t("移除")]]) {
         const button = document.createElement("button"); button.type = "button"; button.className = "btn ghost sm";
@@ -453,7 +615,7 @@
     if (modelsAbort) { modelsAbort.abort(); modelsAbort = null; }
     if (clear) {
       modelItems = []; modelWindows = new Map(); modelsConnected = false;
-      for (const item of selectedModels) if (!item.manual) item.contextWindow = DEFAULT_CTX;
+      if (!multi()) for (const item of selectedModels) if (!item.manual) item.contextWindow = DEFAULT_CTX;
       renderModels(); renderSelected(); syncContext();
     }
     return pending;
@@ -498,7 +660,7 @@
     const controller = new AbortController();
     modelsAbort = controller;
     // Read a replacement key only when sending this same-origin POST, not when scheduling/filtering.
-    const body = { endpoint: $("bc-endpoint").value.trim(), consent: true };
+    const body = { endpoint: $("bc-endpoint").value.trim(), consent: true, ...(multi() ? { provider: activeApi } : {}) };
     if ($("bc-key").value.trim()) body.apiKey = $("bc-key").value.trim();
     const init = {
       method: "POST", cache: "no-store", credentials: "same-origin", signal: controller.signal,
@@ -517,6 +679,7 @@
       if (!r.ok || !data || data.ok !== true) throw { status: r.status, code: data && data.code };
       if (!Array.isArray(data.models)) throw { code: "models_unsupported" };
       modelsConnected = true;
+      if (multi()) connectedApis.add(activeApi);
       const ids = new Set(); modelWindows = new Map();
       for (const item of data.models.slice(0, MODEL_LIMIT)) {
         if (item && validModel(item.id)) {
@@ -551,12 +714,26 @@
     panel.querySelectorAll("input, button").forEach((el) => { el.disabled = value; });
     $("bc-save").textContent = value && saving ? t("正在准备本地桥…") : t("保存配置");
     updateSaveNote(value && saving); updateModelsControls();
-    if (!value) $("bc-use").disabled = $("bc-saved").classList.contains("hidden") || !snapshot || snapshot.local.state !== "ready" || !snapshot.providerId || typeof options.useNew !== "function";
+    if (!value) {
+      $("bc-use").disabled = $("bc-saved").classList.contains("hidden") || !snapshot || snapshot.local.state !== "ready" || !snapshot.providerId || typeof options.useNew !== "function";
+      renderApis();
+    }
   }
   function showForm() {
     cancelModels(true); consentOrigin = ""; $("bc-model-consent").checked = false;
-    errorsClear(); hideKey(true); overviewSnapshot();
+    errorsClear(); hideKey(true); clearDraftKeys(); connectedApis.clear(); overviewSnapshot();
     $("bc-form").classList.remove("hidden"); $("bc-saved").classList.add("hidden"); $("bc-loading").classList.add("hidden");
+    if (multi()) {
+      apiDrafts = snapshot.upstreams?.map((source) => ({ name: source.name, endpoint: source.endpoint,
+        models: source.models.map((pair) => ({ id: pair.model, visibleId: pair.id, manual: true,
+          contextWindow: snapshot.models.find((item) => item.id === pair.id)?.contextWindow || DEFAULT_CTX })) })) ||
+        [{ name: "relay", endpoint: "", models: [] }];
+      usedNames = new Set(apiDrafts.map((source) => source.name));
+      const source = snapshot.upstreams?.find((source) => source.models.some((pair) => pair.id === snapshot.model));
+      defaultSource = source?.name || ""; defaultModel = source?.models.find((pair) => pair.id === snapshot.model)?.model || "";
+      loadApi(apiDrafts[0].name); return;
+    }
+    apiDrafts = []; activeApi = defaultSource = ""; usedNames.clear(); renderApis();
     // Persisted windows are explicit configuration, not disposable discovery metadata.
     selectedModels = snapshot ? snapshot.models.map((m) => ({ ...m, manual: true })) : [];
     defaultModel = snapshot?.model || ""; editingModel = defaultModel;
@@ -569,11 +746,11 @@
   }
   function showSaved() {
     cancelModels(); modelItems = []; renderModels(); consentOrigin = ""; $("bc-model-consent").checked = false;
-    errorsClear(); hideKey(true); overviewSnapshot();
+    errorsClear(); hideKey(true); clearDraftKeys(); renderApis(true); overviewSnapshot();
     $("bc-form").classList.add("hidden"); $("bc-loading").classList.add("hidden"); $("bc-saved").classList.remove("hidden");
     $("bc-saved-endpoint").textContent = snapshot.endpoint; $("bc-saved-model").textContent = snapshot.model;
     $("bc-saved-ctx").textContent = snapshot.contextWindow.toLocaleString(); renderSelected(true);
-    $("bc-remote-state").textContent = modelsConnected ? t("读取清单已连接服务，尚未验证模型推理。") : t("模型推理尚未验证");
+    $("bc-remote-state").textContent = hasDiscovered() ? t("读取清单已连接服务，尚未验证模型推理。") : t("模型推理尚未验证");
     const ready = snapshot.local.state === "ready";
     $("bc-local-state").textContent = ready ? t("本地已准备好") : snapshot.localError === "RECOVERY_EXHAUSTED" ? t("自动恢复次数已耗尽")
       : snapshot.localError === "PATCH_VERIFICATION_FAILED" ? t("桥补丁校验失败")
@@ -591,6 +768,8 @@
     if (busy) return;
     cancelModels(true); currentOrigin = consentOrigin = ""; $("bc-model-consent").checked = false;
     snapshot = null; selectedModels = []; defaultModel = editingModel = ""; ctxManual = false;
+    clearDraftKeys(); connectedApis.clear(); apiDrafts = []; activeApi = defaultSource = ""; usedNames.clear();
+    $("bc-api-list").textContent = $("bc-saved-apis").textContent = "";
     errorsClear(); hideKey(true); $("bc-form").reset();
     $("bc-saved-endpoint").textContent = $("bc-saved-model").textContent = $("bc-saved-ctx").textContent = "";
     $("bc-selected").textContent = $("bc-saved-models").textContent = "";
@@ -621,6 +800,8 @@
     if (!panel || !$("tab-ext").classList.contains("bridge-config-open") || busy && !force) return false;
     ++seq; clearRepair(); cancelModels(true); currentOrigin = consentOrigin = ""; $("bc-model-consent").checked = false;
     busy = false; hideKey(true); snapshot = null; selectedModels = []; defaultModel = editingModel = ""; ctxManual = false;
+    clearDraftKeys(); connectedApis.clear(); apiDrafts = []; activeApi = defaultSource = ""; usedNames.clear();
+    $("bc-api-list").textContent = $("bc-saved-apis").textContent = "";
     $("bc-selected").textContent = $("bc-saved-models").textContent = "";
     $("tab-ext").classList.remove("bridge-config-open");
     $("bc-form").reset(); $("bc-saved-endpoint").textContent = $("bc-saved-model").textContent = $("bc-saved-ctx").textContent = "";
@@ -630,10 +811,38 @@
     if (!force && anchor && anchor.isConnected && anchor.getClientRects().length) anchor.focus({ preventScroll: true });
     return true;
   }
+  async function saveApis() {
+    if (!stashApi()) return;
+    for (const source of apiDrafts) {
+      const endpoint = endpointOf(source.endpoint), previous = snapshot.upstreams?.find((item) => item.name === source.name);
+      const key = (draftKeys.get(source.name) || "").trim();
+      const changed = previous?.hasKey && endpointOf(previous.endpoint).origin !== endpoint.origin;
+      let field = "", message = "";
+      if (endpoint.error) { field = "endpoint"; message = endpoint.error; }
+      else if (!key && (!previous?.hasKey || changed)) { field = "key"; message = changed ? t("服务地址已改变，请重新填写 API Key，旧密钥不会发往新地址。") : t("请填写服务商提供的 API Key。"); }
+      else if (key.length > 1024 || /[\s\u0000-\u001f\u007f-\u009f]/.test(key)) { field = "key"; message = t("API Key 不能包含空格或换行。"); }
+      else if (!source.models.length) { field = "model"; message = t("请输入准确的模型名称，不要包含逗号或换行。"); }
+      if (field) {
+        loadApi(source.name); error(field, message).focus(); return;
+      }
+    }
+    if (!apiDrafts.some((source) => source.name === defaultSource && source.models.some((item) => item.id === defaultModel))) chooseRemainingDefault();
+    const body = aggregateApis();
+    if (!body) {
+      $("bc-api-error").textContent = t("模型可见 ID 冲突、超过 200 字符或总数超过 100；请调整模型后保存。");
+      $("bc-api-error").classList.remove("hidden"); return;
+    }
+    const origins = [...new Set(apiDrafts.map((source) => endpointOf(source.endpoint).origin))].join("\n");
+    if (!confirm(t("保存全部 API 配置？\n\n后续使用时，对话、工具结果和图片将按模型发往以下服务：\n{origins}\n保存本身不调用远端模型，也不切换当前会话。", { origins }))) return;
+    // Aggregate once, only at global Save. Credentials are copied into the outgoing stdin contract, not topology.
+    for (const source of body.upstreams) source.apiKey = (draftKeys.get(source.name) || "").trim();
+    await postConfig(body);
+  }
   async function save(e) {
     e.preventDefault(); if (busy || !snapshot) return;
     if (cancelModels()) $("bc-model-status").textContent = t("读取已取消，可重试或手填模型。");
     updateModelsControls(); errorsClear(); hideKey();
+    if (multi()) { await saveApis(); return; }
     const endpoint = endpointOf($("bc-endpoint").value), model = $("bc-model").value.trim();
     let first = null;
     if (endpoint.error) first = error("endpoint", endpoint.error);
@@ -647,10 +856,13 @@
     if (model && !addModel(false)) return;
     if (!defaultModel || !selectedModels.some((item) => item.id === defaultModel)) defaultModel = selectedModels[0].id;
     if (!confirm(t("保存此 API 配置？\n\n后续使用时，对话、工具结果和图片将发往 {origin}。\n{verification}\n保存本身不调用远端模型，也不切换当前会话。", { origin: endpoint.origin, verification: modelsConnected ? t("读取清单已连接服务，尚未验证模型推理。") : t("模型推理尚未验证") }))) return;
-    // Keep a replacement secret only in this input and the same-origin POST, never in UI state/storage.
+    // The legacy form keeps its replacement secret only in this input and the same-origin POST, never storage.
     const body = { endpoint: $("bc-endpoint").value.trim(), model: defaultModel, consent: true,
       models: selectedModels.map(({ id, contextWindow }) => ({ id, contextWindow })) };
     if ($("bc-key").value.trim()) body.apiKey = $("bc-key").value.trim();
+    await postConfig(body);
+  }
+  async function postConfig(body) {
     const id = ++seq; invalidateReadiness(); setBusy(true, true);
     try {
       const data = await request(body); if (id !== seq || !visible()) return;
@@ -666,11 +878,19 @@
       else if (err.field === "apiKey") error("key", t("请重新填写 API Key；更换服务地址时不能沿用旧密钥。"));
       else if (err.field === "contextWindow") error("ctx", t("填 1024 到 16777216 之间的整数，也可以写 256k、1m；不知道就留空。"));
       else if (err.field === "model") error("model", t("请输入准确的模型名称，不要包含逗号或换行。"));
+      else if (err.field === "upstreams") {
+        $("bc-api-error").textContent = t("模型可见 ID 冲突、超过 200 字符或总数超过 100；请调整模型后保存。");
+        $("bc-api-error").classList.remove("hidden");
+      }
       if (err.saved && typeof options.saved === "function") options.saved();
       if (["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(err.code)) showIssue(err, true);
       else if (err.saved || LOCAL_ERRORS.includes(err.code)) { notice(localMessage(localCode(err.code))); $("bc-repair").classList.remove("hidden"); }
       else notice(t("保存配置未完成；请检查本地状态后重试，当前会话保持不变。"));
-    } finally { body.apiKey = ""; if (id === seq) setBusy(false); }
+    } finally {
+      body.apiKey = "";
+      if (body.upstreams) for (const source of body.upstreams) source.apiKey = "";
+      if (id === seq) setBusy(false);
+    }
   }
   async function useNew() {
     if (busy || !snapshot || snapshot.local.state !== "ready" || !snapshot.providerId || typeof options.useNew !== "function") return;

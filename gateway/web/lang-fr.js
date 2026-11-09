@@ -3130,4 +3130,13 @@ window.I18N_DICT["fr"] = {
   "Claude Code 默认把 30 天没动过的会话连同附属数据删掉，不进回收站。本应用把它改成永久保留：会话只有你在会话列表里删了才会进回收站。你自己在 ~/.claude/settings.json 里写了 cleanupPeriodDays 的，按你写的天数。": "Par défaut, Claude Code supprime les sessions inchangées depuis 30 jours, avec leurs données annexes, sans passer par la corbeille. Cette application les conserve indéfiniment : une session ne va à la corbeille que si vous la supprimez depuis la liste des sessions. Si vous avez défini cleanupPeriodDays dans ~/.claude/settings.json, votre nombre de jours est utilisé.",
   "自动清理": "Nettoyage automatique",
   "只清缓存、7 天没动过的临时文件、30 天前的 Claude Code 杂物；会话、你的文件、程序永不自动删": "Ne nettoie que les caches, les fichiers temporaires inchangés depuis 7 jours et les fichiers annexes de Claude Code de plus de 30 jours. Les sessions, vos fichiers et les programmes ne sont jamais supprimés automatiquement",
+  "多个 API 分别配置模型，共用一个本地桥；保存后统一生效。": "Configurez les modèles de chaque API via un seul pont local ; les changements prennent effet à l’enregistrement.",
+  "API 列表": "Liste des API",
+  "添加 API": "Ajouter une API",
+  "添加多个 API 需要更新桥组件；现有单 API 配置仍可使用。": "Mettez à jour le composant du pont pour ajouter plusieurs API ; la configuration existante à une seule API reste utilisable.",
+  "{n} 个模型": "{n} modèles",
+  "每次只编辑一个 API；添加、移除和默认模型变更均在点击保存配置后生效。": "Modifiez une API à la fois. Les ajouts, suppressions et changements du modèle par défaut prennent effet uniquement après Enregistrer la configuration.",
+  "移除 API「{name}」及其模型？仅在点击保存配置后生效，当前会话保持不变。": "Supprimer l’API « {name} » et ses modèles ? Cela prendra effet uniquement après Enregistrer la configuration ; la conversation actuelle reste inchangée.",
+  "模型可见 ID 冲突、超过 200 字符或总数超过 100；请调整模型后保存。": "Les ID visibles des modèles sont en conflit, dépassent 200 caractères ou sont plus de 100 ; ajustez les modèles avant d’enregistrer.",
+  "保存全部 API 配置？\n\n后续使用时，对话、工具结果和图片将按模型发往以下服务：\n{origins}\n保存本身不调用远端模型，也不切换当前会话。": "Enregistrer toutes les configurations d’API ?\n\nÀ l’utilisation, les conversations, résultats d’outils et images seront envoyés aux services suivants selon le modèle choisi :\n{origins}\nL’enregistrement n’appelle aucun modèle distant et ne change pas la conversation actuelle.",
 };

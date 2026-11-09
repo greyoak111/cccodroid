@@ -3164,5 +3164,14 @@ window.I18N_DICT.en = {
   "会话保留": "Session retention",
   "Claude Code 默认把 30 天没动过的会话连同附属数据删掉，不进回收站。本应用把它改成永久保留：会话只有你在会话列表里删了才会进回收站。你自己在 ~/.claude/settings.json 里写了 cleanupPeriodDays 的，按你写的天数。": "By default Claude Code deletes sessions untouched for 30 days, together with their attached data, without going through the trash. This app keeps them forever instead: a session goes to the trash only when you delete it from the session list. If you set cleanupPeriodDays yourself in ~/.claude/settings.json, your number of days is used.",
   "自动清理": "Auto-clean",
-  "只清缓存、7 天没动过的临时文件、30 天前的 Claude Code 杂物；会话、你的文件、程序永不自动删": "Cleans only caches, temporary files untouched for 7 days, and Claude Code housekeeping files older than 30 days. Sessions, your files and programs are never deleted automatically"
+  "只清缓存、7 天没动过的临时文件、30 天前的 Claude Code 杂物；会话、你的文件、程序永不自动删": "Cleans only caches, temporary files untouched for 7 days, and Claude Code housekeeping files older than 30 days. Sessions, your files and programs are never deleted automatically",
+  "多个 API 分别配置模型，共用一个本地桥；保存后统一生效。": "Configure models for each API through one local bridge; all changes take effect when saved.",
+  "API 列表": "API list",
+  "添加 API": "Add API",
+  "添加多个 API 需要更新桥组件；现有单 API 配置仍可使用。": "Update the bridge component to add multiple APIs; the existing single-API form still works.",
+  "{n} 个模型": "{n} models",
+  "每次只编辑一个 API；添加、移除和默认模型变更均在点击保存配置后生效。": "Edit one API at a time. Additions, removals and default-model changes take effect only after Save configuration.",
+  "移除 API「{name}」及其模型？仅在点击保存配置后生效，当前会话保持不变。": "Remove API “{name}” and its models? This takes effect only after Save configuration; the current conversation stays unchanged.",
+  "模型可见 ID 冲突、超过 200 字符或总数超过 100；请调整模型后保存。": "Visible model IDs conflict, exceed 200 characters or total more than 100; adjust the models before saving.",
+  "保存全部 API 配置？\n\n后续使用时，对话、工具结果和图片将按模型发往以下服务：\n{origins}\n保存本身不调用远端模型，也不切换当前会话。": "Save all API configurations?\n\nWhen used, conversations, tool results and images will be sent to the following services according to the selected model:\n{origins}\nSaving does not call remote models or switch the current conversation."
 };

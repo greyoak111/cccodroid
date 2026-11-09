@@ -3127,3 +3127,12 @@
 3127	Por defecto, Claude Code borra las sesiones sin cambios en 30 días, junto con sus datos asociados, sin pasar por la papelera. Esta app las conserva para siempre: una sesión solo va a la papelera si la eliminas desde la lista de sesiones. Si tú pusiste cleanupPeriodDays en ~/.claude/settings.json, se usa tu número de días.
 3128	Limpieza automática
 3129	Solo limpia cachés, archivos temporales sin cambios en 7 días y archivos auxiliares de Claude Code de más de 30 días. Las sesiones, tus archivos y los programas nunca se borran solos
+3130	Configura modelos por API con un único puente local; todos los cambios se aplican al guardar.
+3131	Lista de API
+3132	Añadir API
+3133	Actualiza el componente del puente para añadir varias API; la configuración de una sola API sigue funcionando.
+3134	{n} modelos
+3135	Edita una API a la vez. Las adiciones, eliminaciones y cambios del modelo predeterminado solo se aplican al pulsar Guardar configuración.
+3136	¿Eliminar la API «{name}» y sus modelos? Solo se aplicará al pulsar Guardar configuración; la conversación actual no cambiará.
+3137	Los ID visibles de modelo coinciden, superan los 200 caracteres o suman más de 100; ajusta los modelos antes de guardar.
+3138	¿Guardar todas las configuraciones de API?\n\nAl usarse, las conversaciones, los resultados de herramientas y las imágenes se enviarán a estos servicios según el modelo seleccionado:\n{origins}\nGuardar no llama a modelos remotos ni cambia la conversación actual.

@@ -3130,4 +3130,13 @@ window.I18N_DICT["id"] = {
   "Claude Code 默认把 30 天没动过的会话连同附属数据删掉，不进回收站。本应用把它改成永久保留：会话只有你在会话列表里删了才会进回收站。你自己在 ~/.claude/settings.json 里写了 cleanupPeriodDays 的，按你写的天数。": "Secara bawaan Claude Code menghapus sesi yang tak berubah selama 30 hari beserta data terkaitnya, tanpa lewat tempat sampah. Aplikasi ini menyimpannya selamanya: sesi hanya masuk tempat sampah bila Anda menghapusnya dari daftar sesi. Jika Anda sendiri menulis cleanupPeriodDays di ~/.claude/settings.json, jumlah hari Anda yang dipakai.",
   "自动清理": "Pembersihan otomatis",
   "只清缓存、7 天没动过的临时文件、30 天前的 Claude Code 杂物；会话、你的文件、程序永不自动删": "Hanya membersihkan cache, file sementara yang tak berubah 7 hari, dan file sampingan Claude Code yang lebih dari 30 hari. Sesi, file Anda, dan program tidak pernah dihapus otomatis",
+  "多个 API 分别配置模型，共用一个本地桥；保存后统一生效。": "Atur model tiap API melalui satu jembatan lokal; semua perubahan berlaku setelah disimpan.",
+  "API 列表": "Daftar API",
+  "添加 API": "Tambah API",
+  "添加多个 API 需要更新桥组件；现有单 API 配置仍可使用。": "Perbarui komponen jembatan untuk menambah beberapa API; konfigurasi satu API yang ada tetap berfungsi.",
+  "{n} 个模型": "{n} model",
+  "每次只编辑一个 API；添加、移除和默认模型变更均在点击保存配置后生效。": "Edit satu API setiap kali. Penambahan, penghapusan, dan perubahan model bawaan hanya berlaku setelah menekan Simpan konfigurasi.",
+  "移除 API「{name}」及其模型？仅在点击保存配置后生效，当前会话保持不变。": "Hapus API “{name}” beserta modelnya? Ini hanya berlaku setelah menekan Simpan konfigurasi; percakapan saat ini tidak berubah.",
+  "模型可见 ID 冲突、超过 200 字符或总数超过 100；请调整模型后保存。": "ID model yang terlihat bentrok, melebihi 200 karakter, atau berjumlah lebih dari 100; sesuaikan model sebelum menyimpan.",
+  "保存全部 API 配置？\n\n后续使用时，对话、工具结果和图片将按模型发往以下服务：\n{origins}\n保存本身不调用远端模型，也不切换当前会话。": "Simpan semua konfigurasi API?\n\nSaat digunakan, percakapan, hasil alat, dan gambar akan dikirim ke layanan berikut sesuai model yang dipilih:\n{origins}\nMenyimpan tidak memanggil model jarak jauh atau mengganti percakapan saat ini.",
 };

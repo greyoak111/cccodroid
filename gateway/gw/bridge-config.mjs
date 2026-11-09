@@ -11,9 +11,17 @@ import { PROVIDERS_CFG, upsertProvider, providersDiskMatches } from "./providers
 import { beginManagedBridgeConfiguration, withManagedBridgeRegistryLock } from "./managed-bridge.mjs";
 
 const ID = "openai-bridge", ENTRY = "lib/openai-bridge/component.cjs";
-const MODELS_MAX_BYTES = 128 << 10, CONFIG_MAX_BYTES = 128 << 10, CONFIG_MODEL_LIMIT = 100;
-const DEFAULT_CONTEXT_WINDOW = 200000;
+const MODELS_MAX_BYTES = 128 << 10, CONFIG_MAX_BYTES = 512 << 10, CONFIG_MODEL_LIMIT = 100;
+const DEFAULT_CONTEXT_WINDOW = 200000, UPSTREAM_LIMIT = 16;
 const validModel = (id) => typeof id === "string" && !!id.trim() && id === id.trim() && id.length <= 200 && !/[,\u0000-\u001f\u007f-\u009f]/.test(id);
+const validUpstreamName = (name) => typeof name === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(name);
+// Only newly supplied keys enter this module; saved upstream keys stay behind the component resolver.
+function clearApiKeys(value) {
+  if (!object(value)) return;
+  if (Object.hasOwn(value, "apiKey")) value.apiKey = "";
+  if (Array.isArray(value.upstreams)) for (const upstream of value.upstreams)
+    if (object(upstream) && Object.hasOwn(upstream, "apiKey")) upstream.apiKey = "";
+}
 const LOCAL_ERRORS = ["RECOVERY_EXHAUSTED", "PATCH_VERIFICATION_FAILED", "COMPONENT_DISABLED", "LOCAL_START_FAILED", "COMPONENT_UNAVAILABLE", "UPDATE_REQUIRED"];
 const COMPONENT_ERRORS = ["INVALID_INPUT", "KEY_REQUIRED", "KEY_HOST_CHANGED", "RUNTIME_CONFLICT", "BUSY", ...LOCAL_ERRORS];
 const CONFIG_CHECKS = ["COMPONENT", "OWNERSHIP", "CONNECTION", "APP_MAPPING", "APP_PROVIDER", "MODEL_LIST"];
@@ -175,21 +183,69 @@ function invokeComponent(command, input, signal) {
   });
 }
 
-function statusView(result) {
+// Flattened visible IDs must exactly match the public model order/default; raw models are local to one API.
+function upstreamsView(raw, ids, model, endpoint, input = false) {
+  const invalid = () => failure(input ? "invalid_upstreams" : "component_response", input ? "upstreams" : "");
+  if (!Array.isArray(raw) || !raw.length || raw.length > UPSTREAM_LIMIT) throw invalid();
+  const names = new Set(), visible = [];
+  const upstreams = raw.map((item) => {
+    if (!object(item) || !validUpstreamName(item.name) || names.has(item.name) ||
+        (input && Object.keys(item).some((k) => !["name", "endpoint", "apiKey", "models"].includes(k))) ||
+        (!input && item.hasKey !== true)) throw invalid();
+    names.add(item.name);
+    let normalized;
+    try { normalized = normalizeBridgeEndpoint(item.endpoint); } catch { throw invalid(); }
+    if (!input && normalized !== item.endpoint) throw invalid();
+    if (!Array.isArray(item.models) || (input && !item.models.length) || item.models.length > CONFIG_MODEL_LIMIT) throw invalid();
+    const rawModels = new Set();
+    const models = item.models.map((pair) => {
+      const rawModel = pair?.model === undefined ? pair?.id : pair.model;
+      if (!object(pair) || !validModel(pair.id) || !validModel(rawModel) || rawModels.has(rawModel) ||
+          (input && Object.keys(pair).some((k) => !["id", "model"].includes(k)))) throw invalid();
+      rawModels.add(rawModel); visible.push(pair.id);
+      return { id: pair.id, model: rawModel };
+    });
+    if (input) apiKeyInput(item.apiKey);
+    return { name: item.name, endpoint: normalized, ...(!input ? { hasKey: true } : {}), models };
+  });
+  if (visible.length > CONFIG_MODEL_LIMIT || new Set(visible).size !== visible.length || !visible.includes(model) ||
+      JSON.stringify(visible) !== JSON.stringify(ids) || upstreams[0].endpoint !== endpoint) throw invalid();
+  // Copy secrets only after the complete topology and every key have passed validation.
+  if (input) for (let i = 0; i < upstreams.length; i++) upstreams[i].apiKey = apiKeyInput(raw[i].apiKey);
+  return upstreams;
+}
+const topology = (upstreams) => upstreams?.map(({ name, endpoint, models }) => ({ name, endpoint, models }));
+
+function projectStatus(result) {
   if (!object(result) || result.schema !== 1 || result.id !== ID || typeof result.configured !== "boolean" ||
       typeof result.localReady !== "boolean" || typeof result.hasKey !== "boolean") throw failure("component_response");
-  if (!result.configured) return { installed: true, configured: false, hasKey: false, endpoint: "", model: "", models: [], localReady: false, local: { state: "stopped" } };
+  const multiUpstream = result.capabilities?.multiUpstream === true;
+  const capabilities = multiUpstream ? { capabilities: { multiUpstream: true } } : {};
+  if (!result.configured) {
+    if (result.upstreams !== undefined) throw failure("component_response");
+    return { installed: true, configured: false, hasKey: false, endpoint: "", model: "", models: [], localReady: false, local: { state: "stopped" }, ...capabilities };
+  }
   if (result.hasKey !== true || !validModel(result.model)) throw failure("component_response");
   const models = result.models === undefined ? [result.model] : result.models;
   if (!Array.isArray(models) || !models.length || models.length > CONFIG_MODEL_LIMIT || !models.every(validModel) ||
       new Set(models).size !== models.length || !models.includes(result.model)) throw failure("component_response");
   const endpoint = normalizeBridgeEndpoint(result.endpoint);
   if (endpoint !== result.endpoint) throw failure("component_response");
+  if (!multiUpstream && result.upstreams !== undefined) throw failure("component_response");
   const localError = LOCAL_ERRORS.includes(result.localError) ? result.localError : result.localError ? "LOCAL_START_FAILED" : "";
+  // 两次原子配置写入之间被终止时，组件只投影旧本地清单，不伪造未提交拓扑。
+  const incomplete = multiUpstream && result.upstreams === undefined && localError === "COMPONENT_DISABLED";
+  const upstreams = multiUpstream && !incomplete ? upstreamsView(result.upstreams, models, result.model, endpoint) : undefined;
   // 故障标记优先于残存进程的 /health；配置页不能给实际 ensure 会拒绝的实例放行。
   const localReady = result.localReady && !localError;
   return { installed: true, configured: true, hasKey: true, endpoint, model: result.model, models: [...models], localReady,
+    ...capabilities, ...(upstreams ? { upstreams } : {}),
     ...(localError ? { localError } : {}), local: { state: localError ? "error" : localReady ? "ready" : "stopped", ...(localError ? { code: localError } : {}) } };
+}
+
+function statusView(result) {
+  try { return projectStatus(result); }
+  finally { clearApiKeys(result); }
 }
 
 function assertGuiOwnership() {
@@ -227,17 +283,28 @@ function defaultConnection(model) {
   } catch { throw conflict("CONNECTION"); }
 }
 
+function apiKeyInput(value) {
+  if (value !== undefined && typeof value !== "string") throw failure("invalid_key", "apiKey");
+  const apiKey = (value || "").trim();
+  if ((value || "").length > 1024 || /[\u0000-\u001f\u007f-\u009f]/.test(value || "") || /\s/.test(apiKey)) throw failure("invalid_key", "apiKey");
+  return apiKey;
+}
 function validateInput(body, modelsOnly = false) {
-  const fields = modelsOnly ? ["endpoint", "apiKey", "consent"] : ["endpoint", "apiKey", "model", "models", "contextWindow", "consent"];
+  const fields = modelsOnly ? ["endpoint", "apiKey", "provider", "consent"] : ["endpoint", "apiKey", "model", "models", "upstreams", "contextWindow", "consent"];
   if (!object(body) || Object.keys(body).some((key) => !fields.includes(key)) || body.consent !== true) throw failure("consent_required");
-  const endpoint = normalizeBridgeEndpoint(body.endpoint);
-  if (body.apiKey !== undefined && typeof body.apiKey !== "string") throw failure("invalid_key", "apiKey");
-  const apiKey = (body.apiKey || "").trim();
-  if ((body.apiKey || "").length > 1024 || /[\u0000-\u001f\u007f]/.test(body.apiKey || "") || /\s/.test(apiKey)) throw failure("invalid_key", "apiKey");
-  if (modelsOnly) return { endpoint, apiKey };
+  const endpoint = normalizeBridgeEndpoint(body.endpoint), apiKey = apiKeyInput(body.apiKey);
+  if (modelsOnly) {
+    if (body.provider !== undefined && !validUpstreamName(body.provider)) throw failure("invalid_provider");
+    return { endpoint, apiKey, ...(body.provider !== undefined ? { provider: body.provider } : {}) };
+  }
   if (typeof body.model !== "string" || !validModel(body.model.trim())) throw failure("invalid_model", "model");
   const model = body.model.trim();
   const models = body.models === undefined ? undefined : configuredModelsInput(body.models, model);
+  if (body.upstreams !== undefined) {
+    if (!models || apiKey) throw failure("invalid_upstreams", "upstreams");
+    return { endpoint, apiKey: "", model, models: models.map((item) => item.id),
+      upstreams: upstreamsView(body.upstreams, models.map((item) => item.id), model, endpoint, true) };
+  }
   return { endpoint, apiKey, model, ...(models?.length > 1 ? { models: models.map((item) => item.id) } : {}) };
 }
 
@@ -294,7 +361,7 @@ function modelsView(result, apiKey = "") {
   const ids = new Set();
   const models = result.models.map((model) => {
     const id = object(model) ? model.id : undefined;
-    if (typeof id !== "string" || !id.trim() || id.length > 200 || /[,\u0000-\u001f\u007f]/.test(id) || ids.has(id) || (apiKey && id.includes(apiKey))) throw failure("MODELS_INVALID_RESPONSE");
+    if (!validModel(id) || ids.has(id) || (apiKey && id.includes(apiKey))) throw failure("MODELS_INVALID_RESPONSE");
     ids.add(id);
     const contextWindow = validWindow(model.context_window);
     return { id, ...(contextWindow ? { context_window: contextWindow } : {}) };
@@ -305,12 +372,12 @@ function modelsView(result, apiKey = "") {
 }
 
 export async function fetchBridgeModels(body, signal) {
-  const input = validateInput(body, true);
+  let input;
   try {
-    // 健康状态只检查固定组件入口；旧 key 的安全实例/同 origin 匹配全由组件 resolver 处理。
-    // 不做 gui-status 预检，也不触发配置、provider、持久化或常驻服务启动。
+    input = validateInput(body, true);
+    // 不做 gui-status 预检；组件仅解析所编辑 API 的 name + origin，不 fanout 或启动常驻服务。
     return modelsView(await invokeComponent("gui-models", input, signal), input.apiKey);
-  } finally { input.apiKey = ""; }
+  } finally { clearApiKeys(input); clearApiKeys(body); }
 }
 
 export async function handleBridgeModels(req, res, signal) {
@@ -331,7 +398,7 @@ export async function handleBridgeModels(req, res, signal) {
     if (!res.destroyed && !res.writableEnded) return sendJson(res, 200, view);
   } catch (error) {
     if (res.destroyed || res.writableEnded) return;
-    const codes = [...COMPONENT_ERRORS, ...MODELS_ERROR_CODES, "not_installed", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key"];
+    const codes = [...COMPONENT_ERRORS, ...MODELS_ERROR_CODES, "not_installed", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key", "invalid_provider"];
     const code = codes.includes(error.code) ? error.code : "MODELS_FAILED";
     // 上游的 429 / 超时 / 网络错误要给外部客户端能退避的状态码，不能一律 400（0.6.9 审计 196 上游.8）
     const status = ["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(code) ? 409
@@ -463,33 +530,55 @@ export async function bridgeConfigStatus() {
 }
 
 export async function saveBridgeConfig(body) {
-  const input = validateInput(body);
-  const models = body.models === undefined ? [{ id: input.model, contextWindow: contextWindowInput(body) || DEFAULT_CONTEXT_WINDOW }]
-    : configuredModelsInput(body.models, input.model);
-  const contextWindow = models.find((item) => item.id === input.model).contextWindow;
-  let saved = false, release;
+  let input, saved = false, release;
   try {
+    input = validateInput(body);
+    const models = body.models === undefined ? [{ id: input.model, contextWindow: contextWindowInput(body) || DEFAULT_CONTEXT_WINDOW }]
+      : configuredModelsInput(body.models, input.model);
+    const contextWindow = models.find((item) => item.id === input.model).contextWindow;
     const current = await bridgeConfigStatus();
     if (!current.installed) throw failure("not_installed");
-    if (!input.apiKey && !current.hasKey) throw failure("KEY_REQUIRED", "apiKey");
-    if (!input.apiKey && new URL(current.endpoint).origin !== new URL(input.endpoint).origin) throw failure("KEY_HOST_CHANGED", "apiKey");
+    if (input.upstreams) {
+      if (!current.capabilities?.multiUpstream) throw failure("UPDATE_REQUIRED");
+      for (const upstream of input.upstreams) {
+        if (upstream.apiKey) continue;
+        const previous = current.upstreams?.find((item) => item.name === upstream.name);
+        if (!previous?.hasKey) throw failure("KEY_REQUIRED", "apiKey");
+        if (new URL(previous.endpoint).origin !== new URL(upstream.endpoint).origin) throw failure("KEY_HOST_CHANGED", "apiKey");
+      }
+    } else {
+      if (!input.apiKey && !current.hasKey) throw failure("KEY_REQUIRED", "apiKey");
+      if (!input.apiKey && new URL(current.endpoint).origin !== new URL(input.endpoint).origin) throw failure("KEY_HOST_CHANGED", "apiKey");
+    }
     if (current.configured) {
       const connection = defaultConnection(current.model);
       if ([...RUNS.values()].some((run) => !run.ended && PROVIDERS_CFG.providers[run.provider]?.baseUrl === connection.baseUrl)) throw failure("BUSY");
     }
     assertGuiOwnership();
     release = beginManagedBridgeConfiguration();
-    const configured = await invokeComponent("gui-configure", input);
+    const compact = input.upstreams && Buffer.byteLength(JSON.stringify(input)) > (128 << 10);
+    const wire = compact ? { ...input, upstreams: input.upstreams.map((upstream) => ({ ...upstream,
+      models: upstream.models.map(({ id, model }) => ({ id, ...(id === model ? {} : { model }) })) })) } : input;
+    let configured;
+    try {
+      // 窗口只在App落盘，重复raw ID可省略；保持组件原有128KiB管道边界。
+      if (Buffer.byteLength(JSON.stringify(wire)) > (128 << 10)) throw failure("invalid_input");
+      configured = await invokeComponent("gui-configure", wire);
+    } finally { if (wire !== input) clearApiKeys(wire); }
     saved = configured?.schema === 1 && configured.id === ID && configured.configured === true;
     const view = statusView(configured);
     if (!view.configured || view.endpoint !== input.endpoint || view.model !== input.model ||
-        JSON.stringify(view.models) !== JSON.stringify(models.map((item) => item.id))) throw failure("component_response");
+        JSON.stringify(view.models) !== JSON.stringify(models.map((item) => item.id)) ||
+        (input.upstreams && JSON.stringify(topology(view.upstreams)) !== JSON.stringify(topology(input.upstreams)))) throw failure("component_response");
     saved = true;
     assertGuiOwnership();
     const providerId = await saveProvider(defaultConnection(view.model), contextWindow, models);
     return { ok: true, saved, ...view, models, providerId, contextWindow };
   } catch (error) { error.saved = saved; throw error; }
-  finally { release?.(); input.apiKey = ""; }
+  finally {
+    try { release?.(); }
+    finally { clearApiKeys(input); clearApiKeys(body); }
+  }
 }
 
 const repairTickets = new Map(), REPAIR_TTL = 60000;
@@ -629,12 +718,12 @@ export async function handleBridgeConfig(req, res) {
     try { body = JSON.parse((await readBodyBuf(req, CONFIG_MAX_BYTES)).toString("utf8")); } catch { throw failure("invalid_input"); }
     return sendJson(res, 200, await saveBridgeConfig(body));
   } catch (error) {
-    const codes = ["BUSY", "RUNTIME_CONFLICT", "not_installed", "component_spawn", "component_failed", "component_response", "component_timeout", "KEY_REQUIRED", "KEY_HOST_CHANGED", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key", "invalid_model", "invalid_context_window", "provider_save_failed", ...LOCAL_ERRORS];
+    const codes = ["BUSY", "RUNTIME_CONFLICT", "not_installed", "component_spawn", "component_failed", "component_response", "component_timeout", "KEY_REQUIRED", "KEY_HOST_CHANGED", "consent_required", "invalid_input", "invalid_endpoint", "unsupported_path", "invalid_key", "invalid_model", "invalid_upstreams", "invalid_context_window", "provider_save_failed", ...LOCAL_ERRORS];
     const code = codes.includes(error.code) ? error.code : "config_failed";
     const status = ["BUSY", "RUNTIME_CONFLICT", "not_installed"].includes(code) ? 409 : 400;
     log(`[bridge-config] ${req.method === "POST" ? "save" : "status"} failed stage=${code}`);
     return sendJson(res, status, { ok: false, saved: error.saved === true, localReady: false, code,
       ...(code === "RUNTIME_CONFLICT" ? { check: CONFIG_CHECKS.includes(error.check) ? error.check : "UNKNOWN" } : {}),
-      ...(["endpoint", "apiKey", "model", "contextWindow"].includes(error.field) ? { field: error.field } : {}), message: failure(code).message });
+      ...(["endpoint", "apiKey", "model", "upstreams", "contextWindow"].includes(error.field) ? { field: error.field } : {}), message: failure(code).message });
   }
 }
