@@ -1,7 +1,25 @@
 {
  "v": 1,
- "updated": "2026-11-03T15:44:23.850Z",
+ "updated": "2026-11-09T12:29:41.583Z",
  "notices": [
+  {
+   "id": "20261109-stable",
+   "level": "info",
+   "from": "2026-11-09",
+   "title": {
+    "zh": "进入长期稳定版",
+    "en": "Long-term stable release"
+   },
+   "body": {
+    "zh": "作者最近现实里比较忙，要过一段时间才能回来更新，v0.6.13 会作为长期稳定版本。遇到问题或有建议，欢迎到 GitHub 提 issue，或在 QQ 群 1062538743、Discord 反馈。",
+    "en": "The author is busy offline for a while and won't be updating for some time, so v0.6.13 will serve as the long-term stable version. For problems or suggestions, please open a GitHub issue, or reach us in the QQ group 1062538743 or on Discord."
+   },
+   "link": "https://github.com/greyoak111/cccodroid/issues",
+   "linkText": {
+    "zh": "去反馈",
+    "en": "Give feedback"
+   }
+  },
   {
    "id": "20261103-adb",
    "level": "warn",
@@ -36,25 +54,6 @@
    },
    "until": "2026-11-18",
    "minVer": "0.6.1"
-  },
-  {
-   "id": "20261025-stance",
-   "level": "info",
-   "from": "2026-10-25",
-   "title": {
-    "zh": "严正声明",
-    "en": "Our position"
-   },
-   "body": {
-    "zh": "cccodroid 坚决反对以下做法：反代、共享或转售账户；破甲，即绕过模型的安全限制；用 agent 批量注册、养号、刷屏，冒充真人发言。项目不提供相关功能，不接受这类 PR 和组件，也不帮忙排查这类用法出的问题。",
-    "en": "cccodroid firmly opposes reverse proxies and shared or resold accounts, jailbreaking a model's safety limits, and using agents to register, farm or run accounts in bulk while posing as real people. The project offers no such features, accepts no PRs or components for them, and won't help troubleshoot problems that come from them."
-   },
-   "until": "2026-11-08",
-   "link": "https://github.com/greyoak111/cccodroid/blob/main/README.zh-CN.md#本项目反对的做法",
-   "linkText": {
-    "zh": "完整说明",
-    "en": "Details"
-   }
   }
  ]
 }
