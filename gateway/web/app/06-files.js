@@ -212,6 +212,7 @@
       `<div class="fs-prev-head">
          <span class="mono">${esc(e.name)}</span>
          <span class="tiny">${fmtSize(e.size)}</span>
+         ${/\.apk$/i.test(e.name) && canShare() ? `<button class="btn sm" data-a="apk">${t("安装")}</button>` : ""}
          ${e.kind === "archive" ? `<button class="btn sm" data-a="arc">${t("打开压缩包")}</button><button class="btn ghost sm" data-a="unpack">${t("解压…")}</button>`
            : `<button class="btn sm" data-a="open">${e.kind === "text" ? t("打开 / 编辑") : t("打开")}</button><button class="btn ghost sm" data-a="pack">${t("压缩…")}</button>`}
          <button class="btn ghost sm" data-a="insert">${t("插入 @路径")}</button>
@@ -222,6 +223,7 @@
     box.querySelector('[data-a="insert"]')?.addEventListener("click", () => insertFile(e));
     box.querySelector('[data-a="rename"]')?.addEventListener("click", () => fsRename(e));
     box.querySelector('[data-a="open"]')?.addEventListener("click", () => openViewer(full, e.kind, e.size));
+    box.querySelector('[data-a="apk"]')?.addEventListener("click", () => vwInstallApk(full));   // .apk 算压缩包，查看器那头的「安装」走不到这里（16-viewer-git.js）
     box.querySelector('[data-a="arc"]')?.addEventListener("click", () => arcOpen(full));
     box.querySelector('[data-a="unpack"]')?.addEventListener("click", () => arcExtractDlg({ path: full, entries: null }));
     box.querySelector('[data-a="pack"]')?.addEventListener("click", () => arcCreateDlg([e.name]));

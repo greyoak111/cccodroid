@@ -43,6 +43,10 @@ test("界面：只有 .apk 且在 cccodroid 里才出「安装」", () => {
   const v = rd("gateway/web/app/16-viewer-git.js");
   assert.match(v, /\$\{\/\\\.apk\$\/i\.test\(path\) && canShare\(\) \? `<button class="btn sm" data-a="apk">/);
   assert.match(v, /post\("\/api\/app\/apk_install", \{ path: p \}\)/);
+  // 文件管理器里 .apk 归「压缩包」，预览栏走的是另一套按钮，也要有
+  const f = rd("gateway/web/app/06-files.js");
+  assert.match(f, /\$\{\/\\\.apk\$\/i\.test\(e\.name\) && canShare\(\) \? `<button class="btn sm" data-a="apk">/);
+  assert.match(f, /querySelector\('\[data-a="apk"\]'\)\?\.addEventListener\("click", \(\) => vwInstallApk\(full\)\)/);
 });
 
 test("新文案都有 9 种译文", () => {
