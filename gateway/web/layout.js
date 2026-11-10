@@ -20,7 +20,7 @@
 // CCLayout.setAvoid(x) 仍保留：没有折痕时，外面也能指定一条要避开的竖线。
 (function () {
   "use strict";
-  const W2 = 840, W3 = 1000, SHORT = 500, LAND_W = 720;
+  const W2 = 840, W3 = 1000, SHORT = 500, LAND_W = 720, SQ_H = 600;
   let MIN_CHAT = 380, MIN_PANE = 320;   // 手机横屏时 apply() 改小一档
   const PANES = ["files", "viewer", "git", "term", "browser"];   // 宽屏时进右侧工作区的
   const tk = (s) => s;   // 词条键：先登记（扫描器认它），显示时 tr()
@@ -91,7 +91,9 @@
     root.classList.toggle("fold-half-v", halfV);
     root.classList.toggle("fold-table", !!fh);
     root.style.setProperty("--fbelow", (fh ? Math.max(0, Math.round(h - fh.y - fh.h)) : 0) + "px");
-    const nt = land || fv.length || w >= W3 ? 3 : w >= W2 ? 2 : 1;
+    // 近方形的大屏（折叠屏展开后横过来：折痕变横向、平放不分栏，宽只有 880 来）宽不到 W3，高也够，照平板排：侧栏常驻
+    const sq = !land && !fv.length && w >= W2 && w < W3 && h >= SQ_H;
+    const nt = land || fv.length || sq || w >= W3 ? 3 : w >= W2 ? 2 : 1;
     const was = tier, wasDocked = root.classList.contains("dock-l");
     tier = nt;
     root.dataset.lay = String(tier);
@@ -101,7 +103,7 @@
     for (const id of PANES) { const i = recent.indexOf(id); if (!isOpen(id) && i >= 0) recent.splice(i, 1); }
     const open = recent.filter(isOpen);
     // 一条竖折痕时一页侧栏一页对话，再开窗格就没地方了：侧栏让位，窗格占侧栏那一页的对面
-    rotate = open.length > 0 && (fv.length === 1 || land && !fv.length && w < MIN_SIDE + MIN_CHAT + MIN_PANE);
+    rotate = open.length > 0 && (fv.length === 1 || (land || sq) && !fv.length && w < MIN_SIDE + MIN_CHAT + MIN_PANE);
 
     // 左侧常驻侧栏：进三栏时展开（除非用户收起过），退出三栏时收回去，别留一个盖满屏幕的抽屉
     // 收常驻栏要赶在摘 dock-l 之前：摘掉后侧栏会先变回盖满屏的抽屉（整屏遮罩 + 毛玻璃）闪一帧
