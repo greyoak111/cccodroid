@@ -349,7 +349,8 @@ public class MainActivity extends Activity {
     private void applyBars(boolean dark) {
         android.view.Window w = getWindow();
         int bg = BrowserPane.pal(this, dark, "bg");
-        w.setNavigationBarColor(bg);           // 状态栏保持透明（见 edgeToEdge），只换图标深浅
+        // 状态栏保持透明（见 edgeToEdge），只换图标深浅；安卓 11+ 导航栏也透明，页面底色透上来
+        if (android.os.Build.VERSION.SDK_INT < 30) w.setNavigationBarColor(bg);
         if (android.os.Build.VERSION.SDK_INT >= 30) {
             int m = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
                   | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
@@ -1383,28 +1384,46 @@ public class MainActivity extends Activity {
     // ── 系统栏：铺满窗口，顶部占位交给页面自己避让 ─────────────────────
     //  以前由系统在顶上留一条状态栏高度的底色：分屏时下半屏没有状态栏，却也留着一条灰条。
     //  现在窗口画到状态栏底下，系统报多少顶部占位（WindowInsets）就告诉页面多少（--safe-t），
-    //  顶栏的底色自己延伸上去；分屏没有状态栏时报 0，界面就占满。底部 / 左右 / 输入法仍由这里留白（adjustResize 不变）。
-    private int insetTop = 0;
+    //  顶栏的底色自己延伸上去；分屏没有状态栏时报 0，界面就占满。
+    //  底部同理（安卓 11+）：手势条 / 三键导航那一截也画进去，高度经 --safe-b 交给页面，输入框、侧栏底的底色延伸下去；
+    //  以前这里留白，那一截只能刷导航栏色，和侧栏、输入框的底色对不上，折叠屏上看着像界面短了一截。
+    //  输入法弹起时仍由这里按键盘高度留白（adjustResize 的效果不变），这时 --safe-b 归 0。左右仍由这里留白。
+    private int insetTop = 0, insetBot = 0;
     private void edgeToEdge() {
         getWindow().setStatusBarColor(Color.TRANSPARENT);
         View d = getWindow().getDecorView();
-        d.setSystemUiVisibility(d.getSystemUiVisibility()
-                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        int f = View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+        // 安卓 11+ 连导航栏底下也画（只是「画到底下」，导航栏照常显示）；导航栏底色透明，三键导航也不另加半透明遮罩
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            f |= View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+            getWindow().setNavigationBarColor(Color.TRANSPARENT);
+            getWindow().setNavigationBarContrastEnforced(false);
+        }
+        d.setSystemUiVisibility(d.getSystemUiVisibility() | f);
         root.setOnApplyWindowInsetsListener((v, in) -> {
             insetTop = in.getSystemWindowInsetTop();
             // LAYOUT_STABLE 下上面那个值在状态栏藏起来后仍报原高度；安卓 11+ 按状态栏当前是否可见取（加上挖孔）
             if (android.os.Build.VERSION.SDK_INT >= 30)
                 insetTop = in.getInsets(android.view.WindowInsets.Type.statusBars() | android.view.WindowInsets.Type.displayCutout()).top;
-            // 安装页没有网页来避让，顶部也由这里留白；界面起来以后交给 --safe-t
-            v.setPadding(in.getSystemWindowInsetLeft(), web == null ? insetTop : 0, in.getSystemWindowInsetRight(), in.getSystemWindowInsetBottom());
+            // 安装页没有网页来避让，顶部、底部都由这里留白；界面起来以后交给 --safe-t / --safe-b
+            int padBot = in.getSystemWindowInsetBottom();
+            insetBot = 0;
+            if (android.os.Build.VERSION.SDK_INT >= 30 && web != null) {
+                int ime = in.getInsets(android.view.WindowInsets.Type.ime()).bottom;
+                int nav = in.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom;
+                if (ime > 0) padBot = Math.max(ime, nav);
+                else { padBot = 0; insetBot = nav; }
+            }
+            v.setPadding(in.getSystemWindowInsetLeft(), web == null ? insetTop : 0, in.getSystemWindowInsetRight(), padBot);
             pushInsets();
             return in.consumeSystemWindowInsets();
         });
     }
     private void pushInsets() {
         if (web == null) return;
-        float css = insetTop / getResources().getDisplayMetrics().density;
-        web.evaluateJavascript("document.documentElement.style.setProperty('--safe-t','" + css + "px')", null);
+        float d = getResources().getDisplayMetrics().density;
+        web.evaluateJavascript("document.documentElement.style.setProperty('--safe-t','" + insetTop / d + "px');"
+            + "document.documentElement.style.setProperty('--safe-b','" + insetBot / d + "px')", null);
         pushFold();
     }
     /** 折痕交给页面：html[data-fold=none|flat|half]、data-fold-dir=v（竖折痕，左右分）|h（横折痕，上下分），
