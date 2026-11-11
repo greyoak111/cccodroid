@@ -119,6 +119,19 @@ Layout follows the window width, not orientation:
 - Wide (≥ 840): chat plus a workspace on the right; drag the divider, double-tap to reset.
 - Wider (≥ 1000): the sidebar stays docked on the left, and its edge can be dragged too.
 
+## Third-party endpoints
+
+First check which protocol the endpoint speaks; the setup differs:
+
+- **Anthropic protocol** (the address usually ends in `/anthropic`, or the provider says it is for Claude Code): Settings → Provider & model → "＋ Add a custom endpoint…", then fill in the address, key and default model name. **You can leave the model list URL empty**: the app then looks for `/v1/models` and `/models` on the same host as the API address, and if it finds a list you can pick models from it. If the provider doesn't publish a list, typing the model name still works.
+- **OpenAI protocol** (only `/v1/chat/completions`): Extensions → Optional components → install "OpenAI API local protocol bridge", then tap "Config". The bridge translates between the two protocols on the device; the model still runs remotely, on your own key and quota.
+  - **Several APIs are supported**: each API has its own address, key, models (tick the option to read the model list automatically to pick from suggestions) and context window, and you choose one default model across all of them. Saving shows which services your conversations will be sent to and only takes effect after you confirm. Saved keys are never shown again; leave the key empty when changing other fields to keep it.
+  - `https://api.example.com` or `…/v1` is completed to `/v1` automatically; if the provider uses a custom path, enter the full `…/chat/completions` address it gives you. Services that only offer `/v1/responses` won't work.
+  - After saving, "Local bridge ready" with "Model inference has not been tested" is normal: tap "Use in a new session" and send a short message. Only a real reply proves it works. Saving does not switch your current conversation.
+- **Context window**: enter what the provider really supports for this model (`256k`, `1m` or an integer), or leave it empty for 200k. A larger number doesn't make the model bigger; it only makes compaction come too late.
+- **No response from upstream**: custom endpoints wait 90 seconds for response headers and retry 3 times, so a stalled upstream shows retries under the bubble instead of hanging at "Connecting". To change it, set `API_TIMEOUT_MS` in the endpoint's `extraEnv`.
+- 401 usually means the key belongs to another provider or has stray spaces; 429 is rate limiting or quota. If text works but images or tools fail, the model itself probably doesn't support them; narrow it down in a new text-only conversation.
+
 ## Extensions
 
 - **Toolkit modules**: install and remove as needed; each shows what it is for, its size and what uses it. Typing a missing command in the terminal tells you which module has it.
