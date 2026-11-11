@@ -6,11 +6,11 @@
 #  用环境变量换掉 ——
 #    CC_ANDROID    编 aarch64 安卓程序的 C 编译器（NDK 里的 aarch64-linux-android26-clang）
 #    JAVAC D8 AAPT2 ANDROID_JAR   对应 SDK / JDK 里的工具
-#    SIGN=apksigner  用 SDK 的 apksigner 签（再给 APKSIGNER、ZIPALIGN）；默认是平板上的签名库
+#    SIGN=apksigner  用 SDK 的 apksigner 签（再给 APKSIGNER、ZIPALIGN）；默认是仓库里的 scripts/apklib.mjs（node-forge，在 third_party/node-forge）
 #  钥匙：KEY 指向 {"key": PEM 私钥, "cert": PEM 证书} 的 JSON，绝不进仓库（CI 里放在仓库 secret）。
 #        换钥匙 = 已装的用户必须卸载重装，所以它丢了就再也发不了更新 —— 要另做离线备份。
 #        只想自己编个包试试：SIGN=apksigner 再给 KS（keystore 文件，口令 KS_PASS，默认 android），装不上正式版之上，但能单独装。
-#        KS 只有 apksigner 那条路认；默认的平板签名库只认 KEY。
+#        KS 只有 apksigner 那条路认；默认的签名库（scripts/apklib.mjs）只认 KEY。
 # ─────────────────────────────────────────────────────────────────────
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -184,7 +184,7 @@ if [ "$SIGN" = apksigner ]; then
   echo "  $(du -h "$OUT/cccodroid.apk" | cut -f1)"
 else
 node --input-type=module -e "
-import fs from 'node:fs'; import { signApk } from '$B/apklib.mjs';
+import fs from 'node:fs'; import { signApk } from '$ROOT/scripts/apklib.mjs';
 const r = signApk('$A/build/unsigned.apk', '$OUT/cccodroid.apk',
   [{ name: 'classes.dex', data: fs.readFileSync('$A/build/classes.dex'), method: 8 },
    ...['libldlinux.so', ...fs.readdirSync('$NL').filter((n) => /^libcc.*\.so$/.test(n)).sort()]
