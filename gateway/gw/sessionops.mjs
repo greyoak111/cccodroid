@@ -750,6 +750,10 @@ export async function exportSessions(ids) {
   return { file, count: list.length, bytes };
 }
 
+// 上次导入的档案没写进磁盘（saveArchive 失败）：同一进程里内存还留着这份，下次导入时顺手再落一次盘，
+// 别因为「正文已在、跳过」就永远补不上（BUG-P03）
+let archivePending = false;
+
 /** 导入：一律落进当前工作区（cwd 改写成本机工作区，--resume 才找得到）；同 id 已有的跳过。
  *  file 是已经落盘的会话包（路由把请求体直接写到盘上）。逐条按字节范围解到目标位置，主记录边解边改 cwd；
  *  解出来的总量不许吃到只剩 512 MB 空间（目录里写的大小可能是假的，按实际解出来的扣） */
@@ -783,7 +787,14 @@ export async function importSessions(file) {
     try { const ev = JSON.parse(l); if (ev.cwd) ev.cwd = ws; return JSON.stringify(ev); } catch { return l; }
   };
   // 后面某条坏了会抛错跳出：前面已经放好的几条，标题照样要落盘（#98 03-002），并告诉前端放好了哪些
-  let archDirty = false, namesSaved = true;
+  let archDirty = false, namesSaved = true, archSaved = true;
+  // 标题 / 档案只补不覆盖：同 ID 的正文已经在本地（重试导入、回收站里恢复出来）时也走这里。
+  // 上次元数据写失败、或正文导进来后重启丢了元数据，再导一次同一个包就能补上；本地已有的用户标题 /
+  // 用户档案不动（NAMES 先到先得；archiveImport 自己会挡住已有题名的旧档案）——BUG-P03
+  const absorbMeta = (s, id) => {
+    if (s.renamed && s.title && !NAMES[id]) NAMES[id] = String(s.title).slice(0, 120);
+    if (archiveImport(id, s.archive)) archDirty = true;
+  };
   try { for (const s of manifest.sessions || []) {
     const id = String(s.id || "");
     if (!SID_RE.test(id)) continue;
@@ -791,7 +802,7 @@ export async function importSessions(file) {
     if (!main) continue;
     // 同号的会话在回收站里：先恢复它，再按「已存在」跳过。以前直接跳过，提示已存在、列表里却看不到（195-A.5）
     if (!findSessionFile(id) && fs.existsSync(path.join(TRASH_DIR, id))) { try { restoreSession(id); } catch {} }
-    if (findSessionFile(id)) { res.skipped.push(id); continue; }
+    if (findSessionFile(id)) { absorbMeta(s, id); res.skipped.push(id); continue; }
     const dst = path.join(dir, id + ".jsonl"), side = path.join(dir, id), hadSide = fs.existsSync(side);
     try {
       // 先解到临时名，整条会话（含子代理记录）都解完再改名：中途失败不留半截会话
@@ -815,12 +826,20 @@ export async function importSessions(file) {
     // 改成「现在导入的」，列表里立刻能看到
     try { const now = new Date(); fs.utimesSync(dst, now, now); } catch {}
     sealSession(id, dst, { flag: "imported" });   // 包里的历史谁都能写：第一次接着聊时提醒模型（见 integrity.mjs）
-    if (s.renamed && s.title) NAMES[id] = String(s.title).slice(0, 120);
-    if (archiveImport(id, s.archive)) archDirty = true;
+    absorbMeta(s, id);
     res.imported.push(id);
   } } catch (e) { e.imported = res.imported; throw e; }
-  finally { namesSaved = saveNames(); if (archDirty && !saveArchive()) log("导入会话：档案没写进去"); }
-  // 标题没落盘：正文已经导进来了，别让接口回 200 就完事，调用方要把这条提示给用户（FIND-014）
+  finally {
+    namesSaved = saveNames();
+    // 档案写错也要如实报（以前只记日志，接口回 200「导入了」但重启后章节档案没了 —— BUG-P03）。
+    // 上次没写成的（archivePending）这次一并重试：正文跳过时也得有机会把元数据补上
+    if (archDirty || archivePending) {
+      if (saveArchive()) archivePending = false;
+      else { archivePending = true; archSaved = false; }
+    }
+  }
+  // 标题 / 档案没落盘：正文已经导进来了，别让接口回 200 就完事，调用方要把这条提示给用户（FIND-014、BUG-P03）
   if (!namesSaved) { res.titleWarning = true; log("导入会话：自定义标题没写进去（存储满了或没有权限）"); }
+  if (!archSaved) { res.archiveWarning = true; log("导入会话：档案没写进去（存储满了或没有权限）"); }
   return res;
 }
