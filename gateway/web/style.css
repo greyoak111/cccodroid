@@ -271,7 +271,7 @@ td{color:var(--fg2)}
 .tool-name{color:var(--tool);font-weight:600;font-family:var(--mono);font-size:12px}
 .tool-arg{color:var(--fg3);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:11.5px}
 .tool-state{font-size:11px;color:var(--fg3);flex:0 0 auto}
-.tool-state.run{color:var(--warn)} .tool-state.ok{color:var(--ok)} .tool-state.err{color:var(--err)}
+.tool-state.run{color:var(--warn)} .tool-state.ok{color:var(--ok)} .tool-state.err{color:var(--err)} .tool-state.unknown{color:var(--warn)}
 .tool-head .chev{color:var(--fg3);font-size:10px;transition:transform .15s}
 .tool.open .chev{transform:rotate(90deg)}
 .tool-body{display:none;border-top:1px solid var(--tool-sep);padding:8px 10px;background:var(--code-bg)}
@@ -409,6 +409,7 @@ td{color:var(--fg2)}
 .perm-diff .del{color:var(--err)} .perm-diff .add{color:var(--ok)}
 .perm-path{font-family:var(--mono);font-size:11.5px;color:var(--fg2);margin:2px 0 4px;overflow-wrap:anywhere}
 .perm-sub{font-size:11.5px;color:var(--fg3);margin:2px 0 4px;overflow-wrap:anywhere}
+.perm-sub.intr-side{color:var(--warn)}
 /* 敏感操作再确认：红边、说明块放最上面 */
 .perm.guard{border-color:var(--err-line,var(--err))}
 .perm.guard .perm-kind{color:var(--err)}

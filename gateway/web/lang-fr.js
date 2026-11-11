@@ -3145,4 +3145,10 @@ window.I18N_DICT["fr"] = {
   "已删除 {n} 项": "{n} élément(s) supprimé(s)",
   "这个文件夹装着应用自己的目录或工作区，不能删": "Ce dossier contient des répertoires propres à l'app ou l'espace de travail et ne peut pas être supprimé",
   "模型清单地址（选填；不填会按接口地址自动查找 /models）": "URL de la liste des modèles (facultatif ; si vide, /models est recherché automatiquement à partir de l'adresse de l'API)",
+  "中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。": "Lors de l’interruption, {n} action(s) susceptible(s) d’avoir des effets de bord n’ont pas renvoyé de résultat : {list}. Impossible de confirmer si elles ont déjà été exécutées ; vérifiez avant de cliquer sur « Continuer ».",
+  "上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。": "L’état d’exécution précédent n’a pas pu être récupéré (registre illisible ou mal formé) ; les tours interrompus et les messages en file n’apparaîtront pas. Le fichier d’origine a été conservé.",
+  "运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。": "L’état d’exécution n’a pas pu être enregistré (stockage plein ou permission refusée). Si le système ferme l’application, ce tour risque de ne pas être récupérable.",
+  "（上一轮没有正常结束，上面的回复可能不完整）": "(Le tour précédent ne s'est pas terminé normalement ; la réponse ci-dessus peut être incomplète.)",
+  "会话已导入，但自定义标题没保存上（存储满了或没有权限），重启后会显示原来的标题": "Les sessions ont été importées, mais les titres personnalisés n'ont pas pu être enregistrés (stockage plein ou permission refusée). Les titres d'origine réapparaîtront après un redémarrage",
+  "会话列表读不出来（{msg}），不是没有会话；检查存储权限后再刷新。": "La liste des sessions n'a pas pu être lue ({msg}) ; cela ne signifie pas qu'il n'y a pas de sessions. Vérifiez les permissions de stockage puis actualisez.",
 };

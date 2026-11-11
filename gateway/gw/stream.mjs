@@ -149,6 +149,13 @@ export function hookContext(ev) {
  *  以前共用一份：子代理一条 message_start 就把主会话的标记清掉，主会话的 assistant 整段又发一遍（重复）；
  *  旁链的增量把它置上，主会话没增量的正文反被挡住（丢字）（0.6.9 审计 195-U.1） */
 const isMainLane = (ev) => !ev.parent_tool_use_id && !ev.isSidechain;
+/** message.content 不一定是数组：坏记录 / 桥可能给字符串、null、数字。统一成块数组，
+ *  别让 for...of 抛错把整条事件丢掉（FIND-022）；字符串按一段正文算，其它非数组当没有。 */
+const contentBlocks = (ev) => {
+  const c = ev.message?.content;
+  if (typeof c === "string") return [{ type: "text", text: c }];
+  return Array.isArray(c) ? c.filter((x) => x && typeof x === "object") : [];
+};
 function laneFlags(flags, ev) {
   if (!flags || isMainLane(ev)) return flags;
   const k = ev.parent_tool_use_id || "sidechain";
@@ -256,8 +263,8 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
       // 子代理的消息（parent_tool_use_id = 主流程里那张 Agent 卡的 id）：工具调用和最后的汇报挂到那张卡下面，
       // 不混进主流程；子代理没有逐字增量，思考不转
       if (ev.parent_tool_use_id) {
-        for (const c of ev.message?.content || []) {
-          if (c.type === "tool_use") sse({ type: "tool_use", id: c.id, name: c.name, input: c.input, parent: ev.parent_tool_use_id });
+        for (const c of contentBlocks(ev)) {
+          if (c.type === "tool_use" && c.id && c.name) sse({ type: "tool_use", id: c.id, name: c.name, input: c.input, parent: ev.parent_tool_use_id });
           else if (c.type === "text" && c.text) sse({ type: "sub_text", parent: ev.parent_tool_use_id, text: String(c.text).slice(0, 20000) });
         }
         break;
@@ -265,7 +272,7 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
       // 没有逐字事件、或桥把最终用量补在 assistant 上时，仍能更新上下文。
       if (!ev.isSidechain && !ev.isMeta && !ev.isApiErrorMessage && ev.message?.model !== "<synthetic>") contextUsage(ev.message?.usage, flags, sse);
       // 逐字增量已发过就别重复整段文本
-      const content = ev.message?.content || [];
+      const content = contentBlocks(ev);
       // 这一块已确认进了对话：逐字推过的不再算「半截」
       if (flags && isMainLane(ev)) for (const c of content) { if (c.type === "text") flags.pendText = 0; else if (c.type === "thinking" || c.type === "redacted_thinking") flags.pendThink = 0; }
       const lf = laneFlags(flags, ev);
@@ -280,7 +287,7 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
         } else if (c.type === "thinking" && c.thinking) {
           // 同理：思考也逐字发过了。以前这里无条件再发整段，思考块里每段都重复两遍
           if (!lf || !lf.gotThinkDelta) sse({ type: "thinking", text: c.thinking });
-        } else if (c.type === "tool_use") {
+        } else if (c.type === "tool_use" && c.id && c.name) {
           if (flags) {
             (flags.toolsOut ||= new Set()).add(c.id);
             if (flags.toolId === c.id && flags.toolTimer) { clearTimeout(flags.toolTimer); flags.toolTimer = null; }
@@ -293,12 +300,12 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
 
     case "user": {
       if (ev.isReplay) { if (onReplay) onReplay(ev); break; }
-      for (const c of ev.message?.content || []) {
+      for (const c of contentBlocks(ev)) {
         if (c.type === "tool_result") {
           let txt = "";
           if (typeof c.content === "string") txt = c.content;
           else if (Array.isArray(c.content)) {
-            txt = c.content.map((x) => (x.type === "text" ? x.text : `[${x.type}]`)).join("\n");
+            txt = c.content.map((x) => (x && x.type === "text" ? String(x.text ?? "") : `[${(x && x.type) || "?"}]`)).join("\n");
           }
           sse({ type: "tool_result", id: c.tool_use_id, ok: !c.is_error, text: String(txt).slice(0, 20000), ...(ev.parent_tool_use_id ? { parent: ev.parent_tool_use_id } : {}) });
         }

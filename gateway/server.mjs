@@ -60,6 +60,7 @@ import { cleanOrphans, routeOrphans } from "./gw/orphans.mjs";
 import { customRefresh, routeCustom } from "./gw/custom.mjs";
 import { routeBus } from "./gw/bus.mjs";
 import { recoverRunMark, routeQueue } from "./gw/queue.mjs";
+import { sweepTemps } from "./gw/statefile.mjs";
 import { routeLogin } from "./gw/login.mjs";
 import { routeRun } from "./gw/run.mjs";
 import { routeOffice } from "./gw/office.mjs";
@@ -206,6 +207,8 @@ server.listen(CFG.port, "127.0.0.1", () => {
   }
   log(`  历史会话 ${listSessions(500).length} 个`);
   try { reapOrphans(); } catch (e) { log("孤儿进程清理失败: " + e.message); }
+  // 上次被结束时留下的隐藏临时文件（原子写换名前、导入没导完、上传没传完）：清掉一小时前的（FIND-016）
+  try { const n = sweepTemps([CFG.home, UPLOAD_DIR]); if (n) log(`清掉 ${n} 个上次留下的临时文件`); } catch (e) { log("临时文件清理失败: " + e.message); }
   try { expireTrash(); } catch (e) { log("回收站清理失败: " + e.message); }
   // 只在启动时清一次的话，长期不重启的应用里过期回收站永远不清（195-A.9）；每天一次，unref 不拦着退出
   setInterval(guarded("回收站清理", expireTrash), 24 * 3600e3).unref();

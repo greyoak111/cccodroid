@@ -8,8 +8,9 @@ import { goalStateOf, tasksOf } from "./goal.mjs";
 import { backfillAgents, readAgentIndex, settleAgentRecs } from "./agents.mjs";
 import { bodyToFile, forEachLine } from "./bigfile.mjs";
 import { agentFilesOf, findLineOffset, latestContextTokens, lineHas, readSessionForward, readSessionPage, transcriptItems } from "./transcript.mjs";
-import { lineageCached } from "./lineage.mjs";
+import { lineageCached, lineageForSession } from "./lineage.mjs";
 import { chapterView } from "./archive-core.mjs";
+import { incompleteItem } from "./incomplete.mjs";
 import { runOfSession } from "./runs.mjs";
 import { archiveBrief, archiveDb, archivedTitle } from "./archive-store.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
@@ -110,7 +111,14 @@ export function listSessions(limit = 150) {
   let dirs = [];
   try {
     dirs = fs.readdirSync(PATHS.projects, { withFileTypes: true }).filter((d) => d.isDirectory());
-  } catch { return []; }
+  } catch (e) {
+    // 目录还不存在是正常的（刚装、还没跑过会话）；读不了（权限、IO 错误）不能当成空表（FIND-015）
+    if (e.code === "ENOENT") return [];
+    const out = [];
+    out.error = e.code || e.message || "read_failed";
+    out.total = 0;
+    return out;
+  }
 
   for (const d of dirs) {
     const dir = path.join(PATHS.projects, d.name);
@@ -366,6 +374,8 @@ export async function routeSessions(req, res, u, p) {
   if (req.method === "GET" && p === "/api/sessions") {
     // limit：界面点「再显示」逐次加 150；首次列表每个文件要读开头取标题，所以默认只给最近 150 个
     const list = listSessions(Math.min(5000, Math.max(150, parseInt(u.searchParams.get("limit"), 10) || 150)));
+    // 会话目录读不了：以前回 200 空表，和「真的没有会话」分不出来（FIND-015）。界面会显示这条错误并给重试
+    if (list.error) return sendJson(res, 500, { ok: false, error: "read_failed", message: tz("会话列表读不出来（{msg}），不是没有会话；检查存储权限后再刷新。", { msg: list.error }) });
     // total：磁盘上一共多少个。列表只给最近 limit 个（加置顶），界面据此说「最近 N 个，共 M 个」（#178-3）
     return sendJson(res, 200, { sessions: list, workspace: CFG.workspace, count: list.length, total: list.total ?? list.length });
   }
@@ -443,7 +453,8 @@ export async function routeSessions(req, res, u, p) {
       const limit = Math.min(200, Math.max(10, Number(u.searchParams.get("limit")) || 40));
       // 正在生成的那一轮走事件总线，这里不重复给
       const excludeFrom = Number(u.searchParams.get("exclude")) || (live ? live.startedAt : 0);
-      const rec = lineageCached(id);
+      // 冷启动后缓存可能还没跟上：只为这个会话补扫新增的部分，压缩分隔才带得上章节标签（FIND-019）
+      const rec = await lineageForSession(id, found.file);
       // 脉络里点站 / 章标题：anchor=压缩消息 uuid（或 start）→ 字节偏移，从那里往后读；after=往下续读
       let fwd = null;
       if (u.searchParams.has("anchor")) {
@@ -475,6 +486,11 @@ export async function routeSessions(req, res, u, p) {
       // 有子代理记录的 Agent 卡打个标，前端据此给「查看过程」
       const subs = agentFilesOf(found.file);
       if (subs.size) for (const it of page.items) if (it.role === "tool_use" && subs.has(it.id)) it.sub = true;
+      // 上一轮没跑完的持久提示（FIND-040）：中断卡被忽略 / 清掉后，半截回复也要能认出来。
+      // 只在这一页读到了记录末尾时挂在最后一条之后；这个会话正在生成就先不挂
+      const atEnd = fwd !== null ? page.next === page.size : !u.searchParams.has("before");
+      const inc = incompleteItem(id, { atEnd, live: !!live });
+      if (inc) page.items.push(inc);
       const wantMeta = !u.searchParams.has("before") && (!u.searchParams.has("after") || u.searchParams.get("meta") === "1");
       return sendJson(res, 200, {
         id,

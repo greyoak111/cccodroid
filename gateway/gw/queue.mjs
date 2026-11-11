@@ -5,6 +5,7 @@ import { CFG, HERE, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
 import { onShutdown } from "./crashguard.mjs";
 import { SETTINGS, saveSettings, capList } from "./settings-store.mjs";
 import { keepBad, writeAtomic } from "./statefile.mjs";
+import { clearIncomplete, markIncomplete } from "./incomplete.mjs";
 import { PERM_MODES, PROVIDER, keyOf, providerById } from "./providers.mjs";
 import { effectiveModel } from "./sessmodel.mjs";
 // 这个会话真跑时用哪家：钉的 → 项目默认 → 全局（和 run.mjs 的 pickProvider 一致；只看钉的会漏掉项目，#102 04-004）
@@ -93,6 +94,10 @@ export function setPermMode(mode, { persist = true } = {}) {
   publish({ type: "perm_mode", mode: eff });
   return { mode: eff, saved };
 }
+// 恢复失败得让用户看见（FIND-041）：以前只写进 gateway.log，界面上既没有中断卡、也没有任何提示。
+// 存中文键 + 变量，界面用同一份词典翻（状态经 SSE 下发，不经过 sendJson 的按请求翻译）
+export const RECOVER_WARNS = [];
+const warnRecover = (key, vars) => { if (!RECOVER_WARNS.some((w) => w.key === key)) RECOVER_WARNS.push({ key, vars: vars || {} }); };
 export function snapshot() {
   return {
     run: runInfo(latestRun()),           // 旧字段：最近开始的那一轮
@@ -104,6 +109,7 @@ export function snapshot() {
     model: SETTINGS.model || PROVIDER.defaultModel || null,
     lastSessionId: LAST_SESSION ? LAST_SESSION.id : null,
     interrupted: INTERRUPTED,
+    recoverWarns: RECOVER_WARNS,
   };
 }
 export const publishState = () => { saveRunMark(); publish({ type: "state", ...snapshot() }); };
@@ -127,13 +133,15 @@ export function saveRunMark() {
   try {
     if (!RUNS.size && !QUEUE.length) { fs.rmSync(RUN_MARK, { force: true }); return true; }
     const live = runList().filter((r) => !r.ended);
-    return writeAtomic(RUN_MARK, JSON.stringify({
+    const ok = writeAtomic(RUN_MARK, JSON.stringify({
       ...(APP_ID ? { app: APP_ID } : {}), ...(STOPPING ? { stop: true } : {}),
       // done：已经答完、只是进程还留着等后台任务回报，而且任务也都清零了 —— 这时被结束不算中断
       // text 以前截 4000 字、别的都不存：没建会话的「重发」长消息后半截悄悄没了，项目 / 模型 / 权限也回落全局（195-AA.5）。
       // 现在存到 64K（更长的标 textCut，界面要说），连同发送参数 req、定时任务身份 sched（AA.3）
       runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, ...(r.cwd ? { cwd: r.cwd } : {}), text: r.text.slice(0, TEXT_KEEP), ...(r.text.length > TEXT_KEEP ? { textCut: true } : {}),
         startedAt: r.startedAt, ...(r.req && Object.keys(r.req).length ? { req: r.req } : {}), ...(r.sched ? { sched: r.sched } : {}),
+        // 有副作用、还没等到结果的工具（FIND-039/049）：恢复后由「继续」卡提示，界面才知道哪些操作不能当没发生
+        ...(r.sideTools?.size ? { sideTools: [...r.sideTools.values()].slice(-20) } : {}),
         // 还没起进程（等确认卡、等桥、核验程序…）：claude 根本没收到这条，恢复后只能「重发」不能「继续」（195-P.3）
         ...(r.preSpawn ? { unstarted: true } : {}),
         ...(r.sealBase?.hash && r.sealBase.sid === r.sessionId ? { sealBase: { size: r.sealBase.size, hash: r.sealBase.hash } } : {}),
@@ -145,7 +153,13 @@ export function saveRunMark() {
       queue: [...live.flatMap((r) => [...(r.pendingInject || []).map((it) => ({ ...it, injected: false })), ...(r.slashFlight || []).map((it) => ({ ...it, injected: false, held: true }))]), ...QUEUE]
         .map((q) => { const sid = q.sessionId || sidForItem(q); return sid ? { ...q, sessionId: sid } : q; }),
     }));
-  } catch { return false; }
+    if (!ok) warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
+    return ok;
+  } catch {
+    // 写不上（满盘、没有权限）：这一轮被结束时可能恢复不了，得让界面知道（FIND-041）
+    warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
+    return false;
+  }
 }
 // 中断记录是个列表：并行时一次会断好几轮，每个会话都要有自己的「继续」卡（群友 Yhaizg 11-01：升级时三个会话在跑，只提示了一个）
 // 旧版本存的是单条对象，读的时候包成列表
@@ -161,8 +175,13 @@ export function setInterrupted(list) {
   INTERRUPTED = intrList(list);
   try {
     if (!INTERRUPTED.length) { fs.rmSync(INTR_FILE, { force: true }); return true; }
-    return writeAtomic(INTR_FILE, JSON.stringify(INTERRUPTED));
-  } catch { return false; }
+    const ok = writeAtomic(INTR_FILE, JSON.stringify(INTERRUPTED));
+    if (!ok) warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
+    return ok;
+  } catch {
+    warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
+    return false;
+  }
 }
 /** 这个会话又跑起来了：去掉它的中断记录。没建立会话的（sid 为空）互相分不清，一律不在这里清 ——
  *  界面「重发」「忽略」时按记录 id 单独清（/api/interrupted/dismiss）。以前空会话号会把别的未建会话的中断记录一起清掉（#149-2） */
@@ -175,6 +194,7 @@ export function clearInterrupted(sid) {
 // 正开着它的界面收到 session_gone 自己退回新对话（服务端删的：项目连目录删、定时任务不存对话、别的窗口，#173-4）
 TRASH_HOOKS.push((id) => {
   clearInterrupted(id);
+  clearIncomplete(id);   // 会话进回收站：未完成标记跟着清掉，别留给同号的将来（FIND-040）
   // 排着的消息也丢掉：不然名额一空就拿已删的会话号去 --resume，claude 报 No conversation found，这条消息悄悄没了（0.6.9 审计 195-W.1）
   const n0 = QUEUE.length;
   for (let k = QUEUE.length - 1; k >= 0; k--) if (sidForItem(QUEUE[k]) === id) QUEUE.splice(k, 1);
@@ -192,10 +212,17 @@ export const RECOVER_HOOKS = [];
 export function recoverRunMark() {
   let m;
   try { m = JSON.parse(fs.readFileSync(RUN_MARK, "utf8")); } catch (e) {
-    if (e.code !== "ENOENT") keepBad(RUN_MARK, `读不了（${e.code || "JSON 坏了"}），中断记录没恢复`);
+    if (e.code !== "ENOENT") {
+      keepBad(RUN_MARK, `读不了（${e.code || "JSON 坏了"}），中断记录没恢复`);
+      warnRecover("上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。");
+    }
     return;
   }
-  if (!m || typeof m !== "object") { keepBad(RUN_MARK, "形状不对，中断记录没恢复"); return; }
+  if (!m || typeof m !== "object") {
+    keepBad(RUN_MARK, "形状不对，中断记录没恢复");
+    warnRecover("上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。");
+    return;
+  }
   // 被结束的那几轮没走收尾，会话记录没重新封签：下一轮会被当成「在应用外被改过」去提醒模型（0.6.9 审计 195-A.8）。
   // 起进程时拍的底存在标记里：记录只是在那之后往后追加了（claude 自己写的），照常封签；前面被改了才标 edited
   for (const r of Array.isArray(m.runs) ? m.runs : []) {
@@ -210,13 +237,21 @@ export function recoverRunMark() {
   }
   if (runs.length) {
     const cause = m.app && APP_ID && m.app !== APP_ID ? "update" : m.stop ? "stop" : null;
-    const now = Date.now(), fresh = runs.map((r) => ({ ...r, at: now, ...(cause ? { cause } : {}), ...(r.unstarted && !r.why ? { why: "unstarted" } : {}) }));
+    const now = Date.now(), fresh = runs.map((r) => {
+      const e = { ...r, at: now, ...(cause ? { cause } : {}), ...(r.unstarted && !r.why ? { why: "unstarted" } : {}) };
+      // 标记可能被手改坏：台账只收字符串、条数和长度都封顶（FIND-039/049）
+      const side = Array.isArray(r.sideTools) ? r.sideTools.filter((x) => typeof x === "string").slice(-20).map((s) => s.slice(0, 200)) : [];
+      if (side.length) e.sideTools = side; else delete e.sideTools;
+      return e;
+    });
     // 上次没处理的中断记录留着；同一个会话以这次的为准
     const sids = new Set(fresh.map((r) => r.sessionId).filter(Boolean)), ids = new Set(fresh.map((r) => r.id));
     if (!setInterrupted([...INTERRUPTED.filter((e) => !ids.has(e.id) && !(e.sessionId && sids.has(e.sessionId))), ...fresh])) {
       log("⚠️ 中断记录没写上，运行标记留着，下次启动再恢复");
       return restoreQueue(m, false);
     }
+    // 旧版本留下的运行标记里没有这个标记：接着补上（FIND-040）
+    for (const e of fresh) if (e.sessionId) markIncomplete(e.sessionId, e.id);
     for (const h of RECOVER_HOOKS) { try { h(fresh); } catch (e) { log("中断恢复钩子出错: " + e.message); } }
   }
   restoreQueue(m, true);
@@ -270,9 +305,36 @@ function logCopy(ev) {
   const st = { cut: false }, input = trimInput(ev.input, st);
   return st.cut ? { ...ev, input, inputCut: true } : { ...ev };
 }
+// 有副作用的工具（改文件、跑命令；只读的 Read/Grep/WebFetch 不算）：中断时结果没回来，
+// 它到底执行了没有谁也不知道，得在「继续」卡上说清楚（FIND-039/049）。
+// MCP 工具副作用不可知，不列；漏报一个只是回到清单之外的旧行为，误报会吓人，所以只收确定的这几类
+const SIDE_TOOLS = new Set(["Bash", "PowerShell", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
+/** 卡片上那一行：工具名 + 最能认出来的一句话（命令 / 文件路径） */
+function sideLabel(name, input) {
+  const i = input && typeof input === "object" ? input : {};
+  const v = (typeof i.description === "string" && i.description.trim()) || i.command || i.file_path || i.notebook_path || "";
+  const s = typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
+  return name + (s ? " " + (s.length > 80 ? s.slice(0, 80) + "…" : s) : "");
+}
+/** 台账变化返回 true（发起 / 销账），调用方据此决定要不要马上重写运行标记 */
+function noteSide(run, ev) {
+  if (!ev || typeof ev !== "object") return false;
+  if (ev.type === "tool_use" && ev.id && SIDE_TOOLS.has(ev.name)) {
+    const m = (run.sideTools ||= new Map());
+    m.delete(ev.id); m.set(ev.id, sideLabel(ev.name, ev.input));
+    if (m.size > 50) m.delete(m.keys().next().value);   // 一轮里挂起几百个没结果的也算极端情况，留最近的
+    return true;
+  }
+  if (ev.type === "tool_result" && ev.id && run.sideTools?.has(ev.id)) { run.sideTools.delete(ev.id); return true; }
+  return false;
+}
+
 /** 这一轮的完整事件记录 —— 断线太久环形缓冲续不上时，靠它把整轮重放给前端。
  *  相邻增量就地合并，一轮再长也只有"块数"那么多条。 */
 function record(run, ev) {
+  // 有副作用的工具：发起时记一笔、结果回来销账（FIND-039/049）。进程被杀时这一笔留在运行标记里，
+  // 下次启动的「继续」卡据此说清楚哪些操作的结果不知道 —— 点「继续」要不要重做，用户得先能判断
+  const side = noteSide(run, ev);
   const last = run.log[run.log.length - 1];
   if (last && last.type === ev.type && (ev.type === "delta" || ev.type === "thinking_delta")) last.text += ev.text;
   else if (last && last.type === "usage" && ev.type === "usage") run.log[run.log.length - 1] = { ...ev };
@@ -280,6 +342,8 @@ function record(run, ev) {
   // 本轮输出 token 每秒一条，夹在增量中间合并不到：只留一条、原地改成最新的数（重放只要最后的值）
   else if (ev.type === "run_tokens" && run.tokAt != null && run.log[run.tokAt]?.type === "run_tokens") run.log[run.tokAt] = { ...ev };
   else { if (ev.type === "run_tokens") run.tokAt = run.log.length; run.log.push(logCopy(ev)); }
+  // 台账变了马上落盘：被强杀时磁盘上那份就是最后一次工具结果之后的真实状态
+  if (side) saveRunMark();
 }
 
 /** 开跑前的最后一道核对（定时任务：入队后任务被删 / 被关就不跑）。返回 false = 丢掉这条 */

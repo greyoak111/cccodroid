@@ -112,6 +112,35 @@ export function lineageFile(sid) { const m = META.get(sid); return m && !m.trash
 /** 不刷新、只读已有缓存的索引记录（会话页每翻一页都要用，首次整理大户要十几秒，不能等） */
 export function lineageCached(sid) { loadCache(); return RECS.get(sid) || null; }
 
+/** 会话页用：只补扫这一个会话（FIND-019）。缓存可能停在最近一次压缩之前，分隔条就只剩通用文案；
+ *  这里按索引里记的偏移把新追加的部分读进来（通常只有几十 KB），不必等 /api/lineage 整体刷新。
+ *  没有缓存记录就不扫（首次整理大户要十几秒，打开会话不能等它），照旧等脉络页整理完。 */
+const SESSION_SCANS = new Map();   // sid → 在途的补扫，同一会话并发打开只扫一次
+export function lineageForSession(sid, file) {
+  const flying = SESSION_SCANS.get(sid);
+  if (flying) return flying;
+  const job = scanOneSession(sid, file).finally(() => SESSION_SCANS.delete(sid));
+  SESSION_SCANS.set(sid, job);
+  return job;
+}
+async function scanOneSession(sid, file) {
+  loadCache();
+  const rec = RECS.get(sid);
+  if (!rec || building) return rec || null;   // 正在整体刷新：它会更新这份记录，别抢
+  const f = file || META.get(sid)?.file;
+  if (!f) return rec;
+  let st; try { st = fs.statSync(f); } catch { return rec; }
+  if (rec.off === st.size && rec.size === st.size && rec.mtime === st.mtimeMs) return rec;
+  const fv = FORGOT.get(sid) || 0;
+  try {
+    const r = await scanSession(f, rec);
+    r.mtime = st.mtimeMs;
+    // 扫的途中会话被改写/删掉并 forget 了：这份结果是旧样子，不能写回去（同 refresh）
+    if ((FORGOT.get(sid) || 0) === fv) { RECS.set(sid, r); dirty = true; gen++; saveCache(); }
+    return RECS.get(sid) || rec;
+  } catch (e) { log(`脉络：补扫 ${sid.slice(0, 8)} 失败：${e.message}`); return rec; }
+}
+
 /** 一个会话的最新索引记录（建档用：要知道它压缩过几次、每章从哪儿开始）；没有这个会话返回 null */
 export async function lineageRecord(sid) {
   await lineageRefresh();
