@@ -462,6 +462,7 @@
     closeViewerPdf();
     vwMdStop();          // 长 Markdown 的分段 observer：以前要等下一次预览才断（审查 #49 P3-7）
     vwDropEd();
+    gutStop();           // 行号栏的 ResizeObserver 与量过的行文本：关了查看器还挂在页面上（FIND-026）
     vwHtmlStop();
     VW.text = ""; VW.wb = VW.sheets = null;   // 大文本、工作簿别跟着查看器一直挂在内存里（#56）
     MO.hide(viewerEl, MO.paneOut(), 170, () => { $("vw-body").innerHTML = ""; });   // 内容等滑出去了再清，别先白一下
