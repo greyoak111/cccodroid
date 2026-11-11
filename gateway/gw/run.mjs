@@ -695,8 +695,10 @@ export async function startRun(item) {
     run.perms.delete(id);
     // 「拒绝并停止」也是停止：这一轮后面排着的别自动发（审查 #49 P2-3）
     if (resp.interrupt) holdLane(run);
-    log(`${resp.behavior === "allow" ? "✓ 允许" : "✗ 拒绝"} ${p.tool}${a.always && resp.updatedPermissions ? "（始终）" : ""}${a.interrupt ? "（并停止）" : ""}`);
-    emit({ type: "perm_resolved", id, behavior: resp.behavior, always: !!resp.updatedPermissions, interrupt: !!a.interrupt });
+    // 超时没答的和用户点了拒绝要分得开：界面上不能把「没人答」说成用户拒绝（FIND-043）
+    const expired = !!a.expired;
+    log(`${resp.behavior === "allow" ? "✓ 允许" : expired ? "⌛ 超时未答，按拒绝处理" : "✗ 拒绝"} ${p.tool}${a.always && resp.updatedPermissions ? "（始终）" : ""}${a.interrupt ? "（并停止）" : ""}`);
+    emit({ type: "perm_resolved", id, behavior: resp.behavior, always: !!resp.updatedPermissions, interrupt: !!a.interrupt, ...(expired ? { expired: true } : {}) });
     // 批准时顺带切模式，规则见 config.mjs permModeAction；"run" 只把这一轮从计划模式带回原模式，全局设置不动（项目默认可能和全局不同）
     const act = permModeAction(resp.behavior, a.mode, run.permMode);
     if (act === "global") setPermMode(a.mode);
@@ -742,7 +744,7 @@ export async function startRun(item) {
       const tm = setTimeout(guarded("权限确认超时", () => {
         if (!run.perms.has(id) || run.ended) return;
         log(`${runTag(run)} ⌛ ${p.tool} 等确认超过 ${PERM_WAIT_MS / 60000} 分钟没人答，按拒绝处理并停止这一轮`);
-        run.answerPerm(id, { behavior: "deny", interrupt: true, message: `The user did not respond to this permission request for ${PERM_WAIT_MS / 60000} minutes, so it was denied.` });
+        run.answerPerm(id, { behavior: "deny", interrupt: true, expired: true, message: `The user did not respond to this permission request for ${PERM_WAIT_MS / 60000} minutes, so it was denied.` });
       }), PERM_WAIT_MS);
       tm.unref?.();
       log(`⏸ 等确认 ${p.tool} ${argLen(p.input)}`);
@@ -751,7 +753,10 @@ export async function startRun(item) {
       return;
     }
     // 别的控制请求（hook 回调、MCP elicitation…）我们不接：回错误，别让 claude 干等
-    if (id) writeCtl({ type: "control_response", response: { subtype: "error", request_id: id, error: `unsupported: ${r.subtype}` } });
+    if (id) {
+      log(`${runTag(run)} ↩ 不支持的控制请求 ${String(r.subtype || "?")}（${id}），回了 error`);
+      writeCtl({ type: "control_response", response: { subtype: "error", request_id: id, error: `unsupported: ${r.subtype}` } });
+    }
   };
 
   const closeInput = () => {
@@ -853,7 +858,12 @@ export async function startRun(item) {
     // 清单工具一出结果就推，不等 4 秒轮询
     if (ev.type === "user" && ev.tool_use_result && (ev.tool_use_result.task || ev.tool_use_result.statusChange || ev.tool_use_result.updatedFields)) setImmediate(() => tasksCheck(run.sessionId));
     // 我们发的 set_permission_mode 的回执：被拒要记下来（以前直接丢掉，切了没生效也看不出来）
-    if (ev.type === "control_response") { if (ev.response && ev.response.subtype === "error") log(`${runTag(run)} ⚠️ claude 拒绝了控制请求：${String(ev.response.error || ev.response.error_code || "").slice(0, 160)}`); return; }
+    if (ev.type === "control_response") {
+      // 说清楚是「控制请求回了错误」，不是用户拒绝：以前一律写成「claude 拒绝了控制请求」，排查时误导（FIND-043）
+      const cr = ev.response || {};
+      if (cr.subtype === "error") log(`${runTag(run)} ⚠️ 控制请求回了错误（request=${String(cr.request_id || "?")}，code=${String(cr.error_code || "-")}）：${String(cr.error || "").slice(0, 160)}`);
+      return;
+    }
     if (ev.type === "assistant" && Array.isArray(ev.message && ev.message.content)) {
       let n = 0;
       for (const c of ev.message.content) if (c && c.type === "tool_use" && c.id && !run.usageTools.has(c.id)) { run.usageTools.add(c.id); n++; }
