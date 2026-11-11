@@ -11,7 +11,7 @@ import { setLastInit } from "./caps.mjs";
 import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
 import { SWALLOW_HOOKS } from "./streamfix.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { END_HOOKS, INTERRUPTED, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, permView, publishState, runEmit, saveRunMark, setInterrupted, setPermMode, sidForItem } from "./queue.mjs";
+import { END_HOOKS, INTERRUPTED, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, permView, publishState, runEmit, runTag, saveRunMark, setInterrupted, setPermMode, sidForItem } from "./queue.mjs";
 import { LOCAL_CMD_RE, handleLocalCommand } from "./modelcmd.mjs";
 import { LL, ensureLlama, localCustomActive } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "./usage.mjs";
@@ -151,7 +151,7 @@ export function askCard(run, emit, { key, tool, input, guard, what, yes, no }) {
     const p = { id, tool, input, suggestions: [], at: Date.now(), runId: run.id, sessionId: run.sessionId || null, guard };
     const timer = setTimeout(() => {
       if (!run.perms?.has(id)) return;
-      log(`⏹ ${what}：${Math.round(CARD.timeout / 60e3)} 分钟没人确认，这一轮停下`);
+      log(`${runTag(run)} ⏹ ${what}：${Math.round(CARD.timeout / 60e3)} 分钟没人确认，这一轮停下`);
       holdLane(run); run.aborted = true;
       setInterrupted([...INTERRUPTED.filter((e) => e.id !== run.id),
         { id: run.id, sessionId: run.sessionId || null, text: String(run.text || "").slice(0, 64 << 10), ...(String(run.text || "").length > 64 << 10 ? { textCut: true } : {}),
@@ -278,7 +278,7 @@ export async function startRun(item) {
 
   const lost = lostProvider(item, sid0, pdef0);
   if (lost) {
-    log(`⛔ 这一轮要用的接口不在了，没有启动（不退回全局默认）`);
+    log(`${runTag(run)} ⛔ 这一轮要用的接口不在了，没有启动（不退回全局默认）`);
     emit({ type: "error", message: tr(LAST_LANG, lost) });
     return endRun(run, { failed: true });
   }
@@ -316,7 +316,7 @@ export async function startRun(item) {
   const cwd0 = cwdOf(item, run.sessionId);
   if (typeof cwd0 !== "string") {
     const msg = tz("工作目录 {dir} 不在了（被删、改名或存储卡拔出了），这一轮没有运行。把目录放回去，或者到项目设置里改路径后再发。", { dir: cwd0.lost });
-    log(`⛔ 工作目录不在了：${cwd0.lost}`);
+    log(`${runTag(run)} ⛔ 工作目录不在了：${cwd0.lost}`);
     emit({ type: "error", message: tr(LAST_LANG, msg) });
     return endRun(run, { failed: true, finalText: msg });
   }
@@ -509,7 +509,7 @@ export async function startRun(item) {
     try { prep = sealPrepare({ cwd, runId: run.id, outputStyle: SETTINGS.outputStyle || "" }); }
     catch (e) { log(`[封口] 准备回填失败：${e.message}`); prep = { block: { found: [{ name: "(cccodroid)", hits: [{ line: 0, excerpt: e.message }] }] } }; }
     if (prep.block) {
-      log(`⛔ [封口] 命中破甲特征，不跑：${prep.block.found.slice(0, 4).map((f) => f.name).join(", ")}`);
+      log(`${runTag(run)} ⛔ [封口] 命中破甲特征，不跑：${prep.block.found.slice(0, 4).map((f) => f.name).join(", ")}`);
       const msg = tr(LAST_LANG, sealBlockMessage(prep.block));
       emit({ type: "error", message: msg });
       return endRun(run, { failed: true, finalText: msg });
@@ -526,7 +526,7 @@ export async function startRun(item) {
   // 记忆目录 claude 自己读、没法拷副本：起进程紧前再比一次，准备之后被改了就重查（见 seal.mjs）
   const late = prep ? sealRecheck(prep) : null;
   if (late) {
-    log(`⛔ [封口] 起进程前记忆被改、命中破甲特征：${late.found.slice(0, 4).map((f) => f.name).join(", ")}`);
+    log(`${runTag(run)} ⛔ [封口] 起进程前记忆被改、命中破甲特征：${late.found.slice(0, 4).map((f) => f.name).join(", ")}`);
     const msg = tr(LAST_LANG, sealBlockMessage(late));
     emit({ type: "error", message: msg });
     return endRun(run, { failed: true, finalText: msg });
@@ -563,12 +563,12 @@ export async function startRun(item) {
   run.childStart = procStart(child.pid) ?? nowTicks();
   // 核过之后、真正执行之前程序被换掉了（来回替换卡时间窗）：这一轮停掉（DeepSeek 复核建议 2）
   if (!P.local && !sealStillValid()) {
-    log("⚠️ [Claude Code 核验] 核过之后程序文件又变了，停掉这一轮");
+    log(`${runTag(run)} ⚠️ [Claude Code 核验] 核过之后程序文件又变了，停掉这一轮`);
     tamperRecord("claude", ["claude: changed right after it was verified"]);
     emit({ type: "error", message: tr(LAST_LANG, "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。") });
     abortRun(run);
   }
-  if (item.timeoutMs > 0) run.limitTimer = setTimeout(() => { run.timedOut = true; log(`⏱ 超过时长上限 ${Math.round(item.timeoutMs / 60000)} 分钟，停止`); abortRun(run); }, item.timeoutMs);
+  if (item.timeoutMs > 0) run.limitTimer = setTimeout(() => { run.timedOut = true; log(`${runTag(run)} ⏱ 超过时长上限 ${Math.round(item.timeoutMs / 60000)} 分钟，停止`); abortRun(run); }, item.timeoutMs);
   child.stdin.on("error", () => {});
   const writeUser = (content) => child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n");
   // 该建档时，提醒作为本轮消息的第二段跟进去：读用户消息的地方只认第一段、或跳过 <…> 开头的段，历史 / 搜索 / 分叉比对都看不见它。斜杠命令不带（包成两段 claude 就不认它是命令了）
@@ -741,7 +741,7 @@ export async function startRun(item) {
       // 一直没人答：到点按「拒绝并停止」收掉，别让这一轮永远占着车道、后面的消息一直排队（0.6.9 审计 P1-4）
       const tm = setTimeout(guarded("权限确认超时", () => {
         if (!run.perms.has(id) || run.ended) return;
-        log(`⌛ ${p.tool} 等确认超过 ${PERM_WAIT_MS / 60000} 分钟没人答，按拒绝处理并停止这一轮`);
+        log(`${runTag(run)} ⌛ ${p.tool} 等确认超过 ${PERM_WAIT_MS / 60000} 分钟没人答，按拒绝处理并停止这一轮`);
         run.answerPerm(id, { behavior: "deny", interrupt: true, message: `The user did not respond to this permission request for ${PERM_WAIT_MS / 60000} minutes, so it was denied.` });
       }), PERM_WAIT_MS);
       tm.unref?.();
@@ -817,7 +817,7 @@ export async function startRun(item) {
       run.overBudget = true;
       // 本来就要收尾的（没有插话、没有后台任务）让它正常结束，留下回复；还要接着干的当场停
       if (run.pendingInject.length || run.bgTasks) {
-        log(`💸 花费 $${run.costSeen.toFixed(4)} 超过单次上限 $${item.limitCost}，停止`);
+        log(`${runTag(run)} 💸 花费 $${run.costSeen.toFixed(4)} 超过单次上限 $${item.limitCost}，停止`);
         abortRun(run);
         return;
       }
@@ -853,7 +853,7 @@ export async function startRun(item) {
     // 清单工具一出结果就推，不等 4 秒轮询
     if (ev.type === "user" && ev.tool_use_result && (ev.tool_use_result.task || ev.tool_use_result.statusChange || ev.tool_use_result.updatedFields)) setImmediate(() => tasksCheck(run.sessionId));
     // 我们发的 set_permission_mode 的回执：被拒要记下来（以前直接丢掉，切了没生效也看不出来）
-    if (ev.type === "control_response") { if (ev.response && ev.response.subtype === "error") log(`⚠️ claude 拒绝了控制请求：${String(ev.response.error || ev.response.error_code || "").slice(0, 160)}`); return; }
+    if (ev.type === "control_response") { if (ev.response && ev.response.subtype === "error") log(`${runTag(run)} ⚠️ claude 拒绝了控制请求：${String(ev.response.error || ev.response.error_code || "").slice(0, 160)}`); return; }
     if (ev.type === "assistant" && Array.isArray(ev.message && ev.message.content)) {
       let n = 0;
       for (const c of ev.message.content) if (c && c.type === "tool_use" && c.id && !run.usageTools.has(c.id)) { run.usageTools.add(c.id); n++; }
@@ -922,14 +922,14 @@ export async function startRun(item) {
       const line = buf.slice(0, nl).trim();
       buf = buf.slice(nl + 1);
       // 单条事件处理出错只丢这一条：以前这里没有 try，一个形状不对的事件就带走整个网关（0.6.9 审计 P1-6）
-      if (line) { try { feed(line); } catch (e) { log(`⚠️ 处理 claude 事件出错（已跳过这条）: ${(e && e.stack) || e}`); } }
+      if (line) { try { feed(line); } catch (e) { log(`${runTag(run)} ⚠️ 处理 claude 事件出错（已跳过这条）: ${(e && e.stack) || e}`); } }
     }
   });
 
   child.stderr.on("data", (d) => {
     const s = d.toString("utf8");
     stderr = (stderr + s).slice(-20000);      // 留最后一段：出错原因通常在末尾，以前只留开头，尾巴全丢（FIND-045）
-    if (/error|Error|failed|ENOENT|EACCES/.test(s)) log(`[claude!] ${s.trim().slice(0, 300)}`);
+    if (/error|Error|failed|ENOENT|EACCES/.test(s)) log(`${runTag(run)} [claude!] ${s.trim().slice(0, 300)}`);
   });
 
   // 收尾时把没送达的插话/斜杠命令退回队列。抽成函数，强制收尾路径（queue.abortRun）也要用，
@@ -953,10 +953,10 @@ export async function startRun(item) {
     if (buf.trim()) feed(buf.trim());
     buf = "";
     run.meter.close();                   // 中断 / 被杀也走这里：子代理记录最后扫一遍
-    try { run.agents?.close(); } catch (e) { log("子代理收尾出错: " + e.message); }
+    try { run.agents?.close(); } catch (e) { log(`${runTag(run)} 子代理收尾出错: ${e.message}`); }
     // claude 已经退出，这时的记录就是下一轮的基准；提醒这一轮已经交出去（正常答完）才清掉标记
     if (!lastResult || lastResult.is_error) run.giveNotesBack?.();
-    try { sealSession(run.sessionId, sfile(), { clear: !!integNote && !run.aborted && !!lastResult && !lastResult.is_error, base: run.sealBase?.sid === run.sessionId && run.sealBase.hash ? run.sealBase : null }); } catch (e) { log(`[封签] ${e.message}`); }
+    try { sealSession(run.sessionId, sfile(), { clear: !!integNote && !run.aborted && !!lastResult && !lastResult.is_error, base: run.sealBase?.sid === run.sessionId && run.sealBase.hash ? run.sealBase : null }); } catch (e) { log(`${runTag(run)} [封签] ${e.message}`); }
     run.inputOpen = false;
     run.perms.clear();                // 卡片随 run_end 一起作废（前端按 run_end 收起）
     requeuePending();
@@ -964,13 +964,13 @@ export async function startRun(item) {
     // 定时任务已经花掉的（崩了、没出 result 也一样）：按 0 记会让它当作没花钱再重试（DeepSeek 复核 #1）
     const spent = () => (run.sched && run.costSeen ? { costRaw: run.costSeen } : {});
     if (run.aborted) {
-      log(`⏹ 已中断 (${ms}ms)`);
+      log(`${runTag(run)} ⏹ 已中断 (${ms}ms)`);
       return endRun(run, { durationMs: ms, ...(run.retired ? { retired: true } : {}), ...(run.outTok ? { usage: { output_tokens: run.outTok } } : {}), ...(run.sched && run.costSeen ? { costRaw: run.costSeen } : {}) });
     }
     // 最后一个 result 之后又起了一轮、没等到它的 result 就异常退出：按失败算，别沿用上一轮的成功
     if (lastResult && resultStale && (code !== 0 || signal)) {
       const hint = exitHint(code, signal);
-      log(`✖ ${hint}（上一轮已答完，接着的这一轮没答完）${stderr ? " :: " + stderr.trim().slice(-300) : ""}`);
+      log(`${runTag(run)} ✖ ${hint}（上一轮已答完，接着的这一轮没答完）${stderr ? " :: " + stderr.trim().slice(-300) : ""}`);
       billAfterRun(run.provider);
       emit({ type: "error", message: tr(LAST_LANG, hint), detail: exitDetail(stderr) });
       return endRun(run, { failed: true, durationMs: ms, ...spent() });
@@ -1006,13 +1006,13 @@ export async function startRun(item) {
       });
     }
     const hint = code !== 0 || signal ? exitHint(code, signal) : tz("生成结束但没有返回结果");
-    log(`✖ ${hint}${stderr ? " :: " + stderr.trim().slice(-300) : ""}`);
+    log(`${runTag(run)} ✖ ${hint}${stderr ? " :: " + stderr.trim().slice(-300) : ""}`);
     emit({ type: "error", message: tr(LAST_LANG, hint), detail: exitDetail(stderr) });
     endRun(run, { failed: true, durationMs: ms, ...spent() });
   };
 
   child.on("error", (e) => {
-    log(`spawn 出错: ${e.message}`);
+    log(`${runTag(run)} spawn 出错: ${e.message}`);
     run.giveNotesBack?.();
     emit({ type: "error", message: tr(LAST_LANG, tz("无法启动 claude：{err}", { err: e.message })) });
     endRun(run, { failed: true });
@@ -1023,12 +1023,12 @@ export async function startRun(item) {
     if (closed) return;
     closed = true;
     try { finish(code, signal); }
-    catch (e) { log(`⚠️ 收尾出错: ${(e && e.stack) || e}`); try { endRun(run, { failed: true }); } catch {} }
+    catch (e) { log(`${runTag(run)} ⚠️ 收尾出错: ${(e && e.stack) || e}`); try { endRun(run, { failed: true }); } catch {} }
   };
   // 管道关不掉的兜底（queue.abortRun 5+2 秒后调）：走和正常退出同一条 finish —— 封签、账本、权限卡、未送达消息都要收，
   // 以前直接 endRun 把这些全跳过了（FIND-002）。进程树由调用方负责杀，这里只把管道拆掉
   run.forceFinish = () => {
-    log("⏹ 强制收尾：按正常收尾处理");
+    log(`${runTag(run)} ⏹ 强制收尾：按正常收尾处理`);
     for (const s of [child.stdin, child.stdout, child.stderr]) try { s?.destroy(); } catch {}
     finishSafe(null, "SIGKILL");
   };
@@ -1037,7 +1037,7 @@ export async function startRun(item) {
   child.on("exit", (code, signal) => {
     const t = setTimeout(() => {
       if (closed) return;
-      log("claude 已退出，输出管道还被别的进程占着，强制收尾");
+      log(`${runTag(run)} claude 已退出，输出管道还被别的进程占着，强制收尾`);
       try { child.stdout.destroy(); child.stderr.destroy(); } catch {}
       finishSafe(code, signal);
     }, 5000);

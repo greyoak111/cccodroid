@@ -70,7 +70,10 @@ export const LIVE = process.env.CCAPP_TEST !== "1";
 
 // ── 工具函数 ──────────────────────────────────────────────────────────
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const TS = () => new Date().toISOString().slice(11, 19);
+// 日志时间带日期、用设备本地时区（sched.mjs 启动时按 persist.sys.timezone 设 TZ）：只有时分秒的话，
+// 诊断包跨天/跨时区就分不清先后（FIND-047）。本地时间比 ISO 的 UTC 更贴近用户看到的时刻。
+const pad2 = (n) => String(n).padStart(2, "0");
+export const logTime = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
 // 默认落 home（私有目录），不落共享存储：脱离 App 单独跑网关时别让别的应用读到日志（审查 v0.5.4 B-L2）
 const LOG_FILE = process.env.CCAPP_LOG || path.join(CFG.home, "gateway.log");
 // 网址里的账号口令（http://user:pass@host）和查询串里的令牌（?key=…、&token=…）不进日志（后者审查 10-29 第六份 低3）
@@ -90,7 +93,7 @@ export const noCred = (s) => s.replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\/\s@]+@/gi,
 const LOG_MAX = 4 << 20;
 let logSize = -1;
 export const log = (...a) => {
-  let line = noCred(`[${TS()}] ${a.join(" ")}`);
+  let line = noCred(`[${logTime()}] ${a.join(" ")}`);
   if (!LIVE) return;
   if (line.length > 4000) line = line.slice(0, 4000) + " …";
   console.log(line);

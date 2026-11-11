@@ -30,3 +30,28 @@ test("FIND-046：起一轮、插话的日志都改走 promptLogLine", () => {
   assert.match(src, /promptLogLine\(item\.message, true\)/);
   assert.match(src, /promptLogLine\(item\.message, false\)/);
 });
+
+// ── FIND-047：日志要带日期，错误行要能定位到轮次/会话 ──
+import { logTime } from "../gw/config.mjs";
+import { runTag } from "../gw/queue.mjs";
+
+test("FIND-047：日志时间带日期、用本地时间", () => {
+  const s = logTime();
+  assert.match(s, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  const t = new Date(s.replace(" ", "T")).getTime();
+  assert.equal(Math.abs(Date.now() - t) < 5000, true, "不是本地时间的当前时刻：" + s);
+});
+
+test("FIND-047：轮次/会话标记", () => {
+  assert.equal(runTag({ id: "r-1" }), "[r-1]");
+  assert.equal(runTag({ id: "r-2", sessionId: "12345678-90ab-cdef" }), "[r-2 12345678]");
+});
+
+test("FIND-047：错误与收尾日志带轮次/会话标记", () => {
+  const run = fs.readFileSync(path.join(ROOT, "gateway", "gw", "run.mjs"), "utf8");
+  assert.match(run, /runTag\(run\)\} ✖ \$\{hint\}/);
+  assert.match(run, /runTag\(run\)\} spawn 出错/);
+  assert.match(run, /runTag\(run\)\} ⚠️ 收尾出错/);
+  const q = fs.readFileSync(path.join(ROOT, "gateway", "gw", "queue.mjs"), "utf8");
+  assert.match(q, /runTag\(run\)\} ⏹ 停止 5 秒后还没收尾/);
+});
