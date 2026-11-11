@@ -687,7 +687,7 @@
         // 按会话号认，不按 view.gen：打开后 hello 一到 resetView 就会把 gen 加一，正常路径也会被当成「切走了」（审查 11-05 #40）
         const key = view.sessionId || "";
         setTimeout(() => {
-          if ((view.sessionId || "") === key) { inputEl.value = userText; autoGrow(); inputEl.focus(); return; }
+          if ((view.sessionId || "") === key) { inputEl.value = userText; autoGrow(); inputEl.focus(); draftPersistSoon(); return; }   // 程序性回填也要落盘（UIFS-008）
           const all = draftsRead();
           if (all[key] && all[key].text && all[key].text.trim()) return;
           all[key] = { text: userText, att: (all[key] && all[key].att) || [], at: Date.now() };

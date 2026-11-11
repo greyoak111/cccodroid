@@ -301,6 +301,7 @@
     inputEl.value = head + s + after;
     const pos = (head + s).length;
     try { inputEl.setSelectionRange(pos, pos); } catch {}
+    draftPersistSoon();   // 程序性改的也要落盘：没有真的 input 事件，不排这一下就只有切会话 / pagehide 才存（UIFS-008）
   }
   const CMD_TOKEN = /(^|\s)\/[a-zA-Z0-9_-]*$/, AT_TOKEN = /()@[^\s@]*$/;
 
@@ -354,6 +355,7 @@
     const pos = (before + glue + s + " ").length;
     try { inputEl.setSelectionRange(pos, pos); } catch {}
     autoGrow(); syncInterject();      // 不经 input 事件：按钮的发送 / 停止要自己对一下（审查 #50 S2-09）
+    draftPersistSoon();               // 同样要排一次落盘（UIFS-008）
   }
 
   // ── 草稿找回（上游 2.1.288：Ctrl+C 清掉的输入，空输入框按 ↑ 找回）──

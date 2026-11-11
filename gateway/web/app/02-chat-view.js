@@ -201,7 +201,7 @@
       // 复制只要说的话：附件那几行 @/data/user/0/…/uploads/… 是给模型读文件用的，粘到别处只是一串长路径（群友 10-31）。
       // 只发了附件没打字的，才照原样复制路径；重发照旧带上附件
       if (a === "copy") copyText(body.trim() || text).then((ok) => toast(ok ? t("已复制") : t("复制失败"), !ok));
-      if (a === "resend") { inputEl.value = text; autoGrow(); inputEl.focus(); }
+      if (a === "resend") { inputEl.value = text; autoGrow(); inputEl.focus(); draftPersistSoon(); }   // 程序性放回也要落盘（UIFS-008）
       if (a === "rewind") rewindTo(b.parentElement);
       if (a === "mark") toggleMark(b.parentElement);
       if (a === "del") deleteMsg(b.parentElement, "user");
