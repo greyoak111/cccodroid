@@ -225,7 +225,7 @@ function screencapOnce(shot) {
   });
 }
 
-// ── 路由：/api/file /api/file/stat /api/file/save /api/file/new /api/file/rename /api/upload /api/screenshot /api/files ──
+// ── 路由：/api/file /api/file/stat /api/file/save /api/file/new /api/file/rename /api/file/delete /api/upload /api/screenshot /api/files ──
 export async function routeFiles(req, res, u, p) {
   // ── 取文件内容（消息里的图片、文件预览、下载都走这里）──
   if (req.method === "GET" && p === "/api/file") {
@@ -352,6 +352,25 @@ export async function routeFiles(req, res, u, p) {
     try { fs.renameSync(from, dst.file); } catch (e) { return sendJson(res, 500, { error: e.message }); }
     log(`[file] 重命名 ${from} → ${dst.file}`);
     return sendJson(res, 200, { ok: true, path: dst.file, kind: fileKind(dst.file, st.isDirectory()) });
+  }
+  // 删除：文件页长按「删除」、多选「删除选中」逐个调这里。永久删除（不进回收站），界面先弹确认。
+  // 防呆照写文件那一套：父目录按真实路径判，不能在应用私有目录里；凭据名不碰；
+  // 文件夹不能是装着私有目录或工作区的上级（删工作区本身也拦）。软链只删链接本身，不跟进去
+  if (req.method === "POST" && p === "/api/file/delete") {
+    const raw = String(u.searchParams.get("path") || "");
+    if (!path.isAbsolute(raw)) return sendJson(res, 400, { error: "absolute path required" });
+    const name = path.basename(raw);
+    if (!name || name === "." || name === "..") return sendJson(res, 400, { error: "bad path" });
+    let dir; try { dir = fs.realpathSync(path.dirname(raw)); } catch { return sendJson(res, 404, { error: "not found" }); }
+    const target = path.join(dir, name);
+    let st; try { st = fs.lstatSync(target); } catch { return sendJson(res, 404, { error: "not found" }); }
+    if (path.dirname(target) === target || zoneOf(dir) === "private" || SECRET_NAMES.has(name) || SECRET_RE.test(target) ||
+        (!st.isSymbolicLink() && pathBlocked(target))) return sendJson(res, 403, { error: "forbidden" });
+    if (st.isDirectory() && holdsPrivate(target)) return sendJson(res, 403, { error: "forbidden", message: tz("这个文件夹装着应用自己的目录或工作区，不能删") });
+    try { fs.rmSync(target, { recursive: st.isDirectory(), force: false }); }
+    catch (e) { return sendJson(res, e.code === "EACCES" || e.code === "EPERM" ? 403 : 500, { error: e.code || e.message, message: e.message }); }
+    log(`[file] 删除${st.isDirectory() ? "目录" : ""} ${target}`);
+    return sendJson(res, 200, { ok: true });
   }
   // ── 把界面拿到的东西落盘（粘贴 / 拖放 / 选择文件共用）──
   if (req.method === "POST" && p === "/api/upload") {

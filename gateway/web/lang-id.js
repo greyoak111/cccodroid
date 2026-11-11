@@ -3139,4 +3139,9 @@ window.I18N_DICT["id"] = {
   "移除 API「{name}」及其模型？仅在点击保存配置后生效，当前会话保持不变。": "Hapus API “{name}” beserta modelnya? Ini hanya berlaku setelah menekan Simpan konfigurasi; percakapan saat ini tidak berubah.",
   "模型可见 ID 冲突、超过 200 字符或总数超过 100；请调整模型后保存。": "ID model yang terlihat bentrok, melebihi 200 karakter, atau berjumlah lebih dari 100; sesuaikan model sebelum menyimpan.",
   "保存全部 API 配置？\n\n后续使用时，对话、工具结果和图片将按模型发往以下服务：\n{origins}\n保存本身不调用远端模型，也不切换当前会话。": "Simpan semua konfigurasi API?\n\nSaat digunakan, percakapan, hasil alat, dan gambar akan dikirim ke layanan berikut sesuai model yang dipilih:\n{origins}\nMenyimpan tidak memanggil model jarak jauh atau mengganti percakapan saat ini.",
+  "删除（{n}）": "Hapus ({n})",
+  "永久删除{what}？删除后不能恢复。": "Hapus {what} secara permanen? Tindakan ini tidak dapat dibatalkan.",
+  "文件夹会连同里面的内容一起删除。": "Folder akan dihapus beserta seluruh isinya.",
+  "已删除 {n} 项": "{n} item dihapus",
+  "这个文件夹装着应用自己的目录或工作区，不能删": "Folder ini berisi direktori milik aplikasi atau ruang kerja dan tidak dapat dihapus",
 };

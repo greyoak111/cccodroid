@@ -3136,3 +3136,8 @@
 3136	Supprimer l’API « {name} » et ses modèles ? Cela prendra effet uniquement après Enregistrer la configuration ; la conversation actuelle reste inchangée.
 3137	Les ID visibles des modèles sont en conflit, dépassent 200 caractères ou sont plus de 100 ; ajustez les modèles avant d’enregistrer.
 3138	Enregistrer toutes les configurations d’API ?\n\nÀ l’utilisation, les conversations, résultats d’outils et images seront envoyés aux services suivants selon le modèle choisi :\n{origins}\nL’enregistrement n’appelle aucun modèle distant et ne change pas la conversation actuelle.
+3139	Supprimer ({n})
+3140	Supprimer définitivement {what} ? Cette action est irréversible.
+3141	Les dossiers seront supprimés avec tout leur contenu.
+3142	{n} élément(s) supprimé(s)
+3143	Ce dossier contient des répertoires propres à l'app ou l'espace de travail et ne peut pas être supprimé

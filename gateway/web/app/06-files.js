@@ -139,7 +139,7 @@
       // 长按：重命名 / 压缩（以前长按直接重命名，压缩只藏在「多选」里，用户找不到，11-09）
       el.addEventListener("contextmenu", (ev) => {
         ev.preventDefault();
-        popMenu(el, [{ head: e.name + (e.dir ? "/" : "") }, { label: t("重命名"), fn: () => fsRename(e) }, { label: t("压缩…"), fn: () => arcCreateDlg([e.name]) }]);
+        popMenu(el, [{ head: e.name + (e.dir ? "/" : "") }, { label: t("重命名"), fn: () => fsRename(e) }, { label: t("压缩…"), fn: () => arcCreateDlg([e.name]) }, "hr", { label: t("删除"), danger: true, fn: () => fsDelete([e.name]) }]);
       });
     });
 
@@ -147,8 +147,10 @@
     $("fs-insert").classList.toggle("hidden", !!multi || !!arc);
     $("fs-multi").classList.toggle("on", !!multi);
     $("fs-multi").setAttribute("aria-pressed", String(!!multi));
-    const act = $("fs-act");
+    const act = $("fs-act"), del = $("fs-del");
     act.classList.toggle("hidden", !multi);
+    del.classList.toggle("hidden", !multi || !!arc);   // 包里的条目不在盘上，删不了
+    if (multi && !arc) { del.textContent = t("删除（{n}）", { n: multi.size }); del.disabled = !multi.size; }
     if (multi) {
       act.textContent = arc ? t("解压选中（{n}）", { n: multi.size }) : t("压缩（{n}）", { n: multi.size });
       act.disabled = !multi.size;
@@ -276,6 +278,25 @@
       toast(t("已重命名"));
     } catch (err) { fsErr(err); }
   }
+  // 删除（永久，不进回收站）：先确认，写明几项、文件夹连里面一起删；逐个调接口，删不掉的报出来，删掉的照算
+  async function fsDelete(names) {
+    if (!names.length || state.fs.arc) return;
+    const ents = names.map((n) => state.fs.entries.find((x) => x.name === n) || { name: n, dir: false });
+    const dirs = ents.filter((x) => x.dir).length;
+    const what = names.length === 1 ? `「${names[0]}${dirs ? "/" : ""}」` : t("选中的 {n} 项", { n: names.length });
+    if (!confirm(t("永久删除{what}？删除后不能恢复。", { what }) + (dirs ? "\n" + t("文件夹会连同里面的内容一起删除。") : ""))) return;
+    let ok = 0, fail = null;
+    for (const e of ents) {
+      try { await api(`/api/file/delete?path=${encodeURIComponent(fullPathOf(e))}`, { method: "POST" }); ok++; }
+      catch (err) { fail = fail || err; }
+    }
+    if (state.fs.multi) state.fs.multi.clear();
+    if (names.includes(state.fs.sel)) state.fs.sel = null;
+    await fsLoad(state.fs.path, { keepQ: true });
+    if (fail) fsErr(fail);
+    else toast(t("已删除 {n} 项", { n: ok }));
+  }
+  $("fs-del").addEventListener("click", () => { if (state.fs.multi) fsDelete([...state.fs.multi]); });
   $("fs-newfile").addEventListener("click", () => fsCreate(false));
   $("fs-mkdir").addEventListener("click", () => fsCreate(true));
 

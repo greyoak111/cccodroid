@@ -3136,3 +3136,8 @@
 3136	¿Eliminar la API «{name}» y sus modelos? Solo se aplicará al pulsar Guardar configuración; la conversación actual no cambiará.
 3137	Los ID visibles de modelo coinciden, superan los 200 caracteres o suman más de 100; ajusta los modelos antes de guardar.
 3138	¿Guardar todas las configuraciones de API?\n\nAl usarse, las conversaciones, los resultados de herramientas y las imágenes se enviarán a estos servicios según el modelo seleccionado:\n{origins}\nGuardar no llama a modelos remotos ni cambia la conversación actual.
+3139	Eliminar ({n})
+3140	¿Eliminar permanentemente {what}? No se puede deshacer.
+3141	Las carpetas se eliminarán junto con todo su contenido.
+3142	Se eliminaron {n} elementos
+3143	Esta carpeta contiene directorios propios de la app o el espacio de trabajo y no se puede eliminar

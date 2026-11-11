@@ -3136,3 +3136,8 @@
 3136	Hapus API “{name}” beserta modelnya? Ini hanya berlaku setelah menekan Simpan konfigurasi; percakapan saat ini tidak berubah.
 3137	ID model yang terlihat bentrok, melebihi 200 karakter, atau berjumlah lebih dari 100; sesuaikan model sebelum menyimpan.
 3138	Simpan semua konfigurasi API?\n\nSaat digunakan, percakapan, hasil alat, dan gambar akan dikirim ke layanan berikut sesuai model yang dipilih:\n{origins}\nMenyimpan tidak memanggil model jarak jauh atau mengganti percakapan saat ini.
+3139	Hapus ({n})
+3140	Hapus {what} secara permanen? Tindakan ini tidak dapat dibatalkan.
+3141	Folder akan dihapus beserta seluruh isinya.
+3142	{n} item dihapus
+3143	Folder ini berisi direktori milik aplikasi atau ruang kerja dan tidak dapat dihapus

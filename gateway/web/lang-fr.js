@@ -3139,4 +3139,9 @@ window.I18N_DICT["fr"] = {
   "移除 API「{name}」及其模型？仅在点击保存配置后生效，当前会话保持不变。": "Supprimer l’API « {name} » et ses modèles ? Cela prendra effet uniquement après Enregistrer la configuration ; la conversation actuelle reste inchangée.",
   "模型可见 ID 冲突、超过 200 字符或总数超过 100；请调整模型后保存。": "Les ID visibles des modèles sont en conflit, dépassent 200 caractères ou sont plus de 100 ; ajustez les modèles avant d’enregistrer.",
   "保存全部 API 配置？\n\n后续使用时，对话、工具结果和图片将按模型发往以下服务：\n{origins}\n保存本身不调用远端模型，也不切换当前会话。": "Enregistrer toutes les configurations d’API ?\n\nÀ l’utilisation, les conversations, résultats d’outils et images seront envoyés aux services suivants selon le modèle choisi :\n{origins}\nL’enregistrement n’appelle aucun modèle distant et ne change pas la conversation actuelle.",
+  "删除（{n}）": "Supprimer ({n})",
+  "永久删除{what}？删除后不能恢复。": "Supprimer définitivement {what} ? Cette action est irréversible.",
+  "文件夹会连同里面的内容一起删除。": "Les dossiers seront supprimés avec tout leur contenu.",
+  "已删除 {n} 项": "{n} élément(s) supprimé(s)",
+  "这个文件夹装着应用自己的目录或工作区，不能删": "Ce dossier contient des répertoires propres à l'app ou l'espace de travail et ne peut pas être supprimé",
 };

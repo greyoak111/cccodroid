@@ -3173,5 +3173,10 @@ window.I18N_DICT.en = {
   "每次只编辑一个 API；添加、移除和默认模型变更均在点击保存配置后生效。": "Edit one API at a time. Additions, removals and default-model changes take effect only after Save configuration.",
   "移除 API「{name}」及其模型？仅在点击保存配置后生效，当前会话保持不变。": "Remove API “{name}” and its models? This takes effect only after Save configuration; the current conversation stays unchanged.",
   "模型可见 ID 冲突、超过 200 字符或总数超过 100；请调整模型后保存。": "Visible model IDs conflict, exceed 200 characters or total more than 100; adjust the models before saving.",
-  "保存全部 API 配置？\n\n后续使用时，对话、工具结果和图片将按模型发往以下服务：\n{origins}\n保存本身不调用远端模型，也不切换当前会话。": "Save all API configurations?\n\nWhen used, conversations, tool results and images will be sent to the following services according to the selected model:\n{origins}\nSaving does not call remote models or switch the current conversation."
+  "保存全部 API 配置？\n\n后续使用时，对话、工具结果和图片将按模型发往以下服务：\n{origins}\n保存本身不调用远端模型，也不切换当前会话。": "Save all API configurations?\n\nWhen used, conversations, tool results and images will be sent to the following services according to the selected model:\n{origins}\nSaving does not call remote models or switch the current conversation.",
+  "删除（{n}）": "Delete ({n})",
+  "永久删除{what}？删除后不能恢复。": "Permanently delete {what}? This can't be undone.",
+  "文件夹会连同里面的内容一起删除。": "Folders will be deleted together with everything inside them.",
+  "已删除 {n} 项": "Deleted {n} item(s)",
+  "这个文件夹装着应用自己的目录或工作区，不能删": "This folder contains the app's own directories or the workspace and can't be deleted"
 };
