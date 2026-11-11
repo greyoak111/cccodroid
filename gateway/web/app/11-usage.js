@@ -543,6 +543,7 @@ ${p && p.plainHttp ? `<div class="tiny warn">${esc(t("这个地址是明文 http
         // 删的就是正在用的接口：reloadProv 里 provView 已经清空，型号 / 思考强度下拉会停在已删清单上；
         // 这里强制按新接口重拉一次，免得再保存时把旧型号写成新接口的型号（195-E.3）
         if (wasActive) await loadModels(true);
+        return;   // 删除动作到此结束：以前缺这一句，会落进下面的公共保存分支，用已删的 id 再把当前卡保存一遍（BUG-UIFS-005）
       }
       const body = {
         id: p ? p.id : "", label: $("cc-label").value.trim(), baseUrl: $("cc-base").value.trim(),
