@@ -230,7 +230,11 @@
       if (typeof total === "number" && typeof a.seen === "number" && total >= a.seen && total - a.seen <= data.length) {
         if (total > a.seen) xt.write(data.slice(data.length - (total - a.seen)));
       } else {
-        xt.reset(); xt.write(data);
+        // 缺的超过回放环（256KB）：中间那段已经拿不回来了，重置后说一声，别让人以为输出是连着的（FIND-045）
+        const lost = typeof total === "number" && typeof a.seen === "number" && total > a.seen;
+        xt.reset();
+        if (lost) xt.write("\x1b[2m" + t("…（已截断）") + "\x1b[0m\r\n");
+        xt.write(data);
       }
       if (typeof total === "number") a.seen = total;
     });

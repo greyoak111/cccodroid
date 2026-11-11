@@ -199,7 +199,8 @@ function exitHint(code, signal) {
 }
 // 错误详情里不放 claude 的「[claude-code:unrecognized_model]」提示行：第三方型号名它都不认识，每次都有，
 // 跟这次为什么失败无关，反而让人去怀疑模型（日志里照留）
-const exitDetail = (stderr) => String(stderr || "").split("\n").filter((l) => !/^\[claude-code:unrecognized_model\]/.test(l.trim())).join("\n").trim().slice(0, 1200);
+// 保留的是最后一段 stderr，这里也取末尾：报错原因通常在最后（FIND-045）
+const exitDetail = (stderr) => String(stderr || "").split("\n").filter((l) => !/^\[claude-code:unrecognized_model\]/.test(l.trim())).join("\n").trim().slice(-1200);
 
 /** 这一轮本该用的那家已经不在了：返回说明（不在就不跑），否则 ""。
  *  pickProvider 找不到指定的那家会一路退到全局默认——全局可能是订阅账户，会话内容、交给它的材料就换了一家发出去。
@@ -920,7 +921,7 @@ export async function startRun(item) {
 
   child.stderr.on("data", (d) => {
     const s = d.toString("utf8");
-    if (stderr.length < 20000) stderr += s;
+    stderr = (stderr + s).slice(-20000);      // 留最后一段：出错原因通常在末尾，以前只留开头，尾巴全丢（FIND-045）
     if (/error|Error|failed|ENOENT|EACCES/.test(s)) log(`[claude!] ${s.trim().slice(0, 300)}`);
   });
 
@@ -962,7 +963,7 @@ export async function startRun(item) {
     // 最后一个 result 之后又起了一轮、没等到它的 result 就异常退出：按失败算，别沿用上一轮的成功
     if (lastResult && resultStale && (code !== 0 || signal)) {
       const hint = exitHint(code, signal);
-      log(`✖ ${hint}（上一轮已答完，接着的这一轮没答完）${stderr ? " :: " + stderr.trim().slice(0, 300) : ""}`);
+      log(`✖ ${hint}（上一轮已答完，接着的这一轮没答完）${stderr ? " :: " + stderr.trim().slice(-300) : ""}`);
       billAfterRun(run.provider);
       emit({ type: "error", message: tr(LAST_LANG, hint), detail: exitDetail(stderr) });
       return endRun(run, { failed: true, durationMs: ms, ...spent() });
@@ -998,7 +999,7 @@ export async function startRun(item) {
       });
     }
     const hint = code !== 0 || signal ? exitHint(code, signal) : tz("生成结束但没有返回结果");
-    log(`✖ ${hint}${stderr ? " :: " + stderr.trim().slice(0, 300) : ""}`);
+    log(`✖ ${hint}${stderr ? " :: " + stderr.trim().slice(-300) : ""}`);
     emit({ type: "error", message: tr(LAST_LANG, hint), detail: exitDetail(stderr) });
     endRun(run, { failed: true, durationMs: ms, ...spent() });
   };

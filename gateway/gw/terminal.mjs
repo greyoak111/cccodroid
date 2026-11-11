@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
@@ -94,6 +95,20 @@ function termInfo(t) {
   return { id: t.id, title: t.title, cols: t.cols, rows: t.rows, created: t.created, alive: t.alive, code: t.code };
 }
 
+/** 从项目页「在终端打开」带来的目录：不是目录就退到工作区（工作区也不可用再退 home）。
+ *  返回 note = 用户带来的那个不可用的目录，开好后在终端里说一声（FIND-045：以前静默换目录，用户以为就在那个项目里） */
+export function resolveTermCwd(want) {
+  let note = "";
+  let cwd = typeof want === "string" && want ? want : CFG.workspace;
+  try { if (!fs.statSync(cwd).isDirectory()) { if (cwd !== CFG.workspace) note = cwd; cwd = CFG.workspace; } }
+  catch { if (cwd !== CFG.workspace) note = cwd; cwd = CFG.workspace; }
+  try { if (!fs.statSync(cwd).isDirectory()) cwd = CFG.home; } catch { cwd = CFG.home; }
+  return { cwd, note };
+}
+
+/** 终端进程退出的代码：被信号结束时按 128+信号号报（以前不管什么信号都报 128，看不出是 TERM 还是 KILL，FIND-045） */
+const exitCodeOf = (code, sig) => code ?? (sig ? 128 + (os.constants.signals[sig] || 0) : null);
+
 function termNew({ cols, rows, login, cwd: want } = {}) {
   for (const [id, t] of TERMS) if (!t.alive) TERMS.delete(id);   // 已退出的不占名额
   // 满了先清掉已退出的（留着只是给用户看最后的输出）
@@ -104,10 +119,8 @@ function termNew({ cols, rows, login, cwd: want } = {}) {
   cols = Math.max(20, Math.min(500, cols | 0 || 80));
   rows = Math.max(5, Math.min(300, rows | 0 || 24));
   const shell = ensureShell();
-  // want：从项目页「在终端打开」带来的目录；不是目录就照旧落在工作区
-  let cwd = typeof want === "string" && want ? want : CFG.workspace;
-  try { if (!fs.statSync(cwd).isDirectory()) cwd = CFG.workspace; } catch { cwd = CFG.workspace; }
-  try { if (!fs.statSync(cwd).isDirectory()) cwd = CFG.home; } catch { cwd = CFG.home; }
+  // want：从项目页「在终端打开」带来的目录；不是目录就退到工作区（工作区也不可用再退 home），落哪儿会说一声
+  const { cwd, note: cwdNote } = resolveTermCwd(want);
   // login：给手动登录用的终端。环境和账户登录一样清掉第三方厂商的地址 / 密钥 / 模型，
   // 开好后替用户敲下 claude auth login —— 授权码由用户贴给 claude 自己的提示，网关只当字节通道
   const env = termEnv();
@@ -133,6 +146,7 @@ function termNew({ cols, rows, login, cwd: want } = {}) {
   };
   child.stdout.on("data", (d) => out(t.dec.write(d)));
   child.stderr.on("data", (d) => out(d.toString()));     // 只有 ptyhost 自己的报错走这里
+  if (cwdNote) out(`\r\n[${tz("目录不存在：{dir}，已改用 {cwd}", { dir: cwdNote, cwd })}]\r\n`);
   child.stdin.on("error", () => {});
   child.stdio[3]?.on("error", () => {});
   const ended = (code) => {
@@ -147,7 +161,7 @@ function termNew({ cols, rows, login, cwd: want } = {}) {
   child.on("error", (e) => { out(`\r\n[${e.message}]\r\n`); if (child.pid == null) ended(127); });
   // exit 时管道里可能还有没读完的尾巴：等 close（stdio 都关了）再收尾，最后几行才送得到（#97 02-006）。
   // 管道万一被漏到别的进程里一直不关，1 秒后照样收尾
-  child.on("exit", (code, sig) => { const c = code ?? (sig ? 128 : null); setTimeout(() => ended(c), 1000).unref?.(); child.once("close", () => ended(c)); });
+  child.on("exit", (code, sig) => { const c = exitCodeOf(code, sig); setTimeout(() => ended(c), 1000).unref?.(); child.once("close", () => ended(c)); });
   TERMS.set(id, t);
   log(`[term] ${id} 打开 ${cols}x${rows} via ${path.basename(pc[0])}`);
   return { ok: true, term: termInfo(t) };
@@ -248,4 +262,4 @@ export async function routeTerminal(req, res, u, p) {
   if (p.startsWith("/api/term/")) return handleTerm(req, res, p);
   return NEXT;
 }
-export const _termForTest = { sseSend, killTermProcs };   // 只给测试用
+export const _termForTest = { sseSend, killTermProcs, exitCodeOf };   // 只给测试用
