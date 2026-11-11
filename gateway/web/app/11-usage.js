@@ -496,7 +496,7 @@
       </select>
       <input id="cc-model" placeholder="${t("默认模型名（必填，claude 不认识第三方模型）")}" value="${esc(v.defaultModel || "")}">
       <input id="cc-fast" placeholder="${t("快模型名（选填，子代理用；留空同上）")}" value="${esc(v.fastModel || "")}">
-      <input id="cc-models" placeholder="${t("模型清单地址（选填，OpenAI 形状的 /models）")}" value="${esc(v.modelsUrl || "")}">
+      <input id="cc-models" placeholder="${t("模型清单地址（选填；不填会按接口地址自动查找 /models）")}" value="${esc(v.modelsUrl || "")}">
       <input id="cc-ctx" inputmode="numeric" placeholder="${t("上下文窗口（选填，token 数，如 1048576；不填按 200k 算）")}" value="${v.contextWindow ? esc(String(v.contextWindow)) : ""}">
       <textarea id="cc-more" rows="3" placeholder="${t("更多模型（选填，每行一个；名字后面可空一格写窗口，如 gpt-6.1-sol 1m）")}">${esc((v.extraModels || []).map((m) => m.id + (m.contextWindow ? " " + m.contextWindow : "")).join("\n"))}</textarea>
       <input id="pc-key" type="password" autocomplete="off"

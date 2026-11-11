@@ -3141,3 +3141,4 @@
 3141	Les dossiers seront supprimés avec tout leur contenu.
 3142	{n} élément(s) supprimé(s)
 3143	Ce dossier contient des répertoires propres à l'app ou l'espace de travail et ne peut pas être supprimé
+3144	URL de la liste des modèles (facultatif ; si vide, /models est recherché automatiquement à partir de l'adresse de l'API)

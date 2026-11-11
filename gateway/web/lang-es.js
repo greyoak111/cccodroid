@@ -3144,4 +3144,5 @@ window.I18N_DICT["es"] = {
   "文件夹会连同里面的内容一起删除。": "Las carpetas se eliminarán junto con todo su contenido.",
   "已删除 {n} 项": "Se eliminaron {n} elementos",
   "这个文件夹装着应用自己的目录或工作区，不能删": "Esta carpeta contiene directorios propios de la app o el espacio de trabajo y no se puede eliminar",
+  "模型清单地址（选填；不填会按接口地址自动查找 /models）": "URL de la lista de modelos (opcional; si se deja vacía se busca /models automáticamente a partir de la dirección de la API)",
 };

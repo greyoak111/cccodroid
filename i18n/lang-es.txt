@@ -3141,3 +3141,4 @@
 3141	Las carpetas se eliminarán junto con todo su contenido.
 3142	Se eliminaron {n} elementos
 3143	Esta carpeta contiene directorios propios de la app o el espacio de trabajo y no se puede eliminar
+3144	URL de la lista de modelos (opcional; si se deja vacía se busca /models automáticamente a partir de la dirección de la API)

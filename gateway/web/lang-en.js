@@ -3178,5 +3178,6 @@ window.I18N_DICT.en = {
   "永久删除{what}？删除后不能恢复。": "Permanently delete {what}? This can't be undone.",
   "文件夹会连同里面的内容一起删除。": "Folders will be deleted together with everything inside them.",
   "已删除 {n} 项": "Deleted {n} item(s)",
-  "这个文件夹装着应用自己的目录或工作区，不能删": "This folder contains the app's own directories or the workspace and can't be deleted"
+  "这个文件夹装着应用自己的目录或工作区，不能删": "This folder contains the app's own directories or the workspace and can't be deleted",
+  "模型清单地址（选填；不填会按接口地址自动查找 /models）": "Model list URL (optional; if empty, /models is looked up automatically from the API address)"
 };
