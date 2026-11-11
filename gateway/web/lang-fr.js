@@ -3150,4 +3150,5 @@ window.I18N_DICT["fr"] = {
   "运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。": "L’état d’exécution n’a pas pu être enregistré (stockage plein ou permission refusée). Si le système ferme l’application, ce tour risque de ne pas être récupérable.",
   "（上一轮没有正常结束，上面的回复可能不完整）": "(Le tour précédent ne s'est pas terminé normalement ; la réponse ci-dessus peut être incomplète.)",
   "会话已导入，但自定义标题没保存上（存储满了或没有权限），重启后会显示原来的标题": "Les sessions ont été importées, mais les titres personnalisés n'ont pas pu être enregistrés (stockage plein ou permission refusée). Les titres d'origine réapparaîtront après un redémarrage",
+  "会话列表读不出来（{msg}），不是没有会话；检查存储权限后再刷新。": "La liste des sessions n'a pas pu être lue ({msg}) ; cela ne signifie pas qu'il n'y a pas de sessions. Vérifiez les permissions de stockage puis actualisez.",
 };

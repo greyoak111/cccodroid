@@ -111,7 +111,14 @@ export function listSessions(limit = 150) {
   let dirs = [];
   try {
     dirs = fs.readdirSync(PATHS.projects, { withFileTypes: true }).filter((d) => d.isDirectory());
-  } catch { return []; }
+  } catch (e) {
+    // 目录还不存在是正常的（刚装、还没跑过会话）；读不了（权限、IO 错误）不能当成空表（FIND-015）
+    if (e.code === "ENOENT") return [];
+    const out = [];
+    out.error = e.code || e.message || "read_failed";
+    out.total = 0;
+    return out;
+  }
 
   for (const d of dirs) {
     const dir = path.join(PATHS.projects, d.name);
@@ -367,6 +374,8 @@ export async function routeSessions(req, res, u, p) {
   if (req.method === "GET" && p === "/api/sessions") {
     // limit：界面点「再显示」逐次加 150；首次列表每个文件要读开头取标题，所以默认只给最近 150 个
     const list = listSessions(Math.min(5000, Math.max(150, parseInt(u.searchParams.get("limit"), 10) || 150)));
+    // 会话目录读不了：以前回 200 空表，和「真的没有会话」分不出来（FIND-015）。界面会显示这条错误并给重试
+    if (list.error) return sendJson(res, 500, { ok: false, error: "read_failed", message: tz("会话列表读不出来（{msg}），不是没有会话；检查存储权限后再刷新。", { msg: list.error }) });
     // total：磁盘上一共多少个。列表只给最近 limit 个（加置顶），界面据此说「最近 N 个，共 M 个」（#178-3）
     return sendJson(res, 200, { sessions: list, workspace: CFG.workspace, count: list.length, total: list.total ?? list.length });
   }

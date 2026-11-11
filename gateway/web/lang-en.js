@@ -3184,5 +3184,6 @@ window.I18N_DICT.en = {
   "上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。": "The previous run state could not be recovered (unreadable or malformed record), so interrupted turns and queued messages will not appear; the original file was kept.",
   "运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。": "The run state could not be saved (storage may be full or permission denied). If the app is closed by the system, this turn may not be recoverable.",
   "（上一轮没有正常结束，上面的回复可能不完整）": "(The previous turn did not finish normally; the reply above may be incomplete)",
-  "会话已导入，但自定义标题没保存上（存储满了或没有权限），重启后会显示原来的标题": "Sessions were imported, but custom titles could not be saved (storage may be full or permission denied). Original titles will show after a restart."
+  "会话已导入，但自定义标题没保存上（存储满了或没有权限），重启后会显示原来的标题": "Sessions were imported, but custom titles could not be saved (storage may be full or permission denied). Original titles will show after a restart.",
+  "会话列表读不出来（{msg}），不是没有会话；检查存储权限后再刷新。": "The session list could not be read ({msg}) — this does not mean there are no sessions. Check storage permissions and refresh."
 };

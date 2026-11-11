@@ -3147,3 +3147,4 @@
 3147	Status proses tidak dapat disimpan (penyimpanan mungkin penuh atau tanpa izin). Jika aplikasi ditutup oleh sistem, giliran ini mungkin tidak dapat dipulihkan.
 3148	(Giliran sebelumnya tidak selesai dengan normal; balasan di atas mungkin tidak lengkap)
 3149	Sesi berhasil diimpor, tetapi judul kustom tidak dapat disimpan (penyimpanan mungkin penuh atau tidak ada izin). Judul asli akan tampil setelah mulai ulang
+3150	Daftar sesi tidak dapat dibaca ({msg}); ini bukan berarti tidak ada sesi. Periksa izin penyimpanan lalu segarkan.

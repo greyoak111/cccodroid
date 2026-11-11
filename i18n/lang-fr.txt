@@ -3147,3 +3147,4 @@
 3147	L’état d’exécution n’a pas pu être enregistré (stockage plein ou permission refusée). Si le système ferme l’application, ce tour risque de ne pas être récupérable.
 3148	(Le tour précédent ne s'est pas terminé normalement ; la réponse ci-dessus peut être incomplète.)
 3149	Les sessions ont été importées, mais les titres personnalisés n'ont pas pu être enregistrés (stockage plein ou permission refusée). Les titres d'origine réapparaîtront après un redémarrage
+3150	La liste des sessions n'a pas pu être lue ({msg}) ; cela ne signifie pas qu'il n'y a pas de sessions. Vérifiez les permissions de stockage puis actualisez.

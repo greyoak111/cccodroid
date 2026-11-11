@@ -3150,4 +3150,5 @@ window.I18N_DICT["id"] = {
   "运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。": "Status proses tidak dapat disimpan (penyimpanan mungkin penuh atau tanpa izin). Jika aplikasi ditutup oleh sistem, giliran ini mungkin tidak dapat dipulihkan.",
   "（上一轮没有正常结束，上面的回复可能不完整）": "(Giliran sebelumnya tidak selesai dengan normal; balasan di atas mungkin tidak lengkap)",
   "会话已导入，但自定义标题没保存上（存储满了或没有权限），重启后会显示原来的标题": "Sesi berhasil diimpor, tetapi judul kustom tidak dapat disimpan (penyimpanan mungkin penuh atau tidak ada izin). Judul asli akan tampil setelah mulai ulang",
+  "会话列表读不出来（{msg}），不是没有会话；检查存储权限后再刷新。": "Daftar sesi tidak dapat dibaca ({msg}); ini bukan berarti tidak ada sesi. Periksa izin penyimpanan lalu segarkan.",
 };
