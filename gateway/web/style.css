@@ -409,6 +409,7 @@ td{color:var(--fg2)}
 .perm-diff .del{color:var(--err)} .perm-diff .add{color:var(--ok)}
 .perm-path{font-family:var(--mono);font-size:11.5px;color:var(--fg2);margin:2px 0 4px;overflow-wrap:anywhere}
 .perm-sub{font-size:11.5px;color:var(--fg3);margin:2px 0 4px;overflow-wrap:anywhere}
+.perm-sub.intr-side{color:var(--warn)}
 /* 敏感操作再确认：红边、说明块放最上面 */
 .perm.guard{border-color:var(--err-line,var(--err))}
 .perm.guard .perm-kind{color:var(--err)}

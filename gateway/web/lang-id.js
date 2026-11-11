@@ -3145,4 +3145,5 @@ window.I18N_DICT["id"] = {
   "已删除 {n} 项": "{n} item dihapus",
   "这个文件夹装着应用自己的目录或工作区，不能删": "Folder ini berisi direktori milik aplikasi atau ruang kerja dan tidak dapat dihapus",
   "模型清单地址（选填；不填会按接口地址自动查找 /models）": "URL daftar model (opsional; jika kosong, /models dicari otomatis dari alamat API)",
+  "中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。": "Saat terputus, {n} tindakan yang mungkin memiliki efek samping tidak mengembalikan hasil: {list}. Tidak dapat dipastikan apakah sudah dijalankan; periksa dulu sebelum menekan «Lanjutkan».",
 };

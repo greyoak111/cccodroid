@@ -1,0 +1,38 @@
+// FIND-039/049：有副作用的工具中断后，运行标记里留下「结果未知」的台账；恢复时带进中断记录给界面提示
+import "../gw/config.mjs";
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { CFG } from "../gw/config.mjs";
+import * as Q from "../gw/queue.mjs";
+import { RUNS } from "../gw/runs.mjs";
+
+const MARK = path.join(CFG.home, "ccapp-run-mark.json"), INTR = path.join(CFG.home, "ccapp-interrupted.json");
+const reset = () => { RUNS.clear(); Q.QUEUE.length = 0; Q.setInterrupted([]); fs.rmSync(INTR, { force: true }); fs.rmSync(MARK, { force: true }); };
+after(reset);
+
+function fakeRun() {
+  return { id: "r-side", sessionId: "sid-side", text: "改一下配置", startedAt: 10, ended: false, log: [], pendingInject: [] };
+}
+const markOf = () => JSON.parse(fs.readFileSync(MARK, "utf8"));
+
+test("有副作用的工具调用没等到结果时记进运行标记，结果回来就销账", () => {
+  reset();
+  const run = fakeRun();
+  RUNS.set(run.id, run);
+  Q.runEmit(run, { type: "tool_use", id: "tu1", name: "Bash", input: { command: "mv a b" } });
+  assert.deepEqual(markOf().runs[0].sideTools, ["Bash mv a b"]);
+  Q.runEmit(run, { type: "tool_use", id: "tu2", name: "Read", input: { file_path: "/a.txt" } });
+  assert.deepEqual(markOf().runs[0].sideTools, ["Bash mv a b"], "只读工具不进台账");
+  Q.runEmit(run, { type: "tool_result", id: "tu1", ok: true, text: "ok" });
+  assert.equal(markOf().runs[0].sideTools, undefined, "结果回来就销账");
+});
+
+test("恢复时把没结果的副作用工具带进中断记录，给界面提示用", () => {
+  reset();
+  fs.writeFileSync(MARK, JSON.stringify({ runs: [{ id: "x1", sessionId: null, text: "提问", startedAt: 1, sideTools: ["Write /a.txt", "Bash npm test"] }], queue: [] }));
+  Q.recoverRunMark();
+  const it = Q.INTERRUPTED.find((e) => e.id === "x1");
+  assert.deepEqual(it.sideTools, ["Write /a.txt", "Bash npm test"]);
+});

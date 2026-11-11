@@ -3145,4 +3145,5 @@ window.I18N_DICT["fr"] = {
   "已删除 {n} 项": "{n} élément(s) supprimé(s)",
   "这个文件夹装着应用自己的目录或工作区，不能删": "Ce dossier contient des répertoires propres à l'app ou l'espace de travail et ne peut pas être supprimé",
   "模型清单地址（选填；不填会按接口地址自动查找 /models）": "URL de la liste des modèles (facultatif ; si vide, /models est recherché automatiquement à partir de l'adresse de l'API)",
+  "中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。": "Lors de l’interruption, {n} action(s) susceptible(s) d’avoir des effets de bord n’ont pas renvoyé de résultat : {list}. Impossible de confirmer si elles ont déjà été exécutées ; vérifiez avant de cliquer sur « Continuer ».",
 };

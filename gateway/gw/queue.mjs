@@ -133,6 +133,8 @@ export function saveRunMark() {
       // 现在存到 64K（更长的标 textCut，界面要说），连同发送参数 req、定时任务身份 sched（AA.3）
       runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, ...(r.cwd ? { cwd: r.cwd } : {}), text: r.text.slice(0, TEXT_KEEP), ...(r.text.length > TEXT_KEEP ? { textCut: true } : {}),
         startedAt: r.startedAt, ...(r.req && Object.keys(r.req).length ? { req: r.req } : {}), ...(r.sched ? { sched: r.sched } : {}),
+        // 有副作用、还没等到结果的工具（FIND-039/049）：恢复后由「继续」卡提示，界面才知道哪些操作不能当没发生
+        ...(r.sideTools?.size ? { sideTools: [...r.sideTools.values()].slice(-20) } : {}),
         // 还没起进程（等确认卡、等桥、核验程序…）：claude 根本没收到这条，恢复后只能「重发」不能「继续」（195-P.3）
         ...(r.preSpawn ? { unstarted: true } : {}),
         ...(r.sealBase?.hash && r.sealBase.sid === r.sessionId ? { sealBase: { size: r.sealBase.size, hash: r.sealBase.hash } } : {}),
@@ -209,7 +211,13 @@ export function recoverRunMark() {
   }
   if (runs.length) {
     const cause = m.app && APP_ID && m.app !== APP_ID ? "update" : m.stop ? "stop" : null;
-    const now = Date.now(), fresh = runs.map((r) => ({ ...r, at: now, ...(cause ? { cause } : {}), ...(r.unstarted && !r.why ? { why: "unstarted" } : {}) }));
+    const now = Date.now(), fresh = runs.map((r) => {
+      const e = { ...r, at: now, ...(cause ? { cause } : {}), ...(r.unstarted && !r.why ? { why: "unstarted" } : {}) };
+      // 标记可能被手改坏：台账只收字符串、条数和长度都封顶（FIND-039/049）
+      const side = Array.isArray(r.sideTools) ? r.sideTools.filter((x) => typeof x === "string").slice(-20).map((s) => s.slice(0, 200)) : [];
+      if (side.length) e.sideTools = side; else delete e.sideTools;
+      return e;
+    });
     // 上次没处理的中断记录留着；同一个会话以这次的为准
     const sids = new Set(fresh.map((r) => r.sessionId).filter(Boolean)), ids = new Set(fresh.map((r) => r.id));
     if (!setInterrupted([...INTERRUPTED.filter((e) => !ids.has(e.id) && !(e.sessionId && sids.has(e.sessionId))), ...fresh])) {
@@ -269,9 +277,36 @@ function logCopy(ev) {
   const st = { cut: false }, input = trimInput(ev.input, st);
   return st.cut ? { ...ev, input, inputCut: true } : { ...ev };
 }
+// 有副作用的工具（改文件、跑命令；只读的 Read/Grep/WebFetch 不算）：中断时结果没回来，
+// 它到底执行了没有谁也不知道，得在「继续」卡上说清楚（FIND-039/049）。
+// MCP 工具副作用不可知，不列；漏报一个只是回到清单之外的旧行为，误报会吓人，所以只收确定的这几类
+const SIDE_TOOLS = new Set(["Bash", "PowerShell", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
+/** 卡片上那一行：工具名 + 最能认出来的一句话（命令 / 文件路径） */
+function sideLabel(name, input) {
+  const i = input && typeof input === "object" ? input : {};
+  const v = (typeof i.description === "string" && i.description.trim()) || i.command || i.file_path || i.notebook_path || "";
+  const s = typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
+  return name + (s ? " " + (s.length > 80 ? s.slice(0, 80) + "…" : s) : "");
+}
+/** 台账变化返回 true（发起 / 销账），调用方据此决定要不要马上重写运行标记 */
+function noteSide(run, ev) {
+  if (!ev || typeof ev !== "object") return false;
+  if (ev.type === "tool_use" && ev.id && SIDE_TOOLS.has(ev.name)) {
+    const m = (run.sideTools ||= new Map());
+    m.delete(ev.id); m.set(ev.id, sideLabel(ev.name, ev.input));
+    if (m.size > 50) m.delete(m.keys().next().value);   // 一轮里挂起几百个没结果的也算极端情况，留最近的
+    return true;
+  }
+  if (ev.type === "tool_result" && ev.id && run.sideTools?.has(ev.id)) { run.sideTools.delete(ev.id); return true; }
+  return false;
+}
+
 /** 这一轮的完整事件记录 —— 断线太久环形缓冲续不上时，靠它把整轮重放给前端。
  *  相邻增量就地合并，一轮再长也只有"块数"那么多条。 */
 function record(run, ev) {
+  // 有副作用的工具：发起时记一笔、结果回来销账（FIND-039/049）。进程被杀时这一笔留在运行标记里，
+  // 下次启动的「继续」卡据此说清楚哪些操作的结果不知道 —— 点「继续」要不要重做，用户得先能判断
+  const side = noteSide(run, ev);
   const last = run.log[run.log.length - 1];
   if (last && last.type === ev.type && (ev.type === "delta" || ev.type === "thinking_delta")) last.text += ev.text;
   else if (last && last.type === "usage" && ev.type === "usage") run.log[run.log.length - 1] = { ...ev };
@@ -279,6 +314,8 @@ function record(run, ev) {
   // 本轮输出 token 每秒一条，夹在增量中间合并不到：只留一条、原地改成最新的数（重放只要最后的值）
   else if (ev.type === "run_tokens" && run.tokAt != null && run.log[run.tokAt]?.type === "run_tokens") run.log[run.tokAt] = { ...ev };
   else { if (ev.type === "run_tokens") run.tokAt = run.log.length; run.log.push(logCopy(ev)); }
+  // 台账变了马上落盘：被强杀时磁盘上那份就是最后一次工具结果之后的真实状态
+  if (side) saveRunMark();
 }
 
 /** 开跑前的最后一道核对（定时任务：入队后任务被删 / 被关就不跑）。返回 false = 丢掉这条 */

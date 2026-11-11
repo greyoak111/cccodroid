@@ -1059,6 +1059,11 @@
     // why: card —— 启动前的确认卡没人答、超时停下的（#171）：claude 根本没起，有会话也只能「重发」，不能「继续」
     // why: unstarted —— 还没起 claude 就被结束了（等确认卡、等桥…，195-P.3）：同样只能「重发」
     const card = it.why === "card", unstarted = it.why === "unstarted", cont = !!it.sessionId && !card && !unstarted;
+    // 有副作用、没等到结果的工具（网关记的台账，FIND-039/049）：点「继续」之前就摆在眼前，
+    // 让用户先核对文件 / 命令结果，别默认它们没执行
+    const side = Array.isArray(it.sideTools) ? it.sideTools.filter((x) => typeof x === "string") : [];
+    const sideNote = side.length ? t("中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。", {
+      n: side.length, list: side.slice(0, 6).join("、") + (side.length > 6 ? "…" : "") }) : "";
     setHtml(b, `<p>${esc(card ? t("这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。", { n: 10, when })
         : unstarted ? t("这一轮还没开始就被结束了（{when} 发的）。", { when })
         // cause：网关分得清的中断原因（195-A.11）。没有就是没打招呼就没了：系统回收、强行停止
@@ -1069,6 +1074,7 @@
       <p class="perm-sub">${esc(card || unstarted ? t("Claude 没收到这条消息。点「重发」把它放回输入框。")
         : it.sessionId ? t("已经做完的部分都在会话里。点「继续」让 Claude 从断开的地方接着做。")
         : t("会话还没来得及建立，Claude 没收到这条消息。点「重发」把它放回输入框。"))}</p>
+      ${sideNote ? `<p class="perm-sub intr-side">${esc(sideNote)}</p>` : ""}
       ${others ? `<p class="perm-sub">${esc(t("另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。", { n: others }))}</p>` : ""}
       ${drafts ? `<p class="perm-sub">${esc(t("还有 {n} 条没建会话的消息也停下了，处理完这条接着显示下一条。", { n: drafts }))}</p>` : ""}
       <div class="perm-acts"><button class="primary" data-a="go">${esc(cont ? t("继续") : t("重发"))}</button>

@@ -3179,5 +3179,6 @@ window.I18N_DICT.en = {
   "文件夹会连同里面的内容一起删除。": "Folders will be deleted together with everything inside them.",
   "已删除 {n} 项": "Deleted {n} item(s)",
   "这个文件夹装着应用自己的目录或工作区，不能删": "This folder contains the app's own directories or the workspace and can't be deleted",
-  "模型清单地址（选填；不填会按接口地址自动查找 /models）": "Model list URL (optional; if empty, /models is looked up automatically from the API address)"
+  "模型清单地址（选填；不填会按接口地址自动查找 /models）": "Model list URL (optional; if empty, /models is looked up automatically from the API address)",
+  "中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。": "At interruption, {n} action(s) with possible side effects had no result: {list}. Whether they already ran cannot be confirmed; please check before clicking Continue."
 };
