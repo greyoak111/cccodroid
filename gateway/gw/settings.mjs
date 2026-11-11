@@ -14,7 +14,12 @@ export { SETTINGS, saveSettings } from "./settings-store.mjs";
 import { SETTINGS, saveSettings, outputStyles } from "./settings-store.mjs";
 import { clampAutoCompact } from "./stream.mjs";
 
-
+// 设置回执只带认识的字段：设置文件能手改、能从旧版 / 分享的预置带过来，里面可能有类凭据字段。
+// 以前直接展开 SETTINGS，GET 和保存回执会把它们原样送回界面（FIND-052）。
+const VIEW_KEYS = ["model", "permissionMode", "guard", "addDirs", "outputStyle", "effort", "allowedTools", "disallowedTools",
+  "autoCompactWindow", "provider", "memGuard", "autoClean", "maxParallel", "staticCompat", "idleCompaction", "workIsland",
+  "localMode", "titleModel", "hiddenProviders", "permNotice", "permMigrated"];
+const settingsView = () => Object.fromEntries(VIEW_KEYS.filter((k) => k in SETTINGS).map((k) => [k, SETTINGS[k]]));
 
 // ── 路由：/api/settings ──
 export async function routeSettings(req, res, u, p) {
@@ -56,9 +61,22 @@ export async function routeSettings(req, res, u, p) {
   }
 
   if (p === "/api/settings") {
-    if (req.method === "GET") return sendJson(res, 200, { ...SETTINGS, maxParallel: maxParallel(), maxParallelCap: MAX_PARALLEL_CAP, workspace: CFG.workspace, outputStyles: outputStyles() });
+    if (req.method === "GET") return sendJson(res, 200, { ...settingsView(), maxParallel: maxParallel(), maxParallelCap: MAX_PARALLEL_CAP, workspace: CFG.workspace, outputStyles: outputStyles() });
     if (req.method === "POST") {
       const b = JSON.parse((await readBody(req)) || "{}");
+      // 先校验、再动内存（FIND-051）：未知厂商、正在生成时切厂商都要在改任何设置之前拦下。
+      // 否则 model 已经写进 SETTINGS、permissionMode 还会经 setPermMode 当场落盘，最后返回 400/409 却留下半套设置。
+      if ("provider" in b) {
+        const want = b.provider ? String(b.provider) : null;
+        const known = want && (want === BUILTIN_PROVIDER.id || (PROVIDERS_CFG && Object.hasOwn(PROVIDERS_CFG.providers, want)));   // constructor / __proto__ 别从原型上认出来（v0514 审查低-4）
+        if (want && !known) return sendJson(res, 400, { error: "unknown provider", provider: want });
+        if (want !== PROVIDER.id && (RUNS.size || bridgeSwitching())) {
+          return sendJson(res, 409, {
+            error: "busy",
+            message: tz("这一轮还在生成中，等它跑完再切厂商（切换会换掉正在用的密钥与模型）。"),
+          });
+        }
+      }
       for (const k of ["model", "outputStyle", "effort", "titleModel"]) {
         // 只收字符串：塞个对象进来会落盘，之后每一轮都在 .trim() / spawn 那里抛错，重启也好不了（审查 10-29 低7）
         // 长度也限：model 原样进 claude 的命令行，单个参数过 128 KB 就 E2BIG，每一轮都起不来（v0514 审查低-3）
@@ -68,7 +86,8 @@ export async function routeSettings(req, res, u, p) {
       if (b.outputStyle && !outputStyles().some((o) => o.id === b.outputStyle)) return sendJson(res, 400, { error: "unknown outputStyle" });
       for (const k of ["model", "outputStyle", "effort", "titleModel"]) if (k in b) SETTINGS[k] = b[k] || null;
       // 权限模式只收 claude 认的值；正在跑的那一轮也当场切过去
-      if ("permissionMode" in b && b.permissionMode !== SETTINGS.permissionMode) setPermMode(String(b.permissionMode || "default"));
+      // 落盘统一放到本路由末尾的一次 saveSettings()：以前 setPermMode 在这里就先写一次盘，后面任何校验失败都会留下半套设置（FIND-051）
+      if ("permissionMode" in b && b.permissionMode !== SETTINGS.permissionMode) setPermMode(String(b.permissionMode || "default"), { persist: false });
       if (b.permNotice === false) SETTINGS.permNotice = false;
       // 条数、长度都有上限：每一轮都要拼进 claude 的命令行，塞几万条会 E2BIG，claude 再也起不来、重启也好不了（审查 v0513b 低-3）
       if (Array.isArray(b.addDirs)) SETTINGS.addDirs = strList(b.addDirs, 64, 4096, 16384);
@@ -117,16 +136,8 @@ export async function routeSettings(req, res, u, p) {
       //  以前没这道闸，"连发消息 + 切厂商"叠在一起就是一场 401 暴雨。
       if ("provider" in b) {
         const want = b.provider ? String(b.provider) : null;
-        const known = want && (want === BUILTIN_PROVIDER.id || (PROVIDERS_CFG && Object.hasOwn(PROVIDERS_CFG.providers, want)));   // constructor / __proto__ 别从原型上认出来（v0514 审查低-4）
-        if (want && !known) return sendJson(res, 400, { error: "unknown provider", provider: want });
-
+        // 未知厂商与「忙时不许切」在开头预校验过了，这里只剩真正要切的
         if (want !== PROVIDER.id) {
-          if (RUNS.size || bridgeSwitching()) {
-            return sendJson(res, 409, {
-              error: "busy",
-              message: tz("这一轮还在生成中，等它跑完再切厂商（切换会换掉正在用的密钥与模型）。"),
-            });
-          }
           const switched = beginBridgeSwitch();
           try {
             SETTINGS.provider = want;
@@ -157,7 +168,7 @@ export async function routeSettings(req, res, u, p) {
       if (!saveSettings())
         return sendJson(res, 500, { error: tz("设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）") });
       log(`设置已更新 provider=${PROVIDER.id} model=${SETTINGS.model || "(默认)"} effort=${SETTINGS.effort} autoCompact=${SETTINGS.autoCompactWindow || "(默认)"} workIsland=${SETTINGS.workIsland}`);
-      return sendJson(res, 200, { ok: true, settings: SETTINGS, provider: PROVIDER.id, upstream: CFG.upstream });
+      return sendJson(res, 200, { ok: true, settings: settingsView(), provider: PROVIDER.id, upstream: CFG.upstream });
     }
   }
   return NEXT;

@@ -478,11 +478,20 @@ export function upsertProvider(id, b, prepare) {
   if (b.clearKey) delete cur.apiKey;
   // 图片随消息发（兼容兜底，见 inlineimg.mjs）：预置和自定义都能开
   if ("inlineImages" in b) { if (b.inlineImages === true) cur.inlineImages = true; else delete cur.inlineImages; }
-  // 记着的线路已经不在了（196-凭据.1）：重选线路时没给新 Key，旧 Key 是给原线路的，不能跟着带到新线路，清掉要用户重填
+  // 换线路时旧 Key 不能跟着走：Key 是按线路发的（cn / intl、按量 / 套餐往往不通用），没有依据默认两家通用。
+  // 旧线路被目录删除时一直会清（196-凭据.1）；两条预置线路之间正常切换漏了，旧 Key 会随新线路域名发出去（FIND-050）。
+  // 没记过线路 = 第一条线路，把第一条明确存回去不算换线路。
   const eps = PRESETS[id] && Array.isArray(PRESETS[id].endpoints) ? PRESETS[id].endpoints : null;
-  if (eps && cur.endpoint && !eps.some((e) => e && e.id === cur.endpoint) && "endpoint" in b && cur.apiKey && !("apiKey" in b && str(b.apiKey))) {
-    delete cur.apiKey;
-    keyCleared = true;
+  if (eps && cur.apiKey && !("apiKey" in b && str(b.apiKey)) && "endpoint" in b) {
+    const next = str(b.endpoint);
+    const known = (x) => eps.some((e) => e && e.id === x);
+    const oldLost = !!cur.endpoint && !known(cur.endpoint);
+    const oldEff = oldLost || !cur.endpoint ? eps[0].id : cur.endpoint;   // 没记过线路时生效的就是第一条
+    const nextEff = next ? (known(next) ? next : null) : eps[0].id;       // 空 = 回到第一条
+    if (oldLost || (nextEff && nextEff !== oldEff)) {
+      delete cur.apiKey;
+      keyCleared = true;
+    }
   }
   for (const k of ["endpoint", "defaultModel", "fastModel"]) if (k in b) { if (str(b[k])) cur[k] = str(b[k]); else delete cur[k]; }
   if (!PRESETS[id]) {
@@ -607,7 +616,15 @@ export async function testProvider(id) {
         body: JSON.stringify({ model: v.defaultModel || "x", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
       });
     }
-    const text = await fetchText(r);
+    let text;
+    try { text = await fetchText(r); }
+    catch (e) {
+      // 响应体超过上限不是网络问题（FIND-020）：以前混进 catch 里报成「连不上」，把排查方向带偏
+      if (/response too large/.test(String(e && e.message))) {
+        return { ok: false, status: r.status, message: tz("地址回了 {s}，但响应体太大（超过 8 MB），没法确认密钥有效", { s: r.status }) };
+      }
+      throw e;
+    }
     if (r.ok) {
       // 2xx 不等于有效：登录页 HTML、空体、200 包着的错误 JSON 以前都报「密钥有效」。要认得出是清单 / 是一条回复
       let j = null; try { j = JSON.parse(text); } catch {}
@@ -624,7 +641,10 @@ export async function testProvider(id) {
     }
     let msg = text.slice(0, 200);
     try { const j = JSON.parse(text); msg = j.error?.message || j.message || j.msg || msg; } catch {}
-    const why = r.status === 401 || r.status === 403 ? "密钥无效或与线路不匹配" : `HTTP ${r.status}`;
+    // 401 才是密钥问题；403 多半是地区 / 风控 / 防火墙拦的，不能一概说「密钥无效」（FIND-020）
+    const why = r.status === 401 ? "密钥无效或与线路不匹配"
+      : r.status === 403 ? "服务器拒绝访问（403）：可能是地区、网络或防火墙限制，不一定是密钥问题"
+      : `HTTP ${r.status}`;
     // 聚合平台（如 opencode Zen）同一个型号可能只走 OpenAI 协议：报 "does not support this protocol"。议题 #23
     const hint = /support(s|ed)? (this|the) protocol|unsupported protocol/i.test(msg) ? tz("（这个型号在这个地址上不支持 Anthropic 协议：换一个支持的型号，或换成平台给 Claude Code 用的那个地址）") : "";
     return { ok: false, status: r.status, message: `${why}：${msg}${hint}` };
@@ -1001,6 +1021,7 @@ export async function routeProviders(req, res, u, p) {
     if ([...RUNS.values()].some((r) => !r.ended && r.provider === id)) return sendJson(res, 409, { error: "busy", message: tz("这一家正在用，等这一轮跑完再删。") });
     const previous = PROVIDERS_RAW.providers[id];
     if (!PRESETS[id] && !previous) return sendJson(res, 404, { error: "unknown provider" });
+    const wasActive = id === PROVIDER.id;   // 在 applyProvider() 换掉当前厂商之前记下
     // 预置厂商删不掉，只清空用户字段（密钥等）；自定义的整条删掉
     delete PROVIDERS_RAW.providers[id];
     const resetSettings = !PRESETS[id] && SETTINGS.provider === id;
@@ -1018,6 +1039,9 @@ export async function routeProviders(req, res, u, p) {
     if (resetSettings) saveSettings();   // 接口已经删掉了；设置即使没写进去，加载时也会按「那家不在了」回落
     applyProvider();
     dropModelCache();
+    // claude 每次要钥匙都读 .cache 里的密钥文件；接口都删了，缓存不能继续留着（FIND-052）
+    try { (await import("./claude.mjs")).clearKeyCache(id, wasActive); }
+    catch (e) { log(`[provider] 清理密钥缓存失败：${e.message}`); }
     return sendJson(res, 200, { ok: true });
   }
   if (req.method === "POST" && p === "/api/providers/test") {
