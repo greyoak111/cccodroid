@@ -616,7 +616,15 @@ export async function testProvider(id) {
         body: JSON.stringify({ model: v.defaultModel || "x", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
       });
     }
-    const text = await fetchText(r);
+    let text;
+    try { text = await fetchText(r); }
+    catch (e) {
+      // 响应体超过上限不是网络问题（FIND-020）：以前混进 catch 里报成「连不上」，把排查方向带偏
+      if (/response too large/.test(String(e && e.message))) {
+        return { ok: false, status: r.status, message: tz("地址回了 {s}，但响应体太大（超过 8 MB），没法确认密钥有效", { s: r.status }) };
+      }
+      throw e;
+    }
     if (r.ok) {
       // 2xx 不等于有效：登录页 HTML、空体、200 包着的错误 JSON 以前都报「密钥有效」。要认得出是清单 / 是一条回复
       let j = null; try { j = JSON.parse(text); } catch {}
@@ -633,7 +641,10 @@ export async function testProvider(id) {
     }
     let msg = text.slice(0, 200);
     try { const j = JSON.parse(text); msg = j.error?.message || j.message || j.msg || msg; } catch {}
-    const why = r.status === 401 || r.status === 403 ? "密钥无效或与线路不匹配" : `HTTP ${r.status}`;
+    // 401 才是密钥问题；403 多半是地区 / 风控 / 防火墙拦的，不能一概说「密钥无效」（FIND-020）
+    const why = r.status === 401 ? "密钥无效或与线路不匹配"
+      : r.status === 403 ? "服务器拒绝访问（403）：可能是地区、网络或防火墙限制，不一定是密钥问题"
+      : `HTTP ${r.status}`;
     // 聚合平台（如 opencode Zen）同一个型号可能只走 OpenAI 协议：报 "does not support this protocol"。议题 #23
     const hint = /support(s|ed)? (this|the) protocol|unsupported protocol/i.test(msg) ? tz("（这个型号在这个地址上不支持 Anthropic 协议：换一个支持的型号，或换成平台给 Claude Code 用的那个地址）") : "";
     return { ok: false, status: r.status, message: `${why}：${msg}${hint}` };
