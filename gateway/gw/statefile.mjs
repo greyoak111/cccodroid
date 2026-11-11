@@ -72,6 +72,28 @@ export function writeAtomic(file, data, { mode = 0o600 } = {}) {
   }
 }
 
+/** 启动时清掉过期的隐藏临时文件（FIND-016）：原子写是「临时文件 → fsync → 换名」，
+ *  在 fsync 之后、换名之前被杀就会留下 .<名字>.tmp-…；导入先落 .import-*.zip 也是一个道理。
+ *  只清够旧的（默认 1 小时前）：正在写的另一个进程（另一个窗口的导入、上传）不会被打扰。
+ *  返回清掉的个数。 */
+export function sweepTemps(dirs, { ageMs = 3600e3 } = {}) {
+  const now = Date.now();
+  let n = 0;
+  for (const dir of dirs) {
+    let names;
+    try { names = fs.readdirSync(dir); } catch { continue; }
+    for (const name of names) {
+      if (!name.startsWith(".") || !(name.includes(".tmp-") || name.startsWith(".part-") || name.startsWith(".import-"))) continue;
+      const p = path.join(dir, name);
+      try {
+        const st = fs.lstatSync(p);
+        if (st.isFile() && now - st.mtimeMs >= ageMs) { fs.rmSync(p, { force: true }); n++; }
+      } catch {}
+    }
+  }
+  return n;
+}
+
 // 常用形状
 /** 普通对象（不是数组、不是 null） */
 export const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
