@@ -8,7 +8,7 @@ import { goalStateOf, tasksOf } from "./goal.mjs";
 import { backfillAgents, readAgentIndex, settleAgentRecs } from "./agents.mjs";
 import { bodyToFile, forEachLine } from "./bigfile.mjs";
 import { agentFilesOf, findLineOffset, latestContextTokens, lineHas, readSessionForward, readSessionPage, transcriptItems } from "./transcript.mjs";
-import { lineageCached } from "./lineage.mjs";
+import { lineageCached, lineageForSession } from "./lineage.mjs";
 import { chapterView } from "./archive-core.mjs";
 import { incompleteItem } from "./incomplete.mjs";
 import { runOfSession } from "./runs.mjs";
@@ -453,7 +453,8 @@ export async function routeSessions(req, res, u, p) {
       const limit = Math.min(200, Math.max(10, Number(u.searchParams.get("limit")) || 40));
       // 正在生成的那一轮走事件总线，这里不重复给
       const excludeFrom = Number(u.searchParams.get("exclude")) || (live ? live.startedAt : 0);
-      const rec = lineageCached(id);
+      // 冷启动后缓存可能还没跟上：只为这个会话补扫新增的部分，压缩分隔才带得上章节标签（FIND-019）
+      const rec = await lineageForSession(id, found.file);
       // 脉络里点站 / 章标题：anchor=压缩消息 uuid（或 start）→ 字节偏移，从那里往后读；after=往下续读
       let fwd = null;
       if (u.searchParams.has("anchor")) {
