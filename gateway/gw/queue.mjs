@@ -78,11 +78,12 @@ const runInfo = (r) => r && {
 /** 改权限模式：存进设置（下一轮沿用），正在跑的那一轮当场切（set_permission_mode） */
 /** 切全局权限模式。模式不认识回 false；否则回 { mode: 实际生效的, saved: 落盘没有 }——
  *  安全模式下不问人的几档会退回 default，接口要回生效的那个，别让界面显示「已切到全部放行」（0.6.9 审计 195-A.6） */
-export function setPermMode(mode) {
+export function setPermMode(mode, { persist = true } = {}) {
   if (!PERM_MODES.includes(mode)) return false;
   if (SETTINGS.permissionMode !== mode) log(`权限模式 ${SETTINGS.permissionMode} → ${mode}`);   // 排障时看得出是谁、何时切的
   SETTINGS.permissionMode = mode;
-  const saved = saveSettings() !== false;
+  // 设置路由要一次请求只写一次盘（中途写盘 + 后面校验失败就是半套设置，FIND-051），由它传 persist:false 自己落盘
+  const saved = persist ? saveSettings() !== false : undefined;
   const eff = safeModePerm(mode);   // 安全模式下不问人的几档退回 default（见 claude.mjs），界面显示实际生效的
   for (const r of RUNS.values()) if (r.setMode) {
     r.setMode(eff);
