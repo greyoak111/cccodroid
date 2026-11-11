@@ -987,9 +987,11 @@ export async function startRun(item) {
       log(`${runTag(run)} ⏹ 已中断 (${ms}ms)`);
       return endRun(run, { durationMs: ms, ...(run.retired ? { retired: true } : {}), ...(run.outTok ? { usage: { output_tokens: run.outTok } } : {}), ...(run.sched && run.costSeen ? { costRaw: run.costSeen } : {}) });
     }
-    // 最后一个 result 之后又起了一轮、没等到它的 result 就异常退出：按失败算，别沿用上一轮的成功
-    if (lastResult && resultStale && (code !== 0 || signal)) {
-      const hint = exitHint(code, signal);
+    // 最后一个 result 之后又起了一轮、没等到它的 result 就退出了：按失败算，别沿用上一轮的成功。
+    // 不能只在非零退出 / 有信号时才算（BUG-R02）：CLI 正常退 0、新一轮却没答完，同样是没答完；
+    // 「后台任务清零、没起新一轮」的 exit 0 不算（resultStale 仍是 false），照旧算成功
+    if (lastResult && resultStale) {
+      const hint = code !== 0 || signal ? exitHint(code, signal) : tz("上一轮已答完，接着的这一轮没有等到结果（已中断）");
       log(`${runTag(run)} ✖ ${hint}（上一轮已答完，接着的这一轮没答完）${stderr ? " :: " + stderr.trim().slice(-300) : ""}`);
       billAfterRun(run.provider);
       emit({ type: "error", message: tr(LAST_LANG, hint), detail: exitDetail(stderr) });
