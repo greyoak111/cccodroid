@@ -232,8 +232,10 @@
       if (typeof total === "number" && typeof a.seen === "number" && total >= a.seen && total - a.seen <= data.length) {
         if (total > a.seen) xt.write(data.slice(data.length - (total - a.seen)));
       } else {
-        // 缺的超过回放环（256KB）：中间那段已经拿不回来了，重置后说一声，别让人以为输出是连着的（FIND-045）
-        const lost = typeof total === "number" && typeof a.seen === "number" && total > a.seen;
+        // 缺口：断线期间丢的比回放环（256KB）还多（seen 有值），或者首次连接时缓冲里只剩尾段（seen 还没值，
+        // total 比回放数据多）。两种都重置后说一声，别让人以为输出是连着的（FIND-045 / BUG-G02）
+        const lost = typeof total === "number"
+          && (typeof a.seen === "number" ? total > a.seen : total > data.length);
         xt.reset();
         if (lost) xt.write("\x1b[2m" + t("…（已截断）") + "\x1b[0m\r\n");
         xt.write(data);
