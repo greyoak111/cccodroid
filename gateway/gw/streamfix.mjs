@@ -39,9 +39,10 @@ export function fixedBaseUrl(baseUrl) {
 /** 结尾的 error 被吞掉时通知谁（run.mjs 挂：按会话号找到那一轮，在界面上留一条提示）。参数 (会话号|"", 报错文字) */
 export const SWALLOW_HOOKS = [];
 /** SSE 修补状态机：feed 进上游原文，吐出要发给 claude 的文本；finish 在上游结束时调用，返回补的尾巴或 null（= 该断就断）。
- *  onSwallow(报错文字)：说完之后才来的 error 被吞掉时调用 */
-export function sseRepairer({ onSwallow } = {}) {
-  let buf = "", cr = "", started = false, gotStop = false, gotMsgStop = false, outTokens = 0, outBytes = 0;
+ *  onSwallow(报错文字)：说完之后才来的 error 被吞掉时调用
+ *  maxBuf：行缓冲上限（字节）。不是 SSE 的正文一直不出现空行时会越攒越多，超了置 overflow 让转发层断开（OBS-001） */
+export function sseRepairer({ onSwallow, maxBuf = 8 << 20 } = {}) {
+  let buf = "", cr = "", started = false, gotStop = false, gotMsgStop = false, outTokens = 0, outBytes = 0, overflow = false;
   const open = new Set(), kinds = new Map();
   let hasOutput = false, hasTool = false;
   const done = () => started && !gotMsgStop && open.size === 0 && hasOutput;
@@ -67,6 +68,11 @@ export function sseRepairer({ onSwallow } = {}) {
     // data 是 null / 数字 / 数组：不是 Anthropic 的事件，原样交给 claude，别在这里按对象去读字段把网关带走（0.6.9 审计 199-9-01）
     if (!j || typeof j !== "object" || Array.isArray(j)) return raw + "\n\n";
     const t = j?.type || event;
+    if (gotMsgStop) {                                 // message_stop 之后的东西一律不要
+      // 回答已经说完再追一个 error：透给 claude 会整条作废、重答一遍（FIND-001），这里丢掉
+      if (t === "error") log(`streamfix: 丢掉 message_stop 之后的 error 事件 ${JSON.stringify(j).slice(0, 200)}`);
+      return "";
+    }
     if (t === "error") {
       // 说完之后才来的报错：不让它把整条回答作废
       // 两头兼顾（0.6.9 审计 195-U.4）：照旧补成说完了——第三方端口常在说完后多塞一个假报错，交给 claude 会整段撤回重答、厂商记两次；
@@ -78,7 +84,6 @@ export function sseRepairer({ onSwallow } = {}) {
       }
       return raw + "\n\n";
     }
-    if (gotMsgStop) return "";                        // message_stop 之后的东西一律不要
     if (t === "message_start") { started = true; outTokens = j.message?.usage?.output_tokens || 0; }
     else if (t === "content_block_start") {
       open.add(j.index); kinds.set(j.index, j.content_block?.type);
@@ -102,23 +107,30 @@ export function sseRepairer({ onSwallow } = {}) {
   }
   return {
     feed(chunk) {
+      if (overflow) return "";
       // 块尾的 \r 先留着：CRLF 正好切在两块之间时，单独把 \r 换成 \n 会多出一个空行，把事件名和 data 拆开（审查 B10）
       let c = cr + chunk; cr = "";
       if (c.endsWith("\r")) { cr = "\r"; c = c.slice(0, -1); }
-      buf += c.replace(/\r\n?/g, "\n");
+      c = c.replace(/\r\n?/g, "\n");
+      if (buf.length + c.length > maxBuf) { overflow = true; buf = ""; return ""; }   // OBS-001
+      buf += c;
       let out = "", i;
       while ((i = buf.indexOf("\n\n")) >= 0) { const raw = buf.slice(0, i); buf = buf.slice(i + 2); if (raw.trim()) out += block(raw); }
       return out;
     },
-    finish() {
+    finish({ complete = false } = {}) {
       if (cr) { buf += "\n"; cr = ""; }
       let out = buf.trim() ? block(buf) : ""; buf = "";
       if (gotMsgStop) return out;
       if (done()) { log("streamfix: 上游没收尾，补 message_delta/message_stop"); return out + tail(); }
+      // 上游正常收完、却连 message_start 都没出：正文不是 SSE（有的端口挂着 event-stream 回 JSON 报错）。
+      // 以前返回 null，攒下的正文跟着 res.end() 一起被吞，claude 只看到空响应；正常收完就原样转下去（FIND-021）
+      if (complete && !started) return out;
       return null;
     },
     get complete() { return gotMsgStop; },
     get started() { return started; },
+    get overflow() { return overflow; },
   };
 }
 
@@ -164,15 +176,23 @@ function handle(req, res) {
     let ended = false;
     const end = () => {
       if (ended) return; ended = true;
-      const t = fix.finish();
-      // 块还开着：真断了，原样交给 claude。连 message_start 都没有、上游又是正常收完的：不是我们认得的流，照常收尾（200-9-06）
-      if (t === null) { if (ur.complete && !fix.started) res.end(); else res.destroy(); return; }
+      if (res.destroyed) return;                        // 行缓冲超限已经主动断开（OBS-001），别再往坏掉的响应里写
+      const t = fix.finish({ complete: ur.complete });
+      // 块还开着：真断了，原样交给 claude。连 message_start 都没有、上游又是正常收完的：不是我们认得的流，正文照常转完（FIND-021、200-9-06）
+      if (t === null) { res.destroy(); return; }
       res.end(t);
     };
     ur.setEncoding("utf8");
     // 下游（claude）读得慢就停读上游，收走了再续：以前不管 write 的返回值，上游有多少吸多少，全堆在响应缓冲里（0.6.9 审计 #193）
     ur.on("data", (d) => {
       const o = fix.feed(d);
+      // 不是 SSE 的正文一直不出现空行、攒过了上限：断开两头，claude 会按断流重试（OBS-001）
+      if (fix.overflow) {
+        log("streamfix: 行缓冲超过上限，断开这一条流让 claude 重试");
+        try { ur.destroy(); } catch {}
+        try { res.destroy(); } catch {}
+        return;
+      }
       const w = o && writePaced(res, o);
       if (w) { ur.pause(); w.then(() => { if (!res.destroyed) ur.resume(); }); }
     });

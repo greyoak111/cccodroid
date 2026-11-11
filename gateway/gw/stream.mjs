@@ -307,7 +307,11 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
           else if (Array.isArray(c.content)) {
             txt = c.content.map((x) => (x && x.type === "text" ? String(x.text ?? "") : `[${(x && x.type) || "?"}]`)).join("\n");
           }
-          sse({ type: "tool_result", id: c.tool_use_id, ok: !c.is_error, text: String(txt).slice(0, 20000), ...(ev.parent_tool_use_id ? { parent: ev.parent_tool_use_id } : {}) });
+          // 工具结果太长时截断要留标记：以前静默截到两万字符，用户以为工具就返回了这么多（FIND-045）
+          const full = String(txt);
+          sse({ type: "tool_result", id: c.tool_use_id, ok: !c.is_error,
+            text: full.length > 20000 ? full.slice(0, 20000) + "\n\n" + tr(LAST_LANG, tz("…（已截断）")) : full,
+            ...(ev.parent_tool_use_id ? { parent: ev.parent_tool_use_id } : {}) });
         }
       }
       break;

@@ -446,6 +446,46 @@ function startTicks(pid, st) {
   try { st ??= fs.readFileSync("/proc/" + pid + "/stat", "utf8"); return +st.slice(st.lastIndexOf(")") + 2).split(" ")[19]; } catch { return null; }
 }
 
+/** 显式取消一轮时，清掉这一轮用 setsid / nohup 双 fork 脱出去、已经不在进程树里的后代（FIND-044）。
+ *  killTree 顺着 /proc 的父子关系和进程组走，脱出去的被 init 收养、又另开了进程组，两头都够不着。
+ *  认法：本 uid、环境里带 CCAPP_RUN_ID=<这一轮>、启动时刻不早于这一轮的 claude（编号同 uid 谁读得到 /proc 都能抄）。
+ *  自己和祖先链不碰：开发端从某个 claude 会话里另起的网关，环境里也带着那轮的编号。
+ *  只在显式取消这条路上调；网关重启时那一套仍是 reapOrphans（用户还没定，别动）。返回清掉的进程数。 */
+export function killRunProcs(runId, sinceTicks = null) {
+  if (runId == null || runId === "") return 0;
+  const uid = process.getuid?.();
+  if (uid == null) return 0;
+  const ppidOf = (pid) => {
+    try { const s = fs.readFileSync(`/proc/${pid}/stat`, "utf8"); return +s.slice(s.lastIndexOf(")") + 2).split(" ")[1]; } catch { return 0; }
+  };
+  const self = new Set();
+  for (let p = process.pid, i = 0; p > 1 && i < 64; i++) { self.add(p); p = ppidOf(p); }
+  let names = [];
+  try { names = fs.readdirSync("/proc"); } catch { return 0; }
+  const victims = [];
+  for (const n of names) {
+    if (!/^\d+$/.test(n)) continue;
+    const pid = +n;
+    if (self.has(pid)) continue;
+    try {
+      if (fs.statSync("/proc/" + n).uid !== uid) continue;
+      const env = "\0" + fs.readFileSync(`/proc/${n}/environ`, "latin1");
+      if (!env.includes("\0CCAPP_RUN_ID=" + runId + "\0")) continue;
+      const st = fs.readFileSync(`/proc/${n}/stat`, "utf8");
+      const t = startTicks(pid, st);
+      if (sinceTicks != null && t != null && t < +sinceTicks) continue;
+      victims.push(pid);
+    } catch {}
+  }
+  for (const pid of victims) {
+    // 脱出去的可能又起了自己的子孙（都带着编号，多半已在名单里；这里按父子关系再摘一遍防漏）
+    const tree = descendants(pid);
+    try { process.kill(pid, "SIGKILL"); } catch {}
+    for (const p of tree) { try { process.kill(p, "SIGKILL"); } catch {} }
+  }
+  return victims.length;
+}
+
 /** 网关启动时清掉上一任留下的孤儿（v0.2.0 设计 A3）。
  *  上一任网关被杀 / 崩溃时，它拉起的 claude 和 claude 另开进程组的子 shell 会被 init 收养（PPID=1），
  *  没人读它们的输出却还在干活：推提交、跑构建、占内存。新网关接不回它们，只能清掉。
