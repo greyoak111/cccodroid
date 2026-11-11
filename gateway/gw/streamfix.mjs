@@ -67,6 +67,11 @@ export function sseRepairer({ onSwallow } = {}) {
     // data 是 null / 数字 / 数组：不是 Anthropic 的事件，原样交给 claude，别在这里按对象去读字段把网关带走（0.6.9 审计 199-9-01）
     if (!j || typeof j !== "object" || Array.isArray(j)) return raw + "\n\n";
     const t = j?.type || event;
+    if (gotMsgStop) {                                 // message_stop 之后的东西一律不要
+      // 回答已经说完再追一个 error：透给 claude 会整条作废、重答一遍（FIND-001），这里丢掉
+      if (t === "error") log(`streamfix: 丢掉 message_stop 之后的 error 事件 ${JSON.stringify(j).slice(0, 200)}`);
+      return "";
+    }
     if (t === "error") {
       // 说完之后才来的报错：不让它把整条回答作废
       // 两头兼顾（0.6.9 审计 195-U.4）：照旧补成说完了——第三方端口常在说完后多塞一个假报错，交给 claude 会整段撤回重答、厂商记两次；
@@ -78,7 +83,6 @@ export function sseRepairer({ onSwallow } = {}) {
       }
       return raw + "\n\n";
     }
-    if (gotMsgStop) return "";                        // message_stop 之后的东西一律不要
     if (t === "message_start") { started = true; outTokens = j.message?.usage?.output_tokens || 0; }
     else if (t === "content_block_start") {
       open.add(j.index); kinds.set(j.index, j.content_block?.type);
