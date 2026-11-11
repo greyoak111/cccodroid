@@ -40,10 +40,13 @@ test("运行标记写不上时留下可见警告（FIND-041）", () => {
   fs.rmSync(MARK, { recursive: true, force: true });
 });
 
-test("恢复时把没结果的副作用工具带进中断记录，给界面提示用", () => {
+test("恢复时把没结果的副作用工具带进中断记录；坏值丢掉、条数和长度封顶", () => {
   reset();
-  fs.writeFileSync(MARK, JSON.stringify({ runs: [{ id: "x1", sessionId: null, text: "提问", startedAt: 1, sideTools: ["Write /a.txt", "Bash npm test"] }], queue: [] }));
+  const many = Array.from({ length: 25 }, (_, i) => `Bash cmd-${i}`);
+  fs.writeFileSync(MARK, JSON.stringify({ runs: [{ id: "x1", sessionId: null, text: "提问", startedAt: 1, sideTools: [42, "", ...many, "W".repeat(300)] }], queue: [] }));
   Q.recoverRunMark();
   const it = Q.INTERRUPTED.find((e) => e.id === "x1");
-  assert.deepEqual(it.sideTools, ["Write /a.txt", "Bash npm test"]);
+  assert.equal(it.sideTools.length, 20, "条数封顶 20");
+  assert.ok(it.sideTools.every((s) => typeof s === "string" && s.length <= 200), "非字符串与超长项被处理");
+  assert.equal(it.sideTools.at(-1), "W".repeat(200), "超长按 200 字截断");
 });
