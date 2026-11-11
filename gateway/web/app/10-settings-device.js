@@ -381,6 +381,8 @@
       .then((j) => { if (j && j.ok === false) throw new Error(j.message || t("保存失败")); })
       .then(loadNotify, (err) => { toast(t("保存失败：{msg}", { msg: err.message || "" }), true); loadNotify(); }));
   $("ntf-sys").addEventListener("click", () => appPost("/api/app/notify_settings"));
+  // 去系统设置里改完通知权限再回来，设置页不会重新打开：状态要自己重拉一次，不然一直显示改之前的（稳定性报告 FIND-031）
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && setOpen) loadNotify(); });
 
   // ── 设备工具（只有 cccodroid：DeviceTools.java + A11y.java，经 device-mcp.mjs 给 Claude）──
   const devName = (n) => ({
