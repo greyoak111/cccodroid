@@ -471,7 +471,17 @@
   // 附加目录照稿收成一个「N 个」按钮，点开才是清单和添加框
   $("dir-toggle").addEventListener("click", () => document.querySelectorAll("#dir-field .dir-more").forEach((x) => x.classList.toggle("hidden")));
 
-  async function saveSettings(patch) {
+  // 普通设置也串行保存（UIFS-010）：连点两次时两个请求并发，回执乱序的话，旧回执里那份整份
+  // settings 快照会把后一次保存的结果在 state.settings 和控件上盖回去。排队后按点击顺序发请求、
+  // 回执按序到达，合并整份快照就不会倒退。失败照旧只回滚自己这次的 patch（revertSet）。
+  let saveQ = Promise.resolve();
+  function saveSettings(patch) {
+    const run = () => saveSettingsNow(patch);
+    const p = saveQ.then(run, run);
+    saveQ = p.catch(() => {});
+    return p;
+  }
+  async function saveSettingsNow(patch) {
     try {
       const r = await api("/api/settings", {
         method: "POST", headers: { "content-type": "application/json" },
