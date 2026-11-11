@@ -213,11 +213,22 @@
     toast(t("已恢复")); loadSessions(); lineageDirty();
     openSession(id);
   }
+  /** 启动时把网关记着的「最近真正跑过的会话」接回来（boot 的 /api/status 与首个 hello 都带 lastSessionId）。
+   *  用户在启动窗口里已经自己点过「新对话」/ 打开过会话（view.userNav），或者已经发出消息，就不接：
+   *  否则刚点开的空白新对话会被换回上一条，草稿也被搬走（FIND-003）。 */
+  function adoptLastSession(sid) {
+    if (!sid || view.sessionId || view.userNav || view.runIds.size || view.cids.size || view.lastRunId) return false;
+    draftSwap(view.sessionId, sid);
+    view.sessionId = sid;
+    saveUiState();
+    return true;
+  }
   /** 打开某个会话（null = 新会话）。重连事件流：网关会把正在跑的那一轮从头重放过来。
    *  anchor：落在某一章开头（脉络里点站 / 章标题；压缩消息的 uuid，第一章是 "start"）
    *  opts.keepPage：不收起整页（网关那边删了正开着的会话，人可能正在项目页里） */
   function openSession(id, jumpQ, anchor, opts = {}) {
     view.userOpen = id || null;   // 用户点开的（不是启动时按记着的会话号接回的）：打不开要说一声
+    view.userNav = true;          // 启动窗口里用户自己开了会话：boot 的「接回上次会话」不再执行（FIND-003）
     if (id !== view.sessionId) saveLastRead();   // 切走前记下读到哪（在底部就作废）
     if ((id || null) !== view.sessionId) {
       draftSwap(view.sessionId, id);   // 输入框、附件栏换成这个会话自己的
@@ -227,6 +238,7 @@
     view.pendNav = null;      // 用户明确打开某一页：上一次在途的锚点 / 续读意图不再适用
     resetView(id);
     if (!id) showWelcome();   // 新会话当场画首屏，不等重连回来——中间空着那一下就是闪
+    showFailNote(id);         // 切走期间它在后台失败了：回到这个会话时把网关层的报错补在最新处（FIND-006）
     view.jumpQ = id && jumpQ ? jumpQ : "";   // 从搜索结果点进来：历史加载完后跳到命中的那条
     view.jumpPages = 0;
     view.anchor = id && anchor ? anchor : "";
@@ -250,6 +262,7 @@
       && !histEl.querySelector(".msg:not(.welcome)") && !liveEl.querySelector(".msg");
   }
   function newConversation(note) {
+    view.userNav = true;   // 空白新对话上点「新对话」也要记：启动窗口里正等着接回上次会话（FIND-003）
     // 已经在空白新对话上又点「新对话」（侧栏 / 顶栏 ＋）：现场不动，只收起整页、聚焦输入框。
     // 以前每点一次都重置视图、重连事件流，顶栏在「新会话」「已连接」之间来回闪（#40）。带 note 的（/clear 等）照旧重开
     if (!note && blankNew()) { closePage(); inputEl.focus(); return false; }
@@ -617,41 +630,90 @@
   let es = null, lastEventId = "", helloCount = 0, busWatch = 0;
 
   let busDownAt = 0, busKick = 0;
+  // 自己重拨的等待：1.5 秒起步翻倍，封顶 30 秒——网关长期不在时不再每 1.5 秒敲一次（FIND-037）。
+  // 只封等待时间，不放弃重拨：网关回来后要自己接上，不能等用户刷新
+  const BUS_RETRY_MIN = 1500, BUS_RETRY_MAX = 30000;
+  let busRetryN = 0, busProbeAt = 0, gwDeadAt = 0;
+  function busRetryDelay(n) { return Math.min(BUS_RETRY_MAX, BUS_RETRY_MIN * Math.pow(2, Math.max(0, n))); }
+  /** 断线时问一句网关还活着没有：问不到就把「生成不受影响」换成「网关离线」（FIND-018）。
+   *  隔 8 秒最多问一次，断线重拨期间不至于把 /api/status 敲个不停 */
+  function probeGateway() {
+    const now = Date.now();
+    if (srv.connected || srv.foreign || now - busProbeAt < 8000 || typeof api !== "function") return;
+    busProbeAt = now;
+    api("/api/status").catch(() => { if (!srv.connected && !srv.foreign) { gwDeadAt = Date.now(); setStatus(t("网关离线"), "err"); } });
+  }
   function connectBus(resume) {
-    // 新的连接已经由用户在开头：把上一轮排着的重连定时器取消，否则 2 秒后它会把刚建好的连接再断一次（0.6.9 审计 195-P.6）
+    // 新的连接已经由用户在开头：把上一轮排着的重拨定时器取消，否则过一会儿它会把刚建好的连接再断一次（0.6.9 审计 195-P.6）
     clearTimeout(busWatch); busWatch = 0;
     if (es) { try { es.close(); } catch {} }
     if (srv.foreign) { es = null; return; }   // 浏览器从别的地址打开：/api 必然 403，别一直重拨（195-G.6）
     // 换视图要整轮重放：旧视图的游标作废，免得重拨时又带着它续传，新视图缺东西（审查 #50 S2-05）
-    if (!resume) lastEventId = "";
+    if (!resume) { lastEventId = ""; busRetryN = 0; }
     // 整轮重放时带上正在看的会话 / 轮次：网关先放它们，别的会话的长轮排后面（#188）
     const focus = !resume || !lastEventId ? [view.sessionId ? "focus=" + encodeURIComponent(view.sessionId) : "", view.runIds.size ? "run=" + encodeURIComponent([...view.runIds].slice(-64).join(",")) : ""].filter(Boolean).join("&") : "";
     const url = "/api/events" + (resume && lastEventId ? "?since=" + encodeURIComponent(lastEventId) : focus ? "?" + focus : "");
-    es = new EventSource(url);
+    const cur = es = new EventSource(url);
+    // 关掉 / 换掉的旧连接上排队的事件还可能派发（OBS-002）：只认当前这条、且没被自己关掉。
+    // 这里不把全局 es 置空：19-boot 的 refreshStatus 用 es && !srv.connected 判断「SSE 断、HTTP 通」
+    cur.dead = false;
     es.onmessage = (m) => {
+      if (es !== cur || cur.dead) return;
       if (m.lastEventId) lastEventId = m.lastEventId;
       let ev; try { ev = JSON.parse(m.data); } catch { return; }
       try { onBus(ev); } catch (e) { console.error(e); }
     };
-    es.onopen = () => { clearTimeout(busWatch); busWatch = 0; busDownAt = 0; setConn(true); };
+    es.onopen = () => {
+      if (es !== cur || cur.dead) return;
+      busRetryN = 0;
+      gwDeadAt = 0;   // 连上了就是活的：断线文案从「生成不受影响」重新算
+      clearTimeout(busWatch); busWatch = 0; busDownAt = 0; setConn(true);
+    };
     es.onerror = () => {
+      if (es !== cur || cur.dead) return;
+      cur.dead = true;
       setConn(false);
       // 一直连不上：多半是通知栏点了「停止」、网关服务没了，界面还开着就请壳把它拉起来（11-05 报告；服务在跑时壳那边什么也不做）
       const now = Date.now();
       if (!busDownAt) busDownAt = now;
       if (now - busDownAt > 4000 && now - busKick > 10000 && !document.hidden && window.CCApp && window.CCApp.ensureGateway) { busKick = now; try { window.CCApp.ensureGateway(); } catch {} }
-      // 网关重启时浏览器有时会直接放弃（CLOSED）：那就自己再拨
-      if (es.readyState === 2) { clearTimeout(busWatch); busWatch = setTimeout(() => connectBus(true), 2000); }
+      // 不让浏览器按服务端的 retry: 1500 一直原地重拨：关掉这条，自己按退避再拨（FIND-037）；拨上由 onopen 复位
+      try { cur.close(); } catch {}
+      clearTimeout(busWatch);
+      busWatch = setTimeout(() => connectBus(true), busRetryDelay(busRetryN++));
+      probeGateway();
     };
   }
   function setConn(ok) {
     srv.connected = ok;
     // 浏览器从 127.0.0.1 / localhost 打开：网关在线，只是来源不对，别说「断开」盖掉「请在应用里打开」（195-G.6 真机）
     if (!ok) setStatus(srv.foreign ? t("请在 cccodroid 应用里打开") : t("与网关断开，正在重连…（生成不受影响）"), "warn");
+    // 刚问过、网关确实不在：每次重拨失败不要把「网关离线」又盖回「生成不受影响」。
+    // 45 秒盖住最长的 30 秒退避；连上（onopen）就清零，重新按原文案说（FIND-018）
+    if (!ok && !srv.foreign && Date.now() - gwDeadAt < 45000) setStatus(t("网关离线"), "err");
+  }
+  /** 回前台把界面状态和网关对一遍：SSE 看起来 OPEN、其实已经不再派发时，残留的「生成中」和停止键靠这个散掉（FIND-017）。
+   *  askedAt：对账发起时刻，之后才起的轮次不归这次快照管 */
+  function reconcileRunViews(askedAt) {
+    const live = new Set((srv.runs || []).map((r) => r.id));
+    for (const [runId, rv] of [...runViews]) {
+      // 网关那边还在跑；或快照之后才起的轮次，不归这次对账管
+      if (live.has(runId) || !(rv.startedAt && rv.startedAt < askedAt)) continue;
+      // 网关那边这一轮已经没了：按普通收尾停下（结果未知，不标失败），过程留在原地
+      rv.timer?.stop();
+      if (rv.av) { rv.av.finish(); if (rv.av.empty) rv.av.remove(); }
+      runViews.set(runId, { startedAt: rv.startedAt });
+      runSid.delete(runId);
+    }
+    if (statRun && !live.has(statRun)) { statStop(); statEl.textContent = statLast[view.sessionId] || ""; }
   }
   document.addEventListener("visibilitychange", () => {
-    // 切回前台：WebView 在后台冻过，连接可能已经悄悄死了
-    if (!document.hidden && (!es || es.readyState !== 1)) connectBus(true);
+    // 切回前台：WebView 在后台冻过，连接可能已经悄悄死了；SSE 看着活着也可能不再派发，
+    // 所以不管连接状态都拉一次快照对账，再按需重连（FIND-017）
+    if (document.hidden) return;
+    const askedAt = Date.now();
+    if (typeof api === "function") api("/api/state").then((s) => { if (s && typeof s === "object") { applyState(s); if (typeof reconcileRunViews === "function") reconcileRunViews(askedAt); } }).catch(() => {});
+    if (!es || es.readyState !== 1) connectBus(true);
   });
 
   // ── 维护者通知（经 cccodroid.net，网关验过签；见 gw/notices.mjs）：和更新说明同样的居中卡片 ──
@@ -693,6 +755,27 @@
   }
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { noticeHold = false; loadNotices(); } });
 
+  // 轮次 → 会话号：error 事件只带 runId，后台会话失败时要按会话留下提示（FIND-006）
+  const runSid = new Map();
+  // 会话号 → { text, at }：切走期间失败时网关给的错误文案没有别的落点（run_end 只有 failed 标记），
+  // 留到下次进入那个会话时补一行；claude 自己写的 is_error 正文仍在历史里，这里只补网关层的（FIND-006）
+  const failNotes = new Map();
+  function recordFailNote(ev) {
+    if (runViews.has(ev.runId)) return;      // 在眼前：正常画进气泡
+    const sid = ev.sessionId || runSid.get(ev.runId) || (srv.runs.find((r) => r.id === ev.runId) || {}).sessionId;
+    if (!sid || sid === view.sessionId) return;
+    failNotes.set(sid, { text: [ev.message, ev.detail].filter(Boolean).join("\n\n"), at: Date.now() });
+    if (failNotes.size > 30) failNotes.delete(failNotes.keys().next().value);
+  }
+  /** 回到某个会话：把切走期间它的失败提示补上（FIND-006） */
+  function showFailNote(sid) {
+    const n = sid && failNotes.get(sid);
+    if (!n) return;
+    failNotes.delete(sid);
+    addNote(t("上一轮在后台失败：{msg}", { msg: n.text }), liveEl);
+    scrollDown();
+  }
+
   function belongs(ev) {
     if (view.runIds.has(ev.runId)) return true;
     if (ev.cid && view.cids.has(ev.cid)) return true;
@@ -702,6 +785,12 @@
   }
 
   function onBus(ev) {
+    // error 事件不带会话号：从带会话号的同类事件里把 runId → sessionId 记下来（FIND-006）
+    if (ev.runId && ev.sessionId) {
+      runSid.set(ev.runId, ev.sessionId);
+      if (runSid.size > 500) runSid.delete(runSid.keys().next().value);
+    }
+    if (ev.type === "error") recordFailNote(ev);
     switch (ev.type) {
       case "hello": return onHello(ev);
       case "tasks":
@@ -748,7 +837,7 @@
       case "inject": {
         // 插话送达：在它被吃进去的位置画出这条消息，之后的回复另起一个气泡，时间顺序才对
         const rv = runViews.get(ev.runId);
-        if (!rv) return;
+        if (!rv || !rv.av) return;   // 收尾后只留了 startedAt 的空壳（FIND-042）
         if (ev.cid) { view.cids.add(ev.cid); view.cidRuns.set(ev.cid, ev.runId); }
         rv.av.finish();
         if (rv.av.empty) rv.av.remove();
@@ -765,7 +854,7 @@
       case "run_idle": {
         // 这一轮答完了，只是 Claude 起的后台任务（本地服务之类）还在跑
         const rv = runViews.get(ev.runId);
-        if (rv && !rv.idle) { rv.idle = true; rv.timer?.stop(ev.at); rv.av.finish(); rv.avDone = true; }
+        if (rv && rv.av && !rv.idle) { rv.idle = true; rv.timer?.stop(ev.at); rv.av.finish(); rv.avDone = true; }
         if (view.runIds.has(ev.runId)) setStatus(idleStatus(ev.bg), "ok");
         return;
       }
@@ -801,12 +890,13 @@
         for (const r of srv.runs) if (r.permMode) r.permMode = ev.mode;
         refreshPlanActs();
         return;
-      case "perm_request": if (runViews.has(ev.runId)) onPermRequest(ev); return;
+      case "perm_request": if (runViews.get(ev.runId)?.av) onPermRequest(ev); return;   // 收尾的空壳不收新卡（FIND-042）
       case "perm_resolved": return permDone(ev.id, ev.behavior, ev);
     }
     const rv = runViews.get(ev.runId);
     if (!rv) return;
     const av = rv.av;
+    if (!av) return;   // 收尾后只留了 startedAt 的空壳（FIND-042）：晚到的增量不再画
     switch (ev.type) {
       case "usage":          if (ev.contextTokens) liveCtx(ev.contextTokens, state.ctxTotal); break;
       case "run_tokens":     rv.out = +ev.out || 0; if (statRun === ev.runId) statPaint(); break;
@@ -863,14 +953,21 @@
     const adoptDrafts = helloCount === 1 || view.adoptDrafts;
     view.adoptDrafts = false;
     applyState(ev);
+    if (helloCount === 1 && !state.serverStatus) {
+      // /api/status 启动时没拿到（超时、网关刚起来那一下的 5xx）：hello 的「已连接」不能把失败盖掉、
+      // 上次会话也没接回。hello 里带着同一份 lastSessionId，按 boot 的规则接一次，再把状态补拉回来（FIND-005）
+      if (typeof adoptLastSession === "function") adoptLastSession(ev.lastSessionId);
+      if (typeof refreshStatus === "function") refreshStatus().catch(() => {});
+    }
     if (ev.resume) { calmStatus(t("已连接")); return; }
     beginReplay();
 
     // 续不上（首次连接 / 网关重启过 / 断太久）：本视图从头来 —— 历史重新取，
     // 正在跑的那一轮紧接着会被网关整轮重放过来
-    if (helloCount === 1 && ev.run && !ev.run.ended && !view.sessionId) {
+    if (helloCount === 1 && ev.run && !ev.run.ended && !view.sessionId && !view.userNav) {
       // 刚打开界面时网关正忙、本地又不知道看哪条（没有上次的会话号）：直接跟上那一轮。
-      // 本地记着会话号时不再改道：以前会覆盖用户最后查看的会话并交换草稿（0.6.9 审计 195-P.7）
+      // 本地记着会话号时不再改道：以前会覆盖用户最后查看的会话并交换草稿（0.6.9 审计 195-P.7）；
+      // 用户在启动窗口里已经自己点了新对话 / 打开过会话，也一样不跟（FIND-003）
       const sid1 = ev.run.sessionId || null;
       // 自动跟到别的会话也要按每会话草稿的契约交接（#120-3）：A 没发的字和附件留在 A，输入框换成 B 自己的草稿；
       // 不然 A 的草稿会顶着 B 的会话号发出去
@@ -946,14 +1043,16 @@
         if (sid) api("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: "/goal clear", sessionId: sid, cid: newCid(), mode: "auto" }) }).catch((e) => toast(e.message, true));
       }, 300);
     }
+    // 这一轮可能是在别的会话里跑完的：权限卡不管当前在看哪条会话都要收掉，游离 DOM 和表单值不能留到页面重载（FIND-007）
+    for (const [id, it] of PERMS) if (it.runId === ev.runId && !it.done) permDone(id, "stopped");
     const rv = runViews.get(ev.runId);
     // 不在当前视图里画的一轮（别的会话在后台跑完）：数照样按会话记下，切过去就能看到
     if (!rv) { if (!ev.localCommand && ev.sessionId) { const st = statBits(ev); if (st) statSave(ev.sessionId, st); } if (belongs(ev)) loadSessions(); return; }
     const av = rv.av;
     rv.timer?.stop(ev.at);
     // 实时那份先停；本地命令（/context 等）不算一轮，底栏回到上一轮的数，普通一轮下面再定格
-    if (statRun === ev.runId) { statStop(); statEl.textContent = statLast[view.sessionId || ev.sessionId] || ""; }
-    for (const [id, it] of PERMS) if (it.runId === ev.runId && !it.done) permDone(id, "stopped");
+    // 记到这一轮自己的会话头上：正在看的可能是刚认领的另一条草稿（FIND-008）
+    if (statRun === ev.runId) { statStop(); statEl.textContent = statLast[ev.sessionId || view.sessionId] || ""; }
     if (ev.sessionId && !view.sessionId && view.runIds.has(ev.runId)) { view.sessionId = ev.sessionId; draftAdopt(ev.sessionId); adoptPendingModel(); saveUiState(); }
     if (ev.usage?.context_tokens) liveCtx(ev.usage.context_tokens, ev.usage.context_window || state.ctxTotal);
 
@@ -972,7 +1071,7 @@
       if (cut) { av.note(t("已中断")); agStopAll(ev.at); }
       else if (ev.retired || bad) agStopAll(ev.at);   // 后台子代理随进程一起停了 / 这一轮失败
       const st = statBits(ev, rv.out);
-      if (st) { statEl.textContent = st; statSave(view.sessionId || ev.sessionId, st); }
+      if (st) { statEl.textContent = st; statSave(ev.sessionId || view.sessionId, st); }
     }
     // 普通一轮出错网关给的是 isError（启动失败才是 failed），两个都要认（审查 #51 第3项）
     if (ev.failed || ev.isError) setStatus(t("失败"), "err");
@@ -983,6 +1082,10 @@
     scrollDown();
     loadSessions();
     if (!state.caps?.slashCommands?.length) loadCaps();
+    // 一轮收尾：气泡已经画完，runViews 里只留开始时间给历史去重回用；计时器、输出计数和 AssistantView
+    // 连同它攥着的工具卡闭包一起放掉，长会话不再一轮压一轮（FIND-042）
+    runViews.set(ev.runId, { startedAt: rv.startedAt });
+    runSid.delete(ev.runId);
   }
 
   // ── 忙闲与排队（都以网关为准）──────────────────────────────────────

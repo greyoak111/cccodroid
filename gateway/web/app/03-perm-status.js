@@ -233,6 +233,9 @@
       it.el.remove();
       it.el = null;
       PERMS.delete(id);          // 卡已经并进工具卡的小标签，这条记录没用了（#95 01-007）
+    } else if (it.el && !it.el.isConnected) {
+      // 切走时卡片随旧视图一起拿掉了，这一轮又在后台结束：记录本身也放掉，游离 DOM / 工具入参 / 表单值不再留到页面重载（FIND-007）
+      PERMS.delete(id);
     } else if (it.el) {
       it.el.classList.remove("busy");
       it.el.classList.add("done", behavior === "allow" ? "ok" : "no");
