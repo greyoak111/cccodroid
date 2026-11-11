@@ -12,7 +12,7 @@ const runProvider = (sid) => providerById(effectiveModel(sid).provider) || PROVI
 import { isLoginMode } from "./models.mjs";
 import { findSessionFile } from "./sessions.mjs";
 import { sealSession } from "./integrity.mjs";
-import { killTree, safeModePerm } from "./claude.mjs";
+import { killRunProcs, killTree, safeModePerm } from "./claude.mjs";
 import { goalCheck, tasksCheck } from "./goal.mjs";
 import { LAST_SESSION, RUNS, SESSIONS, TRASH_HOOKS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
@@ -332,12 +332,18 @@ export function abortRun(run, { hold = true } = {}) {
   if (run.child) {
     const c = run.child;
     killTree(c);
+    // setsid / nohup 双 fork 出去的已经不在进程树、也不在 claude 的进程组里，killTree 够不着：按这一轮的编号清掉（FIND-044）。
+    // 只认在这一轮 claude 之后起来的，编号被别的进程抄去的不算
+    const gone = killRunProcs(run.id, run.childStart);
+    if (gone) log(`⏹ 清掉这一轮脱出进程树的进程 ${gone} 个`);
     // 收尾靠 claude 的输出管道关掉（close 事件）。要是哪个子孙另开了进程组、攥着管道没被杀到，close 就永远不来，
     // 这一轮一直挂在「生成中」：5 秒还没收尾就再杀一遍、把管道关掉，还不行就直接收尾
     setTimeout(() => {
       if (run.ended) return;
       log("⏹ 停止 5 秒后还没收尾，强制关掉 claude 的输出管道");
       killTree(c);
+      const again = killRunProcs(run.id, run.childStart);
+      if (again) log(`⏹ 清掉这一轮脱出进程树的进程 ${again} 个`);
       for (const s of [c.stdin, c.stdout, c.stderr]) try { s?.destroy(); } catch {}
       setTimeout(() => forceEnd(run), 2000).unref();
     }, 5000).unref();
