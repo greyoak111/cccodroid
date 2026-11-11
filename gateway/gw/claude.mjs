@@ -450,6 +450,8 @@ function startTicks(pid, st) {
  *  killTree 顺着 /proc 的父子关系和进程组走，脱出去的被 init 收养、又另开了进程组，两头都够不着。
  *  认法：本 uid、环境里带 CCAPP_RUN_ID=<这一轮>、启动时刻不早于这一轮的 claude（编号同 uid 谁读得到 /proc 都能抄）。
  *  自己和祖先链不碰：开发端从某个 claude 会话里另起的网关，环境里也带着那轮的编号。
+ *  环境里已经没有 CCAPP_RUN=1 的不碰：去掉它是「这不是 claude 运行，是要常驻的服务」的约定（终端、openai-bridge 的
+ *  start-bridge.sh 都这么做，reapOrphans 也按它认）。只认编号的话，用户让 Claude 起的桥 / 服务器一停这一轮就被杀。
  *  只在显式取消这条路上调；网关重启时那一套仍是 reapOrphans（用户还没定，别动）。返回清掉的进程数。 */
 export function killRunProcs(runId, sinceTicks = null) {
   if (runId == null || runId === "") return 0;
@@ -470,7 +472,7 @@ export function killRunProcs(runId, sinceTicks = null) {
     try {
       if (fs.statSync("/proc/" + n).uid !== uid) continue;
       const env = "\0" + fs.readFileSync(`/proc/${n}/environ`, "latin1");
-      if (!env.includes("\0CCAPP_RUN_ID=" + runId + "\0")) continue;
+      if (!env.includes("\0CCAPP_RUN_ID=" + runId + "\0") || !env.includes("\0CCAPP_RUN=1\0")) continue;
       const st = fs.readFileSync(`/proc/${n}/stat`, "utf8");
       const t = startTicks(pid, st);
       if (sinceTicks != null && t != null && t < +sinceTicks) continue;
