@@ -142,7 +142,7 @@ async function listMcp() {
   return out;
 }
 
-async function addMcp(b) {
+export async function addMcp(b) {
   const name = String(b.name || "").trim();
   // 横线开头的名字会被当成 claude 的选项（11-03 审查 L-19，同 badArg）
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(name) || badArg(name)) return { ok: false, message: tz("名字只能用字母、数字、点、下划线、横线") };
@@ -165,7 +165,7 @@ async function addMcp(b) {
   return r.code === 0 ? { ok: true } : { ok: false, message: cliMsg(r) };
 }
 
-async function removeMcp(name) {
+export async function removeMcp(name) {
   if (badArg(String(name ?? ""))) return { ok: false, message: tz("名字格式不对") };
   const r = await extRun(["mcp", "remove", String(name)], 60000);
   return r.code === 0 ? { ok: true } : { ok: false, message: cliMsg(r) };

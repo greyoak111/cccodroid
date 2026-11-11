@@ -14,6 +14,7 @@
     tool: '<path d="M4 20l7-7M14 4l6 6-3 3-6-6zM10 8l6 6"/>',
     play: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/>',
     globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    plug: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
     puzzle: '<path d="M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3z"/>',
   };
   const ei = (n) => `<svg class="ei" viewBox="0 0 24 24">${EI[n]}</svg>`;
@@ -141,7 +142,7 @@
   const tg = (s) => encodeURIComponent(String(s));
   const extPick = {}, extLabels = {};
   const CAT = () => ({ dev: t("开发工具"), office: t("文档办公"), media: t("图像影音"), science: t("科学计算"), eda: t("电子设计"),
-    cad: t("3D 与建模"), ai: t("AI 推理"), gpu: t("GPU 与驱动"), net: t("网络"), other: t("其他") });
+    cad: t("3D 与建模"), ai: t("AI 推理"), gpu: t("GPU 与驱动"), net: t("网络"), mcp: "MCP", other: t("其他") });   // MCP：各语言都叫这个名，不进词典
   function renderIdx(sec, labels) {
     if (labels) extLabels[sec] = labels; else labels = extLabels[sec] || [];
     const bar = $(sec + "-idx"); if (!bar) return;
@@ -185,7 +186,7 @@
   function extSub() { setPageSub("ext", [ext.nMod ? t("{n} 个模块", { n: ext.nMod }) : "", ext.nComp ? t("{n} 个组件", { n: ext.nComp }) : ""].filter(Boolean).join(" · ")); }
   // 分类的颜色和图标（卡片左上角）
   const CAT_LOOK = { gpu: ["#c96442", "cube"], cad: ["#c96442", "cube"], media: ["#b5532f", "play"], office: ["#2f6aa8", "book"], science: ["#7650c0", "gauge"],
-    eda: ["#9a6a00", "bolt"], ai: ["#3d7a2a", "spark"], dev: ["#5d594f", "tool"], net: ["#2f6aa8", "globe"], other: ["#5d594f", "puzzle"] };
+    eda: ["#9a6a00", "bolt"], ai: ["#3d7a2a", "spark"], dev: ["#5d594f", "tool"], net: ["#2f6aa8", "globe"], mcp: ["#7650c0", "plug"], other: ["#5d594f", "puzzle"] };
   // 存储条：工具包模块 + 组件占多少，盘里还剩多少
   function paintStorage() {
     const el = $("ext-storage"); if (!el) return;

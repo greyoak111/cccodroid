@@ -6,7 +6,7 @@ import { CFG, LIVE, LAST_LANG, PREFIX, log, tr, tz } from "./config.mjs";
 import { claudeEnv, killTree } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
-import { SKILLS_DIR, skillMeta } from "./extensions.mjs";
+import { SKILLS_DIR, addMcp, removeMcp, skillMeta } from "./extensions.mjs";
 import { modulesMissingFor } from "./modules.mjs";
 import { ghProxy, pget } from "./pget.mjs";
 import { retireManagedBridge } from "./managed-bridge.mjs";
@@ -97,7 +97,7 @@ function compWriteRecord(id, rec) {
   return writeAtomic(compRecFile(id), JSON.stringify(rec, null, 1));
 }
 export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile, compDropDanglingDocs, compSweepDanglingDocs,
-  compState, compVerCmp, compOlder, compInstall, compSwitch };   // 只给测试用
+  compState, compVerCmp, compOlder, compInstall, compSwitch, compMcpSpec };   // 只给测试用
 
 function compFetch(src, quick) {
   // quick：拉索引用——连不上 8 秒就放弃、只重试一次，好尽快换镜像（GitHub 被墙时以前要干等一分多钟）
@@ -649,7 +649,7 @@ async function compStart(id) {
   if (un) return { ok: false, message: un === "mali" ? tz("这个组件只能用在 ARM Mali GPU（天玑、Exynos 等）的设备上，本机用不了") : tz("这个组件只能用在高通骁龙（Adreno GPU）的设备上，本机用不了") };
   const miss = (entry.requires || []).filter((rid) => !compDepOk(rid, ix.data.components, dk));
   if (miss.length) return { ok: false, message: tz("要先装：{names}", { names: miss.map((rid) => compName(rid, ix.data.components).zh || rid).join("、") }) };
-  const b0 = compBuildFor(entry, dk), b = b0 && { ...b0, source: entry.source, requires: entry.requires || [] };
+  const b0 = compBuildFor(entry, dk), b = b0 && { ...b0, source: entry.source, requires: entry.requires || [], mcp: compMcpSpec(entry) };
   if (!b) return { ok: false, message: tz("这个组件还没有对应当前工具包的版本，先更新工具包或稍后再试") };
   // 防回滚：已装好且索引里的构建版本更旧，不装。过期索引（镜像晚一拍、缓存十分钟）里常有上一版，
   // 用户点一下「更新」反而把新版换掉；损坏/装到一半的记录不拦，那是修复（0.6.9 审计 195-V.1）
@@ -684,6 +684,25 @@ async function compStart(id) {
       job.finished = true; job.error = job.cancelled ? "" : e.message; log(`[comp] ${id} 安装失败：${e.message}`);
     });
   return { r: { ok: true }, job };
+}
+
+/** MCP 组件（索引里带 mcp: { name, bin }）：装好后替用户用 claude mcp add 注册成用户级 MCP，卸载时拿掉。
+ *  名字、命令都过白名单；命令只能是本组件放进 $PREFIX/bin 的程序（安装时再按记录核一遍），不收参数和环境变量 */
+function compMcpSpec(entry) {
+  const m = entry && entry.mcp;
+  if (!m || typeof m !== "object") return null;
+  const name = String(m.name || ""), bin = String(m.bin || "");
+  if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(name) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(bin)) return null;
+  return { name, bin };
+}
+async function compRegisterMcp(id, b, rec) {
+  const m = b.mcp;
+  if (!m || !(rec.files || []).includes("bin/" + m.bin)) return;
+  const r = await addMcp({ name: m.name, transport: "stdio", target: path.join(PREFIX, "bin", m.bin) });
+  if (!r.ok) { log(`[comp] ${id} 注册 MCP ${m.name} 失败：${r.message || "?"}`); return; }
+  rec.mcp = m.name;
+  if (!compWriteRecord(id, rec)) log(`[comp] ${id} 注册了 MCP ${m.name}，但安装记录没写进去`);
+  else log(`[comp] ${id} 已注册 MCP ${m.name}`);
 }
 
 /** 把组件带的 skill 目录拷进 ~/.claude/skills。skill 路径相对 files/（以 usr/ 开头），PREFIX 已经是 files/usr */
@@ -865,6 +884,8 @@ async function compRunInstall(id, b, job) {
     fs.rmSync(tree, { recursive: true, force: true });
     fs.rmSync(gz, { force: true });
   });
+  // 6) MCP 组件：注册成用户级 MCP（走 claude mcp add，和扩展页手动添加同一条路）。失败不算安装失败，扩展页还能手动加
+  if (b.mcp) await compRegisterMcp(id, b, rec);
 }
 
 /** 安装切换（在 compFsExclusive 里跑）：把暂存树 tree/usr 里的新版放进 $PREFIX。
@@ -982,9 +1003,11 @@ export async function compRemove(id) {
     const retired = await retireManagedBridge(id);
     stage = "clear-app-mapping";
     const unmapped = clearBridgeConfigMapping(id);
-    return await compFsExclusive(() => {
+    let mcpName = "";
+    const out = await compFsExclusive(() => {
       stage = "read-record";
       const { exists, rec } = compRemovalRecord(id);
+      mcpName = rec && typeof rec.mcp === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(rec.mcp) ? rec.mcp : "";
       if (!exists && !retired && !unmapped) return { ok: false, message: "not installed" };
       stage = "remove-files";
       // installing / damaged 的完整记录仍有原受管文件清单，照既有管理器处理共享文件和技能。
@@ -997,6 +1020,12 @@ export async function compRemove(id) {
       log(`[comp] ${id} 已卸载（${rec ? rec.files.length : 0} 个文件）`);
       return { ok: true };
     });
+    // 装的时候替用户注册的 MCP 一并拿掉（程序已经删了，留着只会每轮连不上）
+    if (out.ok && mcpName) {
+      const r = await removeMcp(mcpName);
+      log(r.ok ? `[comp] ${id} 已移除 MCP ${mcpName}` : `[comp] ${id} 移除 MCP ${mcpName} 失败：${r.message || "?"}`);
+    }
+    return out;
   } catch (e) {
     if (stage === "retire-managed-bridge" && ["retire-lock", "retire-spawn", "retire-exit", "retire-timeout"].includes(e.stage)) stage = e.stage;
     log(`[comp] ${id} 卸载失败（stage=${stage}）`);
