@@ -190,6 +190,13 @@ let ucHooked = false;
 const askProjectTrust = (run, cwd, proj, emit) => askCard(run, emit, { key: "proj", tool: "ProjectConfig", input: { dir: cwd, risks: proj.risks },
   guard: { cat: "project", what: cwd }, what: `项目配置 ${proj.risks.length} 项`, yes: "✓ 允许", no: "✗ 不加载" });
 
+/** 日志里怎么称呼一条用户消息：诊断包承诺不含消息内容，提问只记字数，斜杠命令只记命令名（FIND-046）。
+ *  以前记前 60 字，原生打包虽然会抹掉整行，但日志文件本身已经把正文写进去了。 */
+export function promptLogLine(message, isCmd) {
+  const s = String(message || "").trim();
+  return isCmd ? `命令 ${s.split(/\s+/)[0].slice(0, 24)}` : `提问（${s.length} 字）`;
+}
+
 // claude 异常退出时给用户的一句话。143 / 137（SIGTERM / SIGKILL）是被别的程序结束的：系统回收内存、别的应用、终端里 kill……
 // 不是模型或接口的问题，说清楚，别让人以为要换模型（11-04 用户反馈）
 function exitHint(code, signal) {
@@ -416,7 +423,7 @@ export async function startRun(item) {
   for (const d of dirs) { if ((dirLen += d.length) > 24576) { log(`--add-dir 太多，从 ${d} 起没加`); break; } argv.push("--add-dir", d); }
 
   const isCmd = message.trim().startsWith("/");
-  log(`▶ ${isCmd ? "命令" : "提问"} ${message.trim().slice(0, 60).replace(/\s+/g, " ")}  ${run.sessionId ? `(续 ${String(run.sessionId).slice(0, 8)})` : "(新会话)"}  [model=${model || "默认"} effort=${effort || "默认"} style=${SETTINGS.outputStyle || "默认"} perm=${permMode}]`);
+  log(`▶ ${promptLogLine(message, isCmd)}  ${run.sessionId ? `(续 ${String(run.sessionId).slice(0, 8)})` : "(新会话)"}  [model=${model || "默认"} effort=${effort || "默认"} style=${SETTINGS.outputStyle || "默认"} perm=${permMode}]`);
   const t0 = Date.now();
 
   // 接口勾了「图片随消息发」：消息里提到的图片再各带一份 image 块（太大的先缩，要等，所以放在起进程前）
@@ -635,7 +642,7 @@ export async function startRun(item) {
       emit({ type: "inject", text: item.message, cid: item.cid, itemId: item.id });   // 先画消息（前端借它另起气泡、重新计时）
       emit({ type: "run_busy", startedAt: Date.now() });
       saveRunMark(); publishState();
-      log(`↪ 插话（命令） ${item.message.trim().slice(0, 40).replace(/\s+/g, " ")}`);
+      log(`↪ 插话 ${promptLogLine(item.message, true)}`);
       return true;
     }
     // 插话里的档号也附上那一章的摘要（同步版：只查已有索引，等不起整理）
@@ -649,7 +656,7 @@ export async function startRun(item) {
     // 就会把 stdin 关掉，这一轮被打断、之后的工具确认也写不进去（0.6.9 审计 195-W.3）。这一轮的 result 之后照常判断收尾
     if (run.idleClose) { clearTimeout(run.idleClose); run.idleClose = null; }
     saveRunMark();     // 马上落盘：送达前 App 被强停，下次启动它还能回到队列里，不会凭空消失
-    log(`↪ 插话 ${item.message.trim().slice(0, 60).replace(/\s+/g, " ")}`);   // 压成一行：诊断包按行抹掉对话内容
+    log(`↪ 插话 ${promptLogLine(item.message, false)}`);
     return true;
   };
   // 子代理联络簿：落盘交代/汇报/长消息，推 ag 事件；一批全部结束时留一条只带路径的短话，跟着用户下一条消息进去

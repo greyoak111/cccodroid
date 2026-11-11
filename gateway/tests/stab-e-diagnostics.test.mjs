@@ -1,0 +1,32 @@
+// e 组 FIND-046：诊断包含用户消息前 60 字，和「已去掉消息内容」的承诺冲突。
+// 日志里不写提问正文（斜杠命令只留命令名），原生打包那层照旧还有一道抹除。
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promptLogLine } from "../gw/run.mjs";
+
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+test("FIND-046：提问日志只记字数，不写正文", () => {
+  const body = "绝密内容 TOPSECRET-MARKER-046";
+  const line = promptLogLine(body, false);
+  assert.equal(line, `提问（${body.length} 字）`);
+  assert.equal(line.includes("TOPSECRET"), false, "日志行里不该有正文：" + line);
+  assert.equal(line.includes("绝密"), false, "日志行里不该有正文：" + line);
+});
+
+test("FIND-046：斜杠命令只记命令名，不带参数", () => {
+  assert.equal(promptLogLine("/compact 因为上下文太长了", true), "命令 /compact");
+  assert.equal(promptLogLine("/rename 我的秘密标题", true), "命令 /rename");
+});
+
+test("FIND-046：起一轮、插话的日志都改走 promptLogLine", () => {
+  const src = fs.readFileSync(path.join(ROOT, "gateway", "gw", "run.mjs"), "utf8");
+  assert.equal(/message\.trim\(\)\.slice\(0, 60\)/.test(src), false, "提问日志还在写正文");
+  assert.equal(/item\.message\.trim\(\)\.slice\(0, (40|60)\)/.test(src), false, "插话日志还在写正文");
+  assert.match(src, /promptLogLine\(message, isCmd\)/);
+  assert.match(src, /promptLogLine\(item\.message, true\)/);
+  assert.match(src, /promptLogLine\(item\.message, false\)/);
+});
