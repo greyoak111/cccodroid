@@ -3179,5 +3179,11 @@ window.I18N_DICT.en = {
   "文件夹会连同里面的内容一起删除。": "Folders will be deleted together with everything inside them.",
   "已删除 {n} 项": "Deleted {n} item(s)",
   "这个文件夹装着应用自己的目录或工作区，不能删": "This folder contains the app's own directories or the workspace and can't be deleted",
-  "模型清单地址（选填；不填会按接口地址自动查找 /models）": "Model list URL (optional; if empty, /models is looked up automatically from the API address)"
+  "模型清单地址（选填；不填会按接口地址自动查找 /models）": "Model list URL (optional; if empty, /models is looked up automatically from the API address)",
+
+  // ── stability report 11-11 (b group): send-path timeouts, drafts, idempotency ──
+  "请求超时：网关没有响应（{n} 秒）": "Request timed out: the gateway didn't respond ({n}s)",
+  "网关离线：{msg} · 点这里重试": "Gateway offline: {msg} · Tap to retry",
+  "草稿没能保存：本机存储空间不足。请把内容复制出去，或先发出去。": "Draft couldn't be saved: device storage is full. Copy the text somewhere, or send it first.",
+  "这条消息的发送标记被用在了别的内容上，请重新发送。": "This send token was used for different content; please send the message again."
 };
