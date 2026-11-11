@@ -788,7 +788,7 @@
       case "inject": {
         // 插话送达：在它被吃进去的位置画出这条消息，之后的回复另起一个气泡，时间顺序才对
         const rv = runViews.get(ev.runId);
-        if (!rv) return;
+        if (!rv || !rv.av) return;   // 收尾后只留了 startedAt 的空壳（FIND-042）
         if (ev.cid) { view.cids.add(ev.cid); view.cidRuns.set(ev.cid, ev.runId); }
         rv.av.finish();
         if (rv.av.empty) rv.av.remove();
@@ -805,7 +805,7 @@
       case "run_idle": {
         // 这一轮答完了，只是 Claude 起的后台任务（本地服务之类）还在跑
         const rv = runViews.get(ev.runId);
-        if (rv && !rv.idle) { rv.idle = true; rv.timer?.stop(ev.at); rv.av.finish(); rv.avDone = true; }
+        if (rv && rv.av && !rv.idle) { rv.idle = true; rv.timer?.stop(ev.at); rv.av.finish(); rv.avDone = true; }
         if (view.runIds.has(ev.runId)) setStatus(idleStatus(ev.bg), "ok");
         return;
       }
@@ -841,12 +841,13 @@
         for (const r of srv.runs) if (r.permMode) r.permMode = ev.mode;
         refreshPlanActs();
         return;
-      case "perm_request": if (runViews.has(ev.runId)) onPermRequest(ev); return;
+      case "perm_request": if (runViews.get(ev.runId)?.av) onPermRequest(ev); return;   // 收尾的空壳不收新卡（FIND-042）
       case "perm_resolved": return permDone(ev.id, ev.behavior, ev);
     }
     const rv = runViews.get(ev.runId);
     if (!rv) return;
     const av = rv.av;
+    if (!av) return;   // 收尾后只留了 startedAt 的空壳（FIND-042）：晚到的增量不再画
     switch (ev.type) {
       case "usage":          if (ev.contextTokens) liveCtx(ev.contextTokens, state.ctxTotal); break;
       case "run_tokens":     rv.out = +ev.out || 0; if (statRun === ev.runId) statPaint(); break;
@@ -993,14 +994,16 @@
         if (sid) api("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: "/goal clear", sessionId: sid, cid: newCid(), mode: "auto" }) }).catch((e) => toast(e.message, true));
       }, 300);
     }
+    // 这一轮可能是在别的会话里跑完的：权限卡不管当前在看哪条会话都要收掉，游离 DOM 和表单值不能留到页面重载（FIND-007）
+    for (const [id, it] of PERMS) if (it.runId === ev.runId && !it.done) permDone(id, "stopped");
     const rv = runViews.get(ev.runId);
     // 不在当前视图里画的一轮（别的会话在后台跑完）：数照样按会话记下，切过去就能看到
     if (!rv) { if (!ev.localCommand && ev.sessionId) { const st = statBits(ev); if (st) statSave(ev.sessionId, st); } if (belongs(ev)) loadSessions(); return; }
     const av = rv.av;
     rv.timer?.stop(ev.at);
     // 实时那份先停；本地命令（/context 等）不算一轮，底栏回到上一轮的数，普通一轮下面再定格
-    if (statRun === ev.runId) { statStop(); statEl.textContent = statLast[view.sessionId || ev.sessionId] || ""; }
-    for (const [id, it] of PERMS) if (it.runId === ev.runId && !it.done) permDone(id, "stopped");
+    // 记到这一轮自己的会话头上：正在看的可能是刚认领的另一条草稿（FIND-008）
+    if (statRun === ev.runId) { statStop(); statEl.textContent = statLast[ev.sessionId || view.sessionId] || ""; }
     if (ev.sessionId && !view.sessionId && view.runIds.has(ev.runId)) { view.sessionId = ev.sessionId; draftAdopt(ev.sessionId); adoptPendingModel(); saveUiState(); }
     if (ev.usage?.context_tokens) liveCtx(ev.usage.context_tokens, ev.usage.context_window || state.ctxTotal);
 
@@ -1019,7 +1022,7 @@
       if (cut) { av.note(t("已中断")); agStopAll(ev.at); }
       else if (ev.retired || bad) agStopAll(ev.at);   // 后台子代理随进程一起停了 / 这一轮失败
       const st = statBits(ev, rv.out);
-      if (st) { statEl.textContent = st; statSave(view.sessionId || ev.sessionId, st); }
+      if (st) { statEl.textContent = st; statSave(ev.sessionId || view.sessionId, st); }
     }
     // 普通一轮出错网关给的是 isError（启动失败才是 failed），两个都要认（审查 #51 第3项）
     if (ev.failed || ev.isError) setStatus(t("失败"), "err");
@@ -1030,6 +1033,10 @@
     scrollDown();
     loadSessions();
     if (!state.caps?.slashCommands?.length) loadCaps();
+    // 一轮收尾：气泡已经画完，runViews 里只留开始时间给历史去重回用；计时器、输出计数和 AssistantView
+    // 连同它攥着的工具卡闭包一起放掉，长会话不再一轮压一轮（FIND-042）
+    runViews.set(ev.runId, { startedAt: rv.startedAt });
+    runSid.delete(ev.runId);
   }
 
   // ── 忙闲与排队（都以网关为准）──────────────────────────────────────
