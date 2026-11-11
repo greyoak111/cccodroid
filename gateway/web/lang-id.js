@@ -3148,4 +3148,5 @@ window.I18N_DICT["id"] = {
   "中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。": "Saat terputus, {n} tindakan yang mungkin memiliki efek samping tidak mengembalikan hasil: {list}. Tidak dapat dipastikan apakah sudah dijalankan; periksa dulu sebelum menekan «Lanjutkan».",
   "上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。": "Status proses sebelumnya tidak dapat dipulihkan (catatan tidak terbaca atau formatnya salah), jadi giliran yang terputus dan pesan dalam antrean tidak akan muncul; berkas aslinya tetap disimpan.",
   "运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。": "Status proses tidak dapat disimpan (penyimpanan mungkin penuh atau tanpa izin). Jika aplikasi ditutup oleh sistem, giliran ini mungkin tidak dapat dipulihkan.",
+  "（上一轮没有正常结束，上面的回复可能不完整）": "(Giliran sebelumnya tidak selesai dengan normal; balasan di atas mungkin tidak lengkap)",
 };

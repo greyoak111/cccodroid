@@ -3145,3 +3145,4 @@
 3145	Lors de l’interruption, {n} action(s) susceptible(s) d’avoir des effets de bord n’ont pas renvoyé de résultat : {list}. Impossible de confirmer si elles ont déjà été exécutées ; vérifiez avant de cliquer sur « Continuer ».
 3146	L’état d’exécution précédent n’a pas pu être récupéré (registre illisible ou mal formé) ; les tours interrompus et les messages en file n’apparaîtront pas. Le fichier d’origine a été conservé.
 3147	L’état d’exécution n’a pas pu être enregistré (stockage plein ou permission refusée). Si le système ferme l’application, ce tour risque de ne pas être récupérable.
+3148	(Le tour précédent ne s'est pas terminé normalement ; la réponse ci-dessus peut être incomplète.)

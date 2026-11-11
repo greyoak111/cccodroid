@@ -10,6 +10,7 @@ import { bodyToFile, forEachLine } from "./bigfile.mjs";
 import { agentFilesOf, findLineOffset, latestContextTokens, lineHas, readSessionForward, readSessionPage, transcriptItems } from "./transcript.mjs";
 import { lineageCached } from "./lineage.mjs";
 import { chapterView } from "./archive-core.mjs";
+import { incompleteItem } from "./incomplete.mjs";
 import { runOfSession } from "./runs.mjs";
 import { archiveBrief, archiveDb, archivedTitle } from "./archive-store.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
@@ -475,6 +476,11 @@ export async function routeSessions(req, res, u, p) {
       // 有子代理记录的 Agent 卡打个标，前端据此给「查看过程」
       const subs = agentFilesOf(found.file);
       if (subs.size) for (const it of page.items) if (it.role === "tool_use" && subs.has(it.id)) it.sub = true;
+      // 上一轮没跑完的持久提示（FIND-040）：中断卡被忽略 / 清掉后，半截回复也要能认出来。
+      // 只在这一页读到了记录末尾时挂在最后一条之后；这个会话正在生成就先不挂
+      const atEnd = fwd !== null ? page.next === page.size : !u.searchParams.has("before");
+      const inc = incompleteItem(id, { atEnd, live: !!live });
+      if (inc) page.items.push(inc);
       const wantMeta = !u.searchParams.has("before") && (!u.searchParams.has("after") || u.searchParams.get("meta") === "1");
       return sendJson(res, 200, {
         id,

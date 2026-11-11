@@ -5,6 +5,7 @@ import { CFG, HERE, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
 import { onShutdown } from "./crashguard.mjs";
 import { SETTINGS, saveSettings, capList } from "./settings-store.mjs";
 import { keepBad, writeAtomic } from "./statefile.mjs";
+import { clearIncomplete, markIncomplete } from "./incomplete.mjs";
 import { PERM_MODES, PROVIDER, keyOf, providerById } from "./providers.mjs";
 import { effectiveModel } from "./sessmodel.mjs";
 // 这个会话真跑时用哪家：钉的 → 项目默认 → 全局（和 run.mjs 的 pickProvider 一致；只看钉的会漏掉项目，#102 04-004）
@@ -192,6 +193,7 @@ export function clearInterrupted(sid) {
 // 正开着它的界面收到 session_gone 自己退回新对话（服务端删的：项目连目录删、定时任务不存对话、别的窗口，#173-4）
 TRASH_HOOKS.push((id) => {
   clearInterrupted(id);
+  clearIncomplete(id);   // 会话进回收站：未完成标记跟着清掉，别留给同号的将来（FIND-040）
   // 排着的消息也丢掉：不然名额一空就拿已删的会话号去 --resume，claude 报 No conversation found，这条消息悄悄没了（0.6.9 审计 195-W.1）
   const n0 = QUEUE.length;
   for (let k = QUEUE.length - 1; k >= 0; k--) if (sidForItem(QUEUE[k]) === id) QUEUE.splice(k, 1);
@@ -247,6 +249,8 @@ export function recoverRunMark() {
       log("⚠️ 中断记录没写上，运行标记留着，下次启动再恢复");
       return restoreQueue(m, false);
     }
+    // 旧版本留下的运行标记里没有这个标记：接着补上（FIND-040）
+    for (const e of fresh) if (e.sessionId) markIncomplete(e.sessionId, e.id);
     for (const h of RECOVER_HOOKS) { try { h(fresh); } catch (e) { log("中断恢复钩子出错: " + e.message); } }
   }
   restoreQueue(m, true);

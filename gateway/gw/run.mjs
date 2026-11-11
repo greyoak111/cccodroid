@@ -12,6 +12,7 @@ import { RUNS, SESSIONS, rememberSession, runFlag, runList } from "./runs.mjs";
 import { SWALLOW_HOOKS } from "./streamfix.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { END_HOOKS, INTERRUPTED, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, permView, publishState, runEmit, saveRunMark, setInterrupted, setPermMode, sidForItem } from "./queue.mjs";
+import { clearIncomplete, markIncomplete } from "./incomplete.mjs";
 import { LOCAL_CMD_RE, handleLocalCommand } from "./modelcmd.mjs";
 import { LL, ensureLlama, localCustomActive } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "./usage.mjs";
@@ -255,6 +256,7 @@ export async function startRun(item) {
   // 以前一开跑就撤，「继续」起不来、空完成时卡片已经没了，用户不知道没跑（0.6.9 审计 195-R.1）。跑着时界面本来就不显示这张卡
   run.intrPending = !!run.sessionId && INTERRUPTED.some((e) => e.sessionId === run.sessionId);
   if (run.sessionId) { RUN_SESSIONS.set(run.id, run.sessionId); idleDisarm(run.sessionId); }
+  if (run.sessionId) markIncomplete(run.sessionId, run.id);   // 这一轮开跑：先记上，拿到结果再清（FIND-040）
   const emit = (ev) => runEmit(run, ev);
   emit({ type: "run_start", text: run.text, sessionId: run.sessionId, follow: run.follow, cid: run.cid, startedAt: run.startedAt, ...(run.auto ? { auto: run.auto } : {}) });
   publishState();
@@ -761,6 +763,7 @@ export async function startRun(item) {
     if (!run.tInit) { run.tInit = Date.now(); emit({ type: "phase", phase: "connect", from: "init" }); }
     setLastInit(init);
     run.sessionId = init.session_id;
+    markIncomplete(run.sessionId, run.id);   // 新会话：拿到会话号就记上（FIND-040）
     run.usageModel = init.model || run.usageModel;
     // 新会话的 run_start 发出时还没有会话号：回填进日志，别的视图切过来、整轮重放时才认得出这是它的
     for (const e of run.log || []) if (e.type === "run_start" && !e.sessionId) e.sessionId = run.sessionId;
@@ -789,6 +792,8 @@ export async function startRun(item) {
   };
   const onResult = (r) => {
     lastResult = r; resultStale = false;
+    // 这一轮走到了结果（答完或报错）：不再是「没跑完」（FIND-040）
+    clearIncomplete(run.sessionId);
     if (run.intrPending && !r.is_error) { run.intrPending = false; clearInterrupted(run.sessionId); }
     // 空闲时送进去的斜杠命令：这个 result 一般就是它的（送进去前这一轮已经答完）。
     // 送进去后后台任务有变、命令自己又还没动静：这个多半是后台任务回报那一轮的，不认领（认领了会在命令还没办完时关 stdin，复核 v067b-3）；
