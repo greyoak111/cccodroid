@@ -630,41 +630,90 @@
   let es = null, lastEventId = "", helloCount = 0, busWatch = 0;
 
   let busDownAt = 0, busKick = 0;
+  // 自己重拨的等待：1.5 秒起步翻倍，封顶 30 秒——网关长期不在时不再每 1.5 秒敲一次（FIND-037）。
+  // 只封等待时间，不放弃重拨：网关回来后要自己接上，不能等用户刷新
+  const BUS_RETRY_MIN = 1500, BUS_RETRY_MAX = 30000;
+  let busRetryN = 0, busProbeAt = 0, gwDeadAt = 0;
+  function busRetryDelay(n) { return Math.min(BUS_RETRY_MAX, BUS_RETRY_MIN * Math.pow(2, Math.max(0, n))); }
+  /** 断线时问一句网关还活着没有：问不到就把「生成不受影响」换成「网关离线」（FIND-018）。
+   *  隔 8 秒最多问一次，断线重拨期间不至于把 /api/status 敲个不停 */
+  function probeGateway() {
+    const now = Date.now();
+    if (srv.connected || srv.foreign || now - busProbeAt < 8000 || typeof api !== "function") return;
+    busProbeAt = now;
+    api("/api/status").catch(() => { if (!srv.connected && !srv.foreign) { gwDeadAt = Date.now(); setStatus(t("网关离线"), "err"); } });
+  }
   function connectBus(resume) {
-    // 新的连接已经由用户在开头：把上一轮排着的重连定时器取消，否则 2 秒后它会把刚建好的连接再断一次（0.6.9 审计 195-P.6）
+    // 新的连接已经由用户在开头：把上一轮排着的重拨定时器取消，否则过一会儿它会把刚建好的连接再断一次（0.6.9 审计 195-P.6）
     clearTimeout(busWatch); busWatch = 0;
     if (es) { try { es.close(); } catch {} }
     if (srv.foreign) { es = null; return; }   // 浏览器从别的地址打开：/api 必然 403，别一直重拨（195-G.6）
     // 换视图要整轮重放：旧视图的游标作废，免得重拨时又带着它续传，新视图缺东西（审查 #50 S2-05）
-    if (!resume) lastEventId = "";
+    if (!resume) { lastEventId = ""; busRetryN = 0; }
     // 整轮重放时带上正在看的会话 / 轮次：网关先放它们，别的会话的长轮排后面（#188）
     const focus = !resume || !lastEventId ? [view.sessionId ? "focus=" + encodeURIComponent(view.sessionId) : "", view.runIds.size ? "run=" + encodeURIComponent([...view.runIds].slice(-64).join(",")) : ""].filter(Boolean).join("&") : "";
     const url = "/api/events" + (resume && lastEventId ? "?since=" + encodeURIComponent(lastEventId) : focus ? "?" + focus : "");
-    es = new EventSource(url);
+    const cur = es = new EventSource(url);
+    // 关掉 / 换掉的旧连接上排队的事件还可能派发（OBS-002）：只认当前这条、且没被自己关掉。
+    // 这里不把全局 es 置空：19-boot 的 refreshStatus 用 es && !srv.connected 判断「SSE 断、HTTP 通」
+    cur.dead = false;
     es.onmessage = (m) => {
+      if (es !== cur || cur.dead) return;
       if (m.lastEventId) lastEventId = m.lastEventId;
       let ev; try { ev = JSON.parse(m.data); } catch { return; }
       try { onBus(ev); } catch (e) { console.error(e); }
     };
-    es.onopen = () => { clearTimeout(busWatch); busWatch = 0; busDownAt = 0; setConn(true); };
+    es.onopen = () => {
+      if (es !== cur || cur.dead) return;
+      busRetryN = 0;
+      gwDeadAt = 0;   // 连上了就是活的：断线文案从「生成不受影响」重新算
+      clearTimeout(busWatch); busWatch = 0; busDownAt = 0; setConn(true);
+    };
     es.onerror = () => {
+      if (es !== cur || cur.dead) return;
+      cur.dead = true;
       setConn(false);
       // 一直连不上：多半是通知栏点了「停止」、网关服务没了，界面还开着就请壳把它拉起来（11-05 报告；服务在跑时壳那边什么也不做）
       const now = Date.now();
       if (!busDownAt) busDownAt = now;
       if (now - busDownAt > 4000 && now - busKick > 10000 && !document.hidden && window.CCApp && window.CCApp.ensureGateway) { busKick = now; try { window.CCApp.ensureGateway(); } catch {} }
-      // 网关重启时浏览器有时会直接放弃（CLOSED）：那就自己再拨
-      if (es.readyState === 2) { clearTimeout(busWatch); busWatch = setTimeout(() => connectBus(true), 2000); }
+      // 不让浏览器按服务端的 retry: 1500 一直原地重拨：关掉这条，自己按退避再拨（FIND-037）；拨上由 onopen 复位
+      try { cur.close(); } catch {}
+      clearTimeout(busWatch);
+      busWatch = setTimeout(() => connectBus(true), busRetryDelay(busRetryN++));
+      probeGateway();
     };
   }
   function setConn(ok) {
     srv.connected = ok;
     // 浏览器从 127.0.0.1 / localhost 打开：网关在线，只是来源不对，别说「断开」盖掉「请在应用里打开」（195-G.6 真机）
     if (!ok) setStatus(srv.foreign ? t("请在 cccodroid 应用里打开") : t("与网关断开，正在重连…（生成不受影响）"), "warn");
+    // 刚问过、网关确实不在：每次重拨失败不要把「网关离线」又盖回「生成不受影响」。
+    // 45 秒盖住最长的 30 秒退避；连上（onopen）就清零，重新按原文案说（FIND-018）
+    if (!ok && !srv.foreign && Date.now() - gwDeadAt < 45000) setStatus(t("网关离线"), "err");
+  }
+  /** 回前台把界面状态和网关对一遍：SSE 看起来 OPEN、其实已经不再派发时，残留的「生成中」和停止键靠这个散掉（FIND-017）。
+   *  askedAt：对账发起时刻，之后才起的轮次不归这次快照管 */
+  function reconcileRunViews(askedAt) {
+    const live = new Set((srv.runs || []).map((r) => r.id));
+    for (const [runId, rv] of [...runViews]) {
+      // 网关那边还在跑；或快照之后才起的轮次，不归这次对账管
+      if (live.has(runId) || !(rv.startedAt && rv.startedAt < askedAt)) continue;
+      // 网关那边这一轮已经没了：按普通收尾停下（结果未知，不标失败），过程留在原地
+      rv.timer?.stop();
+      if (rv.av) { rv.av.finish(); if (rv.av.empty) rv.av.remove(); }
+      runViews.set(runId, { startedAt: rv.startedAt });
+      runSid.delete(runId);
+    }
+    if (statRun && !live.has(statRun)) { statStop(); statEl.textContent = statLast[view.sessionId] || ""; }
   }
   document.addEventListener("visibilitychange", () => {
-    // 切回前台：WebView 在后台冻过，连接可能已经悄悄死了
-    if (!document.hidden && (!es || es.readyState !== 1)) connectBus(true);
+    // 切回前台：WebView 在后台冻过，连接可能已经悄悄死了；SSE 看着活着也可能不再派发，
+    // 所以不管连接状态都拉一次快照对账，再按需重连（FIND-017）
+    if (document.hidden) return;
+    const askedAt = Date.now();
+    if (typeof api === "function") api("/api/state").then((s) => { if (s && typeof s === "object") { applyState(s); if (typeof reconcileRunViews === "function") reconcileRunViews(askedAt); } }).catch(() => {});
+    if (!es || es.readyState !== 1) connectBus(true);
   });
 
   // ── 维护者通知（经 cccodroid.net，网关验过签；见 gw/notices.mjs）：和更新说明同样的居中卡片 ──
