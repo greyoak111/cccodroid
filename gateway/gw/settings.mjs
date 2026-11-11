@@ -14,7 +14,12 @@ export { SETTINGS, saveSettings } from "./settings-store.mjs";
 import { SETTINGS, saveSettings, outputStyles } from "./settings-store.mjs";
 import { clampAutoCompact } from "./stream.mjs";
 
-
+// 设置回执只带认识的字段：设置文件能手改、能从旧版 / 分享的预置带过来，里面可能有类凭据字段。
+// 以前直接展开 SETTINGS，GET 和保存回执会把它们原样送回界面（FIND-052）。
+const VIEW_KEYS = ["model", "permissionMode", "guard", "addDirs", "outputStyle", "effort", "allowedTools", "disallowedTools",
+  "autoCompactWindow", "provider", "memGuard", "autoClean", "maxParallel", "staticCompat", "idleCompaction", "workIsland",
+  "localMode", "titleModel", "hiddenProviders", "permNotice", "permMigrated"];
+const settingsView = () => Object.fromEntries(VIEW_KEYS.filter((k) => k in SETTINGS).map((k) => [k, SETTINGS[k]]));
 
 // ── 路由：/api/settings ──
 export async function routeSettings(req, res, u, p) {
@@ -56,7 +61,7 @@ export async function routeSettings(req, res, u, p) {
   }
 
   if (p === "/api/settings") {
-    if (req.method === "GET") return sendJson(res, 200, { ...SETTINGS, maxParallel: maxParallel(), maxParallelCap: MAX_PARALLEL_CAP, workspace: CFG.workspace, outputStyles: outputStyles() });
+    if (req.method === "GET") return sendJson(res, 200, { ...settingsView(), maxParallel: maxParallel(), maxParallelCap: MAX_PARALLEL_CAP, workspace: CFG.workspace, outputStyles: outputStyles() });
     if (req.method === "POST") {
       const b = JSON.parse((await readBody(req)) || "{}");
       // 先校验、再动内存（FIND-051）：未知厂商、正在生成时切厂商都要在改任何设置之前拦下。
@@ -163,7 +168,7 @@ export async function routeSettings(req, res, u, p) {
       if (!saveSettings())
         return sendJson(res, 500, { error: tz("设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）") });
       log(`设置已更新 provider=${PROVIDER.id} model=${SETTINGS.model || "(默认)"} effort=${SETTINGS.effort} autoCompact=${SETTINGS.autoCompactWindow || "(默认)"} workIsland=${SETTINGS.workIsland}`);
-      return sendJson(res, 200, { ok: true, settings: SETTINGS, provider: PROVIDER.id, upstream: CFG.upstream });
+      return sendJson(res, 200, { ok: true, settings: settingsView(), provider: PROVIDER.id, upstream: CFG.upstream });
     }
   }
   return NEXT;

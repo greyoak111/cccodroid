@@ -1001,6 +1001,7 @@ export async function routeProviders(req, res, u, p) {
     if ([...RUNS.values()].some((r) => !r.ended && r.provider === id)) return sendJson(res, 409, { error: "busy", message: tz("这一家正在用，等这一轮跑完再删。") });
     const previous = PROVIDERS_RAW.providers[id];
     if (!PRESETS[id] && !previous) return sendJson(res, 404, { error: "unknown provider" });
+    const wasActive = id === PROVIDER.id;   // 在 applyProvider() 换掉当前厂商之前记下
     // 预置厂商删不掉，只清空用户字段（密钥等）；自定义的整条删掉
     delete PROVIDERS_RAW.providers[id];
     const resetSettings = !PRESETS[id] && SETTINGS.provider === id;
@@ -1018,6 +1019,9 @@ export async function routeProviders(req, res, u, p) {
     if (resetSettings) saveSettings();   // 接口已经删掉了；设置即使没写进去，加载时也会按「那家不在了」回落
     applyProvider();
     dropModelCache();
+    // claude 每次要钥匙都读 .cache 里的密钥文件；接口都删了，缓存不能继续留着（FIND-052）
+    try { (await import("./claude.mjs")).clearKeyCache(id, wasActive); }
+    catch (e) { log(`[provider] 清理密钥缓存失败：${e.message}`); }
     return sendJson(res, 200, { ok: true });
   }
   if (req.method === "POST" && p === "/api/providers/test") {

@@ -601,6 +601,15 @@ export function termKeyFile(p = PROVIDER) {
   } catch (e) { log("写终端密钥文件失败: " + e.message); return ""; }
 }
 
+/** 接口删掉后清掉它留在 .cache 里的密钥文件（FIND-052）：按 id 一份、终端一份；
+ *  正在用的那家文件名不带 id，删的是当前接口时也要清（否则已删接口的 Key 一直留在盘上）。 */
+export function clearKeyCache(id, active) {
+  const safe = String(id).replace(/[^\w.-]/g, "_");
+  const files = [KEY_FILE + "-" + safe, KEY_FILE + "-term-" + safe];
+  if (active) files.push(KEY_FILE);
+  for (const f of files) { try { fs.unlinkSync(f); } catch {} }
+}
+
 /** 跑一次 claude 并收集全部 stdout（用于取 CLI 状态类输出） */
 /** 起 claude 之前核程序本身（claudeseal.mjs）：对不上返回给人看的原因，能起返回 ""。
  *  开会话以外的路也要核：mcp list、doctor、登录、补档、回退文件、扩展命令都会执行它（审查 11-05 第 16 组 1） */
