@@ -68,7 +68,9 @@
     TERM.list = srv.filter((x) => x.alive || TERM.inst.has(x.id));
     const live = TERM.list.filter((x) => x.alive);
     // 没有终端时直接按目标目录开一个：以前先开一个默认 bash，再开一个目标目录的（195-H.6）
-    if (!live.length) return newTerm({ gen: g, ...(opts.cwd ? { cwd: opts.cwd } : {}) });
+    // 带目录的显式入口在同步后必须兑现：页面重建后本地列表还是空的，网关上却可能留着别的目录的终端，
+    // 不能因为「已经有活终端」就只显示旧的（BUG-G01）
+    if (!live.length || opts.cwd) return newTerm({ gen: g, ...(opts.cwd ? { cwd: opts.cwd } : {}) });
     if (!TERM.list.some((x) => x.id === TERM.cur)) TERM.cur = live[live.length - 1].id;
     renderTermTabs();
     showTerm(TERM.cur);
