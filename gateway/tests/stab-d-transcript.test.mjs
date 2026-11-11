@@ -41,6 +41,16 @@ test("一条坏记录不拖垮整页（往前翻 / 往后读都一样）", async
   assert.ok(fwd.items.some((x) => x.text === "后答"));
 });
 
+test("合成 API 错误记录不当普通助手回复显示（OBS-005）", () => {
+  const its = transcriptItems(ev("assistant", [{ type: "text", text: "API Error: 500 upstream exploded" }], { isApiErrorMessage: true, message: { role: "assistant", model: "<synthetic>", content: [{ type: "text", text: "API Error: 500 upstream exploded" }] } }));
+  assert.equal(its.length, 1);
+  assert.equal(its[0].role, "note");
+  assert.match(its[0].text, /接口报错/);
+  assert.match(its[0].text, /API Error: 500/);
+  // 普通助手回复不受影响
+  assert.equal(transcriptItems(ev("assistant", [{ type: "text", text: "正常回答" }]))[0].role, "assistant");
+});
+
 test("自定义 pick 抛错只丢这一条，不丢整页", async () => {
   const lines = [ev("user", "一"), ev("assistant", [{ type: "text", text: "二" }]), ev("user", "三"), ev("assistant", [{ type: "text", text: "四" }])];
   const file = write(lines);

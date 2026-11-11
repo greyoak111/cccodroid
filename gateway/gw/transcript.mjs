@@ -67,7 +67,13 @@ export function transcriptItems(ev) {
       }
     }
   } else if (ev.type === "assistant") {
+    // 接口报错落成的合成记录（isApiErrorMessage）：不是模型说的话，别混进正常回复里（OBS-005）
+    const apiErr = ev.isApiErrorMessage === true;
     for (const c of blocksOf(ev.message?.content)) {
+      if (apiErr) {
+        if (c.type === "text" && typeof c.text === "string" && c.text) out.push({ role: "note", text: (tr(LAST_LANG, tz("接口报错，不是正常回复：")) + "\n" + c.text).slice(0, 4000) });
+        continue;
+      }
       if (c.type === "text" && typeof c.text === "string" && c.text) {
         // 单条正文不设上限：重开大会话时整段 renderMd 会把界面卡死（195-Q.10）。留一个很大的顶，超出的标出来
         const over = c.text.length > MAX_ASSISTANT_TEXT;
