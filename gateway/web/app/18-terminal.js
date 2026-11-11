@@ -68,7 +68,9 @@
     TERM.list = srv.filter((x) => x.alive || TERM.inst.has(x.id));
     const live = TERM.list.filter((x) => x.alive);
     // 没有终端时直接按目标目录开一个：以前先开一个默认 bash，再开一个目标目录的（195-H.6）
-    if (!live.length) return newTerm({ gen: g, ...(opts.cwd ? { cwd: opts.cwd } : {}) });
+    // 带目录的显式入口在同步后必须兑现：页面重建后本地列表还是空的，网关上却可能留着别的目录的终端，
+    // 不能因为「已经有活终端」就只显示旧的（BUG-G01）
+    if (!live.length || opts.cwd) return newTerm({ gen: g, ...(opts.cwd ? { cwd: opts.cwd } : {}) });
     if (!TERM.list.some((x) => x.id === TERM.cur)) TERM.cur = live[live.length - 1].id;
     renderTermTabs();
     showTerm(TERM.cur);
@@ -230,8 +232,10 @@
       if (typeof total === "number" && typeof a.seen === "number" && total >= a.seen && total - a.seen <= data.length) {
         if (total > a.seen) xt.write(data.slice(data.length - (total - a.seen)));
       } else {
-        // 缺的超过回放环（256KB）：中间那段已经拿不回来了，重置后说一声，别让人以为输出是连着的（FIND-045）
-        const lost = typeof total === "number" && typeof a.seen === "number" && total > a.seen;
+        // 缺口：断线期间丢的比回放环（256KB）还多（seen 有值），或者首次连接时缓冲里只剩尾段（seen 还没值，
+        // total 比回放数据多）。两种都重置后说一声，别让人以为输出是连着的（FIND-045 / BUG-G02）
+        const lost = typeof total === "number"
+          && (typeof a.seen === "number" ? total > a.seen : total > data.length);
         xt.reset();
         if (lost) xt.write("\x1b[2m" + t("…（已截断）") + "\x1b[0m\r\n");
         xt.write(data);

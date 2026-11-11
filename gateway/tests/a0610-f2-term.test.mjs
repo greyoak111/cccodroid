@@ -79,8 +79,9 @@ test("H.2/H.3/H.6/H.7/H.8 前端行为（源码断言）", () => {
   assert.match(src, /TERM\.tvCut/);
   assert.match(src, /total - a\.seen <= data\.length/, "回放没有按累计数续接");
   assert.match(src, /opts\.cwd \? \{ cwd: opts\.cwd \}/);
+  assert.match(src, /if \(!live\.length \|\| opts\.cwd\) return newTerm/, "带目录的显式入口在同步后要兑现（BUG-G01）");
   assert.match(src, /const gen = opts\.gen != null \? opts\.gen : TERM\.gen/);
   assert.match(src, /cell\.getChars\(\)/, "网址定位没有按格子算列");
   const proj = fs.readFileSync(path.join(APP, "14-projects-sched.js"), "utf8");
-  assert.match(proj, /openTerm\(had \? \{\} : \{ cwd: dir \}\)/);
+  assert.match(proj, /await openTerm\(\{ cwd: dir \}\)/);
 });

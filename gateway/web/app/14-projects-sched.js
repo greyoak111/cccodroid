@@ -188,10 +188,9 @@
     ]);
   }
   async function openTermAt(dir) {
-    // 一个终端都没有时，openTerm 直接把第一个开在目标目录；已经有终端的才另开一个（195-H.6）
-    const had = TERM.list.some((x) => x.alive);
-    await openTerm(had ? {} : { cwd: dir });
-    if (had) await newTerm({ cwd: dir });
+    // 显式目录入口：同步之后必须有一个目标目录的终端。列表要等 /api/term/list 回来才知道，
+    // 不能拿同步前的本地列表推断（页面重建后本地是空的、网关却还留着别的目录的终端，BUG-G01）
+    await openTerm({ cwd: dir });
   }
 
   // ── 弹层：宽屏居中（宽 560、高不过宽×φ），窄屏整页推入；返回键先关它 ──
