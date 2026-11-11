@@ -866,7 +866,7 @@ async function billingInfo(id, force) {
         if (d && d.currency && Number.isFinite(d.balance)) noteBalance(id, d.currency, d.balance, acct);
         BAL_CACHE.set(id, { at: Date.now(), acct, data: { ...(d || {}), balanceAt: Date.now() } });
         Object.assign(out, d || {}, { balanceAt: Date.now() });
-      } catch (e) { out.balanceError = e.message; }
+      } catch (e) { out.balanceError = redactKey(e.message, String(v.apiKey || "").trim()); }   // 上游报错回显的 Key 不进设置页（UIFS-009 扩到余额）
     }
   }
   const b = BILL[id];
