@@ -113,15 +113,17 @@ export function forkSession(id, userText, after, { before = false, uuid = "", la
       if (!line.trim()) return;
       if (line.includes('"uuid"')) { try { const e = JSON.parse(line); if (e.uuid && !e.isSidechain && /^(user|assistant|system)$/.test(e.type)) at = e.uuid; } catch {} }
       if (!line.includes(id)) return w.write(line);
-      try { const ev = JSON.parse(line); if (ev.sessionId === id) ev.sessionId = nid; w.write(JSON.stringify(ev)); }
-      catch { w.write(line); }
+      // 解析失败才原样抄；写盘出错不能落进这个 catch 再写一遍（BUG-P02：重复行、坏行照样发布）
+      let out = line;
+      try { const ev = JSON.parse(line); if (ev.sessionId === id) { ev.sessionId = nid; out = JSON.stringify(ev); } } catch {}
+      w.write(out);
     });
+    w.close();      // flush + fsync 出错也算失败：删临时文件，不发布（BUG-P02）
   } catch (e) {
     try { w.close(); } catch {}
     try { fs.rmSync(tmpFile, { force: true }); } catch {}
     throw e;
   }
-  w.close();
   // 同名目录里是子代理记录、超长工具结果：一起抄过去，引用它们的路径照旧有效
   // 抄不全就不分叉：分出来的会话读不到子代理过程，还报成功（#98 03-003 同类）。原会话没动，删掉抄了一半的
   const side = path.join(dir, id);
@@ -237,13 +239,13 @@ export function deleteMessage(id, userText, after, which, uuid = "", replyUuid =
       put(ch ? JSON.stringify(ev) : l);
     });
     for (; k < want.length; k++) moved[want[k]] = newAt;
+    w.close();      // flush + fsync 出错也算失败：删临时文件，不发布（BUG-P02）
   } catch (e) {
     // 清理自身别再抛：否则原始错误被盖住、临时文件也留在原处（200-8-04）
     try { w.close(); } catch {}
     try { fs.rmSync(tmp, { force: true }); } catch {}
     throw e;
   }
-  w.close();
   fs.renameSync(tmp, found.file);
   resealAfterEdit(id, found.file, dirty);
   PEEK_CACHE.delete(found.file);
@@ -496,15 +498,16 @@ function rewriteCwd(file, cwd, sid) {
   try {
     forEachLine(file, (l) => {
       if (!l.includes('"cwd"')) return w.write(l);
-      try { const e = JSON.parse(l); if (e && typeof e.cwd === "string") e.cwd = cwd; w.write(JSON.stringify(e)); }
-      catch { w.write(l); }
+      let out = l;     // 同 forkSession（BUG-P02）：只有解析失败才原样抄，写错照常往外抛
+      try { const e = JSON.parse(l); if (e && typeof e.cwd === "string") { e.cwd = cwd; out = JSON.stringify(e); } } catch {}
+      w.write(out);
     });
+    w.close();      // flush + fsync 出错也算失败：删临时文件，不发布（BUG-P02）
   } catch (e) {
     try { w.close(); } catch {}
     try { fs.rmSync(tmp, { force: true }); } catch {}
     throw e;
   }
-  w.close();
   fs.renameSync(tmp, file);
   resealAfterEdit(sid, file, dirty);
 }

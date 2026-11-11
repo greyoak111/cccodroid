@@ -44,14 +44,28 @@ export function forEachLine(file, fn) {
   } finally { fs.closeSync(fd); }
 }
 
-/** 攒着写：write(line) 自动补换行，close() 落盘。整份不进内存 */
+/** 攒着写：write(line) 自动补换行，close() 落盘（fsync 后关）。整份不进内存。
+ *  写盘出过一次错，这个写手就作废（BUG-P02）：之后的 write / close 都抛同一个错。
+ *  以前失败的那一批还留在缓冲里，上层要是吞了这次异常接着 write，下一次 flush 会把它连同新行再写一遍（重复行），
+ *  短写之后再出错时前半截已经落盘，文件里就是半行坏 JSON —— 然后 close 成功、换名发布 */
 export function lineWriter(file) {
   const fd = fs.openSync(file, "w", 0o600);      // 会话记录只给自己读（分叉出来的以前跟着 umask 是 0644，审查 v0513b 低-10）
-  let parts = [], len = 0;
-  const flush = () => { if (len) { writeAll(fd, Buffer.concat(parts, len)); parts = []; len = 0; } };
+  let parts = [], len = 0, err = null, closed = false;
+  const flush = () => {
+    if (err) throw err;
+    if (!len) return;
+    const b = Buffer.concat(parts, len); parts = []; len = 0;
+    try { writeAll(fd, b); } catch (e) { err = e; throw e; }
+  };
   return {
-    write(line) { const b = Buffer.from(line + "\n", "utf8"); parts.push(b); len += b.length; if (len >= CHUNK) flush(); },
-    close() { try { flush(); } finally { fs.closeSync(fd); } },
+    write(line) { if (err) throw err; const b = Buffer.from(line + "\n", "utf8"); parts.push(b); len += b.length; if (len >= CHUNK) flush(); },
+    close() {
+      if (closed) { if (err) throw err; return; }
+      closed = true;
+      try { flush(); fs.fsyncSync(fd); }
+      catch (e) { err = err || e; throw err; }
+      finally { fs.closeSync(fd); }
+    },
   };
 }
 
