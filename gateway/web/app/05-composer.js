@@ -62,6 +62,9 @@
     }
     if (typed.startsWith("/rename ")) {
       if (!view.sessionId) return toast(t("当前还没有会话"), true);
+      // 发送键连点两下：第一次还没回来时输入框还没清，同一条重命名会再发一遍（稳定性报告 FIND-012）
+      if (renameBusy === typed) return;
+      renameBusy = typed;
       const rgen = view.gen;
       try {
         await api(`/api/session/${encodeURIComponent(view.sessionId)}/rename`, {
@@ -73,6 +76,7 @@
         if (fromInput && rgen === view.gen && inputEl.value.trim() === typed) { inputEl.value = ""; autoGrow(); }
         toast(t("已重命名")); loadSessions();
       } catch (e) { toast(e.message, true); }
+      finally { if (renameBusy === typed) renameBusy = ""; }
       return;
     }
 
@@ -148,6 +152,7 @@
     } finally { if (done) done(); }
   }
   let lastSendAt = 0;
+  let renameBusy = "";   // 正在发的那条 /rename 原文：连点发送时挡掉重复请求（FIND-012）
 
   /** 插话：不打断，把输入框里的字递进正在跑的这一轮（claude 在当前这一步结束后就会看到） */
   function interjectNow() {
@@ -372,18 +377,21 @@
     hidePopup();
   });
 
+  // 输入法正在拼字时按的回车：安卓 WebView 有时在 keydown 里 isComposing 已经是 false，
+  // 只能靠 keyCode 229 认出来；不拦住就会把拼音当消息发出去（稳定性报告 FIND-012）
+  const imeBusy = (e) => !!e.isComposing || e.keyCode === 229;
   inputEl.addEventListener("keydown", (e) => {
     // 一项都没匹配上时也要能 Esc 关掉（审查 #48 03-F04）
     if (e.key === "Escape" && !popupEl.classList.contains("hidden")) { e.preventDefault(); hidePopup(); return; }
     if (!popupEl.classList.contains("hidden") && state.popup.items.length) {
       if (e.key === "ArrowDown") { e.preventDefault(); state.popup.sel = (state.popup.sel + 1) % state.popup.items.length; renderPopup(); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); state.popup.sel = (state.popup.sel - 1 + state.popup.items.length) % state.popup.items.length; renderPopup(); return; }
-      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.isComposing)) {
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !imeBusy(e))) {
         e.preventDefault(); applyPopupChoice(state.popup.sel); return;
       }
     }
     if (e.key === "ArrowUp" && !inputEl.value && draftStash) { e.preventDefault(); draftRestore(); return; }
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && (enterSends() || e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+    if (e.key === "Enter" && !e.shiftKey && !imeBusy(e) && (enterSends() || e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
   });
   // 回车键：默认发送；手机软键盘没有 Shift，想多行输入的可以改成回车换行（Ctrl + 回车或发送键发出）
   const enterSends = () => localStorage.getItem("cc.enterKey") !== "newline";
@@ -403,7 +411,8 @@
       if (it.kind === "file") { const f = it.getAsFile(); if (f) files.push(f); }
     }
     if (!files.length) return;             // 纯文本粘贴，走默认行为
-    e.preventDefault();
+    // 图文一起复制（聊天软件里很常见）：别为了收图片把文字吞掉 —— 有文字就让浏览器照常贴，图片另外进附件栏（稳定性报告 FIND-012）
+    if (!e.clipboardData.getData("text/plain")) e.preventDefault();
     await uploadFiles(files);
   });
 
