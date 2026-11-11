@@ -364,6 +364,10 @@ export function claudeEnv(o = {}) {
   // 厂商文档要求的额外变量（如 GLM 的 API_TIMEOUT_MS）。只收字符串，且不许借道改密钥/端点，
   // 也不许碰「执行什么、加载什么」的变量：自定义厂商的配置能分享导入，带着 CLAUDE_CODE_SHELL(_PREFIX)、LD_PRELOAD、
   // NODE_OPTIONS、PATH、BASH_ENV 之类就能让 claude 跑任意代码（审查 H8）。超时、重试、代理这类照常放行
+  // 预置厂商都在 extraEnv 里带了 API_TIMEOUT_MS，自定义的没有：上游接了请求一个字节都不回时，claude 默认档 100 秒以上不报错，
+  // 界面一直停在「连接中」（#203）。这里补一档默认（只约束等响应头，流开始后不掐），下面用户自己写的会盖掉它。
+  // 不写进厂商对象：协议桥认领的条目要求 extraEnv 为空（bridge-config 的冲突判断）
+  if (p.custom) { env.API_TIMEOUT_MS = "90000"; env.CLAUDE_CODE_MAX_RETRIES = "3"; }
   for (const [k, v] of Object.entries(p.extraEnv || {})) {
     if (/^[A-Z_][A-Z0-9_]*$/.test(k) && !EXTRA_ENV_DENY.test(k)) env[k] = String(v);
   }
