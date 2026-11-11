@@ -33,9 +33,17 @@ test("没填清单地址的自定义端口：猜中 /v1/models 就用上，带�
   try {
     const p = { id: "custom-9", custom: true, group: "custom", authStyle: "bearer", modelsAuth: "bearer", apiKey: "sk-test",
       baseUrl: `http://127.0.0.1:${srv.address().port}/relay/anthropic`, modelsUrl: "", defaultModel: "relay-m1" };
-    const list = await fetchModels(true, p);
+    // 开跑前那次（不带 guess）：不去猜、不发请求，开跑不等
+    await fetchModels(false, p);
+    assert.equal(hits.length, 0, "开跑前不能去猜清单");
+    // 用户打开清单：去猜（前一次没记 10 分钟缓存，这次照样会猜）
+    const list = await fetchModels(false, p, { guess: true });
     assert.deepEqual(list.map((m) => m.id).filter((x) => x.startsWith("relay-")).sort(), ["relay-m1", "relay-m2"]);
     assert.equal(hits[0][0], "/relay/v1/models");
     assert.equal(hits[0][1], "Bearer sk-test");
+    // 猜中以后，开跑前那次直接用猜中的地址（同一配置）
+    const n = hits.length;
+    await fetchModels(true, p);
+    assert.deepEqual(hits.slice(n).map((h) => h[0]), ["/relay/v1/models"]);
   } finally { srv.close(); }
 });

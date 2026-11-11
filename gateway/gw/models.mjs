@@ -275,14 +275,16 @@ let CACHE_GEN = 0, REQ_SEQ = 0;
 export function dropModelCache() { CACHE_GEN++; MODELS = null; MODELS_AT = 0; MODELS_FOR = null; CACHE.clear(); }
 export function expireModelCache() { CACHE_GEN++; MODELS_AT = 0; for (const c of CACHE.values()) c.at = 0; }   // 在途的旧结果别把过期的又续上（复核 L1）
 
-/** p：哪家（缺省 = 全局生效的）。按家各缓存 10 分钟；全局那家的结果同时放进 MODELS */
-export async function fetchModels(force, p = PROVIDER) {
-  const gen = CACHE_GEN, list = await fetchModelsOf(p, force);
+/** p：哪家（缺省 = 全局生效的）。按家各缓存 10 分钟；全局那家的结果同时放进 MODELS。
+ *  guess：自定义端口没填清单地址时去猜 /models。只在用户打开清单（面板、/model）时猜：开跑前要等清单，
+ *  连不上的端口逐个试要白等好几个 15 秒 */
+export async function fetchModels(force, p = PROVIDER, { guess = false } = {}) {
+  const gen = CACHE_GEN, list = await fetchModelsOf(p, force, guess);
   // 全局那份跟着按家缓存走：并发刷新时缓存里留的是后发起的那次（见 keep），这里不按完成顺序另写一份
   if (gen === CACHE_GEN && p.id === PROVIDER.id) { const c = CACHE.get(p.id); MODELS = c && c.sig === sigOf(p) ? c.list : list; MODELS_AT = Date.now(); MODELS_FOR = sigOf(p); }
   return list;
 }
-async function fetchModelsOf(p, force) {
+async function fetchModelsOf(p, force, guess) {
   const sig = sigOf(p), c0 = CACHE.get(p.id), c = c0 && c0.sig === sig ? c0 : null, gen = CACHE_GEN, seq = ++REQ_SEQ;
   // 同一配置两次刷新重叠、先发的后回来：不许盖掉后发的结果（#102 04-002）
   const keep = (list, ttl = true) => {
@@ -333,7 +335,7 @@ async function fetchModelsOf(p, force) {
   if (p.modelsUrl && (key || p.modelsAuth === "none") && modelsUrlOk(p)) {
     const list = await pull(p.modelsUrl);
     if (list) return keep(list);
-  } else if (!p.modelsUrl && p.custom && key) {
+  } else if (!p.modelsUrl && p.custom && key && (guess || GUESSED.has(sig))) {
     // 自定义端口没填清单地址：按接口地址猜几个同主机的 /models（第三方端口多半同时开着 OpenAI 形状的清单）。
     // 只试和接口同主机同端口的地址（照样过 modelsUrlOk），密钥不会被带去别处；猜中的记在这份配置名下，下次直接用
     const hit = GUESSED.get(sig);
@@ -344,8 +346,10 @@ async function fetchModelsOf(p, force) {
     }
     if (hit) GUESSED.delete(sig);
   }
+  // 该猜而这次没猜（开跑前那次）：先用兜底清单，但不记 10 分钟，用户打开清单时照样去猜
+  const skipped = !p.modelsUrl && p.custom && key && !guess && !GUESSED.has(sig);
   return keep(c && c.list ? c.list
-    : withConfigured((p.fallbackModels || []).map((m) => ({ context_window: 0, max_output_tokens: 0, input_modalities: ["text"], effort: null, ...m })), p));
+    : withConfigured((p.fallbackModels || []).map((m) => ({ context_window: 0, max_output_tokens: 0, input_modalities: ["text"], effort: null, ...m })), p), !skipped);
 }
 // 自定义端口猜中的清单地址（按配置指纹记；改了配置指纹就变，重新猜）
 const GUESSED = new Map();
@@ -468,7 +472,7 @@ export async function routeModels(req, res, u, p) {
     const now = effectiveModel(sid, q("project"), { provider: q("provider"), model: q("model"), effort: q("effort") });
     const pp = providerById(now.provider) || PROVIDER;
     const bp = (u.searchParams.get("browse") && providerById(u.searchParams.get("browse"))) || pp;
-    const ms = withWindows(await fetchModels(u.searchParams.get("refresh") === "1", bp));
+    const ms = withWindows(await fetchModels(u.searchParams.get("refresh") === "1", bp, { guess: true }));
     const own = withWindows(bp === pp ? ms : cachedModels(pp));
     // 只认同名：指定了（或那家有默认型号）却不在清单里，能力和窗口就是不知道，别借第一项的（#82，和 currentModelInfo 一致）
     const want = now.model || pp.defaultModel;

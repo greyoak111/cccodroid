@@ -15,7 +15,7 @@ export async function handleLocalCommand(name, arg, reply, sid, stopped = () => 
   // 清单、档位、校验都按这个会话真跑的那家：钉的 → 项目默认 → 全局（和 run.mjs、/api/models 同一套，#78）
   const now = effectiveModel(sid);
   const P = providerById(now.provider) || PROVIDER;
-  const models = await fetchModels(false, P);   // 只是读清单：走 10 分钟缓存，项目那家清单地址慢时别每次干等
+  const models = await fetchModels(false, P, { guess: true });   // 只是读清单：走 10 分钟缓存，项目那家清单地址慢时别每次干等
   // 等清单期间用户点了停止：这条命令就算撤回了，迟到的清单不能再改型号、强度或压缩线（#142-1）
   if (stopped()) return reply("已停止，没有改动。", name === "models" ? "model" : name);
   const curId = now.model, curEff = now.effort;
