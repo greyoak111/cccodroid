@@ -2327,6 +2327,8 @@ window.I18N_DICT.en = {
   "下载地址被重定向到了不加密的 http，没有下载": "The download was redirected to unencrypted http, so it was not downloaded",
   "会话已切换，这条没发": "You switched sessions, so this message wasn't sent",
   "没发出去：{msg}": "Not sent: {msg}",
+  "不确定发出去没有：{msg}": "Not sure whether it was sent: {msg}",
+  "网关已经收下这条了（只是回执没回来），不用重发": "The gateway already has this message (only the receipt was lost). No need to resend.",
   "找回": "Restore",
   "删除失败：{msg}": "Delete failed: {msg}",
   "技能列表读取失败：{msg}": "Couldn't load the skill list: {msg}",
