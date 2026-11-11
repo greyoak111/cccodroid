@@ -45,7 +45,11 @@ export async function scanSession(file, prev) {
   const fd = fs.openSync(file, "r");
   try {
     const head = headHash(fd, st.size);
-    let r = prev && prev.id === id && st.size >= prev.off && prev.head === head ? prev : emptyRecord(id);
+    // 增量续读的前提：这份 prev 是能接着往后读的记录。缓存可能被外部写坏（compacts:null 之类），
+    // 少了这道检查，prev.compacts.map / (prev.refs||[]).map 会抛错，刷新只记日志、坏记录留在缓存里（BUG-PERSIST-005）
+    const prevOk = prev && prev.id === id && Number.isFinite(prev.off) && st.size >= prev.off && prev.head === head &&
+      Array.isArray(prev.uu) && Array.isArray(prev.ts) && Array.isArray(prev.compacts) && (prev.refs == null || Array.isArray(prev.refs));
+    let r = prevOk ? prev : emptyRecord(id);
     if (r === prev) r = { ...prev, uu: prev.uu.slice(), ts: prev.ts.slice(), compacts: prev.compacts.map((c) => ({ ...c })), refs: (prev.refs || []).map((x) => ({ ...x })) };
     r.head = head; r.size = st.size; r.birth = st.birthtimeMs || r.birth || 0;
     // 引用去重表：以前每个匹配都 r.refs.find 线性扫，伪造一条含几万个引用的记录就是 O(n²)（审查 11-05）

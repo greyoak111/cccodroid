@@ -331,6 +331,8 @@
         : t("已导入 {n} 个会话", { n }));
       // 正文进来了、自定义标题没写进去（FIND-014）：不提示的话重启后才发现标题回退了
       if (r.titleWarning) toast(t("会话已导入，但自定义标题没保存上（存储满了或没有权限），重启后会显示原来的标题"), true);
+      // 章节档案也没写进去（BUG-P03）：复用建档接口的同一句提示，不再新增文案；重导同一个包可以补上
+      if (r.archiveWarning) toast(t("档案写不进去（存储满了或没权限），这次没存上"), true);
     } catch (err) {
       // 中途失败：网关在错误回执里带了已经放好的那几个，别把已导入的说没了（196-会话.6）
       const n = err.body && Array.isArray(err.body.imported) ? err.body.imported.length : 0;

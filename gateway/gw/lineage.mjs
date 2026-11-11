@@ -25,6 +25,15 @@ const META = new Map();   // id → { file, project, trashed, mtime }
 let building = null, dirty = false, gen = 0, memo = null;
 const PROG = { done: 0, total: 0 };   // 首次整理大户要十几秒，页面显示进度   // gen：索引每变一次加一；memo：按 gen 缓存的主父推断
 
+/** 缓存条目的形状：数组字段和增量扫描的输入都得对。
+ *  条目里 compacts 被写成 null 时，{...emptyRecord(), ...x} 会用 null 盖掉默认数组：
+ *  元信息（size/off/mtime）又正好和文件一致时刷新直接跳过重扫，chapterView / lastQ 访问 length 就抛错，
+ *  整张脉络图和章节视图都打不开（BUG-PERSIST-005）。这种条目丢掉，按会话记录整份重建，不牵连同批的正常条目 */
+const recShapeOk = (x) =>
+  isObj(x) && typeof x.id === "string" &&
+  Array.isArray(x.uu) && Array.isArray(x.ts) && Array.isArray(x.compacts) &&
+  (x.refs == null || Array.isArray(x.refs)) && (x.sig == null || Array.isArray(x.sig)) &&
+  Number.isFinite(x.size) && Number.isFinite(x.off) && typeof x.head === "string";
 function loadCache() {
   if (RECS) return;
   RECS = new Map();
@@ -33,7 +42,13 @@ function loadCache() {
     fallback: () => ({ v: 2, recs: [] }),
     max: 64 << 20,
   });
-  for (const x of r.data.recs) RECS.set(x.id, { ...emptyRecord(x.id), ...x });
+  let dropped = 0;
+  for (const x of r.data.recs) {
+    if (!recShapeOk(x)) { dropped++; continue; }
+    RECS.set(x.id, { ...emptyRecord(x.id), ...x });
+  }
+  // 丢掉坏条目后让下次保存把干净版本写回去（重新扫描时补全；不是立刻写，别把别的条目冲掉）
+  if (dropped) { dirty = true; log(`脉络：缓存里有 ${dropped} 条形状不对，丢弃并按会话记录重建`); }
 }
 function saveCache() {
   if (!dirty) return;
