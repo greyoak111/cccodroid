@@ -393,7 +393,7 @@
   function LazyCard(id, name, input, live) {
     const calls = [];
     const c = { lazy: true, id, name, input, live, calls, isAgent: name === "Agent" || name === "Task",
-                state: live ? "run" : "ok", summary: summarizeTool(name, input), onChange: null };
+                state: live ? "run" : "unknown", summary: summarizeTool(name, input), onChange: null };
     for (const k of ["result", "subText", "subProgress", "subDone", "stop", "fail", "finish", "subLazy"]) {
       c[k] = (...a) => { calls.push([k, a]); if (k === "result") c.state = a[0] ? "ok" : "err"; if ((k === "stop" || k === "fail") && c.state === "run") c.state = "err"; };
     }
@@ -418,7 +418,7 @@
       `<div class="tool-head"><span class="chev">▶</span><span class="tool-name">${esc(name)}</span>` +
       `<span class="tool-arg"${input && typeof input.command === "string" ? ` title="${esc(input.command.slice(0, 500))}"` : ""}>${esc(summarizeTool(name, input))}</span>` +
       (input && /^\//.test(input.file_path || input.notebook_path || "") ? `<a class="fpath tool-open" href="#" data-path="${esc(input.file_path || input.notebook_path)}" title="${t("在查看器中打开")}">↗</a>` : "") +
-      `<span class="tool-state ${live ? "run" : "ok"}">${live ? t("运行中") : "—"}</span></div>` +
+      `<span class="tool-state ${live ? "run" : "unknown"}">${live ? t("运行中") : t("状态未知")}</span></div>` +
       `<div class="tool-body"></div>`;
     parent.appendChild(card);
     const st = card.querySelector(".tool-state"), bodyEl = card.querySelector(".tool-body");
@@ -490,7 +490,7 @@
       kind: "tool",
       id,
       el: card,
-      name, summary: summarizeTool(name, input), state: live ? "run" : "ok",
+      name, summary: summarizeTool(name, input), state: live ? "run" : "unknown",
       onChange: null,
       result(ok, text) {
         result = { ok, text: String(text || "") };
@@ -547,7 +547,8 @@
           for (const k of sub.kids) k.fail ? k.fail() : k.stop();
         }
       },
-      finish() { if (!result && !live) { st.textContent = "—"; } },
+      // 历史里没等到结果的卡保持「结果未知」，别覆盖成「—」冒充已结束（FIND-038）
+      finish() { if (!result && api.state === "unknown") st.textContent = t("状态未知"); },
       isAgent,
       // 子代理的一步：嵌套工具卡（注册进 TOOL_CARDS，结果和权限卡照常按 id 找到它）
       sub(sid, sname, sinput) {
@@ -667,8 +668,10 @@
       el.classList.toggle("single", n < 2);
       if (n < 2) return;
       const lastM = members[n - 1];
-      const run = members.some((m) => m.state === "run"), err = members.some((m) => m.state === "err");
-      const [cls, txt] = run ? ["run", t("运行中")] : err ? ["err", t("有失败")] : ["ok", t("完成")];
+      const run = members.some((m) => m.state === "run"), err = members.some((m) => m.state === "err"),
+            unk = members.some((m) => m.state === "unknown");
+      // 有一步没等到结果就别说「完成」（FIND-038）：在跑 > 有失败 > 结果未知 > 完成
+      const [cls, txt] = run ? ["run", t("运行中")] : err ? ["err", t("有失败")] : unk ? ["unknown", t("状态未知")] : ["ok", t("完成")];
       head.innerHTML = `<span class="chev">▶</span><span class="tg-count">${esc(t("{n} 个步骤", { n }))}</span>` +
         `<span class="tool-arg">${esc(lastM.name + (lastM.summary ? " " + lastM.summary : ""))}</span>` +
         `<span class="tool-state ${cls}">${esc(txt)}</span>`;
