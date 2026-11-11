@@ -412,7 +412,12 @@
 
   async function loadSettings() {
     try {
-      state.settings = await api("/api/settings");
+      // 读的时候有保存在排队 / 在路上，或者读的途中又点了保存：这份快照可能早于那次保存，
+      // 拿它整份盖 state.settings 和控件，刚存上的值就在界面上退回去了。等保存排完再重读一次（UIFS-010 第二条）
+      const busy = savePending > 0, gen = saveGen;
+      const s = await api("/api/settings");
+      if (busy || gen !== saveGen) return saveQ.then(() => loadSettings());
+      state.settings = s;
       $("set-perm").value = state.settings.permissionMode || "default";
       // 输出风格清单由网关列（内置 + 自定义 .md），不再写死 —— 以前写死的 concise 根本不存在
       $("set-style").innerHTML = '<option value="">' + t("（默认）") + '</option>' +
@@ -474,11 +479,12 @@
   // 普通设置也串行保存（UIFS-010）：连点两次时两个请求并发，回执乱序的话，旧回执里那份整份
   // settings 快照会把后一次保存的结果在 state.settings 和控件上盖回去。排队后按点击顺序发请求、
   // 回执按序到达，合并整份快照就不会倒退。失败照旧只回滚自己这次的 patch（revertSet）。
-  let saveQ = Promise.resolve();
+  let saveQ = Promise.resolve(), saveGen = 0, savePending = 0;   // 后两个给 loadSettings 判断快照是否过时
   function saveSettings(patch) {
+    saveGen++; savePending++;
     const run = () => saveSettingsNow(patch);
     const p = saveQ.then(run, run);
-    saveQ = p.catch(() => {});
+    saveQ = p.catch(() => {}).finally(() => { savePending--; });
     return p;
   }
   async function saveSettingsNow(patch) {

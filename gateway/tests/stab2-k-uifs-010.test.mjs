@@ -22,11 +22,15 @@ function loadSaveSettings() {
   let a = src.indexOf("function saveSettings(patch) {");
   assert.ok(a >= 0, "12-model-caps.js 里找不到 saveSettings");
   if (src.slice(Math.max(0, a - 6), a) === "async ") a -= 6;
+  // 队列变量声明在函数前一行（含 loadSettings 用的计数器），有就一起切进来
+  const q = src.lastIndexOf("let saveQ = Promise.resolve()", a);
+  const hasDecl = q >= 0 && a - q < 200;
+  if (hasDecl) a = q;
   const b = src.indexOf("  // 没存上：控件回到真正存着的值", a);
   assert.ok(b > a, "12-model-caps.js 里找不到 saveSettings 结束标记");
   const fn = src.slice(a, b);
   const code = `
-let saveQ = Promise.resolve();
+${hasDecl ? "" : "let saveQ = Promise.resolve();"}
 ${fn}
 let state = { settings: { outputStyle: "old" }, model: "m" };
 let apiCalls = [], apiImpl = null;
