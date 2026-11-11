@@ -1017,6 +1017,13 @@ export async function startRun(item) {
     try { finish(code, signal); }
     catch (e) { log(`⚠️ 收尾出错: ${(e && e.stack) || e}`); try { endRun(run, { failed: true }); } catch {} }
   };
+  // 管道关不掉的兜底（queue.abortRun 5+2 秒后调）：走和正常退出同一条 finish —— 封签、账本、权限卡、未送达消息都要收，
+  // 以前直接 endRun 把这些全跳过了（FIND-002）。进程树由调用方负责杀，这里只把管道拆掉
+  run.forceFinish = () => {
+    log("⏹ 强制收尾：按正常收尾处理");
+    for (const s of [child.stdin, child.stdout, child.stderr]) try { s?.destroy(); } catch {}
+    finishSafe(null, "SIGKILL");
+  };
   child.on("close", finishSafe);
   // claude 已经退出、但另开进程组的子孙还攥着它的 stdout / stderr 时，close 永远不来：退出 5 秒后还没 close 就自己收尾（0.6.9 审计 195-T.1，同 terminal.mjs）
   child.on("exit", (code, signal) => {

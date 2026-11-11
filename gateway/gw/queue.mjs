@@ -303,6 +303,20 @@ export function endRun(run, fields = {}) {
   setImmediate(pump);
 }
 
+/** abortRun 5+2 秒后的兜底收尾：优先走这一轮自己的 finish（封签、账本、权限卡、未送达消息都收，
+ *  见 run.mjs 的 run.forceFinish，FIND-002）；没有 forceFinish 的才用最小收尾，保证车道不会一直占着 */
+export function forceEnd(run) {
+  if (!run || run.ended) return false;
+  if (typeof run.forceFinish === "function") {
+    try { run.forceFinish(); } catch (e) { log("强制收尾出错: " + e.message); }
+  }
+  if (run.ended) return true;
+  try { run.agents?.close(); } catch {}
+  try { run.requeuePending?.(); } catch (e) { log("退回未送达消息失败: " + e.message); }
+  endRun(run, run.sched && run.costSeen ? { costRaw: run.costSeen } : {});
+  return true;
+}
+
 export function abortRun(run, { hold = true } = {}) {
   if (!run || run.ended) return false;
   run.aborted = true;
@@ -325,7 +339,7 @@ export function abortRun(run, { hold = true } = {}) {
       log("⏹ 停止 5 秒后还没收尾，强制关掉 claude 的输出管道");
       killTree(c);
       for (const s of [c.stdin, c.stdout, c.stderr]) try { s?.destroy(); } catch {}
-      setTimeout(() => { if (!run.ended) { try { run.agents?.close(); } catch {} try { run.requeuePending?.(); } catch (e) { log("退回未送达消息失败: " + e.message); } endRun(run, run.sched && run.costSeen ? { costRaw: run.costSeen } : {}); } }, 2000).unref();
+      setTimeout(() => forceEnd(run), 2000).unref();
     }, 5000).unref();
   }
   return true;
