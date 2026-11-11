@@ -683,6 +683,23 @@ export function zipReadAsync(buf, max = 512 * 1024 * 1024) {
 /** 导出：manifest.json + sessions/<id>.jsonl + sessions/<id>/…（子代理等） */
 // 边读边压边写盘（gw/bigfile.mjs）：一个会话 1 GB 以上也导得出，网关内存不跟着涨。只受 zip32 的 4 GB 和剩余空间限制
 const freeBytes = (dir) => { try { const s = fs.statfsSync(dir); return s.bavail * s.bsize; } catch { return Infinity; } };
+/** 按顺序用 O_EXCL 先占住一个导出文件名（空文件占位）。
+ *  以前先 existsSync 再写临时文件、最后 rename：同一秒的两个导出都看到名字空着，
+ *  后 rename 的会把前一个覆盖掉（稳定性报告 FIND-030）。O_EXCL 让第二个从 -2 开始。
+ *  跨进程同样成立；返回 null 表示名字用完了。写失败时调用方要删掉占位文件 */
+export function reserveExportFile(dir, stamp) {
+  const C = fs.constants;
+  for (let k = 1; k < 100; k++) {
+    const f = path.join(dir, k === 1 ? `sessions-${stamp}.zip` : `sessions-${stamp}-${k}.zip`);
+    let fd;
+    try { fd = fs.openSync(f, C.O_WRONLY | C.O_CREAT | C.O_EXCL | (C.O_NOFOLLOW || 0), 0o600); }
+    catch (e) { if (e.code === "EEXIST") continue; throw e; }
+    try { fs.closeSync(fd); } catch {}
+    return f;
+  }
+  return null;
+}
+
 export async function exportSessions(ids) {
   const entries = [], list = [];
   const walk = (dir, rel) => {
@@ -711,22 +728,25 @@ export async function exportSessions(ids) {
   if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(tz("导出目录是个软链接，不往里写"));
   if (freeBytes(dir) < (256 << 20)) throw new Error(tz("存储空间不够了"));
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
-  // 先写同目录临时文件，写完再换名：写到一半失败不会在导出目录里留下半截 zip，也不会毁掉同名旧导出（197-9.9）。
-  // 临时文件用 O_EXCL + O_NOFOLLOW，不跟软链（11-03 审查 L-1）
-  let file = null, tmp = null, fd;
-  const C = fs.constants;
-  for (let k = 1; !file && k < 100; k++) {
-    const f = path.join(dir, k === 1 ? `sessions-${stamp}.zip` : `sessions-${stamp}-${k}.zip`);
-    if (fs.existsSync(f)) continue;
-    const t = f + ".part-" + process.pid + "-" + Math.random().toString(16).slice(2, 6);
-    try { fd = fs.openSync(t, C.O_WRONLY | C.O_CREAT | C.O_EXCL | (C.O_NOFOLLOW || 0), 0o600); file = f; tmp = t; } catch (e) { if (e.code !== "EEXIST") throw e; }
-  }
+  // 先占名字，再写同目录临时文件，写完再换名：写到一半失败不会在导出目录里留下半截 zip，
+  // 也不会毁掉已有导出（197-9.9）。占位和临时文件都用 O_EXCL + O_NOFOLLOW，不跟软链（11-03 审查 L-1）
+  const file = reserveExportFile(dir, stamp);
   if (!file) throw new Error(tz("导出目录里同名文件太多了"));
+  const C = fs.constants;
+  let tmp = null, fd;
+  try {
+    tmp = file + ".part-" + process.pid + "-" + Math.random().toString(16).slice(2, 6);
+    fd = fs.openSync(tmp, C.O_WRONLY | C.O_CREAT | C.O_EXCL | (C.O_NOFOLLOW || 0), 0o600);
+  } catch (e) { try { fs.rmSync(file, { force: true }); } catch {} throw e; }
   let bytes;
   try {
     bytes = await zipToFile(tmp, entries, fd);
-    fs.renameSync(tmp, file);
-  } catch (e) { try { fs.rmSync(tmp, { force: true }); } catch {} throw e; }
+    fs.renameSync(tmp, file);   // 覆盖自己占住的空文件
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    try { fs.rmSync(file, { force: true }); } catch {}
+    throw e;
+  }
   return { file, count: list.length, bytes };
 }
 
