@@ -1210,6 +1210,7 @@
         }
         inputEl.value = it.text || "";
         autoGrow(); inputEl.focus();
+        draftPersist();   // 程序性放回输入框也要立刻落盘：下一行就把网关那条中断记录 dismiss 掉，进程这时被杀就只剩这份草稿（UIFS-008）
         if (it.textCut) toast(t("原消息太长，只恢复了前 6.5 万字"));
       }
       api("/api/interrupted/dismiss", { method: "POST", body: JSON.stringify({ id: it.id }) }).catch(() => {});

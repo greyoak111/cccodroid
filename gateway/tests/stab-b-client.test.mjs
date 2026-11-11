@@ -134,8 +134,12 @@ test("FIND-048：send() 带幂等键、留底与 20 秒超时；启动 /api/stat
   assert.ok(comp.includes("timeout: 20000"), "发送不能永远等");
   assert.match(comp, /message: text,\s*idem,/);
   assert.ok(comp.includes("r.duplicate"), "重发回来的原 run 不再提示排队");
-  const catchBlk = take(comp, "    } catch (e) {\n      view.cids.delete(cid);", "    } finally");
-  assert.ok(!catchBlk.includes("draftDropLost"), "失败分支不能删留底槽：重发要用原键");
+  // 第二份报告 BUG-R04 起，catch 里多了一条「网关已经收下（有 cid 受理证据）」的成功收尾，它会删槽；
+  // 失败分支仍然不许删（重发要用原键）。锚点不再依赖 catch 第一行，直接取失败处理这段
+  const catchBlk = take(comp, "      const dk1 = draftOwner(ep0, key0);", "    } finally");
+  assert.equal((catchBlk.match(/draftDropLost/g) || []).length, 1, "失败分支不能删留底槽：重发要用原键");
+  assert.ok(catchBlk.slice(0, catchBlk.indexOf("draftDropLost")).includes("if (posted && acceptedId)"),
+    "删槽只发生在有受理证据时");
   assert.ok(comp.includes("if (fromInput) draftDropLost(draftOwner(ep0, key0), idem);"), "成功回执后才删槽");
   assert.ok(boot.includes("armStatusRetry"), "启动状态失败可点重试");
   assert.match(boot, /\/api\/status", \{ timeout: 10000 \}/);

@@ -100,6 +100,7 @@
     const prior = !view.sessionId && !view.lastRunId ? view.firstSend : null;
     let done;
     if (!view.sessionId) view.firstSend = new Promise((ok) => (done = ok));
+    let posted = false;   // 真的发出 POST 了没有：没发出去的本地错误（切会话 / 上一条没送到）不能报成「结果未知」
     try {
       if (prior) {
         const r0 = await Promise.race([prior, new Promise((ok) => setTimeout(() => ok("timeout"), 15000))]);
@@ -107,6 +108,7 @@
         // 等满 15 秒前一条还没拿到 run 号：硬发出去就是另起一个会话，宁可明说没发（审查 #52 #51:1）
         if (r0 === "timeout" && !view.sessionId && !view.lastRunId) throw new Error(t("上一条还没送到网关，这条先没发，稍后再试"));
       }
+      posted = true;
       const r = await api("/api/chat", {
         method: "POST", headers: { "content-type": "application/json" },
         timeout: 20000,   // 入队即回执；网关半死时别永远转圈（FIND-035）
@@ -138,8 +140,26 @@
       else if (!r.started) toast(mode === "inject" ? t("这一轮正在收尾，插不进去 —— 已排到最前，马上发出")
         : srv.run && !srv.run.idle ? t("已排队，这一轮结束后发出") : srv.run?.sealed ? t("已排队：后台任务还在跑，这一轮收不进新消息了。点「立即发送」会停掉后台任务再发") : atCap() ? t("同时在跑的会话已到上限，已排队，有空位就发出") : t("已排队：这个会话的上一轮还没完全结束，结束后发出"));
     } catch (e) {
-      view.cids.delete(cid);
       const dk1 = draftOwner(ep0, key0);
+      // 回执丢了不代表没发出去：网关收下时发 run_start（带 cid），状态快照的 runs / queue 里也有 cid。
+      // 手上已经能看到这枚 cid 就按发送成功收尾，别把原文退回去让人再发一遍（BUG-R04）
+      const acceptedId = view.cidRuns.get(cid)
+        || (srv.runs.find((r) => r && r.cid === cid) || {}).id
+        || (srv.queueAll.find((q) => q && q.cid === cid) || {}).id;
+      if (posted && acceptedId) {
+        if (fromInput) draftDropLost(dk1, idem);   // 有受理证据，算送到了：留底槽连同幂等键一起收掉
+        if (gen === view.gen) {
+          view.runIds.add(acceptedId); view.cidRuns.set(cid, acceptedId); view.lastRunId = acceptedId; view.pendingMerge = null;
+          toast(t("网关已经收下这条了（只是回执没回来），不用重发"));
+        }
+        return;
+      }
+      // 服务端明确回了错误（带 status）才叫没发出去；已经发出 POST 但没有明确回执（断网 / 超时）是结果未知，
+      // 不能替用户下结论。没发出去 / 结果未知两种情况下这枚 cid 都还可能再出现，先留着认（BUG-R04）
+      if (!posted || e.status) view.cids.delete(cid);
+      const msg = e.message || t("发送失败");
+      // 已经发出 POST 又没拿到明确回执 = 结果未知；其余（服务端明确拒绝、本地就没发出去）按原样说「没发出去」
+      const failTitle = posted && !e.status ? t("不确定发出去没有：{msg}", { msg }) : t("没发出去：{msg}", { msg });
       // 别把用户的话吞了。但回执迟到时可能已经切到别的对话、或者又写了新草稿：那就不往输入框里塞，给个「找回」（审查 A-CHAT-001、#50 S2-01）
       // 留底槽这里不删：原文回了草稿，但它同时是这条消息的幂等键——只有拿到网关回执才算送到（FIND-048：超时后重发不能跑两轮）
       if (fromInput && gen === view.gen && !inputEl.value.trim() && !state.attachments.length) {
@@ -147,13 +167,13 @@
         if (sentAtt.length) { state.attachments = sentAtt; renderAttachments(); }
         syncInterject();
         draftPersist();              // 原文已经回输入框：立刻落盘，不留 400ms 空窗
-        toast(e.message || t("发送失败"), true);
+        toast(failTitle, true);
       } else if (fromInput && !mine()) {
         // 已经切到别的会话：直接放回发起那个会话的草稿，回去就能看到；不给「找回」，免得点了塞进眼前这个
         draftPutAway(dk1, typed, sentAtt);
-        toast(t("没发出去：{msg}", { msg: e.message || t("发送失败") }) + " · " + t("已放回原来那个会话的草稿"), true);
+        toast(failTitle + " · " + t("已放回原来那个会话的草稿"), true);
       } else if (fromInput) {
-        toastAct(t("没发出去：{msg}", { msg: e.message || t("发送失败") }), t("找回"), () => {
+        toastAct(failTitle, t("找回"), () => {
           // 提示条还在、人已经切走了：照样放回原会话的草稿
           if (!mine()) { draftPutAway(draftOwner(ep0, key0), typed, sentAtt); return toast(t("已放回原来那个会话的草稿")); }
           inputEl.value = inputEl.value.trim() ? inputEl.value.replace(/\s*$/, "\n\n") + typed : typed;
@@ -161,7 +181,7 @@
           renderAttachments(); autoGrow(); inputEl.focus();
           draftPersist();              // 原文回输入框：立刻落盘
         });
-      } else toast(e.message || t("发送失败"), true);
+      } else toast(failTitle, true);
       if (e.status === 503 && gen === view.gen) openDrawer("settings");
     } finally { if (done) done(); }
   }
@@ -301,6 +321,7 @@
     inputEl.value = head + s + after;
     const pos = (head + s).length;
     try { inputEl.setSelectionRange(pos, pos); } catch {}
+    draftPersistSoon();   // 程序性改的也要落盘：没有真的 input 事件，不排这一下就只有切会话 / pagehide 才存（UIFS-008）
   }
   const CMD_TOKEN = /(^|\s)\/[a-zA-Z0-9_-]*$/, AT_TOKEN = /()@[^\s@]*$/;
 
@@ -327,7 +348,9 @@
         return;
       }
       const full = base.replace(/\/$/, "") + "/" + it.raw;
-      replaceToken(AT_TOKEN, "@" + full + " ");
+      // 引用统一走 attAt：带空白 / 引号 / 反斜杠的路径要加引号并转义，不然 @ 提及按空白截断，
+      // 发送出去只拿到前半截（BUG-UIFS-001，和文件面板 insertAtCursor 同一个规则）
+      replaceToken(AT_TOKEN, attAt(full) + " ");
       hidePopup(); autoGrow(); inputEl.focus();
     }
   }
@@ -341,8 +364,9 @@
   /** 在光标处插入一段文本 */
   function insertAtCursor(s) {
     s = String(s ?? "");
-    // 文件面板 / 查看器插进来的是「@绝对路径」：路径带空白时补引号，不然 @ 提及按空白截断（0.6.9 审计 195-D.2）
-    if (/^@\//.test(s) && !/^@"/.test(s) && /\s/.test(s)) s = attAt(s.slice(1));
+    // 文件面板 / 查看器插进来的是「@绝对路径」：统一交给 attAt 补引号并转义（空白 / 引号 / 反斜杠），
+    // 和 @ 文件补全一个规则；不然 @ 提及按空白截断，带引号、反斜杠的路径也还原不回去（0.6.9 审计 195-D.2、BUG-UIFS-001）
+    if (/^@\//.test(s) && !/^@"/.test(s)) s = attAt(s.slice(1));
     // 有选区就整段替换，不是只在选区起点插（0.6.9 审计 195-D.8）
     const v = inputEl.value, a = inputEl.selectionStart ?? v.length, b = inputEl.selectionEnd ?? a;
     const before = v.slice(0, a), after = v.slice(b);
@@ -351,6 +375,7 @@
     const pos = (before + glue + s + " ").length;
     try { inputEl.setSelectionRange(pos, pos); } catch {}
     autoGrow(); syncInterject();      // 不经 input 事件：按钮的发送 / 停止要自己对一下（审查 #50 S2-09）
+    draftPersistSoon();               // 同样要排一次落盘（UIFS-008）
   }
 
   // ── 草稿找回（上游 2.1.288：Ctrl+C 清掉的输入，空输入框按 ↑ 找回）──
@@ -675,6 +700,23 @@
     return done;
   }
 
+  /** stat 的回执要写回真正在用的那条附件：renderAttachments 会把列表换成 normAtt 的副本，
+   *  改原来那个对象改不到列表里（BUG-UIFS-002）。还在眼前这个草稿就改附件栏；已经换到别的会话就改那份草稿存储 */
+  function attSized(ep, key, p, size) {
+    const hit = (list) => {
+      const x = Array.isArray(list) ? list.find((y) => y && y.path === p) : null;
+      if (!x) return false;
+      x.size = size; x.big = false;
+      return true;
+    };
+    if (draftEpoch === ep || (view.sessionId || "") === draftOwner(ep, key)) { if (hit(state.attachments)) renderAttachments(); return; }   // renderAttachments 会顺带排落盘
+    const all = draftsRead(), d = all[draftOwner(ep, key)];
+    if (d && hit(d.att)) draftsSave(all);
+  }
+  /** 问一次实际大小，回执按发起时的草稿归属写回；问不到就继续按大附件算（原来就是这样） */
+  function attachStat(ep, key, p) {
+    api("/api/file/stat?path=" + encodeURIComponent(p)).then((r) => attSized(ep, key, p, Number(r.size) || 0), () => {});
+  }
   // 安卓壳递进来的东西：别的应用「分享到 Claude CLI」，或系统选择器的结果
   function attachPath(p, from) {
     if (!p) return;
@@ -688,11 +730,12 @@
     const fk = from ? draftOwner(from.ep, from.key) : "";
     if (from && from.ep !== draftEpoch && (view.sessionId || "") !== fk) {
       draftPutAway(fk, "", [a]);
+      attachStat(from.ep, from.key, p);   // 放进原会话草稿的那条也要问大小（BUG-UIFS-002）
       return toast(t("{n} 个文件已附加到刚才那个会话的草稿", { n: 1 }));
     }
     state.attachments.push(a);
     renderAttachments();
-    api("/api/file/stat?path=" + encodeURIComponent(p)).then((r) => { a.size = r.size || 0; a.big = false; renderAttachments(); }, () => {});
+    attachStat(draftEpoch, view.sessionId || "", p);
     toast(t("已附加 {name}", { name }));
   }
   let pickFrom = null;      // 最近一次打开选择器时的草稿（会话号 + 换草稿的代次）

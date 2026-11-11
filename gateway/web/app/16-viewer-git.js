@@ -434,7 +434,7 @@
     vwMdStop();          // 换文件：上一份的分段预览 observer、行号栏状态都别再留着（FIND-026）
     gutStop();
     vwHtmlStop();
-    Object.assign(VW, { path, kind: kind || "other", size: size || 0, text: "", mtime: 0, dirty: false, zoom: 1, git: null, gitInfo: "", gitMarks: null, plainMd: false, wb: null, sheets: null, ready: false, eol: "" });
+    Object.assign(VW, { path, kind: kind || "other", size: size || 0, text: "", mtime: 0, dirty: false, saving: false, zoom: 1, git: null, gitInfo: "", gitMarks: null, plainMd: false, wb: null, sheets: null, ready: false, eol: "" });
     // 换了文档就换代：上一个文档还在途的读取、转换、保存回执一律作废（审查 C-001、04-F04、04-F05）
     VW.gen = (VW.gen || 0) + 1;
     vwActs([]);    // 上一个文档的「保存」先撤掉：读取中点它会把空正文存进新文件（私下反馈 10-29）
@@ -1148,6 +1148,8 @@
     if (r.status === 409) {
       let c = {};
       try { c = await r.json(); } catch {}
+      // JSON 体迟到期间又换了文件：这不是现在这份文件的冲突，别让旧文件的确认框去清新文件的稿 / 重新载入（UIFS-007）
+      if (gen !== VW.gen) return;
       // 原文件不在了（比如刚在文件面板里改了名）：问清楚再按原名另存，修改先留在编辑器里（#145-2）
       if (c.error === "gone") {
         if (confirm(t("原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里"))) return vwSave(true);
@@ -1160,6 +1162,8 @@
     }
     let j = {};
     try { j = await r.json(); } catch {}
+    // 同上：解析期间换了文件，旧回执的 mtime / size 不能写到新文件上（UIFS-007）
+    if (gen !== VW.gen) { if (r.ok) toast(t("已保存")); return; }
     if (!r.ok) return toast(t("保存失败：{msg}", { msg: j.error || r.status }), true);
     VW.mtime = j.mtime; VW.size = j.size;
     // 保存在途时又改了：存下去的只是那一刻的版本，新改的还没存，别把「未保存」清掉（审查 C-002）
