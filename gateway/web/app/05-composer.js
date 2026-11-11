@@ -77,6 +77,11 @@
     const ep0 = draftEpoch, key0 = view.sessionId || "";
     const mine = () => draftEpoch === ep0 || (view.sessionId || "") === draftOwner(ep0, key0);
     if (fromInput) { inputEl.value = ""; autoGrow(); clearAttachments(); }
+    const dk = draftOwner(ep0, key0);
+    // 幂等键：该会话 lost 槽里还是这条、还没确认送到 = 同一条重发，沿用原键，网关只跑一轮（FIND-048/036）
+    const idem = fromInput ? draftSentIdem(dk, text) || newCid() : newCid();
+    // 发出去先留底：POST 悬挂 / 刷新 / 被杀之后原文都还能找回（FIND-035、FIND-010）
+    if (fromInput) draftKeepSent(dk, text, sentAtt, idem);
     syncInterject();
     const gen = view.gen;
     // 新会话第一条的回执还没到就又发：等它回来，拿到 run 号再带着 follow 发，不然两条各起一个会话（审查 #51 第1项）
@@ -93,8 +98,10 @@
       }
       const r = await api("/api/chat", {
         method: "POST", headers: { "content-type": "application/json" },
+        timeout: 20000,   // 入队即回执；网关半死时别永远转圈（FIND-035）
         body: JSON.stringify({
           message: text,
+          idem,     // 网关按它在窗口内去重：重发回原 run，不另起一条（FIND-048/036）
           sessionId: view.sessionId,
           // 新会话还没拿到会话号时连发：告诉网关"跟在上一条后面"，它会接到同一个会话里
           follow: view.sessionId ? null : view.lastRunId,
@@ -106,6 +113,8 @@
           mode: mode || "auto",
         }),
       });
+      // 网关收下了（重发的也算送到了）：留底可以删了
+      if (fromInput) draftDropLost(draftOwner(ep0, key0), idem);
       // 等回执期间切了会话：这一轮属于原来那个会话，别记进现在的视图（否则它的回复渲染到这边，
       // 下一条新会话消息还会带着 follow 接进原来那一轮 —— 审查 中11）
       if (gen !== view.gen) return;
@@ -113,20 +122,24 @@
       view.lastRunId = r.id;
       view.pendingMerge = null;
       // 斜杠命令只在空闲时插进去，送进去就画出来了（gw/run.mjs 的 run.inject），不用再提示
-      if (r.injected) { if (!text.trim().startsWith("/")) toast(t("已插话：当前这一步做完，Claude 就会看到")); }
+      if (r.duplicate) { /* 网关早就收过这条（重发）：别把「已排队」再说一遍 */ }
+      else if (r.injected) { if (!text.trim().startsWith("/")) toast(t("已插话：当前这一步做完，Claude 就会看到")); }
       else if (!r.started) toast(mode === "inject" ? t("这一轮正在收尾，插不进去 —— 已排到最前，马上发出")
         : srv.run && !srv.run.idle ? t("已排队，这一轮结束后发出") : srv.run?.sealed ? t("已排队：后台任务还在跑，这一轮收不进新消息了。点「立即发送」会停掉后台任务再发") : atCap() ? t("同时在跑的会话已到上限，已排队，有空位就发出") : t("已排队：这个会话的上一轮还没完全结束，结束后发出"));
     } catch (e) {
       view.cids.delete(cid);
+      const dk1 = draftOwner(ep0, key0);
       // 别把用户的话吞了。但回执迟到时可能已经切到别的对话、或者又写了新草稿：那就不往输入框里塞，给个「找回」（审查 A-CHAT-001、#50 S2-01）
+      // 留底槽这里不删：原文回了草稿，但它同时是这条消息的幂等键——只有拿到网关回执才算送到（FIND-048：超时后重发不能跑两轮）
       if (fromInput && gen === view.gen && !inputEl.value.trim() && !state.attachments.length) {
         inputEl.value = typed; autoGrow();
         if (sentAtt.length) { state.attachments = sentAtt; renderAttachments(); }
         syncInterject();
+        draftPersist();              // 原文已经回输入框：立刻落盘，不留 400ms 空窗
         toast(e.message || t("发送失败"), true);
       } else if (fromInput && !mine()) {
         // 已经切到别的会话：直接放回发起那个会话的草稿，回去就能看到；不给「找回」，免得点了塞进眼前这个
-        draftPutAway(draftOwner(ep0, key0), typed, sentAtt);
+        draftPutAway(dk1, typed, sentAtt);
         toast(t("没发出去：{msg}", { msg: e.message || t("发送失败") }) + " · " + t("已放回原来那个会话的草稿"), true);
       } else if (fromInput) {
         toastAct(t("没发出去：{msg}", { msg: e.message || t("发送失败") }), t("找回"), () => {
@@ -135,6 +148,7 @@
           inputEl.value = inputEl.value.trim() ? inputEl.value.replace(/\s*$/, "\n\n") + typed : typed;
           for (const a of sentAtt) if (!state.attachments.some((x) => x.path === a.path)) state.attachments.push(a);
           renderAttachments(); autoGrow(); inputEl.focus();
+          draftPersist();              // 原文回输入框：立刻落盘
         });
       } else toast(e.message || t("发送失败"), true);
       if (e.status === 503 && gen === view.gen) openDrawer("settings");
@@ -330,9 +344,10 @@
   // ── 草稿找回（上游 2.1.288：Ctrl+C 清掉的输入，空输入框按 ↑ 找回）──
   // 手机上更常见的是误删、全选后删空：一段 8 个字以上的内容被删空（不是发出去的），输入框下面亮一个「恢复」，20 秒后消失
   const draftChip = $("draft-chip");
-  let draftLast = "", draftStash = "", draftT = null;
-  function draftOffer(text) {
+  let draftLast = "", draftStash = "", draftT = null, draftStashOpt = null;
+  function draftOffer(text, opt) {
     draftStash = text;
+    draftStashOpt = opt || null;
     draftChip.classList.remove("hidden");
     clearTimeout(draftT);
     draftT = setTimeout(() => draftChip.classList.add("hidden"), 20000);
@@ -340,9 +355,15 @@
   function draftRestore() {
     if (!draftStash || inputEl.value) return false;
     inputEl.value = draftStash;
-    draftStash = ""; draftLast = inputEl.value;
+    // 「发出去没回执 / 没发出去」的原文：附件也一起放回（FIND-035/010）
+    if (draftStashOpt) {
+      for (const a of normAtts(draftStashOpt.att || [])) if (!state.attachments.some((x) => x.path === a.path)) state.attachments.push(a);
+      renderAttachments();
+    }
+    draftStash = ""; draftStashOpt = null; draftLast = inputEl.value;
     draftChip.classList.add("hidden");
     autoGrow(); syncInterject(); inputEl.focus();
+    draftPersistSoon();      // 立刻安排落盘：恢复出来的字再丢了就说不清了
     return true;
   }
   draftChip.addEventListener("click", draftRestore);
@@ -473,22 +494,70 @@
   // 只在用户切会话（openSession）时换；重连、新会话拿到会话号都不经过这里，正在打的字不会被换掉
   const DRAFTS_KEY = "cc.drafts";
   function draftsRead() { try { const o = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "{}"); return o && typeof o === "object" && !Array.isArray(o) ? o : {}; } catch { return {}; } }
+  // 配额满了（草稿太长 / 本机存储被别的占满）以前被静默吞掉，重开应用草稿就没了（FIND-011）：说一声，别让人白丢
+  let draftQuotaAt = 0;
+  function draftsSave(all) {
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); return true; }
+    catch (e) {
+      if (Date.now() - draftQuotaAt > 30000) {
+        draftQuotaAt = Date.now();
+        toast(t("草稿没能保存：本机存储空间不足。请把内容复制出去，或先发出去。"), true);
+      }
+      return false;
+    }
+  }
+  // 发出去、还没拿到回执 / 没发出去的原文（lost 槽）：刷新、被杀、切会话之后都还能找回；
+  // 同一条消息重发时沿用里面的幂等键，网关按它去重（FIND-048/036、FIND-035、FIND-010）。最多留 7 天。
+  const LOST_KEEP = 7 * 24 * 3600 * 1000;
+  function lostLive(d) {
+    const L = d && d.lost;
+    return L && typeof L.text === "string" && Date.now() - (L.at || 0) < LOST_KEEP ? L : null;
+  }
+  function draftKeepSent(k, text, att, idem) {
+    const all = draftsRead(), d = all[k] || { text: "", att: [] };
+    d.lost = { text, att: normAtts(att || []), at: Date.now(), idem };
+    d.at = d.at || Date.now(); all[k] = d;
+    return draftsSave(all);
+  }
+  /** 这条正文的重发：该会话 lost 槽里还是同一条、还没确认送到，就沿用原来的幂等键 */
+  function draftSentIdem(k, text) {
+    const L = lostLive(draftsRead()[k]);
+    return L && L.idem && L.text === text ? L.idem : null;
+  }
+  function draftDropLost(k, idem) {
+    const all = draftsRead(), d = all[k];
+    if (!d || !d.lost || (idem && d.lost.idem !== idem)) return;
+    delete d.lost;
+    if (!String(d.text || "").trim() && !(Array.isArray(d.att) && d.att.length)) delete all[k];
+    draftsSave(all);
+  }
   let draftEpoch = 0;   // 换过几次会话草稿：上传回执据此判断附件栏还是不是发起时那个会话的
+  /** 输入框空着时把 lost 槽里的原文亮成「恢复」；输入框有字就不打扰（槽留着，下次进来再说） */
+  function draftOfferLost(k, d) {
+    const L = lostLive(d);
+    if (!L || inputEl.value.trim() || state.attachments.length) return;
+    draftOffer(L.text, { att: L.att, idem: L.idem, key: k });
+  }
   function draftSwap(from, to) {
     const all = draftsRead(), k0 = from || "", k1 = to || "";
     if (k0 === k1) return;
     draftEpoch++;
     const text = inputEl.value, att = state.attachments.slice();
-    if (text.trim() || att.length) all[k0] = { text, att, at: Date.now() }; else delete all[k0];
+    const lost0 = lostLive(all[k0]);
+    if (text.trim() || att.length || lost0) all[k0] = { text, att, at: Date.now(), ...(lost0 ? { lost: lost0 } : {}) };
+    else delete all[k0];
     const d = all[k1];
     delete all[k1];
+    // 没回执 / 没发出去的原文留在会话名下（空正文也留着）：回来还能找回
+    if (lostLive(d)) all[k1] = { text: "", att: [], at: (d && d.at) || Date.now(), lost: d.lost };
     const keys = Object.keys(all).sort((x, y) => (all[y].at || 0) - (all[x].at || 0));
     for (const k of keys.slice(30)) { shareDone(all[k].att, true); delete all[k]; }   // 挤出去的草稿就没了，它的分享文件一起删
-    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
+    draftsSave(all);
     inputEl.value = d && typeof d.text === "string" ? d.text : "";
     state.attachments = d && Array.isArray(d.att) ? normAtts(d.att) : [];
     renderAttachments(); autoGrow();
-    draftLast = inputEl.value; draftStash = ""; draftChip.classList.add("hidden");   // 「恢复误删」是上一个会话的，别带过来
+    draftLast = inputEl.value; draftStash = ""; draftStashOpt = null; draftChip.classList.add("hidden");   // 「恢复误删」是上一个会话的，别带过来
+    draftOfferLost(k1, d);
   }
   // 新会话（还没有会话号）的草稿在第一轮 init 时拿到会话号：同一代次里的空草稿就是那个会话的。
   // 上传 / 选择器回执按这个找回发起的会话，不然切走之后会落进空草稿、被下一个新会话带出来（#133）
@@ -498,7 +567,7 @@
     DRAFT_ALIAS.set(draftEpoch, sid);
     // 「新对话」名下的草稿挪到这个会话：进程被杀后按会话号还能找回（0.6.9 审计 195-D.3）
     const all = draftsRead(), d = all[""];
-    if (d && !all[sid]) { all[sid] = d; delete all[""]; try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {} }
+    if (d && !all[sid]) { all[sid] = d; delete all[""]; draftsSave(all); }
   }
   const draftOwner = (ep, key) => key || DRAFT_ALIAS.get(ep) || "";
   // 当前会话的草稿及时落盘：以前只在切会话 / pagehide 时写，App 被系统杀时正在打的字和附件都会丢（0.6.9 审计 195-D.3）
@@ -506,10 +575,12 @@
   function draftPersist() {
     clearTimeout(draftSaveT); draftSaveT = 0;
     const k = view.sessionId || "", text = inputEl.value, att = normAtts(state.attachments);
-    const all = draftsRead();
-    if (text.trim() || att.length) all[k] = { text, att, at: Date.now() };
-    else if (all[k]) delete all[k]; else return;
-    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
+    const all = draftsRead(), old = all[k], lost = lostLive(old);
+    if (text.trim() || att.length) all[k] = { text, att, at: Date.now(), ...(lost ? { lost } : {}) };
+    // 正文空了也不删：发送时留的 lost 槽还要靠它保存（FIND-035：400ms 后空草稿覆盖原文）
+    else if (lost) all[k] = { text: "", att: [], at: (old && old.at) || Date.now(), lost };
+    else if (old) delete all[k]; else return;
+    draftsSave(all);
   }
   function draftPersistSoon() { if (!draftSaveT) draftSaveT = setTimeout(draftPersist, 400); }
   /** 启动时把当前会话的草稿装回输入框（进程被杀 / 重新打开都走这里） */
@@ -519,6 +590,7 @@
     if (!inputEl.value && typeof d.text === "string") inputEl.value = d.text;
     if (!state.attachments.length) state.attachments = normAtts(d.att);
     renderAttachments(); autoGrow(); draftLast = inputEl.value;
+    draftOfferLost(key || "", d);   // 上次发出去没回执 / 没发出去的原文：输入框空着就亮「恢复」（FIND-010）
   }
   /** 不在眼前的会话的草稿里追加正文 / 附件（发送失败找回、迟到的上传和截屏都往这里放） */
   function draftPutAway(k, text, att) {
@@ -527,7 +599,7 @@
     d.att = [...(Array.isArray(d.att) ? d.att : [])];
     for (const a of att || []) if (!d.att.some((x) => x && x.path === a.path)) d.att.push(a);
     d.at = Date.now(); all[k] = d;
-    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(all)); } catch {}
+    draftsSave(all);
   }
   /** 输入框有字或附件栏里有东西，就算有话要发 */
   function hasDraft() { return !!inputEl.value.trim() || state.attachments.length > 0; }

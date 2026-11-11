@@ -599,20 +599,42 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
     if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB";
     return (n / 1073741824).toFixed(2) + " GB";
   }
+  // api() 的兜底超时：网关半死（TCP 连得上、但不回包）时 fetch 会永远挂着（FIND-004/035）。
+  // 默认给足长操作（LibreOffice 转换、组件安装之类）；要更快失败 / 知道会跑很久的调用自己传 { timeout }，0 = 不设上限。
+  // 上传（/api/upload）和下载另走 fetch / 链接，不经过这里。
+  const API_TIMEOUT = 10 * 60 * 1000;
   async function api(path, opts) {
     // X-CC-Lang：网关据此选提示语的语言（网关侧本地化见 claude-apk/i18n/HANDOFF.md）
     opts = Object.assign({}, opts);
     opts.headers = Object.assign({ "X-CC-Lang": I18N.lang }, opts.headers);
-    const r = await fetch(path, opts);
-    if (!r.ok) {
-      // 服务端带出来的 message 比光秃秃的 "HTTP 409" 有用得多
-      // （比如切厂商时那句"这一轮还在生成中，等它跑完再切"）
-      let msg = "HTTP " + r.status;
-      let j = null;
-      try { j = await r.json(); msg = j.message || j.error || msg; } catch {}
-      const e = new Error(msg); e.status = r.status; e.body = j; throw e;
+    const timeout = opts.timeout === undefined ? API_TIMEOUT : Math.max(0, Number(opts.timeout) || 0);
+    delete opts.timeout;
+    let timer = 0, ctl = null;
+    if (timeout > 0 && !opts.signal) {
+      ctl = new AbortController();
+      opts.signal = ctl.signal;
+      timer = setTimeout(() => ctl.abort(), timeout);
     }
-    return r.json();
+    try {
+      const r = await fetch(path, opts);
+      if (!r.ok) {
+        // 服务端带出来的 message 比光秃秃的 "HTTP 409" 有用得多
+        // （比如切厂商时那句"这一轮还在生成中，等它跑完再切"）
+        let msg = "HTTP " + r.status;
+        let j = null;
+        try { j = await r.json(); msg = j.message || j.error || msg; } catch {}
+        const e = new Error(msg); e.status = r.status; e.body = j; throw e;
+      }
+      return await r.json();
+    } catch (e) {
+      // 自己掐断的才叫超时；服务端回的错误（带 status）原样抛
+      if (ctl && ctl.signal.aborted && e && !e.status) {
+        const err = new Error(t("请求超时：网关没有响应（{n} 秒）", { n: Math.round(timeout / 1000) }));
+        err.timeout = true;
+        throw err;
+      }
+      throw e;
+    } finally { if (timer) clearTimeout(timer); }
   }
   // ── 界面定制的统一存储（0.4.20）：网关 home/ccapp-ui.json 为准（gw/uistore.mjs），本地 cc.ui 是镜像 ──
   //   uiGet(键, 旧的 localStorage 键)：新位置没有就读旧位置（cc.navPins 这类以前存在本地的），写只写新位置。

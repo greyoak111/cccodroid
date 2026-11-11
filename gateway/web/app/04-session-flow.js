@@ -551,7 +551,7 @@
   /** 接上模型没有（登录了，或填了 Key）；网关连不上返回 null */
   async function setupReady() {
     let s = null;
-    try { s = await api("/api/status"); } catch { return null; }
+    try { s = await api("/api/status", { timeout: 10000 }); } catch { return null; }
     let ready = !!(s.keyMode === "key" || s.otherKey);
     if (s.keyMode === "login") {
       // 问不出登录状态（claude auth status 起不来 / 解析不了）时不能当成「未登录」：首屏会收起输入框，

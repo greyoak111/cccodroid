@@ -165,11 +165,31 @@
 
   // ── 状态 ──────────────────────────────────────────────────────────
   let uiTag = null;              // 网关报的前端版本戳，变了就说明有新界面
+  // 连不上网关时，状态行本身就是重试按钮（壳里没有别处可点；和 index.html 那段「界面脚本没加载」同一套做法）。
+  // /api/status 只给 10 秒：网关半死（TCP 通、不回包）时不能永远停在「连接中」（FIND-004）
+  let statusRetryOn = false;
+  function clearStatusRetry() {
+    if (!statusRetryOn) return;
+    statusRetryOn = false;
+    subEl.style.cursor = "";
+    subEl.onclick = null;
+  }
+  function armStatusRetry() {
+    if (statusRetryOn || curPage) return;   // 在别的页面上副标题是页面说明，不拿来做重试按钮
+    statusRetryOn = true;
+    subEl.style.cursor = "pointer";
+    subEl.onclick = () => {
+      clearStatusRetry();
+      if (curPage) return;                  // 点了之前已经切到别的页面：别把页面副标题换成状态
+      setStatus(t("正在连接网关…")); refreshStatus();
+    };
+  }
   async function refreshStatus() {
     const ok = latest("status");   // 迟到的旧快照不许把厂商 / 安全模式 / 状态文字画回去（0.6.9 审计 195-BB.3）
     try {
-      const s = await api("/api/status");
+      const s = await api("/api/status", { timeout: 10000 });
       if (!ok()) return;
+      clearStatusRetry();
       if (uiTag != null && s.uiTag && s.uiTag !== uiTag) {
         // v3 起生成不归页面管，随时刷新都安全
         setStatus(t("界面已更新，正在刷新…"), "warn");
@@ -231,12 +251,14 @@
         srv.foreign = true;
         clearTimeout(busWatch); busWatch = 0;
         if (es) { try { es.close(); } catch {} es = null; }
+        clearStatusRetry();
         $("status-box").textContent = t("请在 cccodroid 应用里打开");
         setStatus(t("请在 cccodroid 应用里打开"), "warn");
         return;
       }
       $("status-box").textContent = t("无法连接网关：{msg}", { msg: e.message });
-      setStatus(t("网关离线"), "err");
+      setStatus(t("网关离线：{msg} · 点这里重试", { msg: e.message }), "err");
+      armStatusRetry();
     }
   }
 

@@ -481,12 +481,38 @@ function sameExec(run, item) {
   return now.P.id === run.exec.provider && now.model === run.exec.model && now.effort === run.exec.effort;
 }
 
+// ── /api/chat 请求级幂等（FIND-048/036）──────────────────────────────
+// 客户端每次发送给一把发送键（idem），同一条消息重发沿用同一把。窗口内同一个键只入队一次，
+// 重发直接回原来那条（同一个 run id）：POST 已被网关受理、回执丢了再发一次，不会跑出第二轮，也不会拆出两个会话。
+// 只对带 idem 的 /api/chat 请求生效；网关自己 enqueue 的不经过这里。窗口只在内存里，网关重启后从头算。
+const IDEM_TTL = 10 * 60 * 1000;
+const IDEM_MAX = 200;
+export const IDEM = new Map();      // 键 → { at, hash, res }（导出给测试看）
+const idemHash = (m) => crypto.createHash("sha256").update(String(m)).digest("hex").slice(0, 32);
+const idemKey = (v) => (typeof v === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(v) ? v : null);
+function idemPrune() {
+  const now = Date.now();
+  for (const [k, v] of IDEM) if (now - v.at > IDEM_TTL) IDEM.delete(k);
+  while (IDEM.size > IDEM_MAX) IDEM.delete(IDEM.keys().next().value);
+}
+
 // ── 路由：/api/chat /api/interrupted/dismiss /api/queue/ ──
 export async function routeQueue(req, res, u, p) {
   if (req.method === "POST" && p === "/api/chat") {
     let b;
     try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
     if (!String(b.message || "").trim()) return sendJson(res, 400, { error: "empty message" });
+    // 幂等放在最前：第一次已经受理过了就直接回原来那条，别让「期间改了接口 / 队列满了 / Provider 没了」把重发拦成另一个错误
+    const message = String(b.message), idem = idemKey(b.idem);
+    if (idem) {
+      idemPrune();
+      const prev = IDEM.get(idem);
+      if (prev) {
+        // 同一把键换了正文：客户端把键用串了。回 409，别把新消息悄悄吞掉
+        if (prev.hash !== idemHash(message)) return sendJson(res, 409, { error: "idem_conflict", message: tz("这条消息的发送标记被用在了别的内容上，请重新发送。") });
+        return sendJson(res, 200, { ...prev.res, duplicate: true });
+      }
+    }
     // 看这条消息要用的那家（新会话首条选的 / 会话钉的 / 全局的），不是只看全局
     const q0 = { sessionId: b.sessionId ? String(b.sessionId) : null, follow: b.follow || null, projectId: b.projectId ? String(b.projectId) : null,
       pin: !b.sessionId && b.pin && typeof b.pin.provider === "string" ? { provider: b.pin.provider } : null };
@@ -505,7 +531,9 @@ export async function routeQueue(req, res, u, p) {
     if (String(b.message).length > MSG_MAX) return sendJson(res, 413, { error: "too_long", message: tz("这条消息太长了（超过 200 万字），改成文件发吧。") });
     for (const k of ["sessionId", "follow"]) if (b[k] != null && b[k] !== "" && !SID_OK.test(String(b[k]))) return sendJson(res, 400, { error: "bad " + k });
     const item = enqueue({ ...b, internal: false, auto: undefined });   // auto（空闲压缩轮）也只许网关自己设（审查 10-30 第九份 后端低8）
-    return sendJson(res, 200, { ok: true, id: item.id, injected: !!item.injected, started: RUNS.has(item.id) });
+    const out = { ok: true, id: item.id, injected: !!item.injected, started: RUNS.has(item.id) };
+    if (idem) { idemPrune(); IDEM.set(idem, { at: Date.now(), hash: idemHash(message), res: out }); }
+    return sendJson(res, 200, out);
   }
   if (req.method === "POST" && p === "/api/interrupted/dismiss") {
     // 带 id 只忽略那一条；不带（旧界面）全清
