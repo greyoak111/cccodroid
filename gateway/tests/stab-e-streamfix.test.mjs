@@ -20,3 +20,12 @@ test("FIND-001：message_stop 之后追发的 error 不透传，回答照常收�
   assert.equal(/event: error/.test(out), false, "error 事件不该出现在下游：" + out.slice(-300));
   assert.match(out, /message_stop/);
 });
+
+test("FIND-021：200 + text/event-stream 但正文不是 SSE → 上游正常收完时原样转下去，不吞", () => {
+  const body = '{"type":"error","error":{"type":"api_error","message":"not sse"}}';
+  const f = sseRepairer();
+  assert.equal(f.feed(body), "", "没有事件分隔，先攒着");
+  const t = f.finish({ complete: true });
+  assert.equal(typeof t, "string");
+  assert.match(t, /not sse/, "正文不能被丢掉");
+});

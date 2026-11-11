@@ -114,11 +114,14 @@ export function sseRepairer({ onSwallow } = {}) {
       while ((i = buf.indexOf("\n\n")) >= 0) { const raw = buf.slice(0, i); buf = buf.slice(i + 2); if (raw.trim()) out += block(raw); }
       return out;
     },
-    finish() {
+    finish({ complete = false } = {}) {
       if (cr) { buf += "\n"; cr = ""; }
       let out = buf.trim() ? block(buf) : ""; buf = "";
       if (gotMsgStop) return out;
       if (done()) { log("streamfix: 上游没收尾，补 message_delta/message_stop"); return out + tail(); }
+      // 上游正常收完、却连 message_start 都没出：正文不是 SSE（有的端口挂着 event-stream 回 JSON 报错）。
+      // 以前返回 null，攒下的正文跟着 res.end() 一起被吞，claude 只看到空响应；正常收完就原样转下去（FIND-021）
+      if (complete && !started) return out;
       return null;
     },
     get complete() { return gotMsgStop; },
@@ -168,9 +171,9 @@ function handle(req, res) {
     let ended = false;
     const end = () => {
       if (ended) return; ended = true;
-      const t = fix.finish();
-      // 块还开着：真断了，原样交给 claude。连 message_start 都没有、上游又是正常收完的：不是我们认得的流，照常收尾（200-9-06）
-      if (t === null) { if (ur.complete && !fix.started) res.end(); else res.destroy(); return; }
+      const t = fix.finish({ complete: ur.complete });
+      // 块还开着：真断了，原样交给 claude。连 message_start 都没有、上游又是正常收完的：不是我们认得的流，正文照常转完（FIND-021、200-9-06）
+      if (t === null) { res.destroy(); return; }
       res.end(t);
     };
     ur.setEncoding("utf8");
