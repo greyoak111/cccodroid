@@ -6,6 +6,13 @@
   // docx / xlsx 是整份读进主线程解析的：超过这个大小就别硬来，改用 LibreOffice 或下载（195-C.3）
   const VW_OFFICE_MAX = 32 * 1024 * 1024;
   async function vwFetchBuf(max) {
+    // 先按大小拦，别把 32MB 以上的文件整份读进内存再判：手机主线程可能直接卡死 / 内存不够（稳定性报告 FIND-024）。
+    // 打开时一般已带 size；没有（0）就向网关补一次 stat。stat 失败按老路走，读回来那个判断还留着兜底
+    if (max) {
+      let size = VW.size;
+      if (!size) { try { size = Number((await api("/api/file/stat?path=" + encodeURIComponent(VW.path))).size) || 0; } catch {} }
+      if (size > max) throw new Error(t("文件太大（{size}），不适合在应用里直接解析；可以用「原版式」转成 PDF 看，或下载后用别的应用打开。", { size: fmtSize(size) }));
+    }
     const r = await fetch(fileUrl(VW.path));
     if (!r.ok) throw new Error("HTTP " + r.status);
     const b = await r.arrayBuffer();
