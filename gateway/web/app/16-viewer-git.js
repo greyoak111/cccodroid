@@ -451,6 +451,11 @@
       vwActs([]);
       const tag = VW.kind === "video" ? "video" : "audio";
       $("vw-body").innerHTML = `<div class="vw-media"><${tag} src="${fileUrl(path)}" controls autoplay></${tag}></div>`;
+      // 读不出来（格式不支持、文件没了、解码失败）时别只给一块空白：换成失败说明和分享入口（稳定性报告 FIND-025）
+      $("vw-body").querySelector("video,audio")?.addEventListener("error", () => {
+        if (VW.path !== path || viewerEl.classList.contains("hidden")) return;
+        vwFail(t("读取失败"));
+      });
       return;
     }
     vwActs([]);
