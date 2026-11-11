@@ -6,19 +6,45 @@
   // docx / xlsx 是整份读进主线程解析的：超过这个大小就别硬来，改用 LibreOffice 或下载（195-C.3）
   const VW_OFFICE_MAX = 32 * 1024 * 1024;
   async function vwFetchBuf(max) {
+    const tooBig = (size) => new Error(t("文件太大（{size}），不适合在应用里直接解析；可以用「原版式」转成 PDF 看，或下载后用别的应用打开。", { size: fmtSize(size) }));
     // 先按大小拦，别把 32MB 以上的文件整份读进内存再判：手机主线程可能直接卡死 / 内存不够（稳定性报告 FIND-024）。
     // 打开时一般已带 size；没有（0）就向网关补一次 stat。stat 失败按老路走，读回来那个判断还留着兜底
     if (max) {
       let size = VW.size;
       if (!size) { try { size = Number((await api("/api/file/stat?path=" + encodeURIComponent(VW.path))).size) || 0; } catch {} }
-      if (size > max) throw new Error(t("文件太大（{size}），不适合在应用里直接解析；可以用「原版式」转成 PDF 看，或下载后用别的应用打开。", { size: fmtSize(size) }));
+      if (size > max) throw tooBig(size);
     }
     const r = await fetch(fileUrl(VW.path));
     if (!r.ok) throw new Error("HTTP " + r.status);
-    const b = await r.arrayBuffer();
-    if (max && b.byteLength > max) {
-      throw new Error(t("文件太大（{size}），不适合在应用里直接解析；可以用「原版式」转成 PDF 看，或下载后用别的应用打开。", { size: fmtSize(b.byteLength) }));
+    // 响应自己声明的大小也先看：Content-Length 超限就别读了（stat 之后文件可能刚被换过）（BUG-UIFS-006）
+    if (max) {
+      let cl = 0;
+      try { cl = Number(r.headers && r.headers.get && r.headers.get("content-length")) || 0; } catch {}
+      if (cl > max) { try { await r.body.cancel?.(); } catch {} throw tooBig(cl); }
     }
+    // 流式读：累计过了上限就取消，不等 arrayBuffer 把整份拉进内存（BUG-UIFS-006）
+    let b;
+    if (max && r.body && typeof r.body.getReader === "function") {
+      const reader = r.body.getReader(), chunks = [];
+      let total = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value || !value.byteLength) continue;
+          total += value.byteLength;
+          if (total > max) { try { await reader.cancel(); } catch {} throw tooBig(total); }
+          chunks.push(value);
+        }
+      } finally { try { reader.releaseLock(); } catch {} }
+      const u = new Uint8Array(total);
+      let off = 0;
+      for (const c of chunks) { u.set(c, off); off += c.byteLength; }
+      b = u.buffer;
+    } else {
+      b = await r.arrayBuffer();
+    }
+    if (max && b.byteLength > max) throw tooBig(b.byteLength);
     return b;
   }
   // 领一个号：同一文档里切版式（网页 ↔ 原版式）、换了文档、关了查看器，之前在途的读取 / 转换 / 安装回来都不许再写正文（审查 #48 04-F04、04-F05）
