@@ -3183,5 +3183,6 @@ window.I18N_DICT.en = {
   "中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。": "At interruption, {n} action(s) with possible side effects had no result: {list}. Whether they already ran cannot be confirmed; please check before clicking Continue.",
   "上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。": "The previous run state could not be recovered (unreadable or malformed record), so interrupted turns and queued messages will not appear; the original file was kept.",
   "运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。": "The run state could not be saved (storage may be full or permission denied). If the app is closed by the system, this turn may not be recoverable.",
-  "（上一轮没有正常结束，上面的回复可能不完整）": "(The previous turn did not finish normally; the reply above may be incomplete)"
+  "（上一轮没有正常结束，上面的回复可能不完整）": "(The previous turn did not finish normally; the reply above may be incomplete)",
+  "会话已导入，但自定义标题没保存上（存储满了或没有权限），重启后会显示原来的标题": "Sessions were imported, but custom titles could not be saved (storage may be full or permission denied). Original titles will show after a restart."
 };

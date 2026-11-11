@@ -3146,3 +3146,4 @@
 3146	No se pudo recuperar el estado de ejecución anterior (registro ilegible o con formato incorrecto), así que los turnos interrumpidos y los mensajes en cola no aparecerán; se conservó el archivo original.
 3147	No se pudo guardar el estado de ejecución (el almacenamiento puede estar lleno o faltar permiso). Si el sistema cierra la app, es posible que este turno no se pueda recuperar.
 3148	(El turno anterior no terminó normalmente; es posible que la respuesta de arriba esté incompleta)
+3149	Se importaron las sesiones, pero no se pudieron guardar los títulos personalizados (puede que el almacenamiento esté lleno o falten permisos). Tras reiniciar se mostrarán los títulos originales

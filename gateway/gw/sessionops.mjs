@@ -763,7 +763,7 @@ export async function importSessions(file) {
     try { const ev = JSON.parse(l); if (ev.cwd) ev.cwd = ws; return JSON.stringify(ev); } catch { return l; }
   };
   // 后面某条坏了会抛错跳出：前面已经放好的几条，标题照样要落盘（#98 03-002），并告诉前端放好了哪些
-  let archDirty = false;
+  let archDirty = false, namesSaved = true;
   try { for (const s of manifest.sessions || []) {
     const id = String(s.id || "");
     if (!SID_RE.test(id)) continue;
@@ -799,6 +799,8 @@ export async function importSessions(file) {
     if (archiveImport(id, s.archive)) archDirty = true;
     res.imported.push(id);
   } } catch (e) { e.imported = res.imported; throw e; }
-  finally { saveNames(); if (archDirty && !saveArchive()) log("导入会话：档案没写进去"); }
+  finally { namesSaved = saveNames(); if (archDirty && !saveArchive()) log("导入会话：档案没写进去"); }
+  // 标题没落盘：正文已经导进来了，别让接口回 200 就完事，调用方要把这条提示给用户（FIND-014）
+  if (!namesSaved) { res.titleWarning = true; log("导入会话：自定义标题没写进去（存储满了或没有权限）"); }
   return res;
 }

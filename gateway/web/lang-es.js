@@ -3149,4 +3149,5 @@ window.I18N_DICT["es"] = {
   "上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。": "No se pudo recuperar el estado de ejecución anterior (registro ilegible o con formato incorrecto), así que los turnos interrumpidos y los mensajes en cola no aparecerán; se conservó el archivo original.",
   "运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。": "No se pudo guardar el estado de ejecución (el almacenamiento puede estar lleno o faltar permiso). Si el sistema cierra la app, es posible que este turno no se pueda recuperar.",
   "（上一轮没有正常结束，上面的回复可能不完整）": "(El turno anterior no terminó normalmente; es posible que la respuesta de arriba esté incompleta)",
+  "会话已导入，但自定义标题没保存上（存储满了或没有权限），重启后会显示原来的标题": "Se importaron las sesiones, pero no se pudieron guardar los títulos personalizados (puede que el almacenamiento esté lleno o falten permisos). Tras reiniciar se mostrarán los títulos originales",
 };

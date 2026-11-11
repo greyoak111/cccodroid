@@ -3146,3 +3146,4 @@
 3146	L’état d’exécution précédent n’a pas pu être récupéré (registre illisible ou mal formé) ; les tours interrompus et les messages en file n’apparaîtront pas. Le fichier d’origine a été conservé.
 3147	L’état d’exécution n’a pas pu être enregistré (stockage plein ou permission refusée). Si le système ferme l’application, ce tour risque de ne pas être récupérable.
 3148	(Le tour précédent ne s'est pas terminé normalement ; la réponse ci-dessus peut être incomplète.)
+3149	Les sessions ont été importées, mais les titres personnalisés n'ont pas pu être enregistrés (stockage plein ou permission refusée). Les titres d'origine réapparaîtront après un redémarrage
