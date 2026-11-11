@@ -145,8 +145,8 @@ export async function latestContextTokens(file) {
  *
  *  excludeFrom：正在生成的那一轮由事件总线实时推，这里按时间戳把它剔掉，免得画两遍。
  *  pick(ev)：一行转成哪些条目，默认 transcriptItems（子代理记录全是侧链，要自己转，#71） */
-export async function readSessionPage(file, { before = null, limit = 40, excludeFrom = 0, pick = transcriptItems } = {}) {
-  const CH = 256 * 1024, MAX_SCAN = 12 * 1024 * 1024;
+export async function readSessionPage(file, { before = null, limit = 40, excludeFrom = 0, pick = transcriptItems, maxLine = 64 << 20 } = {}) {
+  const CH = 256 * 1024, MAX_SCAN = 12 * 1024 * 1024, MAX_LINE = maxLine;
   const fh = await fs.promises.open(file, "r");
   try {
     const size = (await fh.stat()).size;
@@ -155,8 +155,9 @@ export async function readSessionPage(file, { before = null, limit = 40, exclude
     const items = [];
     let contextTokens = null, contextDone = false;
     // 跨块的行按片段攒着，凑齐一行再 Buffer.concat：以前每个 256 KB 块都把整条未完成的行拼一遍，
-    // 20–64 MB 的单行会退化成平方级拷贝（195-Q.2）。carry 里是新→旧的片段
-    let carry = [];
+    // 20–64 MB 的单行会退化成平方级拷贝（195-Q.2）。carry 里是新→旧的片段。
+    // carryOver：这条行超过单行上限，整条不要（OBS-004：70 MB 单行反向读会吃几百 MB）
+    let carry = [], carryLen = 0, carryOver = false;
 
     const handle = (line, at) => {
       cursor = at;
@@ -197,19 +198,26 @@ export async function readSessionPage(file, { before = null, limit = 40, exclude
         if (nl < 0) {
           if (start > 0) {
             // 整段都是某条跨块行的开头部分：先攒着（它是目前最旧的一段，放在 carry 末尾）
-            carry.push(Buffer.from(chunk.subarray(0, end)));
+            if (!carryOver) {
+              carry.push(Buffer.from(chunk.subarray(0, end)));
+              carryLen += end;
+              if (carryLen > MAX_LINE) { carry = []; carryLen = 0; carryOver = true; }
+            }
             break;
           }
-          // 文件头、且这一行没有换行：把攒下的片段拼成完整的一行
+          // 文件头、且这一行没有换行：把攒下的片段拼成完整的一行；超上限的整条跳过
+          const over = carryOver;
           const parts = carry.length ? [chunk.subarray(0, end), ...carry.slice().reverse()] : [chunk.subarray(0, end)];
-          carry = [];
-          const ret = handle(Buffer.concat(parts).toString("utf8").trim(), 0);
+          carry = []; carryLen = 0; carryOver = false;
+          const ret = handle(over ? "" : Buffer.concat(parts).toString("utf8").trim(), 0);
           if (ret) return ret;
           break outer;
         }
         const seg = chunk.subarray(nl + 1, end);
-        const line = carry.length ? Buffer.concat([seg, ...carry.slice().reverse()]).toString("utf8").trim() : seg.toString("utf8").trim();
-        carry = [];
+        let line = "";
+        if (!carryOver && seg.length + carryLen <= MAX_LINE)
+          line = carry.length ? Buffer.concat([seg, ...carry.slice().reverse()]).toString("utf8").trim() : seg.toString("utf8").trim();
+        carry = []; carryLen = 0; carryOver = false;
         const ret = handle(line, start + nl + 1);
         if (ret) return ret;
         if (cursor === 0) break outer;
