@@ -224,10 +224,15 @@ export function lostProvider(item, sid0, pdef0) {
   return "";
 }
 
-// streamfix 吞掉了「说完之后才来的报错」（195-U.4）：按请求头里的会话号找到那一轮，留一句提示，回答真被截断时用户看得见、能让它继续
-SWALLOW_HOOKS.push((sid, msg) => {
+// streamfix 人工补尾时按请求头里的会话号找到那一轮，留一句提示：回答真被截断时用户看得见、能让它继续。
+// kind = "error"：说完之后才来的报错被吞掉（195-U.4）；"truncated"：上游没给消息级收尾就断了，尾巴是我们补的（BUG-R01）
+SWALLOW_HOOKS.push((sid, msg, kind) => {
   const run = sid && runList().find((r) => r.sessionId === sid && !r.ended);
-  if (run) runEmit(run, { type: "note", key: "sfx-swallow", text: tz("上游在回答结尾报了错（{msg}），已按说完处理；如果回答不完整，发一句「继续」", { msg }) });
+  if (!run) return;
+  if (kind === "truncated")
+    runEmit(run, { type: "note", key: "sfx-pad", text: tz("上游没发结束标记就断开了，回答已按说完处理；这条是否完整无法确认，如果没说完，发一句「继续」") });
+  else
+    runEmit(run, { type: "note", key: "sfx-swallow", text: tz("上游在回答结尾报了错（{msg}），已按说完处理；如果回答不完整，发一句「继续」", { msg }) });
 });
 
 export async function startRun(item) {
@@ -803,7 +808,21 @@ export async function startRun(item) {
     });
     publishState();
   };
+  // 同一个 result 重复到达（相同的 uuid / result_index）只结算一次（BUG-R03）：否则 usage 对账把同一份差额再加一遍、
+  // 回复轮数也重复记。只在拿到可靠终止身份时去重，不能按 usage 数值相同猜——两轮真正不同的请求数值可能一样
+  const seenResults = new Set();
+  const resultKey = (r) => {
+    if (typeof r?.uuid === "string" && r.uuid) return "u:" + r.uuid;
+    if (Number.isInteger(r?.result_index) && r?.session_id) return "i:" + r.session_id + ":" + r.result_index;
+    return "";
+  };
   const onResult = (r) => {
+    const rk = resultKey(r);
+    if (rk && seenResults.has(rk)) {
+      log(`${runTag(run)} ↺ 重复到达的 result（${rk.slice(0, 80)}），不重复结算`);
+      return;
+    }
+    if (rk) { seenResults.add(rk); if (seenResults.size > 200) seenResults.delete(seenResults.keys().next().value); }
     lastResult = r; resultStale = false;
     // 这一轮走到了结果（答完或报错）：不再是「没跑完」（FIND-040）
     clearIncomplete(run.sessionId);
@@ -982,9 +1001,11 @@ export async function startRun(item) {
       log(`${runTag(run)} ⏹ 已中断 (${ms}ms)`);
       return endRun(run, { durationMs: ms, ...(run.retired ? { retired: true } : {}), ...(run.outTok ? { usage: { output_tokens: run.outTok } } : {}), ...(run.sched && run.costSeen ? { costRaw: run.costSeen } : {}) });
     }
-    // 最后一个 result 之后又起了一轮、没等到它的 result 就异常退出：按失败算，别沿用上一轮的成功
-    if (lastResult && resultStale && (code !== 0 || signal)) {
-      const hint = exitHint(code, signal);
+    // 最后一个 result 之后又起了一轮、没等到它的 result 就退出了：按失败算，别沿用上一轮的成功。
+    // 不能只在非零退出 / 有信号时才算（BUG-R02）：CLI 正常退 0、新一轮却没答完，同样是没答完；
+    // 「后台任务清零、没起新一轮」的 exit 0 不算（resultStale 仍是 false），照旧算成功
+    if (lastResult && resultStale) {
+      const hint = code !== 0 || signal ? exitHint(code, signal) : tz("上一轮已答完，接着的这一轮没有等到结果（已中断）");
       log(`${runTag(run)} ✖ ${hint}（上一轮已答完，接着的这一轮没答完）${stderr ? " :: " + stderr.trim().slice(-300) : ""}`);
       billAfterRun(run.provider);
       emit({ type: "error", message: tr(LAST_LANG, hint), detail: exitDetail(stderr) });

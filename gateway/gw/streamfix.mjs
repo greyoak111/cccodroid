@@ -36,10 +36,11 @@ export function fixedBaseUrl(baseUrl) {
   return `http://127.0.0.1:${STREAMFIX.port}/u/${id}`;
 }
 
-/** 结尾的 error 被吞掉时通知谁（run.mjs 挂：按会话号找到那一轮，在界面上留一条提示）。参数 (会话号|"", 报错文字) */
+/** 人工补尾时通知谁（run.mjs 挂：按会话号找到那一轮，在界面上留一条提示）。
+ *  参数 (会话号|"", 文字, kind)：kind = "error" 说完之后才来的 error 被吞掉；"truncated" 流没给消息级收尾就断了，尾巴是我们补的（完整性未知） */
 export const SWALLOW_HOOKS = [];
 /** SSE 修补状态机：feed 进上游原文，吐出要发给 claude 的文本；finish 在上游结束时调用，返回补的尾巴或 null（= 该断就断）。
- *  onSwallow(报错文字)：说完之后才来的 error 被吞掉时调用
+ *  onSwallow(文字, kind)：人工补尾时调用，kind 见 SWALLOW_HOOKS
  *  maxBuf：行缓冲上限（字节）。不是 SSE 的正文一直不出现空行时会越攒越多，超了置 overflow 让转发层断开（OBS-001） */
 export function sseRepairer({ onSwallow, maxBuf = 8 << 20 } = {}) {
   let buf = "", cr = "", started = false, gotStop = false, gotMsgStop = false, outTokens = 0, outBytes = 0, overflow = false;
@@ -79,7 +80,7 @@ export function sseRepairer({ onSwallow, maxBuf = 8 << 20 } = {}) {
       // 但不再悄悄吞：报给发起的那一轮，界面上留一句「结尾报了错，回答可能不完整，可以让它继续」，真截断了用户看得见
       if (done()) {
         log(`streamfix: 吞掉结尾的 error 事件 ${JSON.stringify(j).slice(0, 200)}`);
-        try { onSwallow?.(String(j.error?.message || j.message || j.error?.type || "error").slice(0, 300)); } catch {}
+        try { onSwallow?.(String(j.error?.message || j.message || j.error?.type || "error").slice(0, 300), "error"); } catch {}
         return tail();
       }
       return raw + "\n\n";
@@ -122,7 +123,13 @@ export function sseRepairer({ onSwallow, maxBuf = 8 << 20 } = {}) {
       if (cr) { buf += "\n"; cr = ""; }
       let out = buf.trim() ? block(buf) : ""; buf = "";
       if (gotMsgStop) return out;
-      if (done()) { log("streamfix: 上游没收尾，补 message_delta/message_stop"); return out + tail(); }
+      if (done()) {
+        log("streamfix: 上游没收尾，补 message_delta/message_stop");
+        // 补尾保留（第三方端口常不发消息级收尾），但完整性未知要报给发起的那一轮：
+        // 块闭合只说明内容写完了，不代表上游说完了（BUG-R01）；正常完整的流走不到这里，不会重复提示
+        try { onSwallow?.("", "truncated"); } catch {}
+        return out + tail();
+      }
       // 上游正常收完、却连 message_start 都没出：正文不是 SSE（有的端口挂着 event-stream 回 JSON 报错）。
       // 以前返回 null，攒下的正文跟着 res.end() 一起被吞，claude 只看到空响应；正常收完就原样转下去（FIND-021）
       if (complete && !started) return out;
@@ -172,7 +179,7 @@ function handle(req, res) {
     delete h["content-length"]; delete h["content-encoding"]; delete h["transfer-encoding"];
     res.writeHead(ur.statusCode || 200, h);
     const sid = String(req.headers["x-claude-code-session-id"] || "").slice(0, 64);
-    const fix = sseRepairer({ onSwallow: (msg) => { for (const h of SWALLOW_HOOKS) { try { h(sid, msg); } catch {} } } });
+    const fix = sseRepairer({ onSwallow: (msg, kind) => { for (const h of SWALLOW_HOOKS) { try { h(sid, msg, kind); } catch {} } } });
     let ended = false;
     const end = () => {
       if (ended) return; ended = true;
