@@ -23,6 +23,7 @@ const renderAttachments = () => {};
 const draftOwner = (ep, k) => "d" + ep + ":" + k;
 const draftPutAway = (k, text, att) => { away.push({ k, att }); };
 const api = () => Promise.resolve({ size: 7 });
+const attachStat = () => {};   // 第二份报告 BUG-UIFS-002 拆出来的 stat 入口：本用例只测去重
 ${src05.slice(a, b)}
 globalThis.__h = { attachPath, state, toasts, away, setEpoch: (n) => { draftEpoch = n; }, view };
 `;

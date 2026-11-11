@@ -678,6 +678,23 @@
     return done;
   }
 
+  /** stat 的回执要写回真正在用的那条附件：renderAttachments 会把列表换成 normAtt 的副本，
+   *  改原来那个对象改不到列表里（BUG-UIFS-002）。还在眼前这个草稿就改附件栏；已经换到别的会话就改那份草稿存储 */
+  function attSized(ep, key, p, size) {
+    const hit = (list) => {
+      const x = Array.isArray(list) ? list.find((y) => y && y.path === p) : null;
+      if (!x) return false;
+      x.size = size; x.big = false;
+      return true;
+    };
+    if (draftEpoch === ep || (view.sessionId || "") === draftOwner(ep, key)) { if (hit(state.attachments)) renderAttachments(); return; }   // renderAttachments 会顺带排落盘
+    const all = draftsRead(), d = all[draftOwner(ep, key)];
+    if (d && hit(d.att)) draftsSave(all);
+  }
+  /** 问一次实际大小，回执按发起时的草稿归属写回；问不到就继续按大附件算（原来就是这样） */
+  function attachStat(ep, key, p) {
+    api("/api/file/stat?path=" + encodeURIComponent(p)).then((r) => attSized(ep, key, p, Number(r.size) || 0), () => {});
+  }
   // 安卓壳递进来的东西：别的应用「分享到 Claude CLI」，或系统选择器的结果
   function attachPath(p, from) {
     if (!p) return;
@@ -691,11 +708,12 @@
     const fk = from ? draftOwner(from.ep, from.key) : "";
     if (from && from.ep !== draftEpoch && (view.sessionId || "") !== fk) {
       draftPutAway(fk, "", [a]);
+      attachStat(from.ep, from.key, p);   // 放进原会话草稿的那条也要问大小（BUG-UIFS-002）
       return toast(t("{n} 个文件已附加到刚才那个会话的草稿", { n: 1 }));
     }
     state.attachments.push(a);
     renderAttachments();
-    api("/api/file/stat?path=" + encodeURIComponent(p)).then((r) => { a.size = r.size || 0; a.big = false; renderAttachments(); }, () => {});
+    attachStat(draftEpoch, view.sessionId || "", p);
     toast(t("已附加 {name}", { name }));
   }
   let pickFrom = null;      // 最近一次打开选择器时的草稿（会话号 + 换草稿的代次）
