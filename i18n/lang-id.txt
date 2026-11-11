@@ -3148,3 +3148,15 @@
 3148	(Giliran sebelumnya tidak selesai dengan normal; balasan di atas mungkin tidak lengkap)
 3149	Sesi berhasil diimpor, tetapi judul kustom tidak dapat disimpan (penyimpanan mungkin penuh atau tidak ada izin). Judul asli akan tampil setelah mulai ulang
 3150	Daftar sesi tidak dapat dibaca ({msg}); ini bukan berarti tidak ada sesi. Periksa izin penyimpanan lalu segarkan.
+3151	Permintaan habis waktu: gateway tidak merespons ({n} dtk)
+3152	Gateway offline: {msg} · Ketuk untuk mencoba lagi
+3153	Draf tidak bisa disimpan: penyimpanan perangkat penuh. Salin teksnya ke tempat lain, atau kirim dulu.
+3154	Token pengiriman ini dipakai untuk konten lain; kirim ulang pesannya.
+3155	Tidak pasti apakah sudah terkirim: {msg}
+3156	Gateway sudah menerima pesan ini (hanya tanda terimanya yang hilang); tidak perlu dikirim ulang
+3157	Giliran sebelumnya gagal di latar belakang: {msg}
+3158	Alamat mengembalikan {s}, tetapi isi responsnya terlalu besar (lebih dari 8 MB) untuk memastikan kunci valid
+3159	Upstream terputus tanpa penanda akhir, jadi balasan dianggap selesai. Kelengkapannya tidak bisa dipastikan; jika terpotong, kirim “lanjutkan”
+3160	Giliran sebelumnya selesai, tetapi giliran berikutnya tidak mendapat hasil (terputus)
+3161	Direktori tidak ada: {dir}; memakai {cwd} sebagai gantinya
+3162	API mengembalikan error, bukan balasan normal:

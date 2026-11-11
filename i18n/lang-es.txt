@@ -3148,3 +3148,15 @@
 3148	(El turno anterior no terminó normalmente; es posible que la respuesta de arriba esté incompleta)
 3149	Se importaron las sesiones, pero no se pudieron guardar los títulos personalizados (puede que el almacenamiento esté lleno o falten permisos). Tras reiniciar se mostrarán los títulos originales
 3150	No se pudo leer la lista de sesiones ({msg}); no significa que no haya sesiones. Comprueba los permisos de almacenamiento y actualiza.
+3151	Tiempo de espera agotado: la pasarela no respondió ({n} s)
+3152	Pasarela sin conexión: {msg} · Toca para reintentar
+3153	No se pudo guardar el borrador: el almacenamiento del dispositivo está lleno. Copia el texto a otro sitio o envíalo primero.
+3154	Este token de envío se usó para otro contenido; vuelve a enviar el mensaje.
+3155	No se sabe si se envió: {msg}
+3156	La pasarela ya recibió este mensaje (solo se perdió la confirmación); no hace falta reenviarlo
+3157	El turno anterior falló en segundo plano: {msg}
+3158	La dirección devolvió {s}, pero la respuesta es demasiado grande (más de 8 MB) para confirmar que la clave es válida
+3159	El servidor de origen se desconectó sin marca de fin, así que la respuesta se dio por terminada. No se puede confirmar si está completa; si se cortó, envía «continúa»
+3160	El turno anterior terminó, pero el siguiente no recibió resultado (interrumpido)
+3161	No existe el directorio: {dir}; se usa {cwd} en su lugar
+3162	La API devolvió un error, no una respuesta normal:

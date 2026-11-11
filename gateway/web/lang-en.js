@@ -2327,8 +2327,6 @@ window.I18N_DICT.en = {
   "下载地址被重定向到了不加密的 http，没有下载": "The download was redirected to unencrypted http, so it was not downloaded",
   "会话已切换，这条没发": "You switched sessions, so this message wasn't sent",
   "没发出去：{msg}": "Not sent: {msg}",
-  "不确定发出去没有：{msg}": "Not sure whether it was sent: {msg}",
-  "网关已经收下这条了（只是回执没回来），不用重发": "The gateway already has this message (only the receipt was lost). No need to resend.",
   "找回": "Restore",
   "删除失败：{msg}": "Delete failed: {msg}",
   "技能列表读取失败：{msg}": "Couldn't load the skill list: {msg}",
@@ -3183,15 +3181,24 @@ window.I18N_DICT.en = {
   "这个文件夹装着应用自己的目录或工作区，不能删": "This folder contains the app's own directories or the workspace and can't be deleted",
   "模型清单地址（选填；不填会按接口地址自动查找 /models）": "Model list URL (optional; if empty, /models is looked up automatically from the API address)",
 
-  // ── stability report 11-11 (b group): send-path timeouts, drafts, idempotency ──
-  "请求超时：网关没有响应（{n} 秒）": "Request timed out: the gateway didn't respond ({n}s)",
-  "网关离线：{msg} · 点这里重试": "Gateway offline: {msg} · Tap to retry",
-  "草稿没能保存：本机存储空间不足。请把内容复制出去，或先发出去。": "Draft couldn't be saved: device storage is full. Copy the text somewhere, or send it first.",
-  "这条消息的发送标记被用在了别的内容上，请重新发送。": "This send token was used for different content; please send the message again.",
   "中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。": "At interruption, {n} action(s) with possible side effects had no result: {list}. Whether they already ran cannot be confirmed; please check before clicking Continue.",
   "上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。": "The previous run state could not be recovered (unreadable or malformed record), so interrupted turns and queued messages will not appear; the original file was kept.",
   "运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。": "The run state could not be saved (storage may be full or permission denied). If the app is closed by the system, this turn may not be recoverable.",
   "（上一轮没有正常结束，上面的回复可能不完整）": "(The previous turn did not finish normally; the reply above may be incomplete)",
   "会话已导入，但自定义标题没保存上（存储满了或没有权限），重启后会显示原来的标题": "Sessions were imported, but custom titles could not be saved (storage may be full or permission denied). Original titles will show after a restart.",
-  "会话列表读不出来（{msg}），不是没有会话；检查存储权限后再刷新。": "The session list could not be read ({msg}) — this does not mean there are no sessions. Check storage permissions and refresh."
+  "会话列表读不出来（{msg}），不是没有会话；检查存储权限后再刷新。": "The session list could not be read ({msg}) — this does not mean there are no sessions. Check storage permissions and refresh.",
+
+  // ── stability report 11-11/11-12: send path, receipts, streams, terminal ──
+  "请求超时：网关没有响应（{n} 秒）": "Request timed out: the gateway didn't respond ({n}s)",
+  "网关离线：{msg} · 点这里重试": "Gateway offline: {msg} · Tap to retry",
+  "草稿没能保存：本机存储空间不足。请把内容复制出去，或先发出去。": "Draft couldn't be saved: device storage is full. Copy the text somewhere, or send it first.",
+  "这条消息的发送标记被用在了别的内容上，请重新发送。": "This send token was used for different content; please send the message again.",
+  "不确定发出去没有：{msg}": "Not sure whether it was sent: {msg}",
+  "网关已经收下这条了（只是回执没回来），不用重发": "The gateway already has this message (only the receipt was lost). No need to resend.",
+  "上一轮在后台失败：{msg}": "The previous turn failed in the background: {msg}",
+  "地址回了 {s}，但响应体太大（超过 8 MB），没法确认密钥有效": "The address returned {s}, but the response body is too large (over 8 MB) to confirm the key is valid",
+  "上游没发结束标记就断开了，回答已按说完处理；这条是否完整无法确认，如果没说完，发一句「继续」": "The upstream disconnected without an end marker, so the reply was treated as finished. Whether it is complete can't be confirmed; if it was cut off, send “continue”",
+  "上一轮已答完，接着的这一轮没有等到结果（已中断）": "The previous turn finished, but the turn after it got no result (interrupted)",
+  "目录不存在：{dir}，已改用 {cwd}": "Directory not found: {dir}; using {cwd} instead",
+  "接口报错，不是正常回复：": "The API returned an error, not a normal reply:"
 };

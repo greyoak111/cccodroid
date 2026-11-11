@@ -3148,3 +3148,15 @@
 3148	(Le tour précédent ne s'est pas terminé normalement ; la réponse ci-dessus peut être incomplète.)
 3149	Les sessions ont été importées, mais les titres personnalisés n'ont pas pu être enregistrés (stockage plein ou permission refusée). Les titres d'origine réapparaîtront après un redémarrage
 3150	La liste des sessions n'a pas pu être lue ({msg}) ; cela ne signifie pas qu'il n'y a pas de sessions. Vérifiez les permissions de stockage puis actualisez.
+3151	Délai dépassé : la passerelle n'a pas répondu ({n} s)
+3152	Passerelle hors ligne : {msg} · Touchez pour réessayer
+3153	Le brouillon n'a pas pu être enregistré : le stockage de l'appareil est plein. Copiez le texte ailleurs ou envoyez-le d'abord.
+3154	Ce jeton d'envoi a été utilisé pour un autre contenu ; renvoyez le message.
+3155	Impossible de savoir si le message est parti : {msg}
+3156	La passerelle a déjà reçu ce message (seul l'accusé de réception s'est perdu) ; inutile de le renvoyer
+3157	Le tour précédent a échoué en arrière-plan : {msg}
+3158	L'adresse a renvoyé {s}, mais la réponse est trop volumineuse (plus de 8 Mo) pour confirmer que la clé est valide
+3159	L'amont s'est déconnecté sans marqueur de fin ; la réponse a été considérée comme terminée. Impossible de confirmer qu'elle est complète ; si elle est coupée, envoyez « continuer »
+3160	Le tour précédent est terminé, mais le tour suivant n'a reçu aucun résultat (interrompu)
+3161	Dossier introuvable : {dir} ; {cwd} est utilisé à la place
+3162	L'API a renvoyé une erreur, pas une réponse normale :
