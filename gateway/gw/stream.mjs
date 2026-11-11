@@ -249,12 +249,16 @@ export function translate(ev, { sse, onInit, onResult, onReplay, flags, provider
           clearTimeout(flags.toolTimer); toolEmit(flags, sse);
         }
       }
+      // 子代理（parent_tool_use_id）/ 旁链（isSidechain）的逐字增量不进主气泡（REQ-005）：
+      // 子代理的整段正文随后由 assistant 事件挂到 Agent 卡（sub_text），旁链的完整消息照旧由 assistant 事件发。
+      // 这里也不置 lane 的「已逐字推过」：这些字没推给用户看过，后面整段还要发
+      const mainLane = isMainLane(ev);
       if (e?.type === "content_block_delta" && e.delta?.type === "text_delta" && e.delta.text) {
-        if (flags) { laneFlags(flags, ev).gotDelta = true; if (isMainLane(ev)) flags.pendText = (flags.pendText || 0) + e.delta.text.length; }
-        sse({ type: "delta", text: e.delta.text });
+        if (flags && mainLane) { flags.gotDelta = true; flags.pendText = (flags.pendText || 0) + e.delta.text.length; }
+        if (mainLane) sse({ type: "delta", text: e.delta.text });
       } else if (e?.type === "content_block_delta" && e.delta?.type === "thinking_delta" && e.delta.thinking) {
-        if (flags) { laneFlags(flags, ev).gotThinkDelta = true; if (isMainLane(ev)) flags.pendThink = (flags.pendThink || 0) + e.delta.thinking.length; }
-        sse({ type: "thinking_delta", text: e.delta.thinking });
+        if (flags && mainLane) { flags.gotThinkDelta = true; flags.pendThink = (flags.pendThink || 0) + e.delta.thinking.length; }
+        if (mainLane) sse({ type: "thinking_delta", text: e.delta.thinking });
       }
       break;
     }
