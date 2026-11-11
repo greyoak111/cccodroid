@@ -808,7 +808,21 @@ export async function startRun(item) {
     });
     publishState();
   };
+  // 同一个 result 重复到达（相同的 uuid / result_index）只结算一次（BUG-R03）：否则 usage 对账把同一份差额再加一遍、
+  // 回复轮数也重复记。只在拿到可靠终止身份时去重，不能按 usage 数值相同猜——两轮真正不同的请求数值可能一样
+  const seenResults = new Set();
+  const resultKey = (r) => {
+    if (typeof r?.uuid === "string" && r.uuid) return "u:" + r.uuid;
+    if (Number.isInteger(r?.result_index) && r?.session_id) return "i:" + r.session_id + ":" + r.result_index;
+    return "";
+  };
   const onResult = (r) => {
+    const rk = resultKey(r);
+    if (rk && seenResults.has(rk)) {
+      log(`${runTag(run)} ↺ 重复到达的 result（${rk.slice(0, 80)}），不重复结算`);
+      return;
+    }
+    if (rk) { seenResults.add(rk); if (seenResults.size > 200) seenResults.delete(seenResults.keys().next().value); }
     lastResult = r; resultStale = false;
     // 这一轮走到了结果（答完或报错）：不再是「没跑完」（FIND-040）
     clearIncomplete(run.sessionId);
