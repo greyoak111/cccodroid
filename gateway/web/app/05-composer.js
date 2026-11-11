@@ -14,6 +14,9 @@
   async function send(forcedText, mode) {
     const fromInput = forcedText == null;
     if (fromInput && uploading.size) return void toast(t("还有 {n} 个文件正在上传，传完再发送。", { n: uploading.size }), true);
+    // 安卓壳在后台把选择器里的大文件收进工作区（不经网页，见 MainActivity.attachBig）：收完之前也不许发送，
+    // 否则这些附件不在本条消息里、下一条又悄悄带上（稳定性报告 FIND-027）
+    if (fromInput && pickCopy) return void toast(t("还有 {n} 个文件正在上传，传完再发送。", { n: pickCopy }), true);
     const typed = (fromInput ? inputEl.value : forcedText).trim();
     // 附件只在附件栏里显示，发出时才把 @路径 接到末尾（claude 靠它读文件）；手动写过的不重复
     // 大附件只给路径（见 attRef），Claude 用到时自己按路径读
@@ -605,6 +608,14 @@
     toast(t("已附加 {name}", { name }));
   }
   let pickFrom = null;      // 最近一次打开选择器时的草稿（会话号 + 换草稿的代次）
+  // 安卓壳后台收大文件的个数：收的过程中不让发送（FIND-027），收完 / 取消后清掉选择器快照（FIND-034）
+  let pickCopy = 0;
+  window.addEventListener("ccapp-attach-copy-start", (e) => { pickCopy += Math.max(1, Number(e.detail?.value) || 0); });
+  window.addEventListener("ccapp-attach-pick-done", (e) => {
+    pickCopy = Math.max(0, pickCopy - Math.max(0, Number(e.detail?.value) || 0));
+    pickFrom = null;
+  });
+  window.addEventListener("ccapp-attach-pick-cancel", () => { pickFrom = null; pickCopy = 0; });
   window.addEventListener("ccapp-attach", (e) => attachPath(e.detail?.value, null));
   window.addEventListener("ccapp-attach-pick", (e) => attachPath(e.detail?.value, pickFrom));
   window.addEventListener("ccapp-insert", (e) => {
