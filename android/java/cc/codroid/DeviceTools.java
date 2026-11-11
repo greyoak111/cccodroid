@@ -213,12 +213,30 @@ final class DeviceTools {
             nm.createNotificationChannel(new NotificationChannel(CH, Tr.t("Claude 发的通知"), NotificationManager.IMPORTANCE_DEFAULT));
     }
 
+    /** 通知到底能不能出现在通知栏：系统总开关关掉、或这个渠道被用户关成 IMPORTANCE_NONE 时，
+     *  notify() 不抛异常、只是静默不显示（BUG-A04） */
+    static boolean notifyUsable(boolean enabled, int channelImportance) {
+        return enabled && channelImportance != NotificationManager.IMPORTANCE_NONE;
+    }
+
+    /** 统一的通知投递前检查：能用回 null，否则回一条给调用方的失败结果（不自动改系统设置 / 通知权限） */
+    private static JSONObject notifyBlocked(Context c) throws Exception {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        NotificationChannel ch = nm.getNotificationChannel(CH);
+        int importance = ch == null ? NotificationManager.IMPORTANCE_DEFAULT : ch.getImportance();
+        if (notifyUsable(nm.areNotificationsEnabled(), importance)) return null;
+        if (importance == NotificationManager.IMPORTANCE_NONE && nm.areNotificationsEnabled())
+            return fail(Tr.t("系统设置里关掉了「Claude 发的通知」这个通知类别"));
+        return fail(Tr.t("系统设置里关掉了本应用的通知"));
+    }
+
     private static JSONObject notify(Context c, JSONObject a) throws Exception {
         String title = a.optString("title", "").trim(), text = a.optString("text", "").trim();
         if (title.isEmpty() && text.isEmpty()) return fail(Tr.t("title 和 text 至少给一个"));
         channel(c);
+        JSONObject blocked = notifyBlocked(c);
+        if (blocked != null) return blocked;
         NotificationManager nm = c.getSystemService(NotificationManager.class);
-        if (!nm.areNotificationsEnabled()) return fail(Tr.t("系统设置里关掉了本应用的通知"));
         PendingIntent pi = PendingIntent.getActivity(c, 60, new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         int id = noteId++;
@@ -384,6 +402,9 @@ final class DeviceTools {
             catch (Exception ignored) { }
         }
         channel(c);
+        // 通知被系统 / 用户关掉时 notify 不抛异常、只是不显示：以前照样回「已发通知」，用户什么也看不到（BUG-A04）
+        JSONObject blocked = notifyBlocked(c);
+        if (blocked != null) return fail(Tr.t("cccodroid 在后台，安卓不让直接弹出界面；系统里通知又被关掉了，打开请求送不到你面前。请先打开应用再试，或在系统设置里允许通知"));
         PendingIntent pi = PendingIntent.getActivity(c, 700 + (noteId % 50), i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         int id = noteId++;
         c.getSystemService(NotificationManager.class).notify(id, new Notification.Builder(c, CH)

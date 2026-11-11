@@ -739,16 +739,50 @@
     toast(t("已附加 {name}", { name }));
   }
   let pickFrom = null;      // 最近一次打开选择器时的草稿（会话号 + 换草稿的代次）
+  // 每次打开选择器由壳分配一个批次号（BUG-A06）：后台拷大文件要一阵，拷完时可能已经又开了一次选择器，
+  // 光看「当前选择器」会把上一批记到新草稿上。事件带批次号，就按当初那次选择器的草稿归位
+  const pickBatch = new Map();   // 批次号 → 打开那次选择器时的草稿快照
   // 安卓壳后台收大文件的个数：收的过程中不让发送（FIND-027），收完 / 取消后清掉选择器快照（FIND-034）
   let pickCopy = 0;
-  window.addEventListener("ccapp-attach-copy-start", (e) => { pickCopy += Math.max(1, Number(e.detail?.value) || 0); });
+  // 壳的新事件值是 JSON（{id, path} / {id, n}）；旧格式（纯路径、纯数字）继续认，按当前快照处理
+  function pickObj(v) {
+    try { const o = JSON.parse(v); return o && typeof o === "object" ? o : null; } catch { return null; }
+  }
+  window.addEventListener("ccapp-attach-pick-start", (e) => {
+    const id = String(e.detail?.value || "");
+    if (id) pickBatch.set(id, pickFrom);
+  });
+  window.addEventListener("ccapp-attach-copy-start", (e) => {
+    const o = pickObj(e.detail?.value);
+    pickCopy += Math.max(1, Number(o ? o.n : e.detail?.value) || 0);
+  });
   window.addEventListener("ccapp-attach-pick-done", (e) => {
-    pickCopy = Math.max(0, pickCopy - Math.max(0, Number(e.detail?.value) || 0));
+    const o = pickObj(e.detail?.value);
+    pickCopy = Math.max(0, pickCopy - Math.max(0, Number(o ? o.n : e.detail?.value) || 0));
+    if (o) pickBatch.delete(String(o.id ?? ""));
     pickFrom = null;
   });
-  window.addEventListener("ccapp-attach-pick-cancel", () => { pickFrom = null; pickCopy = 0; });
+  window.addEventListener("ccapp-attach-copy-done", (e) => {
+    // 后台收完了，把 FIND-027 的计数放掉（以前只发不收，大文件收完也一直挡着发送）
+    const o = pickObj(e.detail?.value);
+    pickCopy = Math.max(0, pickCopy - Math.max(0, Number(o ? o.n : e.detail?.value) || 0));
+    if (o) pickBatch.delete(String(o.id ?? ""));
+  });
+  window.addEventListener("ccapp-attach-pick-cancel", (e) => {
+    const o = pickObj(e.detail?.value);
+    pickFrom = null;
+    if (o) pickBatch.delete(String(o.id ?? ""));
+    else pickCopy = 0;   // 旧格式没有批次号：沿用「取消即全部作废」；新格式只作废这一批，别的批次还在收
+  });
   window.addEventListener("ccapp-attach", (e) => attachPath(e.detail?.value, null));
-  window.addEventListener("ccapp-attach-pick", (e) => attachPath(e.detail?.value, pickFrom));
+  window.addEventListener("ccapp-attach-pick", (e) => {
+    const o = pickObj(e.detail?.value);
+    if (o) {
+      if (o.path) attachPath(o.path, pickBatch.get(String(o.id ?? "")) || null);
+      return;
+    }
+    attachPath(e.detail?.value, pickFrom);
+  });
   window.addEventListener("ccapp-insert", (e) => {
     const v = e.detail?.value;      // 别叫 t：会遮住翻译函数，下面那句提示就抛「t is not a function」
     if (!v) return;

@@ -55,6 +55,16 @@ public class GatewayService extends Service {
     /** 空闲退出的宽限拍数：刚被闹钟叫醒时网关还没起来、任务还没进队列，先别数空闲（watchFreeze 每 2 秒减一） */
     private volatile int idleGrace;
     private Thread supervisor;
+    /** 生命周期锁：停止 / 销毁与启动准备并发时，靠它原子地交接进程（BUG-A03）；划掉后的空闲查询也在它下面复核代次（BUG-A02） */
+    private final Object life = new Object();
+    /** 服务代次：每次停止 / 销毁 +1；准备中的 spawnGateway 见到它变了就放弃启动（BUG-A03） */
+    private long lifeGen;
+    /** 启动请求代次：每次 onStartCommand +1；划掉后的空闲查询据此发现服务又被拉起过（BUG-A02） */
+    private long startSeq;
+    /** 自己拉起的网关刚起来时的宽限：这几秒还答不了身份证明（同 alive()） */
+    static final long PROOF_GRACE_MS = 20000;
+    /** 过了宽限还连续这么久证明不了自己：结束重起（BUG-A01） */
+    static final long UNPROVEN_KILL_MS = 15000;
 
     /** 服务这会儿在不在（常驻通知里点了停止之后为 false） */
     static boolean serviceUp() { return self != null; }
@@ -148,6 +158,8 @@ public class GatewayService extends Service {
     }
 
     @Override public int onStartCommand(Intent i, int flags, int id) {
+        // 又收到一次启动请求（用户回到界面、闹钟、粘性重建）：划掉后的空闲查询查到一半也要作废重判（BUG-A02）
+        synchronized (life) { startSeq++; }
         // 只认自己通知里那个「停止」：服务是导出的，有跨用户权限的进程（shell、别的拿了 Shizuku 的应用）也能发；对不上就当普通启动（审查 v0.5.9 B5）
         String ik = i == null ? null : i.getStringExtra(MainActivity.IK);
         boolean mine = ik != null && java.security.MessageDigest.isEqual(ik.getBytes(), MainActivity.intentKey(this).getBytes());
@@ -179,10 +191,17 @@ public class GatewayService extends Service {
             else {
                 // 标记文件可能没写上（0.6.9 审计 13-03）：问一次网关再决定。这里在主线程，网络请求放后台线程，
                 // 问不到（网关没起来）就当空闲；网关起着说还有轮次 / 排队，就改成跑完再停
+                final long seen;
+                synchronized (life) { seen = startSeq; }
                 new Thread(() -> {
                     if (MainActivity.appForeground()) { Log.i(TAG, "界面又打开了，不按划掉处理"); return; }
                     if (Updater.gatewayBusy()) { Log.i(TAG, "界面被划掉，网关说还有任务，跑完再停"); closeWhenIdle = true; }
-                    else { Log.i(TAG, "界面被划掉且没有任务在跑，停止服务"); shutdown(); }
+                    else {
+                        // 查询期间用户可能已经回到前台、服务也可能被重新拉起：拿一致的生命周期状态复核后再停（BUG-A02）。
+                        // 以前只查了查询开始前的前台状态，响应的这几秒里用户回来也会把新接纳的任务停掉
+                        if (shutdownIfIdle(seen)) Log.i(TAG, "界面被划掉且没有任务在跑，停止服务");
+                        else Log.i(TAG, "空闲查询期间界面又开了或服务被重新拉起，不按划掉处理");
+                    }
                 }, "task-removed-check").start();
             }
         }
@@ -192,17 +211,26 @@ public class GatewayService extends Service {
     /** 有一轮在跑（标记文件由网关在一轮开始 / 全部结束时增删；网关被杀时会留下，正好算「跑到一半」） */
     private boolean busy() { return new File(env.home, ".run-active").exists(); }
 
-    private void shutdown() {
-        stopping = true;
+    private void shutdown() { shutdownIfIdle(null); }
+
+    /** 停机；给了 seenSeq（划掉后的空闲查询）就先在锁里复核用户没回来、服务没被重新拉起，不能停就返回 false。
+     *  代次和 stopping 在锁里定，退出锁才去杀进程 / 停前台：别让等这把锁的主线程跟着等网关收尾的 5 秒 */
+    private boolean shutdownIfIdle(Long seenSeq) {
+        synchronized (life) {
+            if (seenSeq != null && !idleQueryStillValid(MainActivity.appForeground(), seenSeq, startSeq)) return false;
+            lifeGen++;
+            stopping = true;
+        }
         killGateway();
         ShizukuSetup.get(this).onExit();
         stopForeground(true);
         stopSelf();
+        return true;
     }
 
     @Override public void onDestroy() {
         if (self == this) self = null;
-        stopping = true;
+        synchronized (life) { lifeGen++; stopping = true; }
         Updater.get(this).stopLoop();
         Notify.get(this).stop();
         killGateway();
@@ -245,10 +273,16 @@ public class GatewayService extends Service {
             try {
                 spawnGateway();
                 update(Tr.t("运行中 · 127.0.0.1:") + Env.PORT);
-                int rc = proc.waitFor();
+                // 有界等待 + 身份检查交替：以前这里是无界 waitFor()，自己拉起的网关活着但卡死 / 失联时
+                // 永远走不到循环顶部的 alive()，只能等它自己退出（BUG-A01）
+                int rc = waitGatewayExit();
+                if (stopping) break;
                 Env.resetBoot();             // 网关没了：上一次核身份的缓存作废，别在 3 秒内把签名请求交给接手端口的人
                 why = exitWhy(rc);
                 Log.w(TAG, "网关退出 rc=" + rc + (why != null ? "：" + why : ""));
+            } catch (Cancelled e) {
+                // 准备期间服务被停掉 / 停住（更新工具包）：这次不启动，回循环顶部按最新状态再判断（BUG-A03）
+                continue;
             } catch (GwUnavailable e) {
                 Log.e(TAG, "网关运行库对不上，不起网关：" + e.getMessage());
                 gwBlocked = Tr.f("网关自己的运行库和安装包对不上，为了安全没有启动网关：{0}\n\n联网后会自动再试；一直不行请重装 cccodroid", e.getMessage());
@@ -272,6 +306,8 @@ public class GatewayService extends Service {
     }
 
     private void spawnGateway() throws Exception {
+        final long myGen;
+        synchronized (life) { myGen = lifeGen; }     // 这次启动属于哪一代服务（BUG-A03）
         env = new Env(this);                 // 每次重读：执行方式（files/.exec-mode）改了，重启网关就生效
         Log.i(TAG, "执行方式 pref=" + Env.execPref(this) + " targetSdk=" + env.targetSdk + " loader=" + env.loader + " ldso=" + env.ldsoMatches());
         // 起之前核一遍 files/app（见 AppFiles）：两次起网关之间被改过的，按安装包还原了再起
@@ -296,6 +332,7 @@ public class GatewayService extends Service {
         if (boot == null) throw new java.io.IOException("安装包里没有 app/boot.mjs");
         // 网关自己的运行库（安全 4 第 2 层，见 GwRuntime）：按安装包钉的哈希核 files/gw，对不上的先从 $PREFIX 拷、再联网取。
         // 凑不齐：发行版不起网关（$PREFIX 里的 node 和库同 uid 的进程都能换）；开发版退回 $PREFIX 的，记账本
+        checkSpawn(myGen);                   // 这段可能要联网下 128 MB：停掉 / 停住之后别再白干（BUG-A03）
         GwRuntime gw = new GwRuntime(this, env);
         boolean fetch = System.currentTimeMillis() - gwFetchAt > 30 * 60000L;
         String gwErr;
@@ -310,6 +347,7 @@ public class GatewayService extends Service {
                 }
             });
         } finally { gwFetchStep = null; gwFetchDone = gwFetchTotal = 0; }
+        checkSpawn(myGen);                   // 取运行库期间可能已经被停掉（BUG-A03）
         if (gwErr != null && fetch) gwFetchAt = System.currentTimeMillis();
         if (gwErr != null && !gwErr.equals(gwLastErr)) Ledger.add(env, "verify", false, Tr.t("网关运行库：") + gwErr, null);
         gwLastErr = gwErr;
@@ -372,19 +410,80 @@ public class GatewayService extends Service {
         // 先换上新的再起：网关读到 stdin 之前答不了话，核身份不会拿旧的去比
         Env.spawnKey = ks.toString();
         Env.resetBoot();
-        proc = pb.start();
-        spawnedAt = System.currentTimeMillis();
-        gwBlocked = null;
-        try (java.io.OutputStream o = proc.getOutputStream()) { o.write((ks + "\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII)); }
+        checkSpawn(myGen);                   // pb.start 前最后一眼（BUG-A03）
+        Process p = pb.start();
+        // 进程发布与停止方清理在有同一把锁里交接：停止/销毁要么看到这个新进程把它收走，
+        // 要么在发布前把代次改掉，让这里当场结束它 —— 以前两次 kill 都可能早于新 Process 发布，
+        // 准备完成后仍会把网关拉起来、留下停止后才启动的进程（BUG-A03）
+        boolean cancel;
+        synchronized (life) {
+            cancel = spawnCancelled(stopping, paused, myGen, lifeGen);
+            if (!cancel) {
+                proc = p;
+                spawnedAt = System.currentTimeMillis();
+                gwBlocked = null;
+            }
+        }
+        // 收尾放在锁外：停止方可能正等着这把锁；没交出去的这个进程也要收干净
+        if (cancel) { terminate(p); throw new Cancelled(); }
+        try (java.io.OutputStream o = p.getOutputStream()) { o.write((ks + "\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII)); }
         catch (java.io.IOException e) { Log.w(TAG, "启动随机数没交过去：" + e.getMessage()); }
     }
 
     private void killGateway() {
-        Process p = proc;
-        if (p == null) return;
-        // SIGTERM 让网关自己收尾（它会连带杀掉正在跑的 claude 进程树）
+        Process p;
+        synchronized (life) { p = proc; }
+        if (p != null) terminate(p);
+    }
+
+    /** SIGTERM 让网关自己收尾（它会连带杀掉正在跑的 claude 进程树），5 秒不退再强杀 */
+    private static void terminate(Process p) {
         p.destroy();
         try { if (!p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly(); } catch (InterruptedException ignored) {}
+    }
+
+    /** 准备 / 启动期间服务被停掉或停住：放弃这次启动，别在停止之后再拉起一个网关（BUG-A03） */
+    private static final class Cancelled extends Exception { Cancelled() { super("superseded"); } }
+
+    private void checkSpawn(long gen) throws Cancelled {
+        synchronized (life) {
+            if (spawnCancelled(stopping, paused, gen, lifeGen)) throw new Cancelled();
+        }
+    }
+
+    /** 这次启动是否已经被服务停止 / 停住取代（纯判断，见 checkSpawn 与发布进程时的复核） */
+    static boolean spawnCancelled(boolean stopping, boolean paused, long genAtStart, long genNow) {
+        return stopping || paused || genAtStart != genNow;
+    }
+
+    /** 划掉后的空闲查询查完还能不能按空闲停机：查询期间用户回到前台、或服务又被重新拉起过，都不能停（BUG-A02） */
+    static boolean idleQueryStillValid(boolean foreground, long seenStartSeq, long nowStartSeq) {
+        return !foreground && seenStartSeq == nowStartSeq;
+    }
+
+    /** 自己拉起的网关还活着、却一直证明不了自己：过了启动宽限，又连续失联这么久，就该结束重起（BUG-A01） */
+    static boolean unprovenTooLong(long now, long spawnedAt, long unprovenSince) {
+        return unprovenSince > 0 && now - spawnedAt >= PROOF_GRACE_MS && now - unprovenSince >= UNPROVEN_KILL_MS;
+    }
+
+    /** 等这一代网关退出：有界等一会儿就核一次身份，不再无界 waitFor（BUG-A01）。
+     *  进程还活着但证明不了自己时，先给启动宽限，再要求连续失联一段时间才结束 —— 偶发一次探活失败不杀进程 */
+    private int waitGatewayExit() throws InterruptedException {
+        Process p = proc;
+        long unprovenSince = 0;
+        while (true) {
+            if (p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) return p.exitValue();
+            if (stopping || paused) { killGateway(); continue; }   // 停止 / 停住：销毁后下一拍就退出了
+            long now = System.currentTimeMillis();
+            if (Env.proveGateway()) { unprovenSince = 0; continue; }
+            if (now - spawnedAt < PROOF_GRACE_MS) continue;        // 刚起的网关还没监听好
+            if (unprovenSince == 0) { unprovenSince = now; continue; }
+            if (unprovenTooLong(now, spawnedAt, unprovenSince)) {
+                Log.w(TAG, "网关进程还活着但连续 " + ((now - unprovenSince) / 1000) + " 秒证明不了自己，结束重起");
+                killGateway();
+                return p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS) ? p.exitValue() : -1;
+            }
+        }
     }
 
     /** 端口上已经有活的网关（比如服务重建前留下的那个）就别再起一个。
@@ -395,7 +494,7 @@ public class GatewayService extends Service {
             // 自己拉起的进程还活着：也要有证明。刚起的几秒网关还没监听好，给一段宽限；
             // 过了宽限还证明不了自己（卡死、端口被别人接了）就结束它重起 —— 以前根本不看证明结果（0.6.9 审计 13-02）
             if (Env.proveGateway()) return true;
-            if (System.currentTimeMillis() - spawnedAt < 20000) return true;
+            if (System.currentTimeMillis() - spawnedAt < PROOF_GRACE_MS) return true;
             Log.w(TAG, "网关进程还活着但证明不了自己，结束重起");
             killGateway();
             return false;

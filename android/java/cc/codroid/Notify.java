@@ -53,8 +53,15 @@ final class Notify {
     // 只在事件线程里改；onBackground() 从主线程来，同步一下
     private final Map<String, JSONObject> pending = new HashMap<>();   // 网关当前的待确认项
     private final Set<String> shown = new HashSet<>();                 // 已经发过通知的请求号
-    private final Map<String, String> runText = new HashMap<>();       // runId → 这一轮用户发的消息
+    /** runId → 这一轮用户发的消息。通知里只用前 80 字，存 200 字够了；条数封顶，
+     *  漏收 run_end 的旧轮次（网关换过、服务停过）不会无限累积（BUG-A05） */
+    private static final int RUN_TEXT_KEEP = 64, RUN_TEXT_CHARS = 200;
+    private final Map<String, String> runText = new java.util.LinkedHashMap<String, String>(16, 0.75f, false) {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, String> eldest) { return size() > RUN_TEXT_KEEP; }
+    };
     private final Set<String> doneRuns = new HashSet<>();              // 发过完成通知的 runId（重放去重）
+    /** 上一次 hello 里网关的启动号：变了说明网关重启过，旧轮次的终止事件再也送不到（BUG-A05） */
+    private String lastBoot = "";
 
     private Notify(Context c) {
         ctx = c;
@@ -118,6 +125,9 @@ final class Notify {
 
     // ── 事件流 ──────────────────────────────────────────────────────
     private void run() {
+        // 新一次订阅：上一次订阅留下的旧轮次文本再也等不到 run_end（新连接不带 Last-Event-ID，
+        // 网关只重放还在跑的轮次）。先清掉；还在跑的会在 hello 快照 / run_start 重放里重新放回来（BUG-A05）
+        synchronized (this) { runText.clear(); lastBoot = ""; }
         String lastId = null;
         while (!stopping) {
             HttpURLConnection c = null;
@@ -154,8 +164,16 @@ final class Notify {
             JSONObject ev = new JSONObject(json);
             String type = ev.optString("type");
             synchronized (this) {
-                if ("hello".equals(type) || "state".equals(type)) onState(ev);
-                else if ("run_start".equals(type)) runText.put(ev.optString("runId"), ev.optString("text"));
+                if ("hello".equals(type) || "state".equals(type)) {
+                    if ("hello".equals(type)) {
+                        // 订阅期间网关重启过（启动号变了）：旧轮次等不到终止事件，文本回收（BUG-A05）
+                        String boot = ev.optString("boot");
+                        if (gatewayChanged(boot, lastBoot)) runText.clear();
+                        lastBoot = boot;
+                    }
+                    onState(ev);
+                }
+                else if ("run_start".equals(type)) runText.put(ev.optString("runId"), clip(ev.optString("text"), RUN_TEXT_CHARS));
                 else if ("run_end".equals(type)) onRunEnd(ev);
                 else if ("sched_note".equals(type)) onSchedNote(ev);
                 else if ("sched_next".equals(type)) SchedAlarm.set(ctx, ev.optLong("at"));
@@ -174,7 +192,7 @@ final class Notify {
         for (int k = 0; k < runs.length(); k++) {
             JSONObject run = runs.optJSONObject(k);
             if (run == null) continue;
-            runText.put(run.optString("id"), run.optString("text"));
+            runText.put(run.optString("id"), clip(run.optString("text"), RUN_TEXT_CHARS));
             JSONArray ps = run.optJSONArray("perms");
             if (ps != null) for (int i = 0; i < ps.length(); i++) {
                 JSONObject p = ps.optJSONObject(i);
@@ -295,6 +313,11 @@ final class Notify {
             .setContentIntent(n.openIntent("", 5))
             .setAutoCancel(true)
             .build());
+    }
+
+    /** hello 里的网关启动号变了（网关重启过）：旧轮次的 run_end 再也送不到，文本该回收（BUG-A05） */
+    static boolean gatewayChanged(String boot, String lastBoot) {
+        return boot != null && !boot.isEmpty() && lastBoot != null && !lastBoot.isEmpty() && !boot.equals(lastBoot);
     }
 
     /** 会话号：JSON 里是 null 时 optString 会给出字符串 "null"，要单独判 */
