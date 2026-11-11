@@ -223,18 +223,36 @@
 
   /** from 之后、不在代码块里的最后一个空行位置；没有返回 -1 */
   function safeSplit(s, from) {
-    // 代码块（```）和独占一行的公式块（$$ 或 \[ … \]）里面都不切
-    const re = /^[ \t]*(```|\$\$[ \t]*$|\\\[[ \t]*$|\\\][ \t]*$)/gm;
-    re.lastIndex = from;
+    // 代码块（```）和独占一行的公式块（$$ 或 \[ … \]）里面都不切。
+    // 围栏开闭的判据必须与 renderMdLines 一致（BUG-UIFS-003）：开块允许带 info string（```js）；
+    // 块里只有不带 info 的围栏才是收尾，否则代码里以 ``` 开头的一行（如 ```js）会被当成收尾，
+    // 切段器在代码块中间冻一段，收尾时 tail 又从代码内容中间开始渲染，排版就跟一次性渲染对不上了。
+    const scan = /^[ \t]*```[^\n]*$|^[ \t]*(\$\$|\\\[|\\\])\s*$/gm;
+    scan.lastIndex = from;   // from 只会落在代码块外的空行处，从这里起状态一定是「没开块」
     let open = null, regionStart = from, best = -1, m;
     const consider = (a, b) => {
       const i = s.lastIndexOf("\n\n", b - 1);
       if (i >= a && i > from) best = i;
     };
-    while ((m = re.exec(s))) {
-      const k = m[1].startsWith("```") ? "code" : "math";
-      if (!open) { if (m[1].trim() === "\\]") continue; consider(regionStart, m.index); open = k; }
-      else if (open === k) { open = null; regionStart = m.index + m[0].length; }
+    while ((m = scan.exec(s))) {
+      const line = m[0];
+      if (/^[ \t]*```/.test(line)) {
+        if (open === "math") continue;                       // 公式块里的 ``` 是内容
+        if (open === "code") {
+          if (/^\s*```\s*$/.test(line)) { open = null; regionStart = m.index + line.length; }
+          continue;                                          // 带 info 的 ```（```js）是代码内容
+        }
+        if (/^\s*```\s*([^\s`]*)(?:\s+.*)?$/.test(line)) { consider(regionStart, m.index); open = "code"; }
+        continue;
+      }
+      const tok = m[1];
+      if (open === "code") continue;                         // 代码块里的 $$ / \[ / \] 是内容
+      if (!open) {
+        if (tok === "\\]") continue;
+        consider(regionStart, m.index); open = "math";
+      } else if (tok === "$$" || tok === "\\]") {            // \[ 在公式块里也是内容，不是收尾
+        open = null; regionStart = m.index + line.length;
+      }
     }
     if (!open) consider(regionStart, s.length);
     return best;
