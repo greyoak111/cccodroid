@@ -1001,8 +1001,20 @@
     toastAct((claude ? t("Claude Code 程序被改过，已拒绝启动；") : "") + t("应用文件被改过，已按安装包还原：") + files.slice(0, 3).join(", ") + (files.length > 3 ? " …" : ""),
       t("知道了"), () => { for (const id of ids) api("/api/tamper/ack?id=" + id, { method: "POST" }).catch(() => {}); });
   }
+  // 恢复失败的提示（FIND-041）：网关只在日志里说，界面上以前什么都看不到。同一条只弹一次
+  const recoverShown = new Set();
+  function showRecoverWarn(list) {
+    for (const w of Array.isArray(list) ? list : []) {
+      if (!w || typeof w.key !== "string") continue;
+      const msg = t(w.key, w.vars || {});
+      if (recoverShown.has(msg)) continue;
+      recoverShown.add(msg);
+      toast(msg, true);
+    }
+  }
   function applyState(s) {
     showTamper(s.tamper);
+    showRecoverWarn(s.recoverWarns);
     srv.runs = s.runs || (s.run ? [s.run] : []);
     srv.intr = intrList(s.interrupted);
     srv.queueAll = s.queue || [];

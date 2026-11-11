@@ -3180,5 +3180,7 @@ window.I18N_DICT.en = {
   "已删除 {n} 项": "Deleted {n} item(s)",
   "这个文件夹装着应用自己的目录或工作区，不能删": "This folder contains the app's own directories or the workspace and can't be deleted",
   "模型清单地址（选填；不填会按接口地址自动查找 /models）": "Model list URL (optional; if empty, /models is looked up automatically from the API address)",
-  "中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。": "At interruption, {n} action(s) with possible side effects had no result: {list}. Whether they already ran cannot be confirmed; please check before clicking Continue."
+  "中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。": "At interruption, {n} action(s) with possible side effects had no result: {list}. Whether they already ran cannot be confirmed; please check before clicking Continue.",
+  "上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。": "The previous run state could not be recovered (unreadable or malformed record), so interrupted turns and queued messages will not appear; the original file was kept.",
+  "运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。": "The run state could not be saved (storage may be full or permission denied). If the app is closed by the system, this turn may not be recoverable."
 };

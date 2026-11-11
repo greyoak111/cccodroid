@@ -3143,3 +3143,5 @@
 3143	Folder ini berisi direktori milik aplikasi atau ruang kerja dan tidak dapat dihapus
 3144	URL daftar model (opsional; jika kosong, /models dicari otomatis dari alamat API)
 3145	Saat terputus, {n} tindakan yang mungkin memiliki efek samping tidak mengembalikan hasil: {list}. Tidak dapat dipastikan apakah sudah dijalankan; periksa dulu sebelum menekan «Lanjutkan».
+3146	Status proses sebelumnya tidak dapat dipulihkan (catatan tidak terbaca atau formatnya salah), jadi giliran yang terputus dan pesan dalam antrean tidak akan muncul; berkas aslinya tetap disimpan.
+3147	Status proses tidak dapat disimpan (penyimpanan mungkin penuh atau tanpa izin). Jika aplikasi ditutup oleh sistem, giliran ini mungkin tidak dapat dipulihkan.

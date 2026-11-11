@@ -92,6 +92,10 @@ export function setPermMode(mode) {
   publish({ type: "perm_mode", mode: eff });
   return { mode: eff, saved };
 }
+// 恢复失败得让用户看见（FIND-041）：以前只写进 gateway.log，界面上既没有中断卡、也没有任何提示。
+// 存中文键 + 变量，界面用同一份词典翻（状态经 SSE 下发，不经过 sendJson 的按请求翻译）
+export const RECOVER_WARNS = [];
+const warnRecover = (key, vars) => { if (!RECOVER_WARNS.some((w) => w.key === key)) RECOVER_WARNS.push({ key, vars: vars || {} }); };
 export function snapshot() {
   return {
     run: runInfo(latestRun()),           // 旧字段：最近开始的那一轮
@@ -103,6 +107,7 @@ export function snapshot() {
     model: SETTINGS.model || PROVIDER.defaultModel || null,
     lastSessionId: LAST_SESSION ? LAST_SESSION.id : null,
     interrupted: INTERRUPTED,
+    recoverWarns: RECOVER_WARNS,
   };
 }
 export const publishState = () => { saveRunMark(); publish({ type: "state", ...snapshot() }); };
@@ -126,7 +131,7 @@ export function saveRunMark() {
   try {
     if (!RUNS.size && !QUEUE.length) { fs.rmSync(RUN_MARK, { force: true }); return true; }
     const live = runList().filter((r) => !r.ended);
-    return writeAtomic(RUN_MARK, JSON.stringify({
+    const ok = writeAtomic(RUN_MARK, JSON.stringify({
       ...(APP_ID ? { app: APP_ID } : {}), ...(STOPPING ? { stop: true } : {}),
       // done：已经答完、只是进程还留着等后台任务回报，而且任务也都清零了 —— 这时被结束不算中断
       // text 以前截 4000 字、别的都不存：没建会话的「重发」长消息后半截悄悄没了，项目 / 模型 / 权限也回落全局（195-AA.5）。
@@ -146,7 +151,13 @@ export function saveRunMark() {
       queue: [...live.flatMap((r) => [...(r.pendingInject || []).map((it) => ({ ...it, injected: false })), ...(r.slashFlight || []).map((it) => ({ ...it, injected: false, held: true }))]), ...QUEUE]
         .map((q) => { const sid = q.sessionId || sidForItem(q); return sid ? { ...q, sessionId: sid } : q; }),
     }));
-  } catch { return false; }
+    if (!ok) warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
+    return ok;
+  } catch {
+    // 写不上（满盘、没有权限）：这一轮被结束时可能恢复不了，得让界面知道（FIND-041）
+    warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
+    return false;
+  }
 }
 // 中断记录是个列表：并行时一次会断好几轮，每个会话都要有自己的「继续」卡（群友 Yhaizg 11-01：升级时三个会话在跑，只提示了一个）
 // 旧版本存的是单条对象，读的时候包成列表
@@ -162,8 +173,13 @@ export function setInterrupted(list) {
   INTERRUPTED = intrList(list);
   try {
     if (!INTERRUPTED.length) { fs.rmSync(INTR_FILE, { force: true }); return true; }
-    return writeAtomic(INTR_FILE, JSON.stringify(INTERRUPTED));
-  } catch { return false; }
+    const ok = writeAtomic(INTR_FILE, JSON.stringify(INTERRUPTED));
+    if (!ok) warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
+    return ok;
+  } catch {
+    warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
+    return false;
+  }
 }
 /** 这个会话又跑起来了：去掉它的中断记录。没建立会话的（sid 为空）互相分不清，一律不在这里清 ——
  *  界面「重发」「忽略」时按记录 id 单独清（/api/interrupted/dismiss）。以前空会话号会把别的未建会话的中断记录一起清掉（#149-2） */
@@ -193,10 +209,17 @@ export const RECOVER_HOOKS = [];
 export function recoverRunMark() {
   let m;
   try { m = JSON.parse(fs.readFileSync(RUN_MARK, "utf8")); } catch (e) {
-    if (e.code !== "ENOENT") keepBad(RUN_MARK, `读不了（${e.code || "JSON 坏了"}），中断记录没恢复`);
+    if (e.code !== "ENOENT") {
+      keepBad(RUN_MARK, `读不了（${e.code || "JSON 坏了"}），中断记录没恢复`);
+      warnRecover("上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。");
+    }
     return;
   }
-  if (!m || typeof m !== "object") { keepBad(RUN_MARK, "形状不对，中断记录没恢复"); return; }
+  if (!m || typeof m !== "object") {
+    keepBad(RUN_MARK, "形状不对，中断记录没恢复");
+    warnRecover("上次的运行状态没恢复（记录读不了或格式不对），中断的轮次和排队的消息不会出现；原文件已留底。");
+    return;
+  }
   // 被结束的那几轮没走收尾，会话记录没重新封签：下一轮会被当成「在应用外被改过」去提醒模型（0.6.9 审计 195-A.8）。
   // 起进程时拍的底存在标记里：记录只是在那之后往后追加了（claude 自己写的），照常封签；前面被改了才标 edited
   for (const r of Array.isArray(m.runs) ? m.runs : []) {

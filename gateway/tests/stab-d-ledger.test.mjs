@@ -9,7 +9,7 @@ import * as Q from "../gw/queue.mjs";
 import { RUNS } from "../gw/runs.mjs";
 
 const MARK = path.join(CFG.home, "ccapp-run-mark.json"), INTR = path.join(CFG.home, "ccapp-interrupted.json");
-const reset = () => { RUNS.clear(); Q.QUEUE.length = 0; Q.setInterrupted([]); fs.rmSync(INTR, { force: true }); fs.rmSync(MARK, { force: true }); };
+const reset = () => { RUNS.clear(); Q.QUEUE.length = 0; fs.rmSync(INTR, { recursive: true, force: true }); fs.rmSync(MARK, { recursive: true, force: true }); Q.setInterrupted([]); };
 after(reset);
 
 function fakeRun() {
@@ -27,6 +27,17 @@ test("有副作用的工具调用没等到结果时记进运行标记，结果�
   assert.deepEqual(markOf().runs[0].sideTools, ["Bash mv a b"], "只读工具不进台账");
   Q.runEmit(run, { type: "tool_result", id: "tu1", ok: true, text: "ok" });
   assert.equal(markOf().runs[0].sideTools, undefined, "结果回来就销账");
+});
+
+test("运行标记写不上时留下可见警告（FIND-041）", () => {
+  reset();
+  const run = fakeRun();
+  RUNS.set(run.id, run);
+  fs.mkdirSync(MARK);
+  fs.writeFileSync(path.join(MARK, "x"), "x");   // 目标是目录：换名必失败
+  assert.equal(Q.saveRunMark(), false);
+  assert.ok(Q.snapshot().recoverWarns.some((w) => w.key.includes("运行状态没保存上")));
+  fs.rmSync(MARK, { recursive: true, force: true });
 });
 
 test("恢复时把没结果的副作用工具带进中断记录，给界面提示用", () => {
