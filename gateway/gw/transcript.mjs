@@ -33,6 +33,9 @@ export function agentFilesOf(sessionFile) {
   return m;
 }
 
+/** 单条记录里的数组元素坏了（null、数字、被改成对象）不能带崩整页：只认对象块 */
+const blocksOf = (c) => (Array.isArray(c) ? c.filter((x) => x && typeof x === "object") : []);
+
 /** transcript 的一行 → 0..n 条可渲染的消息 */
 export function transcriptItems(ev) {
   const out = [];
@@ -50,28 +53,29 @@ export function transcriptItems(ev) {
     if (typeof c === "string") {
       if (c && !isInjected(c)) out.push({ role: "user", text: c, uuid: ev.uuid || null });
     } else if (Array.isArray(c)) {
-      const texts = c.filter((x) => x.type === "text" && x.text && !isInjected(x.text)).map((x) => x.text);
+      const blocks = blocksOf(c);
+      const texts = blocks.filter((x) => x.type === "text" && typeof x.text === "string" && x.text && !isInjected(x.text)).map((x) => x.text);
       // 「图片随消息发」时原话里已有 @图片路径，不再补一行 [图片]
-      if (c.some((x) => x.type === "image") && !texts.some((x) => /@\/\S+\.(png|jpe?g|gif|webp)\b/i.test(x))) texts.push("[图片]");
+      if (blocks.some((x) => x.type === "image") && !texts.some((x) => /@\/\S+\.(png|jpe?g|gif|webp)\b/i.test(x))) texts.push("[图片]");
       if (texts.length) out.push({ role: "user", text: texts.join("\n"), uuid: ev.uuid || null });
-      for (const r of c) {
+      for (const r of blocks) {
         if (r.type !== "tool_result") continue;
         let t = "";
         if (typeof r.content === "string") t = r.content;
-        else if (Array.isArray(r.content)) t = r.content.map((x) => (x.type === "text" ? x.text : `[${x.type}]`)).join("\n");
+        else if (Array.isArray(r.content)) t = r.content.map((x) => (x && x.type === "text" ? String(x.text ?? "") : `[${(x && x.type) || "?"}]`)).join("\n");
         out.push({ role: "tool_result", id: r.tool_use_id, ok: !r.is_error, text: String(t).slice(0, 4000) });
       }
     }
   } else if (ev.type === "assistant") {
-    for (const c of ev.message?.content || []) {
-      if (c.type === "text" && c.text) {
+    for (const c of blocksOf(ev.message?.content)) {
+      if (c.type === "text" && typeof c.text === "string" && c.text) {
         // 单条正文不设上限：重开大会话时整段 renderMd 会把界面卡死（195-Q.10）。留一个很大的顶，超出的标出来
         const over = c.text.length > MAX_ASSISTANT_TEXT;
         const text = over ? c.text.slice(0, MAX_ASSISTANT_TEXT) + "\n\n" + tr(LAST_LANG, tz("（正文太长，只显示前 {n} 字）", { n: MAX_ASSISTANT_TEXT })) : c.text;
         out.push({ role: "assistant", text, uuid: ev.uuid || null, ...(over ? { truncated: true } : {}) });   // uuid：书签落点
       }
-      else if (c.type === "thinking" && c.thinking) out.push({ role: "thinking", text: c.thinking.slice(0, 60000) });
-      else if (c.type === "tool_use") out.push({ role: "tool_use", id: c.id, name: c.name, input: clipInput(c.input) });
+      else if (c.type === "thinking" && typeof c.thinking === "string" && c.thinking) out.push({ role: "thinking", text: c.thinking.slice(0, 60000) });
+      else if (c.type === "tool_use" && c.id && c.name) out.push({ role: "tool_use", id: c.id, name: c.name, input: clipInput(c.input) });
     }
   }
   return out;
@@ -159,7 +163,9 @@ export async function readSessionPage(file, { before = null, limit = 40, exclude
           if (c) { contextDone = true; contextTokens = c.n; }
         }
         if (ev && !(excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) {
-          const its = pick(ev);
+          // 一行转不出来（记录坏了、pick 自己出错）只丢这一条，不能让整页历史 500（FIND-023）
+          let its = [];
+          try { const r = pick(ev); if (Array.isArray(r)) its = r; } catch {}
           if (its.length) {
             items.unshift(...its);
             turnStart = its[0].role === "user";
@@ -247,7 +253,9 @@ export async function readSessionForward(file, { after = 0, limit = 40, excludeF
         if (!line) continue;
         let ev = null; try { ev = JSON.parse(line); } catch {}
         if (!ev || (excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) continue;
-        const its = transcriptItems(ev);
+        // 单条转换出错只丢这一行（FIND-023）
+        let its = [];
+        try { its = transcriptItems(ev); } catch {}
         if (!its.length) continue;
         // 够数了、又碰到下一轮的开头：这一行留给下一页
         if (items.length >= limit && its[0].role === "user" && lineAt > from) return { items, from, next: lineAt, size };
@@ -265,7 +273,9 @@ export async function readSessionForward(file, { after = 0, limit = 40, excludeF
     const tail = rest.toString("utf8").trim();
     if (tail && items.length < limit * 4) {
       let ev = null; try { ev = JSON.parse(tail); } catch {}
-      if (ev && !(excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) items.push(...transcriptItems(ev));
+      if (ev && !(excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) {
+        try { items.push(...transcriptItems(ev)); } catch {}   // 末行坏了只丢这一条（FIND-023）
+      }
     }
     return { items, from, next: size, size };
   } finally {
