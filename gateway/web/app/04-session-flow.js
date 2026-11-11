@@ -238,6 +238,7 @@
     view.pendNav = null;      // 用户明确打开某一页：上一次在途的锚点 / 续读意图不再适用
     resetView(id);
     if (!id) showWelcome();   // 新会话当场画首屏，不等重连回来——中间空着那一下就是闪
+    showFailNote(id);         // 切走期间它在后台失败了：回到这个会话时把网关层的报错补在最新处（FIND-006）
     view.jumpQ = id && jumpQ ? jumpQ : "";   // 从搜索结果点进来：历史加载完后跳到命中的那条
     view.jumpPages = 0;
     view.anchor = id && anchor ? anchor : "";
@@ -705,6 +706,27 @@
   }
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { noticeHold = false; loadNotices(); } });
 
+  // 轮次 → 会话号：error 事件只带 runId，后台会话失败时要按会话留下提示（FIND-006）
+  const runSid = new Map();
+  // 会话号 → { text, at }：切走期间失败时网关给的错误文案没有别的落点（run_end 只有 failed 标记），
+  // 留到下次进入那个会话时补一行；claude 自己写的 is_error 正文仍在历史里，这里只补网关层的（FIND-006）
+  const failNotes = new Map();
+  function recordFailNote(ev) {
+    if (runViews.has(ev.runId)) return;      // 在眼前：正常画进气泡
+    const sid = ev.sessionId || runSid.get(ev.runId) || (srv.runs.find((r) => r.id === ev.runId) || {}).sessionId;
+    if (!sid || sid === view.sessionId) return;
+    failNotes.set(sid, { text: [ev.message, ev.detail].filter(Boolean).join("\n\n"), at: Date.now() });
+    if (failNotes.size > 30) failNotes.delete(failNotes.keys().next().value);
+  }
+  /** 回到某个会话：把切走期间它的失败提示补上（FIND-006） */
+  function showFailNote(sid) {
+    const n = sid && failNotes.get(sid);
+    if (!n) return;
+    failNotes.delete(sid);
+    addNote(t("上一轮在后台失败：{msg}", { msg: n.text }), liveEl);
+    scrollDown();
+  }
+
   function belongs(ev) {
     if (view.runIds.has(ev.runId)) return true;
     if (ev.cid && view.cids.has(ev.cid)) return true;
@@ -714,6 +736,12 @@
   }
 
   function onBus(ev) {
+    // error 事件不带会话号：从带会话号的同类事件里把 runId → sessionId 记下来（FIND-006）
+    if (ev.runId && ev.sessionId) {
+      runSid.set(ev.runId, ev.sessionId);
+      if (runSid.size > 500) runSid.delete(runSid.keys().next().value);
+    }
+    if (ev.type === "error") recordFailNote(ev);
     switch (ev.type) {
       case "hello": return onHello(ev);
       case "tasks":
