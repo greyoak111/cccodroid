@@ -519,12 +519,17 @@ ${p && p.plainHttp ? `<div class="tiny warn">${esc(t("这个地址是明文 http
       if (!act) return;
       if (act === "use") return useProvider(p);
       if (act === "test") return testAndShow(p.id);
+      // 这张卡属于哪一家、还是不是刚才那一份 DOM：await 回来的旧回执只许动仍在原卡上的视图（BUG-UIFS-004）
+      const cardId = p ? p.id : "__new__";
+      const keyEl = $("pc-key"), labelEl = $("cc-label");
+      const live = () => state.provView === cardId && $("cc-label") === labelEl && $("pc-key") === keyEl;
       if (act === "clear") {
         if (!confirm(t("清除 {name} 的 Key？", { name: p.label }))) return;
         // 留空保存会继续用旧 Key，以前只能把整个接口删掉（195-E.9）；后端支持 clearKey
         let r;
         try { r = await post("/api/providers/save", { id: p.id, clearKey: true }); } catch (e2) { return toast(e2.message, true); }
         if (r && r.ok === false) return toast(t("清除失败：{msg}", { msg: r.message || "?" }), true);
+        if (!live()) return toast(t("已清除"));
         return reloadProv(t("已清除"));
       }
       if (act === "del") {
@@ -563,11 +568,15 @@ ${p && p.plainHttp ? `<div class="tiny warn">${esc(t("这个地址是明文 http
       }
       let r;
       try { r = await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
-      state.provView = r.id;
       // 换了主机又没给新 Key：网关把旧 Key 清掉了，得说清楚、让用户重新填（0.6.9 审计 P1-2）
       const done = p ? t("已保存") : t("已添加");
       // 远程明文 http：只警告不拦，保存回执带 warning 就跟在「已保存」后面说（199-9-02）
-      await reloadProv(r.keyCleared ? t("换了主机，旧 Key 已清掉，请重新填") : r.warning ? done + " · " + r.warning : done, true);
+      const msg = r.keyCleared ? t("换了主机，旧 Key 已清掉，请重新填") : r.warning ? done + " · " + r.warning : done;
+      // 卡已切走：迟到的回执只报保存结果，别把视图切回来重画当前卡（BUG-UIFS-004）
+      if (!live()) return toast(msg);
+      if (keyEl.value.trim() !== body.apiKey) return toast(msg);   // 同卡提交后又敲了新 Key：留着，别重画掉
+      state.provView = r.id;
+      await reloadProv(msg, true);
     };
   }
 

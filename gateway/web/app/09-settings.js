@@ -710,13 +710,19 @@
       const act = e.target.dataset && e.target.dataset.act;
       if (!act) return;
       if (act === "use") return useProvider(p);
+      // 这张卡的身份与编辑代次：await 回来的旧回执只许动仍在原卡、且输入没被再改过的输入框。
+      // 以前 A 卡保存还没回来就切到 B：A 的旧闭包按全局 id 找 #pc-key，把 B 刚粘进去的 Key 清掉，
+      // 随后的刷新还会把 B 重画（BUG-UIFS-004）。
+      const keyEl = $("pc-key");
+      const live = () => state.provView === p.id && box.contains(keyEl) && $("pc-key") === keyEl;
       if (act === "clear") {
         if (!confirm(t("清除 {name} 的 Key？", { name: p.label }))) return;
         // 没清掉就别说「已清除」（审查 D-04）
         try { await post("/api/providers/save", { id: p.id, clearKey: true }); } catch (e2) { return toast(e2.message, true); }
+        if (!live()) return toast(t("已清除"));
         return reloadProv(t("已清除"));
       }
-      const body = { id: p.id, apiKey: $("pc-key").value.trim() };
+      const body = { id: p.id, apiKey: keyEl.value.trim() };
       if ($("pc-endpoint")) body.endpoint = $("pc-endpoint").value;
       else if (p.endpointLost) body.endpoint = p.endpoint;   // 只剩一条线路时没有下拉框，也得把新线路记下来，提示才会消失（196-凭据.1）
       // 还没 Key、输入框也空着：点保存不能说「已保存」，其实什么都没配上（审查 P3-3）
@@ -724,10 +730,13 @@
       if (act === "save" || body.apiKey || body.endpoint !== p.endpoint) {
         let r;
         try { r = await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
-        $("pc-key").value = "";
         // 线路失效后只重选、没填新 Key：网关把旧 Key 清掉了（196-凭据.1）
-        if (r && r.keyCleared) return reloadProv(t("换了线路，旧 Key 已清掉，请重新填"));
-        if (act === "save") return reloadProv(t("已保存"), true);
+        const msg = r && r.keyCleared ? t("换了线路，旧 Key 已清掉，请重新填") : t("已保存");
+        if (!live()) return toast(msg);                          // 卡已切走：只报结果，不动当前卡
+        if (keyEl.value.trim() !== body.apiKey) return toast(msg); // 同卡提交后又敲了新内容：留着
+        keyEl.value = "";
+        if (r && r.keyCleared) return reloadProv(msg);
+        if (act === "save") return reloadProv(msg, true);
       }
       await testAndShow(p.id);
     };
