@@ -39,9 +39,10 @@ export function fixedBaseUrl(baseUrl) {
 /** 结尾的 error 被吞掉时通知谁（run.mjs 挂：按会话号找到那一轮，在界面上留一条提示）。参数 (会话号|"", 报错文字) */
 export const SWALLOW_HOOKS = [];
 /** SSE 修补状态机：feed 进上游原文，吐出要发给 claude 的文本；finish 在上游结束时调用，返回补的尾巴或 null（= 该断就断）。
- *  onSwallow(报错文字)：说完之后才来的 error 被吞掉时调用 */
-export function sseRepairer({ onSwallow } = {}) {
-  let buf = "", cr = "", started = false, gotStop = false, gotMsgStop = false, outTokens = 0, outBytes = 0;
+ *  onSwallow(报错文字)：说完之后才来的 error 被吞掉时调用
+ *  maxBuf：行缓冲上限（字节）。不是 SSE 的正文一直不出现空行时会越攒越多，超了置 overflow 让转发层断开（OBS-001） */
+export function sseRepairer({ onSwallow, maxBuf = 8 << 20 } = {}) {
+  let buf = "", cr = "", started = false, gotStop = false, gotMsgStop = false, outTokens = 0, outBytes = 0, overflow = false;
   const open = new Set(), kinds = new Map();
   let hasOutput = false, hasTool = false;
   const done = () => started && !gotMsgStop && open.size === 0 && hasOutput;
@@ -106,10 +107,13 @@ export function sseRepairer({ onSwallow } = {}) {
   }
   return {
     feed(chunk) {
+      if (overflow) return "";
       // 块尾的 \r 先留着：CRLF 正好切在两块之间时，单独把 \r 换成 \n 会多出一个空行，把事件名和 data 拆开（审查 B10）
       let c = cr + chunk; cr = "";
       if (c.endsWith("\r")) { cr = "\r"; c = c.slice(0, -1); }
-      buf += c.replace(/\r\n?/g, "\n");
+      c = c.replace(/\r\n?/g, "\n");
+      if (buf.length + c.length > maxBuf) { overflow = true; buf = ""; return ""; }   // OBS-001
+      buf += c;
       let out = "", i;
       while ((i = buf.indexOf("\n\n")) >= 0) { const raw = buf.slice(0, i); buf = buf.slice(i + 2); if (raw.trim()) out += block(raw); }
       return out;
@@ -126,6 +130,7 @@ export function sseRepairer({ onSwallow } = {}) {
     },
     get complete() { return gotMsgStop; },
     get started() { return started; },
+    get overflow() { return overflow; },
   };
 }
 
@@ -171,6 +176,7 @@ function handle(req, res) {
     let ended = false;
     const end = () => {
       if (ended) return; ended = true;
+      if (res.destroyed) return;                        // 行缓冲超限已经主动断开（OBS-001），别再往坏掉的响应里写
       const t = fix.finish({ complete: ur.complete });
       // 块还开着：真断了，原样交给 claude。连 message_start 都没有、上游又是正常收完的：不是我们认得的流，正文照常转完（FIND-021、200-9-06）
       if (t === null) { res.destroy(); return; }
@@ -180,6 +186,13 @@ function handle(req, res) {
     // 下游（claude）读得慢就停读上游，收走了再续：以前不管 write 的返回值，上游有多少吸多少，全堆在响应缓冲里（0.6.9 审计 #193）
     ur.on("data", (d) => {
       const o = fix.feed(d);
+      // 不是 SSE 的正文一直不出现空行、攒过了上限：断开两头，claude 会按断流重试（OBS-001）
+      if (fix.overflow) {
+        log("streamfix: 行缓冲超过上限，断开这一条流让 claude 重试");
+        try { ur.destroy(); } catch {}
+        try { res.destroy(); } catch {}
+        return;
+      }
       const w = o && writePaced(res, o);
       if (w) { ur.pause(); w.then(() => { if (!res.destroyed) ur.resume(); }); }
     });

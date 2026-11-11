@@ -29,3 +29,11 @@ test("FIND-021：200 + text/event-stream 但正文不是 SSE → 上游正常收
   assert.equal(typeof t, "string");
   assert.match(t, /not sse/, "正文不能被丢掉");
 });
+
+test("OBS-001：不是事件、也不像 SSE 的行一直攒着 → 超过上限要报出来，不能无限涨", () => {
+  const f = sseRepairer({ maxBuf: 64 });
+  const out = f.feed("x".repeat(200));
+  assert.equal(out, "");
+  assert.equal(f.overflow, true, "超过上限必须置 overflow，让转发层断开");
+  assert.equal(f.feed("y".repeat(200)), "", "溢出之后不再往下吐");
+});
