@@ -4,7 +4,11 @@
   const BIG_ATT = 20 << 20;
   const isBigAtt = (a) => !!a.big || a.size > BIG_ATT;
   // 带空白的路径要用引号包起来：@ 提及按空白截断，不包的话 claude 只拿到前半截（0.6.9 审计 195-D.2）
-  const attAt = (p) => (/[\s"]/.test(p) ? '@"' + p.replace(/"/g, '\\"') + '"' : "@" + p);
+  // 引号里要转义完整：反斜杠不转义会把后面的字吃掉，换行 / 回车 / 制表符留在引号里会把这一行拆开（稳定性报告 FIND-028）
+  // 转义规则与 02-chat-view.js splitRefs 的反解析一一对应
+  const attAt = (p) => (/[\s"\\]/.test(p) ? '@"' + p
+    .replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t") + '"' : "@" + p);
   const attRef = (a) => isBigAtt(a) ? `[附件：${a.path} · ${a.size ? fmtSize(a.size) : "?"}，文件较大没有直接读入，需要时按路径读取]` : attAt(a.path);
   const newCid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   // 还在上传的文件（0.6.9 审计 195-D.1）：传完之前不发送，否则这些附件不在本条消息里、下一条又悄悄带上
