@@ -327,7 +327,9 @@
         return;
       }
       const full = base.replace(/\/$/, "") + "/" + it.raw;
-      replaceToken(AT_TOKEN, "@" + full + " ");
+      // 引用统一走 attAt：带空白 / 引号 / 反斜杠的路径要加引号并转义，不然 @ 提及按空白截断，
+      // 发送出去只拿到前半截（BUG-UIFS-001，和文件面板 insertAtCursor 同一个规则）
+      replaceToken(AT_TOKEN, attAt(full) + " ");
       hidePopup(); autoGrow(); inputEl.focus();
     }
   }
@@ -341,8 +343,9 @@
   /** 在光标处插入一段文本 */
   function insertAtCursor(s) {
     s = String(s ?? "");
-    // 文件面板 / 查看器插进来的是「@绝对路径」：路径带空白时补引号，不然 @ 提及按空白截断（0.6.9 审计 195-D.2）
-    if (/^@\//.test(s) && !/^@"/.test(s) && /\s/.test(s)) s = attAt(s.slice(1));
+    // 文件面板 / 查看器插进来的是「@绝对路径」：统一交给 attAt 补引号并转义（空白 / 引号 / 反斜杠），
+    // 和 @ 文件补全一个规则；不然 @ 提及按空白截断，带引号、反斜杠的路径也还原不回去（0.6.9 审计 195-D.2、BUG-UIFS-001）
+    if (/^@\//.test(s) && !/^@"/.test(s)) s = attAt(s.slice(1));
     // 有选区就整段替换，不是只在选区起点插（0.6.9 审计 195-D.8）
     const v = inputEl.value, a = inputEl.selectionStart ?? v.length, b = inputEl.selectionEnd ?? a;
     const before = v.slice(0, a), after = v.slice(b);
