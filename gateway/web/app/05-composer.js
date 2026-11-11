@@ -593,6 +593,9 @@
   // 安卓壳递进来的东西：别的应用「分享到 Claude CLI」，或系统选择器的结果
   function attachPath(p, from) {
     if (!p) return;
+    // 壳偶尔会为同一条路径重复发事件；重复的珠子删一个会把壳拷的那份临时文件删掉，另一个就悬空了（稳定性报告 FIND-033）。
+    // 不在眼前的草稿由 draftPutAway 自己按 path 去重
+    if (state.attachments.some((x) => x.path === p)) return;
     const name = p.split("/").pop();
     // 大小先不知道：按大附件算（不出缩略图、发出去只给路径），问到大小再改
     const a = { path: p, name, size: 0, big: true, kind: /\.(png|jpe?g|gif|webp|bmp|avif|heic)$/i.test(p) ? "image" : "other" };
