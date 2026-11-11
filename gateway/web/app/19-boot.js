@@ -536,13 +536,9 @@
     setStatus(t("正在连接网关…"));
 
     await refreshStatus();
-    // 本地不知道用哪条，就问网关「最近真正跑过哪条会话」—— 总比默默开个新会话强
-    if (!view.sessionId && state.serverStatus?.lastSessionId) {
-      // 走草稿交接：新对话没发的字留在新对话名下，不跟着进上一条会话（0.6.9 审计 195-R.5）
-      draftSwap(view.sessionId, state.serverStatus.lastSessionId);
-      view.sessionId = state.serverStatus.lastSessionId;
-      saveUiState();
-    }
+    // 本地不知道用哪条，就问网关「最近真正跑过哪条会话」—— 总比默默开个新会话强；
+    // 用户在 /api/status 回来之前已经自己点了新对话 / 打开过会话，就不接（FIND-003，规则见 04 的 adoptLastSession）
+    adoptLastSession(state.serverStatus?.lastSessionId);
     connectBus(false);                   // hello 到了就会去取历史 / 接上正在跑的那一轮
 
     await Promise.all([loadSettings(), loadCaps(), loadSessions()]);

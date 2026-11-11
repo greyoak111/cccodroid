@@ -213,11 +213,22 @@
     toast(t("已恢复")); loadSessions(); lineageDirty();
     openSession(id);
   }
+  /** 启动时把网关记着的「最近真正跑过的会话」接回来（boot 的 /api/status 与首个 hello 都带 lastSessionId）。
+   *  用户在启动窗口里已经自己点过「新对话」/ 打开过会话（view.userNav），或者已经发出消息，就不接：
+   *  否则刚点开的空白新对话会被换回上一条，草稿也被搬走（FIND-003）。 */
+  function adoptLastSession(sid) {
+    if (!sid || view.sessionId || view.userNav || view.runIds.size || view.cids.size || view.lastRunId) return false;
+    draftSwap(view.sessionId, sid);
+    view.sessionId = sid;
+    saveUiState();
+    return true;
+  }
   /** 打开某个会话（null = 新会话）。重连事件流：网关会把正在跑的那一轮从头重放过来。
    *  anchor：落在某一章开头（脉络里点站 / 章标题；压缩消息的 uuid，第一章是 "start"）
    *  opts.keepPage：不收起整页（网关那边删了正开着的会话，人可能正在项目页里） */
   function openSession(id, jumpQ, anchor, opts = {}) {
     view.userOpen = id || null;   // 用户点开的（不是启动时按记着的会话号接回的）：打不开要说一声
+    view.userNav = true;          // 启动窗口里用户自己开了会话：boot 的「接回上次会话」不再执行（FIND-003）
     if (id !== view.sessionId) saveLastRead();   // 切走前记下读到哪（在底部就作废）
     if ((id || null) !== view.sessionId) {
       draftSwap(view.sessionId, id);   // 输入框、附件栏换成这个会话自己的
@@ -250,6 +261,7 @@
       && !histEl.querySelector(".msg:not(.welcome)") && !liveEl.querySelector(".msg");
   }
   function newConversation(note) {
+    view.userNav = true;   // 空白新对话上点「新对话」也要记：启动窗口里正等着接回上次会话（FIND-003）
     // 已经在空白新对话上又点「新对话」（侧栏 / 顶栏 ＋）：现场不动，只收起整页、聚焦输入框。
     // 以前每点一次都重置视图、重连事件流，顶栏在「新会话」「已连接」之间来回闪（#40）。带 note 的（/clear 等）照旧重开
     if (!note && blankNew()) { closePage(); inputEl.focus(); return false; }
@@ -863,14 +875,21 @@
     const adoptDrafts = helloCount === 1 || view.adoptDrafts;
     view.adoptDrafts = false;
     applyState(ev);
+    if (helloCount === 1 && !state.serverStatus) {
+      // /api/status 启动时没拿到（超时、网关刚起来那一下的 5xx）：hello 的「已连接」不能把失败盖掉、
+      // 上次会话也没接回。hello 里带着同一份 lastSessionId，按 boot 的规则接一次，再把状态补拉回来（FIND-005）
+      if (typeof adoptLastSession === "function") adoptLastSession(ev.lastSessionId);
+      if (typeof refreshStatus === "function") refreshStatus().catch(() => {});
+    }
     if (ev.resume) { calmStatus(t("已连接")); return; }
     beginReplay();
 
     // 续不上（首次连接 / 网关重启过 / 断太久）：本视图从头来 —— 历史重新取，
     // 正在跑的那一轮紧接着会被网关整轮重放过来
-    if (helloCount === 1 && ev.run && !ev.run.ended && !view.sessionId) {
+    if (helloCount === 1 && ev.run && !ev.run.ended && !view.sessionId && !view.userNav) {
       // 刚打开界面时网关正忙、本地又不知道看哪条（没有上次的会话号）：直接跟上那一轮。
-      // 本地记着会话号时不再改道：以前会覆盖用户最后查看的会话并交换草稿（0.6.9 审计 195-P.7）
+      // 本地记着会话号时不再改道：以前会覆盖用户最后查看的会话并交换草稿（0.6.9 审计 195-P.7）；
+      // 用户在启动窗口里已经自己点了新对话 / 打开过会话，也一样不跟（FIND-003）
       const sid1 = ev.run.sessionId || null;
       // 自动跟到别的会话也要按每会话草稿的契约交接（#120-3）：A 没发的字和附件留在 A，输入框换成 B 自己的草稿；
       // 不然 A 的草稿会顶着 B 的会话号发出去
