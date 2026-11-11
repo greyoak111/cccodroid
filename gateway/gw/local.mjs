@@ -12,7 +12,7 @@ import { termEnv } from "./terminal.mjs";
 import { compIndex, compIndexCache, compRun, sha256File } from "./components.mjs";
 import { readSmallFile } from "./saferead.mjs";
 import { guarded } from "./crashguard.mjs";
-import { runEmit } from "./queue.mjs";
+import { END_HOOKS, runEmit } from "./queue.mjs";
 import { privCall } from "./usage.mjs";
 import { ucAppBegin, ucAppWrote } from "./userconf.mjs";
 
@@ -27,7 +27,28 @@ const LLAMA_LOG = path.join(CFG.home, ".cache", "llama-server.log");
 // 运行标记：网关被 SIGKILL 时 detached 的 llama-server 会被 init 收养，新网关认不回来（0.6.9 审计 195-F.1/T.4）
 const LLAMA_PID = path.join(CFG.home, ".cache", "llama-server.pid");
 const llamaBin = () => PREFIX ? path.join(PREFIX, "bin", "llama-server") : "";
-export const LL = { child: null, file: "", id: "", sig: "", gpu: false, state: "off", since: 0, lastUse: 0, err: "", run: null, loadMs: 0 };
+export const LL = { child: null, file: "", id: "", sig: "", gpu: false, state: "off", since: 0, lastUse: 0, err: "", loadMs: 0 };
+// 一个 llama-server、一个槽，可能同时有好几轮端侧对话排着。以前只记最后一轮（LL.run），后开始的会盖掉前面的：
+// 另一轮收不到预填进度、服务崩了也不知道为什么；换模型时那根指针还可能指着已经结束的一轮，
+// 误判成没人用，把别人正在答题的服务停掉（稳定性报告 FIND-009）。改成记所有还没结束的端侧轮次。
+const LL_RUNS = new Set();
+let llRunsHooked = false;
+/** 这一轮开始用端侧模型：记下来，这一轮结束时由 END_HOOKS 摘掉 */
+export function localRunAttach(run) {
+  if (!run) return;
+  LL_RUNS.add(run);
+  if (!llRunsHooked) { llRunsHooked = true; END_HOOKS.push((r) => LL_RUNS.delete(r)); }
+}
+function liveRuns() {
+  for (const r of LL_RUNS) if (r.ended) LL_RUNS.delete(r);
+  return [...LL_RUNS];
+}
+/** 把一条端侧提示发给所有还在用它的轮次；emit 可换实现（测试用） */
+export function localRunNote(key, text, emit = runEmit) {
+  const runs = liveRuns();
+  for (const r of runs) emit(r, { type: "note", key, text });
+  return runs.length;
+}
 const LOCAL_MODE_FILE = path.join(CFG.home, ".cccodroid", "local-mode.json");
 
 /** 自定义模式的配置：{ have, ok, cfg } 或 { have, ok:false, err }。每次现读，改完下一条消息就生效 */
@@ -132,8 +153,9 @@ export async function ensureLlama(want, note) {
   await verifySharedModel(m, note);
   if (llStarting && LL.sig === sig) { await llStarting; return m; }
   if (llStarting) { try { await llStarting; } catch {} }
-  // 只有一个服务、一个槽：另一个会话正用着它答题时换模型，会把那边的生成掐断（#97 02-007）。这边先报错，等那边答完
-  if (LL.child && LL.sig !== sig && LL.run && !LL.run.ended) throw new Error(tz("端侧模型 {model} 正在另一个会话里用，等它答完再换模型", { model: LL.id }));
+  // 只有一个服务、一个槽：另一个会话正用着它答题时换模型，会把那边的生成掐断（#97 02-007）。这边先报错，等那边答完。
+  // 看的是所有还活着的端侧轮次，不是最后一轮：并行时最后一轮可能已经结束（FIND-009）
+  if (LL.child && LL.sig !== sig && liveRuns().length) throw new Error(tz("端侧模型 {model} 正在另一个会话里用，等它答完再换模型", { model: LL.id }));
   if (LL.child) llamaStop("换模型或参数");
   llStarting = llamaStart(m, note).finally(() => { llStarting = null; });
   await llStarting;
@@ -192,11 +214,11 @@ function llamaStart(m, note) {
       if (!listened && LISTEN.test(tail)) listened = true;
       // 读提示的进度（llama-server 每读一批打一行 progress = 0.41）报给当前这一轮：首字前别让人干等
       const s = String(d), mm = s.match(/prompt processing, n_tokens =\s*(\d+), progress = ([\d.]+)/g);
-      if (mm && LL.run && !LL.run.ended && Date.now() - lastNote > 1500) {
+      if (mm && liveRuns().length && Date.now() - lastNote > 1500) {
         const last = mm[mm.length - 1].match(/n_tokens =\s*(\d+), progress = ([\d.]+)/);
         const pct = Math.round(Number(last[2]) * 100);
         lastNote = Date.now();
-        runEmit(LL.run, { type: "note", key: "prefill", text: tz("端侧模型正在读提示：{pct}%", { pct }) });
+        localRunNote("prefill", tz("端侧模型正在读提示：{pct}%", { pct }));
       }
     };
     c.stdout.on("data", guarded("llama stdout", eat)); c.stderr.on("data", guarded("llama stderr", eat));
@@ -214,7 +236,7 @@ function llamaStart(m, note) {
       if (ours && wasReady) {
         const why = tail.split("\n").filter((l) => /error|failed|DeviceLost|out of memory/i.test(l)).pop() || "";
         Object.assign(LL, { state: "error", err: tz("llama-server 意外退出（rc={code}）", { code }) + (why ? "：" + why.trim().slice(0, 200) : "") });
-        if (LL.run && !LL.run.ended) runEmit(LL.run, { type: "note", key: "crash", text: LL.err });
+        localRunNote("crash", LL.err);
       }
       // 加载中被网关自己停掉（停服务、换模型）：不是「没起来」，别把状态改成出错（审查 v0.5.3 B8）
       if (!ours) { if (!done) { done = true; reject(new Error(tz("已停止"))); } return; }
@@ -242,7 +264,7 @@ function llamaStop(why) {
   const c = LL.child;
   if (!c) return;
   log(`[local] 停 llama-server（${why}）`);
-  Object.assign(LL, { child: null, state: "off", run: null });
+  Object.assign(LL, { child: null, state: "off" });
   try { killTree(c); } catch {}
   try { const j = JSON.parse(fs.readFileSync(LLAMA_PID, "utf8")); if (j && j.pid === c.pid) fs.rmSync(LLAMA_PID, { force: true }); } catch {}
 }
