@@ -25,13 +25,15 @@ const lineageShape = (j) => {
 
 export function lineageDb() {
   if (DB) return DB;
-  DB = loadState(FILE, { shape: lineageShape, fallback: () => ({ v: 1, edges: {} }) }).data;
+  const r = loadState(FILE, { shape: lineageShape, fallback: () => ({ v: 1, edges: {} }) });
+  if (r.bad && !r.kept) return r.data;      // 同 archiveDb（BUG-P01）：没读进来的原文件不拿空表缓存，下次再读
+  DB = r.data;
   return DB;
 }
 
 let lastSaveOk = true;
 function save() {
-  lastSaveOk = saveState(FILE, DB ?? { v: 1, edges: {} });
+  lastSaveOk = DB ? saveState(FILE, DB) : false;      // 没读进来就没有可保存的当前状态（BUG-P01）
   if (!lastSaveOk) log("写脉络记录失败");
   return lastSaveOk;
 }
