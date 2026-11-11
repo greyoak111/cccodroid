@@ -784,6 +784,8 @@ public class MainActivity extends Activity {
                     ui.post(() -> android.widget.Toast.makeText(this, Tr.f("「{0}」附加失败：{1}", displayName(u), e.getMessage()), android.widget.Toast.LENGTH_LONG).show());
                 }
             }
+            // 后台收完了：网页那边从这一刻起可以发送（收的过程中要挡住，否则附件落到下一条，FIND-027）
+            if (big) toPage("ccapp-attach-copy-done", String(list.size()));
         }, "attach-big").start();
     }
     /** 别的应用分享进来的流（审查 10-30 第九份 安卓低7）：读是在我们自己的进程里读的，
@@ -2371,14 +2373,16 @@ public class MainActivity extends Activity {
             Uri[] all = chooserResult(this, res, data);
             ValueCallback<Uri[]> cb = fileCb;
             fileCb = null;
-            if (all == null) { cb.onReceiveValue(null); return; }
+            if (all == null) { cb.onReceiveValue(null); toPage("ccapp-attach-pick-cancel", ""); return; }
             // 查大小要问别的应用的 provider（云盘可能要联网），别在主线程上等（11-04 报告 A4）
             new Thread(() -> {
                 java.util.ArrayList<Uri> small = new java.util.ArrayList<>(), big = new java.util.ArrayList<>();
                 for (Uri u : all) (sizeOf(u) > BIG_ATTACH ? big : small).add(u);
                 ui.post(() -> {
                     try { cb.onReceiveValue(small.isEmpty() ? null : small.toArray(new Uri[0])); } catch (Exception ignored) {}
-                    if (!big.isEmpty() && !isDestroyed()) attachBig(big, true);
+                    if (big.isEmpty()) { toPage("ccapp-attach-pick-done", "0"); return; }   // 只有小文件：这一轮到此为止（网页据此清掉选择器快照，FIND-034）
+                    // 后台收大文件之前先告诉网页有几个：收完（copy-done）之前不许发送（FIND-027）
+                    if (!isDestroyed()) { toPage("ccapp-attach-copy-start", String(big.size())); attachBig(big, true); }
                 });
             }, "attach-size").start();
         }

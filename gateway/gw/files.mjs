@@ -225,6 +225,10 @@ function screencapOnce(shot) {
   });
 }
 
+// 共享存储授权被撤回时 realpath / stat 报 EACCES：要按 403 说清楚，别让界面以为文件没了（195-C.7 / FIND-029）
+const deniedCode = (e) => /EACCES|EPERM/.test(String((e && e.code) || e || ""));
+const deniedMsg = () => tz("没有读取这个位置的权限（共享存储需要在系统设置里允许「所有文件访问」）");
+
 // ── 路由：/api/file /api/file/stat /api/file/save /api/file/new /api/file/rename /api/file/delete /api/upload /api/screenshot /api/files ──
 export async function routeFiles(req, res, u, p) {
   // ── 取文件内容（消息里的图片、文件预览、下载都走这里）──
@@ -232,9 +236,9 @@ export async function routeFiles(req, res, u, p) {
     const r = safeFilePath(u.searchParams.get("path"));
     if (r.error) {
       // 没有共享存储权限时 realpath 报 EACCES，以前一律当 404，界面以为文件没了（195-C.7）
-      const denied = /EACCES|EPERM/.test(String(r.detail || ""));
+      const denied = deniedCode(r.detail);
       return sendJson(res, denied ? 403 : r.status || 404, denied
-        ? { error: "forbidden", message: tz("没有读取这个位置的权限（共享存储需要在系统设置里允许「所有文件访问」）") }
+        ? { error: "forbidden", message: deniedMsg() }
         : { error: r.error, detail: r.detail });
     }
     // procfs / sysfs 的 size 和实际能读出的字节对不上，按 size 发 Content-Length 会被浏览器判成截断（200-H-2）
@@ -276,12 +280,20 @@ export async function routeFiles(req, res, u, p) {
     // 原样找不到再去掉首尾空白（复制来的路径常带换行），同 safeFilePath
     const raw = String(u.searchParams.get("path") || ""), q = raw.trim();
     if (!path.isAbsolute(q)) return sendJson(res, 400, { error: "absolute path required" });
-    let real;
+    let real, why = "";
     try { real = fs.realpathSync(path.isAbsolute(raw) ? raw : q); }
-    catch { real = null; }
-    if (real == null && raw !== q) { try { real = fs.realpathSync(q); } catch {} }
-    if (real == null) return sendJson(res, 404, { error: "not found", path: q });
-    let st; try { st = fs.statSync(real); } catch (e) { return sendJson(res, 404, { error: e.message }); }
+    catch (e) { real = null; why = (e && e.code) || (e && e.message) || ""; }
+    if (real == null && raw !== q) { try { real = fs.realpathSync(q); } catch (e) { why = (e && e.code) || (e && e.message) || why; } }
+    // 没有权限和文件真的不在，回执要分开：界面对前者要提示去开「所有文件访问」（FIND-029）
+    if (real == null) return deniedCode(why)
+      ? sendJson(res, 403, { error: "forbidden", path: q, message: deniedMsg() })
+      : sendJson(res, 404, { error: "not found", path: q });
+    let st; try { st = fs.statSync(real); }
+    catch (e) {
+      return deniedCode(e)
+        ? sendJson(res, 403, { error: "forbidden", path: q, message: deniedMsg() })
+        : sendJson(res, 404, { error: e.message });
+    }
     // 目录也过同一道闸：不然私有目录、运行时目录在不在、真实路径是什么都探得出来（11-01 独立审查低-1）
     if (st.isDirectory()) return pathBlocked(real) ? sendJson(res, 403, { error: "forbidden" }) : sendJson(res, 200, { path: real, dir: true });
     const r = safeFilePath(real);

@@ -431,6 +431,8 @@
     if (VW.dirty) draftClear();
     closeViewerPdf();
     vwDropEd();
+    vwMdStop();          // 换文件：上一份的分段预览 observer、行号栏状态都别再留着（FIND-026）
+    gutStop();
     vwHtmlStop();
     Object.assign(VW, { path, kind: kind || "other", size: size || 0, text: "", mtime: 0, dirty: false, zoom: 1, git: null, gitInfo: "", gitMarks: null, plainMd: false, wb: null, sheets: null, ready: false, eol: "" });
     // 换了文档就换代：上一个文档还在途的读取、转换、保存回执一律作废（审查 C-001、04-F04、04-F05）
@@ -451,6 +453,11 @@
       vwActs([]);
       const tag = VW.kind === "video" ? "video" : "audio";
       $("vw-body").innerHTML = `<div class="vw-media"><${tag} src="${fileUrl(path)}" controls autoplay></${tag}></div>`;
+      // 读不出来（格式不支持、文件没了、解码失败）时别只给一块空白：换成失败说明和分享入口（稳定性报告 FIND-025）
+      $("vw-body").querySelector("video,audio")?.addEventListener("error", () => {
+        if (VW.path !== path || viewerEl.classList.contains("hidden")) return;
+        vwFail(t("读取失败"));
+      });
       return;
     }
     vwActs([]);
@@ -765,6 +772,14 @@
     gutSchedule();
   }
   function gutSchedule() { clearTimeout(gutTimer); gutTimer = setTimeout(gutDraw, 120); }
+  // 关查看器 / 切版式时把 observer、待画的行号和量过的行文本一起放下（稳定性报告 FIND-026）：
+  // 以前 ResizeObserver 一直盯着已经拆掉的编辑框，几十万行的 lines 也跟着页面挂着
+  function gutStop() {
+    clearTimeout(gutTimer); gutTimer = 0;
+    if (gutRO) { gutRO.disconnect(); gutRO = null; }
+    if (gutRaf) { cancelAnimationFrame(gutRaf); gutRaf = 0; }
+    gutM = null;
+  }
   function gutDraw() {
     const ta = $("vw-text"); if (!ta) return;
     const wrap = ta.parentElement, gut = wrap.querySelector(".vw-gut");
@@ -965,6 +980,8 @@
 
   function vwRenderText(mode) {
     vwDropEd();
+    vwMdStop();          // 从预览切走：分段渲染的 observer 别跟着文字一起留着（FIND-026）
+    gutStop();           // 行号栏的 observer / 行文本也一起放下，等新的编辑框建好再挂（FIND-026）
     VW.mode = mode;
     if (mode === "edit" && isMd(VW.path) && !VW.plainMd && !VW.enc) { vwRenderActs(); return vwMdEditor(); }
     if (mode === "md") vwMdPreview(VW.text);

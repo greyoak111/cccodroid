@@ -4,7 +4,11 @@
   const BIG_ATT = 20 << 20;
   const isBigAtt = (a) => !!a.big || a.size > BIG_ATT;
   // 带空白的路径要用引号包起来：@ 提及按空白截断，不包的话 claude 只拿到前半截（0.6.9 审计 195-D.2）
-  const attAt = (p) => (/[\s"]/.test(p) ? '@"' + p.replace(/"/g, '\\"') + '"' : "@" + p);
+  // 引号里要转义完整：反斜杠不转义会把后面的字吃掉，换行 / 回车 / 制表符留在引号里会把这一行拆开（稳定性报告 FIND-028）
+  // 转义规则与 02-chat-view.js splitRefs 的反解析一一对应
+  const attAt = (p) => (/[\s"\\]/.test(p) ? '@"' + p
+    .replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t") + '"' : "@" + p);
   const attRef = (a) => isBigAtt(a) ? `[附件：${a.path} · ${a.size ? fmtSize(a.size) : "?"}，文件较大没有直接读入，需要时按路径读取]` : attAt(a.path);
   const newCid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   // 还在上传的文件（0.6.9 审计 195-D.1）：传完之前不发送，否则这些附件不在本条消息里、下一条又悄悄带上
@@ -14,6 +18,9 @@
   async function send(forcedText, mode) {
     const fromInput = forcedText == null;
     if (fromInput && uploading.size) return void toast(t("还有 {n} 个文件正在上传，传完再发送。", { n: uploading.size }), true);
+    // 安卓壳在后台把选择器里的大文件收进工作区（不经网页，见 MainActivity.attachBig）：收完之前也不许发送，
+    // 否则这些附件不在本条消息里、下一条又悄悄带上（稳定性报告 FIND-027）
+    if (fromInput && pickCopy) return void toast(t("还有 {n} 个文件正在上传，传完再发送。", { n: pickCopy }), true);
     const typed = (fromInput ? inputEl.value : forcedText).trim();
     // 附件只在附件栏里显示，发出时才把 @路径 接到末尾（claude 靠它读文件）；手动写过的不重复
     // 大附件只给路径（见 attRef），Claude 用到时自己按路径读
@@ -55,6 +62,9 @@
     }
     if (typed.startsWith("/rename ")) {
       if (!view.sessionId) return toast(t("当前还没有会话"), true);
+      // 发送键连点两下：第一次还没回来时输入框还没清，同一条重命名会再发一遍（稳定性报告 FIND-012）
+      if (renameBusy === typed) return;
+      renameBusy = typed;
       const rgen = view.gen;
       try {
         await api(`/api/session/${encodeURIComponent(view.sessionId)}/rename`, {
@@ -66,6 +76,7 @@
         if (fromInput && rgen === view.gen && inputEl.value.trim() === typed) { inputEl.value = ""; autoGrow(); }
         toast(t("已重命名")); loadSessions();
       } catch (e) { toast(e.message, true); }
+      finally { if (renameBusy === typed) renameBusy = ""; }
       return;
     }
 
@@ -155,6 +166,7 @@
     } finally { if (done) done(); }
   }
   let lastSendAt = 0;
+  let renameBusy = "";   // 正在发的那条 /rename 原文：连点发送时挡掉重复请求（FIND-012）
 
   /** 插话：不打断，把输入框里的字递进正在跑的这一轮（claude 在当前这一步结束后就会看到） */
   function interjectNow() {
@@ -386,18 +398,21 @@
     hidePopup();
   });
 
+  // 输入法正在拼字时按的回车：安卓 WebView 有时在 keydown 里 isComposing 已经是 false，
+  // 只能靠 keyCode 229 认出来；不拦住就会把拼音当消息发出去（稳定性报告 FIND-012）
+  const imeBusy = (e) => !!e.isComposing || e.keyCode === 229;
   inputEl.addEventListener("keydown", (e) => {
     // 一项都没匹配上时也要能 Esc 关掉（审查 #48 03-F04）
     if (e.key === "Escape" && !popupEl.classList.contains("hidden")) { e.preventDefault(); hidePopup(); return; }
     if (!popupEl.classList.contains("hidden") && state.popup.items.length) {
       if (e.key === "ArrowDown") { e.preventDefault(); state.popup.sel = (state.popup.sel + 1) % state.popup.items.length; renderPopup(); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); state.popup.sel = (state.popup.sel - 1 + state.popup.items.length) % state.popup.items.length; renderPopup(); return; }
-      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.isComposing)) {
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !imeBusy(e))) {
         e.preventDefault(); applyPopupChoice(state.popup.sel); return;
       }
     }
     if (e.key === "ArrowUp" && !inputEl.value && draftStash) { e.preventDefault(); draftRestore(); return; }
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && (enterSends() || e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+    if (e.key === "Enter" && !e.shiftKey && !imeBusy(e) && (enterSends() || e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
   });
   // 回车键：默认发送；手机软键盘没有 Shift，想多行输入的可以改成回车换行（Ctrl + 回车或发送键发出）
   const enterSends = () => localStorage.getItem("cc.enterKey") !== "newline";
@@ -417,7 +432,8 @@
       if (it.kind === "file") { const f = it.getAsFile(); if (f) files.push(f); }
     }
     if (!files.length) return;             // 纯文本粘贴，走默认行为
-    e.preventDefault();
+    // 图文一起复制（聊天软件里很常见）：别为了收图片把文字吞掉 —— 有文字就让浏览器照常贴，图片另外进附件栏（稳定性报告 FIND-012）
+    if (!e.clipboardData.getData("text/plain")) e.preventDefault();
     await uploadFiles(files);
   });
 
@@ -662,6 +678,9 @@
   // 安卓壳递进来的东西：别的应用「分享到 Claude CLI」，或系统选择器的结果
   function attachPath(p, from) {
     if (!p) return;
+    // 壳偶尔会为同一条路径重复发事件；重复的珠子删一个会把壳拷的那份临时文件删掉，另一个就悬空了（稳定性报告 FIND-033）。
+    // 不在眼前的草稿由 draftPutAway 自己按 path 去重
+    if (state.attachments.some((x) => x.path === p)) return;
     const name = p.split("/").pop();
     // 大小先不知道：按大附件算（不出缩略图、发出去只给路径），问到大小再改
     const a = { path: p, name, size: 0, big: true, kind: /\.(png|jpe?g|gif|webp|bmp|avif|heic)$/i.test(p) ? "image" : "other" };
@@ -677,6 +696,14 @@
     toast(t("已附加 {name}", { name }));
   }
   let pickFrom = null;      // 最近一次打开选择器时的草稿（会话号 + 换草稿的代次）
+  // 安卓壳后台收大文件的个数：收的过程中不让发送（FIND-027），收完 / 取消后清掉选择器快照（FIND-034）
+  let pickCopy = 0;
+  window.addEventListener("ccapp-attach-copy-start", (e) => { pickCopy += Math.max(1, Number(e.detail?.value) || 0); });
+  window.addEventListener("ccapp-attach-pick-done", (e) => {
+    pickCopy = Math.max(0, pickCopy - Math.max(0, Number(e.detail?.value) || 0));
+    pickFrom = null;
+  });
+  window.addEventListener("ccapp-attach-pick-cancel", () => { pickFrom = null; pickCopy = 0; });
   window.addEventListener("ccapp-attach", (e) => attachPath(e.detail?.value, null));
   window.addEventListener("ccapp-attach-pick", (e) => attachPath(e.detail?.value, pickFrom));
   window.addEventListener("ccapp-insert", (e) => {

@@ -167,7 +167,7 @@
     const m = REF_TAIL.exec(text || "");
     if (!m) return [text, []];
     const refs = [...m[0].matchAll(new RegExp(REF1, "g"))].map(([r, big]) =>
-      big ? { p: big, big: true } : r.startsWith('@"') ? { p: r.slice(2, -1).replace(/\\(.)/g, "$1") } : { p: r.slice(1) });
+      big ? { p: big, big: true } : r.startsWith('@"') ? { p: r.slice(2, -1).replace(/\\(\\|"|n|r|t)/g, (_, c) => (c === "n" ? "\n" : c === "r" ? "\r" : c === "t" ? "\t" : c)) } : { p: r.slice(1) });
     return [text.slice(0, m.index).trimEnd(), refs];
   }
   function refsHtml(refs) {

@@ -14,7 +14,7 @@ import { NEXT, readBody, sendJson } from "./http.mjs";
 import { clearIncomplete, markIncomplete } from "./incomplete.mjs";
 import { END_HOOKS, INTERRUPTED, QUEUE, RUN_LANE, RUN_SESSIONS, abortRun, clearInterrupted, endRun, holdLane, idleArm, idleDisarm, laneOfItem, permView, publishState, runEmit, runTag, saveRunMark, setInterrupted, setPermMode, sidForItem } from "./queue.mjs";
 import { LOCAL_CMD_RE, handleLocalCommand } from "./modelcmd.mjs";
-import { LL, ensureLlama, localCustomActive } from "./local.mjs";
+import { ensureLlama, localCustomActive, localRunAttach } from "./local.mjs";
 import { deviceMcpConfig, privCall, usageAdd, usageIsPrompt, usageMeter } from "./usage.mjs";
 import { TASKS_HINT, contextWindowOf, toolsHint, translate, hookBlocked } from "./stream.mjs";
 import { archiveHint } from "./archive.mjs";
@@ -354,7 +354,7 @@ export async function startRun(item) {
     try {
       const m = await ensureLlama(model, (key, text) => emit({ type: "note", key, text }));
       model = m.id;
-      LL.run = run;
+      localRunAttach(run);
     } catch (e) {
       emit({ type: "error", message: e.message });
       return endRun(run, { failed: true });

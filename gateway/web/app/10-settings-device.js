@@ -363,7 +363,14 @@
   // ── 通知（只有 cccodroid：GatewayService 订阅事件流发通知）──
   async function loadNotify() {
     let st;
-    try { st = await api("/api/app/notify_status"); } catch { return; }
+    try { st = await api("/api/app/notify_status"); }
+    catch (e) {
+      // 网关刚起 / 断网：以前直接隐藏整块，和「这个版本没有这项」分不出来（稳定性报告 FIND-032）
+      $("ntf-err").textContent = t("读取失败") + (e && e.message ? "：" + e.message : "");
+      $("ntf-err-block").classList.remove("hidden");
+      return;
+    }
+    $("ntf-err-block").classList.add("hidden");
     if (!st.ok) return;                              // 开发端 / 旧版：没有这项
     $("ntf-field").classList.remove("hidden");
     $("ntf-done").checked = !!st.done;
@@ -381,6 +388,9 @@
       .then((j) => { if (j && j.ok === false) throw new Error(j.message || t("保存失败")); })
       .then(loadNotify, (err) => { toast(t("保存失败：{msg}", { msg: err.message || "" }), true); loadNotify(); }));
   $("ntf-sys").addEventListener("click", () => appPost("/api/app/notify_settings"));
+  $("ntf-retry").addEventListener("click", () => loadNotify());
+  // 去系统设置里改完通知权限再回来，设置页不会重新打开：状态要自己重拉一次，不然一直显示改之前的（稳定性报告 FIND-031）
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && setOpen) loadNotify(); });
 
   // ── 设备工具（只有 cccodroid：DeviceTools.java + A11y.java，经 device-mcp.mjs 给 Claude）──
   const devName = (n) => ({
@@ -432,7 +442,14 @@
     .catch((e2) => { toast(e2.message, true); devBack(); });
   async function loadDev() {
     let st;
-    try { st = await api("/api/app/dev_status"); } catch { return false; }
+    try { st = await api("/api/app/dev_status"); }
+    catch (e) {
+      // 同通知：首读失败要说出原因、给重试，不能和「这个版本没有设备工具」一样整块隐藏（FIND-032）
+      $("dev-err").textContent = t("读取失败") + (e && e.message ? "：" + e.message : "");
+      $("dev-err-block").classList.remove("hidden");
+      return false;
+    }
+    $("dev-err-block").classList.add("hidden");
     if (!st.ok) return false;
     lastDev = st;
     devRender(st);
@@ -442,6 +459,7 @@
   $("dev-a11y").addEventListener("change", (e) => devSet({ a11y: e.target.value }));
   $("dev-idle").addEventListener("change", (e) => devSet({ idle: Number(e.target.value) || 10 }));
   $("dev-a11y-sys").addEventListener("click", () => appPost("/api/app/a11y_settings"));
+  $("dev-retry").addEventListener("click", () => loadDev());
 
   // 打开更新页时自动查一次：正在查、正在下/装，或 20 秒内刚查过就只刷新显示
   async function updOnOpen() {
