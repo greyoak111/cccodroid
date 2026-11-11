@@ -1,0 +1,17 @@
+{
+	https_port 2443
+	http_port 80
+	admin off
+}
+
+# cccodroid 公网中转：Let's Encrypt 证书由 Caddy 自动签发 / 续期。
+# 用 sslip.io 的通配 DNS（47.103.209.3.sslip.io 直接解析到本机 IP），
+# 不需要买域名；443 被 xray 占用，所以 HTTPS 走 2443。
+https://47.103.209.3.sslip.io:2443 {
+	tls {
+		issuer acme {
+			disable_tlsalpn_challenge
+		}
+	}
+	reverse_proxy 127.0.0.1:9380
+}

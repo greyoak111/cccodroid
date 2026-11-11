@@ -545,7 +545,9 @@
     }
     connectBus(false);                   // hello 到了就会去取历史 / 接上正在跑的那一轮
 
-    await Promise.all([loadSettings(), loadCaps(), loadSessions()]);
+    await Promise.all([loadSettings(), loadCaps(), loadLinkDev()]);
+    await loadSessions();
+    setTimeout(() => loadLinkDev().then((changed) => { if (changed) loadSessions(); }), 3500);
     // 启动时网关没起来 / 接口闪断：loadSettings 自己把错吞了，基础设置会长期停在默认值。
     // 隔一会儿看一眼，没拿到设置就补拉，最多三次（0.6.9 审计 195-N.3）
     const ensureSettings = (left) => setTimeout(async () => {
@@ -558,8 +560,19 @@
     updateCtx(state.ctxUsed, state.ctxTotal);   // 别把恢复回来的用量抹成 0
     // 后台时不轮询（#56），切回前台补一次
     let statusMissed = false;
-    setInterval(() => { if (document.hidden) statusMissed = true; else refreshStatus(); }, 45000);
-    document.addEventListener("visibilitychange", () => { if (!document.hidden && statusMissed) { statusMissed = false; refreshStatus(); } });
+    setInterval(() => {
+      if (document.hidden) statusMissed = true;
+      else {
+        refreshStatus();
+        loadLinkDev().then((changed) => { if (changed) loadSessions(); });
+      }
+    }, 45000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      if (statusMissed) { statusMissed = false; refreshStatus(); }
+      // 后台期间 WebView 可能暂停事件流；回到前台补一次，不靠切页面。
+      loadLinkDev().finally(() => loadSessions());
+    });
     // 设置里有几类（设备与权限、更新、通知、用量……）要等接口回话才显示：开机空下来先拉一遍，
     // 打开设置时就是现成的，不再一项项往外冒（打开时照旧再刷一次）
     setTimeout(() => { if (!setOpen) { loadProviders(); loadPriv(); loadUpd(); loadNotify(); loadDev(); loadQuota().catch(() => {}); } }, 2500);

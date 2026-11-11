@@ -1,6 +1,6 @@
 import { LIVE } from "./config.mjs";
 import { RUNS, runList } from "./runs.mjs";
-import { NEXT, sendJson, uiTag, writePaced } from "./http.mjs";
+import { NEXT, readBody, sendJson, uiTag, writePaced } from "./http.mjs";
 import { flushPend, snapshot } from "./queue.mjs";
 import { onTamper, tamperAck, tamperPending } from "./tamper.mjs";
 
@@ -126,6 +126,28 @@ export async function routeBus(req, res, u, p) {
     })().catch(() => { BUS.clients.delete(res); try { res.destroy(); } catch {} });
     req.on("close", () => BUS.clients.delete(res));
     return;
+  }
+  // linkd 是独立进程：同步拉到新会话或名称/置顶变化后，用网关令牌通知这里，
+  // 让所有已打开的界面立即重取会话列表，而不是等下一次切页或 45 秒轮询。
+  if (req.method === "POST" && p === "/api/link/synced") {
+    let b;
+    try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
+    const n = (v) => Math.max(0, Math.min(10000, Number(v) || 0));
+    const peer = b.peer && typeof b.peer === "object" ? b.peer : {};
+    const ev = {
+      type: "link_sync",
+      at: Number(b.at) || Date.now(),
+      peer: {
+        id: String(peer.id || "").slice(0, 64),
+        name: String(peer.name || "").slice(0, 60),
+        via: peer.via === "relay" ? "relay" : "lan",
+      },
+      pulled: n(b.pulled),
+      pushed: n(b.pushed),
+      meta: !!b.meta,
+    };
+    publish(ev);
+    return sendJson(res, 200, { ok: true });
   }
   if (req.method === "GET" && p === "/api/state") return sendJson(res, 200, snapshot());
   if (req.method === "POST" && p === "/api/tamper/ack") {

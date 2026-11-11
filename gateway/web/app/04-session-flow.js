@@ -713,6 +713,8 @@
       case "state": return applyState(ev);
       case "tamper": return showTamper(ev.tamper);
       case "archive": return loadSessions();   // 建档 / 归入杂项：标题、档号、分组跟着变
+      // linkd 拉到新会话 / 更新名称或置顶：来源表不一定变化，所以必须无条件重取列表。
+      case "link_sync": loadLinkDev().finally(() => loadSessions()); return;
       // 会话进了回收站（网关那边删的：项目连目录删、定时任务不存对话、别的窗口）：正开着它就退回新对话，
       // 别让下一条消息带着它的会话号去 --resume 失败（#173-4）。整页不收，人可能正在项目页里
       case "session_gone":
@@ -725,6 +727,12 @@
         return;
       case "sched": case "sched_note": return onSchedEvent(ev);
       case "sync": return endReplay();
+      case "remote_agent": {
+        if (!belongs(ev)) return;
+        const rv = runViews.get(ev.runId);
+        if (rv) rv.av.remote(ev.name, ev.device);
+        return;
+      }
       case "run_start": {
         if (!belongs(ev)) return;
         view.runIds.add(ev.runId);
@@ -915,6 +923,7 @@
     if (sid) loadOlder(true);
     else if (!adopted && !(ev.run && keepRuns.has(ev.run.id))) showWelcome();
     renderInterrupted(ev.interrupted);   // resetView 清掉了 liveEl，重挂一次
+    loadSessions();                       // 事件流重连期间漏掉的 link_sync：hello 一到就补取一次列表
     calmStatus(t("已连接"));
   }
   /** 「已连接」「就绪」这类平静的状态：这个会话正在生成时不许盖掉「生成中」（审查 #51 第4项） */

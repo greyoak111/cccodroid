@@ -3609,3 +3609,10 @@ html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270
 #st-cards .item label.it-title{display:block;cursor:pointer}
 #st-cards .it-meta code{font-size:10.5px}
 .set-cat .sc select#st-every{min-width:0}
+
+/* 设置 → 设备互联：独立管理页嵌在设置里 */
+.link-embed{margin:8px 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--bg)}
+.link-embed iframe{display:block;width:100%;height:min(72vh,820px);min-height:520px;border:0;background:var(--bg)}
+@media (max-width:680px){.link-embed iframe{height:72vh;min-height:460px}}
+.dev-chip{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:30px;height:18px;margin-inline-start:6px;padding:0 6px;border:1px solid var(--line);border-radius:999px;background:var(--bg2);color:var(--fg3);font-size:10px;font-style:normal;font-weight:600;line-height:1;vertical-align:1px}
+.dev-chip.sm{min-width:26px;height:16px;margin-inline-start:auto;padding:0 5px;font-size:9.5px}

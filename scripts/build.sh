@@ -9,11 +9,13 @@
 #    SIGN=apksigner  用 SDK 的 apksigner 签（再给 APKSIGNER、ZIPALIGN）；默认是平板上的签名库
 #  钥匙：KEY 指向 {"key": PEM 私钥, "cert": PEM 证书} 的 JSON，绝不进仓库（CI 里放在仓库 secret）。
 #        换钥匙 = 已装的用户必须卸载重装，所以它丢了就再也发不了更新 —— 要另做离线备份。
-#        只想自己编个包试试：SIGN=apksigner 再给 KS（keystore 文件，口令 KS_PASS，默认 android），装不上正式版之上，但能单独装。
+#        自己签名：SIGN=apksigner 再给 KS（keystore 文件）。口令用 KS_PASS；私钥口令不同时给 KS_KEY_PASS。
+#        有多个私钥时用 KS_ALIAS 指定别名；只有一个别名时可省略。
+#        口令也可以放进仓库外的文件，用 KS_PASS_FILE / KS_KEY_PASS_FILE 指向它，避免出现在命令历史里。
 #        KS 只有 apksigner 那条路认；默认的平板签名库只认 KEY。
 # ─────────────────────────────────────────────────────────────────────
 set -e
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$0")/.." && (pwd -W 2>/dev/null || pwd))
 SRC=${SRC:-$ROOT/gateway}
 F=/data/user/0/li.dsh.claudecli/files
 P=$F/toolchain/dshtc/prefix
@@ -49,6 +51,14 @@ A=$ROOT/android
 OUT=$ROOT/dist
 [ -z "$KS" ] || [ "$SIGN" = apksigner ] || { echo "✗ KS 要配 SIGN=apksigner 用（默认的签名库只认 KEY 钥匙 JSON）"; exit 1; }
 [ -n "$KS" ] || [ -f "$KEY" ] || { echo "✗ 找不到签名钥匙 $KEY（不会自动生成：换钥匙会让已装用户无法升级）"; exit 1; }
+if [ -n "$KS_PASS_FILE" ]; then
+  [ -r "$KS_PASS_FILE" ] || { echo "✗ 读不到 KS_PASS_FILE：$KS_PASS_FILE"; exit 1; }
+  KS_PASS=$(tr -d '\r\n' < "$KS_PASS_FILE")
+fi
+if [ -n "$KS_KEY_PASS_FILE" ]; then
+  [ -r "$KS_KEY_PASS_FILE" ] || { echo "✗ 读不到 KS_KEY_PASS_FILE：$KS_KEY_PASS_FILE"; exit 1; }
+  KS_KEY_PASS=$(tr -d '\r\n' < "$KS_KEY_PASS_FILE")
+fi
 
 echo "▸ assets"
 rm -rf "$A/assets/app"; mkdir -p "$A/assets/app/web" "$A/assets/app/scripts" "$A/assets/app/bin"
@@ -57,12 +67,19 @@ cp "$SRC/boot.mjs" "$A/assets/app/"      # 网关引导：应用从安装包里�
 mkdir -p "$A/assets/app/gw"; cp "$SRC/gw/"*.mjs "$A/assets/app/gw/"     # 网关的各功能模块
 mkdir -p "$A/assets/app/archive"; cp "$SRC/archive/"* "$A/assets/app/archive/"   # 建档规范与交档命令（脉络，见 gw/archive.mjs）
 mkdir -p "$A/assets/app/guard"; cp "$SRC/guard/"* "$A/assets/app/guard/"       # 敏感操作再确认的钩子（见 gw/claude.mjs guardHooks）
+mkdir -p "$A/assets/app/link"; cp "$SRC/link/"* "$A/assets/app/link/"     # 设备互联：linkd、管理页、远程执行与 MCP
 for f in "$SRC/web/"*; do case "$f" in *.bak*) ;; *) cp -R "$f" "$A/assets/app/web/";; esac; done
 cp "$A/assets/scripts/"* "$A/assets/app/scripts/"
 cp "$A/assets/bin/"* "$A/assets/app/bin/"
 cp "$ROOT/devkit/pgp.mjs" "$A/assets/app/bin/"     # OpenPGP 验签：pkg.mjs、install-claude.mjs 与 devkit 构建共用这一份
 mkdir -p "$A/assets/app/pre"; cp "$A/assets/pre/"* "$A/assets/app/pre/"     # pkg / apt：PATH 最前，压过工具包里的旧替身
 cp "$A/assets/TOOLS.md" "$A/assets/app/"     # 给 claude 的工具说明（网关读进系统提示）
+# Git for Windows 默认可能把文本脚本检出成 CRLF。Android 上 bash 会把行尾 \r
+# 粘到最后一个参数（例如 stable\r），导致安装 Claude Code 时所有 URL 都报 Bad path。
+for f in "$A/assets/app/scripts/"* "$A/assets/app/bin/"* "$A/assets/app/pre/"* "$A/assets/app/link/"*; do
+  [ -f "$f" ] || continue
+  sed -i 's/\r$//' "$f"
+done
 # 随包的第三方许可：Shizuku-API 编进了 classes.dex，MIT 要求随包带上版权与许可原文（#110 10-003）；网页里的库各自带着 LICENSE
 mkdir -p "$A/assets/app/licenses"; cp "$ROOT/NOTICE" "$ROOT/LICENSE" "$A/assets/app/licenses/"; cp "$ROOT/third_party/shizuku/LICENSE" "$A/assets/app/licenses/Shizuku-API-LICENSE"
 # glibc 的 ld.so 以 libldlinux.so 进了 lib/：LGPL 要求随包带上许可原文和取源码的途径
@@ -105,7 +122,7 @@ cp "$A/native/execpath.cjs" "$A/assets/app/lib/"
 # 7-Zip（压缩包浏览、解压、压缩）：成品存在仓库里，由 scripts/build-7zz.sh 从上游源码编出；核过哈希再进 APK
 ( cd "$A/prebuilt" && [ "$(sha256sum libcc7zz.so | cut -c1-64)" = "$(cat libcc7zz.so.sha256)" ] ) || { echo "✗ android/prebuilt/libcc7zz.so 和记下的哈希对不上：重跑 sh scripts/build-7zz.sh"; exit 1; }
 cp "$A/prebuilt/libcc7zz.so" "$NL/"
-TAG=$(cat "$A/assets/app/server.mjs" "$A/assets/app/boot.mjs" "$A/assets/app/gw/"* "$A/assets/app/archive/"* "$A/assets/app/guard/"* "$A/assets/app/TOOLS.md" $(find "$A/assets/app/web" -type f | sort) "$A/assets/app/scripts/"* "$A/assets/app/bin/"* "$A/assets/app/pre/"* "$A/assets/app/lib/"* "$NL/"libcc*.so | md5sum | cut -c1-12)
+TAG=$(cat "$A/assets/app/server.mjs" "$A/assets/app/boot.mjs" "$A/assets/app/gw/"* "$A/assets/app/archive/"* "$A/assets/app/guard/"* $(find "$A/assets/app/link" -type f | sort) "$A/assets/app/TOOLS.md" $(find "$A/assets/app/web" -type f | sort) "$A/assets/app/scripts/"* "$A/assets/app/bin/"* "$A/assets/app/pre/"* "$A/assets/app/lib/"* "$NL/"libcc*.so | md5sum | cut -c1-12)
 echo "$TAG" > "$A/assets/app/TAG"
 echo "  tag $TAG"
 # 逐文件清单（sha256 + 相对路径）：启动时应用按它核对 files/app，被改过、多出来的就从安装包还原（防项目钩子 / MCP 之类偷偷改网关）
@@ -113,15 +130,38 @@ node -e 'const fs=require("fs"),p=require("path"),c=require("crypto"),R=process.
 echo "  清单 $(wc -l < "$A/assets/app/FILES") 个文件"
 
 # 第三方库：Shizuku-API 13.1.5（MIT，Maven Central 原样，sha1 已核）
-LIBS=$(ls "$ROOT"/third_party/shizuku/*.jar | tr '\n' ':')
+if command -v cygpath >/dev/null 2>&1; then
+  AJAR_CP=$(cygpath -w "$AJAR")
+  LIBS_CP=""
+  for J in "$ROOT"/third_party/shizuku/*.jar; do
+    JW=$(cygpath -w "$J")
+    LIBS_CP="${LIBS_CP:+$LIBS_CP;}$JW"
+  done
+  JAVA_CP="$AJAR_CP;$LIBS_CP"
+else
+  JAVA_CP="$AJAR:$(ls "$ROOT"/third_party/shizuku/*.jar | tr '\n' ':')"
+fi
 echo "▸ javac"
 rm -rf "$A/build"; mkdir -p "$A/build/classes"
 $JAVAC -encoding UTF-8 --release 8 -nowarn \
-  -cp "$AJAR:$LIBS" -d "$A/build/classes" $(find "$A/java" -name '*.java')
+  -cp "$JAVA_CP" -d "$A/build/classes" $(find "$A/java" -name '*.java')
 
 echo "▸ d8"
+if command -v cygpath >/dev/null 2>&1; then
+  {
+    find "$A/build/classes" -name '*.class' | while IFS= read -r f; do cygpath -w "$f"; done
+    for J in "$ROOT"/third_party/shizuku/*.jar; do cygpath -w "$J"; done
+  } > "$A/build/d8.args"
+  D8_ARGS="@$(cygpath -w "$A/build/d8.args")"
+else
+  {
+    find "$A/build/classes" -name '*.class'
+    ls "$ROOT"/third_party/shizuku/*.jar
+  } > "$A/build/d8.args"
+  D8_ARGS="@$A/build/d8.args"
+fi
 $D8 --release --min-api 26 \
-  --lib "$AJAR" --output "$A/build" $(find "$A/build/classes" -name '*.class') "$ROOT"/third_party/shizuku/*.jar
+  --lib "$AJAR" --output "$A/build" "$D8_ARGS"
 
 # 「经加载器」要的 glibc ld.so：targetSdk 36 只能 exec APK 原生库目录里的文件，ld.so 就以 libldlinux.so 进 lib/。
 # 取钉住那一版工具包锁文件里的同一个 glibc 包（核 sha256）—— ld.so 与工具包里的 libc.so.6 必须出自同一次构建。
@@ -144,7 +184,10 @@ node "$ROOT/devkit/devkit.mjs" ldso --lock "$LOCK" --target "$PIN_TARGET" --rele
 
 echo "▸ aapt2 + 签名"
 mkdir -p "$OUT"
-$AAPT2 compile --dir "$A/res" -o "$A/build/res.zip"
+(
+  cd "$ROOT"
+  $AAPT2 compile --dir android/res -o android/build/res.zip
+)
 # TARGET_SDK=36：出 targetSdk 36 的包（工具链全走「经加载器」，见 Env.applyLoader）。默认照清单里的 28
 MANIFEST="$A/AndroidManifest.xml"
 if [ -n "$TARGET_SDK" ]; then
@@ -153,8 +196,23 @@ if [ -n "$TARGET_SDK" ]; then
   grep -q "android:targetSdkVersion=\"$TARGET_SDK\"" "$MANIFEST" || { echo "✗ 清单里改不动 targetSdkVersion"; exit 1; }
   echo "  targetSdk $TARGET_SDK"
 fi
-$AAPT2 link -o "$A/build/unsigned.apk" -I "$AJAR" \
-  --manifest "$MANIFEST" -A "$A/assets" "$A/build/res.zip"
+MANIFEST_REL=${MANIFEST#"$ROOT"/}
+(
+  cd "$ROOT"
+  if command -v cygpath >/dev/null 2>&1; then
+    # Windows 版 aapt2 用 -A 写出的条目名是 assets\app\…；Android AssetManager
+    # 只认正斜杠，随后用 zip 添加 assets（见下方）。
+    $AAPT2 link -o android/build/unsigned.apk -I "$AJAR" \
+      --manifest "$MANIFEST_REL" android/build/res.zip
+  else
+    $AAPT2 link -o android/build/unsigned.apk -I "$AJAR" \
+      --manifest "$MANIFEST_REL" -A android/assets android/build/res.zip
+  fi
+)
+if command -v cygpath >/dev/null 2>&1; then
+  command -v zip >/dev/null 2>&1 || { echo "✗ Windows 构建需要 zip（Git Bash 通常自带）"; exit 1; }
+  ( cd "$A" && zip -q -r build/unsigned.apk assets )
+fi
 # FILES 里的每个文件都得真进了包（aapt2 会丢点开头的、_ 开头目录这类）：少一个，装好后 AppFiles 每次启动都判「被改过」、整个重铺
 node -e 'const fs=require("fs"),b=fs.readFileSync(process.argv[1]);let e=b.length-22;while(e>=0&&b.readUInt32LE(e)!==0x06054b50)e--;
   const n=b.readUInt16LE(e+10),names=new Set();for(let i=0,p=b.readUInt32LE(e+16);i<n;i++){const l=b.readUInt16LE(p+28);names.add(b.toString("utf8",p+46,p+46+l));p+=46+l+b.readUInt16LE(p+30)+b.readUInt16LE(p+32)}
@@ -165,7 +223,14 @@ if [ "$SIGN" = apksigner ]; then
   ( cd "$A/build" && zip -q unsigned.apk classes.dex && zip -q -0 unsigned.apk lib/arm64-v8a/libldlinux.so lib/arm64-v8a/libcc*.so )
   ${ZIPALIGN:-zipalign} -p -f 4 "$A/build/unsigned.apk" "$A/build/aligned.apk"
   if [ -n "$KS" ]; then
-    ${APKSIGNER:-apksigner} sign --ks "$KS" --ks-pass "pass:${KS_PASS:-android}" --out "$OUT/cccodroid.apk" "$A/build/aligned.apk"
+    KS_PASS=${KS_PASS:-android}
+    KS_KEY_PASS=${KS_KEY_PASS:-$KS_PASS}
+    set -- sign --ks "$KS" \
+      --ks-pass "pass:$KS_PASS" --key-pass "pass:$KS_KEY_PASS" \
+      --out "$OUT/cccodroid.apk"
+    [ -z "$KS_ALIAS" ] || set -- "$@" --ks-key-alias "$KS_ALIAS"
+    set -- "$@" "$A/build/aligned.apk"
+    ${APKSIGNER:-apksigner} "$@"
   else
     # 钥匙 JSON → PKCS#8 DER + 证书，只在构建目录里待一下，签完就删
     trap 'rm -f "$A/build/key.pk8" "$A/build/cert.pem"' EXIT

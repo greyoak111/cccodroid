@@ -3179,5 +3179,22 @@ window.I18N_DICT.en = {
   "文件夹会连同里面的内容一起删除。": "Folders will be deleted together with everything inside them.",
   "已删除 {n} 项": "Deleted {n} item(s)",
   "这个文件夹装着应用自己的目录或工作区，不能删": "This folder contains the app's own directories or the workspace and can't be deleted",
-  "模型清单地址（选填；不填会按接口地址自动查找 /models）": "Model list URL (optional; if empty, /models is looked up automatically from the API address)"
+  "模型清单地址（选填；不填会按接口地址自动查找 /models）": "Model list URL (optional; if empty, /models is looked up automatically from the API address)",
+  "设备互联": "Device link",
+  "手机": "Phone",
+  "电脑": "PC",
+  "会话在{dev}上创建，同步到本机；在本机打开时仍由本机执行": "Created on {dev} and synced here. Opening it here still runs it on this device.",
+  "手机与电脑互通": "Connect phones and computers",
+  "配对后双向同步 Claude 会话；也可以配置公网中转，并逐台放行远程执行。": "Pair devices to sync Claude sessions both ways. You can also configure a public relay and allow remote execution per device.",
+  "局域网传输是明文 HTTP，只在可信网络开启；公网请使用 HTTPS 中转。远程执行等于允许已放行设备在本机运行命令，只在自己的设备之间开启。": "LAN traffic uses plain HTTP, so enable it only on trusted networks. Use an HTTPS relay across networks. Remote execution lets allowed devices run commands on this device; enable it only between your own devices.",
+  "正在连接互联服务…": "Connecting to the device link service…",
+  "互联服务没有响应": "The device link service is not responding",
+  "运行中 · {n} 台已配对设备": "Running · {n} paired device(s)",
+  "互联服务运行中": "Device link service is running",
+  "互联服务没有启动": "The device link service did not start",
+  "这一轮正在「{name}」上执行。要插话，请在开头写 @手机 或 @电脑。": "This turn is running on “{name}”. To interject, start the message with @phone or @pc.",
+  "另一台设备": "another device",
+  "在 @ 后面写上要插的话": "Write your interjection after @device",
+  "插话没送进去": "The interjection was not delivered",
+  "插话没送进去：{msg}": "The interjection was not delivered: {msg}"
 };

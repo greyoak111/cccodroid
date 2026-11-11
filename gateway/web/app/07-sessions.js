@@ -130,6 +130,7 @@
             <button class="ss-size" data-a="size">${fmtSize(s.sizeKb * 1024)}</button>
             ${st}
             ${pjOfCwd(s.cwd) ? pjMark(pjOfCwd(s.cwd)) : ""}
+            ${linkDevBadge(s.id)}
           </div>
         </div>
         ${picking ? "" : `<button class="ss-more" data-a="more" aria-label="${esc(t("更多"))}"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg></button>`}

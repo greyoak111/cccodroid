@@ -3142,3 +3142,20 @@
 3142	Se eliminaron {n} elementos
 3143	Esta carpeta contiene directorios propios de la app o el espacio de trabajo y no se puede eliminar
 3144	URL de la lista de modelos (opcional; si se deja vacía se busca /models automáticamente a partir de la dirección de la API)
+3145	Enlace de dispositivos
+3146	Teléfono
+3147	PC
+3148	Sesión creada en {dev} y sincronizada aquí. Al abrirla aquí, sigue ejecutándose en este dispositivo.
+3149	Conecta teléfonos y ordenadores
+3150	Empareja dispositivos para sincronizar sesiones de Claude en ambos sentidos. También puedes configurar un relé público y permitir la ejecución remota dispositivo por dispositivo.
+3151	El tráfico de LAN usa HTTP sin cifrar; actívalo solo en redes de confianza. Usa un relé HTTPS entre redes. La ejecución remota permite que los dispositivos autorizados ejecuten comandos en este dispositivo; actívala solo entre tus propios dispositivos.
+3152	Conectando con el servicio de enlace de dispositivos…
+3153	El servicio de enlace de dispositivos no responde
+3154	En ejecución · {n} dispositivo(s) emparejado(s)
+3155	El servicio de enlace de dispositivos está en ejecución
+3156	El servicio de enlace de dispositivos no se inició
+3157	Este turno se está ejecutando en «{name}». Para intervenir, empieza el mensaje con @phone o @pc.
+3158	otro dispositivo
+3159	Escribe tu intervención después de @dispositivo
+3160	La intervención no se envió
+3161	La intervención no se envió: {msg}

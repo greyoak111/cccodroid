@@ -3142,3 +3142,20 @@
 3142	{n} élément(s) supprimé(s)
 3143	Ce dossier contient des répertoires propres à l'app ou l'espace de travail et ne peut pas être supprimé
 3144	URL de la liste des modèles (facultatif ; si vide, /models est recherché automatiquement à partir de l'adresse de l'API)
+3145	Liaison d'appareils
+3146	Téléphone
+3147	PC
+3148	Session créée sur {dev} et synchronisée ici. L'ouvrir ici l'exécute toujours sur cet appareil.
+3149	Connecter téléphones et ordinateurs
+3150	Associez les appareils pour synchroniser les sessions Claude dans les deux sens. Vous pouvez aussi configurer un relais public et autoriser l'exécution distante appareil par appareil.
+3151	Le trafic LAN utilise du HTTP non chiffré ; activez-le uniquement sur un réseau de confiance. Utilisez un relais HTTPS entre réseaux. L'exécution distante permet aux appareils autorisés d'exécuter des commandes sur cet appareil ; activez-la uniquement entre vos propres appareils.
+3152	Connexion au service de liaison d'appareils…
+3153	Le service de liaison d'appareils ne répond pas
+3154	En cours · {n} appareil(s) associé(s)
+3155	Service de liaison d'appareils en cours d'exécution
+3156	Le service de liaison d'appareils n'a pas démarré
+3157	Ce tour s'exécute sur « {name} ». Pour intervenir, commencez le message par @phone ou @pc.
+3158	un autre appareil
+3159	Écrivez votre intervention après @appareil
+3160	L'intervention n'a pas été transmise
+3161	L'intervention n'a pas été transmise : {msg}

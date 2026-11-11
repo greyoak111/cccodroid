@@ -971,3 +971,34 @@
   });
   $("ma-reset")?.addEventListener("click", () => { uiSet("msgActs", null); renderMsgActs(); });
   document.addEventListener("cc:ui", (e) => { if (e.detail.key === "msgActs") renderMsgActs(); if (e.detail.key === "accent") renderAccent(); });
+
+  // ── 设置 → 设备互联：linkd 自带管理页，这里只负责拿到带本机令牌的地址 ──
+  let linkLoading = false;
+  async function linkOpen(restart = false) {
+    const frame = $("link-frame"), stateEl = $("link-state"), result = $("link-result");
+    if (!frame || linkLoading) return;
+    linkLoading = true;
+    if (stateEl) stateEl.textContent = t("正在连接互联服务…");
+    if (result) result.textContent = "";
+    try {
+      if (restart) await api("/api/link/restart", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const r = await api("/api/link/url");
+      if (!r || !r.ok) throw new Error((r && r.error) || t("互联服务没有响应"));
+      const embed = r.embed || "/api/link/ui";
+      if (frame.getAttribute("src") !== embed) frame.setAttribute("src", embed);
+      const s = await api("/api/link/status").catch(() => null);
+      if (stateEl) stateEl.textContent = s && s.running
+        ? t("运行中 · {n} 台已配对设备", { n: (s.peers || []).length })
+        : t("互联服务运行中");
+    } catch (e) {
+      if (stateEl) stateEl.textContent = t("互联服务没有启动");
+      if (result) result.textContent = e.message || String(e);
+    } finally {
+      linkLoading = false;
+    }
+  }
+  $("link-reload")?.addEventListener("click", () => {
+    const f = $("link-frame");
+    if (f) f.src = "about:blank";
+    linkOpen(true);
+  });

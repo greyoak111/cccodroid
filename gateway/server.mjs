@@ -40,7 +40,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { CFG, PATHS, PREFIX, log } from "./gw/config.mjs";
+import { CFG, LIVE, PATHS, PREFIX, log } from "./gw/config.mjs";
 import { SETTINGS, routeSettings, saveSettings } from "./gw/settings.mjs";
 import { API_KEY, PROVIDER, routeProviders } from "./gw/providers.mjs";
 import { fetchModels, normEffort, routeModels } from "./gw/models.mjs";
@@ -87,11 +87,12 @@ import { RUNS } from "./gw/runs.mjs";
 import { syncGitSafe } from "./gw/gitsafe.mjs";
 import { routeArc } from "./gw/archiver.mjs";
 import { routeStorage, startAutoClean } from "./gw/storage.mjs";
+import { routeLink, startLinkdSupervisor, stopLinkd } from "./gw/link.mjs";
 import { COOKIE, SESSION, UI_HOST, cookieHostOk, denyLog, denyReason, localAddr, proofFor, tokenOk } from "./gw/access.mjs";
 import { startWorkIsland, stopWorkIslandSync } from "./gw/work-island.mjs";
 
 // 各模块的路由函数，按原来分支的先后排；返回 NEXT 表示不归它管
-const ROUTES = [routeClaude, routeFeedback, routeUsage, routeCaps, routeProviders, routeSettings, routeProjects, routeBookmarks, routeFonts, commandRoutes(builtinCommands), routeUi, routeSched, routeSessModel, routeBackfill, routeMerge, routeProfile, routeLineage, routeArchive, routeSessions, routeExtensions, routeModels, routeTerminal, routeComponents, routeModules, routeOrphans, routeStorage, routeCustom, routeGit, routeLocal, routeOffice, routeArc, routeFiles, routePreview, routeBus, routeQueue, routeDevside, routeLogin, routeRun, routeNotices, routeReconcile];
+const ROUTES = [routeClaude, routeFeedback, routeUsage, routeCaps, routeProviders, routeSettings, routeProjects, routeBookmarks, routeFonts, commandRoutes(builtinCommands), routeUi, routeSched, routeSessModel, routeBackfill, routeMerge, routeProfile, routeLineage, routeArchive, routeSessions, routeExtensions, routeModels, routeTerminal, routeComponents, routeModules, routeOrphans, routeStorage, routeCustom, routeGit, routeLocal, routeOffice, routeArc, routeFiles, routePreview, routeBus, routeQueue, routeDevside, routeLogin, routeRun, routeNotices, routeReconcile, routeLink];
 
 // ── 路由 ──────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
@@ -215,6 +216,7 @@ server.listen(CFG.port, "127.0.0.1", () => {
   migrateHookPause().catch((e) => log("转换 hooks 暂停失败: " + e.message));
   ensureSessionRetention().catch((e) => log("补会话保留期失败: " + e.message));
   try { startAutoClean(); } catch (e) { log("存储自动清理启动失败: " + e.message); }
+  if (LIVE) try { startLinkdSupervisor(); } catch (e) { log("设备互联启动失败: " + e.message); }
 });
 
 // 启动后校验一次模型名：不在清单里就落到默认。
@@ -241,10 +243,11 @@ setTimeout(async () => {
 // 工作岛的收起放最后：它要同步调 am（最多 3 秒），App 等 5 秒就强杀，先把 claude 和终端收了
 // 正在跑的 claude 一并带走（整个进程组）：以前只收终端，claude 成了孤儿继续写文件、继续计费（0.6.9 审计 P1-3）。
 // 中断记录（run mark）是随时落盘的，重启后照常给「继续」卡
-const shutdown = (sig) => {
+const shutdown = async (sig) => {
   for (const r of RUNS.values()) if (r.child && !r.ended) { try { killTree(r.child); } catch {} }
   if (sig === "SIGTERM") for (const t of TERMS.values()) if (t.alive) { try { killTree(t.child); } catch {} }
   try { bridgeProc?.kill(); } catch {}
+  if (LIVE) try { await stopLinkd(); } catch {}
   runShutdown();
   try { stopWorkIslandSync(); } catch {}
   process.exit(0);

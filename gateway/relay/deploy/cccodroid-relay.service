@@ -1,0 +1,22 @@
+[Unit]
+Description=cccodroid public relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ccrelay
+Group=ccrelay
+WorkingDirectory=/opt/cccodroid-relay
+ExecStart=/usr/bin/node /opt/cccodroid-relay/relay.mjs --data /var/lib/cccodroid-relay --bind 127.0.0.1 --port 9380 --max-gb 8 --name 阿里云中转
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/cccodroid-relay
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

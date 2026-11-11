@@ -814,6 +814,23 @@
     return {
       msgEl, bubble, tailTime,
       phase: setPhase,
+      /** 跨设备执行：把这条回复的署名改成 Claude-手机 / Claude-电脑。 */
+      remote(name, device) {
+        if (this._remote || !msgEl) return;
+        this._remote = true;
+        const raw = String(name || "claude-远端");
+        const label = /^claude/i.test(raw) ? "Claude" + raw.slice(6) : raw;
+        const who = msgEl.querySelector(".who");
+        if (who) {
+          who.textContent = "";
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          who.appendChild(dot);
+          who.appendChild(document.createTextNode(label));
+          if (device) who.title = device;
+        }
+        msgEl.classList.add("remote-agent");
+      },
       /** 工具结果回来：这一批工具都有结果了，下一步就是再请求模型 */
       toolDone(id) { if (pendTools.delete(id) && !pendTools.size) setPhase({ phase: "connect" }); },
       delta(t) { textB().append(t); },

@@ -3142,3 +3142,20 @@
 3142	{n} item dihapus
 3143	Folder ini berisi direktori milik aplikasi atau ruang kerja dan tidak dapat dihapus
 3144	URL daftar model (opsional; jika kosong, /models dicari otomatis dari alamat API)
+3145	Koneksi perangkat
+3146	Ponsel
+3147	PC
+3148	Sesi dibuat di {dev} dan disinkronkan ke sini. Membukanya di sini tetap menjalankannya di perangkat ini.
+3149	Hubungkan ponsel dan komputer
+3150	Pasangkan perangkat untuk menyinkronkan sesi Claude dua arah. Anda juga dapat mengatur relai publik dan mengizinkan eksekusi jarak jauh per perangkat.
+3151	Lalu lintas LAN menggunakan HTTP tanpa enkripsi; aktifkan hanya di jaringan tepercaya. Gunakan relai HTTPS antarjaringan. Eksekusi jarak jauh memungkinkan perangkat yang diizinkan menjalankan perintah di perangkat ini; aktifkan hanya di antara perangkat Anda sendiri.
+3152	Menghubungkan ke layanan koneksi perangkat…
+3153	Layanan koneksi perangkat tidak merespons
+3154	Berjalan · {n} perangkat dipasangkan
+3155	Layanan koneksi perangkat sedang berjalan
+3156	Layanan koneksi perangkat tidak dimulai
+3157	Giliran ini berjalan di 「{name}」. Untuk menyela, awali pesan dengan @phone atau @pc.
+3158	perangkat lain
+3159	Tulis sisipan Anda setelah @perangkat
+3160	Sisipan tidak terkirim
+3161	Sisipan tidak terkirim: {msg}

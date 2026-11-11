@@ -22,6 +22,7 @@ import { cleanMergeFrom } from "./merge.mjs";
 import { LOCAL_CMD_RE } from "./modelcmd.mjs";
 import { tamperPending } from "./tamper.mjs";
 import { RATE_LIMITS } from "./stream.mjs";
+import { linkInject } from "./link.mjs";
 
 // ── 生成与排队 ────────────────────────────────────────────────────────
 export const QUEUE = [];                 // 等着跑的消息：{ id, message, sessionId, follow, model, permissionMode, addDirs, at }
@@ -50,6 +51,14 @@ function laneRun(lane) {
   return null;
 }
 const sameLane = (q, run) => { const l = laneOfItem(q), sid = sidOfLane(l); return l === run.lane || (!!sid && sid === run.sessionId); };
+/** 这个会话是否正有一轮在另一台设备上跑（@ 设备）。 */
+function remoteRunOf(sid) {
+  for (const r of RUNS.values()) {
+    if (!r || r.ended || !r.remote || !r.remoteTaskId) continue;
+    if ((r.sessionId || "") === (sid || "")) return r;
+  }
+  return null;
+}
 let RUN_N = 0;
 const newRunId = () => `r${BOOT}${(++RUN_N).toString(36)}`;
 
@@ -307,6 +316,7 @@ export function abortRun(run, { hold = true } = {}) {
   if (!run || run.ended) return false;
   run.aborted = true;
   run.readyAbort?.abort();
+  if (typeof run.remoteCancel === "function") { try { run.remoteCancel(); } catch {} }
   // 停止要和排队的消息严格隔开：此刻排着的一律挂起，不许这一轮一结束就自动发出去
   // （以前点停止反而是"立刻发下一条"）。用户点 ⚡ 才发；停止之后新发的消息不受影响，照常先跑
   // 并行时只挂起这个会话自己排着的，别的会话不受影响。
@@ -486,14 +496,37 @@ export async function routeQueue(req, res, u, p) {
     let b;
     try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
     if (!String(b.message || "").trim()) return sendJson(res, 400, { error: "empty message" });
+    const msgText = String(b.message || "").trim();
+    // 远端轮次进行中：不带 @ 的消息不能在本机另起一轮，否则两边会同时写同一个会话。
+    const rr = remoteRunOf(b.sessionId);
+    if (rr && !msgText.startsWith("/")) {
+      const mm = /^@(shouji|手机|phone|diannao|电脑|pc)(?:[-－]([^\s，,：:]+))?(?:\s+([\s\S]*))?$/i.exec(msgText);
+      if (!mm) {
+        return sendJson(res, 409, {
+          error: "remote_busy",
+          message: tz("这一轮正在「{name}」上执行。要插话，请在开头写 @手机 或 @电脑。", { name: rr.remoteName || tz("另一台设备") }),
+        });
+      }
+      const text = (mm[3] || "").trim();
+      if (!text) return sendJson(res, 400, { error: "empty message", message: tz("在 @ 后面写上要插的话") });
+      try {
+        const r = await linkInject(rr.remoteTaskId, text);
+        if (r && r.ok === false) return sendJson(res, 409, { error: "inject_failed", message: r.error || tz("插话没送进去") });
+        log(`⇄ 插话 → ${rr.remoteName || "远端"}：${text.slice(0, 40)}${text.length > 40 ? "…" : ""}`);
+        return sendJson(res, 200, { ok: true, injected: true, id: rr.id });
+      } catch (e) {
+        return sendJson(res, 502, { error: "inject_failed", message: tz("插话没送进去：{msg}", { msg: e.message }) });
+      }
+    }
     // 看这条消息要用的那家（新会话首条选的 / 会话钉的 / 全局的），不是只看全局
     const q0 = { sessionId: b.sessionId ? String(b.sessionId) : null, follow: b.follow || null, projectId: b.projectId ? String(b.projectId) : null,
       pin: !b.sessionId && b.pin && typeof b.pin.provider === "string" ? { provider: b.pin.provider } : null };
     const pk = pickProvider(q0), bp = pk.P;
+    const remoteAsk = /^@(shouji|手机|phone|diannao|电脑|pc)(?:[-－]|\s|$)/i.test(msgText);
     // 要用的那家不在了（写错、删了）：当场拒，不悄悄换成全局默认那家发出去（起跑时 startRun 还会再挡一次）
     const lost = lostProvider(q0, pk.sid0, pk.pdef0);
-    if (lost) return sendJson(res, 409, { error: "provider_gone", message: lost });
-    if (!keyOf(bp) && !bp.login && !/^\/(model|models|effort|autocompact)\b/i.test(String(b.message).trim())) {
+    if (lost && !remoteAsk) return sendJson(res, 409, { error: "provider_gone", message: lost });
+    if (!keyOf(bp) && !bp.login && !remoteAsk && !/^\/(model|models|effort|autocompact)\b/i.test(msgText)) {
       return sendJson(res, 503, {
         error: "no_api_key",
         message: tz("「{name}」还没填 Key。到 设置 → 接口 里填好保存，或换一个接口。", { name: bp.label || bp.id }),

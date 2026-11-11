@@ -175,6 +175,32 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
     return { open, close, closeAll, at, top, back, hasModal: () => live().some((x) => x.kind === "modal"), isOpen: (el) => !!(el && el.isConnected && find(el)) };
   })();
 
+  // ── 会话来源（设备互联）────────────────────────────────────────────
+  // 标签只表示这条会话最初在哪台设备上创建；在本机打开时仍由本机 Claude 执行。
+  const LINK_DEV = { kind: "", map: {}, sig: "" };
+  async function loadLinkDev() {
+    try {
+      const r = await fetch("/api/link/origins", { cache: "no-store" });
+      if (!r.ok) return false;
+      const j = await r.json();
+      if (!j || !j.origins) return false;
+      const sig = JSON.stringify(j.origins) + "|" + ((j.self && j.self.kind) || "") + "|" + (Number(j.rev) || 0);
+      if (sig === LINK_DEV.sig) return false;
+      LINK_DEV.kind = (j.self && j.self.kind) || "";
+      LINK_DEV.map = j.origins || {};
+      LINK_DEV.sig = sig;
+      return true;
+    } catch { return false; }
+  }
+  function linkDevBadge(id, sm) {
+    const o = LINK_DEV.map[id];
+    if (!o || (o.kind !== "phone" && o.kind !== "pc")) return "";
+    if (!LINK_DEV.kind || o.kind === LINK_DEV.kind) return "";
+    const label = o.kind === "phone" ? t("手机") : t("电脑");
+    const tip = t("会话在{dev}上创建，同步到本机；在本机打开时仍由本机执行", { dev: label });
+    return `<em class="dev-chip${sm ? " sm" : ""}" title="${esc(tip)}">${esc(label)}</em>`;
+  }
+
   // ── 动效：弹簧曲线 ────────────────────────────────────────────────
   // 只做「交代东西从哪来、去哪了」的动效，只动 transform / opacity；流式正文、对话区滚动、长列表一律不加。
   // 弹簧按物理积分出 0→1 的进度：一份写成 CSS @keyframes（多段 linear —— Chrome 104 没有 linear() 缓动也能播），

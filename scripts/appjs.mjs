@@ -11,8 +11,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = path.join(ROOT, "gateway/web/app");
 const parts = fs.readdirSync(DIR).filter((f) => f.endsWith(".js")).sort();
 const texts = parts.map((f) => fs.readFileSync(path.join(DIR, f), "utf8"));

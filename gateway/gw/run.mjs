@@ -44,6 +44,127 @@ import { keepProcs, killProcs, leftoverProcs, nowTicks, procStart } from "./left
 import { localAddr, witnessMac } from "./access.mjs";
 import { sealed } from "./edition.mjs";
 import { runPromptFile, sealBlockMessage, sealCleanup, sealPrepare, sealRecheck } from "./seal.mjs";
+import { linkGet, linkPost, remoteMcpServer } from "./link.mjs";
+
+// ── 跨设备：@手机 / @电脑 / @shouji-设备号 ───────────────────────────
+// 有 @ 的这一轮本机不跑 Claude，交给 linkd 派给对端。对端有这条会话时由它的
+// 网关真正续跑，事件流经 linkd 长轮询取回；没有时 linkd 自动退回一次性任务。
+function parseRemoteMention(text) {
+  const m = /^@(shouji|手机|phone|diannao|电脑|pc)(?:[-－]([^\s，,：:]+))?(?:\s+([\s\S]*))?$/i.exec(String(text || "").trim());
+  if (!m) return null;
+  return {
+    kind: /^(diannao|电脑|pc)$/i.test(m[1]) ? "pc" : "phone",
+    token: (m[2] || "").trim(),
+    body: (m[3] || "").trim(),
+  };
+}
+
+/** 当前会话最近几条纯文本，供尚未同步完整会话的一次性回退使用。 */
+function remoteContext(sessionId) {
+  if (!sessionId) return "";
+  try {
+    const f = findSessionFile(String(sessionId));
+    if (!f) return "";
+    const st = fs.statSync(f.file);
+    const start = Math.max(0, st.size - 48000);
+    const fd = fs.openSync(f.file, "r");
+    const buf = Buffer.alloc(st.size - start);
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+    const out = [];
+    for (const line of buf.toString("utf8").split("\n").slice(-60)) {
+      if (!line.trim()) continue;
+      let ev; try { ev = JSON.parse(line); } catch { continue; }
+      const msg = ev && ev.message;
+      if (!msg || (msg.role !== "user" && msg.role !== "assistant")) continue;
+      let text = "";
+      if (typeof msg.content === "string") text = msg.content;
+      else if (Array.isArray(msg.content)) text = msg.content.filter((x) => x && x.type === "text").map((x) => x.text).join("\n");
+      text = String(text || "").trim();
+      if (text) out.push((msg.role === "user" ? "用户：" : "本机 Claude：") + text.slice(0, 800));
+    }
+    return out.slice(-6).join("\n\n");
+  } catch { return ""; }
+}
+
+async function startRemoteRun(run, emit, mention) {
+  const started = Date.now();
+  let taskId = "";
+  try {
+    if (!mention.body) throw new Error("在 @设备 后面写上要让对方做什么");
+    const info = await linkGet("/api/remote");
+    if (!info || !info.ok) throw new Error("本机互联服务没有响应");
+    const targets = Array.isArray(info.targets) ? info.targets : [];
+    const tok = mention.token.toLowerCase();
+    const hits = targets.filter((t) => {
+      if (mention.kind && t.kind && t.kind !== mention.kind) return false;
+      if (!tok) return true;
+      const id = String(t.id || "").toLowerCase(), name = String(t.name || "").toLowerCase();
+      return id === tok || id.startsWith(tok) || name === tok || name.includes(tok);
+    }).sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0) || (b.via === "lan" ? 1 : 0) - (a.via === "lan" ? 1 : 0));
+    const target = hits[0];
+    if (!target) {
+      const list = targets.filter((t) => t.id !== info.device?.id).map((t) => `${t.name}（${t.id.slice(0, 8)}）`).join("、");
+      const what = mention.token || (mention.kind === "phone" ? "手机" : "电脑");
+      throw new Error(`找不到设备「${what}」${list ? "。可选：" + list : "，先在设备互联里配对"}`);
+    }
+    if (target.id === (info.device && info.device.id)) throw new Error("这是本机，不用 @；直接说要做的事就行");
+    const label = `claude-${target.kind === "phone" ? "手机" : target.kind === "pc" ? "电脑" : target.name}`;
+    emit({ type: "remote_agent", name: label, device: target.name, id: target.id, via: target.via });
+    run.remote = true;
+    run.remoteName = target.name;
+    run.remoteKind = target.kind || "";
+    emit({ type: "phase", phase: "connect" });
+    const context = remoteContext(run.sessionId);
+    const created = await linkPost("/api/remote/task", {
+      device: target.id,
+      prompt: mention.body,
+      sessionId: run.sessionId || "",
+      text: mention.body,
+      context,
+      wait: 0,
+      timeout: 1800,
+      maxTurns: 80,
+    });
+    taskId = (created.task && created.task.id) || "";
+    run.remoteTaskId = taskId;
+    if (!taskId) throw new Error("没有拿到远程任务号");
+    run.remoteCancel = () => linkPost("/api/remote/cancel", { id: taskId }, 8000).catch(() => {});
+    let since = 0, text = "", sawText = false;
+    while (!run.aborted) {
+      const j = await linkGet(`/api/remote/task/${encodeURIComponent(taskId)}/events?since=${since}&wait=20`, 30000);
+      for (const e of Array.isArray(j.events) ? j.events : []) {
+        const ev = e && e.ev;
+        if (!ev) continue;
+        if (ev.k === "delta" && ev.text) { sawText = true; text += ev.text; emit({ type: "delta", text: ev.text }); }
+        else if (ev.k === "text" && ev.text && !sawText) { sawText = true; text += ev.text; emit({ type: "assistant_text", text: ev.text }); }
+        else if (ev.k === "thinking" && ev.text) emit({ type: "thinking_delta", text: ev.text });
+        else if (ev.k === "tool_use") emit({ type: "tool_use", id: ev.id, name: ev.name || "tool", input: ev.input || {} });
+        else if (ev.k === "tool_result") emit({ type: "tool_result", id: ev.id, ok: !!ev.ok, text: ev.text || "" });
+      }
+      since = Number(j.next) || since;
+      if (j.done) break;
+      if (Date.now() - started > 1800 * 1000) throw new Error("远程任务超时（30 分钟）");
+    }
+    if (run.aborted) {
+      try { await run.remoteCancel?.(); } catch {}
+      return endRun(run, { aborted: true, durationMs: Date.now() - started, remote: true });
+    }
+    const fin = await linkGet(`/api/remote/task/${encodeURIComponent(taskId)}`, 15000);
+    const t = (fin && fin.task) || {};
+    if (t.status === "error") {
+      const msg = t.error || "远程执行失败";
+      emit({ type: "error", message: msg });
+      return endRun(run, { failed: true, durationMs: Date.now() - started, remote: true });
+    }
+    if (t.status === "cancelled") return endRun(run, { aborted: true, durationMs: Date.now() - started, remote: true });
+    if (t.result && !sawText) { text = String(t.result); emit({ type: "assistant_text", text }); }
+    return endRun(run, { resultText: text || t.result || "", durationMs: Date.now() - started, remote: true, remoteTaskId: taskId });
+  } catch (e) {
+    emit({ type: "error", message: "跨设备执行失败：" + e.message });
+    return endRun(run, { failed: true, durationMs: Date.now() - started, remote: true, remoteTaskId: taskId });
+  }
+}
 
 // 必须由人回答的工具：全部放行也照问（问题、计划审批）
 // 敏感操作「这一轮已允许」的范围：读屏、点按、剪贴板这类设备操作一连串连着做，按类别记；
@@ -268,6 +389,13 @@ export async function startRun(item) {
       (text, cmd) => endRun(run, { localCommand: cmd || local[1], resultText: text, durationMs: 0, costUsd: 0 }), run.sessionId, () => run.aborted);
   }
 
+  // 带 @ 的这一轮交给另一台设备；本机没配 API Key 也要能派出去。
+  const mention = parseRemoteMention(message);
+  if (mention) {
+    log(`⇄ 跨设备：${mention.kind} ${mention.token || "自动选择"}（本机不执行）`);
+    return startRemoteRun(run, emit, mention);
+  }
+
   const lost = lostProvider(item, sid0, pdef0);
   if (lost) {
     log(`⛔ 这一轮要用的接口不在了，没有启动（不退回全局默认）`);
@@ -376,7 +504,13 @@ export async function startRun(item) {
   // 设备工具（通知、剪贴板、打开应用、读屏点按…）：只有 cccodroid 有 Java 那一层。开关在应用里，
   // 这里只看总开关决定挂不挂；具体哪些工具出现由 device-mcp.mjs 现问应用。端侧小模型不挂（读不起）
   const devMcp = deviceMcpConfig();
-  if (devMcp && !P.local && (await privCall({ op: "dev_status" }, 3000)).on) argv.push("--mcp-config", devMcp);
+  const mcpServers = {};
+  if (devMcp && !P.local && (await privCall({ op: "dev_status" }, 3000)).on) {
+    try { Object.assign(mcpServers, JSON.parse(devMcp).mcpServers || {}); } catch {}
+  }
+  const remoteMcp = !P.local ? remoteMcpServer() : null;
+  if (remoteMcp) mcpServers["ccapp-remote"] = remoteMcp;
+  if (Object.keys(mcpServers).length) argv.push("--mcp-config", JSON.stringify({ mcpServers }));
 
   // 告诉 claude 这台设备上有什么现成工具 —— 不说它就不会去用。
   // 和用户自己的追加提示合成一条：重复给同一个单值参数，解析器一般只留一个，合成一条最稳

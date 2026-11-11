@@ -30,10 +30,11 @@ import path from "node:path";
 import zlib from "node:zlib";
 import crypto from "node:crypto";
 import { execFileSync, execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import * as xzNs from "./vendor/xz-decompress/dist/package/xz-decompress.js";
 const xz = xzNs.default ?? xzNs;
 
-const HERE = path.dirname(new URL(import.meta.url).pathname);
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MAN = JSON.parse(fs.readFileSync(path.join(HERE, "devkit.json"), "utf8"));
 const args = process.argv.slice(2);
 const cmd = args[0];
