@@ -739,6 +739,12 @@
               <button class="btn sm ghost" id="ntf-sys" data-i18n>去系统通知设置</button>
             </div>
           </div>
+          <!-- 通知状态没读到（网关刚起、断网）：说出原因并可重试，不和「这个版本没有这项」一样整块消失（FIND-032） -->
+          <div class="sblock hidden" id="ntf-err-block">
+            <div class="srow head"><div class="sl"><b data-i18n>通知</b></div></div>
+            <div class="prov-state warn" id="ntf-err"></div>
+            <div class="row-actions"><button class="btn sm ghost" id="ntf-retry" data-i18n>重试</button></div>
+          </div>
           <!-- 设备工具：给 Claude 挂的 MCP（device-mcp.mjs → DeviceTools.java）。只有 cccodroid 有，开发端整块隐藏 -->
           <div class="sblock hidden" id="dev-field">
             <div class="srow head">
@@ -767,6 +773,12 @@
             <div class="row-actions">
               <button class="btn sm ghost" id="dev-a11y-sys" data-i18n>去系统无障碍设置</button>
             </div>
+          </div>
+          <!-- 设备工具状态没读到：同上，给原因和重试（FIND-032） -->
+          <div class="sblock hidden" id="dev-err-block">
+            <div class="srow head"><div class="sl"><b data-i18n>设备工具</b></div></div>
+            <div class="prov-state warn" id="dev-err"></div>
+            <div class="row-actions"><button class="btn sm ghost" id="dev-retry" data-i18n>重试</button></div>
           </div>
         </div>
   
