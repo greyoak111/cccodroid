@@ -591,6 +591,13 @@ export async function fetchKeyed(url, opts = {}) {
 }
 
 /** 验密钥：有模型清单接口就拉清单（不花钱）；没有就发一条 max_tokens=1 的消息 */
+// 上游的报错正文不受本机控制：个别网关会把收到的认证值原样写回 message 里。
+// 测试错误要原样给界面看，就得先把本次用到的 Key 抹掉（UIFS-009）。太短的 Key 不替换，
+// 免得把正常文案搅乱；真实厂商 Key 都远长于这个长度。
+function redactKey(s, key) {
+  const t = String(s == null ? "" : s);
+  return key && key.length >= 8 ? t.split(key).join("…") : t;
+}
 export async function testProvider(id) {
   const v = PROVIDERS_CFG.providers[id];
   if (!v) return { ok: false, message: tz("没有这家厂商") };
@@ -636,11 +643,12 @@ export async function testProvider(id) {
         const n = viaModels ? normalizeModels(j).length : 0;
         return { ok: true, message: n ? tz("密钥有效（{how}，{n} 个模型）", { how, n }) : tz("密钥有效（{how}）", { how }) };
       }
-      const what = err ? String(err).slice(0, 200) : (text.trim() ? text.trim().slice(0, 120) : tz("（空）"));
+      const what = err ? redactKey(String(err), key).slice(0, 200) : (text.trim() ? redactKey(text.trim(), key).slice(0, 120) : tz("（空）"));
       return { ok: false, status: r.status, message: tz("地址回了 {s}，但不是预期的格式，没法确认密钥有效：{what}", { s: r.status, what }) };
     }
     let msg = text.slice(0, 200);
     try { const j = JSON.parse(text); msg = j.error?.message || j.message || j.msg || msg; } catch {}
+    msg = redactKey(String(msg == null ? "" : msg), key).slice(0, 200);   // 上游回显的认证值不外泄（UIFS-009）
     // 401 才是密钥问题；403 多半是地区 / 风控 / 防火墙拦的，不能一概说「密钥无效」（FIND-020）
     const why = r.status === 401 ? "密钥无效或与线路不匹配"
       : r.status === 403 ? "服务器拒绝访问（403）：可能是地区、网络或防火墙限制，不一定是密钥问题"
@@ -649,7 +657,7 @@ export async function testProvider(id) {
     const hint = /support(s|ed)? (this|the) protocol|unsupported protocol/i.test(msg) ? tz("（这个型号在这个地址上不支持 Anthropic 协议：换一个支持的型号，或换成平台给 Claude Code 用的那个地址）") : "";
     return { ok: false, status: r.status, message: `${why}：${msg}${hint}` };
   } catch (e) {
-    return { ok: false, message: tz("连不上：{err}", { err: e.message }) };
+    return { ok: false, message: tz("连不上：{err}", { err: redactKey(e.message, key) }) };
   }
 }
 // ── 余额与消费（设置页的厂商卡片）────────────────────────────────────
