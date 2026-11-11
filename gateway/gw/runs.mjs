@@ -79,7 +79,8 @@ export let LAST_SESSION = (() => {
 export function rememberSession(id) {
   if (!id) return;
   LAST_SESSION = { id: String(id), at: Date.now() };
-  try { fs.writeFileSync(LAST_SESSION_FILE, JSON.stringify(LAST_SESSION), { mode: 0o600 }); } catch {}
+  // 临时文件 + 换名：以前直接写目标文件，写到一半被结束就留下半截 JSON，下次启动退回欢迎页（FIND-013）
+  writeAtomic(LAST_SESSION_FILE, JSON.stringify(LAST_SESSION));
 }
 export function forgetSession() {
   LAST_SESSION = null;
