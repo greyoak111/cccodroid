@@ -12,6 +12,13 @@ import { readSmallFile } from "./saferead.mjs";
 
 const BAD_KEEP = 3;
 
+// 读坏了、又没留成底的文件（BUG-P01）：原文件还在原处，内容没读进来，也没挪到 .bad-*（比如一时 EACCES，读、换名、复制都失败）。
+// 这时调用方手里是默认值；要是照常保存，就是拿默认值把原文件整份盖掉（档案的题名、厂商 Key、设置……）。
+// 记下来：在它被重新读成功、或者终于留成底之前，writeAtomic 一律拒写（返回 false，调用方照旧报「没保存上」）
+const UNREAD = new Set();
+/** 这个状态文件是不是「读坏了又没留底」：调用方据此别缓存默认值，下次再读 */
+export const stateUnread = (file) => UNREAD.has(path.resolve(file));
+
 /** 把坏文件挪到一边留底（不删）。返回留底的路径；挪不动返回 null */
 export function keepBad(file, why) {
   const dst = `${file}.bad-${new Date().toISOString().replace(/[:.]/g, "-")}`;
@@ -29,11 +36,13 @@ export function keepBad(file, why) {
  * 读一份 JSON 状态文件。
  *   shape(j)：把解析出来的值规整成要的形状并返回；形状不对、救不回来就返回 undefined（或抛错）
  *   fallback()：文件不存在 / 坏了时用的默认值（每次新建，别共用一个对象）
- * 返回 { data, missing, bad }：missing = 文件本来就没有；bad = 读坏了（已留底成 .bad-*）
+ * 返回 { data, missing, bad, kept }：missing = 文件本来就没有；bad = 读坏了；kept = 原文件已经留底（或者本来就不用留）。
+ *   bad && !kept：原文件还在原处、没读进来 —— data 只是默认值，别缓存成「当前状态」；写它会被拒（见 UNREAD）
  */
 export function loadState(file, { shape = (j) => j, fallback = () => ({}), max = 8 << 20 } = {}) {
   let st = null;
-  try { st = fs.lstatSync(file); } catch (e) { if (e.code === "ENOENT") return { data: fallback(), missing: true, bad: false }; }
+  const key = path.resolve(file);
+  try { st = fs.lstatSync(file); } catch (e) { if (e.code === "ENOENT") { UNREAD.delete(key); return { data: fallback(), missing: true, bad: false, kept: true }; } }
   const raw = st && st.isFile() && st.size <= max ? readSmallFile(file, max) : null;
   let why = null, data;
   if (raw == null) why = !st ? "读不了" : !st.isFile() ? "不是普通文件" : st.size > max ? `太大（${st.size} 字节）` : "读不了";
@@ -42,9 +51,11 @@ export function loadState(file, { shape = (j) => j, fallback = () => ({}), max =
     try { j = JSON.parse(raw); } catch { why = "不是合法的 JSON"; }
     if (!why) { try { data = shape(j); } catch { data = undefined; } if (data === undefined) why = "内容的格式不对"; }
   }
-  if (!why) return { data, missing: false, bad: false };
-  keepBad(file, why);
-  return { data: fallback(), missing: false, bad: true };
+  if (!why) { UNREAD.delete(key); return { data, missing: false, bad: false, kept: true }; }
+  const kept = !!keepBad(file, why);
+  if (kept) UNREAD.delete(key);
+  else { UNREAD.add(key); log(`⚠️ 状态文件 ${path.basename(file)} ${why}，也没能留底：原文件不动，读成功之前不往里写`); }
+  return { data: fallback(), missing: false, bad: true, kept };
 }
 
 /** 写 JSON 状态文件：同目录临时文件（名字唯一）→ fsync → 换名。成功 true；失败记日志、清临时文件、返回 false（调用方要如实报给用户） */
@@ -54,6 +65,12 @@ export function saveState(file, obj, { mode = 0o600, pretty = true } = {}) {
 
 /** 原子写一份文本 / 二进制。失败返回 false，不抛 */
 export function writeAtomic(file, data, { mode = 0o600 } = {}) {
+  if (UNREAD.has(path.resolve(file))) {
+    // 文件后来被删了（或者被别人换成了别的）就不用再护着；还在就拒写，保住没读进来的原内容
+    let gone = false; try { fs.lstatSync(file); } catch (e) { gone = e.code === "ENOENT"; }
+    if (!gone) { log(`⚠️ 不写 ${path.basename(file)}：上次没读进来、也没留底，写了会盖掉原内容`); return false; }
+    UNREAD.delete(path.resolve(file));
+  }
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.tmp-${process.pid}-${Date.now().toString(36)}${Math.random().toString(16).slice(2, 6)}`);
   let fd = null;
   try {

@@ -34,13 +34,18 @@ const archiveShape = (j) => {
 
 export function archiveDb() {
   if (DB) return DB;
-  DB = loadState(FILE, { shape: archiveShape, fallback: () => ({ v: 1, sessions: {} }) }).data;
+  const r = loadState(FILE, { shape: archiveShape, fallback: () => ({ v: 1, sessions: {} }) });
+  // 读坏了又没留成底（BUG-P01）：原档案还在磁盘上没读进来，空表不能当成当前状态缓存 —— 否则下一次交档把整份档案盖成只剩这一条。
+  // 这次给个用完即弃的空表（保存会被 statefile 拒掉、如实报错），下次调用再读一遍：故障一过就接回原档案
+  if (r.bad && !r.kept) return r.data;
+  DB = r.data;
   return DB;
 }
 
 /** 返回写成没有：调用方要据此报错，别写失败了还回 ok（网关一重启内存里的就没了 —— 审查 中2） */
 export function saveArchive() {
-  return saveState(FILE, DB ?? { v: 1, sessions: {} });
+  if (!DB) return false;      // 还没读进来（或者没读成，见 archiveDb）：没有可保存的当前状态，别拿空表去盖
+  return saveState(FILE, DB);
 }
 
 /** 会话彻底删掉时清掉它的档案（195-A.7 / Y.3） */

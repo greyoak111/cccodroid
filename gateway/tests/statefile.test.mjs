@@ -16,7 +16,7 @@ const bads = (f) => fs.readdirSync(path.dirname(f)).filter((n) => n.startsWith(p
 
 test("不存在：missing，用默认值，不留底", () => {
   const r = loadState(path.join(D, "none.json"), { fallback: () => ({ a: 1 }) });
-  assert.deepEqual(r, { data: { a: 1 }, missing: true, bad: false });
+  assert.deepEqual(r, { data: { a: 1 }, missing: true, bad: false, kept: true });
 });
 
 test("语法坏：原文件留底成 .bad-*，用默认值", () => {
