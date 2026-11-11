@@ -180,9 +180,9 @@ test("196-凭据.1：线路失配后只重选线路、不给新 Key → 旧 Key 
     const p = P.providerById("kimi");
     console.log(JSON.stringify({ cleared: !!a.keyCleared, key: P.keyOf(p) }));`);
   assert.deepEqual(JSON.parse(n.out), { cleared: false, key: "NEW" });
-  // 线路没失配时只换线路：照旧（不清 Key，保持原行为）
+  // 两条预置线路之间正常切换、Key 留空：同样要清旧 Key 并要求重填（FIND-050，以前的「保持原行为」会把旧 Key 发到新域名）
   const k = scenario({ "ccapp-providers.json": { active: "deepseek", providers: { kimi: { apiKey: "K2", endpoint: "cn" } } } }, `
     const a = P.upsertProvider("kimi", { id: "kimi", apiKey: "", endpoint: "intl" });
     console.log(JSON.stringify({ cleared: !!a.keyCleared, key: P.keyOf(P.providerById("kimi")) }));`);
-  assert.deepEqual(JSON.parse(k.out), { cleared: false, key: "K2" });
+  assert.deepEqual(JSON.parse(k.out), { cleared: true, key: null });
 });

@@ -478,11 +478,20 @@ export function upsertProvider(id, b, prepare) {
   if (b.clearKey) delete cur.apiKey;
   // 图片随消息发（兼容兜底，见 inlineimg.mjs）：预置和自定义都能开
   if ("inlineImages" in b) { if (b.inlineImages === true) cur.inlineImages = true; else delete cur.inlineImages; }
-  // 记着的线路已经不在了（196-凭据.1）：重选线路时没给新 Key，旧 Key 是给原线路的，不能跟着带到新线路，清掉要用户重填
+  // 换线路时旧 Key 不能跟着走：Key 是按线路发的（cn / intl、按量 / 套餐往往不通用），没有依据默认两家通用。
+  // 旧线路被目录删除时一直会清（196-凭据.1）；两条预置线路之间正常切换漏了，旧 Key 会随新线路域名发出去（FIND-050）。
+  // 没记过线路 = 第一条线路，把第一条明确存回去不算换线路。
   const eps = PRESETS[id] && Array.isArray(PRESETS[id].endpoints) ? PRESETS[id].endpoints : null;
-  if (eps && cur.endpoint && !eps.some((e) => e && e.id === cur.endpoint) && "endpoint" in b && cur.apiKey && !("apiKey" in b && str(b.apiKey))) {
-    delete cur.apiKey;
-    keyCleared = true;
+  if (eps && cur.apiKey && !("apiKey" in b && str(b.apiKey)) && "endpoint" in b) {
+    const next = str(b.endpoint);
+    const known = (x) => eps.some((e) => e && e.id === x);
+    const oldLost = !!cur.endpoint && !known(cur.endpoint);
+    const oldEff = oldLost || !cur.endpoint ? eps[0].id : cur.endpoint;   // 没记过线路时生效的就是第一条
+    const nextEff = next ? (known(next) ? next : null) : eps[0].id;       // 空 = 回到第一条
+    if (oldLost || (nextEff && nextEff !== oldEff)) {
+      delete cur.apiKey;
+      keyCleared = true;
+    }
   }
   for (const k of ["endpoint", "defaultModel", "fastModel"]) if (k in b) { if (str(b[k])) cur[k] = str(b[k]); else delete cur[k]; }
   if (!PRESETS[id]) {
