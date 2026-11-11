@@ -72,9 +72,10 @@ test("FIND-034 这一轮结束（只有小文件也发 done）就清掉 pickFrom
 
 test("安卓侧：先发 copy-start 再 attachBig，收完发 copy-done；取消与只有小文件各有事件", () => {
   const atStart = java.indexOf('toPage("ccapp-attach-copy-start"');
-  const atBig = java.indexOf("attachBig(big, true)");
+  const atBig = java.indexOf("attachBig(big, true");
   assert.ok(atStart > 0 && atBig > atStart, "copy-start 要在 attachBig 之前发出");
-  assert.ok(java.includes('if (big) toPage("ccapp-attach-copy-done", String(list.size()));'), "attachBig 收完要发 copy-done");
-  assert.ok(java.includes("if (big.isEmpty()) { toPage(\"ccapp-attach-pick-done\", \"0\"); return; }"), "只有小文件也要收尾");
-  assert.ok(java.includes('toPage("ccapp-attach-pick-cancel", "")'), "取消选择器要告诉网页");
+  // BUG-A06 起事件值带上批次号（pickEvent），语义不变：收完发 copy-done
+  assert.ok(java.includes('if (big) toPage("ccapp-attach-copy-done", pickEvent(id, list.size()));'), "attachBig 收完要发 copy-done");
+  assert.ok(java.includes("if (big.isEmpty()) { toPage(\"ccapp-attach-pick-done\", pickEvent(pid, 0)); return; }"), "只有小文件也要收尾");
+  assert.ok(java.includes('toPage("ccapp-attach-pick-cancel", pickEvent(pid, 0))'), "取消选择器要告诉网页");
 });

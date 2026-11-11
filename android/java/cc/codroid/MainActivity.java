@@ -127,6 +127,10 @@ public class MainActivity extends Activity {
     private BrowserPane pane;
     private volatile boolean paneCanBack;
     private ValueCallback<Uri[]> fileCb;
+    /** 每次打开选择器分配一个批次号（BUG-A06）：后台拷贝完成时带回去，
+     *  网页据此把迟到的大文件还给当初那次选择器打开的草稿，而不是当前（可能已经换过的）草稿 */
+    private static final java.util.concurrent.atomic.AtomicLong PICK_SEQ = new java.util.concurrent.atomic.AtomicLong();
+    private volatile long pickId;
     /** 「保存到」：等系统文件面板回来时要复制的源文件。static：挑位置期间界面被回收重建也还在 */
     private static File savePending;
     private static java.lang.ref.WeakReference<MainActivity> saveOwner;
@@ -751,42 +755,59 @@ public class MainActivity extends Activity {
         } catch (Exception e) { return null; }
     }
     /** 选择器里挑的大文件：有路径的递路径，没有的后台拷进 uploads/（不经网页）。
-     *  事件和分享进来的分开（ccapp-attach-pick）：拷的时候用户可能切了会话，网页按打开选择器时的草稿归位（#105 06-014） */
+     *  事件和分享进来的分开（ccapp-attach-pick）：拷的时候用户可能切了会话，网页按打开选择器时的草稿归位（#105 06-014）。
+     *  每次选择器带一个批次号（BUG-A06）：拷完时用户可能已经又开了一次选择器，光看「当前选择器」会把这一批记到新草稿上 */
     /** big=false：不是因为大才走这里（界面重建后回调没了），别提示「文件较大」 */
-    private void attachBig(java.util.List<Uri> list, boolean big) {
+    private void attachBig(java.util.List<Uri> list, boolean big, long pick) {
+        final String id = pick > 0 ? String.valueOf(pick) : "";
         new Thread(() -> {
-            File dir = new File(env.workspace(), "uploads");
-            for (Uri u : list) {
-                String real = realPath(u);
-                if (real != null) { toPage("ccapp-attach-pick", real); continue; }
-                if (big) ui.post(() -> android.widget.Toast.makeText(this, Tr.t("文件较大，正在收进工作区…"), android.widget.Toast.LENGTH_SHORT).show());
-                dir.mkdirs();
-                String name = displayName(u).replaceAll("[^\\w.\\-()\\u4e00-\\u9fff]+", "_").replaceAll("^[.\\s]+", "");
-                if (name.length() > 120) name = name.substring(name.length() - 120);
-                String stamp = new java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.US).format(new java.util.Date());
-                String base = name.isEmpty() ? "upload.bin" : name;
-                // 独占创建占住名字：同一秒附加两个同名大文件（两批分享）时，后一个不会截断前一个还在写的文件
-                File out = new File(dir, stamp + "-" + base);
-                try {
-                    for (int k = 2; !out.createNewFile(); k++) {
-                        if (k > 999) throw new java.io.IOException(Tr.t("同名文件太多了"));
-                        out = new File(dir, stamp + "-" + k + "-" + base);
+            try {
+                File dir = new File(env.workspace(), "uploads");
+                for (Uri u : list) {
+                    String real = realPath(u);
+                    if (real != null) { toPage("ccapp-attach-pick", pickEvent(id, real)); continue; }
+                    if (big) ui.post(() -> android.widget.Toast.makeText(this, Tr.t("文件较大，正在收进工作区…"), android.widget.Toast.LENGTH_SHORT).show());
+                    dir.mkdirs();
+                    String name = displayName(u).replaceAll("[^\\w.\\-()\\u4e00-\\u9fff]+", "_").replaceAll("^[.\\s]+", "");
+                    if (name.length() > 120) name = name.substring(name.length() - 120);
+                    String stamp = new java.text.SimpleDateFormat("yyyyMMddHHmmss", java.util.Locale.US).format(new java.util.Date());
+                    String base = name.isEmpty() ? "upload.bin" : name;
+                    // 独占创建占住名字：同一秒附加两个同名大文件（两批分享）时，后一个不会截断前一个还在写的文件
+                    File out = new File(dir, stamp + "-" + base);
+                    try {
+                        for (int k = 2; !out.createNewFile(); k++) {
+                            if (k > 999) throw new java.io.IOException(Tr.t("同名文件太多了"));
+                            out = new File(dir, stamp + "-" + k + "-" + base);
+                        }
+                    } catch (Exception e) {
+                        ui.post(() -> android.widget.Toast.makeText(this, Tr.f("「{0}」附加失败：{1}", displayName(u), e.getMessage()), android.widget.Toast.LENGTH_LONG).show());
+                        continue;
                     }
-                } catch (Exception e) {
-                    ui.post(() -> android.widget.Toast.makeText(this, Tr.f("「{0}」附加失败：{1}", displayName(u), e.getMessage()), android.widget.Toast.LENGTH_LONG).show());
-                    continue;
+                    try (InputStream in = openShared(u); OutputStream o = new FileOutputStream(out)) {
+                        copyIn(in, o, dir);
+                        toPage("ccapp-attach-pick", pickEvent(id, out.getPath()));
+                    } catch (Exception e) {
+                        out.delete();
+                        ui.post(() -> android.widget.Toast.makeText(this, Tr.f("「{0}」附加失败：{1}", displayName(u), e.getMessage()), android.widget.Toast.LENGTH_LONG).show());
+                    }
                 }
-                try (InputStream in = openShared(u); OutputStream o = new FileOutputStream(out)) {
-                    copyIn(in, o, dir);
-                    toPage("ccapp-attach-pick", out.getPath());
-                } catch (Exception e) {
-                    out.delete();
-                    ui.post(() -> android.widget.Toast.makeText(this, Tr.f("「{0}」附加失败：{1}", displayName(u), e.getMessage()), android.widget.Toast.LENGTH_LONG).show());
-                }
+            } finally {
+                // 后台收完了：网页那边从这一刻起可以发送（收的过程中要挡住，否则附件落到下一条，FIND-027）。
+                // 放在 finally 里：拷贝线程意外中断也要把计数放掉，不能把发送按钮永久卡住
+                if (big) toPage("ccapp-attach-copy-done", pickEvent(id, list.size()));
             }
-            // 后台收完了：网页那边从这一刻起可以发送（收的过程中要挡住，否则附件落到下一条，FIND-027）
-            if (big) toPage("ccapp-attach-copy-done", String(list.size()));
         }, "attach-big").start();
+    }
+
+    /** 选择器批次事件的值：带批次号（BUG-A06）。没有批次号（界面重建后拿不到）或编码失败就退回旧格式
+     *  （纯路径 / 数字），网页仍按当前快照处理 */
+    private static String pickEvent(String id, String path) {
+        if (id == null || id.isEmpty()) return path;
+        try { return new org.json.JSONObject().put("id", id).put("path", path).toString(); } catch (Exception e) { return path; }
+    }
+    private static String pickEvent(String id, int n) {
+        if (id == null || id.isEmpty()) return String.valueOf(n);
+        try { return new org.json.JSONObject().put("id", id).put("n", n).toString(); } catch (Exception e) { return String.valueOf(n); }
     }
     /** 别的应用分享进来的流（审查 10-30 第九份 安卓低7）：读是在我们自己的进程里读的，
      *  file:///data/user/0/cc.codroid/files/home/.gateway-token 这种指向我们私有目录的、或我们自己 provider 的 content://，
@@ -1882,7 +1903,11 @@ public class MainActivity extends Activity {
                         return false;
                     }
                 }
+                long pid = PICK_SEQ.incrementAndGet();
+                pickId = pid;
                 try { startActivityForResult(chooserIntent(p), 7); } catch (Exception e) { fileCb = null; return false; }
+                // 先把这次选择器的批次号交给网页：之后后台拷完的大文件按它归位，不会记到之后打开的选择器上（BUG-A06）
+                toPage("ccapp-attach-pick-start", String.valueOf(pid));
                 return true;
             }
             // 页面里的 alert / confirm / prompt：系统默认的对话框标题是「网址为 http://127.0.0.1 的网页显示」，
@@ -2363,8 +2388,9 @@ public class MainActivity extends Activity {
         }
         if (req == 7 && fileCb == null) {
             // 选文件期间界面被系统收掉重建过（审查 #105 06-010）：网页的回调没了，选的文件照大附件那样递路径 / 收进 uploads，别静默丢掉
+            // 重建后拿不到当初的批次号：按旧格式递，网页按当前快照处理
             Uri[] all = chooserResult(this, res, data);
-            if (all != null && all.length > 0) attachBig(java.util.Arrays.asList(all), false);
+            if (all != null && all.length > 0) attachBig(java.util.Arrays.asList(all), false, 0);
             return;
         }
         if (req == 7) {
@@ -2373,16 +2399,18 @@ public class MainActivity extends Activity {
             Uri[] all = chooserResult(this, res, data);
             ValueCallback<Uri[]> cb = fileCb;
             fileCb = null;
-            if (all == null) { cb.onReceiveValue(null); toPage("ccapp-attach-pick-cancel", ""); return; }
+            final long pidN = pickId;
+            final String pid = pidN > 0 ? String.valueOf(pidN) : "";
+            if (all == null) { cb.onReceiveValue(null); toPage("ccapp-attach-pick-cancel", pickEvent(pid, 0)); return; }
             // 查大小要问别的应用的 provider（云盘可能要联网），别在主线程上等（11-04 报告 A4）
             new Thread(() -> {
                 java.util.ArrayList<Uri> small = new java.util.ArrayList<>(), big = new java.util.ArrayList<>();
                 for (Uri u : all) (sizeOf(u) > BIG_ATTACH ? big : small).add(u);
                 ui.post(() -> {
                     try { cb.onReceiveValue(small.isEmpty() ? null : small.toArray(new Uri[0])); } catch (Exception ignored) {}
-                    if (big.isEmpty()) { toPage("ccapp-attach-pick-done", "0"); return; }   // 只有小文件：这一轮到此为止（网页据此清掉选择器快照，FIND-034）
+                    if (big.isEmpty()) { toPage("ccapp-attach-pick-done", pickEvent(pid, 0)); return; }   // 只有小文件：这一轮到此为止（网页据此清掉选择器快照，FIND-034）
                     // 后台收大文件之前先告诉网页有几个：收完（copy-done）之前不许发送（FIND-027）
-                    if (!isDestroyed()) { toPage("ccapp-attach-copy-start", String(big.size())); attachBig(big, true); }
+                    if (!isDestroyed()) { toPage("ccapp-attach-copy-start", pickEvent(pid, big.size())); attachBig(big, true, pidN); }
                 });
             }, "attach-size").start();
         }
