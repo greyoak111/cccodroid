@@ -16,4 +16,7 @@ AJAR=${ANDROID_JAR:-$HOME/.bldtools/android.jar}
 if [ -f "$AJAR" ]; then
   javac -nowarn -d "$OUT" -cp "$AJAR:$(ls "$ROOT"/third_party/shizuku/*.jar | tr '\n' ':')" $(find "$ROOT/android/java" -name '*.java') "$ROOT/android/tests/cc/codroid/WhatsNewPickTest.java"
   java -cp "$OUT:$AJAR" cc.codroid.WhatsNewPickTest
+  # 第二份稳定性报告 l 组（BUG-A01/A02/A03/A04/A05 的纯逻辑；只调基本类型判断，不碰安卓运行时）
+  javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/Stab2LHostTest.java"
+  java -cp "$OUT:$AJAR" cc.codroid.Stab2LHostTest
 else echo "跳过 WhatsNewPickTest（没有 android.jar）"; fi
