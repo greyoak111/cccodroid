@@ -224,10 +224,15 @@ export function lostProvider(item, sid0, pdef0) {
   return "";
 }
 
-// streamfix 吞掉了「说完之后才来的报错」（195-U.4）：按请求头里的会话号找到那一轮，留一句提示，回答真被截断时用户看得见、能让它继续
-SWALLOW_HOOKS.push((sid, msg) => {
+// streamfix 人工补尾时按请求头里的会话号找到那一轮，留一句提示：回答真被截断时用户看得见、能让它继续。
+// kind = "error"：说完之后才来的报错被吞掉（195-U.4）；"truncated"：上游没给消息级收尾就断了，尾巴是我们补的（BUG-R01）
+SWALLOW_HOOKS.push((sid, msg, kind) => {
   const run = sid && runList().find((r) => r.sessionId === sid && !r.ended);
-  if (run) runEmit(run, { type: "note", key: "sfx-swallow", text: tz("上游在回答结尾报了错（{msg}），已按说完处理；如果回答不完整，发一句「继续」", { msg }) });
+  if (!run) return;
+  if (kind === "truncated")
+    runEmit(run, { type: "note", key: "sfx-pad", text: tz("上游没发结束标记就断开了，回答已按说完处理；这条是否完整无法确认，如果没说完，发一句「继续」") });
+  else
+    runEmit(run, { type: "note", key: "sfx-swallow", text: tz("上游在回答结尾报了错（{msg}），已按说完处理；如果回答不完整，发一句「继续」", { msg }) });
 });
 
 export async function startRun(item) {
