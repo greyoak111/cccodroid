@@ -951,7 +951,10 @@ html[dir="rtl"] .bubble code,html[dir="rtl"] .bubble pre,html[dir="rtl"] .mono{d
 .rc-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
 .rc-head > .tiny{flex:1 1 12em;min-width:0}
 .rc-act{display:flex;justify-content:flex-end;margin-top:6px}
-.item .it-title.wrap{white-space:normal}
+.item .it-title.wrap{white-space:normal;overflow-wrap:anywhere}
+/* 核对记录的长路径（比如没装 Claude Code 时展示的程序路径）没有空格，不折行会撑出设置弹窗 */
+.item.ledger .tiny{overflow-wrap:anywhere}
+.item.ledger .tiny.mono{word-break:break-all}
 #tab-ext > .tiny:first-child{margin-bottom:10px}
 .quota-row > .tiny{min-width:8.5em}
 

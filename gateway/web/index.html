@@ -561,6 +561,10 @@
             <div class="ac-head"><b data-i18n>上下文压缩线</b><span id="ac-val"></span><button class="btn sm ghost" id="ac-auto" data-i18n>交给 claude</button></div>
             <div class="ac-track"><input type="range" id="ac-range" min="0" max="100" step="1"></div>
             <div class="ac-scale"><span id="ac-min"></span><span id="ac-max"></span></div>
+            <!-- 厂商清单没报窗口时滑块没法按窗口换算：换成数字框，设过的值照原样改 -->
+            <div class="sinline hidden" id="ac-manual">
+              <input id="ac-num" type="number" inputmode="numeric" min="100000" max="1000000" step="1000" placeholder="留空 = 交给 claude 按窗口决定" data-i18n-attr="placeholder">
+            </div>
             <p class="tiny" data-i18n>用量逼近这条线时自动摘要历史。线放低更省、记得更少；放高记得多，但每轮更贵、更慢。</p>
           </div>
         </div>
