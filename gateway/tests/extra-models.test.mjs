@@ -24,6 +24,16 @@ test("配置能分享导入、也能手改：形状不对的丢掉，最多 64 �
   assert.deepEqual(extraModelsOf({ extraModels: "m-a" }), []);
 });
 
+test("型号名可以是中文、带方括号；空格 / 逗号 / 控制字符仍拒收", () => {
+  const id = "中转的中转:[特价C]claude-fable-5";
+  assert.deepEqual(extraModelsOf({ extraModels: [{ id }] }), [{ id, contextWindow: 0 }]);
+  assert.deepEqual(extraModelsOf({ extraModels: [{ id: "带逗号,不行" }] }), []);
+  assert.deepEqual(extraModelsOf({ extraModels: [{ id: "带\n换行" }] }), []);
+  const r = upsertProvider("", { label: "中转", baseUrl: "http://127.0.0.1:1", defaultModel: id, extraModels: [{ id }] });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.equal(r.provider.extraModels[0].id, id);
+});
+
 test("接口卡保存：存进配置、清单里出现、选它时下发它的窗口；空数组清掉；坏名字拒收", async () => {
   const r = upsertProvider("", { label: "第三方端口", baseUrl: "http://127.0.0.1:1", defaultModel: "m-a", contextWindow: 1048576,
     extraModels: [{ id: "m-b", contextWindow: 256000 }, { id: "m-c", contextWindow: 0 }] });

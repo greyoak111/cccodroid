@@ -2792,7 +2792,7 @@
 2792	Más modelos (opcional, uno por línea; tras un espacio puedes indicar la ventana, p. ej. gpt-6.1-sol 1m)
 2793	No se entiende la línea {n} de Más modelos: escribe «modelo» o «modelo ventana», con una ventana como 256k o 1m
 2794	Más modelos: 64 como máximo
-2795	El nombre del modelo solo admite letras, dígitos y . _ - : / @ +, hasta 128 caracteres: {id}
+2795	El nombre del modelo no puede contener espacios, comas ni caracteres de control, y debe tener 128 caracteres como máximo: {id}
 2796	{n} eliminadas, {m} ya no existen (eliminadas en otro sitio o ya en la papelera)
 2797	{n} eliminadas, {m} aún generando y sin eliminar, {k} ya no existen
 2798	Instalando. Analiza el siguiente cuando termine.

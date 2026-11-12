@@ -511,7 +511,7 @@ export function upsertProvider(id, b, prepare) {
       if (!list || list.length > 64) return { error: "bad_extra_models", message: tz("更多模型最多 64 个") };
       for (const e of list) {
         const id = e && typeof e.id === "string" ? e.id.trim() : "", n = Number(e && e.contextWindow);
-        if (!MODEL_ID_RE.test(id)) return { error: "bad_extra_models", message: tz("模型名只能用字母、数字和 . _ - : / @ +，不超过 128 个字符：{id}", { id: String(e && e.id || "").slice(0, 40) }) };
+        if (!MODEL_ID_RE.test(id)) return { error: "bad_extra_models", message: tz("模型名不能有空格、逗号或控制字符，不超过 128 个字符：{id}", { id: String(e && e.id || "").slice(0, 40) }) };
         if (e.contextWindow && !(Number.isInteger(n) && n >= 1024 && n <= 16777216)) return { error: "bad_context_window", message: tz("上下文窗口填 1024 到 16777216 之间的整数，也可以写 256k、1m") };
       }
       const clean = extraModelsOf({ extraModels: list });

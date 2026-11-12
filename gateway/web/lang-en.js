@@ -2830,7 +2830,7 @@ window.I18N_DICT.en = {
   "更多模型（选填，每行一个；名字后面可空一格写窗口，如 gpt-6.1-sol 1m）": "More models (optional, one per line; add a window after a space, e.g. gpt-6.1-sol 1m)",
   "更多模型第 {n} 行看不懂：写成「模型名」或「模型名 窗口」，窗口如 256k、1m": "Can't read line {n} of More models: write \"model\" or \"model window\", with a window like 256k or 1m",
   "更多模型最多 64 个": "More models: at most 64",
-  "模型名只能用字母、数字和 . _ - : / @ +，不超过 128 个字符：{id}": "Model names may use only letters, digits and . _ - : / @ +, up to 128 characters: {id}",
+  "模型名不能有空格、逗号或控制字符，不超过 128 个字符：{id}": "Model names can't contain spaces, commas or control characters, and must be at most 128 characters: {id}",
   "{n} 个已删除，{m} 个已经不在了（别处删了或已在回收站）": "{n} deleted, {m} no longer exist (deleted elsewhere or already in the trash)",
   "{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了": "{n} deleted, {m} still generating and not deleted, {k} no longer exist",
   "正在安装，装完再分析下一个": "Installing. Analyze the next one after it finishes.",

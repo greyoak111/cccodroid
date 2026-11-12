@@ -2792,7 +2792,7 @@
 2792	Autres modèles (facultatif, un par ligne ; fenêtre possible après une espace, ex. gpt-6.1-sol 1m)
 2793	Ligne {n} des autres modèles illisible : écrivez « modèle » ou « modèle fenêtre », fenêtre comme 256k ou 1m
 2794	Autres modèles : 64 au maximum
-2795	Le nom du modèle n'accepte que lettres, chiffres et . _ - : / @ +, 128 caractères au plus : {id}
+2795	Le nom du modèle ne peut pas contenir d'espaces, de virgules ni de caractères de contrôle, et doit faire 128 caractères au plus : {id}
 2796	{n} supprimées, {m} n'existent plus (supprimées ailleurs ou déjà dans la corbeille)
 2797	{n} supprimées, {m} encore en génération et non supprimées, {k} n'existent plus
 2798	Installation en cours. Analysez le suivant une fois terminée.

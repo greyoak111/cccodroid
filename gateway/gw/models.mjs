@@ -245,7 +245,9 @@ export function withConfigured(list, p) {
   return more.length ? [...out, ...more.map((e) => one(e.id, e.contextWindow || cw))] : out;
 }
 const okWindow = (n) => Number.isInteger(n) && n >= 1024 && n <= 16777216;
-export const MODEL_ID_RE = /^[\w.:/@+-]{1,128}$/;
+// 模型名由上游决定：除了英文，也有中转站用中文、方括号标价格（如「中转的中转:[特价C]claude-fable-5」）。
+// 只挡空白、逗号和控制 / 格式字符（换行、零宽、双向覆盖），其余交给上游；长度仍限 128。
+export const MODEL_ID_RE = /^[^\s,\p{Cc}\p{Cf}]{1,128}$/u;
 /** 接口卡里另加的型号：[{ id, contextWindow }]。配置能分享导入、也能手改，按形状过一遍，最多 64 个 */
 export function extraModelsOf(p) {
   const seen = new Set(), out = [];

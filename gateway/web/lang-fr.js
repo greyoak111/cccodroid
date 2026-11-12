@@ -2795,7 +2795,7 @@ window.I18N_DICT["fr"] = {
   "更多模型（选填，每行一个；名字后面可空一格写窗口，如 gpt-6.1-sol 1m）": "Autres modèles (facultatif, un par ligne ; fenêtre possible après une espace, ex. gpt-6.1-sol 1m)",
   "更多模型第 {n} 行看不懂：写成「模型名」或「模型名 窗口」，窗口如 256k、1m": "Ligne {n} des autres modèles illisible : écrivez « modèle » ou « modèle fenêtre », fenêtre comme 256k ou 1m",
   "更多模型最多 64 个": "Autres modèles : 64 au maximum",
-  "模型名只能用字母、数字和 . _ - : / @ +，不超过 128 个字符：{id}": "Le nom du modèle n'accepte que lettres, chiffres et . _ - : / @ +, 128 caractères au plus : {id}",
+  "模型名不能有空格、逗号或控制字符，不超过 128 个字符：{id}": "Le nom du modèle ne peut pas contenir d'espaces, de virgules ni de caractères de contrôle, et doit faire 128 caractères au plus : {id}",
   "{n} 个已删除，{m} 个已经不在了（别处删了或已在回收站）": "{n} supprimées, {m} n'existent plus (supprimées ailleurs ou déjà dans la corbeille)",
   "{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了": "{n} supprimées, {m} encore en génération et non supprimées, {k} n'existent plus",
   "正在安装，装完再分析下一个": "Installation en cours. Analysez le suivant une fois terminée.",

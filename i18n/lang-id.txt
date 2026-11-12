@@ -2792,7 +2792,7 @@
 2792	Model lain (opsional, satu per baris; tambahkan jendela setelah spasi, mis. gpt-6.1-sol 1m)
 2793	Baris {n} pada Model lain tidak terbaca: tulis «model» atau «model jendela», jendela seperti 256k atau 1m
 2794	Model lain: paling banyak 64
-2795	Nama model hanya boleh huruf, angka, dan . _ - : / @ +, maksimal 128 karakter: {id}
+2795	Nama model tidak boleh berisi spasi, koma, atau karakter kontrol, dan maksimal 128 karakter: {id}
 2796	{n} dihapus, {m} sudah tidak ada (dihapus di tempat lain atau sudah di tempat sampah)
 2797	{n} dihapus, {m} masih membuat respons dan tidak dihapus, {k} sudah tidak ada
 2798	Sedang memasang. Analisis yang berikutnya setelah selesai.
