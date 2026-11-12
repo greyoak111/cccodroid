@@ -335,6 +335,11 @@
       // 用量条：总刻度用厂商给的真实窗口，但设了压缩窗口就改以它为满刻度。
       // 网关回 0 就是不知道：别拿下拉框落在的那一项兜底，那可能是别的型号（#82）
       loadCtxModel(r);
+      // 压缩线输入框是全局设置，和当前型号在不在清单里无关：型号清单为空、或当前型号是
+      // 别名不在清单里（第三方接口常见）时也要回填，否则「Claude 行为」页一直显示旧值，
+      // 用户再存一次旧值就把刚改的新值盖掉
+      const ac = $("set-autocompact");
+      if (ac && (acForce || document.activeElement !== ac)) ac.value = r.autoCompactWindow || "";
       const cur = MODELS.find((m) => m.id === curId);
       if (cur) {
         const k = (v) => (v ? Math.round(v / 1024) + "k" : "—");
@@ -342,8 +347,6 @@
         $("model-info").textContent =
                     t("上下文 {n} · 输出上限 {out} · 输入 {mods}", { n: k(cur.context_window), out: k(cur.max_output_tokens), mods: (cur.input_modalities || []).join(" / ") }) +
           t("｜这是默认值；单个会话在输入栏下面的模型标签里另选");
-        const ac = $("set-autocompact");
-        if (ac && (acForce || document.activeElement !== ac)) ac.value = r.autoCompactWindow || "";
       } else if (r.nativeModels) {
         $("model-info").innerHTML =
                     t("没指定模型 → <b>由 claude 自己决定</b>（官方账户当前默认 <code>{model}</code>）。", { model: esc(r.defaultModel || t("claude 内置默认")) }) +

@@ -1747,10 +1747,14 @@ public class MainActivity extends Activity {
                     if (p == null || p.isEmpty()) p = "/";
                     if (!p.startsWith("/api/")) {
                         android.webkit.WebResourceResponse r = Env.fetchStatic(p + (u.getEncodedQuery() != null ? "?" + u.getEncodedQuery() : ""));
-                        if (r != null) return r;
+                        if (r != null) {
+                            if (req.isForMainFrame()) waitingShown = false;   // 真页面到了：等待页的状态可以清掉
+                            return r;
+                        }
                         // 页面本身取不到（多半是通知栏点了「停止」、网关没了）：以前回空 502，WebView 停在 ERR_HTTP_RESPONSE_CODE_FAILURE 再没人管。
-                        // 换成一页「等待网关」，同时把服务拉起来，网关答话了重新载入（11-05 报告）
-                        if (req.isForMainFrame()) { ui.post(() -> recoverGateway(true)); return waitingPage(); }
+                        // 换成一页「等待网关」，同时把服务拉起来，网关答话了重新载入（11-05 报告）。
+                        // 置上 waitingShown：recover 的自动重载次数烧完后，onBoot 还能把界面接回来（审查 P2-2）
+                        if (req.isForMainFrame()) { waitingShown = true; ui.post(() -> recoverGateway(true)); return waitingPage(); }
                         return unavailable();
                     }
                 }
@@ -2086,7 +2090,7 @@ public class MainActivity extends Activity {
             });
         }, "ui-prove").start();
     }
-    private boolean waitingShown;
+    private volatile boolean waitingShown;   // WebView 的请求线程也会置位（取不到主页面 / 真页面到了）
     /** 网关还没就绪：先给一页中性的等待页，别把「端口被占」这种结论提前下出来 */
     private void showWaiting() {
         if (web == null) return;

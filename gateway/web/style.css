@@ -3626,9 +3626,11 @@ html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270
 /* 设置：窄屏分段 / 按钮行整行落下；宽屏放不下时分段按钮折行；长单词可断 */
 #tab-settings.set-one .srow:has(.sc .seg){flex-direction:column;align-items:stretch;gap:8px}
 #tab-settings.set-one .srow:has(.sc .btn){flex-direction:column;align-items:stretch;gap:8px}
+#tab-settings.set-one .srow:has(.sc .seg) > .sc,
+#tab-settings.set-one .srow:has(.sc .btn) > .sc{max-width:none}
 #tab-settings.set-one .srow .sc select{max-width:none}
-#set-ov .srow > .sc > .seg{flex-wrap:wrap}
-#set-ov .srow > .sc > .seg > button{overflow-wrap:anywhere}
+:is(#tab-settings,#set-ov) .srow > .sc > .seg{flex-wrap:wrap}
+:is(#tab-settings,#set-ov) .srow > .sc > .seg > button{overflow-wrap:anywhere}
 .sl b,.sl p{overflow-wrap:anywhere}
 .prov-card .sub,.prov-state,#upd-last{overflow-wrap:anywhere}
 #set-autocompact{width:min(260px,100%)}

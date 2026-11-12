@@ -22,6 +22,14 @@ test("窗口未知时压缩线仍可改：不藏整块，换成数字框", () =>
   assert.ok(block.includes('$("ac-val").textContent = acSet'), "已设的值仍要显示出来");
 });
 
+test("型号清单为空 / 当前型号不在清单里：Claude 行为页的压缩线也回填", () => {
+  const fill = caps.indexOf('if (ac && (acForce || document.activeElement !== ac)) ac.value = r.autoCompactWindow || "";');
+  const cur = caps.indexOf("const cur = MODELS.find((m) => m.id === curId);");
+  assert.ok(fill > 0, "找不到压缩线回填语句");
+  assert.ok(cur > 0, "找不到当前型号查找语句");
+  assert.ok(fill < cur, "回填要在 if (cur) 之前，否则清单为空 / 型号不在清单里时不回填");
+});
+
 test("核对记录里的长路径会折行，不再撑出设置弹窗", () => {
   assert.match(css, /\.item\.ledger \.tiny\.mono\{word-break:break-all\}/);
 });
