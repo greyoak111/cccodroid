@@ -312,7 +312,11 @@
       if (!hit) return tip.classList.remove("show");
       const br = box.getBoundingClientRect(), r = hit.getBoundingClientRect();
       tip.textContent = hit.dataset.tip; tip.classList.add("show");
-      tip.style.left = Math.max(40, Math.min(br.width - 40, r.left + r.width / 2 - br.left)) + "px"; tip.style.top = (r.top - br.top - 6) + "px";
+      // 夹取按提示实际宽度算：写死 40px 时，长提示在左右边缘会露出图表外。
+      // 先把提示自身宽度压进图表，免得比图表还宽时怎么摆都会溢出
+      tip.style.maxWidth = Math.max(0, br.width - 8) + "px";
+      const half = Math.min(tip.offsetWidth / 2, Math.max(0, br.width / 2 - 4));
+      tip.style.left = Math.max(half + 4, Math.min(br.width - half - 4, r.left + r.width / 2 - br.left)) + "px"; tip.style.top = (r.top - br.top - 6) + "px";
     };
     box.addEventListener("click", show); box.addEventListener("pointermove", show);
     box.addEventListener("pointerleave", () => box.querySelector(".tip")?.classList.remove("show"));

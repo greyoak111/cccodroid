@@ -39,7 +39,7 @@
   }
 
   const card = (title, meta, body = "", acts = "") => `<div class="sblock st-card"><div class="srow head"><div class="sl"><b>${esc(title)}</b><p>${meta}</p></div>${acts ? `<div class="sc">${acts}</div>` : ""}</div>${body}</div>`;
-  const row = (title, meta, acts = "") => `<div class="item"><div class="it-title">${esc(title)}</div>${meta ? `<div class="it-meta">${meta}</div>` : ""}${acts ? `<div class="it-acts">${acts}</div>` : ""}</div>`;
+  const row = (title, meta, acts = "") => `<div class="item"><div class="it-title wrap" title="${esc(title)}">${esc(title)}</div>${meta ? `<div class="it-meta">${meta}</div>` : ""}${acts ? `<div class="it-acts">${acts}</div>` : ""}</div>`;
   const btn = (act, label, extra = "", cls = "btn sm") => `<button class="${cls}" data-st="${act}" ${extra}>${esc(label)}</button>`;
 
   function stCards(s) {
@@ -54,7 +54,7 @@
     const list = ST.open ? `<div class="list compact">${(tp.top || []).map((u) => {
       const lock = u.inUse || u.active;
       const why = u.inUse ? `<span class="badge warn">${esc(t("正在用"))}</span>` : u.active ? `<span class="badge warn">${esc(t("会话在跑"))}</span>` : u.auto ? `<span class="badge">${esc(t("7 天没动过"))}</span>` : "";
-      return `<div class="item"><label class="it-title"><input type="checkbox" class="sess-ck" data-st-pick="${esc(u.rel)}" ${picks.has(u.rel) && !lock ? "checked" : ""} ${lock ? "disabled" : ""}>${esc(u.rel)}</label>
+      return `<div class="item"><label class="it-title wrap" title="${esc(u.rel)}"><input type="checkbox" class="sess-ck" data-st-pick="${esc(u.rel)}" ${picks.has(u.rel) && !lock ? "checked" : ""} ${lock ? "disabled" : ""}>${esc(u.rel)}</label>
         <div class="it-meta"><span>${sz(u.bytes)}</span><span>${esc(t("最后改动：{when}", { when: relTime(u.newest) }))}</span>${why}</div></div>`;
     }).join("")}</div><div class="row-actions">${btn("clean-picks", t("删除勾选的"), "", "btn sm ghost danger")}</div>` : "";
     out.push(card(t("临时文件"), esc(t("共 {size}，其中 7 天没动过的 {old}。包括后台命令的输出、测试和编译留下的临时目录", { size: sz(tp.bytes), old: sz(tp.auto) })),

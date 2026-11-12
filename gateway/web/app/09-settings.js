@@ -784,7 +784,7 @@
     }
     const box = $("uf-list"); if (!box || !items) return;
     // 清单每行用它自己的字体显示名字，一眼能看出长什么样
-    box.innerHTML = items.map((f) => `<div class="uf-item" data-uf-id="${esc(f.id)}"><span class="uf-nm" style="font-family:${esc(Theme.fam(f.id))},var(--font-ui)">${esc(f.name)}</span>`
+    box.innerHTML = items.map((f) => `<div class="uf-item" data-uf-id="${esc(f.id)}"><span class="uf-nm" title="${esc(f.name)}" style="font-family:${esc(Theme.fam(f.id))},var(--font-ui)">${esc(f.name)}</span>`
       + `<small>${esc(f.fmt)} · ${esc(fmtSize(f.size))}</small><button type="button" class="icon-btn uf-del" title="${esc(t("删除"))}"><svg viewBox="0 0 24 24">${ICONS.del}</svg></button></div>`).join("");
     box.classList.toggle("hidden", !items.length);
   }

@@ -299,8 +299,9 @@
     el.classList.toggle("hidden", !p && !wel);
     el.classList.toggle("empty", !p);
     const CHEV = '<svg class="pj-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg>';
-    if (p) el.innerHTML = `<span class="pj-fold" style="color:${pjCol(p.color)}">${pi("folder")}</span>${esc(p.name)}${wel ? CHEV : ""}`;
-    else if (wel) el.innerHTML = `<span class="pj-fold">${pi("folder")}</span>${esc(t("项目"))}${CHEV}`;
+    el.title = p ? p.name : "";
+    if (p) el.innerHTML = `<span class="pj-fold" style="color:${pjCol(p.color)}">${pi("folder")}</span><span class="pj-name">${esc(p.name)}</span>${wel ? CHEV : ""}`;
+    else if (wel) el.innerHTML = `<span class="pj-fold">${pi("folder")}</span><span class="pj-name">${esc(t("项目"))}</span>${CHEV}`;
   }
   $("proj-chip")?.addEventListener("click", (e) => {
     const p = curProject();

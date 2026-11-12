@@ -92,6 +92,8 @@
     modelEl.innerHTML = (other ? `<span class="chip chip-prov">${esc(provLabel(pv))}</span>` : "") +
       `<span class="chip">${esc(pretty)}</span>${eff ? `<span class="chip">${esc(eff)}</span>` : ""}`;
     modelEl.title = (other ? provLabel(pv) + " · " : "") + name;
+    // #model-chip 是 display:contents，本身没有盒子，title 落不到实际上屏的 chip 上
+    modelEl.querySelectorAll(".chip").forEach((c) => { c.title = modelEl.title; });
   }
   modelEl.setAttribute("role", "button");
   modelEl.tabIndex = 0;
@@ -463,7 +465,7 @@
     const dirs = state.settings.addDirs || [];
     $("dir-toggle").textContent = t("{n} 个", { n: dirs.length });
     $("dir-list").innerHTML = dirs.length
-      ? dirs.map((d, i) => `<div class="item"><div class="it-title">${esc(d)}</div>
+      ? dirs.map((d, i) => `<div class="item"><div class="it-title wrap" title="${esc(d)}">${esc(d)}</div>
           <div class="it-acts"><button data-i="${i}">${t("移除")}</button></div></div>`).join("")
       : '<div class="tiny">' + t("（没有附加目录）") + '</div>';
     $("dir-list").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
@@ -591,7 +593,8 @@
   // ── 压缩线滑块（接口与型号页）：0–100 映射到 [100k, 模型窗口]；没设 = 交给 claude，滑块停在最右、虚线轨道 ──
   // 100k 是 claude 认的下限（gw/models.mjs 的 defaultCompactLine 注释：只认 100k–1M），
   // 以前允许 20k，上下文条按 20k 显示满格、claude 实际按 100k 压（0.6.10 审计 195-O.2）
-  const AC_MIN = 100000, AC_MAX = 1000000;
+  const AC_MIN = 100000;
+  const AC_MAX = 1000000;
   let acWin = 0, acSet = 0, acDef = 0, acForce = false;   // acDef：没设时网关给第三方型号的默认线（0 = 交给 claude）   // acForce：刚存过，焦点还在控件上也按存下的值回填（没存上就弹回去）
   function acStep() { return Math.max(1000, Math.ceil((acWin - AC_MIN) / 100 / 1000) * 1000); }
   function acTok(p) { return Math.min(acWin, Math.round((AC_MIN + (acWin - AC_MIN) * p / 100) / acStep()) * acStep()); }

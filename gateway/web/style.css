@@ -3613,3 +3613,68 @@ html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270
 #st-cards .item label.it-title{display:block;cursor:pointer}
 #st-cards .it-meta code{font-size:10.5px}
 .set-cat .sc select#st-every{min-width:0}
+
+/* ── 0.6.17 前端溢出修补（多路审查汇总） ── */
+/* 权限卡按钮：长规则 / 长译文在卡片内折行，不再被 .perm 裁掉 */
+.perm-acts button{max-width:100%;flex:0 1 auto;white-space:normal;text-align:center;overflow-wrap:anywhere}
+.perm-acts code{white-space:normal;overflow-wrap:anywhere}
+#perm-bar .pb-txt.wrap{overflow-wrap:anywhere;word-break:break-word}
+
+/* 定时任务行：长译文下把状态胶囊 / 开关折到下一行，别推出屏幕 */
+#pages .panel > .row.pj-row{flex-wrap:wrap;row-gap:6px}
+
+/* 设置：窄屏分段 / 按钮行整行落下；宽屏放不下时分段按钮折行；长单词可断 */
+#tab-settings.set-one .srow:has(.sc .seg){flex-direction:column;align-items:stretch;gap:8px}
+#tab-settings.set-one .srow:has(.sc .btn){flex-direction:column;align-items:stretch;gap:8px}
+#tab-settings.set-one .srow .sc select{max-width:none}
+#set-ov .srow > .sc > .seg{flex-wrap:wrap}
+#set-ov .srow > .sc > .seg > button{overflow-wrap:anywhere}
+.sl b,.sl p{overflow-wrap:anywhere}
+.prov-card .sub,.prov-state,#upd-last{overflow-wrap:anywhere}
+#set-autocompact{width:min(260px,100%)}
+
+/* 标题省略号：flex 容器里的匿名文本不会用 text-overflow，改成块级后内联图标仍能排 */
+#tab-sessions .srow-sess .it-title{display:block;min-width:0}
+#tab-sessions .pin-ic{vertical-align:-2px;margin-inline-end:4px}
+.pj-row .t1{display:block;min-width:0}
+.pj-row .t1 svg.ei.pj-ic{vertical-align:-2px;margin-inline-end:4px}
+
+/* 解压 / 密码对话框：长包名不把关闭键顶出去 */
+.mp-head b{flex:1;min-width:0;overflow-wrap:anywhere;padding-inline-end:8px}
+.arc-form .mp-note{overflow-wrap:anywhere}
+
+/* 纸色滑块：别被 .set-cat 的 180px 输入框宽度压住，铺满轨道 */
+#gp-range{width:100%;min-width:0}
+
+/* 上下文用量条：只占一行，长译文省略，不换行画到消息区 */
+#ctxtxt{padding:0 8px;min-width:0}
+#ctxctx,#ctxq{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 整页按钮：长译文在窄屏折行，不被 #page-body 裁掉 */
+:is(#pages,#set-ov) .row-actions .btn,
+:is(#pages,#set-ov) .bc-actions .btn{max-width:100%;white-space:normal;text-align:center;overflow-wrap:anywhere;flex-shrink:1}
+
+/* @ / 命令补全：长文件名、长目录、长过滤词省略，不再横向滚 */
+.pitem{min-width:0}
+.pitem .pi-name{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#popup-list{overflow-x:hidden}
+#popup-head > span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pgroup{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 输入栏 chip：长型号 / 长项目名省略；项目名单独包了一层 */
+#hint-row #model-chip .chip{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#hint-row #proj-chip .pj-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 文件工具条：窄窗格里搜索框先保底，其余控件折行 */
+.fs-tools{flex-wrap:wrap}
+.fs-tools .fs-sb{flex:1 1 160px}
+
+/* 失败提示条：长 URL / 路径 / 哈希不撑出消息区 */
+.note{overflow-wrap:anywhere;word-break:break-word}
+
+/* 用量图表 tooltip：靠边时按实际宽度夹住 */
+.tip{max-width:calc(100vw - 24px);white-space:normal;text-align:center}
+
+/* RTL：命令参数 / 路径按 LTR 排；标题用 start */
+.ts-head,.bubble .hook-ctx{text-align:start}
+html[dir="rtl"] :is(.tool-arg,.perm-path,.missing-img){direction:ltr;text-align:left;unicode-bidi:isolate}
