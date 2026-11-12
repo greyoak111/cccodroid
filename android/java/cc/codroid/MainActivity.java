@@ -1499,7 +1499,7 @@ public class MainActivity extends Activity {
         title.setText("cccodroid");
         title.setTextSize(24);
         title.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
-        title.setPadding(dp(12), 0, 0, 0);
+        title.setPaddingRelative(dp(12), 0, 0, 0);
         title.setTextColor(BrowserPane.pal(this, dark, "fg"));
         head.addView(title);
         col.addView(head);
@@ -1555,9 +1555,11 @@ public class MainActivity extends Activity {
         chooserFoot.setPadding(0, dp(8), 0, 0);
         chooserFoot.setVisibility(View.GONE);
         col.addView(chooserFoot, new LinearLayout.LayoutParams(-1, -2));
+        // 两个按钮竖排、各自占满一行：长译文（德俄语等）横排时会把「我卡住了」挤出屏幕
         LinearLayout acts = new LinearLayout(this);
-        acts.addView(retry, new LinearLayout.LayoutParams(-2, -2));
-        acts.addView(stuck, new LinearLayout.LayoutParams(-2, -2));
+        acts.setOrientation(LinearLayout.VERTICAL);
+        acts.addView(retry, new LinearLayout.LayoutParams(-1, -2));
+        acts.addView(stuck, new LinearLayout.LayoutParams(-1, -2));
         col.addView(acts, new LinearLayout.LayoutParams(-1, -2));
         root.addView(col);
         splash = null; splashMark = null; splashStat = null;
@@ -1572,9 +1574,11 @@ public class MainActivity extends Activity {
             splashStat.setTextColor(BrowserPane.pal(this, dark, "hint"));
             splashStat.setTextSize(12.5f);
             splashStat.setGravity(android.view.Gravity.CENTER);
-            splashStat.setSingleLine(true);
+            splashStat.setSingleLine(false);
+            splashStat.setMaxLines(2);       // 下载地址 / 长路径给两行，超出再省略
             splashStat.setEllipsize(android.text.TextUtils.TruncateAt.END);
             splashStat.setPadding(dp(24), dp(22), dp(24), 0);
+            splashStat.setOnClickListener(v -> expandSetup());   // 点一下直接看完整安装页和日志
             sp.addView(splashStat, new LinearLayout.LayoutParams(-1, -2));
             splash = sp;
             root.addView(sp, new FrameLayout.LayoutParams(-1, -1));
@@ -1929,10 +1933,10 @@ public class MainActivity extends Activity {
             // 旧版种在 127.0.0.1 上的那份清掉：网关已经不认了，留着只会被别的端口收走
             cm.setCookie("http://127.0.0.1:" + Env.PORT, "cc_t_" + Env.PORT + "=; Path=/; Max-Age=0");
             cm.flush();
-            if (squatShown) { squatShown = false; loadUi(); }
+            if (squatShown || waitingShown) { squatShown = false; waitingShown = false; loadUi(); }
         });
-        // 守护线程发现端口被占：正开着的界面马上换成说明页；占用解除、网关起来后（onBoot）再接回界面
-        GatewayService.onSquat = mySquat = () -> ui.post(() -> { if (web != null && !squatShown && isOwnGateway(web.getUrl())) showSquatted(); });
+        // 守护线程核过 /proc、确认端口被别的应用占着：正开着的界面（或等待页）换成说明页；网关起来后（onBoot）再接回界面
+        GatewayService.onSquat = mySquat = () -> ui.post(() -> { if (web != null && !squatShown && (waitingShown || isOwnGateway(web.getUrl()))) showSquatted(); });
         loadUi();
         // 平时启动沿用正在扫的那个标识（不重播进场）；从安装页过来就新起一个居中的
         boolean dark = uiDark();
@@ -2036,15 +2040,17 @@ public class MainActivity extends Activity {
             ui.post(() -> { recovering = false; if (web != null && bounceStage == 0 && !isFinishing()) loadUi(); });
         }, "recover").start();
     }
-    private android.webkit.WebResourceResponse waitingPage() {
+    private String waitingHtml() {
         boolean night = systemNight();
-        String html = "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><body style=\"margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font:15px sans-serif;"
+        return "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><body style=\"margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font:15px sans-serif;"
             + (night ? "background:#1b1b1b;color:#bbb" : "background:#fafafa;color:#555") + "\"><div style=\"text-align:center\">" + android.text.TextUtils.htmlEncode(Tr.t("等待网关…")) + rescueLinks(night ? "#8fb4ff" : "#2a5db0") + "</div></body>";
+    }
+    private android.webkit.WebResourceResponse waitingPage() {
         java.util.Map<String, String> h = new java.util.HashMap<>();
         h.put("Cache-Control", "no-store");
         h.put("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");   // 页面只有一行字：不许脚本、不许任何子请求
         h.put("X-Content-Type-Options", "nosniff");
-        return new android.webkit.WebResourceResponse("text/html", "utf-8", 200, "OK", h, new java.io.ByteArrayInputStream(html.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        return new android.webkit.WebResourceResponse("text/html", "utf-8", 200, "OK", h, new java.io.ByteArrayInputStream(waitingHtml().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     }
     private int bounceStage = 0;   // 0 没在脱困 · 1 正跳出去 · 2 正跳回来
     private void bounce() {
@@ -2068,10 +2074,24 @@ public class MainActivity extends Activity {
             boolean ok = Env.proveGateway() || !Env.portBusy();
             ui.post(() -> {
                 if (web == null) return;
-                if (ok && GatewayService.gwBlocked == null) { web.loadUrl(Env.uiUrl()); return; }
-                showSquatted();
+                if (ok && GatewayService.gwBlocked == null) { waitingShown = false; web.loadUrl(Env.uiUrl()); return; }
+                // 运行库对不上：原因已经确定，直接给说明页
+                if (GatewayService.gwBlocked != null) { showSquatted(); return; }
+                // 端口上有人答话、但这次启动证明不了它：先停在「等待网关」。
+                // 这里证明不了不等于「被别的应用占着」——新进程刚起来时上一任网关可能还在，
+                // 本次启动的随机数还没交给新网关，谁都证明不了。真被占了由 GatewayService 核 /proc
+                // 后走 onSquat 再报，别提前吓人。
+                showWaiting();
+                recoverGateway(true);
             });
         }, "ui-prove").start();
+    }
+    private boolean waitingShown;
+    /** 网关还没就绪：先给一页中性的等待页，别把「端口被占」这种结论提前下出来 */
+    private void showWaiting() {
+        if (web == null) return;
+        web.loadDataWithBaseURL(null, waitingHtml(), "text/html", "utf-8", null);
+        waitingShown = true;
     }
     /** 端口被别的应用占着：界面换成一页说明，别让已经打开的页面继续把输入发过去（审查 10-29 第六份 中3）。
      *  发行版网关运行库对不上、没起网关（GatewayService.gwBlocked）也用这一页 */
@@ -2085,6 +2105,7 @@ public class MainActivity extends Activity {
             + rescueLinks(dark ? "#8fb4ff" : "#2a5db0") + "</body>";
         web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
         squatShown = true;
+        waitingShown = false;
     }
     private boolean squatShown;
 

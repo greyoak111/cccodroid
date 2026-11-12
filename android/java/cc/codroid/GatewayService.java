@@ -48,6 +48,8 @@ public class GatewayService extends Service {
     private volatile Process proc;
     /** 这次网关起于何时：刚起来的那几秒还答不了身份证明，alive() 据此给宽限 */
     private volatile long spawnedAt;
+    /** 自己拉起的网关连续证明不了自己的起点：0 = 上一次探活过了。只由守护线程读写 */
+    private long aliveUnprovenSince;
     private PowerManager.WakeLock wake;
     private volatile boolean stopping;
     /** 界面被划掉时还有任务在跑：跑完再停（重新打开界面就作罢）。闹钟 / 粘性重建拉起的也用它（0.6.9 审计 13-01） */
@@ -421,6 +423,7 @@ public class GatewayService extends Service {
             if (!cancel) {
                 proc = p;
                 spawnedAt = System.currentTimeMillis();
+                aliveUnprovenSince = 0;
                 gwBlocked = null;
             }
         }
@@ -493,10 +496,16 @@ public class GatewayService extends Service {
         if (p != null && p.isAlive()) {
             // 自己拉起的进程还活着：也要有证明。刚起的几秒网关还没监听好，给一段宽限；
             // 过了宽限还证明不了自己（卡死、端口被别人接了）就结束它重起 —— 以前根本不看证明结果（0.6.9 审计 13-02）
-            if (Env.proveGateway()) return true;
-            if (System.currentTimeMillis() - spawnedAt < PROOF_GRACE_MS) return true;
-            Log.w(TAG, "网关进程还活着但证明不了自己，结束重起");
+            if (Env.proveGateway()) { aliveUnprovenSince = 0; return true; }
+            long now = System.currentTimeMillis();
+            if (now - spawnedAt < PROOF_GRACE_MS) return true;
+            // 一次探活失败不算数：组件安装等重活会把事件循环占住一会儿，探活 1.5 秒超时很正常。
+            // 和 waitGatewayExit 一样要求「连续」证明不了自己，别把正在干活的网关杀掉
+            if (aliveUnprovenSince == 0) { aliveUnprovenSince = now; return true; }
+            if (!unprovenTooLong(now, spawnedAt, aliveUnprovenSince)) return true;
+            Log.w(TAG, "网关进程还活着但连续 " + ((now - aliveUnprovenSince) / 1000) + " 秒证明不了自己，结束重起");
             killGateway();
+            aliveUnprovenSince = 0;
             return false;
         }
         // 没有自己拉起的进程：端口上那个必须证明得了自己。接管不了 —— 启动随机数只在原进程内存里（Env.key），
@@ -565,7 +574,12 @@ public class GatewayService extends Service {
                 killed++;
             } catch (Exception ignored) {}
         }
-        if (killed > 0) { sleep(1000); if (!Env.portBusy()) return false; }
+        // 自己刚杀掉的网关可能要几秒才退干净（要收尾、杀 claude 子树）：多等一会儿，
+        // 别在它还没放手时就下结论说「被别的应用占着」
+        if (killed > 0) {
+            for (int i = 0; i < 30; i++) { sleep(100); if (!Env.portBusy()) return false; }
+        }
+        if (Env.proveGateway(true)) return false;  // 这期间已经有能证明自己的网关了：交给上面接管（不吃 3 秒缓存）
         Log.e(TAG, "端口 " + Env.PORT + " 被别的应用占着（证明不了自己是网关）");
         return true;
     }
