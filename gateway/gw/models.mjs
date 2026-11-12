@@ -93,7 +93,7 @@ export function isLoginMode(p = PROVIDER) { return !!(p && p.login && !keyOf(p))
 // 窗口一开始不知道（官方清单要令牌才能拉），跑过一轮后从 result.modelUsage 学到，见 learnWindow。
 const LOGIN_MODELS = [
   ["opus", "Opus（最新）"], ["sonnet", "Sonnet（最新）"], ["haiku", "Haiku（最新）"], ["fable", "Fable（最新）"],
-  ["claude-opus-5-5", "Opus 5.5"], ["claude-fable-5-1", "Fable 5.1"],
+  ["claude-opus-5-5", "Opus 5.5"], ["claude-fable-5-2", "Fable 5.2"], ["claude-fable-5-1", "Fable 5.1"],
   ["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-sonnet-5", "Sonnet 5"],
   ["claude-haiku-5-5", "Haiku 5.5"], ["claude-haiku-4-5-20251001", "Haiku 4.5"],
 ].map(([id, name]) => ({ id, name, context_window: 0, max_output_tokens: 0, input_modalities: ["text", "image"] }));

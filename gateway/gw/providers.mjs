@@ -32,7 +32,7 @@ export const BUILTIN_PROVIDER = {
 };
 
 // ── 内置厂商目录 ──────────────────────────────────────────────────────
-// 都是各家**官方文档**给 Claude Code 用的 Anthropic 兼容端点（2026-10 逐个核对，并实测路由存在）：
+// 都是各家**官方文档**给 Claude Code 用的 Anthropic 兼容端点（2026-11-13 逐个复核，并实测路由存在）：
 //   DeepSeek  api-docs.deepseek.com/guides/agent_integrations/claude_code
 //   智谱 GLM   docs.bigmodel.cn/cn/guide/develop/claude
 //   通义千问   help.aliyun.com/zh/model-studio/claude-code
@@ -71,7 +71,7 @@ const PRESETS = {
     defaultModel: "deepseek-flash", fastModel: "deepseek-flash",
     keyUrl: "https://platform.deepseek.com/api_keys",
     fallbackModels: [
-      { id: "deepseek-flash", name: "DeepSeek Flash", context_window: 1048576 },
+      { id: "deepseek-flash", name: "DeepSeek V4.1 Flash", context_window: 1048576 },
       { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", context_window: 1048576 },
     ],
   },
@@ -85,7 +85,11 @@ const PRESETS = {
       { id: "intl", label: "国际 · z.ai", labelEn: "International · z.ai", baseUrl: "https://api.z.ai/api/anthropic",
         modelsUrl: "https://api.z.ai/api/paas/v4/models", keyUrl: "https://z.ai/manage-apikey/apikey-list" },
     ],
+    hint: "GLM Coding Plan 目前只能用 OpenAI 协议调 5.3 系列；这里走 Anthropic 接口，Coding Plan 请选 GLM-5.2，按量计费的 Key 可以用 5.3。",
+    hintEn: "GLM Coding Plan can currently use the 5.3 series only over the OpenAI protocol; on this Anthropic endpoint pick GLM-5.2. Pay-as-you-go keys can use 5.3.",
     fallbackModels: [
+      { id: "glm-5.3", name: "GLM-5.3", context_window: 1000000 },
+      { id: "glm-5.3-flash", name: "GLM-5.3 Flash", context_window: 1000000 },
       { id: "glm-5.2", name: "GLM-5.2", context_window: 1000000 },
       { id: "glm-4.7", name: "GLM-4.7" },
     ],
@@ -109,7 +113,7 @@ const PRESETS = {
   },
   kimi: {
     label: "Kimi", group: "third", authStyle: "bearer", modelsAuth: "bearer",
-    defaultModel: "kimi-k3", fastModel: "kimi-k2.7-code-highspeed",
+    defaultModel: "kimi-k3.1-pro", fastModel: "kimi-k3.1-pro-highspeed",
     endpoints: [
       { id: "cn", label: "国内 · moonshot.cn", labelEn: "China · moonshot.cn", baseUrl: "https://api.moonshot.cn/anthropic",
         modelsUrl: "https://api.moonshot.cn/v1/models", keyUrl: "https://platform.kimi.com/console/api-keys" },
@@ -117,9 +121,9 @@ const PRESETS = {
         modelsUrl: "https://api.moonshot.ai/v1/models", keyUrl: "https://platform.moonshot.ai/console/api-keys" },
     ],
     fallbackModels: [
+      { id: "kimi-k3.1-pro", name: "Kimi K3.1 Pro", context_window: 1048576 },
+      { id: "kimi-k3.1-pro-highspeed", name: "Kimi K3.1 Pro Highspeed", context_window: 1048576 },
       { id: "kimi-k3", name: "Kimi K3", context_window: 1048576 },
-      { id: "kimi-k2.7-code-highspeed", name: "Kimi K2.7 Code Highspeed" },
-      { id: "kimi-k2.6", name: "Kimi K2.6", context_window: 262144 },
     ],
   },
   minimax: {
@@ -152,7 +156,9 @@ const PRESETS = {
       { id: "doubao-seed-2.1-lite", name: "Doubao Seed 2.1 Lite" },
       { id: "doubao-seed-evolving", name: "Doubao Seed Evolving" },
       { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+      { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", context_window: 1048576 },
       { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+      { id: "kimi-k3.1-pro", name: "Kimi K3.1 Pro", context_window: 1048576 },
       { id: "kimi-k2.8-preview", name: "Kimi K2.8 Preview" },
     ],
   },
@@ -199,21 +205,25 @@ const PRESETS = {
     extraEnv: { API_TIMEOUT_MS: "600000" },
     endpoints: [
       { id: "payg", label: "按量计费", labelEn: "Pay as you go", baseUrl: "https://qianfan.baidubce.com/anthropic",
-        modelsUrl: "https://qianfan.baidubce.com/v2/models", defaultModel: "deepseek-v3.2", fastModel: "deepseek-v3.2" },
+        modelsUrl: "https://qianfan.baidubce.com/v2/models", defaultModel: "deepseek-v4-pro", fastModel: "deepseek-v4.1-flash" },
       { id: "tokenplan", label: "Token Plan 个人版", labelEn: "Token Plan (personal)", baseUrl: "https://qianfan.baidubce.com/anthropic/tokenplan/personal",
         defaultModel: "qianfan-code-latest", fastModel: "qianfan-code-latest" },
     ],
     hint: "千帆上的对话模型都能用。Token Plan 填 qianfan-code-latest，实际用哪个模型在千帆控制台里选；套餐 Key 和按量 Key 不通用。",
     hintEn: "Any chat model on Qianfan works. For Token Plan use qianfan-code-latest and pick the actual model in the Qianfan console; plan keys and pay-as-you-go keys aren't interchangeable.",
     fallbackModels: [
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", context_window: 1048576 },
+      { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", context_window: 1048576 },
+      { id: "ernie-5.5-flash-preview", name: "ERNIE 5.5 Flash Preview", context_window: 1048576 },
+      { id: "glm-5.3", name: "GLM-5.3", context_window: 1000000 },
+      { id: "glm-5.3-flash", name: "GLM-5.3 Flash", context_window: 1000000 },
       { id: "deepseek-v3.2", name: "DeepSeek V3.2" },
-      { id: "kimi-k2.5", name: "Kimi K2.5" },
       { id: "qianfan-code-latest", name: "Qianfan Code Latest (model picked in console)" },
     ],
   },
   hunyuan: {
     label: "腾讯混元", labelEn: "Tencent Hunyuan", group: "third", authStyle: "bearer", modelsAuth: "bearer",
-    defaultModel: "hy3-preview", fastModel: "hy3-preview",
+    defaultModel: "hy4", fastModel: "hy3",
     keyUrl: "https://console.cloud.tencent.com/tokenhub",
     extraEnv: { ENABLE_TOOL_SEARCH: "false" },
     endpoints: [
@@ -225,17 +235,20 @@ const PRESETS = {
     hint: "走腾讯云 TokenHub 按量计费（混元原平台已迁到这里）。TokenHub 上的其他模型也能在模型列表里选。",
     hintEn: "Uses Tencent Cloud TokenHub pay-as-you-go (Hunyuan moved here from its old platform). Other TokenHub models show up in the model list too.",
     fallbackModels: [
-      { id: "hy3-preview", name: "Hy3 Preview" },
+      { id: "hy4", name: "Hy4", context_window: 1048576 },
+      { id: "hy4-preview", name: "Hy4 Preview", context_window: 1048576 },
+      { id: "hy3", name: "Hy3", context_window: 262144 },
     ],
   },
   longcat: {
     label: "美团 LongCat", labelEn: "Meituan LongCat", group: "third", authStyle: "bearer", modelsAuth: "bearer",
     baseUrl: "https://api.longcat.chat/anthropic", modelsUrl: "https://api.longcat.chat/openai/v1/models",
     keyUrl: "https://longcat.chat/platform/api_keys",
-    defaultModel: "LongCat-2.5-Preview", fastModel: "LongCat-2.5-Preview",
+    defaultModel: "LongCat-2.5", fastModel: "LongCat-2.5",
     extraEnv: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: "131072" },
     fallbackModels: [
-      { id: "LongCat-2.5-Preview", name: "LongCat 2.5 Preview" },
+      { id: "LongCat-2.5", name: "LongCat 2.5", context_window: 1048576 },
+      { id: "LongCat-2.5-Preview", name: "LongCat 2.5 Preview", context_window: 1048576 },
       { id: "LongCat-2.0", name: "LongCat 2.0" },
     ],
   },
@@ -255,12 +268,13 @@ const PRESETS = {
     label: "Meta Muse", group: "third", authStyle: "bearer", modelsAuth: "bearer",
     baseUrl: "https://api.meta.ai", modelsUrl: "https://api.meta.ai/v1/models",
     keyUrl: "https://dev.meta.ai/platform",
-    defaultModel: "muse-wonder-1.0", fastModel: "muse-spark-1.3",
+    defaultModel: "muse-wonder-1.0", fastModel: "muse-ember-1.0",
     extraEnv: { ENABLE_TOOL_SEARCH: "true" },
     hint: "Meta Model API 还在公开预览，能不能用看所在国家和地区（中国大陆用不了）。",
     hintEn: "Meta Model API is in public preview; availability depends on your country or region.",
     fallbackModels: [
       { id: "muse-wonder-1.0", name: "Muse Wonder 1.0", context_window: 1048576 },
+      { id: "muse-ember-1.0", name: "Muse Ember 1.0" },
       { id: "muse-spark-1.3", name: "Muse Spark 1.3", context_window: 1048576 },
     ],
   },
