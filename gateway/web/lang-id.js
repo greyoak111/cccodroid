@@ -3163,4 +3163,5 @@ window.I18N_DICT["id"] = {
   "上一轮已答完，接着的这一轮没有等到结果（已中断）": "Giliran sebelumnya selesai, tetapi giliran berikutnya tidak mendapat hasil (terputus)",
   "目录不存在：{dir}，已改用 {cwd}": "Direktori tidak ada: {dir}; memakai {cwd} sebagai gantinya",
   "接口报错，不是正常回复：": "API mengembalikan error, bukan balasan normal:",
+  "压缩线最大 1M，已按 1M 存": "Batas maksimum garis pemadatan adalah 1M; disimpan sebagai 1M",
 };

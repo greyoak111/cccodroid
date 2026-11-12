@@ -518,6 +518,12 @@
       if (v[k] && $(v[k][0])) $(v[k][0]).value = v[k][1];
       if (c[k] && $(c[k][0])) $(c[k][0]).checked = c[k][1];
     }
+    // 压缩线两个入口（设置页输入框 / 窗口未知时的数字框）都回到真正存着的值，滑块跟着重画
+    if (patch && "autoCompactWindow" in patch) {
+      const n = S.autoCompactWindow ? String(S.autoCompactWindow) : "";
+      for (const id of ["set-autocompact", "ac-num"]) { const el = $(id); if (el) el.value = n; }
+      acPaint(acWin, S.autoCompactWindow || 0, acDef);
+    }
     if ("model" in patch || "effort" in patch) loadModels();
   }
 
@@ -649,7 +655,10 @@
       // 更小的它按 100k 处理：界面别让人设成 20k，免得上下文条按 20k 显示满格（195-O.2）
       n = AC_MIN;
       toast(t("压缩线最小 100k，已按 100k 存"));
-    } else if (n > AC_MAX) n = AC_MAX;
+    } else if (n > AC_MAX) {
+      n = AC_MAX;
+      toast(t("压缩线最大 1M，已按 1M 存"));
+    }
     el.value = n == null ? "" : String(n);
     saveSettings({ autoCompactWindow: n }).then(() => { acForce = true; return loadModels(); });
   }

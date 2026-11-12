@@ -67,6 +67,8 @@ public class GatewayService extends Service {
     static final long PROOF_GRACE_MS = 20000;
     /** 过了宽限还连续这么久证明不了自己：结束重起（BUG-A01） */
     static final long UNPROVEN_KILL_MS = 15000;
+    /** squatted() 的三种结论：端口空出来 / 端口上已经是能证明自己的网关 / 被别的应用占着 */
+    static final int SQUAT_NO = 0, SQUAT_ADOPTED = 1, SQUAT_HIJACKED = 2;
 
     /** 服务这会儿在不在（常驻通知里点了停止之后为 false） */
     static boolean serviceUp() { return self != null; }
@@ -264,7 +266,9 @@ public class GatewayService extends Service {
             // 走到这里的是接手的网关（不是本服务拉起的，拉起的在下面 waitFor 里，一退出就作废核身份缓存）：
             // 2 秒看一次，缩短它挂掉到发现端口换了人之间的空档（审查 10-30 第九份 中5）
             if (alive()) { update(Tr.t("运行中 · 127.0.0.1:") + Env.PORT); sleep(2000); continue; }
-            if (squatted()) {
+            int sq = squatted();
+            if (sq == SQUAT_ADOPTED) { sleep(500); continue; }   // 这期间已经有真网关了：回循环顶部让 alive() 接管，别再拉一个撞端口
+            if (sq == SQUAT_HIJACKED) {
                 update(Tr.f("端口 {0} 被别的应用占着，网关起不来。重启手机，或卸载最近装的可疑应用", Env.PORT));
                 Env.resetBoot();
                 Runnable cb = onSquat;
@@ -469,6 +473,19 @@ public class GatewayService extends Service {
         return unprovenSince > 0 && now - spawnedAt >= PROOF_GRACE_MS && now - unprovenSince >= UNPROVEN_KILL_MS;
     }
 
+    /** aliveDecision 的三种结论：继续观察 / 记下失联起点 / 结束重起 */
+    static final int ALIVE_KEEP = 0, ALIVE_ARM = 1, ALIVE_KILL = 2;
+
+    /** 自己拉起的网关这一次探活失败后的处置（纯逻辑，waitGatewayExit / alive 共用）：
+     *  宽限内、或连续失联还不够久 → 继续观察；刚失联 → 记起点；连续够久 → 结束重起。
+     *  进程已经死了不进这里（那是 squatted() 的事）。 */
+    static int aliveDecision(boolean proved, long now, long spawnedAt, long unprovenSince) {
+        if (proved) return ALIVE_KEEP;
+        if (now - spawnedAt < PROOF_GRACE_MS) return ALIVE_KEEP;
+        if (unprovenSince == 0) return ALIVE_ARM;
+        return unprovenTooLong(now, spawnedAt, unprovenSince) ? ALIVE_KILL : ALIVE_KEEP;
+    }
+
     /** 等这一代网关退出：有界等一会儿就核一次身份，不再无界 waitFor（BUG-A01）。
      *  进程还活着但证明不了自己时，先给启动宽限，再要求连续失联一段时间才结束 —— 偶发一次探活失败不杀进程 */
     private int waitGatewayExit() throws InterruptedException {
@@ -479,13 +496,12 @@ public class GatewayService extends Service {
             if (stopping || paused) { killGateway(); continue; }   // 停止 / 停住：销毁后下一拍就退出了
             long now = System.currentTimeMillis();
             if (Env.proveGateway()) { unprovenSince = 0; continue; }
-            if (now - spawnedAt < PROOF_GRACE_MS) continue;        // 刚起的网关还没监听好
-            if (unprovenSince == 0) { unprovenSince = now; continue; }
-            if (unprovenTooLong(now, spawnedAt, unprovenSince)) {
-                Log.w(TAG, "网关进程还活着但连续 " + ((now - unprovenSince) / 1000) + " 秒证明不了自己，结束重起");
-                killGateway();
-                return p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS) ? p.exitValue() : -1;
-            }
+            int d = aliveDecision(false, now, spawnedAt, unprovenSince);
+            if (d == ALIVE_KEEP) continue;                         // 刚起的网关还没监听好 / 连续失联还不够久
+            if (d == ALIVE_ARM) { unprovenSince = now; continue; }
+            Log.w(TAG, "网关进程还活着但连续 " + ((now - unprovenSince) / 1000) + " 秒证明不了自己，结束重起");
+            killGateway();
+            return p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS) ? p.exitValue() : -1;
         }
     }
 
@@ -498,11 +514,11 @@ public class GatewayService extends Service {
             // 过了宽限还证明不了自己（卡死、端口被别人接了）就结束它重起 —— 以前根本不看证明结果（0.6.9 审计 13-02）
             if (Env.proveGateway()) { aliveUnprovenSince = 0; return true; }
             long now = System.currentTimeMillis();
-            if (now - spawnedAt < PROOF_GRACE_MS) return true;
             // 一次探活失败不算数：组件安装等重活会把事件循环占住一会儿，探活 1.5 秒超时很正常。
             // 和 waitGatewayExit 一样要求「连续」证明不了自己，别把正在干活的网关杀掉
-            if (aliveUnprovenSince == 0) { aliveUnprovenSince = now; return true; }
-            if (!unprovenTooLong(now, spawnedAt, aliveUnprovenSince)) return true;
+            int d = aliveDecision(false, now, spawnedAt, aliveUnprovenSince);
+            if (d == ALIVE_KEEP) return true;
+            if (d == ALIVE_ARM) { aliveUnprovenSince = now; return true; }
             Log.w(TAG, "网关进程还活着但连续 " + ((now - aliveUnprovenSince) / 1000) + " 秒证明不了自己，结束重起");
             killGateway();
             aliveUnprovenSince = 0;
@@ -528,12 +544,13 @@ public class GatewayService extends Service {
         return false;
     }
 
-    /** 端口有人占着、又证明不了自己。本应用自己的残留网关（旧版没有 /__proof，或令牌换过）就请它退出、返回 false 照常起；
-     *  杀不着的是别的应用 —— 不起网关，也不往那儿交任何东西。
+    /** 端口有人占着、又证明不了自己。本应用自己的残留网关（旧版没有 /__proof，或令牌换过）就请它退出，按 SQUAT_NO 照常起；
+     *  杀不着的是别的应用 —— 不起网关，也不往那儿交任何东西（SQUAT_HIJACKED）。
+     *  清理期间要是有能证明自己的网关起来了（SQUAT_ADOPTED），交给上面的 alive() 接管，不再拉一个新的撞端口。
      *  前提是 Env.portBusy() 把 127.0.0.1 和 127.0.0.2 都算上（199-1-03 的 Env 半，j1 车道改）；
      *  只探 127.0.0.2 的话，127.0.0.1 被占时这里看不出来，网关会起不来又反复重启 */
-    private boolean squatted() {
-        if (!Env.portBusy()) return false;
+    private int squatted() {
+        if (!Env.portBusy()) return SQUAT_NO;
         int me = android.os.Process.myUid(), killed = 0;
         File[] ps = new File("/proc").listFiles();
         java.util.List<Integer> gw = new java.util.ArrayList<>();
@@ -577,11 +594,11 @@ public class GatewayService extends Service {
         // 自己刚杀掉的网关可能要几秒才退干净（要收尾、杀 claude 子树）：多等一会儿，
         // 别在它还没放手时就下结论说「被别的应用占着」
         if (killed > 0) {
-            for (int i = 0; i < 30; i++) { sleep(100); if (!Env.portBusy()) return false; }
+            for (int i = 0; i < 30; i++) { sleep(100); if (!Env.portBusy()) return SQUAT_NO; }
         }
-        if (Env.proveGateway(true)) return false;  // 这期间已经有能证明自己的网关了：交给上面接管（不吃 3 秒缓存）
+        if (Env.proveGateway(true)) return SQUAT_ADOPTED;  // 这期间已经有能证明自己的网关了：交给上面接管（不吃 3 秒缓存）
         Log.e(TAG, "端口 " + Env.PORT + " 被别的应用占着（证明不了自己是网关）");
-        return true;
+        return SQUAT_HIJACKED;
     }
 
     private String last;

@@ -3160,3 +3160,4 @@
 3160	Giliran sebelumnya selesai, tetapi giliran berikutnya tidak mendapat hasil (terputus)
 3161	Direktori tidak ada: {dir}; memakai {cwd} sebagai gantinya
 3162	API mengembalikan error, bukan balasan normal:
+3163	Batas maksimum garis pemadatan adalah 1M; disimpan sebagai 1M

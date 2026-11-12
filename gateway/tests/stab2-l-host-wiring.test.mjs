@@ -15,7 +15,7 @@ test("BUG-A01 守护线程不再无界 proc.waitFor，改成有界等待 + 身�
   assert.ok(!gw.includes("int rc = proc.waitFor();"), "supervise 里还留着无界 proc.waitFor");
   const body = gw.slice(gw.indexOf("private int waitGatewayExit()"), gw.indexOf("private boolean alive()"));
   assert.ok(body.includes("Env.proveGateway()"), "有界等待期间没核身份");
-  assert.ok(body.includes("unprovenTooLong("), "没按连续失联时长决定结束重起");
+  assert.ok(body.includes("aliveDecision("), "没按连续失联时长决定结束重起");
   assert.ok(body.includes("killGateway()"), "失联够久没结束进程");
 });
 

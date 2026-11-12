@@ -2075,12 +2075,13 @@ public class MainActivity extends Activity {
     private void loadUi() {
         new Thread(() -> {
             Env.resetBoot();       // 这一次核身份一定回调 onBoot，种好 Cookie 再加载（onBoot 的 post 排在下面 loadUrl 前面）
-            boolean ok = Env.proveGateway() || !Env.portBusy();
+            boolean proved = Env.proveGateway();
+            int decision = uiPageDecision(proved, !proved && Env.portBusy(), GatewayService.gwBlocked != null);
             ui.post(() -> {
                 if (web == null) return;
-                if (ok && GatewayService.gwBlocked == null) { waitingShown = false; web.loadUrl(Env.uiUrl()); return; }
+                if (decision == UI_LOAD) { waitingShown = false; web.loadUrl(Env.uiUrl()); return; }
                 // 运行库对不上：原因已经确定，直接给说明页
-                if (GatewayService.gwBlocked != null) { showSquatted(); return; }
+                if (decision == UI_SQUAT) { showSquatted(); return; }
                 // 端口上有人答话、但这次启动证明不了它：先停在「等待网关」。
                 // 这里证明不了不等于「被别的应用占着」——新进程刚起来时上一任网关可能还在，
                 // 本次启动的随机数还没交给新网关，谁都证明不了。真被占了由 GatewayService 核 /proc
@@ -2089,6 +2090,13 @@ public class MainActivity extends Activity {
                 recoverGateway(true);
             });
         }, "ui-prove").start();
+    }
+    /** 界面该显示哪一页（纯逻辑，便于回归）：已证明或端口空 → 界面；运行库对不上 → 说明页；端口忙但证明不了 → 等待页 */
+    static final int UI_LOAD = 0, UI_WAIT = 1, UI_SQUAT = 2;
+    static int uiPageDecision(boolean proved, boolean portBusy, boolean gwBlocked) {
+        if (gwBlocked) return UI_SQUAT;
+        if (proved || !portBusy) return UI_LOAD;
+        return UI_WAIT;
     }
     private volatile boolean waitingShown;   // WebView 的请求线程也会置位（取不到主页面 / 真页面到了）
     /** 网关还没就绪：先给一页中性的等待页，别把「端口被占」这种结论提前下出来 */
@@ -2160,7 +2168,7 @@ public class MainActivity extends Activity {
                 resetting = false;
                 if (isFinishing()) return;
                 new android.app.AlertDialog.Builder(this).setMessage(m).setPositiveButton(Tr.t("好"), null).show();
-                if (booted && web != null) { squatShown = false; loadUi(); }
+                if (booted && web != null) { squatShown = false; waitingShown = false; loadUi(); }
             });
         }, "factory-reset").start();
     }

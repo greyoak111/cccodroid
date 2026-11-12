@@ -655,7 +655,7 @@ a.weblink{overflow-wrap:anywhere}
 .sess-grp.folded .chev{transform:rotate(-90deg)}
 .item .it-snip{font-size:11.5px;color:var(--fg2);line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all}
 .item .it-snip mark,.item .it-title mark{background:var(--active-bg);color:var(--accent);border-radius:3px;padding:0 1px}
-.item .it-title .pin-ic{color:var(--accent);font-size:11px;margin-right:3px}
+.item .it-title .pin-ic{color:var(--accent);font-size:11px;margin-inline-end:3px}
 
 /* 能力 chips */
 .chips{display:flex;flex-wrap:wrap;gap:5px}
@@ -3620,8 +3620,10 @@ html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270
 .perm-acts code{white-space:normal;overflow-wrap:anywhere}
 #perm-bar .pb-txt.wrap{overflow-wrap:anywhere;word-break:break-word}
 
-/* 定时任务行：长译文下把状态胶囊 / 开关折到下一行，别推出屏幕 */
+/* 定时任务行：长译文下把状态胶囊 / 开关折到下一行，别推出屏幕。
+   标题区给个下限：控件放不下时整行折，而不是先把标题压成一条省略号 */
 #pages .panel > .row.pj-row{flex-wrap:wrap;row-gap:6px}
+#pages .panel > .row.pj-row[data-task] > .grow{flex:1 1 12em;min-width:12em}
 
 /* 设置：窄屏分段 / 按钮行整行落下；宽屏放不下时分段按钮折行；长单词可断 */
 #tab-settings.set-one .srow:has(.sc .seg){flex-direction:column;align-items:stretch;gap:8px}

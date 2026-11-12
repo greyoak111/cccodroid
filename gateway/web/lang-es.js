@@ -3163,4 +3163,5 @@ window.I18N_DICT["es"] = {
   "上一轮已答完，接着的这一轮没有等到结果（已中断）": "El turno anterior terminó, pero el siguiente no recibió resultado (interrumpido)",
   "目录不存在：{dir}，已改用 {cwd}": "No existe el directorio: {dir}; se usa {cwd} en su lugar",
   "接口报错，不是正常回复：": "La API devolvió un error, no una respuesta normal:",
+  "压缩线最大 1M，已按 1M 存": "El límite de compactación es 1 M como máximo; se guardó como 1 M",
 };

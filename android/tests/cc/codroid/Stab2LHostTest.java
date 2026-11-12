@@ -44,6 +44,34 @@ public class Stab2LHostTest {
         eq("A01 没有失联记录（身份刚证明过）不杀",
             GatewayService.unprovenTooLong(t0 + 10_000_000, t0, 0), false);
 
+        // ── 独立审查 P2-4：alive() 的连续失联判定 ──
+        eq("ALIVE 已证明：继续观察",
+            GatewayService.aliveDecision(true, t0 + 10_000_000, t0, 0) == GatewayService.ALIVE_KEEP, true);
+        eq("ALIVE 宽限内失联：继续观察",
+            GatewayService.aliveDecision(false, t0 + GatewayService.PROOF_GRACE_MS - 1, t0, t0 + 1000)
+                == GatewayService.ALIVE_KEEP, true);
+        eq("ALIVE 首次失联：记起点",
+            GatewayService.aliveDecision(false, t0 + GatewayService.PROOF_GRACE_MS + 1000, t0, 0)
+                == GatewayService.ALIVE_ARM, true);
+        eq("ALIVE 连续失联还不够久：继续观察",
+            GatewayService.aliveDecision(false,
+                t0 + GatewayService.PROOF_GRACE_MS + GatewayService.UNPROVEN_KILL_MS - 1,
+                t0, t0 + GatewayService.PROOF_GRACE_MS) == GatewayService.ALIVE_KEEP, true);
+        eq("ALIVE 连续失联够久：结束重起",
+            GatewayService.aliveDecision(false,
+                t0 + GatewayService.PROOF_GRACE_MS + GatewayService.UNPROVEN_KILL_MS,
+                t0, t0 + GatewayService.PROOF_GRACE_MS) == GatewayService.ALIVE_KILL, true);
+
+        // ── 独立审查 P2-4：界面页态决策 ──
+        eq("UI 已证明：界面", MainActivity.uiPageDecision(true, false, false) == MainActivity.UI_LOAD, true);
+        eq("UI 端口空：界面", MainActivity.uiPageDecision(false, false, false) == MainActivity.UI_LOAD, true);
+        eq("UI 端口忙但证明不了：等待页",
+            MainActivity.uiPageDecision(false, true, false) == MainActivity.UI_WAIT, true);
+        eq("UI 运行库对不上：说明页",
+            MainActivity.uiPageDecision(false, true, true) == MainActivity.UI_SQUAT, true);
+        eq("UI 运行库对不上优先于证明：说明页",
+            MainActivity.uiPageDecision(true, false, true) == MainActivity.UI_SQUAT, true);
+
         // ── BUG-A05：网关启动号变了才回收旧轮次文本 ──
         eq("A05 同一网关不回收", Notify.gatewayChanged("boot1", "boot1"), false);
         eq("A05 网关换代回收", Notify.gatewayChanged("boot2", "boot1"), true);

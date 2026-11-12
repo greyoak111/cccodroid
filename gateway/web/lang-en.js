@@ -3200,5 +3200,6 @@ window.I18N_DICT.en = {
   "上游没发结束标记就断开了，回答已按说完处理；这条是否完整无法确认，如果没说完，发一句「继续」": "The upstream disconnected without an end marker, so the reply was treated as finished. Whether it is complete can't be confirmed; if it was cut off, send “continue”",
   "上一轮已答完，接着的这一轮没有等到结果（已中断）": "The previous turn finished, but the turn after it got no result (interrupted)",
   "目录不存在：{dir}，已改用 {cwd}": "Directory not found: {dir}; using {cwd} instead",
-  "接口报错，不是正常回复：": "The API returned an error, not a normal reply:"
+  "接口报错，不是正常回复：": "The API returned an error, not a normal reply:",
+  "压缩线最大 1M，已按 1M 存": "Compact line max is 1M; saved as 1M"
 };

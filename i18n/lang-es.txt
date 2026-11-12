@@ -3160,3 +3160,4 @@
 3160	El turno anterior terminó, pero el siguiente no recibió resultado (interrumpido)
 3161	No existe el directorio: {dir}; se usa {cwd} en su lugar
 3162	La API devolvió un error, no una respuesta normal:
+3163	El límite de compactación es 1 M como máximo; se guardó como 1 M

@@ -3160,3 +3160,4 @@
 3160	Le tour précédent est terminé, mais le tour suivant n'a reçu aucun résultat (interrompu)
 3161	Dossier introuvable : {dir} ; {cwd} est utilisé à la place
 3162	L'API a renvoyé une erreur, pas une réponse normale :
+3163	La limite de compactage est de 1 M maximum ; enregistrée à 1 M
