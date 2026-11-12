@@ -75,7 +75,7 @@ test("#193：streamfix 下游不读 → 停读上游，不把整条流吸进响�
     w(ev({ type: "message_start", message: { id: "m", usage: { input_tokens: 1, output_tokens: 0 } } }));
     w(ev({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }));
     const piece = ev({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "中".repeat(2700) } });
-    for (let i = 0; i < 6000; i++) {
+    for (let i = 0; i < 12000; i++) {
       if (res.destroyed) return;
       if (!w(piece)) await new Promise((r) => { res.once("drain", r); res.once("close", r); });
     }
@@ -88,8 +88,10 @@ test("#193：streamfix 下游不读 → 停读上游，不把整条流吸进响�
   await new Promise((r) => setTimeout(r, 1500));
   const sent = total.sent;
   sock.destroy();
-  // 一条流约 49MB；修之前下游不读也整条吸完（本机 49MB 全推出去），修之后只有两段回环的内核缓冲那么多（本机约 11MB）
-  assert.ok(sent < 24 << 20, `下游不读，上游却推出去了 ${sent} 字节`);
+  // 一条流约 99MB；修之前下游不读也整条吸完，修之后只堆到两段回环的内核缓冲那么多。
+  // 这个上限跟设备有关：开发机约 11MB，这台 Android 的回环缓冲约 28MB，所以留到 64MB，
+  // 仍明显小于整条流——整条吸完的老问题照样会在这里失败。
+  assert.ok(sent < 64 << 20, `下游不读，上游却推出去了 ${sent} 字节`);
 });
 
 test("T.3：run.log 里的工具入参截短，实时推送照旧全文", async () => {
