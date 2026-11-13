@@ -25,6 +25,9 @@ import { isInjected } from "./integrity.mjs";
 
 const SUM_HEAD = 1000, SUM_TAIL = 1400, OPEN_MAX = 1600, BATCH_CHARS = 48000, BATCH_N = 24;
 const zh = () => /^zh/i.test(LAST_LANG);
+// 给模型看的语言名：以前非英文界面只写「the interface language (es)」，西语 / 日语界面容易被写成英文
+const LANG_NAME = { en: "English", es: "Spanish", fr: "French", ru: "Russian", ar: "Arabic", ja: "Japanese", ko: "Korean", id: "Indonesian" };
+const langName = (l) => (/^zh-(Hant|TW|HK)/i.test(l) ? "Traditional Chinese" : LANG_NAME[String(l).slice(0, 2)] || "English");
 
 // ── 素材 ──
 
@@ -131,7 +134,7 @@ export function systemPrompt() {
 题名规则：说清这一章干了什么事，用动宾结构（如「补齐 9 家厂商官方接口」「排查终端密钥 401」）；不超过 20 个字；用中文，专有名词、版本号、命令名照原样；不写问候语、日期、「对话」「会话」「讨论」这类空泛词、emoji，结尾不加标点。相邻两章干的是同一件事也各起各的，体现进展。
 只输出一个 JSON 对象，键是章号，值是题名，例如 {"3":"定稿脉络建档规范","4":"实现脉络页地图"}。不要别的文字。`
     : `You title chapters of sessions in a coding-assistant app. A session ends a chapter each time it is compacted. For each chapter you get the compaction summary written when it ended (it covers all work so far; the "Current Work" part is what this chapter ended on), or, for a chapter still open, the user's prompts in it.
-Title rules: say what was done in this chapter as a verb phrase ("Add official endpoints for 9 vendors", "Debug terminal key 401"); at most 60 characters; write in ${LAST_LANG.startsWith("en") ? "English" : "the interface language (" + LAST_LANG + ")"}; keep product names, versions and commands as-is; no greetings, dates, vague words like "chat"/"session"/"discussion", emoji, or trailing punctuation. Adjacent chapters on the same thing still get distinct titles that show progress.
+Title rules: say what was done in this chapter as a verb phrase ("Add official endpoints for 9 vendors", "Debug terminal key 401"); at most 60 characters; write in ${langName(LAST_LANG)}; keep product names, versions and commands as-is; no greetings, dates, vague words like "chat"/"session"/"discussion", emoji, or trailing punctuation. Adjacent chapters on the same thing still get distinct titles that show progress.
 Output only one JSON object mapping chapter number to title, e.g. {"3":"Finalize the archive spec","4":"Build the lineage map"}. No other text.`;
 }
 
