@@ -517,7 +517,19 @@ ${p && p.plainHttp ? `<div class="tiny warn">${esc(t("这个地址是明文 http
       <div class="prov-state" id="pc-result"></div>
             <div class="tiny">${t("要求对端讲 <b>Anthropic Messages</b> 协议（各家文档里写“Claude Code 接入”的那个地址）。")}
         ${t("地址末尾不要带 <code>/v1</code>，claude 会自己补 <code>/v1/messages</code>。")}
-        <br>${t("建议到厂商控制台设个单日消费上限和余额提醒；怀疑 Key 泄漏了，就在那里作废、换个新的。")}</div>`;
+        <br>${t("建议到厂商控制台设个单日消费上限和余额提醒；怀疑 Key 泄漏了，就在那里作废、换个新的。")}</div>
+      <details class="cc-tpl"><summary>${t("示例模板（不是真实服务，换成服务商给你的）")}</summary>
+        <pre style="white-space:pre-wrap;word-break:break-all;margin:6px 0;font-size:12px;line-height:1.5">Base URL: https://api.example.com/anthropic
+Auth: Authorization: Bearer
+Default model: your-model-id
+Fast model: your-fast-model-id (optional)
+Models URL: https://api.example.com/v1/models (optional)
+Extra models (one per line):
+your-model-id 200k
+your-cheap-model 128k
+Context window: 200k (optional; only if the provider doesn't report one)</pre>
+        <div class="tiny">${t("第三方端口由你自己选择，应用不审核、不背书。对方能看到你的 Key、代码和对话，请只用你信任的服务；不要使用共享或转售的账户。")}</div>
+      </details>`;
     box.onclick = async (e) => {
       const act = e.target.dataset && e.target.dataset.act;
       if (!act) return;

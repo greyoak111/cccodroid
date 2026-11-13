@@ -206,23 +206,19 @@ cccodroid aims to follow [Anthropic's terms for products that run Claude Code](h
 - **The name.** cccodroid stands for "Claude Code CLI On droid", modelled on the long-standing Android C/C++ IDE C4droid. The project does not use the Claude or Anthropic names or logos in its name, icon or package name, and does not claim to be made, endorsed or partnered with by Anthropic. If Anthropic asks, the project will be renamed.
 - **No resale, no middleman.** cccodroid is free and open source, has no server, and does not provide, pay for or resell any Claude usage: you sign in with your own account or bring your own API key, and usage is billed to you directly. The author has a Claude Console account and has accepted Anthropic's Commercial Terms, which the terms above require for products that run Claude Code.
 
-### What this project stands against
+### What this project does not do
 
-cccodroid doesn't do, doesn't support, and won't accept pull requests that add any of the following:
+cccodroid is free and open source, has no server, and does not provide, pay for or resell any Claude usage: you sign in with your own account or bring your own API key, and usage is billed to you directly.
 
-- **Reverse proxies and shared or resold accounts**: splitting one subscription among many people, or repackaging subscription usage as an API for sale.
-- **Jailbreaking**: getting around a model's safety limits to extract harmful content it would otherwise refuse.
-- **Mass-controlled accounts**: using agents to register, farm or run accounts in bulk to flood comment sections while passing as real people.
+- **No shared or resold accounts.** Splitting one subscription among multiple people, or repackaging subscription usage as an API for sale, is not supported; we don't build features for it or accept PRs that add it, and the component market does not accept such components.
+- **No jailbreaking.** Getting around a model's safety limits to extract harmful content it would otherwise refuse is not supported.
+- **No mass-controlled accounts.** Using agents to register, farm or run accounts in bulk to flood comment sections while passing as real people is not supported.
 
-These look like clever shortcuts, but ordinary users pay for them:
-- shared accounts get banned without warning;
-- the proxy in the middle sees every piece of code, key and conversation that passes through;
-- flooding accounts crowd out real discussion;
-- platforms respond by tightening limits and raising prices.
+Third-party endpoints are a separate matter: the app lets you connect to any third-party endpoint that speaks the Anthropic or OpenAI protocol, with an address and key you provide. A reverse proxy is a technology; what we oppose is splitting subscriptions, reselling usage, stealing keys or swapping models — not using a proxy because of payment, region or network constraints.
 
-Over time everyone who uses these services honestly loses out.
+Third-party endpoints carry real risks: the operator can see the code, keys and conversations that pass through; shared or resold accounts can be banned; models can be swapped. Those risks are the user's to bear.
 
-We don't police other people's choices. In this project, though, the line is clear: no features for these uses, and no help troubleshooting them. The component market doesn't accept such components either.
+We don't police other people's choices. But this project does not provide shared/resale features, and does not help troubleshoot those uses.
 
 ## Build
 

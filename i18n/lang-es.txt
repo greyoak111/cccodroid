@@ -3161,3 +3161,5 @@
 3161	No existe el directorio: {dir}; se usa {cwd} en su lugar
 3162	La API devolvió un error, no una respuesta normal:
 3163	El límite de compactación es 1 M como máximo; se guardó como 1 M
+3164	Plantilla de ejemplo (no es un servicio real; sustituye los valores por los de tu proveedor)
+3165	Los endpoints de terceros los eliges tú; la app no los audita ni los respalda. El operador puede ver tu clave, tu código y tus conversaciones, así que usa solo servicios de confianza y no uses cuentas compartidas ni revendidas.

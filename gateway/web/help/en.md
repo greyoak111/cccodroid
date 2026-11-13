@@ -128,6 +128,21 @@ First check which protocol the endpoint speaks; the setup differs:
   - **Several APIs are supported**: each API has its own address, key, models (tick the option to read the model list automatically to pick from suggestions) and context window, and you choose one default model across all of them. Saving shows which services your conversations will be sent to and only takes effect after you confirm. Saved keys are never shown again; leave the key empty when changing other fields to keep it.
   - `https://api.example.com` or `…/v1` is completed to `/v1` automatically; if the provider uses a custom path, enter the full `…/chat/completions` address it gives you. Services that only offer `/v1/responses` won't work.
   - After saving, "Local bridge ready" with "Model inference has not been tested" is normal: tap "Use in a new session" and send a short message. Only a real reply proves it works. Saving does not switch your current conversation.
+**Example template** (not a real service; replace the values with what your provider gives you):
+
+```text
+Base URL: https://api.example.com/anthropic
+Auth: Authorization: Bearer
+Default model: your-model-id
+Fast model: your-fast-model-id (optional)
+Models URL: https://api.example.com/v1/models (optional)
+Extra models (one per line):
+your-model-id 200k
+your-cheap-model 128k
+Context window: 200k (optional; only if the provider doesn't report one)
+```
+
+Third-party endpoints are your choice; the app does not vet or endorse them. The operator can see your key, code and conversations, so use only services you trust, and do not use shared or resold accounts.
 - **Context window**: enter what the provider really supports for this model (`256k`, `1m` or an integer), or leave it empty for 200k. A larger number doesn't make the model bigger; it only makes compaction come too late.
 - **No response from upstream**: custom endpoints wait 90 seconds for response headers and retry 3 times, so a stalled upstream shows retries under the bubble instead of hanging at "Connecting". To change it, set `API_TIMEOUT_MS` in the endpoint's `extraEnv`.
 - 401 usually means the key belongs to another provider or has stray spaces; 429 is rate limiting or quota. If text works but images or tools fail, the model itself probably doesn't support them; narrow it down in a new text-only conversation.

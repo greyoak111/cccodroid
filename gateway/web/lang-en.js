@@ -3201,5 +3201,7 @@ window.I18N_DICT.en = {
   "上一轮已答完，接着的这一轮没有等到结果（已中断）": "The previous turn finished, but the turn after it got no result (interrupted)",
   "目录不存在：{dir}，已改用 {cwd}": "Directory not found: {dir}; using {cwd} instead",
   "接口报错，不是正常回复：": "The API returned an error, not a normal reply:",
-  "压缩线最大 1M，已按 1M 存": "Compact line max is 1M; saved as 1M"
+  "压缩线最大 1M，已按 1M 存": "Compact line max is 1M; saved as 1M",
+  "示例模板（不是真实服务，换成服务商给你的）": "Example template (not a real service; replace it with what your provider gives you)",
+  "第三方端口由你自己选择，应用不审核、不背书。对方能看到你的 Key、代码和对话，请只用你信任的服务；不要使用共享或转售的账户。": "Third-party endpoints are your choice; the app does not vet or endorse them. The operator can see your key, code and conversations, so use only services you trust, and do not use shared or resold accounts."
 };

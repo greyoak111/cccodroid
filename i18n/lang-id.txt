@@ -3161,3 +3161,5 @@
 3161	Direktori tidak ada: {dir}; memakai {cwd} sebagai gantinya
 3162	API mengembalikan error, bukan balasan normal:
 3163	Batas maksimum garis pemadatan adalah 1M; disimpan sebagai 1M
+3164	Contoh templat (bukan layanan nyata; ganti dengan nilai dari penyedia Anda)
+3165	Endpoint pihak ketiga Anda pilih sendiri; aplikasi tidak mengaudit atau mendukungnya. Operator dapat melihat Key, kode, dan percakapan Anda, jadi gunakan hanya layanan yang Anda percaya, dan jangan gunakan akun bersama atau hasil jual ulang.

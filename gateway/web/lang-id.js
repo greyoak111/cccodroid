@@ -3164,4 +3164,6 @@ window.I18N_DICT["id"] = {
   "目录不存在：{dir}，已改用 {cwd}": "Direktori tidak ada: {dir}; memakai {cwd} sebagai gantinya",
   "接口报错，不是正常回复：": "API mengembalikan error, bukan balasan normal:",
   "压缩线最大 1M，已按 1M 存": "Batas maksimum garis pemadatan adalah 1M; disimpan sebagai 1M",
+  "示例模板（不是真实服务，换成服务商给你的）": "Contoh templat (bukan layanan nyata; ganti dengan nilai dari penyedia Anda)",
+  "第三方端口由你自己选择，应用不审核、不背书。对方能看到你的 Key、代码和对话，请只用你信任的服务；不要使用共享或转售的账户。": "Endpoint pihak ketiga Anda pilih sendiri; aplikasi tidak mengaudit atau mendukungnya. Operator dapat melihat Key, kode, dan percakapan Anda, jadi gunakan hanya layanan yang Anda percaya, dan jangan gunakan akun bersama atau hasil jual ulang.",
 };
