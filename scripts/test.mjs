@@ -32,6 +32,19 @@ fs.mkdirSync(path.join(prefix, "bin"), { recursive: true });
 fs.symlinkSync(curl, path.join(prefix, "bin", "curl"));
 installRegistryFlock(prefix, home, tmp); // 只写本轮假 PREFIX；锁协议测试不依赖开发机 util-linux / toybox。
 
+// 网关给子进程的 PATH 只有假 $PREFIX/bin、$CCAPP_BIN、/system/bin（见 gw/claude.mjs 的 claudeEnv）。
+// 真机上 sleep / mkdir / cat / gzip 这些由 /system/bin 的 toybox 兜底；CI 的 Ubuntu 没有 /system/bin，
+// 测试里的假脚本（soffice、假 CLI、自检…）就会报「命令找不到」，失败信息还看着像被测代码坏了。
+// 在假前缀里补一份基础命令，造出与真机前缀相近的环境。tar / sh / git / curl / flock 由各测试自己链接，不放这里。
+const BASIC = ["awk","basename","cat","chmod","cp","cut","date","df","dirname","du","env","find","grep","gzip","head","id","ln","ls","mkdir","mktemp","mv","readlink","realpath","rm","sed","seq","sleep","sort","stat","tail","tee","touch","tr","uname","uniq","wc","xargs","zcat"];
+for (const name of BASIC) {
+  const dst = path.join(prefix, "bin", name);
+  if (fs.existsSync(dst)) continue;
+  const real = spawnSync("sh", ["-c", "command -v " + name], { encoding: "utf8" }).stdout.trim();
+  // dash 对 printf / true 这类内建返回的是名字而不是路径，别拿它建软链
+  if (path.isAbsolute(real)) fs.symlinkSync(real, dst);
+}
+
 // 在 cccodroid 里跑时环境里有二十几个 CCAPP_* 指着真数据：一个不留全删，再只设测试要的（审查 L18）。
 // 网关给 claude 注入的 CLAUDE_CODE_* / ANTHROPIC_*（上下文窗口、接口地址…）也会漏进被测的 claudeEnv，一并去掉（11-01 独立审查）
 const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CCAPP_|CLAUDE_CODE_|ANTHROPIC_)/.test(k)));

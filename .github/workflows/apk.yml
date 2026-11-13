@@ -15,10 +15,17 @@ on:
 permissions:
   contents: read
 
+# 同一个分支连着推：只保留最新一次。PR 的旧运行直接取消，别让排队中的运行一直挂着「进行中」；
+# main 不取消（可能正在用正式钥匙出包）。
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  # 网关测试（gateway/tests/，node scripts/test.mjs）：几秒钟跑完；不过就不打包
+  # 网关测试（gateway/tests/，node scripts/test.mjs）：约 8 分钟跑完；不过就不打包
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020   # v4.4.0
@@ -37,8 +44,11 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-24.04
-    # 只有 main 上的运行进正式钥匙所在的环境；其余（PR、别的分支手动跑）不进，拿不到钥匙
-    environment: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'apk-release' || '' }}
+    timeout-minutes: 60
+    # 只有 main 上的运行进正式钥匙所在的环境；其余（PR、别的分支手动跑）进 apk-ci，拿不到钥匙。
+    # 这里必须落到一个真实存在的环境名：算成空字符串时 GitHub 会让这个被跳过的 job 一直「等环境」，
+    # 测试失败后整个运行要挂几十分钟才收尾（PR #204：20:23 就失败了，21:00 运行才结束）。
+    environment: ${{ (github.ref == 'refs/heads/main' && github.event_name != 'pull_request') && 'apk-release' || 'apk-ci' }}
     env:
       BUILD_TOOLS: "35.0.0"
       PLATFORM: "android-35"

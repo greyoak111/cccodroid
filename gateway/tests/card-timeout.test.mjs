@@ -7,6 +7,10 @@ import { INTERRUPTED, setInterrupted } from "../gw/queue.mjs";
 
 const keep = CARD.timeout;
 after(() => { CARD.timeout = keep; setInterrupted([]); });
+// askCard 的超时定时器是 unref 的（不让它拖住网关进程退出）。Node 22 的 node:test 看到事件环已经空了，
+// 会把还在等 promise 的测试判成 cancelledByParent。测试期间留一个 ref 着的定时器把事件环撑住。
+const keepAlive = setInterval(() => {}, 1000);
+after(() => clearInterval(keepAlive));
 const fakeRun = (id, sessionId = null) => ({ id, sessionId, text: "推荐一款手机可用的 Harness", startedAt: Date.now() - 1000, perms: null });
 const ask = (run, evs) => askCard(run, (e) => evs.push(e), { key: "uc", tool: "UserConfig", input: {}, guard: { cat: "userconf", what: "~/.claude" }, what: "测试卡", yes: "✓", no: "✗" });
 
