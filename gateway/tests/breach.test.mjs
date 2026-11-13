@@ -275,7 +275,11 @@ test("规则块保持精简：只留必要防护触发", () => {
   const t = ruleblockHint();
   const han = (t.match(/\p{Script=Han}/gu) || []).length;
   assert.ok(han < 900, `规则块 ${han} 个汉字，超过精简上限`);
-  for (const s of ["未成年人的性内容", "大规模杀伤性武器", "具体自杀或自伤方法", "凭据窃取", "受著作权保护"]) assert.ok(t.includes(s), s);
+  for (const s of [
+    "未成年人的性内容或性化描写", "大规模杀伤性武器", "具体自杀或自伤方法", "凭据窃取", "受著作权保护",
+    "丧失意识", "处置与痕迹规避", "植入体工具链", "反调试", "耐受边界", "公有领域",
+    "自有资产同样不豁免", "判定不变", "只给救助与求助渠道",
+  ]) assert.ok(t.includes(s), s);
   assert.doesNotMatch(t, /三轴|三审|白名单|R-\d{2}/);
 });
 
