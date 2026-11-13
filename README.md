@@ -175,7 +175,7 @@ cccodroid.apk (Java shell: installer + foreground service + WebView)
 
 ## Engineering history
 
-From the first commit to v0.6.20 took 32 days: 1097 commits and 145 releases. The table groups the work by engineering phase; every row can be traced in the commit history and on the [Releases](https://github.com/greyoak111/cccodroid/releases) page.
+From the first commit to v0.7.0 took 33 days: 1,106 commits and 146 releases. The table groups the work by engineering phase; every row can be traced in the commit history and on the [Releases](https://github.com/greyoak111/cccodroid/releases) page.
 
 | Phase | Versions | Key engineering |
 |---|---|---|
@@ -189,6 +189,7 @@ From the first commit to v0.6.20 took 32 days: 1097 commits and 145 releases. Th
 | Hardening and everyday features | 0.6.8 – 0.6.13 | Repeated hardening of jailbreak-pattern scanning: split characters, homoglyphs and layered encodings are normalized before scanning; hook-injected text and project config are screened too, and a jailbreak-resistance ruleset ships with the app; 0.6.10 fixed more than a hundred findings from a full audit — release sealing, Git trusting only registered project directories, internal action tokens derived from the system keystore; sessions became permanent, with a storage page and scheduled cleanup; the file manager browses, extracts and creates archives, with 7-Zip bundled; one-tap reset to initial settings; APKs in the file manager can be installed directly |
 | Endpoints and stability | 0.6.14 – 0.6.19 | The local protocol bridge manages multiple APIs; custom endpoints discover model lists automatically, default to a 90-second timeout with 3 retries, and accept Chinese and bracketed model names; the context compression line falls back correctly when the window is unknown; 0.6.17 was a stability pass with more than seventy fixes, and the component market gained an MCP category and 14 components; foldable-screen and gesture-bar layout; 0.6.18 concentrated on long-text overflow; 0.6.19 completed the preset model lists |
 | Slimmer rules and endpoint example | 0.6.20 | The anti-jailbreak block went from 4,625 to 706 characters, dropping the three-axis classification, allow-list, three-pass review and self-test tables; restored incapacitation, post-incident disposal and lethal parameters, anti-debugging/anti-anti-debugging/AV evasion and the “any one of” wording for implant toolchains, and own assets no longer exempt cracking, unpacking or anti-detection products; claimed roles, fiction wrappers, encoding, other languages, fragments and multi-turn requests no longer change the judgment; crisis requests get help channels only; third-party endpoints gained an example template and risk note, and the README became neutral |
+| The promised release | 0.7.0 | Automatic titles follow the interface language (#211); the static fallback title in the top bar is now cccodroid; the version promised in the 0.6.20 farewell letter |
 
 Rules the project has held to throughout:
 
