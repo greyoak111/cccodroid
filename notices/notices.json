@@ -1,23 +1,18 @@
 {
  "v": 1,
- "updated": "2026-11-09T13:47:40.116Z",
+ "updated": "2026-11-13T12:14:18.190Z",
  "notices": [
   {
-   "id": "20261109-stable2",
+   "id": "20261113-letter",
    "level": "info",
-   "from": "2026-11-09",
+   "from": "2026-11-13",
    "title": {
-    "zh": "进入长期稳定版",
-    "en": "Long-term stable release"
+    "zh": "致正在使用cccodroid的你",
+    "en": "To everyone using cccodroid"
    },
    "body": {
-    "zh": "作者最近现实里比较忙，要过一段时间才能回来更新，v0.6.14 会作为长期稳定版本。遇到问题或有建议，欢迎到 GitHub 提 issue，或在 QQ 群 1062538743、Discord 反馈。",
-    "en": "The author is busy offline for a while and won't be updating for some time, so v0.6.14 will serve as the long-term stable version. For problems or suggestions, please open a GitHub issue, or reach us in the QQ group 1062538743 or on Discord."
-   },
-   "link": "https://github.com/greyoak111/cccodroid/issues",
-   "linkText": {
-    "zh": "去反馈",
-    "en": "Give feedback"
+    "zh": "首先说明一下，这一大段来自于开发者本人，不是ai代笔。\n历时一个月，cccodroid也走完了六个大版本，目前已经进入了一个长期稳定的版本，这是好消息。\n那必然也有一个坏消息。\n开发者本人的三个 claude pro号在两天前先后被封，因此v0.6.18开始的修补都是使用deepseek完成的。\ndeepseek进行bug修复与项目维护尚可，但如果是功能改进与进一步迭代，恐怕存在很大的技术风险。加之开发者本人现实生活压力近期较大，因此到v0.6.20为止，后续的一段时间内确实很难有什么更新了。\n在此期间遇到问题，尽可以去github或交流群反馈，但我更希望阐明的是这样一个观念——等靠要长远来看是不可取的，遇到问题首先要思考的是怎样自己解决，只要有办法克服就自行克服，除非无能为力，否则绝不要萌生向他人求助的依赖心理，这是对自己也是对他人最大的负责。\n自己动手，丰衣足食，vibe coding的时代里，只要你敢想，很多很多都并非不可能，在这里和大家共勉。\n就让我们在v0.7.0再见吧，希望cccodroid会成为你最好的移动端助力。\n—— Grey Oak 于 2026 年农历十月初五",
+    "en": "First, let me be clear: the following lines come from me, the developer, not from an AI on my behalf.\nIn the space of a month, cccodroid has gone through six major releases and has now settled into a long-term stable version. That is the good news.\nAnd so, inevitably, there is bad news as well.\nTwo days ago, my three Claude Pro accounts were banned, one after another. As a result, every fix since v0.6.18 has been made with DeepSeek.\nDeepSeek is up to the task of bug fixing and project maintenance, but when it comes to feature improvements and further iteration, the technical risk is likely to be considerable. Add to that the heavier pressure in my personal life lately, and the reality is that, as of v0.6.20, meaningful updates will indeed be hard to come by for some time.\nIf you run into problems in the meantime, by all means report them on GitHub or in the community group. But what I would rather make clear is this: waiting for help, leaning on others, and expecting to be handed solutions will not serve you in the long run. When a problem arises, the first thing to consider is how to solve it yourself; if there is a way through, find it yourself. Unless you truly have no alternative, never let a dependence on others take root. That is the greatest responsibility you can show—to yourself and to others.\nDo it with your own hands, and you will lack for nothing. In the age of vibe coding, if you dare to imagine it, a great many things are far from impossible. I share these words with all of you.\nLet us meet again at v0.7.0. I hope cccodroid will become your best ally on mobile.\n— Grey Oak, on the fifth day of the tenth lunar month, 2026"
    }
   },
   {
