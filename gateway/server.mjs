@@ -40,7 +40,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { CFG, PATHS, PREFIX, log } from "./gw/config.mjs";
+import { CFG, PATHS, PREFIX, log, reqLang } from "./gw/config.mjs";
 import { SETTINGS, routeSettings, saveSettings } from "./gw/settings.mjs";
 import { API_KEY, PROVIDER, routeProviders } from "./gw/providers.mjs";
 import { fetchModels, normEffort, routeModels } from "./gw/models.mjs";
@@ -132,6 +132,11 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && (p === "/" || p === "/index.html") && cookieHostOk(req) && tokenOk(u.searchParams.get("t") || "")) {
     res.setHeader("Set-Cookie", `${COOKIE}=${SESSION}; Path=/; HttpOnly; SameSite=Strict`);
   }
+
+  // 界面请求都带 X-CC-Lang，但以前只有 /api/reconcile、/api/issue-draft 和带 message 的错误响应会读它：
+  // 普通聊天、会话列表从不更新，LAST_LANG 会一直是进程启动时的 "zh"；英文 / 西语界面下自动起名、
+  // 建档提示、后台通知也跟着按中文走（#211）。过了来源校验的每个请求都记一下，没带头的保留上一次。
+  reqLang(req);
 
   try {
     for (const r of ROUTES) if ((await r(req, res, u, p)) !== NEXT) return;
