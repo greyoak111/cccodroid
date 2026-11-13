@@ -24,8 +24,7 @@ import { validateTitle } from "./archive-core.mjs";
 import { isInjected } from "./integrity.mjs";
 
 const SUM_HEAD = 1000, SUM_TAIL = 1400, OPEN_MAX = 1600, BATCH_CHARS = 48000, BATCH_N = 24;
-const isZh = (l) => /^zh/i.test(String(l || ""));
-const zh = () => isZh(LAST_LANG);
+const zh = () => /^zh/i.test(LAST_LANG);
 
 // ── 素材 ──
 
@@ -126,26 +125,13 @@ export function estimate(targets) {
 
 // ── 问模型 ──
 
-export function systemPrompt(titleLang) {
-  // 自动起名（autotitle.mjs）传 titleLang：题名语言跟对话走，界面语言只决定这段说明本身用中文还是英文。
-  // 不传（手动补档）保持原样：中文界面用中文，其它界面用界面语言。
-  const conv = titleLang !== undefined;
-  const tl = conv ? titleLang : LAST_LANG;
-  const zhTitle = isZh(tl);
-  const lenZh = zhTitle ? "不超过 20 个字" : "不超过 60 个字符";
-  const langZh = conv
-    ? (zhTitle ? "用中文" : "用与对话内容相同的语言（对话是 English、Español 等就用那种语言），不要翻成中文")
-    : "用中文";
-  const lenEn = zhTitle ? "at most 20 Chinese characters" : "at most 60 characters";
-  const langEn = conv
-    ? (zhTitle ? "write in Chinese" : "write in the same language as the conversation (do not translate it into another language)")
-    : `write in ${LAST_LANG.startsWith("en") ? "English" : "the interface language (" + LAST_LANG + ")"}`;
+export function systemPrompt() {
   return zh()
     ? `你给编程助手 App 里的会话章节起题名。会话每压缩一次就结束一章；每章给你的是那一章结束时的压缩摘要（概括到那时为止的工作，重点看「当前工作」那段，那是这一章最后在干的事），或者（还没结束的章）这一章里用户的提问。
-题名规则：说清这一章干了什么事，用动宾结构（如「补齐 9 家厂商官方接口」「排查终端密钥 401」）；${lenZh}；${langZh}，专有名词、版本号、命令名照原样；不写问候语、日期、「对话」「会话」「讨论」这类空泛词、emoji，结尾不加标点。相邻两章干的是同一件事也各起各的，体现进展。
+题名规则：说清这一章干了什么事，用动宾结构（如「补齐 9 家厂商官方接口」「排查终端密钥 401」）；不超过 20 个字；用中文，专有名词、版本号、命令名照原样；不写问候语、日期、「对话」「会话」「讨论」这类空泛词、emoji，结尾不加标点。相邻两章干的是同一件事也各起各的，体现进展。
 只输出一个 JSON 对象，键是章号，值是题名，例如 {"3":"定稿脉络建档规范","4":"实现脉络页地图"}。不要别的文字。`
     : `You title chapters of sessions in a coding-assistant app. A session ends a chapter each time it is compacted. For each chapter you get the compaction summary written when it ended (it covers all work so far; the "Current Work" part is what this chapter ended on), or, for a chapter still open, the user's prompts in it.
-Title rules: say what was done in this chapter as a verb phrase ("Add official endpoints for 9 vendors", "Debug terminal key 401"); ${lenEn}; ${langEn}; keep product names, versions and commands as-is; no greetings, dates, vague words like "chat"/"session"/"discussion", emoji, or trailing punctuation. Adjacent chapters on the same thing still get distinct titles that show progress.
+Title rules: say what was done in this chapter as a verb phrase ("Add official endpoints for 9 vendors", "Debug terminal key 401"); at most 60 characters; write in ${LAST_LANG.startsWith("en") ? "English" : "the interface language (" + LAST_LANG + ")"}; keep product names, versions and commands as-is; no greetings, dates, vague words like "chat"/"session"/"discussion", emoji, or trailing punctuation. Adjacent chapters on the same thing still get distinct titles that show progress.
 Output only one JSON object mapping chapter number to title, e.g. {"3":"Finalize the archive spec","4":"Build the lineage map"}. No other text.`;
 }
 
@@ -185,7 +171,7 @@ export async function ask(prompt, o = {}) {
     fs.mkdirSync(WORK, { recursive: true });
     const P = o.provider || PROVIDER, own = !o.provider;
     const [cmd, args] = claudeCmd([...settingsArgs(P), "-p", "--no-session-persistence", "--tools", "", "--strict-mcp-config",
-      "--system-prompt", systemPrompt(o.titleLang), "--output-format", "json", ...(o.model ? ["--model", o.model] : [])]);
+      "--system-prompt", systemPrompt(), "--output-format", "json", ...(o.model ? ["--model", o.model] : [])]);
     const child = spawn(cmd, args, { cwd: WORK, env: own ? claudeEnv() : claudeEnv({ model: o.model || "", provider: P }), stdio: ["pipe", "pipe", "pipe"], detached: true });
     if (own) JOB.child = child;
     let out = "", err = "", done = false;

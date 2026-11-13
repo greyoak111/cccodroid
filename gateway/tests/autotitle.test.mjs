@@ -5,17 +5,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { CFG } from "../gw/config.mjs";
-import { _firstReply, titleLangOf } from "../gw/autotitle.mjs";
+import { _firstReply } from "../gw/autotitle.mjs";
 import { userPrompt } from "../gw/backfill.mjs";
-
-test("对话语言按脚本判断：汉字要明显多于拉丁字母才算中文", () => {
-  assert.equal(titleLangOf("帮我看看为什么构建失败"), "zh");
-  assert.equal(titleLangOf("请 fix 一下这个 bug"), "zh");
-  assert.equal(titleLangOf("Fix 微信 login"), "en");
-  assert.equal(titleLangOf("Arregla la compilación"), "en");
-  assert.equal(titleLangOf("ビルドを直して"), "ja");
-  assert.equal(titleLangOf("빌드 고쳐 줘"), "ko");
-});
 
 const L = (o) => JSON.stringify(o);
 const user = (c) => L({ type: "user", message: { role: "user", content: c } });

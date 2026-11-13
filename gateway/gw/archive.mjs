@@ -25,10 +25,10 @@ const LANG_NAME = { zh: "Chinese", en: "English", ja: "Japanese", ko: "Korean", 
 const langName = (l) => (/^zh-(Hant|TW|HK)/i.test(l) ? "Traditional Chinese" : LANG_NAME[String(l).slice(0, 2)] || "English");
 
 /** 交一条档。who：ai / user。返回 { ok, n, no, title } 或 { ok: false, errors } */
-export async function fileChapter(sid, { title, same, status, chapter, misc, by = "ai", titleLang } = {}) {
+export async function fileChapter(sid, { title, same, status, chapter, misc, by = "ai" } = {}) {
   const rec = await lineageRecord(sid);
   if (!rec) return { ok: false, errors: ["session not found"] };
-  const v = validateTitle(title, LAST_LANG, titleLang);
+  const v = validateTitle(title, LAST_LANG);
   const st = normStatus(status);
   if (st === undefined) v.errors.push(/^zh/i.test(LAST_LANG) ? "状态只能是：进行中 / 已完成 / 搁置" : "status must be one of: ongoing / done / paused");
   if (v.errors.length) return { ok: false, errors: v.errors };

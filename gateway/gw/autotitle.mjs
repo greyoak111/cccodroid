@@ -23,20 +23,6 @@ const TRIED = new Set();   // 每个会话只试一次（网关重启后清空�
 const titled = (sid) => !!(NAMES[sid] || archiveDb().sessions[sid]?.title);
 const textOf = (c) => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((x) => x && x.type === "text").map((x) => x.text).join("\n") : "");
 
-const KANA = /[぀-ヿㇰ-ㇿ]/g, HANGUL = /[가-힯ᄀ-ᇿ]/g;
-const HAN = /[㐀-鿿豈-﫿]/g, LATIN = /[A-Za-zÀ-ɏ]/g;
-const count = (s, re) => (s.match(re) || []).length;
-
-/** 对话语言：只分脚本（English / Español 等都算拉丁）；汉字要占到拉丁字母的 1/3 才当中文，
- *  免得「Fix 微信 login」这种一句里夹一个中文词就被判成中文对话。 */
-export function titleLangOf(text) {
-  const s = String(text || "");
-  if (count(s, KANA)) return "ja";
-  if (count(s, HANGUL)) return "ko";
-  const han = count(s, HAN), latin = count(s, LATIN);
-  return han >= 2 && han * 3 >= latin ? "zh" : "en";
-}
-
 /** 文件开头 SCAN 字节逐行回调（异步按块读、块间让出事件循环；超过 LINE_CAP 的行不拼出来，直接跳过——
  *  第一轮里几 MB 的工具输出很常见，起名用不着它）。fn 返回 false 停 */
 async function scanLines(file, fn) {
@@ -99,7 +85,6 @@ async function run(sid, P, model) {
   if (!found) return;
   const q = await _promptsFrom(found.file, 0);
   if (!q) return;
-  const titleLang = titleLangOf(q);   // 题名跟用户提问的语言走，不看界面语言
   const reply = await firstReply(found.file).catch(() => "");
   // 指定的型号得在这家现在的清单里：换了全局接口后，旧值别带给新那家（撞名就会用一个没给它选过的型号计费 —— v0515 复核低-3）
   const tm = SETTINGS.titleModel;
@@ -108,14 +93,14 @@ async function run(sid, P, model) {
   const item = { n: 1, open: true, src: q, reply, prev: null };
   let fix = null;
   for (let round = 0; round < 2; round++) {
-    const r = await ask(userPrompt("", [item], fix), { provider: P, model: m, titleLang });
+    const r = await ask(userPrompt("", [item], fix), { provider: P, model: m });
     if (r.error) { log("自动起名调用失败：" + r.error); return; }
     if (titled(sid)) return;   // 问的时候 AI 建了档或用户改了名
     const got = parseTitles(r.text)[1];
-    const v = validateTitle(got, LAST_LANG, titleLang);
+    const v = validateTitle(got, LAST_LANG);
     if (v.ok) {
-      const w = await fileChapter(sid, { title: v.title, chapter: 1, by: "auto", titleLang });
-      log(`自动起名${w.ok ? "" : "没存上"}「${v.title}」（${m || "默认型号"}，${titleLang}，${r.tin}/${r.tout} token）`);
+      const w = await fileChapter(sid, { title: v.title, chapter: 1, by: "auto" });
+      log(`自动起名${w.ok ? "" : "没存上"}「${v.title}」（${m || "默认型号"}，${r.tin}/${r.tout} token）`);
       return;
     }
     fix = { 1: { title: got || "", errors: v.errors } };
