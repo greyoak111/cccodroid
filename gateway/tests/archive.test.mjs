@@ -24,6 +24,16 @@ test("题名校验：好的放行，问候 / 日期 / 标点 / 空泛 / 语言�
   assert.match(validateTitle("你好", "en").errors.join(), /greeting|English/);
 });
 
+test("自动起名按对话语言校验，界面语言只管说明", () => {
+  assert.equal(validateTitle("Add official endpoints for 9 providers", "zh", "en").ok, true);
+  assert.equal(validateTitle("Añadir endpoints oficiales para 9 proveedores", "zh", "en").ok, true);
+  assert.equal(validateTitle("补齐 9 家厂商官方接口", "en", "zh").ok, true);
+  assert.equal(validateTitle("补齐接口", "zh", "en").ok, false, "英文对话不能起中文题名");
+  assert.match(validateTitle("补齐接口", "fr", "en").errors.join(), /same language/);
+  assert.equal(validateTitle("会話のアーカイブを整える", "zh", "ja").ok, true);
+  assert.equal(validateTitle("회의록 정리", "zh", "ko").ok, true);
+});
+
 test("状态：中英文都认，认不出的是 undefined、没给的是 null", () => {
   assert.equal(normStatus("已完成"), "done");
   assert.equal(normStatus("paused"), "paused");
@@ -73,6 +83,17 @@ function session(turns, compacts) {
   fs.writeFileSync(path.join(proj, sid + ".jsonl"), L.map((l) => JSON.stringify(l)).join("\n") + "\n");
   return sid;
 }
+
+test("网关：自动起名带对话语言时，中文界面也收英文 / 西文题名", async () => {
+  const { fileChapter } = await import("../gw/archive.mjs");
+  const ok = await fileChapter(session(2, 0), { title: "Add official endpoints for 9 providers", chapter: 1, by: "auto", titleLang: "en" });
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  const es = await fileChapter(session(2, 0), { title: "Añadir endpoints oficiales para 9 proveedores", chapter: 1, by: "auto", titleLang: "en" });
+  assert.equal(es.ok, true, JSON.stringify(es));
+  // 没给 titleLang 的老调用仍按界面语言（测试环境是中文）校验
+  const old = await fileChapter(session(2, 0), { title: "Add official endpoints for 9 providers", chapter: 1, by: "auto" });
+  assert.equal(old.ok, false);
+});
 
 test("网关：压缩过、刚结束的章没题名 → 系统提示要求先建档；交了不合格的退回，合格的存档、会话列表换成题名", async () => {
   const { archiveHint, fileChapter } = await import("../gw/archive.mjs");

@@ -2,7 +2,7 @@
 import "../gw/config.mjs";   // 放最前：没走 scripts/test.mjs（没有临时 home）就在这里拦下，下面一行都不跑
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { digestSummary, estimate, parseTitles } from "../gw/backfill.mjs";
+import { digestSummary, estimate, parseTitles, systemPrompt } from "../gw/backfill.mjs";
 
 test("摘要截取：去掉套话，留「主要诉求」开头和「当前工作」", () => {
   const body = "1. Primary Request and Intent:\n" + "要做的事。".repeat(400) + "\n\n7. Pending Tasks:\n" + "待办。".repeat(300) + "\n\n8. Current Work:\n正在写脉络页的地图。\n\n9. Optional Next Step:\n下一步。";
@@ -18,6 +18,15 @@ test("解析模型回话：容忍代码围栏和多余文字，只认数字键�
   assert.deepEqual(parseTitles('好的：\n```json\n{"1":"补齐接口","2":"修复 401","x":"不要"}\n```'), { 1: "补齐接口", 2: "修复 401" });
   assert.deepEqual(parseTitles("没有 JSON"), {});
   assert.deepEqual(parseTitles('{"3": 5}'), {});
+});
+
+test("起名提示词：自动起名按对话语言给长度和语言规则，补档仍按界面语言", () => {
+  const zh = systemPrompt("zh"), en = systemPrompt("en");
+  assert.ok(zh.includes("20 个字") && zh.includes("用中文"));
+  assert.ok(en.includes("60 个字符") && en.includes("与对话内容相同的语言"));
+  // 测试环境界面是中文：不传 titleLang 的补档提示词仍是「用中文、20 个字」
+  const backfill = systemPrompt();
+  assert.ok(backfill.includes("20 个字") && backfill.includes("用中文"));
 });
 
 test("预估：摘要章与进行中的章分开算，大会话分批", () => {
