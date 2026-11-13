@@ -44,22 +44,18 @@ const MSG = {
 };
 const isZh = (lang) => /^zh/i.test(String(lang || ""));
 
-/** 校验题名：{ ok, title（去掉外层引号、首尾空白后）, errors[] }；lang 是界面语言，说明用它。
- *  titleLang 可选：题名应使用的语言（自动起名按对话语言传）；中文按字算 20，其它按字符算 60。
- *  不传就是老行为，按界面语言判。 */
-export function validateTitle(raw, lang, titleLang) {
+/** 校验题名：{ ok, title（去掉外层引号、首尾空白后）, errors[] }；lang 是界面语言 */
+export function validateTitle(raw, lang) {
   const m = isZh(lang) ? MSG.zh : MSG.en;
-  const tl = titleLang === undefined ? lang : titleLang;
-  const custom = titleLang !== undefined && String(titleLang) !== String(lang);
   let t = String(raw ?? "").trim();
   for (const [a, b] of QUOTES) if (t.length > 2 && t.startsWith(a) && t.endsWith(b)) t = t.slice(a.length, -b.length).trim();
   const errors = [];
   if (!t) return { ok: false, title: t, errors: [m.empty] };
   if (/[\r\n]/.test(t)) errors.push(m.newline);
   const zhTitle = CJK.test(t);
-  // 中文题名按「字」计：汉字、全角符号算 1，英文字母、数字、空格这类半角字符算半个（和排出来的宽度一致）
-  const n = isZh(tl) ? Math.ceil([...t].reduce((w, c) => w + (c.charCodeAt(0) < 0x2e80 ? 0.5 : 1), 0)) : [...t].length;
-  const max = isZh(tl) ? 20 : 60;
+  // 中文界面按「字」计：汉字、全角符号算 1，英文字母、数字、空格这类半角字符算半个（和排出来的宽度一致）
+  const n = isZh(lang) ? Math.ceil([...t].reduce((w, c) => w + (c.charCodeAt(0) < 0x2e80 ? 0.5 : 1), 0)) : [...t].length;
+  const max = isZh(lang) ? 20 : 60;
   if (n > max) errors.push(m.long(n, max));
   if (n < (zhTitle ? 2 : 3)) errors.push(m.short);
   if (EMOJI.test(t)) errors.push(m.emoji);
@@ -67,14 +63,8 @@ export function validateTitle(raw, lang, titleLang) {
   if (GREET.test(t)) errors.push(m.greet);
   if (DATE.test(t)) errors.push(m.date);
   if (VAGUE.test(t)) errors.push(m.vague);
-  // 自动起名按对话语言判时，重试说明不能说成「界面是中文 / English」
-  const langError = custom
-    ? isZh(tl)
-      ? (isZh(lang) ? "对话是中文：题名用中文写" : "The conversation is in Chinese: write the title in Chinese")
-      : (isZh(lang) ? "题名要用与对话相同的语言写" : "Write the title in the same language as the conversation")
-    : m.lang;
-  if (isZh(tl) && !zhTitle) errors.push(langError);
-  if (/^en/i.test(String(tl || "")) && zhTitle) errors.push(langError);   // 日文 / 韩文等不查语言（汉字也是它们的字）
+  if (isZh(lang) && !zhTitle) errors.push(m.lang);
+  if (/^en/i.test(String(lang || "")) && zhTitle) errors.push(m.lang);   // 日文 / 韩文等界面不查语言（汉字也是它们的字）
   return { ok: !errors.length, title: t, errors };
 }
 
