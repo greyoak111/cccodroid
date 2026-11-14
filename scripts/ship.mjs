@@ -130,7 +130,7 @@ const S = {
     git("add", ...files);
     if (!git("diff", "--cached", "--name-only")) { console.log("  没有要提交的（已提交过）"); state.commit = git("rev-parse", "HEAD"); return; }
     const title = TITLE || fs.readFileSync(wn("zh"), "utf8").split("\n").map((l) => l.replace(/^#+\s*/, "").trim()).find(Boolean) || "";
-    gitc("commit", "-q", "-m", `v${VER}${title ? "：" + title : ""}\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`);
+    gitc("commit", "-q", "-m", `v${VER}${title ? "：" + title : ""}\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>`);
     state.commit = git("rev-parse", "HEAD");
     console.log("  " + git("log", "--oneline", "-1"));
   },
