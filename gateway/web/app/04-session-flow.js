@@ -627,7 +627,7 @@
   }
 
   // ── 事件总线 ──────────────────────────────────────────────────────
-  let es = null, lastEventId = "", helloCount = 0, busWatch = 0;
+  let es = null, lastEventId = "", helloCount = 0, busWatch = 0, busDropped = false;   // busDropped：上一条连接断过（不是换视图的主动重放）
 
   let busDownAt = 0, busKick = 0;
   // 自己重拨的等待：1.5 秒起步翻倍，封顶 30 秒——网关长期不在时不再每 1.5 秒敲一次（FIND-037）。
@@ -672,6 +672,7 @@
     es.onerror = () => {
       if (es !== cur || cur.dead) return;
       cur.dead = true;
+      busDropped = true;
       setConn(false);
       // 一直连不上：多半是通知栏点了「停止」、网关服务没了，界面还开着就请壳把它拉起来（11-05 报告；服务在跑时壳那边什么也不做）
       const now = Date.now();
@@ -802,6 +803,8 @@
       case "state": return applyState(ev);
       case "tamper": return showTamper(ev.tamper);
       case "archive": return loadSessions();   // 建档 / 归入杂项：标题、档号、分组跟着变
+      // 新会话的记录已经落盘（网关核过文件才发）：侧栏 / 会话页立刻出现这个会话，不用等这一轮结束
+      case "session_created": return loadSessions();
       // 会话进了回收站（网关那边删的：项目连目录删、定时任务不存对话、别的窗口）：正开着它就退回新对话，
       // 别让下一条消息带着它的会话号去 --resume 失败（#173-4）。整页不收，人可能正在项目页里
       case "session_gone":
@@ -953,6 +956,11 @@
     const adoptDrafts = helloCount === 1 || view.adoptDrafts;
     view.adoptDrafts = false;
     applyState(ev);
+    // 断线重连、又续不上（网关重启 / 断得太久）：错过的事件补不回来，会话列表按磁盘重读一次，
+    // 断线期间新建的会话也能出现在侧栏。换视图的主动重放（busDropped=false）不算，boot 首次连接也不重复拉
+    const dropped = typeof busDropped !== "undefined" && !!busDropped;   // typeof：界面测试单独切 onHello 跑时没有这个外层变量
+    busDropped = false;
+    if (!ev.resume && dropped && typeof loadSessions === "function") loadSessions();
     if (helloCount === 1 && !state.serverStatus) {
       // /api/status 启动时没拿到（超时、网关刚起来那一下的 5xx）：hello 的「已连接」不能把失败盖掉、
       // 上次会话也没接回。hello 里带着同一份 lastSessionId，按 boot 的规则接一次，再把状态补拉回来（FIND-005）

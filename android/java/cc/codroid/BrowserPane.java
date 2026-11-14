@@ -299,10 +299,11 @@ public class BrowserPane extends LinearLayout {
     }
 
     /** http/https 留在这里；其余协议（intent:、mailto:、market:、tel: …）交给系统。返回 true = 已处理 */
-    /** 内置浏览器碰不得的地址：界面专用地址的任何端口、各种回环写法下的网关端口 */
+    /** 内置浏览器碰不得的地址：老界面专用地址 127.0.0.2 的任何端口、各种回环写法下的网关端口。
+     *  故意不跟 Env.HOST 的回退走（见 MainActivity.isUiHostDot2）：回退设备上浏览器还得能开本机 127.0.0.1 上的服务 */
     static boolean forbidden(String url) {
         if (url == null) return false;
-        try { if (MainActivity.isUiHost(Uri.parse(url.trim()).getHost())) return true; } catch (Exception e) { return true; }
+        try { if (MainActivity.isUiHostDot2(Uri.parse(url.trim()).getHost())) return true; } catch (Exception e) { return true; }
         return MainActivity.isGatewayUrl(url);
     }
 

@@ -13,6 +13,7 @@ cccodroid 申请的权限不少。这一页逐个说明每个权限拿来干什�
 | 网络（`INTERNET`、`ACCESS_NETWORK_STATE`） | 连模型接口、下载 Claude Code 和工具包；看当前连的是不是 Wi-Fi（定时任务的「只在 Wi-Fi 下」） | 不用问，装上就有 | 没法用 |
 | 存储（`READ/WRITE_EXTERNAL_STORAGE`，36 版另要「所有文件访问」`MANAGE_EXTERNAL_STORAGE`） | 读写 `/sdcard/cccodroid`：交付给别的应用的 APK、截图、离线工具包；也让 Claude 能处理你放在共享存储里的文件 | 28 版首次打开时；36 版问一次，带你去系统设置 | 能用，产物只留在应用私有目录，别的应用看不到 |
 | 通知（`POST_NOTIFICATIONS`） | 后台跑完、定时任务结果、需要你确认的操作 | 首次打开 | 能用，只是在后台时收不到提醒 |
+| 锁屏验证（`USE_BIOMETRIC`） | 把需要长期保存的安全开关（后台保活增强、设备工具、特权命令免确认、网页调试）用锁屏再确认一遍 | 打开受保护的开关时（系统锁屏确认，不是权限弹窗） | 开关只在这次运行有效，重启应用后要重新打开 |
 | 前台服务、保持唤醒（`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_SPECIAL_USE`、`WAKE_LOCK`） | 让网关在你切走、锁屏后继续把这一轮跑完 | 不用问 | 不能拒绝；没有它，切到后台几秒就会断网、中断 |
 | 忽略电池优化（`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`） | 让系统省电策略别冻结后台的长任务 | 你在设置里点「后台运行」时 | 长任务、定时任务在锁屏后可能被系统停掉 |
 | 精确闹钟、开机广播（`SCHEDULE_EXACT_ALARM`、`RECEIVE_BOOT_COMPLETED`） | 定时任务到点叫醒网关；开机后重新激活 Shizuku（只在你配对过、且在设置里打开了自动激活时，默认关） | 不用问 | 定时任务可能晚一点才跑；开机后要手动激活 Shizuku |

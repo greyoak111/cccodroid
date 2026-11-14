@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import { CFG, PREFIX, log, tz } from "./config.mjs";
 import { componentEnv as sharedComponentEnv } from "./component-env.mjs";
+import { sameFile as pathSame } from "./pathguard.mjs";
 
 const ID = "openai-bridge";
 const ENTRY = "lib/openai-bridge/component.cjs";
@@ -164,8 +165,10 @@ function clearRegistration(file, expected, sameInstance) {
     const sameFile = current.stamp === expected.stamp && current.identity === expected.identity;
     // 健康卸载可清除同一实例的重写注册；另一实例（即便合法）一律保留。
     const r = current.stored?.value;
+    // runtimeDir 按目录身份（dev:ino）比：同一目录的别名写法（/data/data 与 /data/user/0）不算「另一实例」（06-路径别名卸载走不通）
     const same = sameInstance && object(r) && Object.keys(r).length === 5 &&
-      ["schema", "id", "endpoint", "runtimeDir", "instanceId"].every((key) => r[key] === sameInstance[key]);
+      ["schema", "id", "endpoint", "instanceId"].every((key) => r[key] === sameInstance[key]) &&
+      typeof r.runtimeDir === "string" && pathSame(r.runtimeDir, sameInstance.runtimeDir);
     if (!sameFile && !same) {
       log("[comp] openai-bridge 卸载降级（stage=retire-registration-changed）");
       return false;

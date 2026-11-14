@@ -19,4 +19,7 @@ if [ -f "$AJAR" ]; then
   # 第二份稳定性报告 l 组（BUG-A01/A02/A03/A04/A05 的纯逻辑；只调基本类型判断，不碰安卓运行时）
   javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/Stab2LHostTest.java"
   java -cp "$OUT:$AJAR" cc.codroid.Stab2LHostTest
+  # 05-工具包重装丢组件：同一版重装时组件自己 dpkg 包清单里的文件要跟着搬（只造 MANIFEST，不碰 org.json）
+  javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/InstallerCarryTest.java"
+  java -cp "$OUT:$AJAR" cc.codroid.InstallerCarryTest
 else echo "跳过 WhatsNewPickTest（没有 android.jar）"; fi

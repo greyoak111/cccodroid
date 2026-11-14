@@ -194,7 +194,10 @@ server.listen(CFG.port, "127.0.0.1", () => {
   // 端口拿到了才收：以前在 listen 之前，旧网关还在跑时重复拉起的这个先改了它的恢复记录，再因 EADDRINUSE 退出（0.6.9 审计 195-T.2）。
   // 'listening' 先于任何连接派发，界面的第一个请求照样看得到恢复出来的队列
   try { recoverRunMark(); } catch (e) { log("恢复上次的运行标记失败：" + (e.stack || e.message)); }
-  uiServer.listen(CFG.port, UI_HOST);   // 界面地址也放到恢复之后：别让界面在队列恢复前先连进来
+  // 界面地址也放到恢复之后：别让界面在队列恢复前先连进来。
+  // App 探测到这台设备上 127.0.0.2 不通、界面改走 127.0.0.1 时（access.mjs 的 UI_HOST），主地址就是界面地址，不再另听一份
+  if (UI_HOST !== "127.0.0.1") uiServer.listen(CFG.port, UI_HOST);
+  else log("⚠️ 这台设备上 127.0.0.2 连不通，界面改走 127.0.0.1（应用启动时探测，见 Env.checkHost）");
   // 浏览器直接开这个地址只拿得到静态页，/api 按来源校验一律 403；界面要从应用里开（0.6.9 审计 195-G.6）
   log(`claude-apk 网关 v3 已启动  http://127.0.0.1:${CFG.port}（界面请从 cccodroid 应用里打开）`);
   log(`  运行时 ${CFG.runtime}`);

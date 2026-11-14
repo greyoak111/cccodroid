@@ -699,7 +699,7 @@ final class Installer {
         JSONObject p;
         try { p = new JSONObject(new String(java.nio.file.Files.readAllBytes(pend.toPath()), StandardCharsets.UTF_8)); }
         catch (Exception e) { p = new JSONObject(); }
-        if (old.isDirectory()) carryOverOnce(old, sameDevkit(old, p));
+        if (old.isDirectory()) carryOverOnce(old, sameDevkit(old, p), p.optString("sha256", ""));
         new File(env.usr, "tmp").mkdirs();
         env.home.mkdirs();
 
@@ -739,7 +739,9 @@ final class Installer {
         try {
             JSONObject ok = new JSONObject(new String(java.nio.file.Files.readAllBytes(new File(old, ".devkit-ok").toPath()), StandardCharsets.UTF_8));
             return neu.equals(ok.optString("sha256", ""));
-        } catch (Exception e) { return false; }
+        // 旧标识读不出（损坏 / 缺失）：按同版本处理，宁可多搬。按「不搬」走会把组件文件跟旧 usr 一起删掉，
+        // 而新 .devkit-ok 的 sha 又和组件记录里的 base 相同，界面还报「已安装」—— 静默损坏（群友核对报告 05）
+        } catch (Exception e) { return true; }
     }
 
     /**
@@ -749,7 +751,7 @@ final class Installer {
      * 这次就不搬了 —— 旧目录整个换名留给用户（一次顶层 rename），工具包照常装完。搬的只是用户自己 pip / npm -g 装的包，
      * 跳过不影响工具包本身能用。
      */
-    private void carryOverOnce(File old, boolean keepComponents) throws IOException {
+    private void carryOverOnce(File old, boolean keepComponents, String identity) throws IOException {
         File tryF = new File(env.files, CARRY_TRY);
         if (tryF.exists()) {
             carrySkipped = true;
@@ -765,7 +767,7 @@ final class Installer {
             o.write(("{\"at\":" + System.currentTimeMillis() + "}\n").getBytes(StandardCharsets.UTF_8));
             o.getFD().sync();                          // 要在卡住之前落到盘上，否则下次看不见
         }
-        carryOver(old, env.usr, keepComponents);
+        carryOver(old, env.usr, keepComponents, identity);
         tryF.delete();
     }
 
@@ -936,12 +938,25 @@ final class Installer {
      * 口径照网关的 gw/orphans.mjs baseOwnedPaths：旧工具包的文件一个都不能当用户内容搬进新版。
      * Python 小版本变了就不搬 lib/python3.X（编译过的扩展对不上新解释器）；tmp 与安装器自己的标记不搬。
      */
-    private void carryOver(File old, File neu, boolean keepComponents) {
+    private void carryOver(File old, File neu, boolean keepComponents, String identity) {
+        carryOver(old, neu, env.files, keepComponents, identity, ui);
+    }
+
+    /** carryOver 的实体。静态、只收目录：回归测试直接调，不用造 Android Context。
+     *  identity 是本版工具包的身份（.devkit-pending 的 sha256）；keepComponents 时只认领这个身份上的组件记录。 */
+    static void carryOver(File old, File neu, File filesDir, boolean keepComponents, String identity, Progress ui) {
+        // 组件记录 / 包内 MANIFEST 认领的路径：同一版重装时要跟着搬；换版本时要当旧工具包的东西删掉。
+        // 以前同一版重装只跳过了「把它们加进 owned」这一步，但组件自己的 dpkg 清单（gh.list 等）仍被当成底座，
+        // 清单里的文件照样不搬 —— gh 这类经 dpkg 装的组件重装后仍然是坏的（0.6.11 补丁漏的就是这条路径）
+        java.util.Set<String> compFiles = new java.util.HashSet<>();
+        addComponents(compFiles, old, filesDir, keepComponents ? identity : null);
         java.util.Set<String> owned = new java.util.HashSet<>();
         // dpkg 清单：写的是 /data/data/<包名>/files/usr/…，而 env.usr 是 /data/user/0/…：只比 usr/ 之后的相对路径。
         // 0.3.9 及以前直接拿绝对路径比，一条都对不上，旧工具包和旧组件 bin/ 下的东西全被当成用户的搬了过来
         File[] lists = new File(old, "var/lib/dpkg/info").listFiles((d, n) -> n.endsWith(".list"));
         if (lists != null) for (File l : lists) {
+            // 同一版重装：组件自己带的包清单不算底座的，否则它列的文件全被留在旧目录里删掉
+            if (keepComponents && compFiles.contains("var/lib/dpkg/info/" + l.getName())) continue;
             try {
                 for (String line : java.nio.file.Files.readAllLines(l.toPath())) addOwned(owned, line);
             }
@@ -956,23 +971,28 @@ final class Installer {
             addPaths(owned, new File(m, "FILES"));
             for (String f : new String[]{"MANIFEST", "MANIFEST.local"}) addManifest(owned, new File(m, f));
         }
-        // 已装组件：包内 MANIFEST 加上界面那边的安装记录（files/components/<id>.json 的 files / shared）。
-        // 同一版工具包重装时不认领：组件的文件当成要搬的，新工具包里已有的同名文件照旧不覆盖
-        if (!keepComponents) addComponents(owned, old);
+        // 换版本：组件文件是旧工具包上的，不能搬（新工具包里的同名文件也照旧不覆盖）；同一版重装：不认领，留给 moveUser 搬
+        if (!keepComponents) owned.addAll(compFiles);
         // 整棵都没人认领的目录一次 rename 搬走，不用逐个文件走（lib / share 下动辄几万个文件）
         java.util.Set<String> ownedDirs = new java.util.HashSet<>();
         for (String rel : owned) for (int i = rel.lastIndexOf('/'); i > 0; i = rel.lastIndexOf('/', i - 1)) ownedDirs.add(rel.substring(0, i));
         int n = moveUser(old, neu, "", owned, ownedDirs);
-        if (n > 0) ui.step(Tr.f("保留了你自己装进工具包的 {0} 项", n));
+        if (n > 0 && ui != null) ui.step(Tr.f("保留了你自己装进工具包的 {0} 项", n));
     }
 
-    private void addComponents(java.util.Set<String> owned, File old) {
+    /** 组件认领的路径：包内 MANIFEST + 界面那边的安装记录（files/components/<id>.json 的 files / shared）。
+     *  onlyBase 非空时只收这个工具包身份上的记录（旧工具包留下的记录不能拿来认领）。 */
+    private static void addComponents(java.util.Set<String> owned, File old, File filesDir, String onlyBase) {
         File[] cs = new File(old, "libexec/devkit/components").listFiles();
         if (cs != null) for (File cmp : cs) addManifest(owned, new File(cmp, "MANIFEST"));
-        File[] recs = new File(env.files, "components").listFiles((d, n) -> n.endsWith(".json"));
+        File[] recs = new File(filesDir, "components").listFiles((d, n) -> n.endsWith(".json"));
         if (recs != null) for (File r : recs) {
             try {
                 JSONObject j = new JSONObject(new String(java.nio.file.Files.readAllBytes(r.toPath()), StandardCharsets.UTF_8));
+                if (onlyBase != null) {
+                    String base = j.optString("base", "");
+                    if (!base.isEmpty() && !base.equals(onlyBase)) continue;
+                }
                 for (String k : new String[]{"files", "shared"}) {
                     org.json.JSONArray a = j.optJSONArray(k);
                     if (a != null) for (int i = 0; i < a.length(); i++) addOwned(owned, a.optString(i, ""));
@@ -1010,7 +1030,7 @@ final class Installer {
     }
 
     /** 搬 old 里没人认领的文件到 neu。整棵没人认领、新工具包也没有同名的目录一次 rename；同名的目录下钻，只搬里面多出来的 */
-    private int moveUser(File old, File neu, String relDir, java.util.Set<String> owned, java.util.Set<String> ownedDirs) {
+    private static int moveUser(File old, File neu, String relDir, java.util.Set<String> owned, java.util.Set<String> ownedDirs) {
         File[] kids = new File(old, relDir).listFiles();
         if (kids == null) return 0;
         int n = 0;

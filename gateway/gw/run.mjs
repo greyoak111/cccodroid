@@ -777,9 +777,25 @@ export async function startRun(item) {
   let buf = "", stderr = "", lastResult = null, resultStale = false;
   // 开了 --include-partial-messages，正文已经逐字发过，assistant 事件别重复整段
   const flags = { gotDelta: false, isCmd };
+  // 新会话的记录文件是 claude 在 init 之后才建的：等它在磁盘上真正出现再广播 session_created。
+  // 前端收到就重读会话列表，不用等到 run_end —— 落盘可能比任何固定延时都晚，猜时间治不了。
+  // 每个新会话只报一次；续跑的老会话文件本来就在，不报（那不是「新建」）。
+  const noteSessionFile = (evType) => {
+    if (run.sched) return;   // 定时任务的会话归定时任务页：saveSession=false 的收尾会进回收站，提前闪进侧栏反而点开就 404
+    // 高频增量不每次都查盘；但第一个增量要查一次：长回答可能整段都是 stream_event，等 assistant / 收尾
+    // 才查的话侧栏要等这一轮答完才出现，正是这个 bug 的样子。文件一般在第一个增量前就建好了。
+    if (evType === "stream_event") { if (run.streamChecked) return; run.streamChecked = true; }
+    if (!run.newSession || run.ended || run.fileSeen || !run.sessionId) return;
+    let found = null;
+    try { found = findSessionFile(String(run.sessionId), run.cwd); } catch { found = null; }
+    if (!found) return;
+    run.fileSeen = true;
+    emit({ type: "session_created", sessionId: run.sessionId, runId: run.id, cwd: run.cwd });
+  };
   const onInit = (init) => {
     if (!run.tInit) { run.tInit = Date.now(); emit({ type: "phase", phase: "connect", from: "init" }); }
     setLastInit(init);
+    run.newSession = !run.sessionId;
     run.sessionId = init.session_id;
     markIncomplete(run.sessionId, run.id);   // 新会话：拿到会话号就记上（FIND-040）
     run.usageModel = init.model || run.usageModel;
@@ -806,6 +822,7 @@ export async function startRun(item) {
       outputStyle: init.output_style,
       version: init.claude_code_version,
     });
+    noteSessionFile("init");     // 文件要是在 init 前就有了（少见），当场补报
     publishState();
   };
   // 同一个 result 重复到达（相同的 uuid / result_index）只结算一次（BUG-R03）：否则 usage 对账把同一份差额再加一遍、
@@ -875,6 +892,8 @@ export async function startRun(item) {
   };
   const feed = (line) => {
     let ev; try { ev = JSON.parse(line); } catch { return; }
+    // 上一条事件之后文件可能已经建好：control_request 这类会提前 return 的分支也要先核一次
+    noteSessionFile(ev.type);
     if (ev.type === "control_request") return onControl(ev);
     run.meter.feed(ev);
     if (run.slashFlight.length && ((ev.type === "system" && (ev.subtype === "compact_boundary" || (ev.subtype === "status" && ev.status === "compacting"))) ||
@@ -946,6 +965,9 @@ export async function startRun(item) {
       log(`⏱ 首个回应前：准备 ${s(run.tBoot - run.startedAt)} · 启动并连工具 ${s(run.tInit - run.tBoot)} · 等端口 ${s(run.tFirst - run.tInit)}`);
     }
     translate(ev, { sse: emit, flags, onInit, onResult, onReplay, provider: P });
+    // init 之后的每个事件都核一次：claude 一般在下一次输出前就把记录建好了（实测 init 后约 0.1s），
+    // 这里一旦看到文件就广播；没看到就等下一个事件，不在前端猜延时
+    noteSessionFile(ev.type);
   };
 
   child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
@@ -986,6 +1008,7 @@ export async function startRun(item) {
   const finish = (code, signal) => {
     if (buf.trim()) feed(buf.trim());
     buf = "";
+    noteSessionFile("finish");           // 记录只在退出前才落盘的情况：收尾前再核一次
     run.meter.close();                   // 中断 / 被杀也走这里：子代理记录最后扫一遍
     try { run.agents?.close(); } catch (e) { log(`${runTag(run)} 子代理收尾出错: ${e.message}`); }
     // claude 已经退出，这时的记录就是下一轮的基准；提醒这一轮已经交出去（正常答完）才清掉标记

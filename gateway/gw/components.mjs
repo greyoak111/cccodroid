@@ -281,6 +281,9 @@ function compState(id, entry, dk) {
   if (rec.state !== "ok") return "damaged";
   if (!dk || rec.base !== dk.sha256) return "outdated";          // 工具包换过：组件的文件已随旧工具包一起没了
   for (const b of rec.bin || []) if (!fs.existsSync(path.join(PREFIX, "bin", b))) return "damaged";
+  // 没有命令的组件（库 / 驱动）光看 bin 会漏：记录里的包内 MANIFEST 不在了，就是文件已经被整批删掉
+  const man = `libexec/devkit/components/${id}/MANIFEST`;
+  if ((rec.files || []).includes(man) && !fs.existsSync(path.join(PREFIX, man))) return "damaged";
   const build = entry && compBuildFor(entry, dk);
   // 索引能是旧的（镜像晚一拍、磁盘缓存用了十分钟）：里面的构建比已装的还旧时不算「可更新」，
   // 否则界面推着用户降级（0.6.9 审计 195-V.1）
@@ -295,14 +298,20 @@ const compUnsupported = (e) => { const g = e && e.needs && e.needs.gpu; return G
 // 依赖的组件装好了没有（有新版本可更新也算装好）
 const compDepOk = (rid, comps, dk) => ["ok", "update"].includes(compState(rid, comps[rid] || null, dk));
 const compName = (rid, comps) => (comps[rid] && comps[rid].name) || { zh: rid, en: rid };
-/** 已装的组件里，requires 了 id 的那些（卸载 id 会把它们弄坏） */
+/** 这条记录还属于当前工具包吗：base 对不上的记录，文件已随旧工具包没了，
+ *  不能再拿它认领文件 / 拦卸载 / 拦安装（0.6.9 审计 195-M.3、05-工具包重装丢组件） */
+function compOnDevkit(rec, dk = devkitIdentity()) {
+  return !!(rec && dk && rec.base === dk.sha256);
+}
+/** 已装的组件里，requires 了 id 的那些（卸载 id 会把它们弄坏）。
+ *  装在旧工具包上的记录不算：它的文件已经不在，卸 id 不会再弄坏一个本来就要重装的组件 */
 function compUsers(id) {
-  const out = [];
+  const out = [], dk = devkitIdentity();
   try {
     for (const f of fs.readdirSync(COMP_DIR)) {
       if (!f.endsWith(".json") || f === id + ".json") continue;
       const r = compRecord(f.slice(0, -5));
-      if (r && (r.requires || []).includes(id)) out.push(f.slice(0, -5));
+      if (compOnDevkit(r, dk) && (r.requires || []).includes(id)) out.push(f.slice(0, -5));
     }
   } catch {}
   return out;
@@ -585,8 +594,12 @@ function compRemoveFiles(id, rec, keep = null) {
   const files = (rec.files || []).filter(safeRel);
   const others = [];
   for (const [oid, orec] of compRecords()) if (oid !== id) others.push({ id: oid, rec: orec, needs: compNeeds(oid, orec), gained: [] });
-  // 工具包升级后新底座 / 模块可能接管了同名路径，旧记录还写着它：底座认领的一律不删（审查 B23）
-  const base = baseOwnedPaths(new Set(files));
+  // 工具包升级后新底座 / 模块可能接管了同名路径，旧记录还写着它：底座认领的一律不删（审查 B23）。
+  // 记录装在旧工具包上时（base 明确对不上），它列的 .list 已经不是它的了（同名路径现在是新底座的），
+  // 不能再当 skip 传进去；base 缺失的老记录照旧当自己的，免得升级 / 卸载留下包文件
+  const dk = devkitIdentity();
+  const ownLists = rec && (!rec.base || (dk && rec.base === dk.sha256));
+  const base = baseOwnedPaths(ownLists ? new Set(files) : new Set());
   let baseKept = 0;
   const dirs = new Set();
   // Python 运行时在旁边的 __pycache__ 里生成 .pyc（不在组件清单里）：删 .py 时一并删掉，不然卸载后留下几十 MB
@@ -652,10 +665,12 @@ async function compStart(id) {
   const b0 = compBuildFor(entry, dk), b = b0 && { ...b0, source: entry.source, requires: entry.requires || [], mcp: compMcpSpec(entry) };
   if (!b) return { ok: false, message: tz("这个组件还没有对应当前工具包的版本，先更新工具包或稍后再试") };
   // 防回滚：已装好且索引里的构建版本更旧，不装。过期索引（镜像晚一拍、缓存十分钟）里常有上一版，
-  // 用户点一下「更新」反而把新版换掉；损坏/装到一半的记录不拦，那是修复（0.6.9 审计 195-V.1）
+  // 用户点一下「更新」反而把新版换掉；损坏/装到一半的记录不拦，那是修复（0.6.9 审计 195-V.1）。
+  // 只比同一个工具包上的记录：换过工具包后旧记录（outdated）不能拿旧版本号拦住新工具包的构建 ——
+  // 旧构建已经装不回来了，这不是降级（05-工具包重装丢组件）
   {
     const oldRec = compRecordInfo(id).rec;
-    if (oldRec && oldRec.state === "ok" && compOlder(b, oldRec))
+    if (oldRec && oldRec.state === "ok" && compOnDevkit(oldRec, dk) && compOlder(b, oldRec))
       return { ok: false, message: tz("索引里的版本（{v}）比已装的（{now}）旧，已拒绝降级", { v: b.version, now: oldRec.version }) };
   }
   // 模块化工具包：组件依赖的底座包所在的模块得先装上

@@ -47,7 +47,7 @@ function linkTargetOwned(rel, link) {
   if (!OWNED) return true;
   let t;
   if (link.startsWith("/")) {
-    const m = /^\/data\/(?:data|user\/\d+)\/[^/]+\/files\/usr\/(.+)$/.exec(link);
+    const m = /^\/data\/(?:data|user\/\d+|user_de\/\d+)\/[^/]+\/files\/usr\/(.+)$/.exec(link);
     if (m) t = m[1];
     else if (link.startsWith(PREFIX + "/")) t = link.slice(PREFIX.length + 1);
     else return false;                         // 指到工具包外面：不归任何清单管
@@ -90,15 +90,18 @@ async function ownedPaths() {
   const mj = modulesInfo();
   for (const m of (mj && mj.modules) || []) if (m.dir && !badRel(m.dir)) for (const r of readLines(path.join(PREFIX, m.dir, "FILES")) || []) s.add(r);
   let recs = []; try { recs = fs.readdirSync(COMP_DIR).filter((f) => f.endsWith(".json")); } catch {}
+  const dk = devkitIdentity();
   for (const f of recs) {
     const rec = compRecord(f.slice(0, -5));
-    for (const k of ["files", "shared"]) if (rec && Array.isArray(rec[k])) for (const r of rec[k]) if (typeof r === "string") s.add(r);
+    // 旧工具包上的记录不认领路径：文件已随旧 usr 没了，算进来只会把「谁都不负责」的断链报成缺文件
+    if (!rec || !dk || rec.base !== dk.sha256) continue;
+    for (const k of ["files", "shared"]) if (Array.isArray(rec[k])) for (const r of rec[k]) if (typeof r === "string") s.add(r);
   }
   return s;
 }
 
-// 本应用的包名（清单前缀要对得上的那个）：/data/user/0/<包>/files/usr 或 /data/data/<包>/files/usr
-const OWN = PREFIX ? (/\/data\/(?:data|user\/\d+)\/([^/]+)\/files\/usr\/?$/.exec(PREFIX) || [])[1] || "" : "";
+// 本应用的包名（清单前缀要对得上的那个）：/data/user/0/<包>/files/usr 或 /data/data/<包>/files/usr（工作资料分区是 /data/user_de/N）
+const OWN = PREFIX ? (/\/data\/(?:data|user\/\d+|user_de\/\d+)\/([^/]+)\/files\/usr\/?$/.exec(PREFIX) || [])[1] || "" : "";
 
 const comp = (id) => ({ t: "comp", id }), mod = (id) => ({ t: "mod", id }), DEVKIT = { t: "devkit" }, CLAUDE = { t: "claude" };
 
@@ -146,7 +149,7 @@ export async function reconcileNow() {
     for (const l of readLines(path.join(info, f)) || []) {
       const i = l.indexOf("/files/usr/");
       if (i < 0) continue;
-      const m = /^\/data\/(?:data|user\/\d+)\/([^/]+)$/.exec(l.slice(0, i));
+      const m = /^\/data\/(?:data|user\/\d+|user_de\/\d+)\/([^/]+)$/.exec(l.slice(0, i));
       if (!m || (OWN && m[1] !== OWN)) { foreign.set(l.slice(0, i) || "?", (foreign.get(l.slice(0, i) || "?") || 0) + 1); continue; }
       if (l.length > i + 11) rels.push(l.slice(i + 11));
     }

@@ -1673,7 +1673,22 @@ public class MainActivity extends Activity {
         guardServiceWorkers();
         web = new WebView(this) {
             @Override public boolean dispatchTouchEvent(android.view.MotionEvent e) {
-                if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP) { hangCheck(); imeCheck(); }
+                // 窗格关掉 / 被藏起来（GONE）后主 WebView 会丢视图焦点。必须在 super 分发这一下之前补回来：
+                // 页面处理按下 / 抬起时焦点已经就位，输入框才会正常建连接、出光标。放到抬手 300ms 后再补
+                // （imeCheck 里的兜底），这一下点击已经处理完了，页面收不到输入，输入法手里还是补焦点前那条空连接。
+                if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) {
+                    webRefocused = false;
+                    if (!hasFocus() && hasWindowFocus()) {
+                        if (!isFocusable()) setFocusable(true);
+                        if (!isFocusableInTouchMode()) setFocusableInTouchMode(true);
+                        webRefocused = requestFocus();
+                    }
+                } else if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP) {
+                    hangCheck(); imeCheck(webRefocused);
+                    webRefocused = false;
+                } else if (e.getActionMasked() == android.view.MotionEvent.ACTION_CANCEL) {
+                    webRefocused = false;
+                }
                 return super.dispatchTouchEvent(e);
             }
             @Override public android.view.inputmethod.InputConnection onCreateInputConnection(android.view.inputmethod.EditorInfo o) {
@@ -1725,8 +1740,8 @@ public class MainActivity extends Activity {
                 openExternal(url);
                 return true;
             }
-            // 界面专用地址上别的端口一律不许请求（GHSA-hwmm 第 1 项）：会话 Cookie 种在 127.0.0.2 上，Cookie 不分端口，
-            // 回复里一张 <img src="http://127.0.0.2:端口/…">、预览里的一个请求，都会把它送给在那个端口监听的应用。
+            // 界面专用地址上别的端口一律不许请求（GHSA-hwmm 第 1 项）：会话 Cookie 种在界面地址（Env.HOST，默认 127.0.0.2）上，Cookie 不分端口，
+            // 回复里一张 <img src="http://界面地址:端口/…">、预览里的一个请求，都会把它送给在那个端口监听的应用。
             // 这里在原生层拦，不靠 CSP —— iframe 里的文档不归界面的 CSP 管
             @Override public android.webkit.WebResourceResponse shouldInterceptRequest(WebView v, android.webkit.WebResourceRequest req) {
                 Uri u = req.getUrl();
@@ -1938,8 +1953,9 @@ public class MainActivity extends Activity {
         Env.onBoot = myOnBoot = (v) -> ui.post(() -> {
             android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
             cm.setCookie("http://" + Env.HOST + ":" + Env.PORT, "cc_t_" + Env.PORT + "=" + v + "; Path=/; HttpOnly; SameSite=Strict");
-            // 旧版种在 127.0.0.1 上的那份清掉：网关已经不认了，留着只会被别的端口收走
-            cm.setCookie("http://127.0.0.1:" + Env.PORT, "cc_t_" + Env.PORT + "=; Path=/; Max-Age=0");
+            // 旧版种在另一个界面地址上的那份清掉：网关已经不认了，留着只会被别的端口收走。
+            // 回退设备上界面就在 127.0.0.1（Env.checkHost），清的是旧版留在 127.0.0.2 上的死值（复核报告发现 #2）
+            cm.setCookie("http://" + ("127.0.0.1".equals(Env.HOST) ? "127.0.0.2" : "127.0.0.1") + ":" + Env.PORT, "cc_t_" + Env.PORT + "=; Path=/; Max-Age=0");
             cm.flush();
             if (squatShown || waitingShown) { squatShown = false; waitingShown = false; loadUi(); }
         });
@@ -1976,8 +1992,8 @@ public class MainActivity extends Activity {
     }
 
     // ── 冻结脱困 ─────────────────────────────────────────────────────
-    //  2026-10-16 实测：触摸滚动冻住后 location.reload() 和切后台都不好，跳到 127.0.0.2:9 再跳回来就好 ——
-    //  卡住的是 WebView 给这个文档的手势状态，换站点才会重建。127.0.0.2:9 是浏览器直接拒绝的端口，不发任何网络请求。
+    //  2026-10-16 实测：触摸滚动冻住后 location.reload() 和切后台都不好，跳到 localhost:9 再跳回来就好 ——
+    //  卡住的是 WebView 给这个文档的手势状态，换站点才会重建。localhost:9 是浏览器直接拒绝的端口，不发任何网络请求。
     //  loadUrl 不经过 shouldOverrideUrlLoading，不会被当外链拦掉。跳的那一下先把 WebView 藏起来，免得闪错误页。
     // ── 输入法拿着空连接 ──
     //  「首启打不了中文」的真因（2026-10-21 输入法事件流实测）：页面一加载完，新会话就用 JS 把焦点放进输入框，
@@ -1986,15 +2002,24 @@ public class MainActivity extends Activity {
     //  英文能进，多半是输入法在没有连接时退回去发按键事件（还没单独验证）。分屏 / 切屏让窗口失焦再得焦，连接重建，所以又好了。
     //  这里在手指抬起后看一眼：页面焦点在可编辑处、手里的连接却还是空的，就让输入法重新连一次。
     private boolean imeNoConn = false;
-    private void imeCheck() {
+    /** 这一下按下时主 WebView 没有视图焦点、已在 super 分发前补回：抬手后不能只等 imeNoConn */
+    private boolean webRefocused = false;
+    private void imeCheck(boolean refocused) {
         ui.postDelayed(() -> {
             if (web == null) return;
             // 手指刚点在主界面上，焦点就该在它这里：窗格关掉 / 被藏起来（GONE）后主 WebView 会丢视图焦点，
             // 没有焦点就不会为输入框新建输入连接，点它既没有光标也没有键盘
-            if (!web.hasFocus() && web.hasWindowFocus()) web.requestFocus();
-            if (!imeNoConn) return;
+            boolean late = false;
+            if (!web.hasFocus() && web.hasWindowFocus()) late = web.requestFocus();
+            // 这一下是「补回来的焦点」：输入法可能还拿着补焦点前那条空连接，即使 onCreateInputConnection
+            // 最近一次返回的不是 null（imeNoConn=false）也要让它重连。只认 imeNoConn 会漏掉这种情况。
+            final boolean force = refocused || late;
+            if (!force && !imeNoConn) return;
             web.evaluateJavascript("(function(){var a=document.activeElement;return !!a&&(a.isContentEditable||/^(TEXTAREA|INPUT)$/.test(a.tagName))})()", v -> {
-                if (!"true".equals(v) || web == null || !imeNoConn) return;
+                // 这 300ms 里窗格又开了 / 弹出系统文件选择器 / 切到后台：焦点已经不在主 WebView 上，
+                // 别去动输入法（窗格地址栏、窗格网页的输入不能被抢）
+                if (!"true".equals(v) || web == null || !web.hasFocus() || !web.hasWindowFocus()) return;
+                if (!force && !imeNoConn) return;
                 android.view.inputmethod.InputMethodManager m = getSystemService(android.view.inputmethod.InputMethodManager.class);
                 if (m != null) m.restartInput(web);
             });
@@ -2069,7 +2094,8 @@ public class MainActivity extends Activity {
         if (web == null || bounceStage != 0) return;
         bounceStage = 1;
         web.setVisibility(View.INVISIBLE);
-        web.loadUrl("http://127.0.0.3:9/");     // 必须跨站：界面自己在 127.0.0.2（Env.HOST），同站跳一次不管用
+        web.loadUrl("http://localhost:9/");     // 必须跨站：界面自己在 Env.HOST，同站跳一次不管用；localhost 和两种回环写法都不同站，端口 9 没人听立即拒接。
+                                                // 不用 127.0.0.3：回退设备上（Env.checkHost）它同样连不通，脱困会被连接超时拖慢
         ui.postDelayed(() -> { if (bounceStage == 1) bounceBack(); }, 1500);   // 落地回调没来
         ui.postDelayed(() -> { if (bounceStage != 0) { bounceStage = 0; if (web != null) web.setVisibility(View.VISIBLE); } }, 10000);   // 这 10 秒里渲染进程可能没了、web 已换成 null（11-04 报告 A4）
     }
@@ -2498,11 +2524,26 @@ public class MainActivity extends Activity {
         h = h.toLowerCase(java.util.Locale.ROOT);
         return h.equals("localhost") || h.equals("[::1]") || h.equals("::1") || loopbackV4(h) || isUiHost(h);
     }
-    /** 是不是界面专用地址（Env.HOST = 127.0.0.2）：各种写法（2130706434、0x7f000002、127.2 …）浏览器都会规范成它，一并认 */
+    /** 是不是界面专用地址（Env.HOST：默认 127.0.0.2，个别设备回退 127.0.0.1，见 Env.checkHost）：
+     *  各种写法（2130706434、0x7f000002、127.2 …）浏览器都会规范成它，一并认 */
     static boolean isUiHost(String h) {
         if (h == null) return false;
         h = h.toLowerCase(java.util.Locale.ROOT);
+        boolean one = "127.0.0.1".equals(Env.HOST);
         if (h.startsWith("[::ffff:")) {          // [::ffff:127.0.0.2] / [::ffff:7f00:2]
+            String t = h.substring(8, h.length() - (h.endsWith("]") ? 1 : 0));
+            if (t.equals(one ? "7f00:1" : "7f00:2")) return true;
+            h = t;
+        }
+        return ipv4(h) == (one ? 0x7f000001L : 0x7f000002L);
+    }
+    /** 老界面专用地址 127.0.0.2（各种写法）。内置浏览器（BrowserPane）的拦截锚在这里，不跟 Env.HOST 的回退走：
+     *  回退设备上界面地址是 127.0.0.1，内置浏览器还要能开本机 127.0.0.1 别的端口上的服务（本地开发服务器之类）。
+     *  代价：回退设备上会话 Cookie 种在 127.0.0.1，用户自己去开那个地址时会带上它（11-14 交接 2.6 明示的安全代价，只在回退设备上存在） */
+    static boolean isUiHostDot2(String h) {
+        if (h == null) return false;
+        h = h.toLowerCase(java.util.Locale.ROOT);
+        if (h.startsWith("[::ffff:")) {
             String t = h.substring(8, h.length() - (h.endsWith("]") ? 1 : 0));
             if (t.equals("7f00:2")) return true;
             h = t;

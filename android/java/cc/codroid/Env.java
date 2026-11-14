@@ -8,8 +8,27 @@ import java.util.Map;
 final class Env {
     static final int PORT = 8791;
     /** 界面和 App 访问网关用的地址。不用 127.0.0.1：Cookie 不按端口隔离，种在 127.0.0.1 上会被同机别的应用
-     *  在任意端口收走（GHSA-hwmm 第 1 项）。网关两个地址都听，终端里的工具照旧走 127.0.0.1 + 令牌头。见 gateway/gw/access.mjs 的 UI_HOST */
-    static final String HOST = "127.0.0.2";
+     *  在任意端口收走（GHSA-hwmm 第 1 项）。网关两个地址都听，终端里的工具照旧走 127.0.0.1 + 令牌头。见 gateway/gw/access.mjs 的 UI_HOST。
+     *  个别设备上 127.0.0.2 根本连不通（11-14 一加 PGP110 / Android 17：发往它的 SYN 被静默丢掉，只剩 127.0.0.1 能通）：
+     *  核不了身份 → 每 40 秒杀一次网关 → 界面永远「等待网关」。类加载时自连探测一次（checkHost），不通就回退 127.0.0.1；
+     *  代价是回退设备上会话 Cookie 落在 127.0.0.1，内置浏览器访问本机 127.0.0.1 别的端口时会带上它（11-14 交接 2.6 明示的安全代价） */
+    static volatile String HOST = "127.0.0.2";
+    static { checkHost(); }
+
+    /** 这台设备上 127.0.0.2 通不通：先绑一个端口、再连它自己。绑不上、或 SYN 等不到应答（该设备上被静默丢掉）就回退 127.0.0.1。
+     *  整个进程只跑这一次，正常设备行为完全不变 */
+    private static void checkHost() {
+        try (java.net.ServerSocket ss = new java.net.ServerSocket()) {
+            ss.setReuseAddress(false);
+            ss.bind(new java.net.InetSocketAddress("127.0.0.2", 0));
+            try (java.net.Socket s = new java.net.Socket()) {
+                s.connect(new java.net.InetSocketAddress("127.0.0.2", ss.getLocalPort()), 300);
+            }
+        } catch (Exception e) {
+            HOST = "127.0.0.1";
+            android.util.Log.w("cccodroid", "127.0.0.2 在本机连不通，界面地址回退 127.0.0.1：" + e);
+        }
+    }
 
     /** 网关访问令牌（server.mjs 首次启动时生成，0600，存在应用私有目录）。见 server.mjs「访问控制」 */
     private static volatile File tokenFile = new File("/data/data/cc.codroid/files/home/.gateway-token");

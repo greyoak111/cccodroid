@@ -24,14 +24,13 @@ const TTL = 14 * 86400e3;
 const readLines = (f) => { try { return fs.readFileSync(f, "utf8").split("\n").filter(Boolean); } catch { return []; } };
 const manPath = (l) => l.split(" ").slice(2).join(" ");
 
-/** 底座认领的路径（相对 $PREFIX）：各包清单 + 工具包 / 模块清单。skip 里的 .list（相对路径）不算 —— 组件卸载时排除它自己带进来的包清单 */
+/** 底座认领的路径（相对 $PREFIX）：各包清单 + 工具包 / 模块清单。
+ *  skip 里的 .list（相对路径）不算 —— 组件卸载时排除它自己带进来的包清单。
+ *  但底座清单自己也列着的 .list 不能跳：工具包换过之后，旧组件记录里的同名 .list 现在是底座的，
+ *  跳掉它就等于放弃了这份清单对底座文件的保护，卸旧组件会删到新底座的文件（05-工具包重装丢组件）。 */
 export function baseOwnedPaths(skip) {
   const s = new Set();
-  const info = path.join(PREFIX, "var/lib/dpkg/info");
-  try {
-    for (const f of fs.readdirSync(info)) if (f.endsWith(".list") && !(skip && skip.has("var/lib/dpkg/info/" + f)))
-      for (const l of readLines(path.join(info, f))) { const i = l.indexOf("/files/usr/"); if (i >= 0) s.add(l.slice(i + 11)); }
-  } catch {}
+  // 先收工具包 / 模块清单：判断 skip 里的 .list 是不是底座自己带的，要看这里
   const dk = path.join(PREFIX, "libexec/devkit");
   for (const l of readLines(path.join(dk, "FILES"))) s.add(l);
   for (const f of [path.join(dk, "MANIFEST"), path.join(PREFIX, ".devkit-manifest")]) for (const l of readLines(f)) s.add(manPath(l));
@@ -42,6 +41,16 @@ export function baseOwnedPaths(skip) {
     for (const l of readLines(path.join(d, "FILES"))) s.add(l);
     for (const f of ["MANIFEST", "MANIFEST.local"]) for (const l of readLines(path.join(d, f))) s.add(manPath(l));
   }
+  const info = path.join(PREFIX, "var/lib/dpkg/info");
+  try {
+    for (const f of fs.readdirSync(info)) {
+      if (!f.endsWith(".list")) continue;
+      const rel = "var/lib/dpkg/info/" + f;
+      if (skip && skip.has(rel) && !s.has(rel)) continue;   // 组件自己带的包清单（底座清单里没有同名项）
+      s.add(rel);                                            // 清单文件本身也是底座的，不能按组件文件删掉
+      for (const l of readLines(path.join(info, f))) { const i = l.indexOf("/files/usr/"); if (i >= 0) s.add(l.slice(i + 11)); }
+    }
+  } catch {}
   return s;
 }
 

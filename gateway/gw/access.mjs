@@ -34,8 +34,11 @@ export const COOKIE = `cc_t_${CFG.port}`;
 // <img src="http://127.0.0.1:端口/…">，Cookie 都会跟着送过去，对方拿到就能用原生客户端重放 /api/*。
 // cccodroid 的界面因此改走 127.0.0.2（同样是回环，网关两个地址都听），会话 Cookie 只认这个地址上来的请求；
 // App 那边把内置浏览器里这个地址的所有端口、界面里这个地址的其他端口全拦掉，Cookie 就送不到别人手里。
-// 开发端的外壳还是 127.0.0.1，照旧
-export const UI_HOST = "127.0.0.2";
+// 开发端的外壳还是 127.0.0.1，照旧。
+// 个别设备上 127.0.0.2 根本连不通（11-14 一加 PGP110 / Android 17：发往它的 SYN 被静默丢掉，127.0.0.1 正常）：
+// App 核不了身份，每 40 秒杀一次网关重起，界面永远停在「等待网关」。App 拉起网关前先自连探测，不通就经
+// CCAPP_UI_HOST=127.0.0.1 让界面改走主地址（见 Env.checkHost）。只认这两个值，别的一律按 127.0.0.2
+export const UI_HOST = process.env.CCAPP_UI_HOST === "127.0.0.1" ? "127.0.0.1" : "127.0.0.2";
 const UI_HOSTPORT = `${UI_HOST}:${CFG.port}`;
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${CFG.port}`, `localhost:${CFG.port}`, UI_HOSTPORT]);
 /** 这个请求能不能凭 Cookie 认、能不能种 Cookie：cccodroid 里只有界面专用地址可以 */

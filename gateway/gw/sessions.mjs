@@ -60,6 +60,43 @@ export function savePins() {
 // ── 会话（claude 的 transcript 文件）─────────────────────────────────
 /** 项目目录名 → 真实 cwd（从 jsonl 里读，目录名本身不可逆） */
 export const PEEK_CACHE = new Map();   // 标题/cwd 取自文件开头，写进去就不变了，没必要每次列表都重读
+// Claude Code 自己的 /resume 只滤 sessionKind=daemon / daemon-worker（后台守护进程开的会话，不是用户
+// 开的那条对话）；bg 是用户自己甩到后台的会话，在 /resume 里带「bg」标记照常显示，这里不能一起藏掉。
+// 同样不按 isSidechain / 标题猜：用户从工具调用里接出来的会话、被复用成任务的会话都不能因此消失。
+const HIDDEN_KINDS = new Set(["daemon", "daemon-worker"]);
+const KIND_CACHE = new Map();   // 文件 → { size, mtimeMs, ino, kind }：分类要扫每个文件的开头，缓存住
+function sessionKindOf(file, st) {
+  const hit = KIND_CACHE.get(file);
+  if (hit && st && hit.size === st.size && hit.mtimeMs === st.mtimeMs && (hit.ino == null || st.ino == null || hit.ino === st.ino)) return hit.kind;
+  let kind = "", fd = null;
+  try {
+    fd = fs.openSync(file, "r");
+    // 和 Claude Code 读 /resume 元数据一样：只看文件开头 64 KB 里第一条带 parentUuid 的记录。sessionKind
+    // 就在这条记录上；不整份读，免得几千个会话时列表被磁盘拖住。找不到就当普通会话（宁可多显示，不误藏）。
+    const buf = Buffer.alloc(65536);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    const head = buf.toString("utf8", 0, n);
+    for (const line of head.split("\n")) {
+      if (!line.trim()) continue;
+      let ev;
+      try { ev = JSON.parse(line); } catch {
+        // 这一行被 64 KB 截断 / 不是完整 JSON：只有它看起来就是主记录时才停，其余（如超长正文）继续往下找。
+        // 解析不了就当普通会话显示——宁可多显示，也不能把用户自己的对话藏掉。
+        if (line.includes('"parentUuid":')) break;
+        continue;
+      }
+      if (!ev || !Object.prototype.hasOwnProperty.call(ev, "parentUuid")) continue;
+      if (typeof ev.sessionKind === "string") kind = ev.sessionKind;
+      break;
+    }
+  } catch {} finally {
+    if (fd != null) try { fs.closeSync(fd); } catch {}
+  }
+  const rec = { size: st?.size, mtimeMs: st?.mtimeMs, ino: st?.ino, kind };
+  KIND_CACHE.set(file, rec);
+  if (KIND_CACHE.size > 5000) KIND_CACHE.delete(KIND_CACHE.keys().next().value);
+  return kind;
+}
 /** st：调用方已经 stat 过就传进来。缓存带上 size/mtime/inode：同尺寸原地改写、删消息重写也能察觉（200-15-08） */
 export function peekSession(file, st = null) {
   let cur = st;
@@ -140,8 +177,11 @@ export function listSessions(limit = 150) {
     }
   }
 
-  found.sort((a, b) => b.mtime - a.mtime);
-  const shown = found.filter((s, i) => i < limit || PINS[s.id]);
+  // 先滤守护进程会话，再排序、截断：反过来的话，最近的守护会话会占掉 limit 名额，把用户自己的对话挤出去
+  for (const s of found) s.hidden = HIDDEN_KINDS.has(sessionKindOf(s.file, { size: s.size, mtimeMs: s.mtime, ino: s.ino }));
+  const visible = found.filter((s) => !s.hidden);
+  visible.sort((a, b) => b.mtime - a.mtime);
+  const shown = visible.filter((s, i) => i < limit || PINS[s.id]);
   const out = shown.map((s) => {
     const meta = peekSession(s.file, { size: s.size, mtimeMs: s.mtime, ino: s.ino }), ab = archiveBrief(s.id, s.size, lineageCached(s.id)?.compacts?.length || 0);
     return {
@@ -158,7 +198,7 @@ export function listSessions(limit = 150) {
       currentProject: meta.cwd === CFG.workspace || meta.cwd === realWorkspace(),
     };
   });
-  out.total = found.length;
+  out.total = visible.length;
   return out;
 }
 
@@ -376,7 +416,7 @@ export async function routeSessions(req, res, u, p) {
     const list = listSessions(Math.min(5000, Math.max(150, parseInt(u.searchParams.get("limit"), 10) || 150)));
     // 会话目录读不了：以前回 200 空表，和「真的没有会话」分不出来（FIND-015）。界面会显示这条错误并给重试
     if (list.error) return sendJson(res, 500, { ok: false, error: "read_failed", message: tz("会话列表读不出来（{msg}），不是没有会话；检查存储权限后再刷新。", { msg: list.error }) });
-    // total：磁盘上一共多少个。列表只给最近 limit 个（加置顶），界面据此说「最近 N 个，共 M 个」（#178-3）
+    // total：用户能看到的会话一共多少个（不含后台守护会话）。列表只给最近 limit 个（加置顶），界面据此说「最近 N 个，共 M 个」（#178-3）
     return sendJson(res, 200, { sessions: list, workspace: CFG.workspace, count: list.length, total: list.total ?? list.length });
   }
   // ── 会话管理：批量进回收站 / 回收站 / 导出 / 导入 ──

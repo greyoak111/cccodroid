@@ -405,6 +405,8 @@ public class GatewayService extends Service {
         StringBuilder ks = new StringBuilder();
         for (byte x : kb) ks.append(String.format("%02x", x));
         pb.environment().put("CCAPP_SPAWN_KEY", "stdin");
+        // 界面地址探测的结果（见 Env.checkHost）：回退设备上让网关把界面地址并进主地址（gateway/gw/access.mjs 的 UI_HOST）
+        pb.environment().put("CCAPP_UI_HOST", Env.HOST);
         pb.redirectInput(ProcessBuilder.Redirect.PIPE);
         pb.directory(env.app);
         pb.redirectErrorStream(true);

@@ -226,7 +226,8 @@ final class Consent {
                     done(a, Tr.f("没有验证，「{0}」只在这次运行有效", label(name, value)));
                 }
             });
-        } catch (Exception e) { done(a, Tr.t("弹不出锁屏验证，只在这次运行有效：") + e.getMessage()); }
+        } catch (java.lang.SecurityException e) { done(a, Tr.t("弹不出锁屏验证（缺少生物识别权限），只在这次运行有效：") + e.getMessage()); }
+        catch (Exception e) { done(a, Tr.t("弹不出锁屏验证，只在这次运行有效：") + e.getMessage()); }
     }
     private static void done(Activity a, String toast) {
         synchronized (LOCK) { running = false; }

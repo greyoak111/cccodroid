@@ -246,8 +246,9 @@
       }
     } catch (e) {
       if (!ok()) return;
-      // 手机浏览器从 127.0.0.1 / localhost 打开：/api 因来源校验必然 403，网关其实在线（0.6.9 审计 195-G.6）
-      if (e.status === 403 && location.hostname !== "127.0.0.2") {
+      // 手机浏览器从 127.0.0.1 / localhost 打开：/api 因来源校验必然 403，网关其实在线（0.6.9 审计 195-G.6）。
+      // 按有没有原生桥判断是不是在应用里，不按地址：127.0.0.2 不通的设备上应用自己的界面也在 127.0.0.1
+      if (e.status === 403 && !window.CCApp) {
         srv.foreign = true;
         clearTimeout(busWatch); busWatch = 0;
         if (es) { try { es.close(); } catch {} es = null; }
@@ -281,7 +282,7 @@
   })();
 
   // ── 滚动冻结脱困（自动 + 顶栏雪花按钮）──────────────────────────────
-  //  冻住时页面救不了自己：跨站跳转会被壳当外链拦掉，只能请壳（CCApp.unfreeze）跳一次 127.0.0.2:9 再回来。
+  //  冻住时页面救不了自己：跨站跳转会被壳当外链拦掉，只能请壳（CCApp.unfreeze）跳一次别的站点（localhost:9，见 MainActivity.bounce）再回来。
   //  会话 id 本来就在 localStorage；输入框草稿先放 sessionStorage，回来再填上。
   //  每次脱困都在 localStorage["cc.freezeLog"] 留最近 5 次现场（含触摸日志尾巴），以后找触发条件用。
   (() => {
