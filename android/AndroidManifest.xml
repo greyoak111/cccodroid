@@ -180,5 +180,8 @@
             </intent-filter>
             <meta-data android:name="android.accessibilityservice" android:resource="@xml/a11y" />
         </service>
+
+        <!-- 激活 Shizuku 时触发 binder 补投的一次性进程（见 ShzNudge.java）。不导出 -->
+        <service android:name=".ShzNudge" android:process=":shznudge" android:exported="false" />
     </application>
 </manifest>

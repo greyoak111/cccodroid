@@ -209,6 +209,7 @@ window.I18N_DICT.en = {
   "重启手机后自动重新激活（需连着 Wi‑Fi；会在开机时启动 cccodroid 后台服务）": "Reactivate automatically after a reboot (needs Wi-Fi; starts cccodroid's background service at boot)",
   "后台保活增强：放宽安卓的“幽灵进程”上限（防止并行编译时子进程被系统杀掉）、加入电池白名单、允许后台运行": "Keep-alive boost: raise Android's “phantom process” limit (so parallel builds don't have their subprocesses killed), add to the battery whitelist, allow background running",
   "开启后，终端里可用 <code>priv '命令'</code> 以 shell 身份执行（pm / am / settings / dumpsys / logcat / screencap…），Claude 也会用它。 没有 Shizuku 时基础开发功能照常，只是这些调试能力用不了。": "Once enabled, <code>priv 'command'</code> runs in the terminal as the shell user (pm / am / settings / dumpsys / logcat / screencap…), and Claude can use it too. Without Shizuku the basic development features still work — only these debug capabilities are unavailable.",
+  "荣耀 / 华为等系统会冻住后台的 Shizuku、拖慢激活：到系统应用管理 → Shizuku 里打开「忽略电池优化」防冻。": "Honor / Huawei and similar systems freeze background Shizuku and slow down activation: in system App management \u2192 Shizuku, enable \"Ignore battery optimization\" to prevent freezing.",
 
   // ── updates ──
   "已是最新": "Up to date",

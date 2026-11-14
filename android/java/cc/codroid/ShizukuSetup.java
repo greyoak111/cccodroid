@@ -270,12 +270,12 @@ final class ShizukuSetup {
             return;
         }
         if (!onWifi()) { set("need_wifi", Tr.t("无线调试要连着 Wi‑Fi 才能用（不需要能上网）。连上 Wi‑Fi 后再点「激活」")); return; }
-        if (connectAndStart()) return;
+        if (connectAndStart(true)) return;
         startPairing();
     }
 
     /** 已配对过的情况：开无线调试（有 WRITE_SECURE_SETTINGS 时自己开）→ 连 → 起服务。成功返回 true */
-    private boolean connectAndStart() throws Exception {
+    private boolean connectAndStart(boolean bounce) throws Exception {
         if (wirelessOn() == 0 && hasWss()) {
             if (wifiOrig < 0) wifiOrig = 0;
             set("connecting", Tr.t("打开无线调试…"));
@@ -289,7 +289,7 @@ final class ShizukuSetup {
         String serial = trustedSerial(untrusted);
         if (serial != null) {
             markPaired();    // 钥匙被信任了（不管是哪次配对的）：重启后能自动来
-            startServer(serial);
+            startServer(serial, bounce);
             return true;
         }
         // 端口在、却连不上：本机已不再信任我们的 adb 钥匙（在无线调试里被"取消保存"了），得重新配对
@@ -297,20 +297,32 @@ final class ShizukuSetup {
         return false;
     }
 
-    /** 找一个认我们钥匙的无线调试端口，连上并返回 serial；没有返回 null。有端口拒绝我们时 untrusted[0]=true */
+    /** 找一个认我们钥匙的无线调试端口，连上并返回 serial；没有返回 null。只有认证被拒（钥匙真不认了）时 untrusted[0]=true */
     private String trustedSerial(boolean[] untrusted) throws Exception {
         List<Integer> ports = discover("_adb-tls-connect._tcp", 8000);
         // mDNS 找不到（实测开着 VPN 时就找不到）：扫本机回环口，认出回 STLS 的那个端口
         if (ports.isEmpty()) { log("mDNS 没找到，改扫本机端口"); ports = probeLocalAdb(); }
-        log("连接端口候选 " + ports);
-        for (int port : ports) {
-            String serial = "127.0.0.1:" + port;
-            String out = adb(20, "connect", serial);
-            if (!out.contains("connected to")) { untrusted[0] = true; continue; }
-            String st = adb(10, "-s", serial, "get-state").trim();
-            if (st.equals("device")) return serial;
-            adb(10, "disconnect", serial); log(serial + " 状态 " + st);
-            return null;
+        // 荣耀 Magic V6 实测：无线调试开开关关之后 adbd 重启，mDNS 记录还挂着旧端口，adbd 也要
+        // 几秒才重新监听。连不上 ≠ 钥匙失效：先探测真实端口重试，再等两秒重试，别误判成要重新配对。
+        for (int attempt = 0; attempt < 3; attempt++) {
+            log("连接端口候选 " + ports);
+            for (int port : ports) {
+                String serial = "127.0.0.1:" + port;
+                String out = adb(20, "connect", serial);
+                if (!out.contains("connected to")) {
+                    if (out.contains("failed to authenticate")) untrusted[0] = true;   // 只有认证失败才是钥匙失效
+                    continue;
+                }
+                String st = adb(10, "-s", serial, "get-state").trim();
+                if (st.equals("device")) return serial;
+                adb(10, "disconnect", serial); log(serial + " 状态 " + st);
+                return null;
+            }
+            if (attempt < 2) {
+                List<Integer> p2 = probeLocalAdb();
+                if (!p2.isEmpty()) ports = p2;
+                else Thread.sleep(2000);
+            }
         }
         return null;
     }
@@ -394,7 +406,7 @@ final class ShizukuSetup {
                 }
                 pairNote(Tr.t("✓ 配对成功，正在启动 Shizuku…"), false);
                 Thread.sleep(1500);
-                if (!connectAndStart()) { failNote(Tr.t("配对回了成功，但连不上无线调试：确认「无线调试」开关开着再点「激活」；还不行就到「无线调试」里取消多出来的配对设备，重新配对")); return; }
+                if (!connectAndStart(true)) { failNote(Tr.t("配对回了成功，但连不上无线调试：确认「无线调试」开关开着再点「激活」；还不行就到「无线调试」里取消多出来的配对设备，重新配对")); return; }
                 pairOk = 1; pairCheckedAt = System.currentTimeMillis();
             } catch (Exception e) {
                 // 别只改状态：通知还停在常驻的「配对中…」，用户划不掉
@@ -404,14 +416,97 @@ final class ShizukuSetup {
     }
 
     private void startServer(String serial) throws Exception {
+        startServer(serial, true);
+    }
+
+    private void startServer(String serial, boolean bounce) throws Exception {
         set("starting", Tr.t("启动 Shizuku 服务…"));
         String out = adb(40, "-s", serial, "shell", starter());
-        adb(10, "disconnect", serial);
-        for (int i = 0; i < 60 && !Priv.running(); i++) Thread.sleep(250);
-        if (!Priv.running()) throw new Exception(Tr.t("Shizuku 没起来：") + tail(out));
+        // 服务起来了，但凭据要等服务投递。Shizuku 13.5+ 有两条投递路：启动时扫一遍申请了 API
+        // 的应用逐个投，和任何应用进程/uid 状态变化时补投。荣耀 Magic V6 / 安卓 17 + Shizuku 13.6
+        // 实测：第一条路对 shell 拉起的服务进程返回空（包可见性过滤）；激活时本应用一直前台、
+        // 状态不变，第二条路也不触发——等多久都没用。所以主动做一次「退到桌面再回来」：
+        // 前后台往返产生状态变化，凭据立刻补投（安卓 10 起后台起 Activity 受限，但离开前台
+        // 10 秒宽限内允许）。开机自动激活（reactivateAsync）不弹界面，bounce=false。
+        if (bounce) {
+            try {
+                // 整段在设备侧执行：切到桌面（荣耀上 shell 解析不了 HOME intent 就注入 Home 键），
+                // 3 秒后经 shell 的 am start 把应用叫回前台。用 shell 叫回不受安卓后台起 Activity
+                // 的限制，也不依赖应用进程在后台没被厂商冻住——整段跑在 adbd 那侧。
+                String r = adb(20, "-s", serial, "shell",
+                    "am start -c android.intent.category.HOME 2>/dev/null || input keyevent 3; sleep 3; am start --activity-reorder-to-front -n cc.codroid/.MainActivity");
+                adb(10, "disconnect", serial);
+                log("自动切出切回：" + tail(r));
+            } catch (Exception e) {
+                log("自动切出切回失败：" + e.getMessage());
+                try { adb(10, "disconnect", serial); } catch (Exception ignored) {}
+                bounceBack();   // adb 都不行了：留条通知，点一下回来同样触发补投
+            }
+        } else {
+            adb(10, "disconnect", serial);
+        }
+        // 起一个一次性进程（ShzNudge）再敲一次门：部分机型上进程状态变化也能触发补投；
+        // 本机无效但无害。然后等 60 秒（每 30 秒确认服务进程还在），没到就转入第二阶段——
+        // 提示用户切出去再切回来，继续守着，凭据一到自动完成激活（最多再等 10 分钟）。
+        boolean[] alive = new boolean[1];
+        for (int i = 0; i < 240 && !Priv.running(); i++) {
+            Thread.sleep(250);
+            if (i > 0 && i % 120 == 0) {
+                set("starting", Tr.f("Shizuku 在启动：正在把凭据投递给各应用（{0} 秒）…", i / 4));
+                alive[0] = nudgeAndCheck(serial, alive[0], out);
+            }
+        }
+        if (!Priv.running() && !alive[0]) throw new Exception(Tr.t("Shizuku 没起来：") + tail(out));
+        // 第二阶段：服务进程在、凭据还没到。系统只在应用状态变化时补投——让用户切出去再切回来。
+        // 切回之后 Priv.running() 变 true，这里自动收尾。每 30 秒确认服务进程，没了才放弃。
+        for (int i = 0; i < 2400 && !Priv.running(); i++) {
+            if (i == 0) set("starting", Tr.t("服务已启动，正在等系统补投凭据：按 Home 切出去、再切回 cccodroid，就会自动完成激活"));
+            Thread.sleep(250);
+            if (i > 0 && i % 120 == 0) alive[0] = nudgeAndCheck(serial, alive[0], out);
+        }
+        if (!Priv.running()) throw new Exception(Tr.t("等了 10 分钟，凭据还是没投递到 cccodroid：") + (alive[0] ? Tr.t("（服务进程还在，点「刷新」看看，或重新点激活）") : Tr.t("服务进程也没了")) );
         restoreWifi();
         cancelNote();
         requestPermission();
+    }
+
+    /** 自动切回前台。安卓 10 起后台起 Activity 受限，但离开前台 10 秒宽限内允许；被拦就留条通知，点一下回来同样触发补投 */
+    private void bounceBack() {
+        try {
+            ctx.startActivity(MainActivity.internal(ctx, MainActivity.ACTION_SHIZUKU_NOOP)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+        } catch (Exception e) {
+            try {
+                PendingIntent pi = PendingIntent.getActivity(ctx, NOTE + 1,
+                    MainActivity.internal(ctx, MainActivity.ACTION_SHIZUKU_NOOP).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                ctx.getSystemService(NotificationManager.class).notify(NOTE, new Notification.Builder(ctx, CH)
+                    .setSmallIcon(android.R.drawable.ic_secure)
+                    .setContentTitle("Shizuku")
+                    .setContentText(Tr.t("点此回到 cccodroid，完成凭据投递"))
+                    .setStyle(new Notification.BigTextStyle().bigText(Tr.t("点此回到 cccodroid，完成凭据投递")))
+                    .setContentIntent(pi).setAutoCancel(true).build());
+            } catch (Exception ignored) {}
+            log("自动切回被拦，留了通知：" + e.getMessage());
+        }
+    }
+
+    /** 看一眼服务进程还在不在（不在就直接抛「没起来」），顺便再敲一次门。返回进程是否还在 */
+    private boolean nudgeAndCheck(String serial, boolean wasAlive, String out) throws Exception {
+        try {
+            String c = adb(15, "connect", serial);
+            if (c.contains("connected to")) {
+                String pid = adb(15, "-s", serial, "shell", "pidof shizuku_server").trim();
+                adb(10, "disconnect", serial);
+                if (pid.isEmpty()) throw new Exception(Tr.t("Shizuku 没起来：") + tail(out));
+                try { ctx.startService(new Intent(ctx, ShzNudge.class)); } catch (Throwable ignored) {}
+                return true;
+            }
+        } catch (Exception e) {
+            if (e.getMessage() != null && e.getMessage().startsWith(Tr.t("Shizuku 没起来："))) throw e;
+            log("检查服务进程失败，继续等：" + e.getMessage());
+        }
+        return wasAlive;
     }
 
     private String starter() throws Exception {
@@ -448,7 +543,7 @@ final class ShizukuSetup {
                 wifiOrig = wirelessOn();
                 try {
                     if (!onWifi()) { failNote(Tr.t("没连 Wi‑Fi，Shizuku 没能自动激活。连上 Wi‑Fi 后点此重试")); return; }
-                    if (!connectAndStart()) failNote(Tr.t("Shizuku 自动激活没成功，点此重试"));
+                    if (!connectAndStart(false)) failNote(Tr.t("Shizuku 自动激活没成功，点此重试"));
                 } finally { if (!Priv.running()) restoreWifi(); idle(); }
             } catch (Exception e) {
                 failNote(Tr.t("Shizuku 自动激活失败：") + e.getMessage());
