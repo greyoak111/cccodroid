@@ -305,8 +305,12 @@ public class MainActivity extends Activity {
 
     @Override public void onWindowFocusChanged(boolean has) {
         super.onWindowFocusChanged(has);
-        // 只在窗口里谁都没焦点时补：应用内浏览器的地址栏 / 网页正拿着焦点时别抢
-        if (has && web != null && web.getParent() != null && getCurrentFocus() == null) web.requestFocus();
+        // 窗格（地址栏 / 窗格里的网页）正开着且拿着焦点时别抢；其余情况一律还给主界面。
+        // 只认 getCurrentFocus() == null 不够：焦点可能落在根布局或已被藏起来（GONE）的窗格上，
+        // 主 WebView 就再也拿不回来，之后点输入框没有光标、键盘起不来（同「首启打不了字」）
+        if (!has || web == null || web.getParent() == null) return;
+        boolean paneOwns = pane != null && pane.getVisibility() == View.VISIBLE && pane.hasFocus();
+        if (!paneOwns) web.requestFocus();
     }
 
     /** 帧率心跳：小米上应用自己的帧率靠广播告诉 PowerKeeper；它重启或名单被重置后，靠这里补回来 */
@@ -1984,7 +1988,11 @@ public class MainActivity extends Activity {
     private boolean imeNoConn = false;
     private void imeCheck() {
         ui.postDelayed(() -> {
-            if (web == null || !imeNoConn || !web.hasFocus()) return;
+            if (web == null) return;
+            // 手指刚点在主界面上，焦点就该在它这里：窗格关掉 / 被藏起来（GONE）后主 WebView 会丢视图焦点，
+            // 没有焦点就不会为输入框新建输入连接，点它既没有光标也没有键盘
+            if (!web.hasFocus() && web.hasWindowFocus()) web.requestFocus();
+            if (!imeNoConn) return;
             web.evaluateJavascript("(function(){var a=document.activeElement;return !!a&&(a.isContentEditable||/^(TEXTAREA|INPUT)$/.test(a.tagName))})()", v -> {
                 if (!"true".equals(v) || web == null || !imeNoConn) return;
                 android.view.inputmethod.InputMethodManager m = getSystemService(android.view.inputmethod.InputMethodManager.class);
@@ -2325,7 +2333,13 @@ public class MainActivity extends Activity {
     private void placePane(float x, float y, float w, float h) {
         paneBox = new float[] { x, y, w, h };
         if (pane == null) return;
-        if (w <= 0 || h <= 0) { pane.setVisibility(View.GONE); return; }
+        if (w <= 0 || h <= 0) {
+            // GONE 会把焦点从窗格（地址栏 / 网页）里清掉；谁被清了就还给主界面，别让主 WebView 一直没焦点
+            boolean hadFocus = pane.hasFocus();
+            pane.setVisibility(View.GONE);
+            if (hadFocus && web != null) web.requestFocus();
+            return;
+        }
         float d = getResources().getDisplayMetrics().density;
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) pane.getLayoutParams();
         lp.leftMargin = Math.round(x * d); lp.topMargin = Math.round(y * d);
@@ -2360,11 +2374,18 @@ public class MainActivity extends Activity {
     /** fromPane = 用户点了窗格自己的 ✕（或渲染进程崩了）：要告诉页面把占位撤掉 */
     private void closePane(boolean fromPane) {
         if (pane == null) return;
+        boolean hadFocus = pane.hasFocus();   // 窗格或它的地址栏 / 网页正拿着焦点
         root.removeView(pane);
         pane.destroy();
         pane = null;
         paneBox = null;
         paneCanBack = false;
+        // 焦点跟着被移除的窗格一起没了，主 WebView 不会自己拿回来：之后点输入框没有光标、键盘起不来
+        if (hadFocus && web != null) {
+            web.setFocusable(true);
+            web.setFocusableInTouchMode(true);
+            web.requestFocus();
+        }
         if (fromPane && web != null) web.evaluateJavascript(guarded("__ccBrowserClosed", "window.__ccBrowserClosed&&__ccBrowserClosed()"), null);
     }
     /** 返回手势要同步问"网页能不能后退"，JS 桥在别的线程上，这里定时把答案备好 */
