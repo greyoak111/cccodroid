@@ -295,6 +295,7 @@ App 下载哪个版本的工具包，由 [devkit-sources.txt](devkit-sources.txt
   - zx-5426 提供的红队资料，让 0.6.7 的破甲特征检查补上了好几类专为躲检测改写的说法；另有 21 个修复提交（分段下载写盘、补尾、并发缩图、定时任务、队列卡住、账本容错等），0.6.4–0.6.7 陆续合并。
   - 1fshi26 整理的破甲研究资料用在了 0.6.2 的加固上：项目里打开就会自动运行的钩子、MCP 改成先问你再加载。
   - FatBrother1 参与红队测试。
+- **[zhiererer](https://github.com/zhiererer)**：0.7.2 修的七个问题里六个是 ta 发现并定位的。0.7.4 又提交五个 PR——外部/无头会话自动归「杂项」（[#218](https://github.com/greyoak111/cccodroid/pull/218)）、桥路径别名按目录身份判定启动与修复（[#219](https://github.com/greyoak111/cccodroid/pull/219)）、启动预热托管桥并恢复旧周期故障锁（[#220](https://github.com/greyoak111/cccodroid/pull/220)）、篡改提示区分来源并标明时间（[#221](https://github.com/greyoak111/cccodroid/pull/221)）、新对话光标与无障碍确认框（[#223](https://github.com/greyoak111/cccodroid/pull/223)）——以及桥裸模型名 404（[#217](https://github.com/greyoak111/cccodroid/issues/217)）与上下文口径（[#222](https://github.com/greyoak111/cccodroid/issues/222)）的排查报告与补丁，每个都带真机验证和测试。
 
 报告问题、测试机型、审查代码同样是贡献，都会记在这里。
 
