@@ -409,14 +409,48 @@ test("网关启动预热：没有注册时不碰组件", async () => {
   assert.deepEqual(f.calls(), []);
 });
 
-test("网关启动预热：已停用或恢复预算耗尽时不自作主张重启", async (t) => {
-  for (const marker of [path.join("disabled"), path.join("runtime-home/.claude-code-router/recovery.failed")]) {
-    const f = fixture();
-    fs.mkdirSync(path.dirname(path.join(f.dir, marker)), { recursive: true });
-    fs.writeFileSync(path.join(f.dir, marker), "stopped\n");
-    assert.equal(await warmManagedBridge(), false, marker + " 时不应预热");
-    assert.deepEqual(f.calls(), [], marker + " 时不应调用组件");
-  }
+test("网关启动预热：用户停用（disabled）时不碰", async () => {
+  const f = fixture(), marker = path.join(f.dir, "disabled");
+  fs.writeFileSync(marker, "stopped\n");
+  assert.equal(await warmManagedBridge(), false);
+  assert.deepEqual(f.calls(), []);
+  assert.equal(fs.readFileSync(marker, "utf8"), "stopped\n");
+});
+
+test("网关启动预热：上一周期的故障锁改名留证、清掉旧预算，再给一次机会", async () => {
+  const f = fixture(), state = path.join(f.dir, "runtime-home/.claude-code-router");
+  fs.mkdirSync(state, { recursive: true });
+  const lock = path.join(state, "recovery.failed"), attempts = path.join(state, "recovery.attempts");
+  fs.writeFileSync(lock, "recovery limit reached\n");
+  fs.writeFileSync(attempts, "3\n");
+  assert.equal(await warmManagedBridge(), true);
+  assert.deepEqual(f.calls().map((call) => call.command), ["ensure"]);
+  assert.equal(fs.existsSync(lock), false, "旧故障锁应已改名");
+  assert.equal(fs.existsSync(attempts), false, "旧恢复预算应已清掉");
+  assert.ok(fs.readdirSync(state).some((name) => /^recovery\.failed\.prev-\d+$/.test(name)), "旧锁应留一份 .prev 证据");
+});
+
+test("网关启动预热：本周期刚写下的故障锁不动、不硬启", async () => {
+  const f = fixture(), state = path.join(f.dir, "runtime-home/.claude-code-router");
+  fs.mkdirSync(state, { recursive: true });
+  const lock = path.join(state, "recovery.failed");
+  fs.writeFileSync(lock, "recovery limit reached\n");
+  const future = new Date(Date.now() + 60000);
+  fs.utimesSync(lock, future, future);
+  assert.equal(await warmManagedBridge(), false);
+  assert.deepEqual(f.calls(), []);
+  assert.equal(fs.readFileSync(lock, "utf8"), "recovery limit reached\n");
+});
+
+test("网关启动预热：故障锁是链接时只读不动", async () => {
+  const f = fixture(), state = path.join(f.dir, "runtime-home/.claude-code-router");
+  fs.mkdirSync(state, { recursive: true });
+  const target = path.join(f.dir, "not-a-lock"), lock = path.join(state, "recovery.failed");
+  fs.writeFileSync(target, "keep me\n");
+  fs.symlinkSync(target, lock);
+  assert.equal(await warmManagedBridge(), false);
+  assert.deepEqual(f.calls(), []);
+  assert.equal(fs.lstatSync(lock).isSymbolicLink(), true);
 });
 
 test("网关启动预热：组件不健康只当没预热，不抛出", async () => {

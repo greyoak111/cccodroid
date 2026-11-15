@@ -399,10 +399,30 @@ export async function ensureManagedBridge(p, { signal } = {}) {
  * 网关启动后预热托管桥。
  * 托管桥是应用的子进程，应用被升级（覆盖安装必然强停）或被系统清掉时，桥和看护会一起消失；
  * 以前要等用户下一句消息才冷启动（实测约 9 秒），这段时间里设置页、状态检查看到的都是「未运行」。
- * 这里在启动后异步拉起一次：调用方不必等，失败只当没预热。已停用（disabled）或恢复预算耗尽
- * （recovery.failed）是用户/看护明确停下的状态，不在这里偷偷重启。
+ * 这里在启动后异步拉起一次：调用方不必等，失败只当没预热。已停用（disabled）是用户明确停下的状态，不碰。
+ *
+ * 恢复预算和故障锁（recovery.attempts / recovery.failed）是看护在**同一个监督周期**里防崩溃循环用的；
+ * 网关就是一个新周期（应用升级、进程被杀都会换一个）。旧周期的锁不能让桥永久停用：看护锁停后
+ * start-bridge.sh 会拒绝一切启动（包括应用发起的 ensure），应用内只有「诊断」没有解除入口。
+ * 所以启动时把上一周期留下的故障锁改名留证、清掉旧预算，给新周期一次完整机会；本周期里再崩，
+ * 看护照常锁停，等下一次网关启动再清。
  */
+function clearStaleRecoveryLock(state, before) {
+  const lock = path.join(state, "recovery.failed");
+  try {
+    const st = fs.lstatSync(lock);
+    if (!st.isFile() || st.isSymbolicLink() || st.uid !== process.getuid() || st.mtimeMs > before) return false;
+  } catch { return false; }
+  try { fs.renameSync(lock, lock + ".prev-" + Date.now()); } catch { return false; }
+  try {
+    const attempts = path.join(state, "recovery.attempts"), st = fs.lstatSync(attempts);
+    if (st.isFile() && !st.isSymbolicLink() && st.uid === process.getuid()) fs.rmSync(attempts, { force: true });
+  } catch {}
+  return true;
+}
+
 export async function warmManagedBridge() {
+  const startedAt = Date.now();
   let stored;
   try { stored = readRegistration(); } catch { return false; }
   const endpoint = endpointOf(stored.value?.endpoint);
@@ -410,11 +430,13 @@ export async function warmManagedBridge() {
   let r;
   try { r = binding(endpoint); } catch { return false; }
   if (!r) return false;
-  for (const file of [path.join(r.runtimeDir, "disabled"),
-    path.join(r.runtimeDir, "runtime-home/.claude-code-router/recovery.failed")]) {
-    try { fs.lstatSync(file); return false; }
-    catch (error) { if (error.code !== "ENOENT") return false; }
-  }
+  try { if (fs.lstatSync(path.join(r.runtimeDir, "disabled"))) return false; }
+  catch (error) { if (error.code !== "ENOENT") return false; }
+  const state = path.join(r.runtimeDir, "runtime-home/.claude-code-router");
+  clearStaleRecoveryLock(state, startedAt);
+  // 清不掉（链接、权限不对、刚被本周期写下）就说明锁还在，不硬启。
+  try { if (fs.lstatSync(path.join(state, "recovery.failed"))) return false; }
+  catch (error) { if (error.code !== "ENOENT") return false; }
   try { return await ensureManagedBridge({ custom: true, baseUrl: endpoint }); }
   catch { return false; }
 }
