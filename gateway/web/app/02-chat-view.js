@@ -8,6 +8,40 @@
   chatEl.appendChild(queueStrip);
   const olderEl = $("older"), histEl = $("hist"), liveEl = $("live");
 
+  // Android 的「全选」默认选整个 document，侧栏、输入框也会跟着变蓝。
+  // 记住从哪条消息开始选，把越界的端点裁回正文；不重建消息、不接管系统选字菜单，输入框和查看器仍走原生选择。
+  (() => {
+    let box = null;
+    const boxOf = (node) => {
+      const el = node?.nodeType === 1 ? node : node?.parentElement;
+      const b = el?.closest(".bubble, .note, .hook-ctx-b");
+      return b && chatEl.contains(b) ? b : null;
+    };
+    document.addEventListener("pointerdown", (e) => { box = boxOf(e.target); }, true);
+    document.addEventListener("selectionchange", () => {
+      const active = document.activeElement;
+      if (active?.matches("input, textarea, select") || active?.isContentEditable) { box = null; return; }
+      const s = getSelection();
+      if (!s || !s.rangeCount) { box = null; return; }
+      if (s.isCollapsed) { if (!box?.contains(s.anchorNode)) box = null; return; }
+      if (!box?.isConnected) box = null;
+      const a = boxOf(s.anchorNode), f = boxOf(s.focusNode);
+      if (a && a === f) box = a;
+      else if (!box) box = a;
+      if (!box) return;
+      const r = s.getRangeAt(0), bounds = document.createRange();
+      bounds.selectNodeContents(box);
+      const start = bounds.comparePoint(r.startContainer, r.startOffset), end = bounds.comparePoint(r.endContainer, r.endOffset);
+      // 新选区整个在别处（如查看器）：不是拖出消息边界，不拽回来。
+      if (start > 0 || end < 0) { box = null; return; }
+      if (start === 0 && end === 0) return;
+      const backward = s.anchorNode === r.endContainer && s.anchorOffset === r.endOffset;
+      const sn = start < 0 ? box : r.startContainer, so = start < 0 ? 0 : r.startOffset;
+      const en = end > 0 ? box : r.endContainer, eo = end > 0 ? box.childNodes.length : r.endOffset;
+      s.setBaseAndExtent(backward ? en : sn, backward ? eo : so, backward ? sn : en, backward ? so : eo);
+    });
+  })();
+
   const view = {
     sessionId: null,
     gen: 0,              // 每换一次会话 +1，迟到的历史响应据此作废
