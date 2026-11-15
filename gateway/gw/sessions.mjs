@@ -16,6 +16,7 @@ import { archiveBrief, archiveDb, archivedTitle } from "./archive-store.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { isInjected } from "./integrity.mjs";
 import { isObj, loadState, saveState } from "./statefile.mjs";
+import { looksBackground } from "./sessmanaged.mjs";
 
 // ── 会话重命名表 ──────────────────────────────────────────────────────
 // 文件坏了（解析不了、或是 null / 数组之类）：留底成 .bad-* 再当没有，别让整个会话列表跟着抛错（#98 03-012）
@@ -110,7 +111,7 @@ export function peekSession(file, st = null) {
   return rec;
 }
 function peekSessionRaw(file) {
-  let title = "", cwd = "", firstMsg = "", created = 0;
+  let title = "", cwd = "", firstMsg = "", created = 0, entrypoint = "";
   let fd = null;
   try {
     fd = fs.openSync(file, "r");
@@ -120,6 +121,7 @@ function peekSessionRaw(file) {
       if (!line.trim()) continue;
       let ev; try { ev = JSON.parse(line); } catch { continue; }
       if (ev.cwd && !cwd) cwd = ev.cwd;
+      if (!entrypoint && typeof ev.entrypoint === "string") entrypoint = ev.entrypoint;
       if (!created && ev.timestamp) created = Date.parse(ev.timestamp) || 0;
       if (ev.type === "attachment") continue;
 
@@ -140,7 +142,7 @@ function peekSessionRaw(file) {
     if (fd != null) try { fs.closeSync(fd); } catch {}
   }
   title = firstMsg.replace(/\s+/g, " ").trim().slice(0, 90);
-  return { title: title || "(无标题)", cwd, created };
+  return { title: title || "(无标题)", cwd, created, entrypoint };
 }
 
 export function listSessions(limit = 150) {
@@ -186,7 +188,7 @@ export function listSessions(limit = 150) {
     const meta = peekSession(s.file, { size: s.size, mtimeMs: s.mtime, ino: s.ino }), ab = archiveBrief(s.id, s.size, lineageCached(s.id)?.compacts?.length || 0);
     return {
       id: s.id,
-      no: ab.no, misc: ab.misc,
+      no: ab.no, misc: sessionMisc(s.id, ab.misc, meta),
       created: meta.created || 0,
       pinned: PINS[s.id] || 0,
       title: sessionTitle(s.id, meta),
@@ -658,4 +660,12 @@ export async function routeSessions(req, res, u, p) {
     }
   }
   return NEXT;
+}
+
+/** 列表 / 脉络共用：档案里的杂项标记，加上「外部 / 无头会话自动归杂项」。
+ *  用户在菜单里归入或移出过（miscBy=user）、改过名、置顶过的，都以用户为准，不自动归。 */
+export function sessionMisc(id, archived, meta) {
+  if (archived) return true;
+  if (archiveDb().sessions[id]?.miscBy === "user" || NAMES[id] || PINS[id]) return false;
+  return !!meta && looksBackground(id, meta.created, meta.entrypoint);
 }

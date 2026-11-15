@@ -9,7 +9,7 @@ import path from "node:path";
 import { CFG, PATHS, log } from "./config.mjs";
 import { isObj, loadState, saveState } from "./statefile.mjs";
 import { NEXT, sendJson } from "./http.mjs";
-import { NAMES, NAMES_REV, PINS } from "./sessions.mjs";
+import { NAMES, NAMES_REV, PINS, findSessionFile, peekSession, sessionMisc } from "./sessions.mjs";
 import { archiveDb, archivedTitle, miscOf } from "./archive-store.mjs";
 import { chapterView } from "./archive-core.mjs";
 import { runOfSession } from "./runs.mjs";
@@ -224,7 +224,7 @@ export async function lineageGraph() {
     nodes.push({
       id: r.id, title: name || cv.sessionTitle || lastQ(r) || "", titleBy: name ? "user" : cv.sessionTitle ? "archive" : null,
       pinned: PINS[r.id] || 0, band, cwd: r.cwd || "", trashed: !!m.trashed,
-      sched: sched.get(r.id) || null, misc: miscOf(entry, r.size, r.compacts.length), running: !!runOfSession(r.id),
+      sched: sched.get(r.id) || null, misc: sessionMisc(r.id, miscOf(entry, r.size, r.compacts.length), lineMeta(r.id)), running: !!runOfSession(r.id),
       firstTs: r.firstTs || r.birth || m.mtime || 0, lastTs: r.lastTs || m.mtime || 0, turns: r.turns, sizeKb: Math.round(r.size / 1024),
       chapters: cv.chapters.map((c) => ({ n: c.n, anchor: c.n === 1 ? "start" : c.anchor, from: c.from, to: c.to, title: c.title, by: c.by, same: c.same, status: c.status, q: (c.n === 1 ? r.lead || r.first : r.compacts[c.n - 2]?.q) || "" })),
     });
@@ -273,4 +273,11 @@ export async function routeLineage(req, res, u, p) {
   if (quick.error) return sendJson(res, 500, quick);
   try { return sendJson(res, 200, quick); }
   catch (e) { return sendJson(res, 500, { error: e.message }); }
+}
+
+// 脉络节点的开头信息（created / entrypoint）：走会话列表同一份 peek 缓存
+function lineMeta(id) {
+  const f = findSessionFile(id);
+  if (!f) return null;
+  try { const st = fs.statSync(f.file || f); return peekSession(f.file || f, { size: st.size, mtimeMs: st.mtimeMs, ino: st.ino }); } catch { return null; }
 }
