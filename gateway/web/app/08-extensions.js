@@ -1192,8 +1192,30 @@
       ? t("环境变量，可选，用逗号分隔（KEY=值）")
       : t("请求头，可选，用逗号分隔（Header: 值），例如 Authorization: Bearer 你的令牌");
   };
-  $("ext-mcp-tr").addEventListener("change", syncMcpHint);
+  // 本机服务器走回环最稳：填局域网 IP，手机一切换网络 IP 就变，MCP 跟着断连（群里实际踩过）。
+  // 从目标里抠出主机：去掉协议和路径，再剥掉端口，剩下要是个 IPv4 再判断私网段。
+  const mcpLanHost = (target) => {
+    const host = String(target || "").trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0].split(":")[0];
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+    if (!m) return false;
+    const [a, b] = [+m[1], +m[2]];
+    if (a === 127) return false;   // 回环不是局域网，不提醒
+    return a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+  };
+  const syncMcpIpTip = () => {
+    const tip = $("ext-mcp-ip-tip");
+    if ($("ext-mcp-tr").value === "stdio") { tip.classList.add("hidden"); return; }
+    const lan = mcpLanHost($("ext-mcp-target").value);
+    tip.textContent = lan
+      ? t("这像是一个局域网地址：服务器在本机的话，请改成 http://127.0.0.1:端口，局域网 IP 一变就断连")
+      : t("服务器在本机就填 http://127.0.0.1:端口 最稳；局域网 IP 会随网络切换而变化，导致断连");
+    tip.classList.toggle("warn", lan);
+    tip.classList.remove("hidden");
+  };
+  $("ext-mcp-tr").addEventListener("change", () => { syncMcpHint(); syncMcpIpTip(); });
+  $("ext-mcp-target").addEventListener("input", syncMcpIpTip);
   syncMcpHint();
+  syncMcpIpTip();
   // ── MCP 编辑模式：mcpEdit = null 是添加；有值 = 正在编辑这条（名字和点掉的键存这里，表单字段直接读）──
   // 值（令牌等）不回到表单：留空 = 保留原值，要换就填新的；点掉 chip 的键会从配置里删掉。
   let mcpEdit = null;
@@ -1202,6 +1224,7 @@
     ["ext-mcp-name", "ext-mcp-target", "ext-mcp-env"].forEach((id) => ($(id).value = ""));
     $("ext-mcp-tr").value = "stdio";
     syncMcpHint();
+    $("ext-mcp-ip-tip").classList.add("hidden");
     $("ext-mcp-cur").classList.add("hidden");
     $("ext-mcp-cur").innerHTML = "";
     $("ext-mcp-edit-tip").classList.add("hidden");
@@ -1229,6 +1252,7 @@
     $("ext-mcp-target").value = r.target;
     $("ext-mcp-env").value = "";
     syncMcpHint();
+    syncMcpIpTip();
     renderMcpCur();
     $("ext-mcp-edit-tip").textContent = t("正在编辑 {name}：留空 = 保留原值，点 × 删掉，填新的替换", { name: r.name });
     $("ext-mcp-edit-tip").classList.remove("hidden");

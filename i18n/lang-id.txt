@@ -3190,3 +3190,5 @@
 3190	Server MCP ini tidak ditemukan (konektor akun tidak bisa diedit)
 3191	Sudah ada server MCP dengan nama ini
 3192	stdio tidak menyimpan header: {names} akan dibuang. Lanjutkan?
+3193	Jika server ada di perangkat ini, isi http://127.0.0.1:port — IP LAN berubah saat jaringan berganti dan koneksi putus
+3194	Ini tampak seperti alamat LAN: jika server ada di perangkat ini, ganti ke http://127.0.0.1:port — IP LAN berubah dan koneksi putus

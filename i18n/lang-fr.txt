@@ -3190,3 +3190,5 @@
 3190	Ce serveur MCP est introuvable (les connecteurs de compte ne peuvent pas être modifiés)
 3191	Un serveur MCP porte déjà ce nom
 3192	stdio ne conserve pas les en-têtes : {names} seront supprimés. Continuer ?
+3193	Si le serveur tourne sur cet appareil, mettez http://127.0.0.1:port ; l'IP locale change avec le réseau et coupe la connexion
+3194	Cela ressemble à une adresse locale : si le serveur tourne sur cet appareil, remplacez-la par http://127.0.0.1:port ; l'IP locale change et la connexion tombe

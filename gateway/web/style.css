@@ -623,6 +623,8 @@ html.has-right #pages{inset-inline-end:var(--rw)}
 }
 .tiny{font-size:11px;color:var(--fg3);margin-top:6px;line-height:1.6}
 .tiny code{font-size:11px}
+.tiny.warn{color:var(--warn)}
+#ext-mcp-ip-tip{overflow-wrap:break-word}
 a.weblink{overflow-wrap:anywhere}
 
 /* 列表（会话、目录） */

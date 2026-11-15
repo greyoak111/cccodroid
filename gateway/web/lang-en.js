@@ -3231,4 +3231,6 @@ window.I18N_DICT.en = {
   "找不到这条 MCP 配置（账户连接器不能编辑）": "MCP server not found (account connectors can't be edited)",
   "已经有叫这个名字的 MCP 服务器了": "An MCP server with this name already exists",
   "stdio 不保存请求头：{names} 会被丢掉，继续吗？": "stdio doesn't store headers: {names} will be dropped. Continue?",
+  "服务器在本机就填 http://127.0.0.1:端口 最稳；局域网 IP 会随网络切换而变化，导致断连": "If the server runs on this device, use http://127.0.0.1:port — a LAN IP changes when the network switches and the connection drops",
+  "这像是一个局域网地址：服务器在本机的话，请改成 http://127.0.0.1:端口，局域网 IP 一变就断连": "This looks like a LAN address: if the server runs on this device, use http://127.0.0.1:port instead — a LAN IP changes and the connection drops",
 };

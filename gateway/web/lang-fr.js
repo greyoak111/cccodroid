@@ -3193,4 +3193,6 @@ window.I18N_DICT["fr"] = {
   "找不到这条 MCP 配置（账户连接器不能编辑）": "Ce serveur MCP est introuvable (les connecteurs de compte ne peuvent pas être modifiés)",
   "已经有叫这个名字的 MCP 服务器了": "Un serveur MCP porte déjà ce nom",
   "stdio 不保存请求头：{names} 会被丢掉，继续吗？": "stdio ne conserve pas les en-têtes : {names} seront supprimés. Continuer ?",
+  "服务器在本机就填 http://127.0.0.1:端口 最稳；局域网 IP 会随网络切换而变化，导致断连": "Si le serveur tourne sur cet appareil, mettez http://127.0.0.1:port ; l'IP locale change avec le réseau et coupe la connexion",
+  "这像是一个局域网地址：服务器在本机的话，请改成 http://127.0.0.1:端口，局域网 IP 一变就断连": "Cela ressemble à une adresse locale : si le serveur tourne sur cet appareil, remplacez-la par http://127.0.0.1:port ; l'IP locale change et la connexion tombe",
 };
