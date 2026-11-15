@@ -401,6 +401,14 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
   var PJ = { list: [], colors: [], ws: "", cur: null, detail: null, loaded: false, effLevels: [] };
   var SC = { data: null, cur: null, detail: null, flt: "all", rflt: "all" };
   const chatEl = $("chat"), inputEl = $("input"), sendEl = $("btn-send");
+  // 点了一下输入框、或用户手势里它刚拿到焦点：请外壳确认主 WebView 有视图焦点、重建输入连接并弹键盘。
+  // 视图焦点丢了、或输入法手里还是空连接时，只靠 focus() 只有边框变色，既没光标也没键盘（0.7.3 的新对话实测）。
+  // click 还要管「DOM 焦点本来就在输入框、只是连接坏了」再点一次的情况；程序化自动聚焦（没有用户手势）不弹键盘。
+  const ccFocusInput = () => { try { if (window.CCApp && CCApp.inputFocus) CCApp.inputFocus(); } catch {} };
+  inputEl.addEventListener("click", ccFocusInput);
+  inputEl.addEventListener("focus", () => {
+    if (!window.navigator.userActivation || navigator.userActivation.isActive) ccFocusInput();
+  });
   const interjectEl = $("btn-interject");
   const subEl = $("sub-title"), statEl = $("stat-chip"), modelEl = $("model-chip");
   const permEl = $("perm-chip"), drawerEl = $("drawer"), toastEl = $("toast");
