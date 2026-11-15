@@ -323,6 +323,24 @@ test("只读检查用固定白名单区分App接口、清单、映射和连接�
   assert.deepEqual(provider, baseline); assert.deepEqual(fs.readFileSync(mappingFile), mapping); assert.deepEqual(fs.readFileSync(connectionFile), connection);
 });
 
+test("旧记录写的是另一种路径写法（同一目录的别名）照样认；相对路径不认", async () => {
+  // 真机上是 /data/data/<包名> 和 /data/user/0/<包名> 绑定挂载；测试里用软链造一个指向同一目录的别名
+  await request(input());
+  const alias = path.join(root, "home-alias");
+  fs.rmSync(alias, { force: true }); fs.symlinkSync(home, alias);
+  const aliasTarget = path.join(alias, ".local/share/ccr-bridge-kit");
+  const manifestFile = path.join(target, ".ccr-bridge-kit.json"), manifest = fs.readFileSync(manifestFile), reg = fs.readFileSync(registration);
+  const m = JSON.parse(manifest), r = JSON.parse(reg);
+  put(manifestFile, { ...m, target: aliasTarget, service: { ...m.service, home: alias } });
+  put(registration, { ...r, runtimeDir: aliasTarget });
+  const ok = await request();
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  put(manifestFile, { ...m, target: ".local/share/ccr-bridge-kit" });
+  const bad = await request();
+  assert.equal(bad.status, 409); assert.equal(bad.body.check, "OWNERSHIP");
+  fs.writeFileSync(manifestFile, manifest); fs.writeFileSync(registration, reg); fs.rmSync(alias, { force: true });
+});
+
 const repairRequest = body => request(body, "/api/components/openai-bridge/repair");
 const inspectRepair = () => repairRequest({ action: "inspect", consent: true });
 const applyRepair = ticket => repairRequest({ action: "apply", consent: true, ticket });

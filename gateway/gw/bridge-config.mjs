@@ -9,6 +9,7 @@ import { readBodyBuf, sendJson } from "./http.mjs";
 import { RUNS } from "./runs.mjs";
 import { PROVIDERS_CFG, upsertProvider, providersDiskMatches } from "./providers.mjs";
 import { beginManagedBridgeConfiguration, withManagedBridgeRegistryLock } from "./managed-bridge.mjs";
+import { sameFile } from "./pathguard.mjs";
 
 const ID = "openai-bridge", ENTRY = "lib/openai-bridge/component.cjs";
 const MODELS_MAX_BYTES = 128 << 10, CONFIG_MAX_BYTES = 512 << 10, CONFIG_MODEL_LIMIT = 100;
@@ -97,6 +98,10 @@ function componentEntry() {
 
 // HOME 是信任根：宿主给的若是别名（/data/data ↔ /data/user/0），在根这一层规范成真实路径，
 // 组件拿到的 HOME、manifest 里的 target、这里的归属检查才是同一个；根以下各级仍逐级要求不是链接（#66 第 4 项）
+// 记录里的路径和这次算出来的是不是同一处：/data/data/<包名> 和 /data/user/0/<包名> 是绑定挂载，
+// realpath 归并不了（见 pathguard.mjs 开头），旧记录可能是另一种写法。按目录身份（dev+ino）认；
+// 只认绝对路径，记录里写相对路径的照旧当不匹配。文件还不存在时退回字符串相等（06-路径别名卸载走不通）
+const samePlace = (recorded, want) => typeof recorded === "string" && path.isAbsolute(recorded) && (recorded === want || sameFile(recorded, want));
 const HOME_ROOT = () => { try { return fs.realpathSync(CFG.home); } catch { return CFG.home; } };
 const componentEnv = () => sharedComponentEnv(HOME_ROOT(), PREFIX);
 
@@ -258,7 +263,7 @@ function assertGuiOwnership() {
     for (const dir of [home, path.join(home, ".local"), path.join(home, ".local", "share"), target])
       if (fs.realpathSync(dir) !== path.resolve(dir)) throw conflict("OWNERSHIP");
     const manifest = regularJson(path.join(target, ".ccr-bridge-kit.json"), 1 << 20);
-    if (!object(manifest) || manifest.id !== "ccr-bridge-kit" || manifest.target !== target || manifest.guiManaged !== true) throw conflict("OWNERSHIP");
+    if (!object(manifest) || manifest.id !== "ccr-bridge-kit" || !samePlace(manifest.target, target) || manifest.guiManaged !== true) throw conflict("OWNERSHIP");
   } catch { throw conflict("OWNERSHIP"); }
 }
 
@@ -272,7 +277,7 @@ function defaultConnection(model) {
     }
     const registration = regularJson(path.join(home, ".cccodroid", "services", ID + ".json"), 4096);
     const connection = regularJson(path.join(target, "connection.json"), CONFIG_MAX_BYTES);
-    if (!object(registration) || registration.schema !== 1 || registration.id !== ID || registration.runtimeDir !== target ||
+    if (!object(registration) || registration.schema !== 1 || registration.id !== ID || !samePlace(registration.runtimeDir, target) ||
         typeof registration.instanceId !== "string" || !/^[0-9a-f]{32}$/.test(registration.instanceId) ||
         Object.keys(registration).some((key) => !["schema", "id", "endpoint", "runtimeDir", "instanceId"].includes(key))) throw failure("RUNTIME_CONFLICT");
     const match = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{3,4})$/.exec(registration.endpoint);
@@ -633,8 +638,8 @@ async function repairCandidate() {
   const home = HOME_ROOT(), target = path.join(home, ".local/share/ccr-bridge-kit"), connection = defaultConnection(view.model);
   const registration = regularJson(path.join(home, ".cccodroid/services/openai-bridge.json"), 4096);
   const manifest = regularJson(path.join(target, ".ccr-bridge-kit.json"), 65536);
-  if (manifest.service?.schema !== 1 || manifest.service.home !== home || manifest.service.instanceId !== registration.instanceId ||
-      manifest.componentEntry !== componentEntry() || manifest.settings !== path.join(home, ".claude/settings.json")) throw repairFailure();
+  if (manifest.service?.schema !== 1 || !samePlace(manifest.service.home, home) || manifest.service.instanceId !== registration.instanceId ||
+      !samePlace(manifest.componentEntry, componentEntry()) || !samePlace(manifest.settings, path.join(home, ".claude/settings.json"))) throw repairFailure();
   const state = regularJson(providerStateFile(), 4096);
   if (!object(state) || state.schema !== 1 || state.id !== ID || !/^custom-[1-9][0-9]*$/.test(state.providerId || "") ||
       Object.keys(state).some(k => !["schema", "id", "providerId", "fingerprint", "modelsFingerprint", "pending"].includes(k)) ||
