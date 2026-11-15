@@ -150,9 +150,9 @@ your-cheap-model 128k
 ## 扩展
 
 - **工具包模块**：随装随卸，写明用途、大小、谁在用。终端里敲一个没装的命令，会告诉你在哪个模块。
-- **组件**：Chromium、Blender、Godot、LibreOffice、llama.cpp、GPU 驱动这些大件，用到再装。装前核对签名，每个组件自带一个技能，装好 Claude 就会用。
+- **组件**：Chromium、Blender、Godot、LibreOffice、llama.cpp、GPU 驱动、QQ 机器人（原生 NapCat / SnowLuma）这些大件，用到再装。装前核对签名，每个组件自带一个技能，装好 Claude 就会用。
 - **常用指令**：扩展页「常用指令」里新建，起个名字（比如 issue），写好要发给 Claude 的话；之后输入框里打 `/issue 具体内容`，后面的内容会填进正文里的 `$ARGUMENTS`。可以存成所有项目通用，也可以只给当前项目。存的是 Claude Code 官方的命令文件，终端里的 claude 也能用。
-- **插件、技能、MCP**：在扩展页添加和管理，下一条消息生效。侧栏「更多 → 能力」能看到这一轮 Claude 能用的全部东西。
+- **插件、技能、MCP**：在扩展页添加、编辑和管理（MCP 条目长按或双击直接进编辑，令牌只回显名字），下一条消息生效。侧栏「更多 → 能力」能看到这一轮 Claude 能用的全部东西。
 - **pkg**：终端里 `pkg install rust` 这样装 Termux 仓库的包，`pkg verified` 看实测能用的清单。
 
 ## Shizuku 与系统权限

@@ -150,9 +150,9 @@ Third-party endpoints are your choice; the app does not vet or endorse them. The
 ## Extensions
 
 - **Toolkit modules**: install and remove as needed; each shows what it is for, its size and what uses it. Typing a missing command in the terminal tells you which module has it.
-- **Components**: large tools such as Chromium, Blender, Godot, LibreOffice, llama.cpp and GPU drivers, installed when you need them. Signatures are checked first, and each component ships a skill so Claude knows how to use it.
+- **Components**: large tools such as Chromium, Blender, Godot, LibreOffice, llama.cpp, GPU drivers and QQ bots (native NapCat / SnowLuma), installed when you need them. Signatures are checked first, and each component ships a skill so Claude knows how to use it.
 - **Saved prompts**: create one under Saved prompts on the Extensions page: give it a name (say, issue) and write what should be sent to Claude. Then type `/issue your details` in the input box, and the text after the name fills `$ARGUMENTS`. A prompt can be for all projects or just the current one. They're stored as standard Claude Code command files, so claude in the terminal can use them too.
-- **Plugins, skills, MCP**: add and manage them on the Extensions page; changes apply from the next message. More → Capabilities shows everything Claude can use this turn.
+- **Plugins, skills, MCP**: add, edit and manage them on the Extensions page (long-press or double-tap an MCP entry to edit it directly; tokens are never echoed, only their names); changes apply from the next message. More → Capabilities shows everything Claude can use this turn.
 - **pkg**: in the terminal, `pkg install rust` installs packages from the Termux repository; `pkg verified` lists the ones tested on device.
 
 ## Shizuku and system permissions

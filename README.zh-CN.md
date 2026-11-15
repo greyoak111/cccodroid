@@ -70,13 +70,14 @@ cccodroid 让执行回到你自己的设备上：云端只负责模型推理，�
 - **工具包按模块装**（扩展 → 工具包模块，0.3.9 起）：开发工具包分成基础、命令行工具、C/C++ 编译、Java 与安卓打包、图形库、音视频、文档与数据、Go 语言、Node.js 生态几块，首次安装时勾选，之后随装随卸。每块写明用途、主要命令、大小、依赖和被谁用着；在终端敲一个没装的命令会提示它在哪块。从 0.3.8 及以前升级会装上全部模块，功能一样不少。
 - **可选组件**（扩展 → 可选组件）：体积大的工具不随应用安装，用得上再下载。每个组件包都对应特定版本的工具包，装之前先核对 SHA-256 和逐文件清单，卸载干净。
   - **浏览器组件（无头 Chromium 155）**：下载约 254 MB，装好后约 750 MB。让 Claude 在后台打开网页：截图、导出 PDF、取渲染后的页面、用 puppeteer-core 操作网页。附带一个技能，告诉 Claude 怎么用。
-  - **社区组件**：还可以装 [cccodroid-components](https://github.com/greyoak111/cccodroid-components) 仓库里的组件。目前 29 个，加上面的浏览器共 30 个。开发：GitHub CLI（gh）、Godot（无头运行 / 导出 APK）、Graphviz / PlantUML 画图、Hugo 建站、逆向分析（rizin、binwalk）；图像影音：Blender（无头合成 / 渲染，3D 走 GPU）、LilyPond（乐谱排版）、音乐制作工具链；办公：LibreOffice、Pandoc、PDF 工具箱、OCR（简繁中英）、LaTeX（Tectonic，支持中文）；AI：llama.cpp、OpenAI 桥（预览，把 OpenAI 兼容接口转成 Claude Code 能用的接口）；3D 与科学计算：OpenSCAD、GNU Octave、科学计算 Python（numpy / scipy / matplotlib）；电子设计：ngspice / gnucap、Icarus Verilog / Yosys；GPU：骁龙驱动（Vulkan / OpenGL / OpenCL）、Mali 驱动、GPU 跑分；网络：Cloudflare（wrangler）、rclone。见[完整列表](https://github.com/greyoak111/cccodroid-components/blob/main/README.zh-CN.md#组件列表)。索引带 ed25519 签名，核对不过不装；社区组件标「社区」，没人在真机上验证过的会先提示一声再装。
+  - **社区组件**：还可以装 [cccodroid-components](https://github.com/greyoak111/cccodroid-components) 仓库里的组件。目前 46 个，加上面的浏览器共 47 个。开发：GitHub CLI（gh）、Godot（无头运行 / 导出 APK）、Graphviz / PlantUML 画图、Hugo 建站、逆向分析（rizin、binwalk）；图像影音：Blender（无头合成 / 渲染，3D 走 GPU）、LilyPond（乐谱排版）、音乐制作工具链；办公：LibreOffice、Pandoc、PDF 工具箱、OCR（简繁中英）、LaTeX（Tectonic，支持中文）；AI：llama.cpp、OpenAI 桥（预览，把 OpenAI 兼容接口转成 Claude Code 能用的接口）；3D 与科学计算：OpenSCAD、GNU Octave、科学计算 Python（numpy / scipy / matplotlib）；电子设计：ngspice / gnucap、Icarus Verilog / Yosys；GPU：骁龙驱动（Vulkan / OpenGL / OpenCL）、Mali 驱动、GPU 跑分；网络：Cloudflare（wrangler）、rclone、QQ 机器人（原生 NapCat / SnowLuma，OneBot v11）。见[完整列表](https://github.com/greyoak111/cccodroid-components/blob/main/README.zh-CN.md#组件列表)。索引带 ed25519 签名，核对不过不装；社区组件标「社区」，没人在真机上验证过的会先提示一声再装。
   - **自定义组件**：市场里没有的 Linux arm64 程序可以自己导入（单个程序或 .tar.gz / .zip），自动认出它是 glibc、安卓原生、静态程序还是脚本，缺的库从 Termux glibc 仓库补上；装好就是一条命令，Claude 和终端都能用。来源由你自己负责。
 - **多种接入方式**：
   - Claude 账户登录：应用内完成，浏览器授权后自动回到应用。账户卡片显示 5 小时额度与每周额度的占用和重置时间（取自 Claude Code 每轮自己回报的数据，应用不拿你的凭据去查任何东西）。
   - Claude API Key。
   - 各家模型厂商的官方 Anthropic 兼容接口：DeepSeek、智谱 GLM、通义千问、Kimi、MiniMax、火山方舟（豆包）、小米 MiMo、阶跃星辰、百度千帆、腾讯混元、美团 LongCat、xAI Grok、Meta Muse。
   - 可以继续添加任意第三方兼容接口。
+  - **OpenAI 协议**（只给 `/v1/chat/completions` 的服务）：扩展 → 可选组件 → 装「OpenAI API 本地协议桥」，装好点「配置」填 API 地址、Key、模型。桥在本机做协议翻译，模型仍在远端，额度和 Key 都是你自己的。
   - 端侧小模型：装上 llama.cpp 组件，就能用本机跑的小模型聊天，不联网、不花钱。手机算力有限，干活还是交给云端模型。
   - **每个对话各用各的**：设置里的接口、型号、思考强度是默认值；在对话里单独选过的，只改这个对话。好几个对话可以同时跑，比如一个用 Claude 账户、一个用 DeepSeek，互不影响。
 - **完整的开发工具链**（约 250 个包，取自 [Termux](https://termux.dev) 官方仓库）：
@@ -100,7 +101,7 @@ cccodroid 让执行回到你自己的设备上：云端只负责模型推理，�
   - 开发工具包：只在 Wi‑Fi 下预先下载，下次打开应用时替换；你用 pip / npm -g 装进去的东西会保留。
   - 更新之间不会互相打断：工具包在下载或替换时，应用本体的更新会等它完成。替换前先按发布清单核对解出来的内容，核对不过就不动旧工具包；替换中途被打断（应用重启、进程被杀），下次打开时会接着装完或退回旧版。
   - 设置页的**校验 / 修复**：逐个文件核对工具包的哈希；修复会重装同一版本，你自己装的包照常保留。每次启动也会做一次快速自检。
-- **扩展**：在「扩展」页安装、启用、停用、卸载 Claude Code 插件（搜索官方目录，或添加别的插件市场），从 zip 安装技能，添加 / 移除 MCP 服务器。全部经 Claude Code 自己的 `claude plugin` / `claude mcp` 命令完成；需要执行命令才能装的插件，会先把命令给你过目。0.6.7 起插件里的钩子不运行，你自己的技能用 `/user:名字` 调用。
+- **扩展**：在「扩展」页安装、启用、停用、卸载 Claude Code 插件（搜索官方目录，或添加别的插件市场），从 zip 安装技能，添加 / 编辑 / 移除 MCP 服务器（长按或双击条目直接进编辑，令牌只回显名字）。全部经 Claude Code 自己的 `claude plugin` / `claude mcp` 命令完成；需要执行命令才能装的插件，会先把命令给你过目。0.6.7 起插件里的钩子不运行，你自己的技能用 `/user:名字` 调用。
 - **运行前先核对**（0.6.7 起）：
   - Claude Code 要对得上 Anthropic 签名的清单才运行；网关用自己的一份运行库，每次启动前按安装包核一遍，pkg 升级、工具包更新都碰不到它。
   - CLAUDE.md、规则、技能、命令、子代理、输出风格、插件里的文本、自动记忆这些要交给 Claude Code 的配置，先过一遍破甲特征检查：命中的那一轮不运行，告诉你是哪个文件哪一行。MCP 服务器按 `~/.claude.json` 里登记的原样转交，服务器定义不做这项检查。
