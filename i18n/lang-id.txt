@@ -3163,3 +3163,10 @@
 3163	Batas maksimum garis pemadatan adalah 1M; disimpan sebagai 1M
 3164	Contoh templat (bukan layanan nyata; ganti dengan nilai dari penyedia Anda)
 3165	Endpoint pihak ketiga Anda pilih sendiri; aplikasi tidak mengaudit atau mendukungnya. Operator dapat melihat Key, kode, dan percakapan Anda, jadi gunakan hanya layanan yang Anda percaya, dan jangan gunakan akun bersama atau hasil jual ulang.
+3166	HONOR / Huawei dan sistem serupa membekukan Shizuku di latar belakang dan memperlambat aktivasi: di Pengelolaan aplikasi → Shizuku, aktifkan "Abaikan pengoptimalan baterai".
+3167	Menunggu konfirmasi (bukan akibat pemuatan ulang ini)
+3168	Catatan baru atau berkas tambahan
+3169	Pertama dicatat: {time}
+3170	Waktu tidak diketahui
+3171	Berkas konfigurasi diubah dan ditulis ulang menggunakan pengaturan aplikasi saat ini:
+3172	Berkas aplikasi yang berjalan diubah; perlindungan diaktifkan:

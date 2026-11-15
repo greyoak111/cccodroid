@@ -3163,3 +3163,10 @@
 3163	La limite de compactage est de 1 M maximum ; enregistrée à 1 M
 3164	Modèle d’exemple (ce n’est pas un vrai service ; remplacez-le par les valeurs de votre fournisseur)
 3165	Les points de terminaison tiers sont votre choix ; l’application ne les audite pas et ne les recommande pas. L’opérateur peut voir votre clé, votre code et vos conversations : n’utilisez que des services de confiance, et pas de comptes partagés ou revendus.
+3166	HONOR / Huawei et systèmes similaires gèlent Shizuku en arrière-plan et ralentissent l'activation : dans Gestion des applications → Shizuku, activez « Ignorer l'optimisation de la batterie ».
+3167	En attente de confirmation (non causé par cette actualisation)
+3168	Nouvel enregistrement ou fichiers ajoutés
+3169	Premier enregistrement : {time}
+3170	Heure inconnue
+3171	Les fichiers de configuration ont été modifiés puis réécrits avec les paramètres actuels de l’application :
+3172	Des fichiers de l’application en cours ont été modifiés ; la protection a été déclenchée :

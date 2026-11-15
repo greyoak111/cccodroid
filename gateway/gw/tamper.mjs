@@ -49,12 +49,18 @@ export function tamperNote(ids = null) {
   const fresh = EVENTS.filter((e) => !e.told);
   if (!fresh.length) return "";
   for (const e of fresh) { e.told = true; ids?.push(e.id); }
-  const files = [...new Set(fresh.flatMap((e) => e.files))].slice(0, 12).join(", ");
-  const claude = fresh.some((e) => e.src === "claude");
-  return "App note: cccodroid found its own program files modified outside the app's normal update path and " +
-    (claude ? "refused to start a modified Claude Code binary; " : "") +
-    `restored them from the installed package (${files}). Any such change, including one made earlier in this session, has been undone. ` +
-    "Don't try to reapply it or work around these safeguards; if you made the change, tell the user plainly.";
+  const notes = fresh.map((e) => {
+    const files = e.files.slice(0, 12).join(", ");
+    if (e.src === "claude") return `Refused to start a modified Claude Code binary (${files}).`;
+    if (e.src === "app") return `App files were restored from the installed package (${files}); those changes have been undone.`;
+    const config = e.files.filter((f) => /^ccapp-(settings|providers)\.json$/.test(f));
+    const program = e.files.filter((f) => !config.includes(f));
+    return (config.length ? `Configuration files were written back using the app's current settings (${config.join(", ")}); external edits have been undone. ` : "") +
+      (program.length ? `Runtime app-file protection was triggered (${program.slice(0, 12).join(", ")}); files may be restored from the startup snapshot or await an idle restart. ` : "") +
+      "To change provider configuration, use the app's provider settings or the authenticated POST /api/providers/save API; do not edit ccapp-providers.json directly.";
+  });
+  return "App note: cccodroid detected changes outside its normal update/settings flow. " + notes.join(" ") +
+    " Don't try to reapply them or work around these safeguards; if you made the change, tell the user plainly.";
 }
 
 /** 这一轮没送到模型（没起来、出错、没答完）：tamperNote 记下的那几条下一轮再说（0.6.9 审计 200-S-10） */

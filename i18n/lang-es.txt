@@ -3163,3 +3163,10 @@
 3163	El límite de compactación es 1 M como máximo; se guardó como 1 M
 3164	Plantilla de ejemplo (no es un servicio real; sustituye los valores por los de tu proveedor)
 3165	Los endpoints de terceros los eliges tú; la app no los audita ni los respalda. El operador puede ver tu clave, tu código y tus conversaciones, así que usa solo servicios de confianza y no uses cuentas compartidas ni revendidas.
+3166	HONOR / Huawei y sistemas similares congelan Shizuku en segundo plano y ralentizan la activación: en Gestión de aplicaciones → Shizuku activa «Ignorar optimización de batería».
+3167	Pendiente de confirmación (no causado por esta recarga)
+3168	Registro nuevo o archivos añadidos
+3169	Primer registro: {time}
+3170	Hora desconocida
+3171	Los archivos de configuración se modificaron y se reescribieron con los ajustes actuales de la aplicación:
+3172	Se modificaron archivos de la aplicación en ejecución; se activó la protección:

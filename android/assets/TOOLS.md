@@ -30,6 +30,17 @@
 - **命令行工具**：rg、fd、bat、delta、hx（+ `hx-grammar` 装语法）、jq、yq、sqlite3、typst、duckdb、magick（ImageMagick）、man、file、tar、xz、zstd、zip / unzip、`7z`（7-Zip，随应用自带，读写 7z / zip / tar.*，能解 rar / iso / cab 等几十种）。交互式 bash 里 tab 补全可用。
 - **Claude Code** 本身：终端里 `claude` 命令可用，用的是打开终端时应用里选的那家接口、型号和密钥（密钥经 apiKeyHelper 从私有文件读，不在环境变量里）。换了接口要新开一个终端。
 
+## 接口配置：通过应用或网关 API 保存
+
+接口配置（地址、型号和密钥等）要通过应用的接口设置或 **`POST /api/providers/save`** 保存。不要直接编辑 `ccapp-providers.json`：网关以内存中的当前接口配置为准，检测到外部改动会写回并提示；这不表示恢复了出厂配置。
+
+- API 地址使用当前网关端口的回环地址；请求体为 JSON，`Content-Type: application/json`。浏览器内同源请求沿用应用会话 Cookie；本机工具使用已授权的 `X-CC-Token` 请求头（不是 `Authorization: Bearer`）。Host 必须是网关允许的本机地址，带 Origin 时也要通过来源检查。
+- 沿用应用/工具已有的鉴权与网关身份核验，不把令牌放进 URL、日志或回复，也不为配置接口关闭校验。没有现成的授权调用入口时，用应用接口设置页。
+- `GET /api/providers` 可查接口 id 和非完整密钥的状态；不要把返回里的密钥尾号写进回复。保存某家时传它的 `id`，只传需要更新的字段，例如 `{"id":"custom-1","defaultModel":"example-model"}`；新建自定义接口时省略 `id`，至少传 `baseUrl`，可传 `label`、`defaultModel`、`fastModel`、`apiKey`、`authStyle`（`bearer` 或 `x-api-key`）。示例中的 id 和型号只是占位，先查实际列表。
+- `baseUrl` 是兼容 Anthropic Messages 的接口根地址，网关会移除末尾 `/v1`，客户端再补 `/v1/messages`；OpenAI 协议接口应使用应用的桥接配置入口。
+- 不传 `apiKey` 或传空串通常保留已有密钥；`clearKey: true` 才是显式清除。更换主机或预置线路且未提供新密钥时可能清除旧密钥，检查返回的 `keyCleared`。预置厂商的地址由线路目录管理，选线路传 `endpoint`。
+- 检查 JSON 的 `ok` / `error`，不能只看 HTTP 状态；成功返回 `id` 和 `provider`。正在使用该接口时修改连接信息可能返回 HTTP 409 / `busy`，等当前轮结束再保存。保存不会自动把会话切换到新接口。
+
 ## 系统权限：priv
 
 需要 pm / am / settings / dumpsys / logcat / screencap / input 之类的系统能力时，用 `priv '<命令>'`：经 Shizuku 以 shell 身份（uid 2000）执行，标准输入、输出与退出码都照常传递；`priv -- 程序 参数…` 不经 sh 直接执行。
