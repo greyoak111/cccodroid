@@ -228,7 +228,7 @@ server.listen(CFG.port, "127.0.0.1", () => {
   ensureSessionRetention().catch((e) => log("补会话保留期失败: " + e.message));
   try { startAutoClean(); } catch (e) { log("存储自动清理启动失败: " + e.message); }
   // 托管桥（OpenAI 兼容端点）是应用的子进程：应用升级/被系统清掉时桥跟着没了，以前要等下一句消息才冷启动。
-  // 启动后台预热一次，不阻塞网关；没注册、已停用、恢复预算耗尽时 warmManagedBridge 自己会跳过。
+  // 启动后台预热一次，不阻塞网关；尊重停用状态，只恢复上个进程周期留下的故障锁。
   setTimeout(() => {
     warmManagedBridge().then((ok) => { if (ok) log("托管桥已预热"); }).catch(() => {});
   }, 3000).unref();

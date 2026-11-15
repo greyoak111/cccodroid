@@ -11,6 +11,7 @@ const ID = "openai-bridge";
 const ENTRY = "lib/openai-bridge/component.cjs";
 const inFlight = new Map(), failures = new Map(), configuring = new Set();
 const SUCCESS_TTL = 20000, FAILURE_TTL = 60000, OUTPUT_LIMIT = 16384;
+const PROCESS_STARTED_AT = Date.now() - process.uptime() * 1000;
 let retiring = null, ready = null, configurationEpoch = 0;
 
 function fail(stage = "binding") {
@@ -407,22 +408,37 @@ export async function ensureManagedBridge(p, { signal } = {}) {
  * 所以启动时把上一周期留下的故障锁改名留证、清掉旧预算，给新周期一次完整机会；本周期里再崩，
  * 看护照常锁停，等下一次网关启动再清。
  */
-function clearStaleRecoveryLock(state, before) {
-  const lock = path.join(state, "recovery.failed");
+function clearStaleRecoveryLock(runtimeDir) {
+  let fd;
   try {
-    const st = fs.lstatSync(lock);
-    if (!st.isFile() || st.isSymbolicLink() || st.uid !== process.getuid() || st.mtimeMs > before) return false;
-  } catch { return false; }
-  try { fs.renameSync(lock, lock + ".prev-" + Date.now()); } catch { return false; }
-  try {
-    const attempts = path.join(state, "recovery.attempts"), st = fs.lstatSync(attempts);
-    if (st.isFile() && !st.isSymbolicLink() && st.uid === process.getuid()) fs.rmSync(attempts, { force: true });
-  } catch {}
-  return true;
+    fd = fs.openSync(runtimeDir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    for (const name of ["runtime-home", ".claude-code-router"]) {
+      const next = fs.openSync(`/proc/self/fd/${fd}/${name}`,
+        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+      fs.closeSync(fd);
+      fd = next;
+      if (fs.fstatSync(fd).uid !== process.getuid()) return false;
+    }
+    const state = `/proc/self/fd/${fd}`, lock = state + "/recovery.failed", attempts = state + "/recovery.attempts";
+    const oldFile = (file) => {
+      try {
+        const st = fs.lstatSync(file);
+        if (!st.isFile() || st.uid !== process.getuid() || st.mtimeMs >= PROCESS_STARTED_AT) throw fail();
+        return st;
+      } catch (error) { if (error.code === "ENOENT") return null; throw error; }
+    };
+    if (!oldFile(lock)) return true;
+    // 预算也必须来自旧周期。先留证预算，再移走故障锁；任一步失败就不启动。
+    const oldAttempts = oldFile(attempts), suffix = ".prev-" + Date.now() + "-" + crypto.randomBytes(4).toString("hex");
+    if (oldAttempts) fs.renameSync(attempts, attempts + suffix);
+    fs.renameSync(lock, lock + suffix);
+    return true;
+  } catch (error) { return error.code === "ENOENT"; }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 
 export async function warmManagedBridge() {
-  const startedAt = Date.now();
+  if (retiring || configuring.size) return false;
   let stored;
   try { stored = readRegistration(); } catch { return false; }
   const endpoint = endpointOf(stored.value?.endpoint);
@@ -433,7 +449,7 @@ export async function warmManagedBridge() {
   try { if (fs.lstatSync(path.join(r.runtimeDir, "disabled"))) return false; }
   catch (error) { if (error.code !== "ENOENT") return false; }
   const state = path.join(r.runtimeDir, "runtime-home/.claude-code-router");
-  clearStaleRecoveryLock(state, startedAt);
+  if (!clearStaleRecoveryLock(r.runtimeDir)) return false;
   // 清不掉（链接、权限不对、刚被本周期写下）就说明锁还在，不硬启。
   try { if (fs.lstatSync(path.join(state, "recovery.failed"))) return false; }
   catch (error) { if (error.code !== "ENOENT") return false; }
