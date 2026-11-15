@@ -3173,4 +3173,5 @@ window.I18N_DICT["id"] = {
   "时间未知": "Waktu tidak diketahui",
   "配置文件被改过，已按应用里的当前设置写回：": "Berkas konfigurasi diubah dan ditulis ulang menggunakan pengaturan aplikasi saat ini:",
   "运行中的应用文件被改过，已触发保护处理：": "Berkas aplikasi yang berjalan diubah; perlindungan diaktifkan:",
+  "上下文窗口（选填，token 数，1k=1024；不填按 200k 算）": "Jendela konteks (opsional, jumlah token, 1k=1024; kosong = 200k)",
 };

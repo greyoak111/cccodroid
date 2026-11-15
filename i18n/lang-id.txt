@@ -3170,3 +3170,4 @@
 3170	Waktu tidak diketahui
 3171	Berkas konfigurasi diubah dan ditulis ulang menggunakan pengaturan aplikasi saat ini:
 3172	Berkas aplikasi yang berjalan diubah; perlindungan diaktifkan:
+3173	Jendela konteks (opsional, jumlah token, 1k=1024; kosong = 200k)

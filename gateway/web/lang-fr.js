@@ -3173,4 +3173,5 @@ window.I18N_DICT["fr"] = {
   "时间未知": "Heure inconnue",
   "配置文件被改过，已按应用里的当前设置写回：": "Les fichiers de configuration ont été modifiés puis réécrits avec les paramètres actuels de l’application :",
   "运行中的应用文件被改过，已触发保护处理：": "Des fichiers de l’application en cours ont été modifiés ; la protection a été déclenchée :",
+  "上下文窗口（选填，token 数，1k=1024；不填按 200k 算）": "Fenêtre de contexte (facultatif, en tokens, 1k=1024 ; vide = 200k)",
 };

@@ -3170,3 +3170,4 @@
 3170	Heure inconnue
 3171	Les fichiers de configuration ont été modifiés puis réécrits avec les paramètres actuels de l’application :
 3172	Des fichiers de l’application en cours ont été modifiés ; la protection a été déclenchée :
+3173	Fenêtre de contexte (facultatif, en tokens, 1k=1024 ; vide = 200k)

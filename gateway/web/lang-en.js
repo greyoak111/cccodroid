@@ -3211,4 +3211,5 @@ window.I18N_DICT.en = {
   "时间未知": "Unknown time",
   "配置文件被改过，已按应用里的当前设置写回：": "Configuration files were modified and written back using the app’s current settings: ",
   "运行中的应用文件被改过，已触发保护处理：": "Running app files were modified; protection was triggered: ",
+  "上下文窗口（选填，token 数，1k=1024；不填按 200k 算）": "Context window (optional, tokens, 1k=1024; blank = 200k)",
 };

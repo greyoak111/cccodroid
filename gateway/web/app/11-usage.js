@@ -501,7 +501,7 @@
       <input id="cc-model" placeholder="${t("默认模型名（必填，claude 不认识第三方模型）")}" value="${esc(v.defaultModel || "")}">
       <input id="cc-fast" placeholder="${t("快模型名（选填，子代理用；留空同上）")}" value="${esc(v.fastModel || "")}">
       <input id="cc-models" placeholder="${t("模型清单地址（选填；不填会按接口地址自动查找 /models）")}" value="${esc(v.modelsUrl || "")}">
-      <input id="cc-ctx" inputmode="numeric" placeholder="${t("上下文窗口（选填，token 数，如 1048576；不填按 200k 算）")}" value="${v.contextWindow ? esc(String(v.contextWindow)) : ""}">
+      <input id="cc-ctx" inputmode="numeric" placeholder="${t("上下文窗口（选填，token 数，1k=1024；不填按 200k 算）")}" value="${v.contextWindow ? esc(String(v.contextWindow)) : ""}">
       <textarea id="cc-more" rows="3" placeholder="${t("更多模型（选填，每行一个；名字后面可空一格写窗口，如 gpt-6.1-sol 1m）")}">${esc((v.extraModels || []).map((m) => m.id + (m.contextWindow ? " " + m.contextWindow : "")).join("\n"))}</textarea>
       <input id="pc-key" type="password" autocomplete="off"
         placeholder="${p && p.hasKey ? t("已保存（…{tail}），留空则不改", { tail: esc(p.keyTail) }) : t("粘贴 API Key")}">
@@ -567,9 +567,9 @@ Context window: 200k (optional; only if the provider doesn't report one)</pre>
         modelsUrl: $("cc-models").value.trim(), apiKey: $("pc-key").value.trim(), inlineImages: $("cc-inline").checked,
       };
       if (!body.defaultModel) return toast(t("默认模型名必填"), true);
-      // 上下文窗口：k / m 按千 / 百万；清单不报窗口时默认/快模型按它算（#67）
+      // 上下文窗口：k / m 按二进制（1k=1024、1m=1048576），与型号面板的显示口径一致（#222）；清单不报窗口时默认/快模型按它算（#67）
       const cw = $("cc-ctx").value.trim().replace(/[,_]/g, "").replace(/^0+(?:\.0+)?$/, ""), cm = /^(\d+(?:\.\d+)?)\s*([km]?)$/i.exec(cw);
-      body.contextWindow = cw ? (cm ? Math.round(Number(cm[1]) * ({ k: 1e3, m: 1e6 }[cm[2].toLowerCase()] || 1)) : -1) : 0;
+      body.contextWindow = cw ? (cm ? Math.round(Number(cm[1]) * ({ k: 1024, m: 1048576 }[cm[2].toLowerCase()] || 1)) : -1) : 0;
       if (cw && !(body.contextWindow >= 1024 && body.contextWindow <= 16777216)) return toast(t("上下文窗口填 1024 到 16777216 之间的整数，也可以写 256k、1m"), true);
       // 更多模型：每行「模型名」或「模型名 窗口」；第三方端口清单拉不到、或清单里没有的型号从这里加
       body.extraModels = [];
@@ -579,7 +579,7 @@ Context window: 200k (optional; only if the provider doesn't report one)</pre>
         if (!ln) continue;
         const lm = /^(\S+)(?:\s+(\d+(?:\.\d+)?)\s*([km]?))?$/i.exec(ln.replace(/[,_](?=\d)/g, ""));
         if (!lm) return toast(t("更多模型第 {n} 行看不懂：写成「模型名」或「模型名 窗口」，窗口如 256k、1m", { n: i + 1 }), true);
-        const w = lm[2] ? Math.round(Number(lm[2]) * ({ k: 1e3, m: 1e6 }[lm[3].toLowerCase()] || 1)) : 0;
+        const w = lm[2] ? Math.round(Number(lm[2]) * ({ k: 1024, m: 1048576 }[lm[3].toLowerCase()] || 1)) : 0;
         if (lm[2] && !(w >= 1024 && w <= 16777216)) return toast(t("上下文窗口填 1024 到 16777216 之间的整数，也可以写 256k、1m"), true);
         if (!body.extraModels.some((m) => m.id === lm[1])) body.extraModels.push({ id: lm[1], contextWindow: w });
       }
