@@ -176,6 +176,81 @@ export async function removeMcp(name) {
   return r.code === 0 ? { ok: true } : { ok: false, message: cliMsg(r) };
 }
 
+/** 长按编辑：读出一条用户级 MCP 的原始定义，填进编辑表单。
+ *  账户连接器（claude.ai）不在 ~/.claude.json 里，也不归网关管，编辑不了。 */
+export function getMcp(name) {
+  if (!extIdOk(name) || badArg(name)) return { ok: false, message: tz("名字格式不对") };
+  const off = extOff();
+  const d = off.mcp[name] || userMcpDef(name);
+  if (!d) return { ok: false, message: tz("找不到这条 MCP 配置（账户连接器不能编辑）") };
+  const pairs = (o) => (o && typeof o === "object" && !Array.isArray(o) ? Object.entries(o) : []);
+  return { ok: true, def: {
+    name,
+    transport: d.type === "sse" || d.type === "http" ? d.type : (d.url ? "http" : "stdio"),
+    target: String(d.url || [d.command, ...(Array.isArray(d.args) ? d.args : [])].filter((x) => x != null).join(" ")),
+    env: pairs(d.env).map(([k, v]) => `${k}=${v}`),
+    headers: pairs(d.headers).map(([k, v]) => `${k}: ${v}`),
+    disabled: !!off.mcp[name],
+  } };
+}
+
+/** 长按编辑保存：claude mcp add 不允许同名覆盖，所以先 remove 再用 add-json 写回新定义
+ *  （add-json 是「停用 / 启用」已在用的写法，网关不自己改 ~/.claude.json）。失败自动回滚原定义。 */
+export async function updateMcp(b) {
+  const oldName = String(b.oldName || "").trim();
+  const name = String(b.name || "").trim();
+  const transport = ["stdio", "http", "sse"].includes(b.transport) ? b.transport : "stdio";
+  const target = String(b.target || "").trim();
+  const envs = [].concat(b.env || []).map(String);
+  const hdrs = [].concat(b.headers || []).map(String);
+  if (!extIdOk(oldName) || badArg(oldName)) return { ok: false, message: tz("名字格式不对") };
+  if (!extIdOk(name) || badArg(name)) return { ok: false, message: tz("名字只能用字母、数字、点、下划线、横线") };
+  if (!target) return { ok: false, message: tz("缺少命令或地址") };
+  if (transport !== "stdio" && (badArg(target) || !/^https?:\/\/[^\s]+$/i.test(target))) return { ok: false, message: tz("地址要以 http:// 或 https:// 开头") };
+  if (transport !== "stdio" && envs.length) return { ok: false, message: tz("远程 MCP 不支持环境变量：请求头要写成 Header: 值") };
+
+  const off = extOff();
+  const disabled = !!off.mcp[oldName];
+  const oldDef = disabled ? off.mcp[oldName] : userMcpDef(oldName);
+  if (!oldDef) return { ok: false, message: tz("找不到这条 MCP 配置（账户连接器不能编辑）") };
+  if (name !== oldName && (disabled ? off.mcp[name] : userMcpDef(name))) return { ok: false, message: tz("已经有叫这个名字的 MCP 服务器了") };
+
+  // 表单里的「Header: 值」「KEY=值」还原成对象；值里带冒号 / 等号时只切第一个分隔符
+  const pairs = (list, sep) => {
+    const o = {};
+    for (const s of list) { const i = s.indexOf(sep); if (i > 0) o[s.slice(0, i).trim()] = s.slice(i + 1).trim(); }
+    return o;
+  };
+  const envObj = pairs(envs, "="), hdrObj = pairs(hdrs, ":");
+  let def;
+  if (transport === "stdio") {
+    const parts = (target.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((x) => x.replace(/^(["'])(.*)\1$/, "$2"));
+    if (!parts.length) return { ok: false, message: tz("缺少命令或地址") };
+    def = { ...oldDef, command: parts[0], args: parts.slice(1) };
+    delete def.url; delete def.type; delete def.headers;   // 从远程改成本地：清掉远程字段
+    if (Object.keys(envObj).length) def.env = envObj; else delete def.env;
+  } else {
+    def = { ...oldDef, type: transport, url: target };
+    delete def.command; delete def.args; delete def.env;   // 从本地改成远程：清掉本地字段
+    if (Object.keys(hdrObj).length) def.headers = hdrObj; else delete def.headers;
+  }
+
+  // 停用中的条目没连 claude：只改停用名单，启用时 add-json 会拿新定义加回去
+  if (disabled) {
+    if (name !== oldName) delete off.mcp[oldName];
+    off.mcp[name] = def;
+    return saveExtOff(off) ? { ok: true } : { ok: false, message: tz("停用名单写不进去") };
+  }
+
+  const rm = await extRun(["mcp", "remove", "-s", "user", oldName], 60000);
+  if (rm.code !== 0) return { ok: false, message: cliMsg(rm) };
+  const add = await extRun(["mcp", "add-json", "-s", "user", name, JSON.stringify(def)], 60000);
+  if (add.code === 0) { log(`MCP ${oldName} 已编辑`); return { ok: true }; }
+  // 写回失败就把原定义加回去，别把用户配置弄丢
+  const rb = await extRun(["mcp", "add-json", "-s", "user", oldName, JSON.stringify(oldDef)], 60000);
+  return { ok: false, message: tz("保存失败，已恢复原配置：{msg}", { msg: cliMsg(add) + (rb.code !== 0 ? "（回滚也没成功：" + cliMsg(rb) + "）" : "") }) };
+}
+
 // 技能：~/.claude/skills/<名字>/SKILL.md（开头 YAML 里有 name / description）
 // ── Hooks：到某个时刻自动跑的命令（claude 的 settings.json 里 "hooks" 一个键） ──
 // claude 没有管 hooks 的命令行，只能直接改 settings.json：只动 hooks 一个键，其余原样保留；
@@ -705,7 +780,7 @@ async function importSkill(buf) {
   if (!dirs.length) throw new Error(skipped.map((x) => `${x.name}：${x.why}`).join("；"));
   return { ok: true, dir: dirs.join("、"), dirs, skipped };
 }
-export const _extForTest = { importSkill, zipEntryCount, setSkillMode, disableMcp, enableMcp, forgetMcp, setOff, listSkills, listMcp };   // 只给测试用
+export const _extForTest = { importSkill, zipEntryCount, setSkillMode, disableMcp, enableMcp, forgetMcp, setOff, listSkills, listMcp, getMcp, updateMcp };   // 只给测试用
 
 // ── 路由：/api/ext/ ──
 export async function routeExtensions(req, res, u, p) {
@@ -732,6 +807,8 @@ export async function routeExtensions(req, res, u, p) {
       if (req.method === "POST" && p === "/api/ext/marketplaces/remove") return sendJson(res, 200, await marketplaceOp("remove", String(body.name || "")));
       if (req.method === "GET" && p === "/api/ext/mcp") return sendJson(res, 200, { items: await listMcp() });
       if (req.method === "POST" && p === "/api/ext/mcp/add") return sendJson(res, 200, await addMcp(body));
+      if (req.method === "POST" && p === "/api/ext/mcp/get") return sendJson(res, 200, getMcp(String(body.name || "")));
+      if (req.method === "POST" && p === "/api/ext/mcp/update") return sendJson(res, 200, await updateMcp(body));
       if (req.method === "POST" && p === "/api/ext/mcp/remove") return sendJson(res, 200, await removeMcp(body.name));
       if (req.method === "POST" && p === "/api/ext/mcp/disable") return sendJson(res, 200, await disableMcp(String(body.name || "")));
       if (req.method === "POST" && p === "/api/ext/mcp/enable") return sendJson(res, 200, await enableMcp(String(body.name || "")));

@@ -1051,6 +1051,8 @@
       m.disabled ? `<div class="tiny ext-st">${esc(t("已停用：Claude 不会连它，定义存着，点启用就加回来。"))}</div>` : `<div class="tiny ext-st ${m.ok ? "ok" : "warn"}">${esc(m.status)}</div>`,
       m.cloud ? ["cloud"] : m.disabled ? ["off"] : [m.ok ? "ok" : "bad", /^https?:/i.test(m.target || "") ? "remote" : "local"])).join("")
       || `<div class="tiny">${esc(r.err || t("还没有 MCP 服务器。"))}</div>`;
+    // 长按编辑要知道按的是哪条：条目顺序和 items 一一对应，渲染完把名字挂上去，不塞进 innerHTML 省得再转义一遍
+    [...box.querySelectorAll(".item")].forEach((el, i) => { const m = (r.items || [])[i]; if (m) el.dataset.mcp = m.name; });
     renderIdx("mcp", [["ok", t("已连接")], ["bad", t("连不上")], ["off", t("已停用")], ["cloud", t("账户连接器")], ["local", t("本地")], ["remote", t("远程")]]);
   }
 
@@ -1214,6 +1216,77 @@
     const r = await post("/api/ext/mcp/add", body).catch((e) => ({ ok: false, message: e.message }));
     toast(r.ok ? t("已添加 {name}", { name: body.name }) : t("添加失败：{msg}", { msg: r.message || "" }), !r.ok);
     if (r.ok) { ["ext-mcp-name", "ext-mcp-target", "ext-mcp-env"].forEach((id) => ($(id).value = "")); loadExtMcp(); }
+  });
+
+  // ── 长按 MCP 条目编辑：Android WebView 长按会发 contextmenu（和文件列表长按一致） ──
+  // 不另起弹窗，复用上面「添加 MCP 服务器」的表单：进入编辑时把「添加」换成「保存修改 / 取消」。
+  let mcpEdit = null;
+
+  function exitMcpEdit() {
+    mcpEdit = null;
+    $("ext-mcp-add").classList.remove("hidden");
+    $("ext-mcp-save").classList.add("hidden");
+    $("ext-mcp-cancel").classList.add("hidden");
+    $("ext-mcp-edit-tip").classList.add("hidden");
+    ["ext-mcp-name", "ext-mcp-target", "ext-mcp-env"].forEach((id) => ($(id).value = ""));
+  }
+
+  async function openMcpEdit(name) {
+    if (mcpEdit) exitMcpEdit();
+    const r = await post("/api/ext/mcp/get", { name }).catch((e) => ({ ok: false, message: e.message }));
+    if (!r.ok) return toast(t("打不开编辑：{msg}", { msg: r.message || "" }), true);
+    const d = r.def || {};
+    mcpEdit = { oldName: name };
+    const sec = $("ext-mcp-add").closest("details");
+    if (sec) sec.open = true;
+    $("ext-mcp-name").value = d.name || name;
+    $("ext-mcp-tr").value = ["stdio", "http", "sse"].includes(d.transport) ? d.transport : "stdio";
+    $("ext-mcp-tr").dispatchEvent(new Event("change"));   // 让输入框提示跟着类型切（http/sse 提示请求头写法）
+    $("ext-mcp-target").value = d.target || "";
+    // 一行一条：请求头的值里可能带逗号或等号，按行填回去不会被切坏
+    $("ext-mcp-env").value = [].concat(d.headers || [], d.env || []).join("\n");
+    $("ext-mcp-edit-tip").textContent = t("正在编辑 {name}：改网址、令牌或命令后点「保存修改」。", { name });
+    $("ext-mcp-edit-tip").classList.remove("hidden");
+    $("ext-mcp-add").classList.add("hidden");
+    $("ext-mcp-save").classList.remove("hidden");
+    $("ext-mcp-cancel").classList.remove("hidden");
+    $("ext-mcp-name").scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  // 长按 = contextmenu；桌面没有长按，双击也能进同一个编辑器
+  const mcpEditTarget = (e) => e.target.closest("button, a, input, select, textarea") ? null : e.target.closest(".item[data-mcp]");
+  $("ext-mcp").addEventListener("contextmenu", (e) => {
+    const it = mcpEditTarget(e);
+    if (!it) return;
+    e.preventDefault();
+    openMcpEdit(it.dataset.mcp);
+  });
+  $("ext-mcp").addEventListener("dblclick", (e) => {
+    const it = mcpEditTarget(e);
+    if (it) openMcpEdit(it.dataset.mcp);
+  });
+
+  $("ext-mcp-cancel").addEventListener("click", exitMcpEdit);
+
+  $("ext-mcp-save").addEventListener("click", async () => {
+    if (!mcpEdit) return;
+    const transport = $("ext-mcp-tr").value;
+    const raw = $("ext-mcp-env").value;
+    const extra = (raw.includes("\n") ? raw.split("\n") : raw.split(",")).map((x) => x.trim()).filter(Boolean);
+    const env = extra.filter((x) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(x));
+    const headers = extra.filter((x) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(x) && x.includes(":"));
+    // 远程没有子进程：KEY=值 会被塞进 -e，令牌根本发不出去（和添加表单同一个坑）
+    if (transport !== "stdio" && env.length) return toast(t("远程 MCP 要填请求头：把 {bad} 改成冒号写法", { bad: env[0] }), true);
+    const body = {
+      oldName: mcpEdit.oldName, name: $("ext-mcp-name").value.trim(), transport,
+      target: $("ext-mcp-target").value.trim(), env, headers,
+    };
+    const btn = $("ext-mcp-save");
+    btn.disabled = true;
+    const r = await post("/api/ext/mcp/update", body).catch((e) => ({ ok: false, message: e.message }));
+    btn.disabled = false;
+    toast(r.ok ? t("已保存，下次连的就是新配置") : t("保存失败：{msg}", { msg: r.message || "" }), !r.ok);
+    if (r.ok) { exitMcpEdit(); loadExtMcp(); }
   });
 
   $("tab-ext").addEventListener("click", async (e) => {
