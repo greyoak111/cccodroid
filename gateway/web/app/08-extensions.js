@@ -1045,7 +1045,7 @@
     $("ext-m-count").textContent = r.err ? "—" : (r.items || []).length;
     box.innerHTML = (r.items || []).map((m) => extItem(
       esc(m.name) + (m.cloud ? ` <span class="badge">${t("账户连接器")}</span>` : ""),
-      `<span class="mono">${esc(m.target)}</span>`,
+      `<span class="mono">${esc(m.target)}</span>` + (m.hdr ? ` <span class="badge">${esc(t("请求头"))}: ${esc(m.hdr)}</span>` : ""),
       m.cloud ? "" : m.disabled ? `<button data-x="mcp-on" data-id="${esc(m.name)}" data-target="${esc(m.target)}">${t("启用")}</button><button data-x="mcp-forget" data-id="${esc(m.name)}">${t("移除")}</button>`
         : (m.user ? `<button data-x="mcp-off" data-id="${esc(m.name)}">${t("停用")}</button>` : "") + `<button data-x="mcp-rm" data-id="${esc(m.name)}">${t("移除")}</button>`,
       m.disabled ? `<div class="tiny ext-st">${esc(t("已停用：Claude 不会连它，定义存着，点启用就加回来。"))}</div>` : `<div class="tiny ext-st ${m.ok ? "ok" : "warn"}">${esc(m.status)}</div>`,
@@ -1183,15 +1183,33 @@
     if (r.ok) $("ext-m-src").value = "";
     loadExtMarkets();
   });
+  // 选 http / sse 时把输入框提示换成请求头的写法：远程服务器常要 Bearer 令牌，
+  // 写成 KEY=值 会被当成环境变量（远程没有子进程，-e 无处注入），令牌根本没发出去。
+  const syncMcpHint = () => {
+    $("ext-mcp-env").placeholder = $("ext-mcp-tr").value === "stdio"
+      ? t("环境变量，可选，用逗号分隔（KEY=值）")
+      : t("请求头，可选，用逗号分隔（Header: 值），例如 Authorization: Bearer 你的令牌");
+  };
+  $("ext-mcp-tr").addEventListener("change", syncMcpHint);
+  syncMcpHint();
   $("ext-mcp-add").addEventListener("click", async () => {
     const transport = $("ext-mcp-tr").value;
     // 请求头的值本身可能带英文逗号：有换行就按行分（一行一条），没换行才退回逗号（195-J.11）
     const raw = $("ext-mcp-env").value;
     const extra = (raw.includes("\n") ? raw.split("\n") : raw.split(",")).map((x) => x.trim()).filter(Boolean);
+    const envLike = extra.filter((x) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(x));
+    const hdrLike = extra.filter((x) => x.includes(":") && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(x));
+    // 远程 MCP 只认请求头。旧代码把 Authorization=Bearer … 静默塞进 -e，claude
+    // 收不到 --header → 服务器 401 → 按 MCP 规范转去 OAuth 动态客户端注册 →
+    // 界面只报 "Dynamic Client Registration rejected (HTTP 404)"，用户看不出是令牌没带上。
+    // 这里直接拦下并给出正确写法，不再生成一条注定连不上的配置。
+    if (transport !== "stdio" && envLike.length) {
+      return toast(t("远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌", { bad: envLike[0] }), true);
+    }
     const body = {
       name: $("ext-mcp-name").value.trim(), transport, target: $("ext-mcp-target").value.trim(),
-      env: extra.filter((x) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(x)),
-      headers: extra.filter((x) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(x) && x.includes(":")),
+      env: envLike,
+      headers: hdrLike,
     };
     const r = await post("/api/ext/mcp/add", body).catch((e) => ({ ok: false, message: e.message }));
     toast(r.ok ? t("已添加 {name}", { name: body.name }) : t("添加失败：{msg}", { msg: r.message || "" }), !r.ok);
