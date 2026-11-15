@@ -396,6 +396,30 @@ export async function ensureManagedBridge(p, { signal } = {}) {
 }
 
 /**
+ * 网关启动后预热托管桥。
+ * 托管桥是应用的子进程，应用被升级（覆盖安装必然强停）或被系统清掉时，桥和看护会一起消失；
+ * 以前要等用户下一句消息才冷启动（实测约 9 秒），这段时间里设置页、状态检查看到的都是「未运行」。
+ * 这里在启动后异步拉起一次：调用方不必等，失败只当没预热。已停用（disabled）或恢复预算耗尽
+ * （recovery.failed）是用户/看护明确停下的状态，不在这里偷偷重启。
+ */
+export async function warmManagedBridge() {
+  let stored;
+  try { stored = readRegistration(); } catch { return false; }
+  const endpoint = endpointOf(stored.value?.endpoint);
+  if (!endpoint) return false;
+  let r;
+  try { r = binding(endpoint); } catch { return false; }
+  if (!r) return false;
+  for (const file of [path.join(r.runtimeDir, "disabled"),
+    path.join(r.runtimeDir, "runtime-home/.claude-code-router/recovery.failed")]) {
+    try { fs.lstatSync(file); return false; }
+    catch (error) { if (error.code !== "ENOENT") return false; }
+  }
+  try { return await ensureManagedBridge({ custom: true, baseUrl: endpoint }); }
+  catch { return false; }
+}
+
+/**
  * false = 非本组件/无可安全清除的注册；true = 已停用，或只清理固定残留注册并跳过脚本。
  * 固定 uninstall 或注册锁失败会拒绝（静态 code/stage），让组件管理器保包。
  */

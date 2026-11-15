@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { ensureManagedBridge, retireManagedBridge } from "../gw/managed-bridge.mjs";
+import { ensureManagedBridge, retireManagedBridge, warmManagedBridge } from "../gw/managed-bridge.mjs";
 import { guardRegistryFlock, registryFlockFixture } from "./fixtures/registry-flock.mjs";
 
 // 用确定的假值验证环境隔离；不读取或转发调用者的任何真实凭据。
@@ -392,4 +392,35 @@ test("停止等待只取消本会话，不杀共享启动器或另一会话", as
   assert.equal(await second, true);
   assert.equal(await ensureManagedBridge(f.p), true);
   assert.equal(f.calls().length, 1);
+});
+
+test("网关启动预热：有注册时后台拉起一次", async () => {
+  const f = fixture();
+  assert.equal(await warmManagedBridge(), true);
+  assert.deepEqual(f.calls().map((call) => call.command), ["ensure"]);
+  assert.equal(await warmManagedBridge(), true);
+  assert.equal(f.calls().length, 1, "ready 缓存内不重复拉起");
+});
+
+test("网关启动预热：没有注册时不碰组件", async () => {
+  const f = fixture();
+  fs.rmSync(reg, { force: true });
+  assert.equal(await warmManagedBridge(), false);
+  assert.deepEqual(f.calls(), []);
+});
+
+test("网关启动预热：已停用或恢复预算耗尽时不自作主张重启", async (t) => {
+  for (const marker of [path.join("disabled"), path.join("runtime-home/.claude-code-router/recovery.failed")]) {
+    const f = fixture();
+    fs.mkdirSync(path.dirname(path.join(f.dir, marker)), { recursive: true });
+    fs.writeFileSync(path.join(f.dir, marker), "stopped\n");
+    assert.equal(await warmManagedBridge(), false, marker + " 时不应预热");
+    assert.deepEqual(f.calls(), [], marker + " 时不应调用组件");
+  }
+});
+
+test("网关启动预热：组件不健康只当没预热，不抛出", async () => {
+  const f = fixture("fail");
+  assert.equal(await warmManagedBridge(), false);
+  assert.deepEqual(f.calls().map((call) => call.command), ["ensure"]);
 });
