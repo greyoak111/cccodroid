@@ -3174,4 +3174,9 @@ window.I18N_DICT["zh-Hant"] = {
   "配置文件被改过，已按应用里的当前设置写回：": "設定檔案被改過，已按應用程式裡的目前設定寫回：",
   "运行中的应用文件被改过，已触发保护处理：": "執行中的應用程式檔案被改過，已觸發保護處理：",
   "上下文窗口（选填，token 数，1k=1024；不填按 200k 算）": "上下文視窗（選填，token 數，1k=1024；不填按 200k 算）",
+  "环境变量，可选，用逗号分隔（KEY=值）": "環境變數，選填，用逗號分隔（KEY=值）",
+  "请求头，可选，用逗号分隔（Header: 值），例如 Authorization: Bearer 你的令牌": "請求標頭，選填，用逗號分隔（Header: 值），例如 Authorization: Bearer 你的令牌",
+  "请求头": "請求標頭",
+  "远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌": "遠端 MCP 要填請求標頭：把 {bad} 改成冒號寫法，例如 Authorization: Bearer 你的令牌",
+  "远程 MCP 不支持环境变量：请求头要写成 Header: 值，例如 Authorization: Bearer 你的令牌": "遠端 MCP 不支援環境變數：請求標頭要寫成 Header: 值，例如 Authorization: Bearer 你的令牌",
 };

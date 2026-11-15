@@ -3174,4 +3174,9 @@ window.I18N_DICT["id"] = {
   "配置文件被改过，已按应用里的当前设置写回：": "Berkas konfigurasi diubah dan ditulis ulang menggunakan pengaturan aplikasi saat ini:",
   "运行中的应用文件被改过，已触发保护处理：": "Berkas aplikasi yang berjalan diubah; perlindungan diaktifkan:",
   "上下文窗口（选填，token 数，1k=1024；不填按 200k 算）": "Jendela konteks (opsional, jumlah token, 1k=1024; kosong = 200k)",
+  "环境变量，可选，用逗号分隔（KEY=值）": "Variabel lingkungan, opsional, dipisahkan koma (KEY=nilai)",
+  "请求头，可选，用逗号分隔（Header: 值），例如 Authorization: Bearer 你的令牌": "Header, opsional, dipisahkan koma (Header: nilai), mis. Authorization: Bearer token-anda",
+  "请求头": "Header",
+  "远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌": "MCP jarak jauh memakai header: tulis {bad} dengan titik dua, mis. Authorization: Bearer token-anda",
+  "远程 MCP 不支持环境变量：请求头要写成 Header: 值，例如 Authorization: Bearer 你的令牌": "MCP jarak jauh tidak mendukung variabel lingkungan: tulis header sebagai Header: nilai, mis. Authorization: Bearer token-anda",
 };

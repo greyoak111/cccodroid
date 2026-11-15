@@ -3174,4 +3174,9 @@ window.I18N_DICT["es"] = {
   "配置文件被改过，已按应用里的当前设置写回：": "Los archivos de configuración se modificaron y se reescribieron con los ajustes actuales de la aplicación:",
   "运行中的应用文件被改过，已触发保护处理：": "Se modificaron archivos de la aplicación en ejecución; se activó la protección:",
   "上下文窗口（选填，token 数，1k=1024；不填按 200k 算）": "Ventana de contexto (opcional, tokens, 1k=1024; vacío = 200k)",
+  "环境变量，可选，用逗号分隔（KEY=值）": "Variables de entorno, opcional, separadas por comas (CLAVE=valor)",
+  "请求头，可选，用逗号分隔（Header: 值），例如 Authorization: Bearer 你的令牌": "Cabeceras, opcional, separadas por comas (Header: valor), p. ej. Authorization: Bearer tu-token",
+  "请求头": "Cabeceras",
+  "远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌": "El MCP remoto usa cabeceras: escribe {bad} con dos puntos, p. ej. Authorization: Bearer tu-token",
+  "远程 MCP 不支持环境变量：请求头要写成 Header: 值，例如 Authorization: Bearer 你的令牌": "El MCP remoto no admite variables de entorno: escribe las cabeceras como Header: valor, p. ej. Authorization: Bearer tu-token",
 };

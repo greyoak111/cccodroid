@@ -3171,3 +3171,8 @@
 3171	Les fichiers de configuration ont été modifiés puis réécrits avec les paramètres actuels de l’application :
 3172	Des fichiers de l’application en cours ont été modifiés ; la protection a été déclenchée :
 3173	Fenêtre de contexte (facultatif, en tokens, 1k=1024 ; vide = 200k)
+3174	Variables d’env., facultatif, séparées par des virgules (CLÉ=valeur)
+3175	En-têtes, facultatif, séparés par des virgules (Header: valeur), ex. Authorization: Bearer votre-jeton
+3176	En-têtes
+3177	Le MCP distant prend des en-têtes : écrivez {bad} avec deux-points, ex. Authorization: Bearer votre-jeton
+3178	Le MCP distant ne prend pas de variables d’env. : écrivez les en-têtes sous la forme Header: valeur, ex. Authorization: Bearer votre-jeton

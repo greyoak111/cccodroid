@@ -3171,3 +3171,8 @@
 3171	Los archivos de configuración se modificaron y se reescribieron con los ajustes actuales de la aplicación:
 3172	Se modificaron archivos de la aplicación en ejecución; se activó la protección:
 3173	Ventana de contexto (opcional, tokens, 1k=1024; vacío = 200k)
+3174	Variables de entorno, opcional, separadas por comas (CLAVE=valor)
+3175	Cabeceras, opcional, separadas por comas (Header: valor), p. ej. Authorization: Bearer tu-token
+3176	Cabeceras
+3177	El MCP remoto usa cabeceras: escribe {bad} con dos puntos, p. ej. Authorization: Bearer tu-token
+3178	El MCP remoto no admite variables de entorno: escribe las cabeceras como Header: valor, p. ej. Authorization: Bearer tu-token

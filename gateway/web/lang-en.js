@@ -3212,4 +3212,9 @@ window.I18N_DICT.en = {
   "配置文件被改过，已按应用里的当前设置写回：": "Configuration files were modified and written back using the app’s current settings: ",
   "运行中的应用文件被改过，已触发保护处理：": "Running app files were modified; protection was triggered: ",
   "上下文窗口（选填，token 数，1k=1024；不填按 200k 算）": "Context window (optional, tokens, 1k=1024; blank = 200k)",
+  "环境变量，可选，用逗号分隔（KEY=值）": "Env vars, optional, comma-separated (KEY=value)",
+  "请求头，可选，用逗号分隔（Header: 值），例如 Authorization: Bearer 你的令牌": "Headers, optional, comma-separated (Header: value), e.g. Authorization: Bearer your-token",
+  "请求头": "Headers",
+  "远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌": "Remote MCP takes headers: use a colon in {bad}, e.g. Authorization: Bearer your-token",
+  "远程 MCP 不支持环境变量：请求头要写成 Header: 值，例如 Authorization: Bearer 你的令牌": "Remote MCP doesn't take env vars: write headers as Header: value, e.g. Authorization: Bearer your-token",
 };

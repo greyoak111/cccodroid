@@ -3171,3 +3171,8 @@
 3171	Berkas konfigurasi diubah dan ditulis ulang menggunakan pengaturan aplikasi saat ini:
 3172	Berkas aplikasi yang berjalan diubah; perlindungan diaktifkan:
 3173	Jendela konteks (opsional, jumlah token, 1k=1024; kosong = 200k)
+3174	Variabel lingkungan, opsional, dipisahkan koma (KEY=nilai)
+3175	Header, opsional, dipisahkan koma (Header: nilai), mis. Authorization: Bearer token-anda
+3176	Header
+3177	MCP jarak jauh memakai header: tulis {bad} dengan titik dua, mis. Authorization: Bearer token-anda
+3178	MCP jarak jauh tidak mendukung variabel lingkungan: tulis header sebagai Header: nilai, mis. Authorization: Bearer token-anda
