@@ -3226,4 +3226,8 @@ window.I18N_DICT.en = {
   "只能编辑你自己加的（用户级）MCP 服务器": "Only MCP servers you added (user-level) can be edited",
   "保存失败：{msg}，旧配置已原样恢复": "Save failed: {msg}; the old config was restored as-is",
   "保存失败：{msg}，而且旧配置没能恢复，请手动检查": "Save failed: {msg}, and the old config could not be restored — please check manually",
+  "打不开编辑：{msg}": "Can't open editor: {msg}",
+  "正在编辑 {name}：留空 = 保留原值，点 × 删掉，填新的替换": "Editing {name}: blank = keep value, tap × to delete, type to replace",
+  "找不到这条 MCP 配置（账户连接器不能编辑）": "MCP server not found (account connectors can't be edited)",
+  "已经有叫这个名字的 MCP 服务器了": "An MCP server with this name already exists",
 };

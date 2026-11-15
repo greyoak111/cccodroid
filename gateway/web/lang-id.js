@@ -3188,4 +3188,8 @@ window.I18N_DICT["id"] = {
   "只能编辑你自己加的（用户级）MCP 服务器": "Hanya server MCP yang Anda tambahkan (tingkat pengguna) yang bisa diedit",
   "保存失败：{msg}，旧配置已原样恢复": "Gagal menyimpan: {msg}; konfigurasi lama dipulihkan apa adanya",
   "保存失败：{msg}，而且旧配置没能恢复，请手动检查": "Gagal menyimpan: {msg}, dan konfigurasi lama tidak bisa dipulihkan — silakan periksa manual",
+  "打不开编辑：{msg}": "Tidak bisa membuka editor: {msg}",
+  "正在编辑 {name}：留空 = 保留原值，点 × 删掉，填新的替换": "Mengedit {name}: kosongkan = pertahankan nilai, ketuk × untuk hapus, isi untuk mengganti",
+  "找不到这条 MCP 配置（账户连接器不能编辑）": "Server MCP ini tidak ditemukan (konektor akun tidak bisa diedit)",
+  "已经有叫这个名字的 MCP 服务器了": "Sudah ada server MCP dengan nama ini",
 };

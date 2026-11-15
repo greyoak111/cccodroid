@@ -1046,11 +1046,13 @@
     box.innerHTML = (r.items || []).map((m) => extItem(
       esc(m.name) + (m.cloud ? ` <span class="badge">${t("账户连接器")}</span>` : ""),
       `<span class="mono">${esc(m.target)}</span>` + (m.hdr ? ` <span class="badge">${esc(t("请求头"))}: ${esc(m.hdr)}</span>` : ""),
-      m.cloud ? "" : m.disabled ? `<button data-x="mcp-on" data-id="${esc(m.name)}" data-target="${esc(m.target)}">${t("启用")}</button><button data-x="mcp-forget" data-id="${esc(m.name)}">${t("移除")}</button>`
+      m.cloud ? "" : m.disabled ? `<button data-x="mcp-on" data-id="${esc(m.name)}" data-target="${esc(m.target)}">${t("启用")}</button><button data-x="mcp-edit" data-id="${esc(m.name)}">${t("编辑")}</button><button data-x="mcp-forget" data-id="${esc(m.name)}">${t("移除")}</button>`
         : (m.user ? `<button data-x="mcp-off" data-id="${esc(m.name)}">${t("停用")}</button><button data-x="mcp-edit" data-id="${esc(m.name)}">${t("编辑")}</button>` : "") + `<button data-x="mcp-rm" data-id="${esc(m.name)}">${t("移除")}</button>`,
       m.disabled ? `<div class="tiny ext-st">${esc(t("已停用：Claude 不会连它，定义存着，点启用就加回来。"))}</div>` : `<div class="tiny ext-st ${m.ok ? "ok" : "warn"}">${esc(m.status)}</div>`,
       m.cloud ? ["cloud"] : m.disabled ? ["off"] : [m.ok ? "ok" : "bad", /^https?:/i.test(m.target || "") ? "remote" : "local"])).join("")
       || `<div class="tiny">${esc(r.err || t("还没有 MCP 服务器。"))}</div>`;
+    // 长按编辑要知道按的是哪条：条目顺序和 items 一一对应，渲染完把名字挂上去，不塞进 innerHTML 省得再转义一遍
+    [...box.querySelectorAll(".item")].forEach((el, i) => { const m = (r.items || [])[i]; if (m) el.dataset.mcp = m.name; });
     renderIdx("mcp", [["ok", t("已连接")], ["bad", t("连不上")], ["off", t("已停用")], ["cloud", t("账户连接器")], ["local", t("本地")], ["remote", t("远程")]]);
   }
 
@@ -1202,7 +1204,9 @@
     syncMcpHint();
     $("ext-mcp-cur").classList.add("hidden");
     $("ext-mcp-cur").innerHTML = "";
-    $("ext-mcp-add").textContent = t("添加");
+    $("ext-mcp-edit-tip").classList.add("hidden");
+    $("ext-mcp-add").classList.remove("hidden");
+    $("ext-mcp-save").classList.add("hidden");
     $("ext-mcp-cancel").classList.add("hidden");
   };
   const renderMcpCur = () => {
@@ -1211,12 +1215,43 @@
     const env = mcpEdit.fullEnv.filter((k) => !mcpEdit.dropEnv.has(k));
     const hdr = mcpEdit.fullHdr.filter((k) => !mcpEdit.dropHdr.has(k));
     box.innerHTML = (hdr.length ? `<div>${esc(t("现有请求头"))}：${hdr.map((k) => chip(k, "hdr")).join("")}</div>` : "")
-      + (env.length ? `<div>${esc(t("现有环境变量"))}：${env.map((k) => chip(k, "env")).join("")}</div>` : "")
-      + (hdr.length || env.length ? `<div>${esc(t("留空 = 保留原值，想换就填新的"))}</div>` : "");
+      + (env.length ? `<div>${esc(t("现有环境变量"))}：${env.map((k) => chip(k, "env")).join("")}</div>` : "");
     box.classList.toggle("hidden", !env.length && !hdr.length);
   };
+  const openMcpEdit = async (name) => {
+    if (mcpEdit) endMcpEdit();
+    const r = await api(`/api/ext/mcp/get?name=${encodeURIComponent(name)}`).catch((e) => ({ ok: false, message: e.message }));
+    if (!r.ok) return toast(t("打不开编辑：{msg}", { msg: r.message || "" }), true);
+    mcpEdit = { name: r.name, fullEnv: r.envNames || [], fullHdr: r.headerNames || [], dropEnv: new Set(), dropHdr: new Set() };
+    $("ext-mcp-addbox").open = true;
+    $("ext-mcp-name").value = r.name;
+    $("ext-mcp-tr").value = r.transport;
+    $("ext-mcp-target").value = r.target;
+    $("ext-mcp-env").value = "";
+    syncMcpHint();
+    renderMcpCur();
+    $("ext-mcp-edit-tip").textContent = t("正在编辑 {name}：留空 = 保留原值，点 × 删掉，填新的替换", { name: r.name });
+    $("ext-mcp-edit-tip").classList.remove("hidden");
+    $("ext-mcp-add").classList.add("hidden");
+    $("ext-mcp-save").classList.remove("hidden");
+    $("ext-mcp-cancel").classList.remove("hidden");
+    $("ext-mcp-addbox").scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  // 长按 = contextmenu（和文件列表长按一致）；桌面没有长按，双击也能进
+  const mcpEditTarget = (e) => (e.target.closest("button, a, input, select, textarea") ? null : e.target.closest(".item[data-mcp]"));
+  $("ext-mcp").addEventListener("contextmenu", (e) => {
+    const it = mcpEditTarget(e);
+    if (!it) return;
+    e.preventDefault();
+    openMcpEdit(it.dataset.mcp);
+  });
+  $("ext-mcp").addEventListener("dblclick", (e) => {
+    const it = mcpEditTarget(e);
+    if (it) openMcpEdit(it.dataset.mcp);
+  });
   $("ext-mcp-cancel").addEventListener("click", endMcpEdit);
-  $("ext-mcp-add").addEventListener("click", async () => {
+  $("ext-mcp-save").addEventListener("click", async () => {
+    if (!mcpEdit) return;
     const transport = $("ext-mcp-tr").value;
     // 请求头的值本身可能带英文逗号：有换行就按行分（一行一条），没换行才退回逗号（195-J.11）
     const raw = $("ext-mcp-env").value;
@@ -1230,13 +1265,23 @@
     if (transport !== "stdio" && envLike.length) {
       return toast(t("远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌", { bad: envLike[0] }), true);
     }
-    if (mcpEdit) {
-      const body = { name: mcpEdit.name, newName: $("ext-mcp-name").value.trim(), transport, target: $("ext-mcp-target").value.trim(),
-        env: envLike, headers: hdrLike, dropEnv: [...mcpEdit.dropEnv], dropHeaders: [...mcpEdit.dropHdr] };
-      const r = await post("/api/ext/mcp/edit", body).catch((e) => ({ ok: false, message: e.message }));
-      toast(r.ok ? t("已保存修改 {name}", { name: body.newName }) : t("编辑失败：{msg}", { msg: r.message || "" }), !r.ok);
-      if (r.ok) { endMcpEdit(); loadExtMcp(); }
-      return;
+    const body = { name: mcpEdit.name, newName: $("ext-mcp-name").value.trim(), transport, target: $("ext-mcp-target").value.trim(),
+      env: envLike, headers: hdrLike, dropEnv: [...mcpEdit.dropEnv], dropHeaders: [...mcpEdit.dropHdr] };
+    const btn = $("ext-mcp-save");
+    btn.disabled = true;
+    const r = await post("/api/ext/mcp/edit", body).catch((e) => ({ ok: false, message: e.message }));
+    btn.disabled = false;
+    toast(r.ok ? t("已保存修改 {name}", { name: body.newName }) : t("编辑失败：{msg}", { msg: r.message || "" }), !r.ok);
+    if (r.ok) { endMcpEdit(); loadExtMcp(); }
+  });
+  $("ext-mcp-add").addEventListener("click", async () => {
+    const transport = $("ext-mcp-tr").value;
+    const raw = $("ext-mcp-env").value;
+    const extra = (raw.includes("\n") ? raw.split("\n") : raw.split(",")).map((x) => x.trim()).filter(Boolean);
+    const envLike = extra.filter((x) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(x));
+    const hdrLike = extra.filter((x) => x.includes(":") && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(x));
+    if (transport !== "stdio" && envLike.length) {
+      return toast(t("远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌", { bad: envLike[0] }), true);
     }
     const body = {
       name: $("ext-mcp-name").value.trim(), transport, target: $("ext-mcp-target").value.trim(),
@@ -1321,21 +1366,7 @@
     const x = b.dataset.x, id = b.dataset.id;
     if (x === "install") return installPlugin(id, b);
     if (x === "mcp-edit") {
-      b.disabled = true;
-      const r = await api(`/api/ext/mcp/get?name=${encodeURIComponent(id)}`).catch((e) => ({ ok: false, message: e.message }));
-      b.disabled = false;
-      if (!r.ok) return toast(t("编辑失败：{msg}", { msg: r.message || "" }), true);
-      mcpEdit = { name: r.name, fullEnv: r.envNames || [], fullHdr: r.headerNames || [], dropEnv: new Set(), dropHdr: new Set() };
-      $("ext-mcp-name").value = r.name;
-      $("ext-mcp-tr").value = r.transport;
-      $("ext-mcp-target").value = r.target;
-      $("ext-mcp-env").value = "";
-      syncMcpHint();
-      renderMcpCur();
-      $("ext-mcp-add").textContent = t("保存修改");
-      $("ext-mcp-cancel").classList.remove("hidden");
-      $("ext-mcp-addbox").open = true;
-      $("ext-mcp-addbox").scrollIntoView({ behavior: "smooth", block: "center" });
+      await openMcpEdit(id);
       return;
     }
     if (x === "mcp-drop") {

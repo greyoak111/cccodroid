@@ -360,12 +360,13 @@
         </details>
         <details class="ext-more" id="ext-mcp-addbox"><summary data-i18n>添加 MCP 服务器</summary>
           <div class="ext-form">
+            <div id="ext-mcp-edit-tip" class="tiny ok hidden"></div>
             <input id="ext-mcp-name" placeholder="名字（字母、数字、- _ .）" data-i18n-attr="placeholder" autocomplete="off">
             <select id="ext-mcp-tr"><option value="stdio">stdio</option><option value="http">http</option><option value="sse">sse</option></select>
             <input id="ext-mcp-target" placeholder="命令（stdio）或网址（http / sse）" data-i18n-attr="placeholder" autocomplete="off">
             <input id="ext-mcp-env" placeholder="环境变量 / 请求头，可选，用逗号分隔（KEY=值 或 Header: 值）" data-i18n-attr="placeholder" autocomplete="off">
             <div id="ext-mcp-cur" class="chips tiny hidden"></div>
-            <span class="cc-btns"><button id="ext-mcp-add" class="btn sm" data-i18n>添加</button><button id="ext-mcp-cancel" class="btn sm ghost hidden" data-i18n>取消</button></span>
+            <span class="cc-btns"><button id="ext-mcp-add" class="btn sm" data-i18n>添加</button><button id="ext-mcp-save" class="btn sm hidden" data-i18n>保存修改</button><button id="ext-mcp-cancel" class="btn sm ghost hidden" data-i18n>取消</button></span>
           </div>
         </details>
       </details>

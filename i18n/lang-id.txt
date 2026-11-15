@@ -3185,3 +3185,7 @@
 3185	Hanya server MCP yang Anda tambahkan (tingkat pengguna) yang bisa diedit
 3186	Gagal menyimpan: {msg}; konfigurasi lama dipulihkan apa adanya
 3187	Gagal menyimpan: {msg}, dan konfigurasi lama tidak bisa dipulihkan — silakan periksa manual
+3188	Tidak bisa membuka editor: {msg}
+3189	Mengedit {name}: kosongkan = pertahankan nilai, ketuk × untuk hapus, isi untuk mengganti
+3190	Server MCP ini tidak ditemukan (konektor akun tidak bisa diedit)
+3191	Sudah ada server MCP dengan nama ini

@@ -3185,3 +3185,7 @@
 3185	Solo se pueden editar los servidores MCP que añadiste (nivel de usuario)
 3186	Error al guardar: {msg}; la configuración anterior se restauró tal cual
 3187	Error al guardar: {msg} y no se pudo restaurar la configuración anterior; revísalo manualmente
+3188	No se pudo abrir el editor: {msg}
+3189	Editando {name}: deja en blanco = conservar el valor, toca × para eliminar, escribe para reemplazar
+3190	No se encontró este servidor MCP (los conectores de cuenta no se pueden editar)
+3191	Ya existe un servidor MCP con este nombre
