@@ -3176,3 +3176,12 @@
 3176	Cabeceras
 3177	El MCP remoto usa cabeceras: escribe {bad} con dos puntos, p. ej. Authorization: Bearer tu-token
 3178	El MCP remoto no admite variables de entorno: escribe las cabeceras como Header: valor, p. ej. Authorization: Bearer tu-token
+3179	Quitar de la configuración
+3180	Cabeceras actuales
+3181	Variables de entorno actuales
+3182	Deja en blanco para conservar los valores; escribe para cambiarlos
+3183	Cambios guardados en {name}
+3184	Error al editar: {msg}
+3185	Solo se pueden editar los servidores MCP que añadiste (nivel de usuario)
+3186	Error al guardar: {msg}; la configuración anterior se restauró tal cual
+3187	Error al guardar: {msg} y no se pudo restaurar la configuración anterior; revísalo manualmente

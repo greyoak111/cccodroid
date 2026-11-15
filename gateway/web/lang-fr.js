@@ -3179,4 +3179,13 @@ window.I18N_DICT["fr"] = {
   "请求头": "En-têtes",
   "远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌": "Le MCP distant prend des en-têtes : écrivez {bad} avec deux-points, ex. Authorization: Bearer votre-jeton",
   "远程 MCP 不支持环境变量：请求头要写成 Header: 值，例如 Authorization: Bearer 你的令牌": "Le MCP distant ne prend pas de variables d’env. : écrivez les en-têtes sous la forme Header: valeur, ex. Authorization: Bearer votre-jeton",
+  "从配置里删掉": "Retirer de la configuration",
+  "现有请求头": "En-têtes actuels",
+  "现有环境变量": "Variables d’env. actuelles",
+  "留空 = 保留原值，想换就填新的": "Laisser vide pour conserver les valeurs, écrire pour modifier",
+  "已保存修改 {name}": "Modifications enregistrées pour {name}",
+  "编辑失败：{msg}": "Échec de la modification : {msg}",
+  "只能编辑你自己加的（用户级）MCP 服务器": "Seuls les serveurs MCP que vous avez ajoutés (niveau utilisateur) peuvent être modifiés",
+  "保存失败：{msg}，旧配置已原样恢复": "Échec de l’enregistrement : {msg} ; l’ancienne configuration a été restaurée telle quelle",
+  "保存失败：{msg}，而且旧配置没能恢复，请手动检查": "Échec de l’enregistrement : {msg}, et l’ancienne configuration n’a pas pu être restaurée — vérifiez manuellement",
 };

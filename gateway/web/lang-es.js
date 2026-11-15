@@ -3179,4 +3179,13 @@ window.I18N_DICT["es"] = {
   "请求头": "Cabeceras",
   "远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌": "El MCP remoto usa cabeceras: escribe {bad} con dos puntos, p. ej. Authorization: Bearer tu-token",
   "远程 MCP 不支持环境变量：请求头要写成 Header: 值，例如 Authorization: Bearer 你的令牌": "El MCP remoto no admite variables de entorno: escribe las cabeceras como Header: valor, p. ej. Authorization: Bearer tu-token",
+  "从配置里删掉": "Quitar de la configuración",
+  "现有请求头": "Cabeceras actuales",
+  "现有环境变量": "Variables de entorno actuales",
+  "留空 = 保留原值，想换就填新的": "Deja en blanco para conservar los valores; escribe para cambiarlos",
+  "已保存修改 {name}": "Cambios guardados en {name}",
+  "编辑失败：{msg}": "Error al editar: {msg}",
+  "只能编辑你自己加的（用户级）MCP 服务器": "Solo se pueden editar los servidores MCP que añadiste (nivel de usuario)",
+  "保存失败：{msg}，旧配置已原样恢复": "Error al guardar: {msg}; la configuración anterior se restauró tal cual",
+  "保存失败：{msg}，而且旧配置没能恢复，请手动检查": "Error al guardar: {msg} y no se pudo restaurar la configuración anterior; revísalo manualmente",
 };

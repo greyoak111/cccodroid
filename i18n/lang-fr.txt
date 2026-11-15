@@ -3176,3 +3176,12 @@
 3176	En-têtes
 3177	Le MCP distant prend des en-têtes : écrivez {bad} avec deux-points, ex. Authorization: Bearer votre-jeton
 3178	Le MCP distant ne prend pas de variables d’env. : écrivez les en-têtes sous la forme Header: valeur, ex. Authorization: Bearer votre-jeton
+3179	Retirer de la configuration
+3180	En-têtes actuels
+3181	Variables d’env. actuelles
+3182	Laisser vide pour conserver les valeurs, écrire pour modifier
+3183	Modifications enregistrées pour {name}
+3184	Échec de la modification : {msg}
+3185	Seuls les serveurs MCP que vous avez ajoutés (niveau utilisateur) peuvent être modifiés
+3186	Échec de l’enregistrement : {msg} ; l’ancienne configuration a été restaurée telle quelle
+3187	Échec de l’enregistrement : {msg}, et l’ancienne configuration n’a pas pu être restaurée — vérifiez manuellement

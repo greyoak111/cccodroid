@@ -3176,3 +3176,12 @@
 3176	Header
 3177	MCP jarak jauh memakai header: tulis {bad} dengan titik dua, mis. Authorization: Bearer token-anda
 3178	MCP jarak jauh tidak mendukung variabel lingkungan: tulis header sebagai Header: nilai, mis. Authorization: Bearer token-anda
+3179	Hapus dari konfigurasi
+3180	Header saat ini
+3181	Variabel lingkungan saat ini
+3182	Kosongkan untuk mempertahankan nilai, isi untuk mengubah
+3183	Perubahan {name} tersimpan
+3184	Gagal mengedit: {msg}
+3185	Hanya server MCP yang Anda tambahkan (tingkat pengguna) yang bisa diedit
+3186	Gagal menyimpan: {msg}; konfigurasi lama dipulihkan apa adanya
+3187	Gagal menyimpan: {msg}, dan konfigurasi lama tidak bisa dipulihkan — silakan periksa manual

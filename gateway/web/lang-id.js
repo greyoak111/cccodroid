@@ -3179,4 +3179,13 @@ window.I18N_DICT["id"] = {
   "请求头": "Header",
   "远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌": "MCP jarak jauh memakai header: tulis {bad} dengan titik dua, mis. Authorization: Bearer token-anda",
   "远程 MCP 不支持环境变量：请求头要写成 Header: 值，例如 Authorization: Bearer 你的令牌": "MCP jarak jauh tidak mendukung variabel lingkungan: tulis header sebagai Header: nilai, mis. Authorization: Bearer token-anda",
+  "从配置里删掉": "Hapus dari konfigurasi",
+  "现有请求头": "Header saat ini",
+  "现有环境变量": "Variabel lingkungan saat ini",
+  "留空 = 保留原值，想换就填新的": "Kosongkan untuk mempertahankan nilai, isi untuk mengubah",
+  "已保存修改 {name}": "Perubahan {name} tersimpan",
+  "编辑失败：{msg}": "Gagal mengedit: {msg}",
+  "只能编辑你自己加的（用户级）MCP 服务器": "Hanya server MCP yang Anda tambahkan (tingkat pengguna) yang bisa diedit",
+  "保存失败：{msg}，旧配置已原样恢复": "Gagal menyimpan: {msg}; konfigurasi lama dipulihkan apa adanya",
+  "保存失败：{msg}，而且旧配置没能恢复，请手动检查": "Gagal menyimpan: {msg}, dan konfigurasi lama tidak bisa dipulihkan — silakan periksa manual",
 };

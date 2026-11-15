@@ -3217,4 +3217,13 @@ window.I18N_DICT.en = {
   "请求头": "Headers",
   "远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌": "Remote MCP takes headers: use a colon in {bad}, e.g. Authorization: Bearer your-token",
   "远程 MCP 不支持环境变量：请求头要写成 Header: 值，例如 Authorization: Bearer 你的令牌": "Remote MCP doesn't take env vars: write headers as Header: value, e.g. Authorization: Bearer your-token",
+  "从配置里删掉": "Remove from config",
+  "现有请求头": "Current headers",
+  "现有环境变量": "Current env vars",
+  "留空 = 保留原值，想换就填新的": "Leave blank to keep values; type to change",
+  "已保存修改 {name}": "Saved changes to {name}",
+  "编辑失败：{msg}": "Edit failed: {msg}",
+  "只能编辑你自己加的（用户级）MCP 服务器": "Only MCP servers you added (user-level) can be edited",
+  "保存失败：{msg}，旧配置已原样恢复": "Save failed: {msg}; the old config was restored as-is",
+  "保存失败：{msg}，而且旧配置没能恢复，请手动检查": "Save failed: {msg}, and the old config could not be restored — please check manually",
 };

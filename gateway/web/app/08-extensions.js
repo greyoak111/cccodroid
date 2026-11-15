@@ -1047,7 +1047,7 @@
       esc(m.name) + (m.cloud ? ` <span class="badge">${t("账户连接器")}</span>` : ""),
       `<span class="mono">${esc(m.target)}</span>` + (m.hdr ? ` <span class="badge">${esc(t("请求头"))}: ${esc(m.hdr)}</span>` : ""),
       m.cloud ? "" : m.disabled ? `<button data-x="mcp-on" data-id="${esc(m.name)}" data-target="${esc(m.target)}">${t("启用")}</button><button data-x="mcp-forget" data-id="${esc(m.name)}">${t("移除")}</button>`
-        : (m.user ? `<button data-x="mcp-off" data-id="${esc(m.name)}">${t("停用")}</button>` : "") + `<button data-x="mcp-rm" data-id="${esc(m.name)}">${t("移除")}</button>`,
+        : (m.user ? `<button data-x="mcp-off" data-id="${esc(m.name)}">${t("停用")}</button><button data-x="mcp-edit" data-id="${esc(m.name)}">${t("编辑")}</button>` : "") + `<button data-x="mcp-rm" data-id="${esc(m.name)}">${t("移除")}</button>`,
       m.disabled ? `<div class="tiny ext-st">${esc(t("已停用：Claude 不会连它，定义存着，点启用就加回来。"))}</div>` : `<div class="tiny ext-st ${m.ok ? "ok" : "warn"}">${esc(m.status)}</div>`,
       m.cloud ? ["cloud"] : m.disabled ? ["off"] : [m.ok ? "ok" : "bad", /^https?:/i.test(m.target || "") ? "remote" : "local"])).join("")
       || `<div class="tiny">${esc(r.err || t("还没有 MCP 服务器。"))}</div>`;
@@ -1192,6 +1192,30 @@
   };
   $("ext-mcp-tr").addEventListener("change", syncMcpHint);
   syncMcpHint();
+  // ── MCP 编辑模式：mcpEdit = null 是添加；有值 = 正在编辑这条（名字和点掉的键存这里，表单字段直接读）──
+  // 值（令牌等）不回到表单：留空 = 保留原值，要换就填新的；点掉 chip 的键会从配置里删掉。
+  let mcpEdit = null;
+  const endMcpEdit = () => {
+    mcpEdit = null;
+    ["ext-mcp-name", "ext-mcp-target", "ext-mcp-env"].forEach((id) => ($(id).value = ""));
+    $("ext-mcp-tr").value = "stdio";
+    syncMcpHint();
+    $("ext-mcp-cur").classList.add("hidden");
+    $("ext-mcp-cur").innerHTML = "";
+    $("ext-mcp-add").textContent = t("添加");
+    $("ext-mcp-cancel").classList.add("hidden");
+  };
+  const renderMcpCur = () => {
+    const box = $("ext-mcp-cur");
+    const chip = (k, which) => `<span class="chip">${esc(k)}<button data-x="mcp-drop" data-which="${which}" data-k="${esc(k)}" title="${esc(t("从配置里删掉"))}">×</button></span>`;
+    const env = mcpEdit.fullEnv.filter((k) => !mcpEdit.dropEnv.has(k));
+    const hdr = mcpEdit.fullHdr.filter((k) => !mcpEdit.dropHdr.has(k));
+    box.innerHTML = (hdr.length ? `<div>${esc(t("现有请求头"))}：${hdr.map((k) => chip(k, "hdr")).join("")}</div>` : "")
+      + (env.length ? `<div>${esc(t("现有环境变量"))}：${env.map((k) => chip(k, "env")).join("")}</div>` : "")
+      + (hdr.length || env.length ? `<div>${esc(t("留空 = 保留原值，想换就填新的"))}</div>` : "");
+    box.classList.toggle("hidden", !env.length && !hdr.length);
+  };
+  $("ext-mcp-cancel").addEventListener("click", endMcpEdit);
   $("ext-mcp-add").addEventListener("click", async () => {
     const transport = $("ext-mcp-tr").value;
     // 请求头的值本身可能带英文逗号：有换行就按行分（一行一条），没换行才退回逗号（195-J.11）
@@ -1205,6 +1229,14 @@
     // 这里直接拦下并给出正确写法，不再生成一条注定连不上的配置。
     if (transport !== "stdio" && envLike.length) {
       return toast(t("远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌", { bad: envLike[0] }), true);
+    }
+    if (mcpEdit) {
+      const body = { name: mcpEdit.name, newName: $("ext-mcp-name").value.trim(), transport, target: $("ext-mcp-target").value.trim(),
+        env: envLike, headers: hdrLike, dropEnv: [...mcpEdit.dropEnv], dropHeaders: [...mcpEdit.dropHdr] };
+      const r = await post("/api/ext/mcp/edit", body).catch((e) => ({ ok: false, message: e.message }));
+      toast(r.ok ? t("已保存修改 {name}", { name: body.newName }) : t("编辑失败：{msg}", { msg: r.message || "" }), !r.ok);
+      if (r.ok) { endMcpEdit(); loadExtMcp(); }
+      return;
     }
     const body = {
       name: $("ext-mcp-name").value.trim(), transport, target: $("ext-mcp-target").value.trim(),
@@ -1288,6 +1320,29 @@
     if (!b || b.disabled) return;
     const x = b.dataset.x, id = b.dataset.id;
     if (x === "install") return installPlugin(id, b);
+    if (x === "mcp-edit") {
+      b.disabled = true;
+      const r = await api(`/api/ext/mcp/get?name=${encodeURIComponent(id)}`).catch((e) => ({ ok: false, message: e.message }));
+      b.disabled = false;
+      if (!r.ok) return toast(t("编辑失败：{msg}", { msg: r.message || "" }), true);
+      mcpEdit = { name: r.name, fullEnv: r.envNames || [], fullHdr: r.headerNames || [], dropEnv: new Set(), dropHdr: new Set() };
+      $("ext-mcp-name").value = r.name;
+      $("ext-mcp-tr").value = r.transport;
+      $("ext-mcp-target").value = r.target;
+      $("ext-mcp-env").value = "";
+      syncMcpHint();
+      renderMcpCur();
+      $("ext-mcp-add").textContent = t("保存修改");
+      $("ext-mcp-cancel").classList.remove("hidden");
+      $("ext-mcp-addbox").open = true;
+      $("ext-mcp-addbox").scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (x === "mcp-drop") {
+      if (!mcpEdit) return;
+      (b.dataset.which === "env" ? mcpEdit.dropEnv : mcpEdit.dropHdr).add(b.dataset.k);
+      return renderMcpCur();
+    }
     const url = { uninstall: "/api/ext/plugins/uninstall", enable: "/api/ext/plugins/enable", disable: "/api/ext/plugins/disable",
       "skill-rm": "/api/ext/skills/delete", "mcp-rm": "/api/ext/mcp/remove", "market-rm": "/api/ext/marketplaces/remove",
       "mcp-off": "/api/ext/mcp/disable", "mcp-on": "/api/ext/mcp/enable", "mcp-forget": "/api/ext/mcp/forget" }[x];
