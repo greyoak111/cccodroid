@@ -112,8 +112,8 @@ test("篡改留痕：界面待提示、点过就不提；模型只告诉一次",
   const p = tamperPending();
   assert.equal(p.length, 2);
   const n = tamperNote();
-  assert.match(n, /restored them from the installed package \(TOOLS\.md, gw\/x\.mjs, 2\.1\.311/);
-  assert.match(n, /refused to start a modified Claude Code binary/);
+  assert.match(n, /Runtime app-file protection was triggered \(TOOLS\.md, gw\/x\.mjs\)/);
+  assert.match(n, /Refused to start a modified Claude Code binary \(2\.1\.311\/claude:_binary_does_not_match\)/);
   assert.equal(tamperNote(), "", "只说一次");
   tamperAck(p[0].id);
   assert.equal(tamperPending().length, 1);
