@@ -50,3 +50,14 @@ test("卸载 / 升级后：share/doc 下已经断掉的软链清掉，普通文�
   assert.equal(fs.readFileSync(path.join(SWEEP, "plain.txt"), "utf8"), "普通文件");
   assert.ok(fs.lstatSync(KEEP_BIN).isSymbolicLink(), "share/doc 以外的悬空软链不碰");
 });
+
+test("glibc/share/doc 下的断链同样算文档软链（devkit-2026.10.28 的 glibc 不再带 LICENSES）", () => {
+  const gdoc = path.join(PREFIX, "glibc/share/doc/b3-gdoc");
+  fs.mkdirSync(gdoc, { recursive: true });
+  fs.symlinkSync("../../../../share/LICENSES/GPL-3.0.txt", path.join(gdoc, "copyright"));
+  const rec = { id: "b3-doc", files: ["glibc/share/doc/b3-gdoc/copyright"] };
+  assert.equal(compDropDanglingDocs(rec), 1, "glibc 前缀的断链也要摘掉");
+  assert.equal(fs.existsSync(path.join(gdoc, "copyright")), false);
+  assert.deepEqual(rec.files, []);
+  fs.rmSync(path.join(PREFIX, "glibc/share/doc/b3-gdoc"), { recursive: true, force: true });
+});

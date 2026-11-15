@@ -82,7 +82,9 @@ export function compRecordInfo(id) {
   try { st = fs.lstatSync(f); }
   catch (e) { return { rec: null, missing: e.code === "ENOENT", bad: e.code !== "ENOENT" }; }
   if (!st.isFile()) return { rec: null, missing: false, bad: true };       // 软链 / 目录 / 设备文件
-  const t = readSmall(f);
+  // 记录上限放 8 MB：共享清单大的组件（melt 的 x11 闭包 19k 条共享文件）记录会过 1 MB，
+  // 默认上限会把自家刚写好的记录判成坏记录，界面永远「已损坏」（2026-11-16 真机验证发现）
+  const t = readSmall(f, 8 << 20);
   if (t == null) return { rec: null, missing: false, bad: true };          // 超过 1 MB / 读不了
   try {
     const j = JSON.parse(t);
@@ -456,10 +458,12 @@ function compMoveIn(stageUsr, rel = "", moved = [], skipped = [], orphans = new 
 // ── 悬空的文档软链（196-真机.3）──
 // Termux 的包把 share/doc/<包>/copyright 做成指向 ../../LICENSES/<协议>.txt 的软链，LICENSES 又不在包里：
 // 装进 $PREFIX 就是一堆断链（真机上 86 个），界面和对账都当异常。只碰 share/doc/ 下的软链，普通文件不碰。
+// glibc 底座的包在 glibc/share/doc/，同样算（devkit-2026.10.28 的 glibc 2.44 不再带 LICENSES，
+// 2026-11-16 真机验证时 gpu-driver-glibc / speech 装完被这批断链判成「共享文件被删」）。
 const DOC_PREFIX = "share/doc/";
-/** 这条相对路径是不是「share/doc/ 下、目标已经断了的软链」 */
+/** 这条相对路径是不是「share/doc/ 或 glibc/share/doc/ 下、目标已经断了的软链」 */
 function docLinkDangling(rel) {
-  if (typeof rel !== "string" || !rel.startsWith(DOC_PREFIX)) return false;
+  if (typeof rel !== "string" || !/^(?:glibc\/)?share\/doc\//.test(rel)) return false;
   const abs = path.join(PREFIX, rel);
   try { if (!fs.lstatSync(abs).isSymbolicLink()) return false; } catch { return false; }
   try { fs.statSync(abs); return false; }
@@ -891,6 +895,12 @@ async function compRunInstall(id, b, job) {
     if (b.skill) compInstallSkill(id, b.skill, rec);
     // 首次配置这段时间里，另一个卸载 / pkg 卸载可能把本组件依赖的共享文件删掉了：
     // 提交 ok 之前再核一次，别报「装好了」却缺依赖（0.6.9 审计 #185）
+    // 悬空的文档软链不算缺（底座不再带 LICENSES 时整批都断），从共享清单里摘掉，和 compDropDanglingDocs 一个口径
+    const danglingDocs = (rec.shared || []).filter((r) => typeof r === "string" && docLinkDangling(r));
+    if (danglingDocs.length) {
+      rec.shared = (rec.shared || []).filter((r) => !danglingDocs.includes(r));
+      log(`[comp] ${id}：${danglingDocs.length} 条共享文档软链是断的（底座没带 LICENSES），没留`);
+    }
     const goneShared = (rec.shared || []).filter((r) => typeof r === "string" && !fs.existsSync(path.join(PREFIX, r)));
     if (goneShared.length) throw new Error(tz("安装期间有 {n} 个共享文件被卸载删掉了，请重新安装", { n: goneShared.length }));
     rec.state = "ok"; rec.at = Date.now();

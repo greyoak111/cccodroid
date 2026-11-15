@@ -12,7 +12,7 @@ import { _customForTest } from "../gw/custom.mjs";
 const { compWriteRecord, compRecordInfo, compRecFile } = _compForTest;
 const { customRecords, CUSTOM_DIR } = _customForTest;
 const rec = (id) => path.join(COMP_DIR, id + ".json");
-const COMP_IDS = ["b3-miss", "b3-bad", "b3-atomic", "b3-fail"];
+const COMP_IDS = ["b3-miss", "b3-bad", "b3-atomic", "b3-fail", "b3-big"];
 const CUSTOM_IDS = ["b3-good", "b3-bad-cust", "b3-half"];
 
 after(() => {
@@ -45,6 +45,19 @@ test("compWriteRecord：原子写成功可读回；写失败返回 false，不�
   fs.writeFileSync(path.join(blocker, "x"), "占位");
   assert.equal(compWriteRecord("b3-fail", { id: "b3-fail" }), false, "写不进去要如实返回 false");
   assert.ok(!fs.readdirSync(COMP_DIR).some((n) => n.includes(".tmp-")), "失败要把临时文件清掉");
+});
+
+test("compRecordInfo：共享清单大的记录（>1MB，melt 实测 1.1MB）要能读出来", () => {
+  fs.mkdirSync(COMP_DIR, { recursive: true });
+  // 19k 条共享路径，模拟 melt 的 x11 闭包（2026-11-16 真机验证：记录 1,096,028 字节，超 1MB 默认上限被判坏）
+  const shared = [];
+  for (let i = 0; i < 19000; i++) shared.push(`share/cccodroid/base/file-${String(i).padStart(5, "0")}-with-a-long-ish-name.txt`);
+  assert.equal(compWriteRecord("b3-big", { id: "b3-big", state: "ok", shared }), true);
+  assert.ok(fs.statSync(rec("b3-big")).size > 1 << 20, "测试前提：记录确实超过 1 MB");
+  const info = compRecordInfo("b3-big");
+  assert.equal(info.bad, false, "超过 1 MB 不能判坏");
+  assert.equal(info.rec.state, "ok");
+  assert.equal(info.rec.shared.length, 19000);
 });
 
 test("customRecords：坏记录 / 装到一半的记录照样列出来（damaged），组件不会凭空消失", () => {
