@@ -432,7 +432,7 @@ function clearStaleRecoveryLock(runtimeDir) {
     const oldAttempts = oldFile(attempts), suffix = ".prev-" + Date.now() + "-" + crypto.randomBytes(4).toString("hex");
     if (oldAttempts) fs.renameSync(attempts, attempts + suffix);
     fs.renameSync(lock, lock + suffix);
-    return true;
+    return "recovered";
   } catch (error) { return error.code === "ENOENT"; }
   finally { if (fd !== undefined) fs.closeSync(fd); }
 }
@@ -448,8 +448,20 @@ export async function warmManagedBridge() {
   if (!r) return false;
   try { if (fs.lstatSync(path.join(r.runtimeDir, "disabled"))) return false; }
   catch (error) { if (error.code !== "ENOENT") return false; }
+  // 提前发出的用户请求可能正因旧锁失败；等它收尾，避免旧失败在恢复后写回冷却缓存。
+  const epoch = configurationEpoch, key = epoch + ":" + r.key;
+  const pending = inFlight.get(key);
+  if (pending) {
+    try { await pending.promise; } catch {}
+    if (retiring || configuring.size || epoch !== configurationEpoch) return false;
+    try { if (binding(endpoint)?.key !== r.key) return false; } catch { return false; }
+    try { if (fs.lstatSync(path.join(r.runtimeDir, "disabled"))) return false; }
+    catch (error) { if (error.code !== "ENOENT") return false; }
+  }
   const state = path.join(r.runtimeDir, "runtime-home/.claude-code-router");
-  if (!clearStaleRecoveryLock(r.runtimeDir)) return false;
+  const recovery = clearStaleRecoveryLock(r.runtimeDir);
+  if (!recovery) return false;
+  if (recovery === "recovered") { failures.delete(key); ready = null; }
   // 清不掉（链接、权限不对、刚被本周期写下）就说明锁还在，不硬启。
   try { if (fs.lstatSync(path.join(state, "recovery.failed"))) return false; }
   catch (error) { if (error.code !== "ENOENT") return false; }

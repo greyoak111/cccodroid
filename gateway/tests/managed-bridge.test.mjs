@@ -487,6 +487,33 @@ for (const part of ["runtime-home", ".claude-code-router"]) test(`网关启动�
   assert.deepEqual(f.calls(), []);
 });
 
+for (const pending of [false, true]) test(`网关启动预热：提前请求${pending ? "仍在途" : "已失败"}时旧锁恢复不受失败缓存阻挡`, async () => {
+  const f = fixture("fail"), state = path.join(f.dir, "runtime-home/.claude-code-router");
+  fs.mkdirSync(state, { recursive: true });
+  const lock = path.join(state, "recovery.failed");
+  fs.writeFileSync(lock, "previous failure\n");
+  const old = new Date(Date.now() - process.uptime() * 1000 - 60000);
+  fs.utimesSync(lock, old, old);
+  const request = assert.rejects(ensureManagedBridge(f.p));
+  await until(() => f.calls().length === 1, "提前 ensure 未启动");
+  if (!pending) await request;
+  fs.writeFileSync(path.join(f.dir, "mode"), "ok");
+  assert.equal(await warmManagedBridge(), true);
+  await request;
+  assert.equal(f.calls().length, 2);
+  assert.equal(fs.existsSync(lock), false);
+});
+
+test("网关启动预热：没有故障锁时保留看护已有预算", async () => {
+  const f = fixture(), attempts = path.join(f.dir, "runtime-home/.claude-code-router/recovery.attempts");
+  fs.mkdirSync(path.dirname(attempts), { recursive: true });
+  fs.writeFileSync(attempts, "2\n");
+  const old = new Date(Date.now() - process.uptime() * 1000 - 60000);
+  fs.utimesSync(attempts, old, old);
+  assert.equal(await warmManagedBridge(), true);
+  assert.equal(fs.readFileSync(attempts, "utf8"), "2\n");
+});
+
 test("网关启动预热：组件不健康只当没预热，不抛出", async () => {
   const f = fixture("fail");
   assert.equal(await warmManagedBridge(), false);
