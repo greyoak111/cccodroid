@@ -209,7 +209,6 @@ window.I18N_DICT.en = {
   "重启手机后自动重新激活（需连着 Wi‑Fi；会在开机时启动 cccodroid 后台服务）": "Reactivate automatically after a reboot (needs Wi-Fi; starts cccodroid's background service at boot)",
   "后台保活增强：放宽安卓的“幽灵进程”上限（防止并行编译时子进程被系统杀掉）、加入电池白名单、允许后台运行": "Keep-alive boost: raise Android's “phantom process” limit (so parallel builds don't have their subprocesses killed), add to the battery whitelist, allow background running",
   "开启后，终端里可用 <code>priv '命令'</code> 以 shell 身份执行（pm / am / settings / dumpsys / logcat / screencap…），Claude 也会用它。 没有 Shizuku 时基础开发功能照常，只是这些调试能力用不了。": "Once enabled, <code>priv 'command'</code> runs in the terminal as the shell user (pm / am / settings / dumpsys / logcat / screencap…), and Claude can use it too. Without Shizuku the basic development features still work — only these debug capabilities are unavailable.",
-  "荣耀 / 华为等系统会冻住后台的 Shizuku、拖慢激活：到系统应用管理 → Shizuku 里打开「忽略电池优化」防冻。": "Honor / Huawei and similar systems freeze background Shizuku and slow down activation: in system App management \u2192 Shizuku, enable \"Ignore battery optimization\" to prevent freezing.",
 
   // ── updates ──
   "已是最新": "Up to date",
@@ -3204,5 +3203,12 @@ window.I18N_DICT.en = {
   "接口报错，不是正常回复：": "The API returned an error, not a normal reply:",
   "压缩线最大 1M，已按 1M 存": "Compact line max is 1M; saved as 1M",
   "示例模板（不是真实服务，换成服务商给你的）": "Example template (not a real service; replace it with what your provider gives you)",
-  "第三方端口由你自己选择，应用不审核、不背书。对方能看到你的 Key、代码和对话，请只用你信任的服务；不要使用共享或转售的账户。": "Third-party endpoints are your choice; the app does not vet or endorse them. The operator can see your key, code and conversations, so use only services you trust, and do not use shared or resold accounts."
+  "第三方端口由你自己选择，应用不审核、不背书。对方能看到你的 Key、代码和对话，请只用你信任的服务；不要使用共享或转售的账户。": "Third-party endpoints are your choice; the app does not vet or endorse them. The operator can see your key, code and conversations, so use only services you trust, and do not use shared or resold accounts.",
+  "荣耀 / 华为等系统会冻住后台的 Shizuku、拖慢激活：到系统应用管理 → Shizuku 里打开「忽略电池优化」防冻。": "Honor / Huawei and similar systems freeze background Shizuku and slow down activation: in system App management \u2192 Shizuku, enable \"Ignore battery optimization\" to prevent freezing.",
+  "待确认记录（非本次刷新产生）": "Pending acknowledgment (not caused by this refresh)",
+  "新记录或新增文件": "New record or added files",
+  "首次记录：{time}": "First recorded: {time}",
+  "时间未知": "Unknown time",
+  "配置文件被改过，已按应用里的当前设置写回：": "Configuration files were modified and written back using the app’s current settings: ",
+  "运行中的应用文件被改过，已触发保护处理：": "Running app files were modified; protection was triggered: ",
 };

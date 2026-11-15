@@ -1097,20 +1097,39 @@
   }
 
   // ── 忙闲与排队（都以网关为准）──────────────────────────────────────
-  // 篡改留痕（网关 gw/tamper.mjs）：应用文件被改过、已还原，提示一次；点「知道了」告诉网关，换个界面也不再提
-  // 有新的才弹；弹的时候把还没点过的全列上（替换式的提示条，只列新的会把上一批顶掉，DeepSeek 复核建议 7）
+  // 状态恢复带来的是待确认记录，不是刷新刚产生的改动；仍显示并保留手动 ack。
+  // 有新的才弹，替换式提示条始终列出全部 pending；同一事件合并新文件也要再提示。
   const tamperShown = new Set();
-  function showTamper(list) {
+  function showTamper(list, restored = false) {
     list = list || [];
-    const key = (e) => e.id + ":" + (e.files || []).length;
+    // 网关重启会重用 id；时间和文件内容也参与去重，避免漏掉重启后的事件。
+    const key = (e) => JSON.stringify([e.id, e.at, e.src, e.files || []]);
     if (!list.some((e) => !tamperShown.has(key(e)))) return;
+    const lines = list.map((e) => {
+      const status = restored || tamperShown.has(key(e))
+        ? t("待确认记录（非本次刷新产生）") : t("新记录或新增文件");
+      const at = new Date(e.at);
+      const time = t("首次记录：{time}", { time: Number.isFinite(at.getTime()) ? at.toLocaleString() : t("时间未知") });
+      const files = e.files || [];
+      const preview = (items) => items.slice(0, 3).join(", ") + (items.length > 3 ? " …" : "");
+      let action;
+      if (e.src === "claude") action = t("Claude Code 程序被改过，已拒绝启动；") + preview(files);
+      else if (e.src === "app") action = t("应用文件被改过，已按安装包还原：") + preview(files);
+      else {
+        // runtime 也包含程序快照写回、等待空闲重启等；同一事件可能合并两类文件。
+        const config = e.src === "runtime" ? files.filter((f) => /^ccapp-(settings|providers)\.json$/.test(f)) : [];
+        const program = files.filter((f) => !config.includes(f));
+        const parts = [];
+        if (config.length) parts.push(t("配置文件被改过，已按应用里的当前设置写回：") + preview(config));
+        if (program.length) parts.push(t("运行中的应用文件被改过，已触发保护处理：") + preview(program));
+        action = parts.join(" · ");
+      }
+      return status + " · " + time + " · " + action;
+    });
     for (const e of list) tamperShown.add(key(e));
-    const claude = list.some((e) => e.src === "claude");
-    const files = [...new Set(list.flatMap((e) => e.files || []))];
     console.warn("[tamper]", list);
     const ids = list.map((e) => e.id);
-    toastAct((claude ? t("Claude Code 程序被改过，已拒绝启动；") : "") + t("应用文件被改过，已按安装包还原：") + files.slice(0, 3).join(", ") + (files.length > 3 ? " …" : ""),
-      t("知道了"), () => { for (const id of ids) api("/api/tamper/ack?id=" + id, { method: "POST" }).catch(() => {}); });
+    toastAct(lines.join(" | "), t("知道了"), () => { for (const id of ids) api("/api/tamper/ack?id=" + id, { method: "POST" }).catch(() => {}); });
   }
   // 恢复失败的提示（FIND-041）：网关只在日志里说，界面上以前什么都看不到。同一条只弹一次
   const recoverShown = new Set();
@@ -1124,7 +1143,7 @@
     }
   }
   function applyState(s) {
-    showTamper(s.tamper);
+    showTamper(s.tamper, true);
     showRecoverWarn(s.recoverWarns);
     srv.runs = s.runs || (s.run ? [s.run] : []);
     srv.intr = intrList(s.interrupted);
