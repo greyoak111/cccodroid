@@ -1146,7 +1146,7 @@ test("bridge multiple models: add, default, edit, remove and save windows indepe
   assert.equal(u.get("bc-selected").children.length, 2);
   u.response(saved({ model: "small-model", contextWindow: 128000, models: [{ id: "large-model", contextWindow: 512000 }, { id: "small-model", contextWindow: 128000 }] }));
   await u.submit();
-  assert.deepEqual(u.configPosts()[0].body.models, [{ id: "large-model", contextWindow: 512000 }, { id: "small-model", contextWindow: 128000 }]);
+  assert.deepEqual(u.configPosts()[0].body.models, [{ id: "large-model", contextWindow: 524288 }, { id: "small-model", contextWindow: 128000 }]);
   assert.equal(u.configPosts()[0].body.model, "small-model");
   assert.equal(u.modelCalls().length, 1, "selection and model editing never refetch");
   assert.equal(u.get("bc-saved-models").children.length, 2);
@@ -1263,11 +1263,11 @@ for (const selection of ["suggestion", "typing"]) test(`bridge windows: ${select
   if (selection === "suggestion") u.pickModel("large-model");
   else u.input("model", "large-model");
   assert.equal(u.get("bc-model").value, "large-model");
-  assert.equal(u.get("bc-ctx").value, "512000");
+  assert.equal(u.get("bc-ctx").value, "524288");
   await u.click("models-retry"); await u.advance(0);
-  assert.equal(u.get("bc-ctx").value, "512000", "selecting an existing model must retain its manual precedence");
-  const models = [{ id: "large-model", contextWindow: 512000 }];
-  u.response(saved({ model: "large-model", models, contextWindow: 512000 })); await u.submit();
+  assert.equal(u.get("bc-ctx").value, "524288", "selecting an existing model must retain its manual precedence");
+  const models = [{ id: "large-model", contextWindow: 524288 }];
+  u.response(saved({ model: "large-model", models, contextWindow: 524288 })); await u.submit();
   assert.deepEqual(u.configPosts()[0].body.models, models);
 });
 
@@ -1344,7 +1344,7 @@ test("multi APIs: selected API shows only raw models/windows; global default and
   await u.apiAction("api-select", "relay"); assert.equal(u.get("bc-ctx").value, "512000");
   u.post(() => reply(publicReply(u.configPosts().at(-1).body))); await u.submit();
   const body = u.configPosts()[0].body;
-  assert.deepEqual(body.models, [{ id: "relay/shared", contextWindow: 512000 }, { id: "relay-2/shared", contextWindow: 256000 }]);
+  assert.deepEqual(body.models, [{ id: "relay/shared", contextWindow: 512000 }, { id: "relay-2/shared", contextWindow: 262144 }]);
   assert.equal(body.model, "relay-2/shared"); assert.equal(body.apiKey, "");
   assert.ok(body.upstreams.every(source => source.apiKey === ""));
   assert.equal(used, 0); assert.equal(u.modelCalls().length, 0);
@@ -1365,7 +1365,7 @@ test("multi APIs: additive drafts aggregate duplicate raw IDs only at global Sav
   u.post(() => reply(publicReply(u.configPosts().at(-1).body))); await u.submit();
   assert.deepEqual(u.configPosts()[0].body, {
     endpoint: "https://one.example.com/v1/chat/completions", apiKey: "", model: "relay-2/shared", consent: true,
-    models: [{ id: "relay/shared", contextWindow: 512000 }, { id: "relay-2/shared", contextWindow: 128000 }],
+    models: [{ id: "relay/shared", contextWindow: 524288 }, { id: "relay-2/shared", contextWindow: 131072 }],
     upstreams: [
       { name: "relay", endpoint: "https://one.example.com/v1/chat/completions", apiKey: "typed-primary-key", models: [{ id: "relay/shared", model: "shared" }] },
       { name: "relay-2", endpoint: "https://two.example.com/v1/chat/completions", apiKey: "typed-secondary-key", models: [{ id: "relay-2/shared", model: "shared" }] },
@@ -1373,7 +1373,7 @@ test("multi APIs: additive drafts aggregate duplicate raw IDs only at global Sav
   });
   assert.equal(u.get("bc-key").value, ""); await u.click("edit");
   assert.equal(u.get("bc-key").value, ""); await u.apiAction("api-select", "relay-2"); assert.equal(u.get("bc-key").value, "");
-  assert.equal(u.get("bc-ctx").value, "128000");
+  assert.equal(u.get("bc-ctx").value, "131072");
 });
 
 test("multi APIs: API switching aborts discovery, drops late data and consent even when origins match", async () => {

@@ -21,7 +21,10 @@
   }
   const validWindow = (n) => Number.isInteger(n) && n >= 1024 && n <= 16777216;
   const validModel = (id) => typeof id === "string" && !!id && id === id.trim() && id.length <= 200 && !/[,\u0000-\u001f\u007f-\u009f]/.test(id);
-  let panel = null, options = {}, snapshot = null, busy = false, seq = 0, returnTop = 0;
+  let panel = null, options = {}, snapshot = null, busy = false, seq = 0, returnTop = 0, pendingOpen = false;
+  // 面板生命周期诊断（低噪声，不含 Key / 端点等敏感配置）：偶发空白时靠这几行定位
+  // 是「结果被丢弃」「观察者误关」还是「请求本身失败」。查 logcat 的 [bridge-cfg]。
+  const bclog = (ev, extra) => console.warn("[bridge-cfg]", ev, extra);
   let repairPlan = null, repairUntil = 0, repairTimer = null;
   // Discovery state contains only model metadata/origins and cancellation handles, never a key or key fingerprint.
   let modelsTimer = null, modelsDeadline = null, modelsAbort = null, modelsSeq = 0;
@@ -60,12 +63,12 @@
     else return { error: t("该路径无法自动补全，请填写服务商提供的完整 /chat/completions 地址。"), origin: u.origin };
     return { url: u.href, origin: u.origin };
   }
-  // 上下文窗口：空 = 0（不知道）；k / m 按千 / 百万；不合法回 null
+  // 上下文窗口：空 = 0（不知道）；k / m 按二进制（1k=1024、1m=1048576），与型号面板的显示口径一致（#222）；不合法回 null
   function ctxOf(raw) {
     const m = /^(\d+(?:\.\d+)?)\s*([km]?)$/i.exec(String(raw).trim().replace(/[,_]/g, ""));
     if (!String(raw).trim() || /^0+(?:\.0+)?$/.test(String(raw).trim())) return 0;
     if (!m) return null;
-    const n = Math.round(Number(m[1]) * ({ k: 1e3, m: 1e6 }[m[2].toLowerCase()] || 1));
+    const n = Math.round(Number(m[1]) * ({ k: 1024, m: 1048576 }[m[2].toLowerCase()] || 1));
     return n >= 1024 && n <= 16777216 ? n : null;
   }
   function safeSnapshot(data) {
@@ -776,19 +779,27 @@
     $("bc-form").classList.add("hidden"); $("bc-saved").classList.add("hidden"); $("bc-loading").classList.remove("hidden");
     overview(t("检查中…"), t("检查中…"), t("尚未检查"));
     setBusy(true); const id = ++seq;
+    bclog("check start", `seq=${id}`);
     try {
-      const data = await request(); if (id !== seq || !visible()) return;
+      const data = await request();
+      // 只按请求序号作废旧结果：seq 变了说明面板被关过（close 的每个路径都 ++seq）。
+      // 不再看 visible()：页面切走 / 离场动画期间结果仍有效，丢弃只会把面板留在「检查中…」
+      // 的空白状态（偶发空白的候选根因）；面板真被关时 seq 已变，旧结果照样到不了界面。
+      if (id !== seq) return;
       snapshot = safeSnapshot(data);
-      if (!snapshot.installed) { $("bc-loading").classList.add("hidden"); showIssue({ code: "not_installed" }); }
-      else if (snapshot.configured && snapshot.hasKey) showSaved();
-      else showForm();
+      if (!snapshot.installed) { $("bc-loading").classList.add("hidden"); showIssue({ code: "not_installed" }); bclog("check done", "seq=" + id + " code=not_installed"); }
+      else if (snapshot.configured && snapshot.hasKey) { showSaved(); bclog("check done", "seq=" + id + " saved"); }
+      else { showForm(); bclog("check done", "seq=" + id + " form"); }
     } catch (e) {
-      if (id !== seq || !visible()) return;
+      if (id !== seq) return;
       $("bc-loading").classList.add("hidden"); showIssue(e);
-    } finally { if (id === seq) setBusy(false); }
+      bclog("check fail", "seq=" + id + " code=" + (e && e.code));
+    } finally {
+      if (id === seq) { setBusy(false); if (pendingOpen) { pendingOpen = false; bclog("reopen"); checkStatus(); } }
+    }
   }
   async function open(opts = {}) {
-    if (busy) return;
+    if (busy) { pendingOpen = true; return; }   // 上一轮还在飞：记一笔，收尾后自动补一次，不再静默无效
     if (!panel) createPanel();
     options = opts;
     const body = $("page-body"); returnTop = body.scrollTop;
@@ -798,13 +809,15 @@
   }
   function close(force = false) {
     if (!panel || !$("tab-ext").classList.contains("bridge-config-open") || busy && !force) return false;
-    ++seq; clearRepair(); cancelModels(true); currentOrigin = consentOrigin = ""; $("bc-model-consent").checked = false;
+    ++seq; bclog("close", "force=" + force);
+    clearRepair(); cancelModels(true); currentOrigin = consentOrigin = ""; $("bc-model-consent").checked = false;
     busy = false; hideKey(true); snapshot = null; selectedModels = []; defaultModel = editingModel = ""; ctxManual = false;
     clearDraftKeys(); connectedApis.clear(); apiDrafts = []; activeApi = defaultSource = ""; usedNames.clear();
     $("bc-api-list").textContent = $("bc-saved-apis").textContent = "";
     $("bc-selected").textContent = $("bc-saved-models").textContent = "";
     $("tab-ext").classList.remove("bridge-config-open");
     $("bc-form").reset(); $("bc-saved-endpoint").textContent = $("bc-saved-model").textContent = $("bc-saved-ctx").textContent = "";
+    $("bc-loading").classList.add("hidden");   // 关面板一定清掉「检查中…」：任何路径都不留悬空的加载态
     $("page-body").scrollTop = returnTop;
     const anchor = options.anchor;
     options = {}; setBusy(false);
@@ -915,7 +928,7 @@
   addEventListener("blur", () => { hideKey(); suspendModels(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) { hideKey(); suspendModels(); } else updateModelsControls(); });
   addEventListener("pagehide", () => { if (panel) close(true); });
-  new MutationObserver(() => { if (panel && $("tab-ext").classList.contains("bridge-config-open") && !visible()) close(true); })
+  new MutationObserver(() => { if (panel && $("tab-ext").classList.contains("bridge-config-open") && !visible()) { bclog("observer close", "moLeave=" + !!$("pages")._moLeave + " pagesHidden=" + $("pages").classList.contains("hidden")); close(true); } })
     .observe($("pages"), { attributes: true, subtree: true, attributeFilter: ["class"] });
   window.CCBridgeConfig = { open, close };
 })();
