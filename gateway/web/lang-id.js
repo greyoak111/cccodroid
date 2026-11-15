@@ -3192,4 +3192,5 @@ window.I18N_DICT["id"] = {
   "正在编辑 {name}：留空 = 保留原值，点 × 删掉，填新的替换": "Mengedit {name}: kosongkan = pertahankan nilai, ketuk × untuk hapus, isi untuk mengganti",
   "找不到这条 MCP 配置（账户连接器不能编辑）": "Server MCP ini tidak ditemukan (konektor akun tidak bisa diedit)",
   "已经有叫这个名字的 MCP 服务器了": "Sudah ada server MCP dengan nama ini",
+  "stdio 不保存请求头：{names} 会被丢掉，继续吗？": "stdio tidak menyimpan header: {names} akan dibuang. Lanjutkan?",
 };

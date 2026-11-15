@@ -3189,3 +3189,4 @@
 3189	Editando {name}: deja en blanco = conservar el valor, toca × para eliminar, escribe para reemplazar
 3190	No se encontró este servidor MCP (los conectores de cuenta no se pueden editar)
 3191	Ya existe un servidor MCP con este nombre
+3192	stdio no guarda cabeceras: {names} se descartarán. ¿Continuar?

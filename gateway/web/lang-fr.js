@@ -3192,4 +3192,5 @@ window.I18N_DICT["fr"] = {
   "正在编辑 {name}：留空 = 保留原值，点 × 删掉，填新的替换": "Modification de {name} : laisser vide = conserver la valeur, × pour supprimer, écrire pour remplacer",
   "找不到这条 MCP 配置（账户连接器不能编辑）": "Ce serveur MCP est introuvable (les connecteurs de compte ne peuvent pas être modifiés)",
   "已经有叫这个名字的 MCP 服务器了": "Un serveur MCP porte déjà ce nom",
+  "stdio 不保存请求头：{names} 会被丢掉，继续吗？": "stdio ne conserve pas les en-têtes : {names} seront supprimés. Continuer ?",
 };

@@ -3230,4 +3230,5 @@ window.I18N_DICT.en = {
   "正在编辑 {name}：留空 = 保留原值，点 × 删掉，填新的替换": "Editing {name}: blank = keep value, tap × to delete, type to replace",
   "找不到这条 MCP 配置（账户连接器不能编辑）": "MCP server not found (account connectors can't be edited)",
   "已经有叫这个名字的 MCP 服务器了": "An MCP server with this name already exists",
+  "stdio 不保存请求头：{names} 会被丢掉，继续吗？": "stdio doesn't store headers: {names} will be dropped. Continue?",
 };

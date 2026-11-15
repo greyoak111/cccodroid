@@ -3189,3 +3189,4 @@
 3189	Modification de {name} : laisser vide = conserver la valeur, × pour supprimer, écrire pour remplacer
 3190	Ce serveur MCP est introuvable (les connecteurs de compte ne peuvent pas être modifiés)
 3191	Un serveur MCP porte déjà ce nom
+3192	stdio ne conserve pas les en-têtes : {names} seront supprimés. Continuer ?

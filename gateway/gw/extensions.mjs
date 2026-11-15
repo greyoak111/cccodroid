@@ -203,7 +203,8 @@ export async function editMcp(b) {
   if (!def) return { ok: false, message: tz("找不到这条 MCP 配置（账户连接器不能编辑）") };
   const newName = String(b.newName || name).trim();
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(newName) || badArg(newName)) return { ok: false, message: tz("名字只能用字母、数字、点、下划线、横线") };
-  if (newName !== name && (disabled ? !!off.mcp[newName] : !!userMcpDef(newName))) return { ok: false, message: tz("已经有叫这个名字的 MCP 服务器了") };
+  // 两边名单都要查：停用条目改名成活跃条目（或反过来）会留下同名幽灵，列表只显示一条、另一条会「复活」
+  if (newName !== name && (!!off.mcp[newName] || !!userMcpDef(newName))) return { ok: false, message: tz("已经有叫这个名字的 MCP 服务器了") };
   const transport = ["stdio", "http", "sse"].includes(b.transport) ? b.transport : (def.type === "http" || def.type === "sse" ? def.type : "stdio");
   const target = String(b.target || "").trim();
   if (!target) return { ok: false, message: tz("缺少命令或地址") };
@@ -229,11 +230,11 @@ export async function editMcp(b) {
   } else {
     const parts = target.match(/"[^"]*"|'[^']*'|\S+/g).map((x) => x.replace(/^(["'])(.*)\1$/, "$2"));
     if (!parts.length) return { ok: false, message: tz("缺少命令或地址") };
-    nd = { ...def, type: "stdio", command: parts[0], args: parts.slice(1),
-      env: merged(def.env, dropEnv, envs, "="), headers: merged(def.headers, dropHdr, hdrs, ":") };
-    delete nd.url;
+    // claude 对 stdio 条目不存 headers（实测 add-json 静默剥掉）：这里显式删，
+    // 别让「保存成功」之后令牌悄悄没了（前端在切 transport 时会先弹确认）
+    nd = { ...def, type: "stdio", command: parts[0], args: parts.slice(1), env: merged(def.env, dropEnv, envs, "=") };
+    delete nd.url; delete nd.headers;
     if (!Object.keys(nd.env).length) delete nd.env;
-    if (!Object.keys(nd.headers).length) delete nd.headers;
   }
   // 停用中的条目没连 claude：只改停用名单，启用时按新定义加回，不碰 .claude.json
   if (disabled) {

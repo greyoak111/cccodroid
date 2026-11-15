@@ -3189,3 +3189,4 @@
 3189	Mengedit {name}: kosongkan = pertahankan nilai, ketuk × untuk hapus, isi untuk mengganti
 3190	Server MCP ini tidak ditemukan (konektor akun tidak bisa diedit)
 3191	Sudah ada server MCP dengan nama ini
+3192	stdio tidak menyimpan header: {names} akan dibuang. Lanjutkan?

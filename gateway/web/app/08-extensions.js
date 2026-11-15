@@ -1265,6 +1265,11 @@
     if (transport !== "stdio" && envLike.length) {
       return toast(t("远程 MCP 要填请求头：把 {bad} 改成冒号写法，例如 Authorization: Bearer 你的令牌", { bad: envLike[0] }), true);
     }
+    // claude 对 stdio 条目不存请求头：留着头的条目切成 stdio 会静默丢令牌（和 #225 同类），先问一句
+    if (transport === "stdio") {
+      const keep = mcpEdit.fullHdr.filter((k) => !mcpEdit.dropHdr.has(k));
+      if (keep.length && !confirm(t("stdio 不保存请求头：{names} 会被丢掉，继续吗？", { names: keep.join("、") }))) return;
+    }
     const body = { name: mcpEdit.name, newName: $("ext-mcp-name").value.trim(), transport, target: $("ext-mcp-target").value.trim(),
       env: envLike, headers: hdrLike, dropEnv: [...mcpEdit.dropEnv], dropHeaders: [...mcpEdit.dropHdr] };
     const btn = $("ext-mcp-save");

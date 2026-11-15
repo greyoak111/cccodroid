@@ -14,7 +14,7 @@ const root = fs.mkdtempSync(path.join(process.env.CCAPP_WORKSPACE, "f6-"));
 const cli = path.join(root, "fake-cli.sh"), argLog = path.join(root, "argv.log");
 const failOnce = path.join(root, "fail-once"), failAll = path.join(root, "fail-all");
 const sh = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
-fs.writeFileSync(cli, `#!${sh}\nprintf 'POS:%s|%s|%s|%s|%s\\n' "$1" "$2" "$3" "$4" "$5" >> '${argLog}'\nfor a in "$@"; do printf '%s\\n' "$a"; done >> '${argLog}'\nprintf '\\n' >> '${argLog}'\ncase "$5" in\n  remove) exit 0 ;;\n  add-json) if [ -f '${failAll}' ]; then exit 1; elif [ -f '${failOnce}' ]; then rm -f '${failOnce}'; exit 1; fi ;;\nesac\nexit 0\n`, { mode: 0o700 });
+fs.writeFileSync(cli, `#!${sh}\nfor a in "$@"; do printf '%s\\n' "$a"; done >> '${argLog}'\nprintf '\\n' >> '${argLog}'\nsub=""; prev=""\nfor a in "$@"; do if [ "$prev" = "mcp" ]; then sub="$a"; break; fi; prev="$a"; done\ncase "$sub" in\n  remove) exit 0 ;;\n  add-json) if [ -f '${failAll}' ]; then exit 1; elif [ -f '${failOnce}' ]; then rm -f '${failOnce}'; exit 1; fi ;;\nesac\nexit 0\n`, { mode: 0o700 });
 const prev = { claude: PATHS.claude, loader: PATHS.loader, claudeLoader: PATHS.claudeLoader };
 PATHS.claude = process.execPath; PATHS.loader = PATHS.claudeLoader = cli;
 const { editMcp, getMcp, _extForTest } = await import("../gw/extensions.mjs");
@@ -102,7 +102,7 @@ test("editMcp：远程改本地清掉远程字段，本地改远程清掉本地�
   assert.equal(j.command, "npx");
   assert.deepEqual(j.args, ["-y", "x"]);
   assert.ok(!("url" in j), "url 清掉");
-  assert.deepEqual(j.headers, { Authorization: "Bearer tok" }, "请求头保留，想删点掉 chip");
+  assert.ok(!("headers" in j), "claude 不存 stdio 请求头：这里显式删掉，别静默丢令牌");
   resetLog();
   putDef("e8", { type: "stdio", command: "npx", args: ["-y", "x"], env: { A: "1" } });
   const r2 = await editMcp({ name: "e8", transport: "http", target: "http://h2/mcp", env: [], headers: [], dropEnv: [], dropHeaders: [] });
@@ -141,11 +141,20 @@ test("editMcp：停用中的条目只改停用名单，不碰 claude，可改名
   assert.equal(off.mcp.dx, undefined);
 });
 
-test("editMcp：改名撞已有名字直接拒；远程传环境变量照拒", async () => {
+test("editMcp：改名撞已有名字直接拒（两边名单都查）；远程传环境变量照拒", async () => {
   putDef("e5", { type: "http", url: "http://a/mcp" });
   putDef("e6", { type: "http", url: "http://b/mcp" });
   assert.match((await editMcp({ name: "e5", newName: "e6", transport: "http", target: "http://a2/mcp" })).message, /已经有叫这个名字/);
   assert.match((await editMcp({ name: "e5", transport: "http", target: "http://a2/mcp", env: ["A=1"] })).message, /远程 MCP 不支持环境变量/);
+});
+
+test("editMcp：跨名单改名互撞也拒（停用→活跃、活跃→停用）", async () => {
+  putDef("act1", { type: "http", url: "http://a/mcp" });
+  saveExtOff({ mcp: { off1: { type: "http", url: "http://o/mcp" } } });
+  // 停用条目改名成活跃条目名字：以前会放行，留下同名幽灵
+  assert.match((await editMcp({ name: "off1", newName: "act1", transport: "http", target: "http://o2/mcp" })).message, /已经有叫这个名字/);
+  // 活跃条目改名成停用名单里的名字
+  assert.match((await editMcp({ name: "act1", newName: "off1", transport: "http", target: "http://a2/mcp" })).message, /已经有叫这个名字/);
 });
 
 test("editMcp：校验（找不到、坏名字、坏地址）", async () => {
