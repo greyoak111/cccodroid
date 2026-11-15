@@ -136,7 +136,8 @@ async function listMcp() {
     const m = line.match(/^(.+?): (.+) - ([✔✗⚠!]|[^\s]+)\s*(.*)$/u);
     if (!m) continue;
     const name = m[1].trim();
-    out.push({ name, target: m[2].trim(), ok: m[3] === "✔", status: (m[3] + " " + m[4]).trim().slice(0, 200), cloud: name.startsWith("claude.ai "), user: !!userMcpDef(name) });
+    const def = userMcpDef(name);
+    out.push({ name, target: m[2].trim(), ok: m[3] === "✔", status: (m[3] + " " + m[4]).trim().slice(0, 200), cloud: name.startsWith("claude.ai "), user: !!def, hdr: headerNames(def) });
   }
   for (const [name, d] of Object.entries(extOff().mcp)) if (!out.some((x) => x.name === name)) out.push({ name, target: mcpTarget(d), ok: false, status: "", disabled: true });
   return out;
@@ -152,9 +153,13 @@ export async function addMcp(b) {
   // http / sse 的地址是位置参数：只收 http(s) 网址，别的（横线开头、控制字符）不进命令行
   if (transport !== "stdio" && (badArg(target) || !/^https?:\/\/[^\s]+$/i.test(target))) return { ok: false, message: tz("地址要以 http:// 或 https:// 开头") };
   // -e / --header 是可变参数，会把后面的名字吞掉：名字放前面，选项跟在后面、用 -- 收尾
+  const envs = [].concat(b.env || []);
+  // http / sse 没有子进程，-e 无处注入。前端已拦，这里再挡一次（API 直调 / 旧版页面），
+  // 免得把 Authorization=Bearer … 当成环境变量，生成一条不带令牌、注定 401 的配置。
+  if (transport !== "stdio" && envs.length) return { ok: false, message: tz("远程 MCP 不支持环境变量：请求头要写成 Header: 值，例如 Authorization: Bearer 你的令牌") };
   const args = ["mcp", "add", "-s", "user", "--transport", transport, name];
   if (transport !== "stdio") args.push(target);
-  for (const kv of [].concat(b.env || [])) if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(kv)) args.push("-e", kv);
+  for (const kv of envs) if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(kv)) args.push("-e", kv);
   for (const h of [].concat(b.headers || [])) if (String(h).includes(":")) args.push("--header", String(h));
   if (transport === "stdio") {
     // 命令行按空白切开；带空格的参数用引号括起来
@@ -456,6 +461,12 @@ function userMcpDef(name) {
     return d && typeof d === "object" && !Array.isArray(d) ? d : null;
   } catch { return null; }
 }
+/** 列表里只显示请求头的名字（值可能是令牌，不显示）：一眼能看出令牌到底配上没有，
+ *  不用等 claude 报 "Dynamic Client Registration rejected (HTTP 404)" 再猜。 */
+const headerNames = (d) => {
+  const h = d && d.headers;
+  return h && typeof h === "object" && !Array.isArray(h) ? Object.keys(h).slice(0, 12).join(", ") : "";
+};
 // 启用前的确认框要看得出加回去的是什么：命令 / 地址之外，环境变量和请求头的名字也带上（值可能是密钥，不显示）
 const mcpTarget = (d) => {
   const keys = (o) => (o && typeof o === "object" && !Array.isArray(o) ? Object.keys(o).slice(0, 12).join(", ") : "");
