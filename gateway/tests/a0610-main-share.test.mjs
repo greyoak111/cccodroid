@@ -28,7 +28,7 @@ test("拷成功才记清单；删只删清单里、uploads/ 下的普通文件�
   assert.match(done, /getCanonicalPath\(\)\.equals\(f\.getParentFile\(\)\.getCanonicalPath\(\)\)/);
   assert.match(done, /NOFOLLOW_LINKS/);
   assert.match(MA, /public void shareDone\(String k, String path, boolean drop\) \{ if \(!Env\.bridgeOk\(k\)\) return;/);
-  assert.match(rd("gateway/web/theme.js"), /const KEYED = \[[^\]]*"shareDone"\]/);
+  assert.match(rd("gateway/web/theme.js"), /const KEYED = \[[^\]]*"shareDone"[^\]]*"inputFocus"[^\]]*\]/);
 });
 
 test("界面：移除附件、/clear、草稿被挤掉时删；正常发出只划掉", () => {
