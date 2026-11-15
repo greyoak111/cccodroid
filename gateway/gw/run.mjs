@@ -23,6 +23,7 @@ import { SUBAGENT_HINT, agentBook, takeAgentNote, putAgentNote, onShared, privat
 import { findSessionFile, peekSession } from "./sessions.mjs";
 import { projectById, projectDefaults, projectOfDir } from "./projects.mjs";
 import { sessLostProvider, sessModel, sessProvider, setSessModel } from "./sessmodel.mjs";
+import { noteManaged } from "./sessmanaged.mjs";
 import { inlineImages, inlineImagesSync, wantsInline } from "./inlineimg.mjs";
 import { pathWatch, previewHint, putPathNote, settlePathNote, takePathNote } from "./pathnote.mjs";
 import { claudeSeal, sealStillValid } from "./claudeseal.mjs";
@@ -797,6 +798,7 @@ export async function startRun(item) {
     setLastInit(init);
     run.newSession = !run.sessionId;
     run.sessionId = init.session_id;
+    noteManaged(run.sessionId);              // 应用里开的会话（含 --resume）：记一笔，列表才不会归进杂项
     markIncomplete(run.sessionId, run.id);   // 新会话：拿到会话号就记上（FIND-040）
     run.usageModel = init.model || run.usageModel;
     // 新会话的 run_start 发出时还没有会话号：回填进日志，别的视图切过来、整轮重放时才认得出这是它的

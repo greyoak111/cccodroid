@@ -17,6 +17,7 @@ import { ucPending } from "./userconf.mjs";
 import { forEachLine, lineWriter, writeAll, zipEntries, zipExtract, zipToFile } from "./bigfile.mjs";
 import { archiveDb, archiveImport, saveArchive } from "./archive-store.mjs";
 import { isObj, loadState, saveState, writeAtomic } from "./statefile.mjs";
+import { noteManaged } from "./sessmanaged.mjs";
 
 // ── 会话管理：回收站 / 导出 / 导入 ─────────────────────────────────────
 // 回收站放在 claude 的 projects 目录之外（它看不见，--resume 也就找不回来），同一文件系统，挪进挪出都是 rename。
@@ -137,6 +138,7 @@ export function forkSession(id, userText, after, { before = false, uuid = "", la
   try { fs.renameSync(tmpFile, finalFile); }
   catch (e) { fs.rmSync(path.join(dir, nid), { recursive: true, force: true }); fs.rmSync(tmpFile, { force: true }); return { ok: false, status: 500, message: tz("分叉的会话没能落盘：{err}", { err: e.code || e.message }) }; }
   sealSession(nid, finalFile, { flag: dirty || undefined });
+  noteManaged(nid);   // 新会话号是网关起的：不记的话会被当成外部会话归进杂项
   const title = (NAMES[id] || peekSession(found.file).title || "").slice(0, 100);
   NAMES[nid] = title + " · " + tr(LAST_LANG, before ? tz("回退") : tz("分叉")); saveNames();
   recordPrimary(nid, id, at, before ? "rewind" : "fork");
@@ -830,6 +832,7 @@ export async function importSessions(file) {
     try { const now = new Date(); fs.utimesSync(dst, now, now); } catch {}
     sealSession(id, dst, { flag: "imported" });   // 包里的历史谁都能写：第一次接着聊时提醒模型（见 integrity.mjs）
     absorbMeta(s, id);
+    noteManaged(id);    // 用户自己导进来的，当应用会话
     res.imported.push(id);
   } } catch (e) { e.imported = res.imported; throw e; }
   finally {
