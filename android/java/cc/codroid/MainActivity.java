@@ -310,7 +310,29 @@ public class MainActivity extends Activity {
         // 主 WebView 就再也拿不回来，之后点输入框没有光标、键盘起不来（同「首启打不了字」）
         if (!has || web == null || web.getParent() == null) return;
         boolean paneOwns = pane != null && pane.getVisibility() == View.VISIBLE && pane.hasFocus();
-        if (!paneOwns) web.requestFocus();
+        if (!paneOwns) {
+            web.requestFocus();
+            // 从别的应用 / 文件选择器 / 系统对话框回来，输入法可能还拿着旧的空连接；
+            // 页面又恰好停在输入框上时，这里补一次重连（只在 onCreateInputConnection 报过空连接时做）
+            if (imeNoConn) restoreInputIfEditable(web);
+        }
+    }
+
+    /** 页面焦点在可编辑元素上就重建输入连接（窗口刚回来 / 手点过主界面之后的兜底） */
+    private void restoreInputIfEditable(final android.webkit.WebView w) {
+        if (w == null) return;
+        w.evaluateJavascript("(function(){var a=document.activeElement;return !!a&&(a.isContentEditable||/^(TEXTAREA|INPUT)$/.test(a.tagName))})()", v -> {
+            if (!"true".equals(v) || !mainInputReady(w)) return;
+            android.view.inputmethod.InputMethodManager m = getSystemService(android.view.inputmethod.InputMethodManager.class);
+            if (m != null) m.restartInput(w);
+        });
+    }
+
+    /** 主 WebView 现在能接输入：就是当前这个、没销毁、挂上了、显示着、窗口有焦点、窗格没抢 */
+    private boolean mainInputReady(android.webkit.WebView w) {
+        if (w == null || w != web || isFinishing() || isDestroyed()) return false;
+        if (!w.isAttachedToWindow() || !w.isShown() || !w.hasWindowFocus()) return false;
+        return !(pane != null && pane.getVisibility() == View.VISIBLE && pane.hasFocus());
     }
 
     /** 帧率心跳：小米上应用自己的帧率靠广播告诉 PowerKeeper；它重启或名单被重置后，靠这里补回来 */
@@ -427,22 +449,30 @@ public class MainActivity extends Activity {
     }
 
     /** 第一次开读屏 / 点按前问一句（审查 v0.5.9 B4）：系统那套「此应用将能读取屏幕」的提示被我们写系统设置绕过了，这里补上 */
-    private long a11yAskAt;
+    /** 确认框正显示着：同一时刻只弹一个。以前用 20 秒时间窗，开完总开关马上切读屏模式，
+     *  后一次请求会被静默吞掉（页面上还提示「请在弹出的对话框里确认」，框却不会出来）。 */
+    private android.app.AlertDialog a11yDialog;
     private void confirmA11y(String mode, boolean on) {
         boolean screen = "auto".equals(mode) || "on".equals(mode);
         if (!screen && !on) return;
-        // 弹框的口令同 uid 的进程读得到，别让它反复弹来磨人：20 秒内只弹一次
-        long now = android.os.SystemClock.elapsedRealtime();
-        if (now - a11yAskAt < 20_000) return;
-        a11yAskAt = now;
-        android.app.AlertDialog d = new android.app.AlertDialog.Builder(this)
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { ui.post(() -> confirmA11y(mode, on)); return; }
+        if (isFinishing() || isDestroyed()) return;
+        if (a11yDialog != null) { android.util.Log.i("cccodroid", "无障碍确认框正在显示，忽略重复请求"); return; }
+        final android.app.AlertDialog d = new android.app.AlertDialog.Builder(this)
             .setTitle(screen ? Tr.t("允许 Claude 读屏和点按？") : Tr.t("打开设备工具？"))
             .setMessage(screen ? Tr.t("打开后，Claude 能看到屏幕上的内容（包括别的应用里的），也能替你点按、输入。cccodroid 会直接打开无障碍服务，系统不会再提示。\n\n随时可以在 设置 → 设备工具 里关掉。")
                 : Tr.t("打开后，Claude 能读写剪贴板、发通知、打开应用、列出已装应用、分享文件。\n\n随时可以在 设置 → 设备工具 里关掉。"))
             .setPositiveButton(Tr.t("允许"), (x, w) -> DeviceTools.a11yConfirmed(this, screen ? mode : "", on))
             .setNegativeButton(Tr.t("取消"), null)
             .create();
-        guard(d, android.content.DialogInterface.BUTTON_POSITIVE);
+        a11yDialog = d;
+        d.setOnDismissListener((x) -> { if (a11yDialog == d) a11yDialog = null; });
+        try {
+            if (!guard(d, android.content.DialogInterface.BUTTON_POSITIVE)) { if (a11yDialog == d) a11yDialog = null; }
+        } catch (RuntimeException ex) {
+            if (a11yDialog == d) a11yDialog = null;
+            throw ex;
+        }
     }
 
     // ── 敏感确认框：显示期间设备工具不许动屏幕（DeviceTools.call），按钮一秒后才能点、被别的窗口盖住时不收触摸 ──
@@ -1678,7 +1708,10 @@ public class MainActivity extends Activity {
                 // （imeCheck 里的兜底），这一下点击已经处理完了，页面收不到输入，输入法手里还是补焦点前那条空连接。
                 if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) {
                     webRefocused = false;
-                    if (!hasFocus() && hasWindowFocus()) {
+                    // 窗格正开着并拿着焦点时别抢（它的地址栏 / 网页可能在输入）。
+                    // 窗口没有焦点的那一下补了也没用（requestFocus 不会把窗口焦点抢回来），留给 onWindowFocusChanged。
+                    boolean paneOwns = pane != null && pane.getVisibility() == View.VISIBLE && pane.hasFocus();
+                    if (!hasFocus() && !paneOwns && hasWindowFocus()) {
                         if (!isFocusable()) setFocusable(true);
                         if (!isFocusableInTouchMode()) setFocusableInTouchMode(true);
                         webRefocused = requestFocus();
@@ -1795,6 +1828,36 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Object() {
             // 有副作用的方法第一个参数是口令 k（见 Env.BRIDGE_KEY）；界面在 theme.js 里包一层自动带上，调用处照旧写
             @android.webkit.JavascriptInterface public boolean keyed() { return true; }
+            /** 页面上输入框被点了一下、或用户手势里它刚拿到焦点：确认主 WebView 有视图焦点，
+             *  再重建输入连接、请键盘出来。视图焦点丢了、或输入法手里还是那条空连接时，
+             *  只靠 JS focus() 只有边框变色，既没光标也没键盘。 */
+            @android.webkit.JavascriptInterface public void inputFocus(String k) { if (!Env.bridgeOk(k)) return;
+                ui.post(() -> {
+                    final android.webkit.WebView w = web;
+                    // 留一行现场：再出问题时看这一行就知道当时是哪种状态（视图焦点 / 窗口焦点 / 连接是否报过空）
+                    if (w != null) android.util.Log.i("cccodroid", "inputFocus view=" + (w.hasFocus() ? 1 : 0)
+                        + " win=" + (w.hasWindowFocus() ? 1 : 0) + " conn=" + (imeNoConn ? 0 : 1)
+                        + " ready=" + (mainInputReady(w) ? 1 : 0));
+                    if (!mainInputReady(w)) return;
+                    w.evaluateJavascript("(function(){var a=document.activeElement;return !!a&&(a.isContentEditable||((a.tagName==='TEXTAREA'||a.tagName==='INPUT')&&!a.disabled&&!a.readOnly))})()", v -> {
+                        if (!"true".equals(v) || !mainInputReady(w)) return;
+                        if (!w.hasFocus()) {
+                            w.setFocusable(true);
+                            w.setFocusableInTouchMode(true);
+                            w.requestFocus();
+                        }
+                        if (!w.hasFocus()) return;
+                        final android.view.inputmethod.InputMethodManager m = getSystemService(android.view.inputmethod.InputMethodManager.class);
+                        if (m == null) return;
+                        m.restartInput(w);
+                        // 键盘等下一帧再请：这一刻输入连接可能刚被重建，showSoftInput 太早会落空
+                        w.postOnAnimation(() -> {
+                            if (!mainInputReady(w) || !w.hasFocus()) return;
+                            m.showSoftInput(w, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+                        });
+                    });
+                });
+            }
             @android.webkit.JavascriptInterface public void openUrl(String k, String url) { if (!Env.bridgeOk(k)) return;
                 if (url != null && (url.startsWith("https://") || url.startsWith("http://"))) ui.post(() -> openExternal(url));
             }
