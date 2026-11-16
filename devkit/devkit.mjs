@@ -89,18 +89,28 @@ async function loadIndex(repos = REPOS) {
 }
 
 async function loadRepo(repo) {
-  const { base, dist, component, arch } = repo;
+  const { dist, component, arch } = repo;
   // Release 先验 Termux 自动构建钥的签名再用：清单签的是「cccodroid 打的包」，这一步保证包确实出自 Termux（审查 10-29 M4）。
-  // 和设备上 pkg.mjs 用同一份钥匙与验签代码（打 APK 时 build.sh 把 pgp.mjs 拷进 app/bin）；按需导入，开发端只拷了 devkit.mjs 也能加载
+  // 和设备上 pkg.mjs 用同一份钥匙与验签代码（打 APK 时 build.sh 把 pgp.mjs 拷进 app/bin）；按需导入，开发端只拷了 devkit.mjs 也能加载。
+  // Release 和 Release.gpg 要从同一个源成对取、验不过就换下一个源：CDN 镜像在 Termux 发版窗口会
+  // 把新的 Release 和旧的 Release.gpg 搭在一起（2026-11-16 实测 packages-cf.termux.dev），
+  // 只用一个源会把「镜像滞后」当成「上游换钥」整个仓库都用不了（pkg.mjs 里一直是换源重试的写法）
   const { TERMUX_KEYS, verifyDetached } = await import("./pgp.mjs");
-  const relBuf = await get(`${base}dists/${dist}/Release`);
-  verifyDetached(relBuf, (await get(`${base}dists/${dist}/Release.gpg`)).toString(), TERMUX_KEYS);
-  const rel = relBuf.toString();
-  const rp = `${component}/binary-${arch}/Packages.gz`;
-  const want = rel.split("SHA256:")[1].split("\n").find((l) => l.trim().endsWith(" " + rp));
-  if (!want) throw new Error("Release 里没有 " + rp);
-  const gz = await get(`${base}dists/${dist}/${rp}`);
-  if (sha256(gz) !== want.trim().split(/\s+/)[0]) throw new Error("Packages.gz 哈希与 Release 不符");
+  let relBuf = null, rel = null, gz = null, lastErr = null;
+  for (const base of [repo.base, ...(repo.mirrors || [])]) {
+    try {
+      const buf = await get(`${base}dists/${dist}/Release`);
+      verifyDetached(buf, (await get(`${base}dists/${dist}/Release.gpg`)).toString(), TERMUX_KEYS);
+      relBuf = buf; rel = buf.toString();
+      const rp = `${component}/binary-${arch}/Packages.gz`;
+      want = rel.split("SHA256:")[1].split("\n").find((l) => l.trim().endsWith(" " + rp));
+      if (!want) throw new Error("Release 里没有 " + rp);
+      gz = await get(`${base}dists/${dist}/${rp}`);
+      if (sha256(gz) !== want.trim().split(/\s+/)[0]) throw new Error("Packages.gz 哈希与 Release 不符");
+      break;
+    } catch (e) { lastErr = e; }
+  }
+  if (!relBuf || !rel || !gz) throw new Error(`${repo.name || "repo"}：所有源的 Release 都没过签名校验（最后：${lastErr && lastErr.message}）`);
   const date = (rel.match(/^Date: (.+)$/m) || [])[1];
 
   const pkgs = new Map(), provides = new Map();
