@@ -103,7 +103,7 @@ async function loadRepo(repo) {
       verifyDetached(buf, (await get(`${base}dists/${dist}/Release.gpg`)).toString(), TERMUX_KEYS);
       relBuf = buf; rel = buf.toString();
       const rp = `${component}/binary-${arch}/Packages.gz`;
-      want = rel.split("SHA256:")[1].split("\n").find((l) => l.trim().endsWith(" " + rp));
+      const want = rel.split("SHA256:")[1].split("\n").find((l) => l.trim().endsWith(" " + rp));
       if (!want) throw new Error("Release 里没有 " + rp);
       gz = await get(`${base}dists/${dist}/${rp}`);
       if (sha256(gz) !== want.trim().split(/\s+/)[0]) throw new Error("Packages.gz 哈希与 Release 不符");
