@@ -50,6 +50,32 @@ test("missing components are reported per operation without installing anything"
   assert.equal(info.maxImagePages, 100);
 });
 
+test("parser environment drops credentials, proxy settings and unrecognized runtime-prefixed variables", () => {
+  // 只向纯函数传假数据，不读取或改写测试进程中的真实凭据。
+  const sensitive = {
+    OPENAI_API_KEY: "fake-key", ANTHROPIC_AUTH_TOKEN: "fake-token", PDF_TEST_API_KEY: "fake-key",
+    CCAPP_KEY_FILE: "/fake/key-file", CCAPP_TOKEN_FILE: "/fake/token-file", CCAPP_GLIBC_API_KEY: "fake-key",
+    HTTP_PROXY: "http://fake.invalid", HTTPS_PROXY: "http://fake.invalid", NODE_OPTIONS: "--require=/fake/hook",
+  };
+  const env = _pdfForTest.pdfEnv(root, { ...sensitive, PATH: "/untrusted/search/path", HOME: "/fake/home", CCAPP_BIN: "/runtime/bin" });
+  for (const name of Object.keys(sensitive)) assert.equal(Object.hasOwn(env, name), false, name);
+  assert.equal(env.HOME, root); assert.equal(env.TMPDIR, root); assert.equal(env.XDG_CONFIG_HOME, root);
+  assert.ok(!env.PATH.includes("/untrusted/search/path"));
+  assert.ok(env.PATH.split(path.delimiter).includes("/runtime/bin"));
+});
+
+test("parser environment retains the exact Android loader variables and bionic preload", () => {
+  const runtime = {
+    CCAPP_LD: "/apk/ld.so", CCAPP_SELF_EXE: "/runtime/node", CCAPP_GLIBC_LIB: "/runtime/glibc/lib",
+    CCAPP_GLIBC_PRELOAD: "/apk/glibc-shim.so", CCAPP_BIONIC_PRELOAD: "/apk/bionic-shim.so", CCAPP_EXEC: "loader",
+    TERMUX_APP__DATA_DIR: "/data/user/0/example", TERMUX_APP__LEGACY_DATA_DIR: "/data/data/example", TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE: "force",
+  };
+  const env = _pdfForTest.pdfEnv(root, { ...runtime, LD_PRELOAD: "/wrong/preload.so" });
+  for (const [name, value] of Object.entries(runtime)) assert.equal(env[name], value, name);
+  assert.equal(env.LD_PRELOAD, runtime.CCAPP_BIONIC_PRELOAD);
+  assert.equal(env.LC_ALL, "C");
+});
+
 // 受控 CLI 只检查任务边界/退出路径，不冒充 PDF 格式验证。真实 qpdf/Poppler 的行为另作集成验证。
 test("CLI lifecycle: snapshots, one active job, cancellation, failure cleanup and compression warning", { skip: process.platform === "win32", timeout: 20000 }, async (t) => {
   const bin = path.join(PREFIX, "bin"), owned = [];
@@ -62,19 +88,22 @@ if(text.includes('WAIT')) await new Promise(r=>setTimeout(r,60000));
 if(text.includes('FAIL')) process.exit(2);
 if(a.includes('--show-npages')) { console.log(3); process.exit(0); }
 const dest=name==='pdf-shrink'?a[1]:a.at(-1);
-fs.writeFileSync(dest,'%PDF-result\\n'+JSON.stringify({a,text,secret:process.env.PDF_TEST_API_KEY||null}));
+fs.writeFileSync(dest,'%PDF-result\\n'+JSON.stringify({a,text,home:process.env.HOME,environmentNames:Object.keys(process.env)}));
 `;
   for (const name of ["qpdf", "pdf-shrink", "gs"]) {
     const f = path.join(bin, name); assert.equal(fs.existsSync(f), false, "fixture must not overwrite a real program");
     fs.writeFileSync(f, script, { mode: 0o755 }); owned.push(f);
   }
-  const old = process.env.PDF_TEST_API_KEY; process.env.PDF_TEST_API_KEY = "test-secret";
   try {
-    await t.test("file names stay data and parser environment excludes API keys", async () => {
+    await t.test("file names stay data and parser uses the isolated job home", async () => {
       const j = startPdfJob(body("ok")); await j.done;
       assert.equal(j.state, "done");
       const got = fs.readFileSync(j.outputs[0].path, "utf8");
-      assert.match(got, /source/); assert.doesNotMatch(got, /test-secret/);
+      assert.match(got, /source/);
+      const report = JSON.parse(got.slice(got.indexOf("{")));
+      assert.equal(report.home, j.work);
+      assert.ok(!report.environmentNames.includes("CCAPP_KEY_FILE"));
+      assert.ok(!report.environmentNames.includes("CCAPP_TOKEN_FILE"));
       assert.equal(fs.existsSync(j.work), false);
       assert.equal(fs.readFileSync(src, "utf8"), "%PDF-1.4\nsource\n");
     });
@@ -99,7 +128,6 @@ fs.writeFileSync(dest,'%PDF-result\\n'+JSON.stringify({a,text,secret:process.env
       assert.ok(j.outputBytes >= j.inputBytes);
     });
   } finally {
-    if (old === undefined) delete process.env.PDF_TEST_API_KEY; else process.env.PDF_TEST_API_KEY = old;
     for (const f of owned) fs.unlinkSync(f);
   }
 });

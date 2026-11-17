@@ -7,7 +7,6 @@ import { CFG, PREFIX } from "./config.mjs";
 import { NEXT, readBodyBuf, sendJson } from "./http.mjs";
 import { safeFilePath, safeWritePath } from "./files.mjs";
 import { ensureShell, killTree } from "./claude.mjs";
-import { termEnv } from "./terminal.mjs";
 import { markChild, unmarkChild } from "./components.mjs";
 import { onShutdown } from "./crashguard.mjs";
 
@@ -52,13 +51,16 @@ function stop(j, code = "cancelled") {
 }
 onShutdown("PDF tools", () => { for (const j of JOBS.values()) stop(j); });
 
-// termux-exec 的 exec 垫片需要 CCAPP_* 与 LD_PRELOAD；其余只放运行时路径，文档解析器不继承密钥/代理/令牌文件。
-function pdfEnv(work) {
-  const src = termEnv(), env = {};
-  for (const k of ["PATH", "PREFIX", "SHELL", "LD_LIBRARY_PATH", "LD_PRELOAD", "LANG", "LC_ALL", "TZ", "FONTCONFIG_FILE", "FONTCONFIG_PATH", "SystemRoot", "WINDIR"])
+// 文档解析不需要终端的账号环境，也不能触发 termKeyFile()。只保留 Env.java / exec-shim.c 实际使用的运行时变量。
+function pdfEnv(work, src = process.env) {
+  const env = {};
+  for (const k of ["SHELL", "LD_LIBRARY_PATH", "LD_PRELOAD", "LANG", "TZ", "FONTCONFIG_FILE", "FONTCONFIG_PATH", "SystemRoot", "WINDIR",
+    "CCAPP_LD", "CCAPP_SELF_EXE", "CCAPP_GLIBC_LIB", "CCAPP_GLIBC_PRELOAD", "CCAPP_BIONIC_PRELOAD", "CCAPP_EXEC", "CCAPP_BIN", "CCAPP_PREFIX",
+    "TERMUX_APP__DATA_DIR", "TERMUX_APP__LEGACY_DATA_DIR", "TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE"])
     if (src[k] != null) env[k] = src[k];
-  for (const k of Object.keys(src)) if (/^CCAPP_(LD|SELF_EXE|GLIBC_.*|BIONIC_PRELOAD|EXEC|BIN|PREFIX)$/.test(k)) env[k] = src[k];
-  return { ...env, HOME: work, TMPDIR: work, TMP: work, TEMP: work, XDG_CONFIG_HOME: work, XDG_CACHE_HOME: work, LC_ALL: "C" };
+  if (src.CCAPP_BIONIC_PRELOAD) env.LD_PRELOAD = src.CCAPP_BIONIC_PRELOAD;
+  const dirs = [PREFIX && path.join(PREFIX, "bin"), src.CCAPP_BIN, "/system/bin", "/system/xbin"].filter(Boolean);
+  return { ...env, PATH: dirs.join(path.delimiter), PREFIX, HOME: work, TMPDIR: work, TMP: work, TEMP: work, XDG_CONFIG_HOME: work, XDG_CACHE_HOME: work, LC_ALL: "C" };
 }
 function run(j, name, args) {
   if (j.stop) fail(j.stop);
@@ -67,7 +69,7 @@ function run(j, name, args) {
   return new Promise((resolve, reject) => {
     // 固定 shell 程序段；路径和参数全走 argv，文件名里的引号、$() 都只是文件名。
     const argv = process.platform === "win32" ? [cmd, ...args] : [ensureShell(), "-c", 'exec "$0" "$@"', cmd, ...args];
-    const child = spawn(argv[0], argv.slice(1), { cwd: j.work, env: pdfEnv(j.work), detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(argv[0], argv.slice(1), { cwd: j.work, env: pdfEnv(j.work), shell: false, windowsHide: true, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     j.child = child;
     const mark = markChild(child, cmd, args);
     let out = "";
@@ -234,4 +236,4 @@ export async function routePdfTools(req, res, u, p) {
   return NEXT;
 }
 
-export const _pdfForTest = { JOBS, jobView, stop };
+export const _pdfForTest = { JOBS, jobView, stop, pdfEnv };
