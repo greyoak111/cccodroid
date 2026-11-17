@@ -3192,3 +3192,51 @@
 3192	stdio no guarda cabeceras: {names} se descartarán. ¿Continuar?
 3193	Si el servidor está en este dispositivo, usa http://127.0.0.1:puerto; la IP de LAN cambia al cambiar de red y se corta la conexión
 3194	Esto parece una dirección de LAN: si el servidor está en este dispositivo, cámbiala a http://127.0.0.1:puerto; la IP de LAN cambia y se pierde la conexión
+3195	Unir PDF
+3196	Extraer páginas
+3197	Separar en páginas individuales
+3198	Girar páginas
+3199	Comprimir PDF
+3200	PDF a imágenes
+3201	Páginas no válidas. Usa un formato como 1-3,5 y revisa el total.
+3202	Error al procesar el PDF: {code}
+3203	El archivo seleccionado no es un PDF
+3204	Subir
+3205	Bajar
+3206	Selecciona PDF en el panel de archivos o pulsa «Elegir PDF…».
+3207	Faltan herramientas PDF: {tools}. Instala «Herramientas PDF» en Extensiones → Componentes opcionales.
+3208	Importando PDF…
+3209	Procesando PDF…
+3210	Procesamiento completado
+3211	La compresión no redujo el tamaño. Se conserva el original.
+3212	Abrir carpeta de resultados
+3213	Conexión interrumpida. Reintentando…
+3214	Herramientas PDF
+3215	Los archivos se procesan en este dispositivo. No se sobrescriben los originales.
+3216	Operación
+3217	Abrir componentes opcionales
+3218	Añadir desde el panel de archivos
+3219	Elegir PDF…
+3220	Une hasta 20 PDF. Para otras operaciones, selecciona solo uno.
+3221	Páginas
+3222	Formato: 1-3,5. Déjalo vacío para todas las páginas.
+3223	Ángulo de giro
+3224	Calidad de compresión
+3225	Libro electrónico (ebook)
+3226	Archivo pequeño (screen)
+3227	Impresión (printer)
+3228	Formato de imagen
+3229	Resolución
+3230	Baja (72 DPI)
+3231	Alta (150 DPI)
+3232	Hasta 100 páginas por operación. El lado largo de la imagen se limita a 2048 píxeles.
+3233	Carpeta de salida (nueva)
+3234	Iniciar procesamiento
+3235	Elige hasta 20 PDF, con un total de 256 MB.
+3236	El total de páginas PDF no puede superar las 1000.
+3237	No se puede procesar el PDF. Comprueba que no esté dañado ni tenga contraseña.
+3238	Se agotó el tiempo. Reduce las páginas y vuelve a intentarlo.
+3239	Ya hay una tarea PDF en curso. Inténtalo más tarde.
+3240	Instala el componente de herramientas PDF y vuelve a abrirlas.
+3241	Indica una carpeta de salida nueva en una ubicación con permiso de escritura.
+3242	El resultado supera 512 MB. Reduce las páginas o la resolución.

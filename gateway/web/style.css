@@ -1,4 +1,27 @@
 /* Claude CLI · 图形化入口 */
+
+/* PDF 使用现有底部面板和主题；文件名、完整路径在窄屏也能换行。 */
+#pdf-tools{position:fixed;inset:0;z-index:90;background:var(--scrim);display:flex;align-items:flex-end}
+#pdf-tools .pdf-form{width:100%;max-width:720px;max-height:calc(100dvh - var(--safe-t, 0px) - 12px);margin-inline:auto;overflow-y:auto;padding:16px 16px calc(var(--safe-b, 0px) + 16px);box-sizing:border-box}
+.pdf-form .field{margin-block:14px}
+.pdf-form .field input,.pdf-form .field select{width:100%;box-sizing:border-box}
+.pdf-form [hidden]{display:none!important}
+.pdf-form .tiny,.pdf-status{overflow-wrap:anywhere}
+.pdf-form .tiny{color:var(--fg2)}
+.pdf-form .row-actions{gap:8px;flex-wrap:wrap}
+.pdf-inputs,.pdf-outputs{padding:0;list-style:none;margin-block:12px}
+.pdf-inputs li,.pdf-outputs li{display:flex;align-items:center;gap:8px;padding-block:10px;border-bottom:1px solid var(--line)}
+.pdf-file-name{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px;overflow-wrap:anywhere}
+.pdf-file-actions{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.pdf-file-actions button{min-width:40px;min-height:40px;padding:8px}
+.pdf-file-actions svg{width:16px;height:16px}
+.pdf-file-actions .pdf-up{transform:rotate(180deg)}
+.pdf-status{margin-block:12px;color:var(--fg);font-weight:600}
+.pdf-status:empty,.pdf-requirements:empty{display:none}
+.pdf-warning{color:var(--warn)}
+.pdf-submit{justify-content:flex-end;margin-top:16px}
+.pdf-outputs span{flex:1;min-width:0;overflow-wrap:anywhere}
+@media(max-width:540px){.pdf-inputs li{align-items:stretch;flex-direction:column}.pdf-file-actions{justify-content:flex-start}.pdf-outputs li{flex-wrap:wrap}.pdf-outputs span{flex-basis:100%}}
 /* 内置等宽字体：Monaspace Neon（GitHub Next，SIL OFL 1.1）的子集 —— 只留拉丁、标点、箭头、制表符，
    字重 300–700 可变。按 OFL 保留字名的要求，衍生版改名 CC Mono；许可证见 fonts/OFL-CCMono.txt */
 @font-face{font-family:"CC Mono";src:url("/fonts/ccmono.woff") format("woff");font-weight:300 700;font-style:normal;font-display:swap}

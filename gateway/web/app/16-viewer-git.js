@@ -498,6 +498,7 @@
       return closeViewer();
     }
     if (a === "share") return shareFile(VW.path);
+    if (a === "pdftools") return openPdfToolbox([VW.path]);
     if (a === "save") return vwSave(false);
     if (a === "md") { VW.text = vwText(); if (isMd(VW.path)) localStorage.setItem("cc.vw.mdmode", "md"); return vwRenderText("md"); }
     if (a === "edit" && VW.mode === "html") {
