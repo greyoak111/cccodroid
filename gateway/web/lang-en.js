@@ -3281,5 +3281,4 @@ window.I18N_DICT.en = {
   "先安装 PDF 工具箱组件，再重新打开工具箱。": "Install the PDF toolbox component, then reopen the toolbox.",
   "请填写可写位置下尚不存在的输出文件夹。": "Enter a new output folder in a writable location.",
   "结果超过 512 MB，请减少页数或分辨率。": "Output exceeds 512 MB. Reduce pages or resolution.",
-
 };
