@@ -1,4 +1,4 @@
-  // ── 使用统计：网关按 UTC 小时记，这里按本地时区汇总成日 / 周 / 月；月报画在 canvas 上，看到的就是导出的 ──
+  // ── 使用统计：网关按 UTC 刻钟记，旧记录按小时；这里按本地时区汇总成日 / 周 / 月 ──
   const us = { raw: null, days: new Map(), month: null, busy: false };
   const usDayKey = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   const usMonthKey = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
@@ -14,10 +14,12 @@
   }
   function usBuild() {
     us.days = new Map();
-    for (const [k, b] of Object.entries(us.raw.hours || {})) {
-      const d = new Date(+k * 3600e3), key = usDayKey(d);
-      if (!us.days.has(key)) us.days.set(key, usEmpty());
-      usMerge(us.days.get(key), b, d.getHours());
+    for (const [buckets, ms] of [[us.raw.hours, 3600e3], [us.raw.quarters, 900e3]]) {
+      for (const [k, b] of Object.entries(buckets || {})) {
+        const d = new Date(+k * ms), key = usDayKey(d);
+        if (!us.days.has(key)) us.days.set(key, usEmpty());
+        usMerge(us.days.get(key), b, d.getHours());
+      }
     }
   }
   /** [a, b) 两个本地日期之间的合计 */
@@ -336,7 +338,7 @@
   });
   async function loadUsage() {
     try {
-      us.raw = await api("/api/usage"); us.err = "";
+      us.raw = await api("/api/usage?detail=quarter"); us.err = "";
       if (/^✗/.test($("us-result").textContent)) $("us-result").textContent = "";   // 恢复了：旧的失败提示别留着
       if (!us.month) { const n = new Date(); us.month = [n.getFullYear(), n.getMonth()]; }
       usBuild(); usPaint();
@@ -357,11 +359,11 @@
   }
   setInterval(async () => {
     if (curPage !== "usage" || document.hidden || us.busy || !us.raw) return;
-    let r = null; try { r = await api("/api/usage"); } catch {}
+    let r = null; try { r = await api("/api/usage?detail=quarter"); } catch {}
     if (curPage !== "usage") return;
     const moved = usDayMoved();
     // 只比 hours 会漏掉补算进度 / 开关 / 起始时间的变化（195-O.7）
-    const sig = (x) => JSON.stringify([x.hours, x.imported, x.importing, x.off, x.since]);
+    const sig = (x) => JSON.stringify([x.hours, x.quarters, x.imported, x.importing, x.off, x.since]);
     if (!moved && (!r || sig(r) === sig(us.raw))) return;
     if (r) us.raw = r;
     usBuild(); usPaint();
@@ -436,10 +438,8 @@
         if (confirm(t("按现存的会话记录重新补算 {d} 之前的统计？删掉的会话补不回来，那部分会变少。", { d: new Date(us.raw.since).toLocaleDateString(I18N.lang) }))) usImport(false);
       } else if (act === "clear-month") {
         if (!confirm(t("清除 {m} 的统计？", { m: usMonthName(y, m) }))) return;
-        // 统计按 UTC 整点桶存、只能整桶删：区间对到整点上。半小时 / 45 分时区里本地月初月末不在整点，
-        // 不这么对会把下个月（或上个月）边界那个桶一起删掉（195-O.5）
-        const clearFrom = Math.ceil(usMonth0(y, m).getTime() / 3600e3) * 3600e3;
-        const clearTo = Math.floor(usMonth0(y, m + 1).getTime() / 3600e3) * 3600e3;
+        const clearFrom = usMonth0(y, m).getTime();
+        const clearTo = usMonth0(y, m + 1).getTime();
         await post("/api/usage/clear", { from: clearFrom, to: clearTo });
         loadUsage();
       } else if (act === "clear-all") {

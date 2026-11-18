@@ -172,7 +172,7 @@
     <section id="tab-bookmarks" class="tab-pane hidden"></section>
     <section id="tab-usage" class="tab-pane hidden">
       <!-- 用量（照设计稿）：一排数字（额度、今天、本月、缓存命中）→ 每天用量柱状图（可切表格）→ 按型号占比 → 最费的对话 / 耗电 → 月报与数据管理。
-           数据：额度来自 /api/login/status；token 来自网关的使用统计（home/ccapp-usage.json，按小时记）；耗电来自 /api/energy -->
+           数据：额度来自 /api/login/status；token 来自网关的使用统计（home/ccapp-usage.json）；耗电来自 /api/energy -->
       <!-- 额度与消费：当前接口（账户额度 / 厂商余额与消费）+ 其他配过的接口 + 快用完时的提醒。顶栏细条的速览卡「查看用量」跳到这里 -->
       <div class="chart-card" id="us-acct">
         <div class="cc-h"><b data-i18n>额度与消费</b><span class="muted" id="us-acct-name"></span><span class="grow"></span><button class="btn sm ghost" id="us-acct-ref" data-i18n>刷新</button></div>

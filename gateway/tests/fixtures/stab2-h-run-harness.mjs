@@ -66,6 +66,6 @@ export async function runWith(id, steps, code = 0) {
 export const usageTotals = () => {
   const j = JSON.parse(fs.readFileSync(path.join(home, "ccapp-usage.json"), "utf8"));
   const sum = { t: 0, i: 0, o: 0 };
-  for (const b of Object.values(j.hours || {})) { sum.t += b.t || 0; sum.i += b.i || 0; sum.o += b.o || 0; }
+  for (const b of [...Object.values(j.hours || {}), ...Object.values(j.quarters || {})]) { sum.t += b.t || 0; sum.i += b.i || 0; sum.o += b.o || 0; }
   return sum;
 };

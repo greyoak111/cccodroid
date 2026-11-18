@@ -16,14 +16,14 @@ const SESS = path.join(CFG.home, "ccapp-session-models.json");
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
 
 test("runShutdown：usage 的 5 秒防抖、sessmodel 的 300ms 防抖都立刻落盘", () => {
-  const h = Math.floor(Date.now() / 3600e3);
-  const m0 = (readJson(USAGE)?.hours?.[h]?.m) || 0;
-  usageAdd({ m: 1 }, "b3-flush", "b3-model", Date.now());
+  const ts = Date.now(), q = Math.floor(ts / 900e3);
+  const m0 = (readJson(USAGE)?.quarters?.[q]?.m) || 0;
+  usageAdd({ m: 1 }, "b3-flush", "b3-model", ts);
   setSessModel("b3-flush", { model: "b3-model" });
   // 防抖还没到点：文件里还没有这一段
-  assert.equal((readJson(USAGE)?.hours?.[h]?.m) || 0, m0, "5 秒防抖不该已经写");
+  assert.equal((readJson(USAGE)?.quarters?.[q]?.m) || 0, m0, "5 秒防抖不该已经写");
   assert.equal(readJson(SESS)?.["b3-flush"], undefined, "300ms 防抖不该已经写");
   runShutdown();   // 等于 server.mjs 收到 SIGTERM 走的退出流程
-  assert.equal(readJson(USAGE)?.hours?.[h]?.m, m0 + 1, "用量要写下去");
+  assert.equal(readJson(USAGE)?.quarters?.[q]?.m, m0 + 1, "用量要写下去");
   assert.equal(readJson(SESS)?.["b3-flush"]?.model, "b3-model", "会话模型要写下去");
 });
