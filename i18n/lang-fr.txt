@@ -3192,3 +3192,51 @@
 3192	stdio ne conserve pas les en-têtes : {names} seront supprimés. Continuer ?
 3193	Si le serveur tourne sur cet appareil, mettez http://127.0.0.1:port ; l'IP locale change avec le réseau et coupe la connexion
 3194	Cela ressemble à une adresse locale : si le serveur tourne sur cet appareil, remplacez-la par http://127.0.0.1:port ; l'IP locale change et la connexion tombe
+3195	Fusionner des PDF
+3196	Extraire des pages
+3197	Séparer les pages
+3198	Pivoter les pages
+3199	Compresser un PDF
+3200	PDF en images
+3201	Pages incorrectes. Utilisez le format 1-3,5 et vérifiez le nombre de pages.
+3202	Échec du traitement PDF : {code}
+3203	Le fichier sélectionné n'est pas un PDF
+3204	Monter
+3205	Descendre
+3206	Sélectionnez des PDF dans les fichiers ou cliquez sur « Choisir des PDF… ».
+3207	Outils PDF manquants : {tools}. Installez « Boîte à outils PDF » dans Extensions → Composants optionnels.
+3208	Importation des PDF…
+3209	Traitement du PDF…
+3210	Traitement terminé
+3211	La compression n'a pas réduit la taille. L'original est conservé.
+3212	Ouvrir le dossier de sortie
+3213	Connexion interrompue. Nouvelle tentative…
+3214	Boîte à outils PDF
+3215	Les fichiers sont traités sur cet appareil. Les originaux ne sont pas écrasés.
+3216	Opération
+3217	Ouvrir les composants optionnels
+3218	Ajouter depuis les fichiers
+3219	Choisir des PDF…
+3220	Fusionnez jusqu'à 20 PDF. Sélectionnez un PDF pour les autres opérations.
+3221	Pages
+3222	Format : 1-3,5. Laissez vide pour toutes les pages.
+3223	Angle de rotation
+3224	Qualité de compression
+3225	Livre numérique (ebook)
+3226	Petit fichier (screen)
+3227	Impression (printer)
+3228	Format d'image
+3229	Résolution
+3230	Basse (72 DPI)
+3231	Haute (150 DPI)
+3232	Jusqu'à 100 pages à la fois. Le grand côté des images est limité à 2048 pixels.
+3233	Dossier de sortie (nouveau)
+3234	Lancer le traitement
+3235	Choisissez jusqu'à 20 PDF, 256 Mo au total.
+3236	Le nombre total de pages PDF ne peut pas dépasser 1000.
+3237	Traitement impossible. Vérifiez que le PDF est intact et sans mot de passe.
+3238	Délai dépassé. Réduisez le nombre de pages et réessayez.
+3239	Une tâche PDF est déjà en cours. Réessayez plus tard.
+3240	Installez le composant PDF, puis rouvrez la boîte à outils.
+3241	Indiquez un nouveau dossier de sortie dans un emplacement accessible en écriture.
+3242	La sortie dépasse 512 Mo. Réduisez les pages ou la résolution.

@@ -337,7 +337,7 @@
 
   async function vwPdf(url, extra) {
     const still = vwTake();
-    vwActs([["−", "zoom-"], ["+", "zoom+"]].concat(extra || []));
+    vwActs([["−", "zoom-"], ["+", "zoom+"]].concat(extra || [], !url ? [[t("PDF 工具箱"), "pdftools"]] : []));
     $("vw-body").innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
     let lib, doc;
     try {

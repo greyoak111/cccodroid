@@ -3192,3 +3192,51 @@
 3192	stdio tidak menyimpan header: {names} akan dibuang. Lanjutkan?
 3193	Jika server ada di perangkat ini, isi http://127.0.0.1:port — IP LAN berubah saat jaringan berganti dan koneksi putus
 3194	Ini tampak seperti alamat LAN: jika server ada di perangkat ini, ganti ke http://127.0.0.1:port — IP LAN berubah dan koneksi putus
+3195	Gabungkan PDF
+3196	Ekstrak halaman
+3197	Pisahkan per halaman
+3198	Putar halaman
+3199	Kompres PDF
+3200	PDF ke gambar
+3201	Halaman tidak valid. Gunakan format 1-3,5 dan periksa jumlah halaman.
+3202	Pemrosesan PDF gagal: {code}
+3203	File yang dipilih bukan PDF
+3204	Pindah ke atas
+3205	Pindah ke bawah
+3206	Pilih PDF di panel file atau klik “Pilih PDF…”.
+3207	Alat PDF belum tersedia: {tools}. Instal “Kotak alat PDF” di Ekstensi → Komponen opsional.
+3208	Mengimpor PDF…
+3209	Memproses PDF…
+3210	Pemrosesan selesai
+3211	Kompresi tidak memperkecil ukuran. File asli tetap tersimpan.
+3212	Buka folder hasil
+3213	Koneksi terputus. Mencoba lagi…
+3214	Kotak alat PDF
+3215	File hanya diproses di perangkat ini. File asli tidak ditimpa.
+3216	Operasi
+3217	Buka komponen opsional
+3218	Tambah dari panel file
+3219	Pilih PDF…
+3220	Gabungkan hingga 20 PDF. Pilih satu PDF untuk operasi lain.
+3221	Halaman
+3222	Format: 1-3,5. Kosongkan untuk semua halaman.
+3223	Sudut rotasi
+3224	Kualitas kompresi
+3225	Buku elektronik (ebook)
+3226	File kecil (screen)
+3227	Cetak (printer)
+3228	Format gambar
+3229	Resolusi
+3230	Rendah (72 DPI)
+3231	Tinggi (150 DPI)
+3232	Maksimal 100 halaman per proses. Sisi panjang gambar dibatasi 2048 piksel.
+3233	Folder hasil (baru)
+3234	Mulai pemrosesan
+3235	Pilih maksimal 20 PDF dengan total 256 MB.
+3236	Jumlah halaman PDF tidak boleh melebihi 1000.
+3237	PDF tidak dapat diproses. Pastikan file tidak rusak dan tanpa kata sandi.
+3238	Waktu pemrosesan habis. Kurangi halaman lalu coba lagi.
+3239	Tugas PDF sedang berjalan. Coba lagi nanti.
+3240	Instal komponen kotak alat PDF, lalu buka kembali.
+3241	Masukkan folder hasil baru di lokasi yang dapat ditulis.
+3242	Hasil melebihi 512 MB. Kurangi halaman atau resolusi.
