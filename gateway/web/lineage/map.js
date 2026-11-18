@@ -402,7 +402,7 @@
         layer.main.insertAdjacentHTML("beforeend", `<line x1="${xn}" y1="28" x2="${xn}" y2="${st.H}" class="lm-nowline"/>`);
         line = layer.main.querySelector(".lm-nowline");
         const first = layer.main.querySelector("[data-lineage-id]");   // 排在会话线下面，和原来 scene 里的次序一致
-        if (first) layer.main.insertBefore(line, first);
+        if (first) first.parentNode.insertBefore(line, first);         // line 与 first 同是 svg 的直接子节点，不能在 layer.main 上插
       }
       line.setAttribute("x1", xn); line.setAttribute("x2", xn); line.setAttribute("y2", st.H);
       let text = layer.axis.querySelector(".t-now");
