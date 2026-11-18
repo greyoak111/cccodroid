@@ -37,7 +37,8 @@ function publicFixture() {
     listeners: [() => counts.listeners++, () => counts.listeners++],
     cancelAnimationFrame: id => cancelled.push(id), clearTimeout: id => cleared.push(id),
     filter() { counts.filter++; }, relayout() { counts.relayout++; },
-    select() {}, home() {}, snapshot() {}, paintTree() {}, paint() {}, paintSelection() {}, place() {},
+    select() {}, home() {}, snapshot() {}, paintTree() {}, paint() {}, paintSelection() {}, place() {}, drawNow() { counts.now = (counts.now || 0) + 1; },
+    dayStart: ms => Math.floor(ms / 86400000),
   };
   const a = source.indexOf("    return {\n      set(model"), b = source.indexOf("\n  }\n\n  window.CCLineageMap", a);
   assert.ok(a >= 0 && b > a);
@@ -156,7 +157,7 @@ test("选中、家族、跳过多选和定时任务保持不同的色调语义",
   assert.equal(context.tones({ id: "task", task: {} }, pick, null, null).on, false);
 });
 
-test("同值 set 保留缓存；原地修改、筛选和 now 变化都使缓存失效", () => {
+test("同值 set 保留缓存；原地修改、筛选使缓存失效；同日 now 变化只挪现在线；手势不被刷新清掉", () => {
   const f = publicFixture(), model = { now: 1, bands: [], sessions: [{ id: "a", title: "first" }] };
   f.api.set(model); assert.equal(f.counts.filter, 1);
   const cache = {}, refs = [{}]; f.st.geo = f.st.drawn = cache; f.st.refs = refs;
@@ -165,9 +166,17 @@ test("同值 set 保留缓存；原地修改、筛选和 now 变化都使缓存�
   model.sessions[0].title = "changed"; f.api.set(model);
   assert.equal(f.counts.filter, 2); assert.equal(f.st.geo, null); assert.equal(f.st.refs.length, 0);
   f.api.set(model, { misc: true }); f.api.set(model, { band: "project" });
-  model.now++; f.api.set(model); assert.equal(f.counts.filter, 5);
-  assert.equal(f.counts.relayout, 6); assert.equal(f.pts.size, 0);
-  assert.equal(f.drag, null); assert.equal(f.pinch, null);
+  assert.equal(f.counts.filter, 4);
+  // now 每次心跳都变：同日变化不重建图，只挪「现在」线（新对象带新 now，数据不变）
+  f.st.drawn = f.st.geo = cache; f.st.mode = "map";
+  f.api.set({ ...model, now: model.now + 1 });
+  assert.equal(f.counts.filter, 4); assert.equal(f.st.geo, cache); assert.equal(f.counts.now, 1);
+  // 跨天变化：日期刻度要跟上，正常失效
+  f.api.set({ ...model, now: model.now + 86400000 });
+  assert.equal(f.counts.filter, 5); assert.equal(f.st.geo, null);
+  assert.equal(f.counts.relayout, 7);
+  // 手势状态不再被数据刷新打断（拖到一半来了心跳，接着拖）
+  assert.equal(f.pts.size, 1); assert.ok(f.drag); assert.ok(f.pinch);
 });
 
 test("snapshot 独立计算完整几何，先读继承样式再固化，不改活地图缓存", () => {
@@ -194,11 +203,11 @@ test("snapshot 独立计算完整几何，先读继承样式再固化，不改�
     }, remove() { removed.push("box"); } };
   let build = 0, sceneGeo;
   const context = { st, document: { createElement: () => box, body: {} }, root: { appendChild(node) { assert.equal(node, box); } },
-    buildAxis(k) { build++; return { k, width: 1000 }; }, layout: () => ({ height: 700, bandY: [{ key: "a", y: 44 }] }),
+    buildAxis(k) { build++; return { k, width: 1000, Xn: () => 900 }; }, layout: () => ({ height: 700, bandY: [{ key: "a", y: 44 }] }),
     scene(k, pick, selected, value) { assert.equal(k, 0.5); assert.equal(pick, null); assert.equal(selected, null); sceneGeo = value;
       return { W: 1000, H: 700, L: value.L, g: [], lines: ["<path/>"], labels: ["<text>all nodes</text>"], ax: [], hits: ["FORBIDDEN_HIT"] }; },
     getComputedStyle(node) { if (parts.includes(node)) events.push("read:" + node.name); return { color: "rgb(10, 20, 30)", fontFamily: "sans-serif", fontSize: "12px", fontWeight: "500", backgroundColor: "rgb(255, 255, 255)", getPropertyValue: () => "rgb(10, 20, 30)" }; },
-    XMLSerializer: class { serializeToString(node) { return node.serialize(); } }, bandName: () => "Band A", esc: value => String(value) };
+    XMLSerializer: class { serializeToString(node) { return node.serialize(); } }, bandName: () => "Band A", esc: value => String(value), t: value => value };
   vm.runInNewContext(take("    function geometry(", "    function tones(") + take("    function snapshot(", "    // ── 卡片") + "this.snapshot = snapshot;", context);
   const result = context.snapshot({ foot: "Export" });
   assert.equal(build, 1); assert.notEqual(sceneGeo, geo);

@@ -68,14 +68,17 @@
     // ── 数据：按开关筛出要画的会话 ──
     function filter() {
       const m = st.model;
-      if (!m) { st.vis = []; st.BY = {}; st.down.clear(); st.titles.clear(); return; }
+      if (!m) { st.vis = []; st.BY = {}; st.down.clear(); st.titles.clear(); st.sel = null; return; }
       st.vis = m.sessions.filter((s) => (st.misc || !s.misc) && (!st.band || s.band === st.band));
       st.BY = Object.fromEntries(st.vis.map((s) => [s.id, s]));
       st.down = new Map(); st.titles = new Map();
-      for (const s of st.vis) {
-        const title = clip(s.title); st.titles.set(s.id, { title, width: textW(title), full: textW(s.title) });
-        for (const id of [s.parent, ...(s.extra || []).map((e) => e.id), ...(s.reads || []).filter((r) => r.early).map((r) => r.id)])
-          if (id && st.BY[id]) { if (!st.down.has(id)) st.down.set(id, []); st.down.get(id).push(s.id); }
+      // 树形态不画图：亲缘索引和标题测量留着不建（full 只有任务条用，别的会话别白量）
+      if (st.mode !== "tree") {
+        for (const s of st.vis) {
+          const title = clip(s.title); st.titles.set(s.id, { title, width: textW(title), full: s.task ? textW(s.title) : 0 });
+          for (const id of [s.parent, ...(s.extra || []).map((e) => e.id), ...(s.reads || []).filter((r) => r.early).map((r) => r.id)])
+            if (id && st.BY[id]) { if (!st.down.has(id)) st.down.set(id, []); st.down.get(id).push(s.id); }
+        }
       }
       if (st.sel && !st.BY[st.sel]) st.sel = null;
     }
@@ -83,8 +86,10 @@
     const endOf = (s) => (s.task ? s.task.runs[s.task.runs.length - 1].ts : s.to);
 
     // ── 时间轴：按事件疏密伸缩（相邻事件宽 min(76, 12+15√小时)，超 36 小时压成 44 并画 ⋯）──
+    // 「现在」不进事件集合：它每时每刻在动，进几何签名会让同一份数据永远缓存不中。
+    // 现在线单独走 Xn（延伸段复刻原来的压缩语义），位置和刻度只随数据变。
     function buildAxis(K) {
-      const ev = new Set([st.model.now]);
+      const ev = new Set();
       for (const s of st.vis) {
         if (s.task) { s.task.runs.forEach((r) => ev.add(r.ts)); continue; }
         ev.add(s.from); ev.add(s.to); if (s.at) ev.add(s.at);
@@ -101,21 +106,40 @@
       const X = (ms) => {
         if (!ts.length) return LEFT;
         if (ms <= ts[0]) return xs[0] - (ts[0] - ms) / 36e5 * 4 * K;
-        if (ms >= ts[ts.length - 1]) return xs[xs.length - 1] + (ms - ts[ts.length - 1]) / 36e5 * 20 * K;
+        const lastT = ts[ts.length - 1];
+        if (ms >= lastT) {
+          // 「现在」是数据之后的新锚点：它在的延伸段从它起算，和以前把 now 塞进事件集合等价
+          const now = st.model.now;
+          if (now > lastT && ms >= now) return Xn() + (ms - now) / 36e5 * 20 * K;
+          return xs[xs.length - 1] + (ms - lastT) / 36e5 * 20 * K;
+        }
         let lo = 0, hi = ts.length - 1;
         while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ts[m] <= ms) lo = m; else hi = m; }
         return xs[lo] + (xs[hi] - xs[lo]) * (ms - ts[lo]) / (ts[hi] - ts[lo]);
       };
-      // 日期刻度：每天 0 点；落在压掉的空档里的不标，太挤的跳过；第一天也标
+      // 「现在」的位置：数据事件之后按事件间距规则延伸（超 36 小时压成 44 并画 ⋯），
+      // 和以前把 now 塞进事件集合时算出来的位置一致
+      const Xn = () => {
+        if (!ts.length) return LEFT;
+        const lastT = ts[ts.length - 1];
+        if (st.model.now <= lastT) return X(st.model.now);
+        const h = (st.model.now - lastT) / 36e5;
+        const hGap = h > 36;
+        const lastBr = breaks[breaks.length - 1];
+        if (hGap && !(lastBr && lastBr[0] === lastT && lastBr[1] === st.model.now)) breaks.push([lastT, st.model.now]);
+        return xs[xs.length - 1] + (hGap ? 44 : Math.min(76, 12 + 15 * Math.sqrt(h))) * K;
+      };
+      const nx = Xn();   // 先算「现在」位置（超 36 小时还会在 breaks 里补上这一段），刻度要看到完整的空档
+      // 日期刻度：每天 0 点；落在压掉的空档里的不标，太挤的跳过；第一天也标，最晚标到今天
       const ticks = ts.length ? [[ts[0], LEFT - 4]] : [];
       let last = LEFT;
       // 初值也要走和步进相同的「跨过一天」：直接 +24h 在秋季回拨日（当地一天 25 小时）会落到当天 23:00，
       // 下一次归零就跳到后天，第二天整天的刻度消失
-      if (ts.length) for (let d = dayStart(dayStart(ts[0]) + 30 * 36e5); d <= ts[ts.length - 1]; d = dayStart(d + 30 * 36e5)) {
+      if (ts.length) for (let d = dayStart(dayStart(ts[0]) + 30 * 36e5); d <= dayStart(st.model.now); d = dayStart(d + 30 * 36e5)) {
         if (breaks.some(([a, b]) => d > a && d < b)) continue;
         const x = X(d); if (x - last < 84) continue; ticks.push([d, x]); last = x;
       }
-      return { X, ticks, breaks: breaks.map(([a, b]) => (X(a) + X(b)) / 2), width: xs[xs.length - 1] + RIGHT };
+      return { X, Xn, ticks, breaks: breaks.map(([a, b]) => (X(a) + (b === st.model.now ? nx : X(b))) / 2), width: nx + RIGHT };
     }
 
     // ── 布局：按带分；每带里按 DFS（主父）顺序给线找最高的空车道（时间段 + 标题宽度不重叠）。
@@ -231,9 +255,6 @@
         g.push(`<line x1="${b}" y1="30" x2="${b}" y2="${H}" class="lm-brk"/>`);
       }
       L.bandY.forEach((b, i) => { if (i) g.push(`<line x1="0" y1="${b.y - 6}" x2="${W}" y2="${b.y - 6}" class="lm-sep"/>`); });
-      const xn = AX.X(st.model.now);
-      g.push(`<line x1="${xn}" y1="28" x2="${xn}" y2="${H}" class="lm-nowline"/>`);
-      ax.push(`<text class="t-now" x="${xn - 4}" y="20" text-anchor="end">${esc(t("现在"))}</text>`);
       const TR = "var(--lm-track)";
       for (const s of st.vis) {
         const P = L.pos[s.id]; if (!P) continue;
@@ -296,13 +317,9 @@
       }
       return { W, H, L, g, ax, lines, labels, hits, sts };
     }
+    // 选线/读记录的增量状态向量：indexScene 首建与 paintSelection 增量共用一份，别写两处以后改丢一边
+    const stateOf = (style, v, fam, reads) => [style, v.on, v.chosen, v.picked, ...reads.map((r) => !!(fam && v.on && fam.has(r.dataset.read)))].join("|");
     function indexScene() {
-      let style = root.querySelector("style[data-map-zoom]");
-      if (!style) {
-        style = document.createElement("style"); style.dataset.mapZoom = "1";
-        style.textContent = ".lmap .lm-main :is(path,line,rect,circle),.lmap .lm-axis :is(path,line){vector-effect:non-scaling-stroke}";
-        root.appendChild(style);
-      }
       const labels = new Map([...layer.main.querySelectorAll("[data-lineage-label]")].map((el) => [el.dataset.lineageLabel, el]));
       const chapters = new Map([...layer.main.querySelectorAll("[data-lineage-chapters]")].map((el) => [el.dataset.lineageChapters, el]));
       const PK = st.pick, sel = PK ? null : st.sel, fam = sel ? family(sel) : null;
@@ -311,7 +328,7 @@
         const s = st.BY[id], v = tones(s, PK, sel, fam);
         const reads = [...line.querySelectorAll("[data-read]")], style = line.getAttribute("style");
         return { s, line, label, text: label, chapters: chapters.get(id), picked: line.querySelector("[data-picked]"), reads, style, selected: label.style.display === "none",
-          state: [style, v.on, v.chosen, v.picked, ...reads.map((r) => !!(fam && v.on && fam.has(r.dataset.read)))].join("|") };
+          state: stateOf(style, v, fam, reads) };
       });
       st.sticky = [...layer.main.querySelectorAll("text[data-sx]")].map((el) => ({ el, sx: +el.dataset.sx, ex: +el.dataset.ex, w: +el.dataset.w, x: +el.dataset.sx }));
       st.text = [...layer.main.querySelectorAll("text"), ...layer.axis.querySelectorAll("text")];
@@ -326,7 +343,7 @@
       let changedChapters = false;
       for (const ref of st.refs) {
         const { s, line, label, text } = ref, v = tones(s, PK, sel, fam), style = toneStyle(v);
-        const state = [style, v.on, v.chosen, v.picked, ...ref.reads.map((r) => !!(fam && v.on && fam.has(r.dataset.read)))].join("|");
+        const state = stateOf(style, v, fam, ref.reads);
         if (ref.state === state) continue;
         ref.state = state;
         if (style !== ref.style) { line.setAttribute("style", style); ref.style = style; }
@@ -375,7 +392,27 @@
       layer.band.innerHTML = L.bandY.map((b) => `<div style="top:${b.y + 4}px">${esc(bandName(b.key))}</div>`).join("");
       st.cardHtml = sel ? card(sel) : ""; layer.card.innerHTML = st.cardHtml;
       root.classList.toggle("picking", !!PK);
-      st.ratio = 1; indexScene(); place();
+      st.ratio = 1; indexScene(); drawNow(); place();
+    }
+    // 「现在」线和标签单独维护：数据没变只到点时（set 的 now-only 路径）不动整图，只挪它俩。
+    function drawNow() {
+      const xn = st.AX.Xn();
+      let line = layer.main.querySelector(".lm-nowline");
+      if (!line) {
+        layer.main.insertAdjacentHTML("beforeend", `<line x1="${xn}" y1="28" x2="${xn}" y2="${st.H}" class="lm-nowline"/>`);
+        line = layer.main.querySelector(".lm-nowline");
+        const first = layer.main.querySelector("[data-lineage-id]");   // 排在会话线下面，和原来 scene 里的次序一致
+        if (first) layer.main.insertBefore(line, first);
+      }
+      line.setAttribute("x1", xn); line.setAttribute("x2", xn); line.setAttribute("y2", st.H);
+      let text = layer.axis.querySelector(".t-now");
+      if (!text) {
+        layer.axis.insertAdjacentHTML("beforeend", `<text class="t-now" x="${xn - 4}" y="20" text-anchor="end">${esc(t("现在"))}</text>`);
+        text = layer.axis.querySelector(".t-now");
+      }
+      text.setAttribute("x", xn - 4);
+      if (!st.text.includes(text)) { st.text = [...st.text, text]; st.textList = null; }
+      delete text._zoom;   // x 变了，place 的缩放键作废，下帧重算反缩放
     }
 
     // ── 导出（规划书 §4 阶段 4）：整张图（不带选中、不带热区）画成独立的 SVG。
@@ -383,7 +420,12 @@
     function snapshot(o = {}) {
       if (st.dead || !st.model || !st.vis.length) return null;
       const k = st.mode === "map" ? st.k : 1;
-      const S = scene(k, null, null, geometry(k, false));
+      const geo = geometry(k, false);
+      const S = scene(k, null, null, geo);
+      // 「现在」线单独维护（见 drawNow），导出图里照旧带上
+      const xn = geo.AX.Xn();
+      S.g.push(`<line x1="${xn}" y1="28" x2="${xn}" y2="${S.H}" class="lm-nowline"/>`);
+      S.ax.push(`<text class="t-now" x="${xn - 4}" y="20" text-anchor="end">${esc(t("现在"))}</text>`);
       const box = document.createElement("div");
       box.className = "lm-canvas";
       box.style.cssText = "position:absolute;left:-200000px;top:0;visibility:hidden;display:block;pointer-events:none";
@@ -457,7 +499,12 @@
         for (const L of st.sticky) {
           let x = Math.max(L.sx, LEFT + (-st.tx + 132 - LEFT) / ratio);
           if (x + L.w / ratio > L.ex) x = Math.max(L.sx, L.ex - L.w / ratio);
-          if (x !== L.x) { L.x = x; L.el.setAttribute("x", x); }
+          if (x !== L.x) {
+            L.x = x; L.el.setAttribute("x", x);
+            // 反缩放用元素自己的 x：sticky 的 x 变了，transform 跟着换，text 循环不管 x
+            if (ratio === 1) L.el.removeAttribute("transform"); else L.el.setAttribute("transform", `translate(${x} 0) scale(${1 / ratio} 1) translate(${-x} 0)`);
+            L.el._zoom = ratio + ":" + x;
+          }
         }
       }
       if (ratio !== st.ratio) {
@@ -468,8 +515,9 @@
         }
         for (const hit of st.hits) hit.el.setAttribute("width", Math.max(hit.width, hit.title / ratio));
       }
-      if (st.textTx !== st.tx || st.textRatio !== ratio || st.textList !== st.text) {
-        st.textTx = st.tx; st.textRatio = ratio; st.textList = st.text;
+      // 普通文字只在比例或集合变化时过一遍；平移不改它们的 x，别每次 pan 都全量扫 text
+      if (st.textRatio !== ratio || st.textList !== st.text) {
+        st.textRatio = ratio; st.textList = st.text;
         for (const el of st.text) {
           const x = +el.getAttribute("x"), key = ratio + ":" + x;
           if (el._zoom === key) continue;
@@ -477,7 +525,7 @@
           if (ratio === 1) el.removeAttribute("transform"); else el.setAttribute("transform", `translate(${x} 0) scale(${1 / ratio} 1) translate(${-x} 0)`);
         }
       }
-      const xn = LEFT + (st.AX.X(st.model.now) - LEFT) * ratio + st.tx;
+      const xn = LEFT + (st.AX.Xn() - LEFT) * ratio + st.tx;
       layer.now.classList.toggle("show", xn < 40 || xn > cv.clientWidth - 10);
     }
     function frame() {
@@ -485,6 +533,7 @@
       st.frame = requestAnimationFrame(() => { st.frame = 0; place(); });
     }
     function zoomTo(k, mid, base) {
+      // 预览只做 transform 近似：线宽、文字间距随比例伸缩，松手 commitZoom 精确重排（文字宽度/刻度回正）。
       st.k = k;
       st.W = LEFT + (st.AX.width - LEFT - RIGHT) * (k / st.drawK) + RIGHT;
       const b = bounds();
@@ -545,7 +594,8 @@
     });
     listen(cv, "pointerdown", (e) => {
       if (st.dead || !st.AX || e.button > 0) return;
-      clearTimeout(st.zoomT); st.zoomT = 0;
+      // 滚轮缩放预览还没提交就按下：先精确提交一次再开始手势，别让地图停在预览近似上
+      if (st.zoomT) commitZoom();
       try { cv.setPointerCapture(e.pointerId); } catch {}
       cancelAnimationFrame(st.raf);
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -715,6 +765,7 @@
         for (const id of pts.keys()) { try { cv.releasePointerCapture(id); } catch {} }
         st.mode = mode; st.placed = false; pts.clear(); drag = pinch = null;
         cancelAnimationFrame(st.raf); st.raf = 0;
+        filter();   // 树形态不建 down/titles，切回地图要重建
       }
       if (mode === "tree") return paintTree();
       paint();
@@ -745,20 +796,25 @@
         if ("misc" in o) st.misc = !!o.misc;
         if ("band" in o) st.band = o.band || null;
         // set 的数据可能原地修改，不能只按对象身份缓存；同一份心跳则不再建图。
-        const key = JSON.stringify([model, st.misc, st.band]);
+        // 调用方给 rev 时用 rev（现在线单独更新，见下）；不给就退回数据签名（教程这类静态调用）。
+        // now 不参与签名（每次都 Date.now()）；「哪天」参与：跨天日期刻度要跟上，走全量重建。
+        const sig = o.rev != null ? o.rev : [model && model.sessions, model && model.bands];
+        const key = JSON.stringify([sig, st.misc, st.band, model ? dayStart(model.now) : 0]);
+        // 只到点、没跨天：刻度不变，挪「现在」线就够
+        const nowOnly = model && st.model && key === st.key && model.now !== st.model.now;
         st.model = model;
         if (key !== st.key) {
           st.key = key; st.geo = st.drawn = st.AX = st.L = null; st.treeKey = ""; st.W = st.H = 0;
           cancelAnimationFrame(st.raf); cancelAnimationFrame(st.frame); st.raf = st.frame = 0;
           clearTimeout(st.zoomT); clearTimeout(st.moT); st.zoomT = st.moT = 0; root.classList.remove("mo-pick");
-          for (const id of pts.keys()) { try { cv.releasePointerCapture(id); } catch {} }
-          pts.clear(); drag = pinch = null;
+          // 手势状态不清：拖到一半数据刷新，松开前还在原处接着拖；scene 重建不影响 transform 预览
           st.refs = st.sticky = st.text = st.dots = st.hits = st.treeRows = []; st.stickyList = st.textList = null;
           layer.main.replaceChildren(); layer.axis.replaceChildren(); layer.band.replaceChildren(); layer.card.replaceChildren(); tree.replaceChildren();
           st.cardHtml = ""; filter();
         }
         if (o.home) st.placed = false;
         relayout();
+        if (nowOnly && st.drawn && st.mode === "map") { drawNow(); place(); }
       },
       select,
       home,
@@ -774,7 +830,8 @@
         }
       },
       snapshot,
-      state: () => ({ pick: st.pick ? [...st.pick.set] : null, sel: st.sel, k: st.k, tx: st.tx, ty: st.ty, mode: st.mode, W: st.W, H: st.H, n: st.vis.length }),
+      state: () => (st.dead ? { pick: null, sel: null, k: 1, tx: 0, ty: 0, mode: "", W: 0, H: 0, n: 0 }
+        : { pick: st.pick ? [...st.pick.set] : null, sel: st.sel, k: st.k, tx: st.tx, ty: st.ty, mode: st.mode, W: st.W, H: st.H, n: st.vis.length }),
       destroy() {
         if (st.dead) return; st.dead = true;
         if (ro) ro.disconnect();
@@ -783,6 +840,7 @@
         for (const off of listeners) off(); listeners.length = 0;
         pts.clear(); drag = pinch = null;
         st.model = st.geo = st.drawn = st.AX = st.L = st.pick = null; st.vis = []; st.BY = {};
+        st.mode = ""; st.sel = null; st.k = 1; st.tx = st.ty = 0;
         st.refs = st.sticky = st.text = st.dots = st.hits = st.treeRows = []; st.stickyList = st.textList = null; st.down.clear(); st.titles.clear(); st.key = st.treeKey = st.cardHtml = "";
         for (const el of Object.values(layer)) el.replaceChildren(); tree.replaceChildren(); st.W = st.H = 0;
         root.innerHTML = ""; root.classList.remove("lmap", "tree", "picking", "mo-pick");

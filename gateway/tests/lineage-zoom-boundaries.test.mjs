@@ -11,12 +11,12 @@ const take = (start, end) => {
   return source.slice(a, b);
 };
 function fixture(width = 2000) {
-  const geo = { key: "stable", k: 1, AX: { width, X: () => width - 240 }, L: { height: 500, bandY: [] } };
+  const geo = { key: "stable", k: 1, AX: { width, X: () => width - 240, Xn: () => width - 240 }, L: { height: 500, bandY: [] } };
   const st = { model: { now: 1800000000000 }, key: "stable", geo, drawn: geo, drawK: 1, k: 1, W: width, H: 500,
     AX: geo.AX, L: geo.L, tx: -800, ty: 0, frame: 0, raf: 0, zoomT: 0 };
   const calls = { scene: 0, selection: 0, animate: [], gesture: [] };
   const context = { LEFT: 112, RIGHT: 240, st, layer: { main: { firstElementChild: {} } }, cv: { clientWidth: 1000, clientHeight: 500 },
-    clearTimeout() {}, cancelAnimationFrame() {}, buildAxis: k => ({ width: 112 + (width - 352) * k + 240, X: () => 1800 }), layout: () => geo.L,
+    clearTimeout() {}, cancelAnimationFrame() {}, buildAxis: k => ({ width: 112 + (width - 352) * k + 240, X: () => 1800, Xn: () => 1800 }), layout: () => geo.L,
     paintSelection() { calls.selection++; }, place() {}, frame() {},
     scene() { calls.scene++; throw Error("Cached geometry must not rebuild the scene"); },
     animateTo: (x, y) => calls.animate.push({ x, y }), gesture: kind => calls.gesture.push(kind) };
@@ -60,7 +60,7 @@ test("同一精确缓存从放大或缩小预览返回 home 后，多次 paint �
 });
 
 test("真实多选圆环及勾路径均进入补偿索引，在预览缩放中保持相同屏幕几何", () => {
-  const st = { dead: false, AX: { width: 2000, X: () => 1800 }, k: 1, drawK: 1, tx: -1000, ty: 0, W: 2000,
+  const st = { dead: false, AX: { width: 2000, X: () => 1800, Xn: () => 1800 }, k: 1, drawK: 1, tx: -1000, ty: 0, W: 2000,
     model: { now: 1800000000000 }, sticky: [], text: [], dots: [], hits: [], ratio: 1, titles: new Map(), BY: {} };
   const shapes = [];
   const matches = (node, selector) => selector === "circle" ? node.tag === "circle" : selector === "[data-zoom-x]" ? node.getAttribute("data-zoom-x") !== null : false;

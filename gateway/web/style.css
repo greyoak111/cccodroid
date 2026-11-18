@@ -3184,7 +3184,10 @@ html[data-motion="on"] .ch-sep.mo-hit :is(.ch-n,.ch-t){animation:mo-bump var(--m
 /* 脉络选线：其余的线退暗，卡片弹上来，逐章题名浮出 */
 html[data-motion="on"] .lmap.mo-pick .lm-main .dim{animation:mo-dim calc(.32s * var(--mo-x,1)) ease-out}
 html[data-motion="on"] .lmap.mo-pick .lm-cardbox{animation:mo-card var(--mo-snap) linear both}
-html[data-motion="on"] .lmap.mo-pick .t-ch{animation:mo-rise var(--mo-soft) linear both;animation-delay:calc(.08s * var(--mo-x,1))}
+/* 章节题名的浮出只做淡入：SVG 反缩放靠元素自己的 transform 属性，动画再写 transform 会把它盖掉，
+   缩放预览期间字就歪了（both 填充一直压到动画移除）。 */
+@keyframes lm-rise{from{opacity:0}to{opacity:1}}
+html[data-motion="on"] .lmap.mo-pick .t-ch{animation:lm-rise var(--mo-soft) linear both;animation-delay:calc(.08s * var(--mo-x,1))}
 
 
 /* 手机上的工具包模块行：命令一长串只露两行（整份在展开里）；右侧大小 + 按钮别把标题挤没 */
