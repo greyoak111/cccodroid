@@ -25,6 +25,13 @@ const bin = (name) => {
 export const pdfToolsInfo = () => ({ operations: Object.fromEntries(Object.entries(NEED).map(([op, names]) => [op, names.filter((n) => !bin(n))])), maxInput: MAX_INPUT, maxPages: MAX_PAGES, maxImagePages: 100 });
 
 /** 不把用户输入直接拼给 qpdf：只收升序的十进制页码/范围，展开后再交给工具。 */
+// 转图片是否要 -scale-to 封顶：按 pdfinfo 的页面尺寸与所选分辨率算出栅格长边，超过 2048 才封。
+// poppler 的 -scale-to 是「缩放进框」（含放大），小页面会被无谓放大、低分辨率档一起失真，所以只在真超限时用。
+export function pdfImageCap(infoText, dpi) {
+  const m = /^Page size:\s+([\d.]+)\s*x\s*([\d.]+)/m.exec(infoText || "");
+  if (!m) return true; // 解析不到就保守封顶：防巨幅位图优先
+  return Math.max(Number(m[1]), Number(m[2])) * dpi / 72 > 2048;
+}
 export function pdfPages(text, count) {
   if (!Number.isSafeInteger(count) || count < 1 || count > MAX_PAGES) fail("page-limit");
   if (typeof text !== "string" || text.length > 4000) fail("pages");
@@ -132,7 +139,12 @@ async function processPdf(j, b) {
     const selection = path.join(j.work, "selection.pdf");
     await q(["--empty", "--pages", inputs[0], selected.join(","), "--", selection]);
     // 输出长边封顶：伪造的巨幅页面也不能让手机按全尺寸分配位图。
-    await run(j, "pdftoppm", ["-r", String(b.dpi), "-scale-to", "2048", b.format === "jpeg" ? "-jpeg" : "-png", selection, path.join(out, "page")]);
+    // pdfinfo 与 pdftoppm 同包，这里先按所选分辨率算栅格长边，超了才加 -scale-to。
+    const info = await run(j, "pdfinfo", [selection]);
+    const args = ["-r", String(b.dpi)];
+    if (pdfImageCap(info, b.dpi)) args.push("-scale-to", "2048");
+    args.push(b.format === "jpeg" ? "-jpeg" : "-png", selection, path.join(out, "page"));
+    await run(j, "pdftoppm", args);
   }
   if (j.stop) fail(j.stop);
   const names = fs.readdirSync(out).sort((a, z) => a.localeCompare(z, "en", { numeric: true }));

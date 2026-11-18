@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { CFG, PREFIX } from "../gw/config.mjs";
-import { pdfPages, pdfToolsInfo, startPdfJob, _pdfForTest } from "../gw/pdf-tools.mjs";
+import { pdfPages, pdfImageCap, pdfToolsInfo, startPdfJob, _pdfForTest } from "../gw/pdf-tools.mjs";
 
 const root = fs.mkdtempSync(path.join(CFG.workspace, "pdf-tools-test-"));
 const src = path.join(root, "report $(echo unsafe) 'quoted'.pdf");
@@ -43,6 +43,16 @@ test("private documents and existing destination directories cannot be used", ()
     error(() => startPdfJob(body("existing", { dest: root })), "destination-exists");
     assert.equal(fs.readFileSync(src, "utf8"), "%PDF-1.4\nsource\n");
   } finally { fs.unlinkSync(secret); }
+});
+test("image raster cap only applies when the page raster exceeds 2048px", () => {
+  // -scale-to 会连小页面一起放大：低分辨率档必须原样出栅格，只有超限才封顶
+  assert.equal(pdfImageCap("Page size: 340.157 x 453.543 pts (A6)", 72), false);
+  assert.equal(pdfImageCap("Page size: 595.276 x 841.89 pts (A4)", 150), false);
+  assert.equal(pdfImageCap("Page size: 983 x 900 pts", 150), false); // 2047.9px，贴边不封
+  assert.equal(pdfImageCap("Page size: 1000 x 1000 pts", 150), true);  // 2083px
+  assert.equal(pdfImageCap("Page size: 3000 x 3000 pts", 72), true);
+  assert.equal(pdfImageCap("", 72), true);   // 解析不到就保守封顶
+  assert.equal(pdfImageCap("Page size: 340.157 x 453.543 pts (A6)", 150), false);
 });
 test("missing components are reported per operation without installing anything", () => {
   const info = pdfToolsInfo();
