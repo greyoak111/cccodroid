@@ -44,6 +44,16 @@ function cmdDir(scope, dir) {
   return cd;
 }
 
+function cmdScalar(text) {
+  // 带引号的字段只认闭引号后面的注释。普通字段里的 C#、issue#1 都是文字。
+  if (/^["']/.test(text)) {
+    const quoted = /^("(?:\\.|[^"\\])*"|'(?:''|[^'])*')\s+(#.*)$/.exec(text);
+    return quoted ? [quoted[1], quoted[2]] : [text, ""];
+  }
+  const at = text.search(/(?:^|[ \t])#/);
+  return at < 0 ? [text, ""] : [text.slice(0, at).trimEnd(), text.slice(at).trimStart()];
+}
+
 /** 拆 frontmatter：description / argument-hint 读出来给界面改，其余项原样留着。
  *  一项 = 顶格的 key: 行 + 后面缩进的续行。以前只认单行，description: | 这种多行写法被读成「|」、
  *  续行留进 extra，保存后成了非法 YAML（审查 B22） */
@@ -63,26 +73,35 @@ export function parseCmd(txt) {
     const key = kv && (kv[1] === "description" ? "description" : kv[1] === "argument-hint" ? "hint" : "");
     if (!key) { while (it.length > 1 && !it[it.length - 1].trim()) it.pop(); if (it.some((l) => l.trim())) keep.push(it.join("\n")); continue; }
     const head = kv[2].trim(), rest = it.slice(1).map((l) => l.trim()).filter(Boolean);
-    let v;
-    if (/^[|>][+-]?\d*$/.test(head)) v = rest.join(head[0] === "|" ? "\n" : " ");   // 块标量：界面上是一行，换行变空格见 saveCmd
-    else {
+    const block = /^([|>](?:[+-][1-9]?|[1-9][+-]?)?)(?:[ \t]+(#.*))?$/.exec(head);
+    let v, comment;
+    if (block) {
+      v = rest.join(head[0] === "|" ? "\n" : " ");   // 块里的 # 是正文，只有头部可以跟注释
+      comment = block[2];
+    } else {
       // 引号里的要按 YAML 的规矩解开转义：只去掉外层引号，存一次多一层反斜杠，越存越多（#97 02-009）
-      const raw = [head, ...rest].filter(Boolean).join(" ");
+      const [raw, trailing] = cmdScalar([head, ...rest].filter(Boolean).join(" "));
+      comment = trailing;
       if (/^"[\s\S]*"$/.test(raw)) { try { v = JSON.parse(raw); } catch { v = raw.slice(1, -1); } }
       else if (/^'[\s\S]*'$/.test(raw)) v = raw.slice(1, -1).replace(/''/g, "'");
       else v = raw;
     }
     out[key] = v;
+    if (comment) (out.comments ||= {})[key] = comment;
   }
   out.extra = keep.join("\n");
   return out;
 }
 // 开头是 [ ] - . 或数字的裸写会被 YAML 读成数组 / 列表 / 数字：一律加引号（DeepSeek 复核 低-3）
-const yq = (s) => (/^[\w\s一-鿿，。、（）()<>\[\].-]*$/.test(s) && !/^\s|\s$/.test(s) && !/^[\[\]\-.\d]/.test(s) ? s : JSON.stringify(s));
-export function formatCmd({ description, hint, body, extra }) {
+const yq = (s) => (/^[\w\s一-鿿，。、（）()<>\[\].-]*$/.test(s) && !/^\s|\s$/.test(s) && !/^[\[\]\-.\d]/.test(s)
+  && !/^(?:true|false|null|yes|no|on|off|y|n)$/i.test(s) ? s : JSON.stringify(s));
+export function formatCmd({ description, hint, body, extra, comments }) {
   const fm = [];
-  if (description) fm.push(`description: ${yq(description)}`);
-  if (hint) fm.push(`argument-hint: ${yq(hint)}`);
+  for (const [key, label, value] of [["description", "description", description], ["hint", "argument-hint", hint]]) {
+    const comment = comments?.[key];
+    if (value) fm.push(label + ": " + yq(value) + (comment ? " " + comment : ""));
+    else if (comment) fm.push(comment);
+  }
   if (extra) fm.push(extra);
   const b = String(body || "").replace(/\r\n/g, "\n").replace(/\s+$/, "") + "\n";
   return fm.length ? `---\n${fm.join("\n")}\n---\n${b}` : b;
@@ -126,12 +145,12 @@ function saveCmd(b, builtin) {
   const desc = String(b.description || "").replace(/[\r\n]+/g, " ").trim().slice(0, 200);
   const hint = String(b.hint || "").replace(/[\r\n]+/g, " ").trim().slice(0, 80);
   // 改名 / 编辑时把我们不管的 frontmatter 项（allowed-tools 等）带过去
-  let extra = "";
+  let prior = {};
   try {
     const p = path.join(d, (old || name) + ".md"), lst = fs.lstatSync(p);
-    if (lst.isFile()) extra = parseCmd(fs.readFileSync(p, "utf8")).extra;   // 软链不跟（197-1.4）
+    if (lst.isFile()) prior = parseCmd(fs.readFileSync(p, "utf8"));   // 软链不跟（197-1.4）
   } catch {}
-  const text = formatCmd({ description: desc, hint, body, extra });
+  const text = formatCmd({ description: desc, hint, body, extra: prior.extra, comments: prior.comments });
   if (Buffer.byteLength(text) > MAX_FILE) return { ok: false, message: "指令内容太长了（上限 64 KB）" };
   // 临时名带进程号 + 随机：固定 .tmp 被人先放一个软链就能顺着写到别处；wx 不覆盖，rename 也不跟目标软链
   const tmp = file + ".tmp-" + process.pid + "-" + Math.random().toString(16).slice(2, 8);

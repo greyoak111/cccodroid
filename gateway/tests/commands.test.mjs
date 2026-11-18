@@ -30,3 +30,29 @@ test("名字：字母数字 - _，不许路径和空格", () => {
   for (const ok of ["issue", "pr-review", "a_b", "X1"]) assert.ok(CMD_NAME_RE.test(ok), ok);
   for (const bad of ["../x", "a b", "-x", "", "a/b", "中文", "x".repeat(41)]) assert.ok(!CMD_NAME_RE.test(bad), bad);
 });
+
+test("编辑指令保留行尾注释以及引号、块标量里的井号", () => {
+  for (const [line, value] of [
+    ["周报 # 编辑者", "周报"],
+    ['"a # b" # 编辑者', "a # b"],
+    ["'it''s #1' # 编辑者", "it's #1"],
+    ["C# # 编辑者", "C#"],
+    ["| # 编辑者\n  一行 # 正文", "一行 # 正文"],
+  ]) {
+    const input = "---\ndescription: " + line + "\n---\n正文\n";
+    const cmd = parseCmd(input);
+    assert.equal(cmd.description, value);
+    const saved = formatCmd({ ...cmd, description: "新说明" });
+    assert.match(saved, /^description: 新说明 # 编辑者$/m);
+    assert.equal(parseCmd(saved).description, "新说明");
+  }
+});
+
+test("说明和参数提示中的 YAML 保留字写成字符串", () => {
+  for (const value of ["true", "false", "Null", "NULL", "yes", "off"]) {
+    const saved = formatCmd({ description: value, hint: value, body: "正文" });
+    assert.ok(saved.includes("description: " + JSON.stringify(value) + "\n"));
+    assert.ok(saved.includes("argument-hint: " + JSON.stringify(value) + "\n"));
+    assert.equal(parseCmd(saved).hint, value);
+  }
+});
