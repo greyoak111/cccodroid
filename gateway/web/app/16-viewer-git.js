@@ -1004,21 +1004,53 @@
   }
 
   // ── Markdown 预览：长稿分段，只渲染屏幕附近的段，远了再收回去，几百万字也不卡 ──
-  const MD_LAZY_MIN = 200 * 1024, MD_CHUNK = 24 * 1024;
-  /** 按空行切段，不切开代码块、公式块，也不切在列表、缩进续行前面 */
+  const MD_LAZY_MIN = 200 * 1024, MD_CHUNK = 24 * 1024, MD_CHUNK_HARD = 128 * 1024;
+  /** 按空行切段，不切开代码块、公式块，也不切在列表、缩进续行前面。
+   *  单个结构超过硬上限（巨围栏、连续列表、单行超长）仍要切开，不然命中观察范围时
+   *  一次性同步解析几百万字照样卡（审计 P2-5）：
+   *  - 围栏/公式：在切口补上收尾行、下一段补回开头行，每段各自是合法结构，内容拼起来不丢
+   *  - 列表/正文：硬上限到了就在行边界切（ol 渲染带 start=，编号不会乱）
+   *  - 单行超长：按字符切片，每片独立成段 */
   function mdChunks(text) {
     const lines = text.split("\n"), out = [];
-    let buf = [], n = 0, fence = "", math = false;
+    let buf = [], n = 0, fence = "", fenceOpen = "", math = false, mathOpen = "", mathClose = "";
+    const closeFence = () => (fence === "~" ? "~~~" : "```");
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
       buf.push(l); n += l.length + 1;
       const fm = /^\s{0,3}(`{3,}|~{3,})/.exec(l);
-      if (fm) { if (!fence) fence = fm[1][0]; else if (fm[1][0] === fence) fence = ""; continue; }
-      if (fence) continue;
+      if (fm) { if (!fence) { fence = fm[1][0]; fenceOpen = l; } else if (fm[1][0] === fence) fence = ""; continue; }
+      // 单行超长（压缩过的 js、无换行正文）：按字符切成片，每片独立成段；内容不丢，单次解析有上限
+      if (l.length + 1 >= MD_CHUNK_HARD) {
+        buf.pop(); n -= l.length + 1;
+        const pieces = [];
+        for (let s = 0; s < l.length; s += MD_CHUNK) pieces.push(l.slice(s, s + MD_CHUNK));
+        for (let s = 0; s < pieces.length; s++) {
+          buf.push(pieces[s]); n += pieces[s].length + 1;
+          if (s === pieces.length - 1) break;   // 最后一片留在 buf 里，随收尾成段
+          if (fence) { out.push(buf.join("\n") + "\n" + closeFence()); buf = [fenceOpen]; n = fenceOpen.length + 1; }
+          else if (math) { out.push(buf.join("\n") + "\n" + mathClose); buf = [mathOpen]; n = mathOpen.length + 1; }
+          else { out.push(buf.join("\n")); buf = []; n = 0; }
+        }
+        continue;
+      }
+      if (fence) {
+        if (n >= MD_CHUNK_HARD && lines[i + 1] != null) { out.push(buf.join("\n") + "\n" + closeFence()); buf = [fenceOpen]; n = fenceOpen.length + 1; }
+        continue;
+      }
       const t = l.trim();
-      if (math) { if (t.endsWith("$$") || t.endsWith("\\]")) math = false; }
-      else if ((t.startsWith("$$") && !(t.length > 2 && t.slice(2).endsWith("$$"))) || (t.startsWith("\\[") && !t.endsWith("\\]"))) math = true;
-      if (math || n < MD_CHUNK || l.trim()) continue;
+      if (math) {
+        const closed = t.endsWith("$$") || t.endsWith("\\]");
+        if (closed) math = false;
+        if (n >= MD_CHUNK_HARD && lines[i + 1] != null && !closed) { out.push(buf.join("\n") + "\n" + mathClose); buf = [mathOpen]; n = mathOpen.length + 1; }
+        continue;
+      }
+      if ((t.startsWith("$$") && !(t.length > 2 && t.slice(2).endsWith("$$"))) || (t.startsWith("\\[") && !t.endsWith("\\]"))) {
+        math = true; mathOpen = t.startsWith("$$") ? "$$" : "\\["; mathClose = t.startsWith("$$") ? "$$" : "\\]";
+        continue;
+      }
+      if (l.trim()) { if (n >= MD_CHUNK_HARD && lines[i + 1] != null) { out.push(buf.join("\n")); buf = []; n = 0; } continue; }
+      if (n < MD_CHUNK) continue;
       const nx = lines[i + 1];
       if (nx == null || /^(\s|[-*+]\s|\d+[.)]\s|>)/.test(nx)) continue;
       out.push(buf.join("\n")); buf = []; n = 0;
