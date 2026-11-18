@@ -99,7 +99,8 @@ function compWriteRecord(id, rec) {
   return writeAtomic(compRecFile(id), JSON.stringify(rec, null, 1));
 }
 export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile, compDropDanglingDocs, compSweepDanglingDocs,
-  compState, compVerCmp, compOlder, compInstall, compSwitch, compRecover, compClearStage, compMcpSpec };   // 只给测试用
+  compState, compVerCmp, compOlder, compInstall, compSwitch, compRecover, compClearStage, compMcpSpec,
+  compRecovering: () => compRecovering };   // 只给测试用：恢复单飞当前登记（复核第三轮 §1）
 
 function compFetch(src, quick) {
   // quick：拉索引用——连不上 8 秒就放弃、只重试一次，好尽快换镜像（GitHub 被墙时以前要干等一分多钟）
@@ -836,6 +837,7 @@ async function sweepRecover() {
     const mark = path.join(COMP_RUN_DIR, id + ".installing");
     const beat = (n) => { try { fs.writeFileSync(mark, JSON.stringify({ id, phase: "recover", moved: n, at: uptimeMs(), gw: process.pid, boot: bootId() })); } catch {} };
     const clean = () => { try { fs.rmSync(mark, { force: true }); } catch {} };
+    let tookOver = false;   // 只有真接管了这条记录（写过自己的 beat(0)）才清心跳：跳过别的活网关时心跳是人家正在用的（复核第三轮 P2-1）
     try {
       await compFsExclusive(async () => {
         // 全部状态在锁内重读（复核 R2-P0-1）：锁外看到的 installing 可能已被一次失败回滚或另一次恢复改掉了，
@@ -851,6 +853,7 @@ async function sweepRecover() {
           } catch {}
         }
         beat(0);
+        tookOver = true;
         const files = new Set(Array.isArray(rec.files) ? rec.files.filter(safeRel) : []);   // files 不是数组只当没有，别中断整轮（复核 P2-8）
         // 这条 installing 是旧工具包上的：$PREFIX 已经整体换过，清单里的路径现在归新底座。只清记录和暂存，不碰 $PREFIX（复核 P1-6）
         if (dk && rec.base && rec.base !== dk.sha256) {
@@ -870,7 +873,7 @@ async function sweepRecover() {
         const missing = [...files].filter((r) => !docLinkDangling(r) && !fs.existsSync(path.join(PREFIX, r)));
         const danglingShared = (rec.shared || []).filter((r) => typeof r === "string" && docLinkDangling(r));
         const goneShared = (rec.shared || []).filter((r) => typeof r === "string" && !danglingShared.includes(r) && !fs.existsSync(path.join(PREFIX, r)));
-        if (rec.committed || (!fs.existsSync(bak) && !fs.existsSync(tree))) {
+        if ((rec.committed || (!fs.existsSync(bak) && !fs.existsSync(tree))) && !rec.rolledBack) {
           if (!missing.length && !goneShared.length) {
             rec.state = "ok"; rec.at = Date.now();
             if (compWriteRecord(id, rec)) log(`[comp] ${id}：上次安装实际已完成，记录补成 ok`);
@@ -911,8 +914,14 @@ async function sweepRecover() {
             return;
           }
           // prev 丢了（写失败 / 被删）就没法区分新旧：新文件一个都不敢删，记录也留着 installing——
-          // 删了记录就新旧混杂且无人认领，重装 / 卸载都还能走（复核 R2-P2-2）
-          if (!prev) { log(`[comp] ${id}：启动回滚放回了备份，但没有旧记录可对照，新文件没敢删，记录留在 installing`); return; }
+          // 删了记录就新旧混杂且无人认领，重装 / 卸载都还能走（复核 R2-P2-2）。
+          // 给记录盖「已回滚」章：下一轮恢复看到章就不能把「内容已是旧版」补成假的新版本 ok（复核第三轮 P2-2）
+          if (!prev) {
+            rec.rolledBack = true;
+            if (compWriteRecord(id, rec)) log(`[comp] ${id}：启动回滚放回了备份，但没有旧记录可对照，新文件没敢删，记录留在 installing（已盖章防第二轮补假 ok）`);
+            else log(`[comp] ${id}：启动回滚放回了备份，但没有旧记录可对照，新文件没敢删，记录留在 installing（盖章没写进去，下次启动再试）`);
+            return;
+          }
           const del = [...files].filter((r) => !inBak.has(r) && !prevFiles.has(r));
           for (let i = 0; i < del.length; i++) {
             try { fs.rmSync(path.join(PREFIX, del[i]), { force: true }); } catch {}
@@ -923,8 +932,9 @@ async function sweepRecover() {
           return;
         }
         // 无备份、有暂存树。搬完的证据是 moved / committed 落盘，或「没有备份计划且没有旧记录」（全新安装）：
-        // 只看「files 全在」会把升级的备份前状态（同路径旧文件还在）误判成搬完补成假 ok（复核 R2-P1-2）
-        const complete = rec.committed || rec.moved || (backupPlan.size === 0 && !prev);
+        // 只看「files 全在」会把升级的备份前状态（同路径旧文件还在）误判成搬完补成假 ok（复核 R2-P1-2）。
+        // 上一轮已经回滚过的记录（rolledBack 章）更不能补 ok：内容已是旧版，补了就假报新版装好（复核第三轮 P2-2）
+        const complete = (rec.committed || rec.moved || (backupPlan.size === 0 && !prev)) && !rec.rolledBack;
         if (complete && !missing.length && !goneShared.length) {
           rec.state = "ok"; rec.at = Date.now();
           if (compWriteRecord(id, rec)) log(`[comp] ${id}：上次安装实际已完成，记录补成 ok`);
@@ -946,7 +956,7 @@ async function sweepRecover() {
         writePrevOrDrop(id, prev);
       });
     } catch (e) { log(`[comp] ${id} 启动恢复失败：${e.message}`); }
-    clean();
+    if (tookOver) clean();
   }
 }
 

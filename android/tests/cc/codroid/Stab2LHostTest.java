@@ -99,6 +99,10 @@ public class Stab2LHostTest {
         eq("安装 parseBeatAt 换行缩进也认", (long) GatewayService.parseBeatAt("{\n  \"phase\": \"move\",\n  \"at\": " + (t0 - 1) + "\n}", t0) == t0 - 1, true);
         eq("安装 parseBeatAt 冒号前没空白字段不存在", GatewayService.parseBeatAt("{\"phasex\":\"move\",\"at\":" + (t0 - 1) + "}", t0) == null, true);
         eq("安装 parseBeatAt boot 对不上不认（跨重启旧文件）", GatewayService.parseBeatAt("{\"phase\":\"move\",\"at\":" + (t0 - 1) + ",\"boot\":\"wrong-boot\"}", t0) == null, true);
+        // ── 复核第三轮 §2：id 恰叫 at/boot/phase 不能误命中字段名 ──
+        eq("安装 parseBeatAt id 叫 at 不干扰字段", (long) GatewayService.parseBeatAt("{\"id\":\"at\",\"phase\":\"move\",\"at\":" + (t0 - 1) + "}", t0) == t0 - 1, true);
+        eq("安装 parseBeatAt id 叫 boot 不干扰字段", (long) GatewayService.parseBeatAt("{\"id\":\"boot\",\"phase\":\"move\",\"at\":" + (t0 - 1) + "}", t0) == t0 - 1, true);
+        eq("安装 parseBeatAt id 叫 phase 不干扰字段", (long) GatewayService.parseBeatAt("{\"id\":\"phase\",\"phase\":\"move\",\"at\":" + (t0 - 1) + "}", t0) == t0 - 1, true);
         String boot = "";
         try { boot = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("/proc/sys/kernel/random/boot_id")), java.nio.charset.StandardCharsets.UTF_8).trim(); } catch (Exception ignored) {}
         if (!boot.isEmpty()) eq("安装 parseBeatAt boot 匹配认", (long) GatewayService.parseBeatAt("{\"phase\":\"move\",\"at\":" + (t0 - 1) + ",\"boot\":\"" + boot + "\"}", t0) == t0 - 1, true);

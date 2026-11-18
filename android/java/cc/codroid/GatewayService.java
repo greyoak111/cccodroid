@@ -496,9 +496,21 @@ public class GatewayService extends Service {
      *  字段名与 gateway/gw/components.mjs 的 beat 写入口径一致，改字段要两头一起改。冒号前后允许空白（复核 R2-P2-5）；
      *  带 boot 的心跳和本机 boot_id 对不上（重启后的旧文件）当无效（复核 R2-P3-4）。畸形 / 缺字段 / 未来 at / 阶段不放行 → null */
     private static String hostBootId = null;
+    /** 找字段名（"name"）：只认 { 或 , 后面的位置（JSON 键），心跳里的 id 等值恰好叫 at/boot/phase 不能误命中（复核第三轮 §2） */
+    private static int fieldPos(String s, String name) {
+        int from = 0;
+        while (true) {
+            int i = s.indexOf("\"" + name + "\"", from);
+            if (i < 0) return -1;
+            int j = i - 1;
+            while (j >= 0 && (s.charAt(j) == ' ' || s.charAt(j) == '\t' || s.charAt(j) == '\n' || s.charAt(j) == '\r')) j--;
+            if (j < 0 || s.charAt(j) == '{' || s.charAt(j) == ',') return i;
+            from = i + 1;
+        }
+    }
     static Long parseBeatAt(String s, long now) {
         if (s == null) return null;
-        int p = s.indexOf("\"at\"");
+        int p = fieldPos(s, "at");
         if (p < 0) return null;
         p = skipWsColon(s, p + 4);
         if (p < 0) return null;
@@ -507,7 +519,7 @@ public class GatewayService extends Service {
         if (e == p) return null;
         long t;
         try { t = Long.parseLong(s.substring(p, e)); } catch (NumberFormatException x) { return null; }
-        int q = s.indexOf("\"phase\"");
+        int q = fieldPos(s, "phase");
         if (q < 0) return null;
         q = skipWsColon(s, q + 7);
         if (q < 0 || q >= s.length() || s.charAt(q) != '"') return null;
@@ -515,7 +527,7 @@ public class GatewayService extends Service {
         if (qe < 0) return null;
         String phase = s.substring(q + 1, qe);
         // boot 校验：心跳带了开机代号就对一下，跨重启的旧 at 会「回到过去」造成误判
-        int b = s.indexOf("\"boot\"");
+        int b = fieldPos(s, "boot");
         if (b >= 0) {
             b = skipWsColon(s, b + 6);
             if (b < 0 || b >= s.length() || s.charAt(b) != '"') return null;
@@ -535,7 +547,8 @@ public class GatewayService extends Service {
         return i;
     }
     private static String hostBoot() {
-        if (hostBootId != null) return hostBootId;
+        // 读失败不缓存空串：下次再读。缓存了空串，网关侧读成功就永久不匹配，宽限静默关闭（复核第三轮 §3）
+        if (hostBootId != null && !hostBootId.isEmpty()) return hostBootId;
         try {
             hostBootId = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("/proc/sys/kernel/random/boot_id")), java.nio.charset.StandardCharsets.UTF_8).trim();
         } catch (Exception e) { hostBootId = ""; }

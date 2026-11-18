@@ -1015,36 +1015,40 @@
     const lines = text.split("\n"), out = [];
     let buf = [], n = 0, fence = "", fenceOpen = "", math = false, mathOpen = "", mathClose = "";
     const closeFence = () => (fence === "~" ? "~~~" : "```");
+    // 单行超长（压缩过的 js、无换行正文）：按字符切成片，每片独立成段；内容不丢，单次解析有上限。
+    // close/reopen 只在围栏、公式里给（切口补收尾行、下一段补回开头行），正文里不给
+    const cutBig = (l, close, reopen) => {
+      buf.pop(); n -= l.length + 1;
+      const pieces = [];
+      for (let s = 0; s < l.length; s += MD_CHUNK) pieces.push(l.slice(s, s + MD_CHUNK));
+      for (let s = 0; s < pieces.length; s++) {
+        buf.push(pieces[s]); n += pieces[s].length + 1;
+        if (s === pieces.length - 1) break;   // 最后一片留在 buf 里，随收尾成段
+        if (close) { out.push(buf.join("\n") + "\n" + close); buf = [reopen]; n = reopen.length + 1; }
+        else { out.push(buf.join("\n")); buf = []; n = 0; }
+      }
+    };
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
       buf.push(l); n += l.length + 1;
       const fm = /^\s{0,3}(`{3,}|~{3,})/.exec(l);
       if (fm) { if (!fence) { fence = fm[1][0]; fenceOpen = l; } else if (fm[1][0] === fence) fence = ""; continue; }
-      // 单行超长（压缩过的 js、无换行正文）：按字符切成片，每片独立成段；内容不丢，单次解析有上限
-      if (l.length + 1 >= MD_CHUNK_HARD) {
-        buf.pop(); n -= l.length + 1;
-        const pieces = [];
-        for (let s = 0; s < l.length; s += MD_CHUNK) pieces.push(l.slice(s, s + MD_CHUNK));
-        for (let s = 0; s < pieces.length; s++) {
-          buf.push(pieces[s]); n += pieces[s].length + 1;
-          if (s === pieces.length - 1) break;   // 最后一片留在 buf 里，随收尾成段
-          if (fence) { out.push(buf.join("\n") + "\n" + closeFence()); buf = [fenceOpen]; n = fenceOpen.length + 1; }
-          else if (math) { out.push(buf.join("\n") + "\n" + mathClose); buf = [mathOpen]; n = mathOpen.length + 1; }
-          else { out.push(buf.join("\n")); buf = []; n = 0; }
-        }
+      const t = l.trim();
+      if (math) {
+        // 先判收尾再切：巨行恰是公式收尾行时分类不乱（复核第三轮 §5.3）
+        const closed = t.endsWith("$$") || t.endsWith("\\]");
+        if (closed) math = false;
+        if (l.length + 1 >= MD_CHUNK_HARD) { cutBig(l, closed ? "" : mathClose, closed ? "" : mathOpen); continue; }
+        if (!closed && n >= MD_CHUNK_HARD && lines[i + 1] != null) { out.push(buf.join("\n") + "\n" + mathClose); buf = [mathOpen]; n = mathOpen.length + 1; }
         continue;
       }
       if (fence) {
+        if (l.length + 1 >= MD_CHUNK_HARD) { cutBig(l, closeFence(), fenceOpen); continue; }
         if (n >= MD_CHUNK_HARD && lines[i + 1] != null) { out.push(buf.join("\n") + "\n" + closeFence()); buf = [fenceOpen]; n = fenceOpen.length + 1; }
         continue;
       }
-      const t = l.trim();
-      if (math) {
-        const closed = t.endsWith("$$") || t.endsWith("\\]");
-        if (closed) math = false;
-        if (n >= MD_CHUNK_HARD && lines[i + 1] != null && !closed) { out.push(buf.join("\n") + "\n" + mathClose); buf = [mathOpen]; n = mathOpen.length + 1; }
-        continue;
-      }
+      // 巨行按正文切片：$$ 开头的巨行也不再开公式（与渲染器对巨单行公式的行为反而一致，复核第三轮 §5.3）
+      if (l.length + 1 >= MD_CHUNK_HARD) { cutBig(l, "", ""); continue; }
       if ((t.startsWith("$$") && !(t.length > 2 && t.slice(2).endsWith("$$"))) || (t.startsWith("\\[") && !t.endsWith("\\]"))) {
         math = true; mathOpen = t.startsWith("$$") ? "$$" : "\\["; mathClose = t.startsWith("$$") ? "$$" : "\\]";
         continue;

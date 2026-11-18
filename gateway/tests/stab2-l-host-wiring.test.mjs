@@ -104,7 +104,8 @@ test("心跳跨语言契约：JS 写 at/phase/gw/boot 与 Java parseBeatAt 解�
   assert.ok(comp.includes("uptimeMs"), "JS 心跳没用单调时间");
   assert.ok(comp.includes("{ id, phase, moved, at: uptimeMs(), gw: process.pid, boot: bootId() }"), "JS 心跳字段/顺序和契约不符");
   // Java 侧：parseBeatAt 按 "at" / "phase" / "boot" 解析同一批字段；两边的字段名要一起改
-  assert.ok(gw.includes("indexOf(\"\\\"at\\\"\")") && gw.includes("indexOf(\"\\\"phase\\\"\")") && gw.includes("indexOf(\"\\\"boot\\\"\")"),
+  // 字段名要按 JSON 键位置找（fieldPos），不能裸 indexOf：id 恰叫 at/boot/phase 会误命中（复核第三轮 §2）
+  assert.ok(gw.includes("fieldPos(s, \"at\")") && gw.includes("fieldPos(s, \"phase\")") && gw.includes("fieldPos(s, \"boot\")"),
     "Java 解析口径和 JS 写入口径对不上");
   // P0 单飞：启动恢复和安装前预恢复共用同一个，别并发互删
   assert.ok(comp.includes("compRecovering") && comp.includes("if (compRecovering) return compRecovering"), "compRecover 没做单飞");

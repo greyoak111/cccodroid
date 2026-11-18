@@ -189,6 +189,12 @@ test("P0-2 有备份但没有旧记录：宁可不删，别把旧版最后一份
   assert.ok(fs.existsSync(path.join(PREFIX, "bin/new")), "没有旧记录可对照，新文件也没敢删");
   const got = JSON.parse(fs.readFileSync(path.join(COMP_DIR, id + ".json"), "utf8"));
   assert.equal(got.state, "installing", "记录留在 installing：删了就新旧混杂且无人认领（复核 R2-P2-2）");
+  assert.equal(got.rolledBack, true, "盖了已回滚章（复核第三轮 P2-2）");
+  // 第三轮 P2-2：第二轮恢复不能把「内容已回旧版」补成假的 2.0.0 ok
+  await compRecover();
+  assert.equal(fs.existsSync(path.join(COMP_DIR, id + ".json")), false, "第二轮收敛：删掉半截记录可重装，不补成假 ok");
+  assert.equal(fs.readFileSync(path.join(PREFIX, "bin/x"), "utf8"), "v1-x", "旧内容不动");
+  assert.ok(fs.existsSync(path.join(PREFIX, "bin/new")), "没人认领的新文件仍不删");
 });
 
 test("P2-8 files 不是数组：跳过这个组件，后面的照常恢复", async () => {
@@ -350,7 +356,12 @@ test("R2-P0-1 两个并发恢复共用单飞：只恢复一次，不互删", asy
   const bak = path.join(stage, id + ".old");
   fs.mkdirSync(path.dirname(path.join(bak, "bin/c-a")), { recursive: true });
   fs.renameSync(path.join(PREFIX, "bin/c-a"), path.join(bak, "bin/c-a"));
-  await Promise.all([compRecover(), compRecover()]);   // 启动恢复 + 预恢复撞在一起
+  const pa = compRecover();
+  const flight = m._compForTest.compRecovering();
+  assert.ok(flight, "第一次调用就把单飞登记上（复核第三轮 §1，行为级钉住单飞）");
+  const pb = compRecover();
+  assert.equal(m._compForTest.compRecovering(), flight, "第二次调用返回同一个单飞，不再另开一轮");
+  await Promise.all([pa, pb]);   // 启动恢复 + 预恢复撞在一起
   assert.equal(fs.readFileSync(path.join(PREFIX, "bin/c-a"), "utf8"), "v1-a", "旧文件放回，没被第二个恢复删掉");
   assert.equal(fs.existsSync(path.join(PREFIX, "bin/c-new")), false, "新文件删掉");
   const got = JSON.parse(fs.readFileSync(path.join(COMP_DIR, id + ".json"), "utf8"));

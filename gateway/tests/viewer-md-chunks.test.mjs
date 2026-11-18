@@ -117,6 +117,15 @@ test("巨围栏每段用真渲染器渲染：恰好一个闭合代码块，围�
   assert.ok(html.includes(("line 2999").padEnd(60, "x")), "最后一行内容渲染出来");
 });
 
+test("巨行恰是公式收尾行：分类不乱，后续行照常按正文分（复核第三轮 §5.3）", () => {
+  const t = "$$\nx+y\n" + "z".repeat(300 * 1024) + "$$\nplain line";
+  const parts = mdChunks(t);
+  assert.ok(parts.length >= 2, "巨行要切：" + parts.length);
+  const last = parts[parts.length - 1];
+  assert.ok(last.endsWith("plain line"), "收尾后的正文行独立在最后一段，不被公式分类吞掉");
+  assert.equal(parts.join("\n").replace(/\n/g, ""), t.replace(/\n/g, ""), "字符级不丢内容（切片引入的换行除外）");
+});
+
 test("小输入不动：围栏、公式、短稿原样返回", () => {
   // vm 里跑出来的数组原型和宿主不同，deepEqual 判不等，比字符串化结果
   const eq = (got, want) => assert.equal(JSON.stringify(got), JSON.stringify(want));

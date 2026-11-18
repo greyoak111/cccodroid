@@ -62,6 +62,7 @@ test("占位、合成消息和零用量错误不清掉已有的真实占用", ()
 });
 
 test("非零但偏小的开头用量先留在本请求，不覆盖上次的真实占用", () => {
+  // 没有后续 delta / assistant 正是「暂缓后流断」的形态：用量条停在上一轮旧值、不回摆（复核第三轮 §4.1 显式化）
   const pending = { input_tokens: 22119, output_tokens: 0 };
   const r = replay([start(usage), start(pending)]);
   assert.deepEqual(r.contexts, [101521]);
