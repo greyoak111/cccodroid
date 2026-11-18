@@ -67,9 +67,10 @@ public class GatewayService extends Service {
     static final long PROOF_GRACE_MS = 20000;
     /** 过了宽限还连续这么久证明不了自己：结束重起（BUG-A01） */
     static final long UNPROVEN_KILL_MS = 15000;
-    /** 组件安装（switch/move/recover）期间探活失败不算数：网关在同步搬几千个文件，/__proof 答不上来是正常的。
-     *  网关落 components/.runs/<id>.installing 心跳；心跳持续新鲜就继续放行（安装可能要好几分钟，复核 P1-5），
-     *  停更超过这时长才按真卡死处理（组件安装报告 §1） */
+    /** 组件安装（switch/backup/move/recover）期间探活失败不算数：网关在分批搬几千个文件，/__proof 答不上来是正常的。
+     *  网关落 components/.runs/<id>.installing 心跳；分批搬移持续多久都放行（复核 P1-5），
+     *  但单次同步系统调用卡死（现场 157/338 秒那种停顿）会让心跳停更——停更超过这时长仍按真卡死处理，
+     *  由启动恢复收口（复核 R2-P2-7：这里是「心跳停更上限」，不是「安装总时长上限」） */
     static final long INSTALL_GRACE_MS = 120000;
     /** squatted() 的四种结论：端口空出来 / 端口上已经是能证明自己的网关 / 被别的应用占着 / 残留网关在安装，先不打扰 */
     static final int SQUAT_NO = 0, SQUAT_ADOPTED = 1, SQUAT_HIJACKED = 2, SQUAT_WAIT = 3;
@@ -490,26 +491,55 @@ public class GatewayService extends Service {
         return t > bestAt && t <= now && installingPhase(phase) ? t : bestAt;
     }
 
-    /** 手写解析网关写的心跳（紧凑 JSON {id, phase, moved, at}，at 是开机以来单调毫秒，与 /proc/uptime 同基准）：
+    /** 手写解析网关写的心跳（JSON {id, phase, moved, at, gw, boot}，at 是 /proc/uptime 单调毫秒）：
      *  桌面 JVM 的 android.jar 是桩、org.json 调不了，纯字符串解析让 installingBeat 能进 JVM 测试跑全链路（复核 P2-14）。
-     *  字段名与 gateway/gw/components.mjs 的 beat 写入口径一致，改字段要两头一起改。畸形 / 缺字段 / 未来 at / 阶段不放行 → null */
+     *  字段名与 gateway/gw/components.mjs 的 beat 写入口径一致，改字段要两头一起改。冒号前后允许空白（复核 R2-P2-5）；
+     *  带 boot 的心跳和本机 boot_id 对不上（重启后的旧文件）当无效（复核 R2-P3-4）。畸形 / 缺字段 / 未来 at / 阶段不放行 → null */
+    private static String hostBootId = null;
     static Long parseBeatAt(String s, long now) {
         if (s == null) return null;
-        int p = s.indexOf("\"at\":");
+        int p = s.indexOf("\"at\"");
         if (p < 0) return null;
-        p += 5;
+        p = skipWsColon(s, p + 4);
+        if (p < 0) return null;
         int e = p;
         while (e < s.length() && s.charAt(e) >= '0' && s.charAt(e) <= '9') e++;
         if (e == p) return null;
         long t;
         try { t = Long.parseLong(s.substring(p, e)); } catch (NumberFormatException x) { return null; }
-        int q = s.indexOf("\"phase\":\"");
+        int q = s.indexOf("\"phase\"");
         if (q < 0) return null;
-        q += 9;
-        int qe = s.indexOf('"', q);
+        q = skipWsColon(s, q + 7);
+        if (q < 0 || q >= s.length() || s.charAt(q) != '"') return null;
+        int qe = s.indexOf('"', q + 1);
         if (qe < 0) return null;
-        long got = beatBetter(now, 0, t, s.substring(q, qe));
+        String phase = s.substring(q + 1, qe);
+        // boot 校验：心跳带了开机代号就对一下，跨重启的旧 at 会「回到过去」造成误判
+        int b = s.indexOf("\"boot\"");
+        if (b >= 0) {
+            b = skipWsColon(s, b + 6);
+            if (b < 0 || b >= s.length() || s.charAt(b) != '"') return null;
+            int be = s.indexOf('"', b + 1);
+            if (be < 0) return null;
+            if (!s.substring(b + 1, be).equals(hostBoot())) return null;
+        }
+        long got = beatBetter(now, 0, t, phase);
         return got > 0 ? got : null;
+    }
+    /** 从 i 起跳过空白与冒号，返回字段值起点；格式不对返回 -1 */
+    private static int skipWsColon(String s, int i) {
+        while (i < s.length() && (s.charAt(i) == ' ' || s.charAt(i) == '\t' || s.charAt(i) == '\n' || s.charAt(i) == '\r')) i++;
+        if (i >= s.length() || s.charAt(i) != ':') return -1;
+        i++;
+        while (i < s.length() && (s.charAt(i) == ' ' || s.charAt(i) == '\t' || s.charAt(i) == '\n' || s.charAt(i) == '\r')) i++;
+        return i;
+    }
+    private static String hostBoot() {
+        if (hostBootId != null) return hostBootId;
+        try {
+            hostBootId = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("/proc/sys/kernel/random/boot_id")), java.nio.charset.StandardCharsets.UTF_8).trim();
+        } catch (Exception e) { hostBootId = ""; }
+        return hostBootId;
     }
 
     /** 读网关落的安装心跳（components/.runs/*.installing），取 at 最新的一份。now 传 SystemClock.elapsedRealtime()
@@ -599,8 +629,10 @@ public class GatewayService extends Service {
             return false;
         }
         // 没有自己拉起的进程：端口上那个必须证明得了自己。接管不了 —— 启动随机数只在原进程内存里（Env.key），
-        // 认不出来的只能请它退出重起，不能把令牌交给一个证明不了身份的进程（0.6.9 审计 13-02）
-        if (installingGrace()) return true;   // 但它正在安装（服务重建前留下的残留网关）：先别判死，让它装完再证明自己（复核 P1-4）
+        // 认不出来的只能请它退出重起，不能把令牌交给一个证明不了身份的进程（0.6.9 审计 13-02）。
+        // 正在安装的残留网关（服务重建、proc==null、端口还被它占着）先别判死；自己拉起的进程死了
+        // （proc 非 null 但 isAlive 为假）绝不宽限——心跳文件可能还是新的，但网关已经不在了（复核 R2-P1-3）
+        if (proc == null && Env.portBusy() && installingGrace()) return true;
         return Env.proveGateway();
     }
 
@@ -626,8 +658,6 @@ public class GatewayService extends Service {
      *  只探 127.0.0.2 的话，127.0.0.1 被占时这里看不出来，网关会起不来又反复重启 */
     private int squatted() {
         if (!Env.portBusy()) return SQUAT_NO;
-        // 服务重建后留下的残留网关正在安装：先别发信号杀它，回循环顶部让 alive() 按安装心跳继续等（复核 P1-4）
-        if (installingGrace()) { Log.w(TAG, "端口上的残留网关正在安装组件，先不打扰，等它收尾"); return SQUAT_WAIT; }
         int me = android.os.Process.myUid(), killed = 0;
         File[] ps = new File("/proc").listFiles();
         java.util.List<Integer> gw = new java.util.ArrayList<>();
@@ -641,6 +671,9 @@ public class GatewayService extends Service {
                 gw.add(Integer.parseInt(name));
             } catch (Exception ignored) {}
         }
+        // 残留网关正在安装（心跳新鲜）且它的进程真活着：先别发信号杀它，回循环顶部让 alive() 按安装心跳继续等。
+        // 没有活着的网关进程就不等——心跳文件可能是刚被杀的网关留下的，空转 120 秒只会让 UI 干等（复核 R2-P1-3）
+        if (!gw.isEmpty() && anyAlive(gw) && installingGrace()) { Log.w(TAG, "端口上的残留网关正在安装组件，先不打扰，等它收尾"); return SQUAT_WAIT; }
         if (!gw.isEmpty()) {
             // 先礼后兵：SIGTERM 让网关自己收尾（它退出时会连带结束正在跑的 claude 进程树）。
             // 以前直接 SIGKILL：收尾没跑，claude 成了孤儿；而且这里就 return 了，下面的兜底清理也不做（0.6.9 审计 13-02）

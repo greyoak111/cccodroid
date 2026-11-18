@@ -86,10 +86,11 @@ test("复核 67ea9ba：启动恢复心跳、接管路径、多份心跳取最新
   assert.ok(gw.includes('"backup".equals(phase)'), "看门狗没放行 backup 阶段的备份心跳");
   // P1-4：没有自己拉起进程时的 alive() 与 squatted() 都先查安装心跳，别杀服务重建前的残留网关
   const alive = gw.slice(gw.indexOf("private boolean alive()"), gw.indexOf("private static boolean alivePid"));
-  assert.ok(alive.includes("if (installingGrace()) return true;"), "alive() 无进程分支没查安装心跳");
+  assert.ok(alive.includes("proc == null && Env.portBusy() && installingGrace()"), "alive() 无进程分支的宽限没要求端口忙 + 服务重建（死进程会空等 120 秒，复核 R2-P1-3）");
   assert.ok(gw.includes("SQUAT_WAIT"), "squatted() 没有「正在安装，先不打扰」的结论");
   const squatted = gw.slice(gw.indexOf("private int squatted()"), gw.indexOf("private String last"));
   assert.ok(squatted.includes("installingGrace()"), "squatted() 发信号前没查安装心跳");
+  assert.ok(squatted.includes("!gw.isEmpty() && anyAlive(gw) && installingGrace()"), "squatted() 没要求真有活着的网关进程（心跳文件可能是死网关留下的）");
   assert.ok(gw.includes("sq == SQUAT_ADOPTED || sq == SQUAT_WAIT"), "守护循环没处理 SQUAT_WAIT");
   // P2-11：心跳文件先 isFile 再读，FIFO 不能把 supervise 线程卡死
   assert.ok(gw.includes("!f.getName().endsWith(\".installing\") || !f.isFile()"), "installingBeat 没挡非普通文件");
@@ -97,11 +98,14 @@ test("复核 67ea9ba：启动恢复心跳、接管路径、多份心跳取最新
   assert.ok(gw.includes("android.os.SystemClock.elapsedRealtime"), "installingGrace 没用单调钟");
 });
 
-test("心跳跨语言契约：JS 写 at/phase 与 Java parseBeatAt 解析口径一致", () => {
+test("心跳跨语言契约：JS 写 at/phase/gw/boot 与 Java parseBeatAt 解析口径一致", () => {
   const comp = fs.readFileSync(new URL("../gw/components.mjs", import.meta.url), "utf8");
-  // JS 侧：beat 写 {id, phase, moved, at}，at 是 /proc/uptime 单调毫秒
+  // JS 侧：beat 写 {id, phase, moved, at, gw, boot}，at 是 /proc/uptime 单调毫秒
   assert.ok(comp.includes("uptimeMs"), "JS 心跳没用单调时间");
-  assert.ok(comp.includes("{ id, phase, moved, at: uptimeMs() }"), "JS 心跳字段/顺序和契约不符");
-  // Java 侧：parseBeatAt 按 "at": 和 "phase":" 解析同一批字段；两边的字段名要一起改
-  assert.ok(gw.includes("indexOf(\"\\\"at\\\":\")") && gw.includes("indexOf(\"\\\"phase\\\":\\\"\")"), "Java 解析口径和 JS 写入口径对不上");
+  assert.ok(comp.includes("{ id, phase, moved, at: uptimeMs(), gw: process.pid, boot: bootId() }"), "JS 心跳字段/顺序和契约不符");
+  // Java 侧：parseBeatAt 按 "at" / "phase" / "boot" 解析同一批字段；两边的字段名要一起改
+  assert.ok(gw.includes("indexOf(\"\\\"at\\\"\")") && gw.includes("indexOf(\"\\\"phase\\\"\")") && gw.includes("indexOf(\"\\\"boot\\\"\")"),
+    "Java 解析口径和 JS 写入口径对不上");
+  // P0 单飞：启动恢复和安装前预恢复共用同一个，别并发互删
+  assert.ok(comp.includes("compRecovering") && comp.includes("if (compRecovering) return compRecovering"), "compRecover 没做单飞");
 });

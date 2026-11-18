@@ -3282,4 +3282,5 @@ window.I18N_DICT.en = {
   "请填写可写位置下尚不存在的输出文件夹。": "Enter a new output folder in a writable location.",
   "结果超过 512 MB，请减少页数或分辨率。": "Output exceeds 512 MB. Reduce pages or resolution.",
   "个文件": "file(s)",
+  "上次安装的备份还没恢复，请重试；不行就先卸载再重装": "The backup from the last install hasn\"t been restored. Retry, or uninstall and reinstall.",
 };

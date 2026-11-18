@@ -3244,4 +3244,5 @@ window.I18N_DICT["fr"] = {
   "请填写可写位置下尚不存在的输出文件夹。": "Indiquez un nouveau dossier de sortie dans un emplacement accessible en écriture.",
   "结果超过 512 MB，请减少页数或分辨率。": "La sortie dépasse 512 Mo. Réduisez les pages ou la résolution.",
   "个文件": "fichier(s)",
+  "上次安装的备份还没恢复，请重试；不行就先卸载再重装": "La sauvegarde de la dernière installation n\"a pas encore été restaurée. Réessayez, sinon désinstallez puis réinstallez.",
 };
