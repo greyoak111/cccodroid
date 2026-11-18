@@ -430,6 +430,7 @@
   async function openViewer(path, kind, size) {
     if (VW.dirty && !confirm(t("有未保存的修改，丢弃？"))) return;
     if (VW.dirty) draftClear();
+    closeViewerSheet();
     closeViewerPdf();
     vwDropEd();
     vwMdStop();          // 换文件：上一份的分段预览 observer、行号栏状态都别再留着（FIND-026）

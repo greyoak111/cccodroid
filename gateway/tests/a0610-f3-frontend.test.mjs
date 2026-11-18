@@ -16,7 +16,7 @@ const src12 = read("app/12-model-caps.js");
 const src13 = read("app/13-nav-menus.js");
 const src14 = read("app/14-projects-sched.js");
 const src16 = read("app/16-viewer-git.js");
-const src17 = read("app/17-office.js");
+const sheet = read("office/sheet-model.js");
 const src19 = read("app/19-boot.js");
 const src15 = read("app/15-pages.js");
 const html = read("index.html");
@@ -133,7 +133,7 @@ test("B14 196 端侧.5：到 GitHub 反馈按钮有忙碌态，防连点", () =>
 
 test("B18 196 注入域 .2/.3/.4/.6/.9：缺字段不破渲染，选中文字不能往草稿里注入", () => {
   assert.ok(src16.includes("if (!r || typeof r.url !== \"string\") throw new Error(t(\"预览服务没有返回地址\"))"), "预览回执缺 url 有守卫（已由 f234f61 修）");
-  assert.ok(src17.includes("try { rg = X.utils.decode_range(ws[\"!ref\"]); }"), "畸形 !ref 有守卫（已由 f234f61 修）");
+  assert.match(sheet, /try \{\s*rg = X\.utils\.decode_range\(ws\["!ref"\]\);[^]*?catch \{ return active = \{ i, badRange: true \}; \}/, "Worker 模型中的畸形 !ref 仍有守卫");
   assert.ok(src16.includes("const cmsg = typeof c.message === \"string\" ? c.message : \"\""), "git show 缺 message 不抛错");
   assert.ok(src16.includes("const cfiles = Array.isArray(c.files) ? c.files : []"), "git show 缺 files 不抛错");
   assert.ok(src08.includes("const ub = m.usedBy || {}"), "模块缺 usedBy 不炸整个列表");
