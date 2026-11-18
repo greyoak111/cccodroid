@@ -3243,4 +3243,5 @@ window.I18N_DICT["fr"] = {
   "先安装 PDF 工具箱组件，再重新打开工具箱。": "Installez le composant PDF, puis rouvrez la boîte à outils.",
   "请填写可写位置下尚不存在的输出文件夹。": "Indiquez un nouveau dossier de sortie dans un emplacement accessible en écriture.",
   "结果超过 512 MB，请减少页数或分辨率。": "La sortie dépasse 512 Mo. Réduisez les pages ou la résolution.",
+  "个文件": "fichier(s)",
 };

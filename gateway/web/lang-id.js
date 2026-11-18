@@ -3243,4 +3243,5 @@ window.I18N_DICT["id"] = {
   "先安装 PDF 工具箱组件，再重新打开工具箱。": "Instal komponen kotak alat PDF, lalu buka kembali.",
   "请填写可写位置下尚不存在的输出文件夹。": "Masukkan folder hasil baru di lokasi yang dapat ditulis.",
   "结果超过 512 MB，请减少页数或分辨率。": "Hasil melebihi 512 MB. Kurangi halaman atau resolusi.",
+  "个文件": "berkas",
 };

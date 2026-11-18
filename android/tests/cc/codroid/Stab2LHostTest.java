@@ -16,6 +16,11 @@ public class Stab2LHostTest {
         if (!ok) fail++;
         System.out.println((ok ? "✓ " : "✗ ") + what + "（得到 " + got + "，期望 " + want + "）");
     }
+    static void eql(String what, long got, long want) {
+        boolean ok = got == want;
+        if (!ok) fail++;
+        System.out.println((ok ? "✓ " : "✗ ") + what + "（得到 " + got + "，期望 " + want + "）");
+    }
 
     public static void main(String[] a) {
         // ── BUG-A03：spawnGateway 准备期间的取消判断 ──
@@ -63,8 +68,9 @@ public class Stab2LHostTest {
                 t0, t0 + GatewayService.PROOF_GRACE_MS) == GatewayService.ALIVE_KILL, true);
 
         // ── 组件安装报告 §1：安装阶段的心跳放宽「证明不了自己」的时限 ──
-        eq("安装 只有 switch / move 阶段算安装中", GatewayService.installingPhase("switch"), true);
-        eq("安装 只有 switch / move 阶段算安装中", GatewayService.installingPhase("move"), true);
+        eq("安装 switch / move / recover 阶段算安装中", GatewayService.installingPhase("switch"), true);
+        eq("安装 switch / move / recover 阶段算安装中", GatewayService.installingPhase("move"), true);
+        eq("安装 启动恢复也算安装中", GatewayService.installingPhase("recover"), true);
         eq("安装 downloading / verifying 不算", GatewayService.installingPhase("downloading"), false);
         eq("安装 空阶段不算", GatewayService.installingPhase(""), false);
         eq("安装 心跳 100 秒前还新鲜", GatewayService.installingFresh(t0 + 100_000, t0), true);
@@ -72,6 +78,12 @@ public class Stab2LHostTest {
             GatewayService.installingFresh(t0 + GatewayService.INSTALL_GRACE_MS, t0), false);
         eq("安装 心跳是未来时间不新鲜", GatewayService.installingFresh(t0, t0 + 1), false);
         eq("安装 心跳时间戳为 0 不新鲜", GatewayService.installingFresh(t0, 0), false);
+
+        // ── 复核 P2-9：多份心跳取最新，未来时间戳 / 非安装阶段不能盖住新鲜的 ──
+        eql("安装 取最新：更晚的新鲜心跳盖过旧的", GatewayService.beatBetter(t0 + 1000, t0 + 500, t0 + 900, "move"), t0 + 900);
+        eql("安装 取最新：旧的不盖新的", GatewayService.beatBetter(t0 + 1000, t0 + 900, t0 + 500, "move"), t0 + 900);
+        eql("安装 未来时间戳不参与（时间被回拨过）", GatewayService.beatBetter(t0, t0 - 500, t0 + 100, "move"), t0 - 500);
+        eql("安装 非安装阶段的心跳不参与取最新", GatewayService.beatBetter(t0 + 1000, t0 + 500, t0 + 900, "downloading"), t0 + 500);
 
         // ── 独立审查 P2-4：界面页态决策 ──
         eq("UI 已证明：界面", MainActivity.uiPageDecision(true, false, false) == MainActivity.UI_LOAD, true);

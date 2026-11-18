@@ -247,7 +247,9 @@
       let bar = "";
       if (pr && pr.total) {
         const pct = Math.min(100, (pr.done / pr.total) * 100).toFixed(1);
-        bar = '<div class="comp-bar"><i style="width:' + pct + '%"></i></div><div class="tiny">' + MB(pr.done) + " / " + MB(pr.total) + (pr.via ? " · " + t("来自 {src}", { src: esc(pr.via) }) : "") + "</div>";
+        // installing 阶段的 done/total 是文件数，别再当字节显示成 0.0 MB（复核 P2-12）
+        const amt = pr.files ? pr.done + " / " + pr.total + " " + t("个文件") : MB(pr.done) + " / " + MB(pr.total);
+        bar = '<div class="comp-bar"><i style="width:' + pct + '%"></i></div><div class="tiny">' + amt + (pr.via ? " · " + t("来自 {src}", { src: esc(pr.via) }) : "") + "</div>";
       }
       // 已装和待装不是同一个版本时两个都写出来：以前只显示已装版本，点「更新」之前看不到会升到哪一版，
       // 被回放的旧索引推着「更新」也无从察觉（0.6.9 审计 195-V.1）

@@ -71,9 +71,24 @@ test("组件安装报告 §1：安装心跳接进两处探活失败路径，时�
   const alive = gw.slice(gw.indexOf("private boolean alive()"), gw.indexOf("private static boolean alivePid"));
   assert.ok(alive.includes("installingGrace()"), "alive() 的探活失败没查安装心跳");
   assert.ok(gw.includes("installingBeat(File files)") && gw.includes("installingPhase(String phase)")
-    && gw.includes("installingFresh(long now, long at)"), "心跳判定缺了纯逻辑件");
+    && gw.includes("installingFresh(long now, long at)") && gw.includes("beatBetter(long now, long bestAt, long t, String phase)"),
+    "心跳判定缺了纯逻辑件");
   // 放宽要清零连续失联起点：宽限期一过从零重新累计，不能把安装期间的旧账一次清算
   assert.ok(wait.includes("if (installingGrace()) { unprovenSince = 0; continue; }")
     && alive.includes("if (installingGrace()) { aliveUnprovenSince = 0; return true; }"),
     "安装放宽后没清零连续失联起点");
+});
+
+test("复核 67ea9ba：启动恢复心跳、接管路径、多份心跳取最新", () => {
+  // P1-3：启动恢复也写 recover 心跳，看门狗放行这个阶段
+  assert.ok(gw.includes('"recover".equals(phase)'), "看门狗没放行 recover 阶段的恢复心跳");
+  // P1-4：没有自己拉起进程时的 alive() 与 squatted() 都先查安装心跳，别杀服务重建前的残留网关
+  const alive = gw.slice(gw.indexOf("private boolean alive()"), gw.indexOf("private static boolean alivePid"));
+  assert.ok(alive.includes("if (installingGrace()) return true;"), "alive() 无进程分支没查安装心跳");
+  assert.ok(gw.includes("SQUAT_WAIT"), "squatted() 没有「正在安装，先不打扰」的结论");
+  const squatted = gw.slice(gw.indexOf("private int squatted()"), gw.indexOf("private String last"));
+  assert.ok(squatted.includes("installingGrace()"), "squatted() 发信号前没查安装心跳");
+  assert.ok(gw.includes("sq == SQUAT_ADOPTED || sq == SQUAT_WAIT"), "守护循环没处理 SQUAT_WAIT");
+  // P2-11：心跳文件先 isFile 再读，FIFO 不能把 supervise 线程卡死
+  assert.ok(gw.includes("!f.getName().endsWith(\".installing\") || !f.isFile()"), "installingBeat 没挡非普通文件");
 });

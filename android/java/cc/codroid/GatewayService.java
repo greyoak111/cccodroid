@@ -67,11 +67,12 @@ public class GatewayService extends Service {
     static final long PROOF_GRACE_MS = 20000;
     /** 过了宽限还连续这么久证明不了自己：结束重起（BUG-A01） */
     static final long UNPROVEN_KILL_MS = 15000;
-    /** 组件安装（switch/move）期间探活失败不算数的时长：网关在同步搬几千个文件，/__proof 答不上来是正常的。
-     *  网关落 components/.runs/<id>.installing 心跳，超过这时长没更新才按真卡死处理（组件安装报告 §1） */
+    /** 组件安装（switch/move/recover）期间探活失败不算数：网关在同步搬几千个文件，/__proof 答不上来是正常的。
+     *  网关落 components/.runs/<id>.installing 心跳；心跳持续新鲜就继续放行（安装可能要好几分钟，复核 P1-5），
+     *  停更超过这时长才按真卡死处理（组件安装报告 §1） */
     static final long INSTALL_GRACE_MS = 120000;
-    /** squatted() 的三种结论：端口空出来 / 端口上已经是能证明自己的网关 / 被别的应用占着 */
-    static final int SQUAT_NO = 0, SQUAT_ADOPTED = 1, SQUAT_HIJACKED = 2;
+    /** squatted() 的四种结论：端口空出来 / 端口上已经是能证明自己的网关 / 被别的应用占着 / 残留网关在安装，先不打扰 */
+    static final int SQUAT_NO = 0, SQUAT_ADOPTED = 1, SQUAT_HIJACKED = 2, SQUAT_WAIT = 3;
 
     /** 服务这会儿在不在（常驻通知里点了停止之后为 false） */
     static boolean serviceUp() { return self != null; }
@@ -270,7 +271,7 @@ public class GatewayService extends Service {
             // 2 秒看一次，缩短它挂掉到发现端口换了人之间的空档（审查 10-30 第九份 中5）
             if (alive()) { update(Tr.t("运行中 · 127.0.0.1:") + Env.PORT); sleep(2000); continue; }
             int sq = squatted();
-            if (sq == SQUAT_ADOPTED) { sleep(500); continue; }   // 这期间已经有真网关了：回循环顶部让 alive() 接管，别再拉一个撞端口
+            if (sq == SQUAT_ADOPTED || sq == SQUAT_WAIT) { sleep(500); continue; }   // 真网关起来了 / 残留网关在安装：回循环顶部让 alive() 再判断，别抢端口、别杀它
             if (sq == SQUAT_HIJACKED) {
                 update(Tr.f("端口 {0} 被别的应用占着，网关起不来。重启手机，或卸载最近装的可疑应用", Env.PORT));
                 Env.resetBoot();
@@ -478,36 +479,41 @@ public class GatewayService extends Service {
         return unprovenSince > 0 && now - spawnedAt >= PROOF_GRACE_MS && now - unprovenSince >= UNPROVEN_KILL_MS;
     }
 
-    /** 心跳阶段里值得放行探活失败的：switch（备份旧版 + 记录切换）与 move（搬文件）都可能长时间占着事件循环（组件安装报告 §1） */
-    static boolean installingPhase(String phase) { return "switch".equals(phase) || "move".equals(phase); }
+    /** 心跳阶段里值得放行探活失败的：switch（备份旧版 + 记录切换）、move（搬文件）、recover（启动恢复回滚）
+     *  都可能长时间占着事件循环（组件安装报告 §1；复核 P1-3） */
+    static boolean installingPhase(String phase) { return "switch".equals(phase) || "move".equals(phase) || "recover".equals(phase); }
     /** 心跳还新鲜吗：at 要是个过去的时间，且距今不超过 INSTALL_GRACE_MS（at<=0 或未来时间都算不新鲜） */
     static boolean installingFresh(long now, long at) { return at > 0 && at <= now && now - at < INSTALL_GRACE_MS; }
+    /** 多份心跳取最新时只认「没到未来时间、阶段值得放行」的：系统时间被回拨留下的未来时间戳、
+     *  或 downloading 之类阶段的心跳，不能盖住真正新鲜的 move 心跳（复核 P2-9） */
+    static long beatBetter(long now, long bestAt, long t, String phase) {
+        return t > bestAt && t <= now && installingPhase(phase) ? t : bestAt;
+    }
 
     /** 读网关落的安装心跳（components/.runs/*.installing，JSON {id, phase, moved, at}），取 at 最新的一份。
-     *  返回 { 时间戳, 是否安装阶段 }；没有 / 读不了 / 超 4 KB 都当没有 */
+     *  返回 { 时间戳, 是否安装阶段 }；没有 / 读不了 / 不是普通文件 / 超 4 KB 都当没有 */
     static long[] installingBeat(File files) {
         File[] list = new File(files, "components/.runs").listFiles();
-        long at = 0; String phase = "";
+        long at = 0, now = System.currentTimeMillis();
         if (list != null) for (File f : list) {
-            if (!f.getName().endsWith(".installing")) continue;
+            if (!f.getName().endsWith(".installing") || !f.isFile()) continue;   // FIFO / 目录别去读，会把 supervise 线程卡死（复核 P2-11）
             try {
-                java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
-                java.io.InputStream in = new java.io.FileInputStream(f);
-                byte[] buf = new byte[1024]; int c, total = 0;
-                while ((c = in.read(buf)) > 0) { total += c; if (total > 4096) break; b.write(buf, 0, c); }
-                in.close();
+                byte[] buf = new byte[4097]; int total = 0, c;
+                try (java.io.InputStream in = new java.io.FileInputStream(f)) {
+                    while (total < buf.length && (c = in.read(buf, total, buf.length - total)) > 0) total += c;
+                }
                 if (total > 4096) continue;
-                org.json.JSONObject j = new org.json.JSONObject(b.toString("UTF-8"));
-                long t = j.optLong("at", 0);
-                if (t > at) { at = t; phase = j.optString("phase", ""); }
+                org.json.JSONObject j = new org.json.JSONObject(new String(buf, 0, total, "UTF-8"));
+                at = beatBetter(now, at, j.optLong("at", 0), j.optString("phase", ""));
             } catch (Exception ignored) {}
         }
         if (at == 0) return null;
-        return new long[]{ at, installingPhase(phase) ? 1 : 0 };
+        return new long[]{ at, 1 };
     }
 
     /** 网关正在合法地长时间忙组件安装：探活失败暂时不算数（组件安装报告 §1）。
-     *  心跳超过 INSTALL_GRACE_MS 没更新才按真卡死处理，看门狗仍会结束它 */
+     *  心跳持续新鲜就继续放行（安装搬几千个文件可能要好几分钟，复核 P1-5）；
+     *  心跳停更超过 INSTALL_GRACE_MS 才按真卡死处理，看门狗仍会结束它 */
     private boolean installingGrace() {
         Env e = env;
         long[] beat = e == null ? null : installingBeat(e.files);
@@ -569,6 +575,7 @@ public class GatewayService extends Service {
         }
         // 没有自己拉起的进程：端口上那个必须证明得了自己。接管不了 —— 启动随机数只在原进程内存里（Env.key），
         // 认不出来的只能请它退出重起，不能把令牌交给一个证明不了身份的进程（0.6.9 审计 13-02）
+        if (installingGrace()) return true;   // 但它正在安装（服务重建前留下的残留网关）：先别判死，让它装完再证明自己（复核 P1-4）
         return Env.proveGateway();
     }
 
@@ -594,6 +601,8 @@ public class GatewayService extends Service {
      *  只探 127.0.0.2 的话，127.0.0.1 被占时这里看不出来，网关会起不来又反复重启 */
     private int squatted() {
         if (!Env.portBusy()) return SQUAT_NO;
+        // 服务重建后留下的残留网关正在安装：先别发信号杀它，回循环顶部让 alive() 按安装心跳继续等（复核 P1-4）
+        if (installingGrace()) { Log.w(TAG, "端口上的残留网关正在安装组件，先不打扰，等它收尾"); return SQUAT_WAIT; }
         int me = android.os.Process.myUid(), killed = 0;
         File[] ps = new File("/proc").listFiles();
         java.util.List<Integer> gw = new java.util.ArrayList<>();
