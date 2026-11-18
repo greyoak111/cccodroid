@@ -292,7 +292,9 @@ td{color:var(--fg2)}
 /* 用户亲手收起的组：图片预览、展开着的卡都不再撑开它；只有待确认的权限卡还能把它摊开 */
 .tgroup.shut:not(.single):not(:has(.perm:not(.done))) .tg-body{display:none}
 .tgroup.shut:not(:has(.perm:not(.done))) .tg-head .chev{transform:none}
-.tg-body>.think{margin:6px 0}
+.tg-body>.think,.tg-entry>.think{margin:6px 0}
+.tg-page[hidden]{display:none}
+.tg-page{display:block;width:100%;text-align:start}
 .tgroup:not(.single) .tg-body{margin-inline-start:12px;padding-inline-start:8px;border-inline-start:1px solid var(--tool-line)}
 .tool-head{display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:12.5px;cursor:pointer;user-select:none}
 .tool-name{color:var(--tool);font-weight:600;font-family:var(--mono);font-size:12px}

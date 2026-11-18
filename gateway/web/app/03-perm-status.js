@@ -154,7 +154,8 @@
           <button class="pa-stop">${p.tool === "UserConfig" ? t("撤销并停止") : t("拒绝并停止")}</button>
         </div>
       </div>`;
-    const tc = p.toolUseId && TOOL_CARDS.get(p.toolUseId);
+    let tc = p.toolUseId && TOOL_CARDS.get(p.toolUseId);
+    if (tc?.reveal) tc = tc.reveal();
     if (tc && tc.el && tc.el.isConnected) tc.el.after(el);
     else {
       const rv = runViews.get(runId);
@@ -843,7 +844,7 @@
           if (prev) { blocks.splice(blocks.indexOf(prev), 1); g.addThink(prev); }
           push(g);
         }
-        g.add(ToolBlock(g.body, id, name, input, live));
+        g.tool(id, name, input, live);
         keepTail();
         scrollDown();
       },
@@ -888,7 +889,7 @@
       },
       get empty() { return !any; },
       get ended() { return ended; },
-      remove() { phClear(); msgEl.remove(); },   // 阶段提示的每秒定时器一起停（审查 中14）
+      remove() { phClear(); dropCards(msgEl); for (const b of blocks) b.dispose?.(); blocks.length = 0; last = null; msgEl.remove(); },   // 分页停放的步骤也必须释放
     };
   }
 
