@@ -16,6 +16,33 @@ const take = (src, start, end) => {
   return src.slice(a, b);
 };
 
+// PR #232 的活动表逻辑落在 Worker 模型（17-office.js 打开时先要 active 再 vwSheetShow），
+// 直接测模型：create() 按名字把 activeTab 映射到过滤后的可见表，越界/隐藏/缺失都回落到第一张。
+const modelSrc = fs.readFileSync(new URL("../web/office/sheet-model.js", import.meta.url), "utf8");
+const mctx = {};
+vm.runInNewContext(modelSrc, mctx);
+const model = mctx.SheetPreview;
+assert.ok(model && typeof model.create === "function", "sheet-model.js 的 SheetPreview.create 取不到");
+
+test("表格打开保存的活动表：activeTab 映射到可见表序号", () => {
+  const mk = (activeTab) => model.create({
+    SheetNames: ["隐藏", "封面", "本期"],
+    Workbook: { Sheets: [{ Hidden: 1 }, {}, {}], WBView: [{ activeTab }] },
+  }, {});
+  assert.equal(mk(2).active, 1, "保存的活动表「本期」在过滤掉隐藏表后是第 2 张可见表（前端拿它当 VW.sheets 下标）");
+  assert.equal(mk(0).active, 0, "活动表是隐藏表：回落到第一张可见表");
+  assert.equal(mk(9).active, 0, "activeTab 越界：回落到第一张可见表");
+});
+
+test("工作簿没保存活动表（无 WBView）：打开第一张", () => {
+  const m = model.create({
+    SheetNames: ["甲", "乙"],
+    Workbook: { Sheets: [{}, {}] },
+  }, {});
+  assert.equal(m.active, 0);
+  assert.deepEqual(m.names, ["甲", "乙"]);
+});
+
 function load() {
   const code = `
 const VW = { path: "/w/f.docx", size: 0 };

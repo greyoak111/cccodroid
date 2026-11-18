@@ -24,7 +24,7 @@ function respond(data) {
       if (SheetPreview.zipExpandsTooMuch(data.buffer)) { const e = new Error("sheet budget"); e.code = "tooBig"; throw e; }
       const wb = XLSX.read(data.buffer, { type: "array", cellStyles: true, cellNF: true });
       model = SheetPreview.create(wb, XLSX);
-      value = { names: model.names };
+      value = { names: model.names, active: model.active };
     } else if (!model) throw new Error("sheet not ready");
     else if (op === "page") value = model.page(data.sheet, data.from);
     else if (op === "cell") value = model.cell(data.sheet, data.addr);

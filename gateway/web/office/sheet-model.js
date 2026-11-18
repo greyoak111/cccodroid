@@ -40,7 +40,10 @@
     const meta = (wb.Workbook && wb.Workbook.Sheets) || [], visible = wb.SheetNames.filter((n, i) => !(meta[i] && meta[i].Hidden));
     const names = visible.length ? visible : wb.SheetNames;
     if (names.length > 1000 || names.reduce((n, s) => n + s.length, 0) > 65536) throw tooBig();
-    let active = null;
+    // 工作簿保存的活动表（PR #232）：按名字映射到过滤后的可见表，活动表隐藏/缺失/越界时回落到第一张可见表
+    const act = wb.SheetNames[(wb.Workbook && wb.Workbook.WBView && wb.Workbook.WBView[0] && wb.Workbook.WBView[0].activeTab) ?? 0];
+    const activeIdx = Math.max(0, names.indexOf(act));   // activeTab 越界/指向隐藏表时 indexOf 得 -1，回落到第一张可见表
+    let active = null;   // 上面是保存的活动表，这个 active 是当前工作表的解析缓存
     const valid = (n, max) => Number.isInteger(n) && n >= 0 && n <= max;
     function sheet(i) {
       if (!Number.isInteger(i) || i < 0 || i >= names.length) throw new Error("sheet index");
@@ -122,7 +125,7 @@
       if (text.length + formula.length > PAGE_HTML) throw tooBig();
       return { addr, text, formula };
     }
-    return { names, page, cell };
+    return { names, active: activeIdx, page, cell };
   }
   scope.SheetPreview = { create, zipExpandsTooMuch, sheetText };
 })(globalThis);

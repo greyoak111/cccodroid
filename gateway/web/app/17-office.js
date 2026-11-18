@@ -198,7 +198,9 @@
           else if (e.name !== "AbortError" && gen === s.cellGen && page === s.pageGen) vwSheetFail(s, e);
         }
       });
-      await vwSheetShow(0);
+      // 打开工作簿保存的活动表；Worker 给的活动索引不在范围内（隐藏/缺失已回落）就还是第一张（PR #232）
+      const first = Number.isInteger(r.active) && r.active >= 0 && r.active < VW.sheets.length ? r.active : 0;
+      await vwSheetShow(first);
     } catch (e) {
       if (s && (!still() || VW.sheet !== s)) closeViewerSheet(s);
       else if (still()) { closeViewerSheet(s); vwFail(t("这个表格读不出来：{msg}", { msg: e.message || String(e) }), true); }
