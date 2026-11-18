@@ -17,7 +17,7 @@ const { compWriteRecord, compRecover, compClearStage } = m._compForTest;
 
 const ids = new Set([ID + "-bak", ID + "-tree", ID + "-done", ID + "-half", ID + "-ok", ID + "-other",
   ID + "-committed", ID + "-commshared", ID + "-halfbak", ID + "-idem", ID + "-noprev", ID + "-badarr", ID + "-after", ID + "-oldbase",
-  ID + "-rbfail", ID + "-legacy", ID + "-prebak", ID + "-clear"]);
+  ID + "-rbfail", ID + "-legacy", ID + "-prebak", ID + "-window", ID + "-clear"]);
 const w = (rel, content) => { const f = path.join(PREFIX, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, content); return f; };
 after(() => {
   for (const id of ids) {
@@ -58,7 +58,8 @@ test("有 .old 备份：回滚——旧文件放回、新搬进去的删掉、�
 test("没有 .old 但有暂存树：删已搬入的、删记录，压缩包留着重装", async () => {
   const id = ID + "-tree";
   w("bin/rec-new", "new-half");
-  const rec = { id, source: "official", version: "2.0.0", state: "installing", at: 2, bin: [], files: ["bin/rec-new"], shared: [] };
+  // files 里带一个没搬到的：不全在 → 走「撤已搬入」；全在会按窄窗口补 ok（见 -window 用例）
+  const rec = { id, source: "official", version: "2.0.0", state: "installing", at: 2, bin: [], files: ["bin/rec-new", "share/rec/missing"], shared: [] };
   assert.ok(compWriteRecord(id, rec));
   fs.mkdirSync(path.join(stage, id, "usr", "bin"), { recursive: true });
   fs.writeFileSync(path.join(stage, id, "usr", "bin", "rec-new"), "full");
@@ -243,17 +244,32 @@ test("旧记录无 committed：文件都在但 shared 缺，不补 ok、不删�
 
 test("升级在备份前被杀（无备份有暂存树）：旧版路径不删，只撤本次新搬的", async () => {
   const id = ID + "-prebak";
-  w("bin/a", "v1-a"); w("bin/new", "new");
+  // 备份还没开始：旧版 bin/a 在，新版 bin/prebak-new 还没搬进来（不在 $PREFIX）
+  w("bin/a", "v1-a");
   const prev = { id, source: "official", version: "1.0.0", state: "ok", at: 1, bin: [], files: ["bin/a"], shared: [] };
   fs.writeFileSync(path.join(COMP_DIR, id + ".json.prev"), JSON.stringify(prev));
-  const rec = { id, source: "official", version: "2.0.0", state: "installing", at: 2, bin: [], files: ["bin/a", "bin/new"], shared: [] };
+  const rec = { id, source: "official", version: "2.0.0", state: "installing", at: 2, bin: [], files: ["bin/a", "bin/prebak-new"], shared: [] };
   assert.ok(compWriteRecord(id, rec));
   fs.mkdirSync(path.join(stage, id, "usr", "bin"), { recursive: true });
   await compRecover();
   assert.equal(fs.readFileSync(path.join(PREFIX, "bin/a"), "utf8"), "v1-a", "旧版路径不删");
-  assert.equal(fs.existsSync(path.join(PREFIX, "bin/new")), false, "新搬的撤掉");
+  assert.equal(fs.existsSync(path.join(PREFIX, "bin/prebak-new")), false, "没搬进来的新文件保持没有");
   const got = JSON.parse(fs.readFileSync(path.join(COMP_DIR, id + ".json"), "utf8"));
   assert.equal(got.version, "1.0.0", "记录退回旧版");
+});
+
+test("窄窗口：有暂存树、无备份、files 全在（死在提交点落盘前）：补 ok 不删文件", async () => {
+  const id = ID + "-window";
+  w("bin/rec-new", "new");
+  const rec = { id, source: "official", version: "2.0.0", state: "installing", at: 2, bin: [], files: ["bin/rec-new"], shared: [] };
+  assert.ok(compWriteRecord(id, rec));
+  fs.mkdirSync(path.join(stage, id, "usr", "bin"), { recursive: true });
+  fs.writeFileSync(path.join(stage, id + "-ab12cd34ef56.tar.gz"), "gz");
+  await compRecover();
+  assert.ok(fs.existsSync(path.join(PREFIX, "bin/rec-new")), "装好的文件不删");
+  const got = JSON.parse(fs.readFileSync(path.join(COMP_DIR, id + ".json"), "utf8"));
+  assert.equal(got.state, "ok", "补成 ok");
+  assert.equal(fs.existsSync(path.join(stage, id)), false, "暂存树收掉");
 });
 
 test("compClearStage 只清本组件的暂存、备份和压缩包，别的组件不碰", () => {

@@ -892,7 +892,16 @@ export async function compRecover() {
           }
           writePrevOrDrop(id, prev);
         } else {
-          // 只剩「无备份、有暂存树」：备份都还没有（升级在备份前被杀）或搬移中：prev.files 里的旧版文件不动，
+          // 无备份、有暂存树。files 全在 = 搬移已完成、死在提交点落盘之前（committed 写入前那个窄窗口）：
+          // 和 committed 一个待遇补 ok，别把装好的删掉（复核 P0-1 的窄窗口版）
+          if (files.size && !missing.length && !goneShared.length) {
+            rec.state = "ok"; rec.at = Date.now();
+            if (compWriteRecord(id, rec)) log(`[comp] ${id}：上次安装实际已完成，记录补成 ok`);
+            else log(`[comp] ${id}：上次安装的文件都在，但补写 ok 记录失败`);
+            compClearStage(id);
+            return;
+          }
+          // 备份都还没有（升级在备份前被杀）或搬移中：prev.files 里的旧版文件不动，
           // 只撤本次搬进去的；压缩包留着重装不用重下
           const del = [...files].filter((r) => !prevFiles.has(r));
           for (let i = 0; i < del.length; i++) {
