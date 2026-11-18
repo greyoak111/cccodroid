@@ -332,7 +332,8 @@ async function handleGit(req, res, p, u) {
     let r;
     if (commit) {
       if (!/^[0-9a-f]{4,64}$/i.test(commit)) return sendJson(res, 400, { error: "bad commit" });
-      r = await git(root, ["show", "--format=", "--patch", "-M", commit, ...(file ? ["--", file] : [])]);
+      // 与提交详情一样按第一父比较；单文件也要让 Git 在限制路径之前找出改名来源。
+      r = await git(root, ["show", "--format=", "--patch", "--diff-merges=first-parent", "-M", ...(file ? ["--follow"] : []), commit, ...(file ? ["--", file] : [])]);
     } else {
       const st = file ? await git(root, ["status", "--porcelain=v1", "-z", "--", file]) : null;
       if (st && st.out.startsWith("??")) r = await git(root, ["diff", "--no-index", "--", "/dev/null", file]);
@@ -342,7 +343,14 @@ async function handleGit(req, res, p, u) {
         // 对比里是旧的、提交时 add -A 进去的却是新的（#146-2）。sha256 仓库的空树是另一个哈希
         let base = "HEAD";
         if (head.code) { const fmt = await git(root, ["rev-parse", "--show-object-format"]); base = fmt.out.trim() === "sha256" ? EMPTY_TREE_256 : EMPTY_TREE; }
-        r = await git(root, ["diff", base, "-M", ...(file ? ["--", file] : [])]);
+        const paths = file ? [file] : [];
+        // 限定到新路径的 status 把暂存的改名报成 A。带上旧路径才能和整份对比得到同一组红绿行。
+        if (st && /^[AR]/.test(st.out)) {
+          const renames = await gitRenames(root);
+          if (!renames) return sendJson(res, 500, { error: tz("读取失败") });
+          if (renames.has(file)) paths.unshift(renames.get(file));
+        }
+        r = await git(root, ["diff", base, "-M", ...(file ? ["--", ...paths] : [])]);
       }
       if (r.code === 1 && r.out) r.code = 0;            // --no-index 有差异时退出码是 1
     }

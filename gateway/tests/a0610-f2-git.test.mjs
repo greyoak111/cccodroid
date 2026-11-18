@@ -24,6 +24,8 @@ async function serve(...routes) {
 const base = await serve(routeGit);
 const W = CFG.workspace;
 fs.mkdirSync(W, { recursive: true });
+const gitBin = path.join(process.env.CCAPP_PREFIX, "bin", "git");
+if (!fs.existsSync(gitBin)) fs.symlinkSync(execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim(), gitBin);
 const GIT_ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", LC_ALL: "C.UTF-8" };
 const git = (cwd, ...args) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env: GIT_ENV, encoding: "utf8" });
 const get = async (p) => { const r = await fetch(base + p); return { status: r.status, body: await r.json() }; };
@@ -84,6 +86,33 @@ test("196-7 合并提交的历史详情能看到文件（按第一父比较）",
   assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
   assert.ok(r.body.files.length >= 1, "合并提交的文件列表是空的");
   assert.ok(r.body.files.some((f) => f.path === "b.txt"));
+  for (const suffix of ["", "&file=b.txt"]) {
+    const patch = await get("/api/git/diff?dir=" + enc(dir) + "&commit=" + hash + suffix);
+    assert.equal(patch.status, 200);
+    assert.match(patch.body.diff, /^\+b$/m);
+    assert.doesNotMatch(patch.body.diff, /^\+c$/m);
+  }
+});
+
+test("改名文件与整份对比一致，暂存和提交后都能找回旧路径", async () => {
+  const dir = fs.mkdtempSync(path.join(W, "rename-diff-"));
+  git(dir, "init", "-q");
+  fs.writeFileSync(path.join(dir, "old.txt"), "one\ntwo\nthree\nfour\n");
+  git(dir, "add", "old.txt"); git(dir, "commit", "-qm", "base");
+  git(dir, "mv", "old.txt", "new name.txt");
+  const url = "/api/git/diff?dir=" + enc(dir) + "&file=" + enc("new name.txt");
+  const check = async (suffix, edited) => {
+    const r = await get(url + suffix);
+    assert.equal(r.status, 200);
+    assert.match(r.body.diff, /^rename from old\.txt$/m);
+    assert.doesNotMatch(r.body.diff, /^\+one$/m);
+    assert.equal(r.body.diff.includes("+five\n"), edited);
+  };
+  await check("", false);
+  fs.appendFileSync(path.join(dir, "new name.txt"), "five\n");
+  await check("", true);
+  git(dir, "add", "new name.txt"); git(dir, "commit", "-qm", "rename and edit");
+  await check("&commit=" + git(dir, "rev-parse", "HEAD").trim(), true);
 });
 
 test("196-2 未跟踪文件超过 1000 个时 status 仍能打开并标 truncated", async () => {
