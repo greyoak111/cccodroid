@@ -312,10 +312,11 @@
     const frozen = document.createElement("div"), tail = document.createElement("div");
     el.append(frozen, tail);
     parent.appendChild(el);
-    let text = "", fz = 0, timer = 0, shown = 0, ending = false, hlAt = 0;
+    let text = "", fz = 0, timer = 0, shown = 0, ending = false, hlAt = 0, disposed = false;
     el._src = () => text;   // 书签：没有 uuid 时按正文开头去文件里认领
 
     function paint(final) {
+      if (disposed) return;
       if (timer) { clearTimeout(timer); timer = 0; }
       if (final) shown = text.length;
       const vis = text.slice(0, shown);
@@ -361,20 +362,23 @@
       paint(false);
       if (shown < text.length || ending) timer = setTimeout(tick, STREAM_TICK);
     }
-    const kick = () => { if (busReplay) REPLAY_FLUSH.add(flushNow); if (!timer) timer = setTimeout(tick, STREAM_TICK); };
+    const kick = () => { if (disposed) return; if (busReplay) REPLAY_FLUSH.add(flushNow); if (!timer) timer = setTimeout(tick, STREAM_TICK); };
     function flushNow() { if (timer && el.isConnected) { shown = text.length; paint(ending); } }
-    return {
+    // 释放链（dropCards）：流到一半切会话/换页，tick 不能继续在新会话里滚屏
+    function dispose() { if (disposed) return; disposed = true; if (timer) { clearTimeout(timer); timer = 0; } text = ""; shown = 0; CHAT_BLOCKS.delete(el); }
+    return trackChatBlock({
       kind: "text",
-      append(t) { text += t; if (busReplay) shown = text.length; kick(); },
+      append(t) { if (disposed) return; text += t; if (busReplay) shown = text.length; kick(); },
       // 整段正文（没有逐字增量的厂商）重放时同样直接整段显示，不再从头吐一遍（审查 #48 06-06 / F8）
-      set(t) { text = t; if (live) { shown = busReplay ? text.length : Math.min(shown, text.length); kick(); } else paint(true); },
-      finish() { if (!live) return; if (shown >= text.length) paint(true); else { ending = true; kick(); } },
+      set(t) { if (disposed) return; text = t; if (live) { shown = busReplay ? text.length : Math.min(shown, text.length); kick(); } else paint(true); },
+      finish() { if (disposed || !live) return; if (shown >= text.length) paint(true); else { ending = true; kick(); } },
       /** 从末尾删掉 n 个字（流断了、那半截不算数）；冻结的段落可能也在里面，整块重画 */
-      drop(n) { text = text.slice(0, Math.max(0, text.length - n)); shown = Math.min(shown, text.length); frozen.innerHTML = ""; fz = 0; paint(!live); return text.length; },
-      remove() { if (timer) { clearTimeout(timer); timer = 0; } el.remove(); },
+      drop(n) { if (disposed) return 0; text = text.slice(0, Math.max(0, text.length - n)); shown = Math.min(shown, text.length); frozen.innerHTML = ""; fz = 0; paint(!live); return text.length; },
+      remove() { dispose(); el.remove(); },
+      dispose,
       get text() { return text; },
       el,
-    };
+    });
   }
 
   function ThinkBlock(parent) {
@@ -855,7 +859,9 @@
     function reveal(e) {
       if (disposed) return null;
       follow = false; start = Math.max(0, e.at - TOOL_GROUP_PAGE + 1);
-      el.classList.add("open"); el.classList.remove("shut"); draw();
+      el.classList.add("open"); el.classList.remove("shut");
+      if (key) foldSet(key, true);   // 视觉已展开，偏好跟着记，重建后别又折回去
+      draw();
       return e.block;
     }
     older.addEventListener("click", () => { follow = false; start = Math.max(0, start - TOOL_GROUP_PAGE); draw(); });

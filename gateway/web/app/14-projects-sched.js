@@ -369,6 +369,7 @@
     let d = SC.detail && SC.detail.task.id === id ? SC.detail : null;
     if (!d) {
       if (box._taskId !== id) { box.innerHTML = pageHead("", "", true) + `<div class="muted">${esc(t("加载中…"))}</div>`; box._taskId = null; box._taskHtml = null; }
+      else box._taskHtml = null;   // 同一任务刷新窗口内 SC.detail 被清空：旧 DOM 的操作会静默失效，拉回来必须整块重画
       // 先放局部，确认还在看这个任务再写全局：不然 A 的详情迟到把 SC.detail 改成 A，在 B 页点「立刻跑一次」跑的是 A（私下反馈 10-29）
       let d0;
       try { d0 = await api("/api/sched/" + encodeURIComponent(id)); }

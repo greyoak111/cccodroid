@@ -155,10 +155,14 @@
       ...[...count.keys()].filter((g) => !known.has(g)).sort().map((g) => [g, safeDecode(g.replace(/^[a-z]+:/, ""))])];
     if (extPick[sec] && !count.get(extPick[sec])) extPick[sec] = "";
     const cur = extPick[sec] || "";
-    bar.classList.toggle("hidden", chips.length < 2 && !cur);      // 只有一类时没什么可切的
-    bar.innerHTML = [["", t("全部"), items.length], ...chips.map(([g, l]) => [g, l, count.get(g)])]
+    const inner = [["", t("全部"), items.length], ...chips.map(([g, l]) => [g, l, count.get(g)])]
       .map(([g, l, n]) => `<button class="idx-chip${g === cur ? " on" : ""}" data-sec="${sec}" data-idx="${esc(g)}">${esc(l)}${g ? `<span>${n}</span>` : ""}</button>`).join("");
-    for (const it of items) it.classList.toggle("hidden", !!cur && !it.dataset.tags.split(" ").includes(cur));
+    // 轮询期间标签/计数/选中通常没变：签名相同就别重建（横向滚动条的位置和焦点会被 innerHTML 清掉）
+    if (bar._html !== inner) {
+      bar._html = inner; bar.innerHTML = inner;
+      bar.classList.toggle("hidden", chips.length < 2 && !cur);    // 只有一类时没什么可切的
+      for (const it of items) it.classList.toggle("hidden", !!cur && !it.dataset.tags.split(" ").includes(cur));
+    }
   }
   $("tab-ext").addEventListener("click", (e) => {
     const c = e.target.closest(".idx-chip"); if (!c) return;
@@ -312,9 +316,18 @@
     const changed = box._html !== next;
     if (changed) {
       const opened = new Set([...box.querySelectorAll(".ccard.open")].map((c) => c.dataset.comp));
+      // live 区（GitHub 登录状态、模型下载面板）是缓存外原地更新的：整块重画会把它们打回初始值，
+      // 记下来写回，别让用户在 #llm-url 里的输入和展开态被一秒一次的轮询吞掉
+      const gh = $("gh-auth"), dl = $("llm-dl"), url = $("llm-url");
+      const ghHtml = gh ? gh.innerHTML : null, dlHtml = dl ? dl.innerHTML : null, dlOpen = dl ? dl.open : false, urlVal = url ? url.value : null;
+      const active = document.activeElement, activeId = active && active.id && box.contains(active) ? active.id : null;
       box.innerHTML = next; box._html = next;
       // 进度更新可以换卡片，用户刚展开的说明不能每秒被收回去。
       for (const c of box.querySelectorAll(".ccard")) if (opened.has(c.dataset.comp)) c.classList.add("open");
+      if (ghHtml != null && $("gh-auth")) $("gh-auth").innerHTML = ghHtml;
+      if (dlHtml != null && $("llm-dl")) { $("llm-dl").innerHTML = dlHtml; $("llm-dl").open = dlOpen; }
+      if (urlVal != null && $("llm-url")) $("llm-url").value = urlVal;
+      if (activeId && box.querySelector("#" + activeId)) box.querySelector("#" + activeId).focus();
     }
     $("comp-count").textContent = (r.items || []).length || "";
     ext.nComp = (r.items || []).length; extSub();
