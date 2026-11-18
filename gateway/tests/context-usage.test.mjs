@@ -61,8 +61,69 @@ test("占位、合成消息和零用量错误不清掉已有的真实占用", ()
   assert.deepEqual(r.contexts, [101521]);
 });
 
-test("工具清理或压缩后上下文可以变小，不能取历史最大值", () => {
-  assert.deepEqual(replay([start(usage), start({ input_tokens: 12000 })]).contexts, [101521, 12000]);
+test("非零但偏小的开头用量先留在本请求，不覆盖上次的真实占用", () => {
+  const pending = { input_tokens: 22119, output_tokens: 0 };
+  const r = replay([start(usage), start(pending)]);
+  assert.deepEqual(r.contexts, [101521]);
+  assert.equal(r.flags.contextTokens, 101521);
+  assert.equal(r.flags.mainCtx, 101521);
+  assert.deepEqual(r.flags.promptUsage, pending, "后续 delta 仍须合并这一请求自己的字段");
+});
+
+test("连续工具请求开头报小值、末尾补全：上下文条不再来回摆动", () => {
+  const pending = { input_tokens: 22119, output_tokens: 0 };
+  const r = replay([
+    start(pending), delta({ input_tokens: 41148, output_tokens: 128 }),
+    start(pending), delta({ input_tokens: 44002, output_tokens: 1527 }),
+    start(pending), assistant({ input_tokens: 46158, output_tokens: 324 }),
+  ]);
+  assert.deepEqual(r.contexts, [22119, 41148, 44002, 46158]);
+});
+
+test("工具清理后上下文可以变小：末尾仅输出字段也能确认开头的较小值", () => {
+  const r = replay([start(usage), start({ input_tokens: 12000, output_tokens: 0 }), delta({ output_tokens: 50 })]);
+  assert.deepEqual(r.contexts, [101521, 12000]);
+  assert.equal(r.flags.mainCtx, 12000);
+  assert.equal(r.flags.promptUsage.cache_read_input_tokens, undefined, "不借用上一请求的缓存字段");
+});
+
+test("末尾完整用量与 assistant 都能确认下降，不要求输出 token 大于零", () => {
+  const smaller = { input_tokens: 12000, output_tokens: 0 };
+  for (const final of [delta(smaller), assistant(smaller)]) {
+    assert.deepEqual(replay([start(usage), start({ input_tokens: 100 }), final]).contexts, [101521, 12000]);
+  }
+});
+
+test("开头较小值缺省 output_tokens 时也先等确认，带输出的真实用量不拦", () => {
+  assert.deepEqual(replay([start(usage), start({ input_tokens: 12000 })]).contexts, [101521]);
+  assert.deepEqual(replay([start(usage), start({ input_tokens: 12000, output_tokens: 1 })]).contexts, [101521, 12000]);
+});
+
+test("压缩完成立即下降，下一请求的新刻度仍可增长", () => {
+  for (const compact of [{ compact_metadata: { pre_tokens: 101521, post_tokens: 12000 } },
+    { compactMetadata: { preTokens: 101521, postTokens: 12000 } }]) {
+    const r = replay([start(usage), { type: "system", subtype: "compact_boundary", ...compact }, start({ input_tokens: 12500, output_tokens: 0 })]);
+    assert.equal(r.out.find((e) => e.type === "compacted").post, 12000);
+    assert.deepEqual(r.contexts, [101521, 12500]);
+  }
+});
+
+test("压缩缺少 post 时，下一请求较小的真实占用在末尾仍能落定", () => {
+  const r = replay([start(usage), { type: "system", subtype: "compact_boundary", compact_metadata: {} },
+    start({ input_tokens: 12000, output_tokens: 0 }), delta({ output_tokens: 1 })]);
+  assert.deepEqual(r.contexts, [101521, 12000]);
+});
+
+test("暂缓较小值也保留缓存期限，同值最终用量不重复推送", () => {
+  const pending = { input_tokens: 100, cache_creation_input_tokens: 1000, output_tokens: 0,
+    cache_creation: { ephemeral_1h_input_tokens: 1000 } };
+  const held = replay([start(usage), start(pending)]);
+  assert.equal(held.flags.cache1h, true);
+  assert.deepEqual(held.contexts, [101521]);
+  const r = replay([start(usage), start(pending), delta({ input_tokens: 100521, output_tokens: 50 }),
+    assistant({ input_tokens: 100521, cache_creation_input_tokens: 1000, output_tokens: 50 })]);
+  assert.deepEqual(r.contexts, [101521]);
+  assert.equal(r.flags.mainCtx, 101521);
 });
 
 test("子代理的用量不覆盖主会话", () => {
