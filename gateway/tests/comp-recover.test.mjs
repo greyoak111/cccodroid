@@ -13,10 +13,11 @@ fs.mkdirSync(stage, { recursive: true });
 const ID = "rec-0611";
 
 const m = await import("../gw/components.mjs");
-const { compWriteRecord, compRecover } = m._compForTest;
+const { compWriteRecord, compRecover, compClearStage } = m._compForTest;
 
 const ids = new Set([ID + "-bak", ID + "-tree", ID + "-done", ID + "-half", ID + "-ok", ID + "-other",
-  ID + "-committed", ID + "-commshared", ID + "-halfbak", ID + "-idem", ID + "-noprev", ID + "-badarr", ID + "-after", ID + "-oldbase"]);
+  ID + "-committed", ID + "-commshared", ID + "-halfbak", ID + "-idem", ID + "-noprev", ID + "-badarr", ID + "-after", ID + "-oldbase",
+  ID + "-rbfail", ID + "-legacy", ID + "-prebak", ID + "-clear"]);
 const w = (rel, content) => { const f = path.join(PREFIX, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, content); return f; };
 after(() => {
   for (const id of ids) {
@@ -28,6 +29,7 @@ after(() => {
     for (const r of ["bin/rec-old", "bin/rec-new", "share/rec/a", "share/rec/missing",
       "bin/a", "bin/b", "bin/new", "bin/x", "bin/c-new", "share/rec/gone"]) fs.rmSync(path.join(PREFIX, r), { force: true });
   }
+  fs.rmSync(path.join(stage, "other-comp-ab12cd34ef56.tar.gz"), { force: true });
   fs.rmSync(path.join(PREFIX, ".devkit-ok"), { force: true });
 });
 
@@ -79,7 +81,7 @@ test("没有 .old 也没有暂存树、files 全在：提交点之后被杀，�
   assert.ok(fs.existsSync(path.join(PREFIX, "bin/rec-new")), "文件没动");
 });
 
-test("没有 .old 也没有暂存树、files 不全：删残留、退回 .json.prev", async () => {
+test("没有 .old 也没有暂存树、files 不全：留 installing 可重装，不删 $PREFIX", async () => {
   const id = ID + "-half";
   w("bin/rec-new", "new-half");
   const prev = { id, source: "official", version: "1.0.0", state: "ok", at: 1, bin: [], files: ["share/rec/a"], shared: [] };
@@ -88,9 +90,10 @@ test("没有 .old 也没有暂存树、files 不全：删残留、退回 .json.p
     files: ["bin/rec-new", "share/rec/missing"], shared: [] };
   assert.ok(compWriteRecord(id, rec));
   await compRecover();
-  assert.equal(fs.existsSync(path.join(PREFIX, "bin/rec-new")), false, "残留删掉");
+  // 复核 P0-1 后的语义：半截状态不删已放进 $PREFIX 的文件（重装会补），记录留在 installing 让界面显示可重装
+  assert.equal(fs.existsSync(path.join(PREFIX, "bin/rec-new")), true, "不删残留");
   const got = JSON.parse(fs.readFileSync(path.join(COMP_DIR, id + ".json"), "utf8"));
-  assert.equal(got.version, "1.0.0"); assert.equal(got.state, "ok");
+  assert.equal(got.state, "installing"); assert.equal(got.version, "2.0.0");
 });
 
 test("别的组件、ok 记录、坏记录都不动", async () => {
@@ -206,4 +209,64 @@ test("P1-6 旧工具包上的 installing：只清记录和暂存，不碰 $PREFI
   assert.equal(fs.existsSync(path.join(COMP_DIR, id + ".json")), false, "旧记录清掉");
   assert.equal(fs.existsSync(path.join(stage, id)), false, "暂存树清掉");
   assert.ok(fs.existsSync(path.join(PREFIX, "bin/rec-new")), "$PREFIX 没动");
+});
+
+test("§3 回滚放回失败：不删文件、不写回旧记录，留 installing + 备份 + .prev 下次再试", async () => {
+  const id = ID + "-rbfail";
+  w("bin/rec-old", "i-am-a-file");            // 旧版路径被一个文件占住，备份里的深路径放不回去
+  w("bin/rec-new", "new");
+  const prev = { id, source: "official", version: "1.0.0", state: "ok", at: 1, bin: [], files: ["bin/rec-old"], shared: [] };
+  fs.writeFileSync(path.join(COMP_DIR, id + ".json.prev"), JSON.stringify(prev));
+  const rec = { id, source: "official", version: "2.0.0", state: "installing", at: 2, bin: [], files: ["bin/rec-old", "bin/rec-new"], shared: [] };
+  assert.ok(compWriteRecord(id, rec));
+  const bak = path.join(stage, id + ".old");
+  fs.mkdirSync(path.join(bak, "bin/rec-old"), { recursive: true });
+  fs.writeFileSync(path.join(bak, "bin/rec-old/y"), "old");
+  await compRecover();
+  assert.ok(fs.existsSync(bak), "备份留着下次再试");
+  assert.equal(fs.existsSync(path.join(PREFIX, "bin/rec-new")), true, "新文件也没敢删");
+  const got = JSON.parse(fs.readFileSync(path.join(COMP_DIR, id + ".json"), "utf8"));
+  assert.equal(got.state, "installing", "不写回 ok 假装旧版完好");
+  assert.ok(fs.existsSync(path.join(COMP_DIR, id + ".json.prev")), ".prev 留着，恢复要拿它对照");
+});
+
+test("旧记录无 committed：文件都在但 shared 缺，不补 ok、不删文件，留 installing 可重装", async () => {
+  const id = ID + "-legacy";
+  w("bin/rec-new", "new");
+  const rec = { id, source: "official", version: "2.0.0", state: "installing", at: 2, bin: [], files: ["bin/rec-new"], shared: ["share/rec/gone"] };
+  assert.ok(compWriteRecord(id, rec));
+  await compRecover();
+  const got = JSON.parse(fs.readFileSync(path.join(COMP_DIR, id + ".json"), "utf8"));
+  assert.equal(got.state, "installing", "shared 没了不能补 ok");
+  assert.ok(fs.existsSync(path.join(PREFIX, "bin/rec-new")), "已装好的文件不删");
+});
+
+test("升级在备份前被杀（无备份有暂存树）：旧版路径不删，只撤本次新搬的", async () => {
+  const id = ID + "-prebak";
+  w("bin/a", "v1-a"); w("bin/new", "new");
+  const prev = { id, source: "official", version: "1.0.0", state: "ok", at: 1, bin: [], files: ["bin/a"], shared: [] };
+  fs.writeFileSync(path.join(COMP_DIR, id + ".json.prev"), JSON.stringify(prev));
+  const rec = { id, source: "official", version: "2.0.0", state: "installing", at: 2, bin: [], files: ["bin/a", "bin/new"], shared: [] };
+  assert.ok(compWriteRecord(id, rec));
+  fs.mkdirSync(path.join(stage, id, "usr", "bin"), { recursive: true });
+  await compRecover();
+  assert.equal(fs.readFileSync(path.join(PREFIX, "bin/a"), "utf8"), "v1-a", "旧版路径不删");
+  assert.equal(fs.existsSync(path.join(PREFIX, "bin/new")), false, "新搬的撤掉");
+  const got = JSON.parse(fs.readFileSync(path.join(COMP_DIR, id + ".json"), "utf8"));
+  assert.equal(got.version, "1.0.0", "记录退回旧版");
+});
+
+test("compClearStage 只清本组件的暂存、备份和压缩包，别的组件不碰", () => {
+  const id = ID + "-clear";
+  fs.mkdirSync(path.join(stage, id), { recursive: true });
+  fs.writeFileSync(path.join(stage, id, "x"), "x");
+  fs.mkdirSync(path.join(stage, id + ".old"), { recursive: true });
+  fs.writeFileSync(path.join(stage, id + ".old", "y"), "y");
+  fs.writeFileSync(path.join(stage, id + "-ab12cd34ef56.tar.gz"), "gz");
+  fs.writeFileSync(path.join(stage, "other-comp-ab12cd34ef56.tar.gz"), "other");
+  compClearStage(id);
+  assert.equal(fs.existsSync(path.join(stage, id)), false, "暂存树清掉");
+  assert.equal(fs.existsSync(path.join(stage, id + ".old")), false, ".old 清掉");
+  assert.equal(fs.existsSync(path.join(stage, id + "-ab12cd34ef56.tar.gz")), false, "压缩包清掉");
+  assert.ok(fs.existsSync(path.join(stage, "other-comp-ab12cd34ef56.tar.gz")), "别的组件不碰");
 });

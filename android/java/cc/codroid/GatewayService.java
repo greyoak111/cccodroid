@@ -479,9 +479,9 @@ public class GatewayService extends Service {
         return unprovenSince > 0 && now - spawnedAt >= PROOF_GRACE_MS && now - unprovenSince >= UNPROVEN_KILL_MS;
     }
 
-    /** 心跳阶段里值得放行探活失败的：switch（备份旧版 + 记录切换）、move（搬文件）、recover（启动恢复回滚）
-     *  都可能长时间占着事件循环（组件安装报告 §1；复核 P1-3） */
-    static boolean installingPhase(String phase) { return "switch".equals(phase) || "move".equals(phase) || "recover".equals(phase); }
+    /** 心跳阶段里值得放行探活失败的：switch（记录切换）、backup（备份旧版）、move（搬文件）、recover（启动恢复回滚）
+     *  都可能长时间占着事件循环（组件安装报告 §1；复核 P1-3/P2-13） */
+    static boolean installingPhase(String phase) { return "switch".equals(phase) || "backup".equals(phase) || "move".equals(phase) || "recover".equals(phase); }
     /** 心跳还新鲜吗：at 要是个过去的时间，且距今不超过 INSTALL_GRACE_MS（at<=0 或未来时间都算不新鲜） */
     static boolean installingFresh(long now, long at) { return at > 0 && at <= now && now - at < INSTALL_GRACE_MS; }
     /** 多份心跳取最新时只认「没到未来时间、阶段值得放行」的：系统时间被回拨留下的未来时间戳、
@@ -490,11 +490,34 @@ public class GatewayService extends Service {
         return t > bestAt && t <= now && installingPhase(phase) ? t : bestAt;
     }
 
-    /** 读网关落的安装心跳（components/.runs/*.installing，JSON {id, phase, moved, at}），取 at 最新的一份。
+    /** 手写解析网关写的心跳（紧凑 JSON {id, phase, moved, at}，at 是开机以来单调毫秒，与 /proc/uptime 同基准）：
+     *  桌面 JVM 的 android.jar 是桩、org.json 调不了，纯字符串解析让 installingBeat 能进 JVM 测试跑全链路（复核 P2-14）。
+     *  字段名与 gateway/gw/components.mjs 的 beat 写入口径一致，改字段要两头一起改。畸形 / 缺字段 / 未来 at / 阶段不放行 → null */
+    static Long parseBeatAt(String s, long now) {
+        if (s == null) return null;
+        int p = s.indexOf("\"at\":");
+        if (p < 0) return null;
+        p += 5;
+        int e = p;
+        while (e < s.length() && s.charAt(e) >= '0' && s.charAt(e) <= '9') e++;
+        if (e == p) return null;
+        long t;
+        try { t = Long.parseLong(s.substring(p, e)); } catch (NumberFormatException x) { return null; }
+        int q = s.indexOf("\"phase\":\"");
+        if (q < 0) return null;
+        q += 9;
+        int qe = s.indexOf('"', q);
+        if (qe < 0) return null;
+        long got = beatBetter(now, 0, t, s.substring(q, qe));
+        return got > 0 ? got : null;
+    }
+
+    /** 读网关落的安装心跳（components/.runs/*.installing），取 at 最新的一份。now 传 SystemClock.elapsedRealtime()
+     *  （心跳 at 是 /proc/uptime 单调毫秒，同一基准；墙钟跳变不再影响判定，复核 P2-9）。
      *  返回 { 时间戳, 是否安装阶段 }；没有 / 读不了 / 不是普通文件 / 超 4 KB 都当没有 */
-    static long[] installingBeat(File files) {
+    static long[] installingBeat(File files, long now) {
         File[] list = new File(files, "components/.runs").listFiles();
-        long at = 0, now = System.currentTimeMillis();
+        long at = 0;
         if (list != null) for (File f : list) {
             if (!f.getName().endsWith(".installing") || !f.isFile()) continue;   // FIFO / 目录别去读，会把 supervise 线程卡死（复核 P2-11）
             try {
@@ -503,8 +526,8 @@ public class GatewayService extends Service {
                     while (total < buf.length && (c = in.read(buf, total, buf.length - total)) > 0) total += c;
                 }
                 if (total > 4096) continue;
-                org.json.JSONObject j = new org.json.JSONObject(new String(buf, 0, total, "UTF-8"));
-                at = beatBetter(now, at, j.optLong("at", 0), j.optString("phase", ""));
+                Long t = parseBeatAt(new String(buf, 0, total, "UTF-8"), now);
+                if (t != null && t > at) at = t;
             } catch (Exception ignored) {}
         }
         if (at == 0) return null;
@@ -513,11 +536,13 @@ public class GatewayService extends Service {
 
     /** 网关正在合法地长时间忙组件安装：探活失败暂时不算数（组件安装报告 §1）。
      *  心跳持续新鲜就继续放行（安装搬几千个文件可能要好几分钟，复核 P1-5）；
-     *  心跳停更超过 INSTALL_GRACE_MS 才按真卡死处理，看门狗仍会结束它 */
+     *  心跳停更超过 INSTALL_GRACE_MS 才按真卡死处理，看门狗仍会结束它。
+     *  时间基准用开机单调钟：心跳 at 是网关按 /proc/uptime 写的，墙钟跳变两边都不会失真（复核 P2-9） */
     private boolean installingGrace() {
         Env e = env;
-        long[] beat = e == null ? null : installingBeat(e.files);
-        return beat != null && beat[1] == 1 && installingFresh(System.currentTimeMillis(), beat[0]);
+        long now = android.os.SystemClock.elapsedRealtime();
+        long[] beat = e == null ? null : installingBeat(e.files, now);
+        return beat != null && beat[1] == 1 && installingFresh(now, beat[0]);
     }
 
     /** aliveDecision 的三种结论：继续观察 / 记下失联起点 / 结束重起 */

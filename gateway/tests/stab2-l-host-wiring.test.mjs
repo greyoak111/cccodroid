@@ -70,9 +70,9 @@ test("组件安装报告 §1：安装心跳接进两处探活失败路径，时�
   assert.ok(wait.includes("installingGrace()"), "有界等待的探活失败没查安装心跳");
   const alive = gw.slice(gw.indexOf("private boolean alive()"), gw.indexOf("private static boolean alivePid"));
   assert.ok(alive.includes("installingGrace()"), "alive() 的探活失败没查安装心跳");
-  assert.ok(gw.includes("installingBeat(File files)") && gw.includes("installingPhase(String phase)")
-    && gw.includes("installingFresh(long now, long at)") && gw.includes("beatBetter(long now, long bestAt, long t, String phase)"),
-    "心跳判定缺了纯逻辑件");
+  assert.ok(gw.includes("installingBeat(File files, long now)") && gw.includes("installingPhase(String phase)")
+    && gw.includes("installingFresh(long now, long at)") && gw.includes("beatBetter(long now, long bestAt, long t, String phase)")
+    && gw.includes("parseBeatAt(String s, long now)"), "心跳判定缺了纯逻辑件");
   // 放宽要清零连续失联起点：宽限期一过从零重新累计，不能把安装期间的旧账一次清算
   assert.ok(wait.includes("if (installingGrace()) { unprovenSince = 0; continue; }")
     && alive.includes("if (installingGrace()) { aliveUnprovenSince = 0; return true; }"),
@@ -82,6 +82,8 @@ test("组件安装报告 §1：安装心跳接进两处探活失败路径，时�
 test("复核 67ea9ba：启动恢复心跳、接管路径、多份心跳取最新", () => {
   // P1-3：启动恢复也写 recover 心跳，看门狗放行这个阶段
   assert.ok(gw.includes('"recover".equals(phase)'), "看门狗没放行 recover 阶段的恢复心跳");
+  // P2-13：备份是独立阶段，看门狗分得清「在备份」和「卡在 switch」
+  assert.ok(gw.includes('"backup".equals(phase)'), "看门狗没放行 backup 阶段的备份心跳");
   // P1-4：没有自己拉起进程时的 alive() 与 squatted() 都先查安装心跳，别杀服务重建前的残留网关
   const alive = gw.slice(gw.indexOf("private boolean alive()"), gw.indexOf("private static boolean alivePid"));
   assert.ok(alive.includes("if (installingGrace()) return true;"), "alive() 无进程分支没查安装心跳");
@@ -91,4 +93,15 @@ test("复核 67ea9ba：启动恢复心跳、接管路径、多份心跳取最新
   assert.ok(gw.includes("sq == SQUAT_ADOPTED || sq == SQUAT_WAIT"), "守护循环没处理 SQUAT_WAIT");
   // P2-11：心跳文件先 isFile 再读，FIFO 不能把 supervise 线程卡死
   assert.ok(gw.includes("!f.getName().endsWith(\".installing\") || !f.isFile()"), "installingBeat 没挡非普通文件");
+  // P2-9：看门狗按开机单调时间读心跳，墙钟跳变不再失真
+  assert.ok(gw.includes("android.os.SystemClock.elapsedRealtime"), "installingGrace 没用单调钟");
+});
+
+test("心跳跨语言契约：JS 写 at/phase 与 Java parseBeatAt 解析口径一致", () => {
+  const comp = fs.readFileSync(new URL("../gw/components.mjs", import.meta.url), "utf8");
+  // JS 侧：beat 写 {id, phase, moved, at}，at 是 /proc/uptime 单调毫秒
+  assert.ok(comp.includes("uptimeMs"), "JS 心跳没用单调时间");
+  assert.ok(comp.includes("{ id, phase, moved, at: uptimeMs() }"), "JS 心跳字段/顺序和契约不符");
+  // Java 侧：parseBeatAt 按 "at": 和 "phase":" 解析同一批字段；两边的字段名要一起改
+  assert.ok(gw.includes("indexOf(\"\\\"at\\\":\")") && gw.includes("indexOf(\"\\\"phase\\\":\\\"\")"), "Java 解析口径和 JS 写入口径对不上");
 });

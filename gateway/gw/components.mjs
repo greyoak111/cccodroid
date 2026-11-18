@@ -99,7 +99,7 @@ function compWriteRecord(id, rec) {
   return writeAtomic(compRecFile(id), JSON.stringify(rec, null, 1));
 }
 export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile, compDropDanglingDocs, compSweepDanglingDocs,
-  compState, compVerCmp, compOlder, compInstall, compSwitch, compRecover, compMcpSpec };   // 只给测试用
+  compState, compVerCmp, compOlder, compInstall, compSwitch, compRecover, compClearStage, compMcpSpec };   // 只给测试用
 
 function compFetch(src, quick) {
   // quick：拉索引用——连不上 8 秒就放弃、只重试一次，好尽快换镜像（GitHub 被墙时以前要干等一分多钟）
@@ -385,6 +385,17 @@ export async function breathe() {
   lastBreath = Date.now();
 }
 
+// 安装心跳的时间戳用开机以来的单调毫秒（/proc/uptime），和安卓侧 SystemClock.elapsedRealtime 同一基准：
+// 用户改系统时间（墙钟跳变）不再让全部心跳提前过期或集体新鲜（复核 P2-9）。字段名 at/phase 与
+// GatewayService.parseBeatAt 的解析口径一致，改字段要两头一起改（复核 P2-14 契约）
+function uptimeMs() {
+  try {
+    const ms = Math.round(Number(fs.readFileSync("/proc/uptime", "utf8").split(/\s+/)[0]) * 1000);
+    if (ms > 0) return ms;
+  } catch {}
+  return Date.now();   // 读不到（理论上不会）：退墙钟——Java 侧按单调时间读会当成未来时间不放行，安全方向
+}
+
 // 组件安装 / 模块下载 / 自检这些 detached 子进程，网关被 SIGKILL 后会继续写 $PREFIX（0.6.9 审计 195-T.4）。
 // 起的时候落一份运行标记，正常退出删掉；新网关启动时按标记清掉上一任留下的。
 const COMP_RUN_DIR = PREFIX ? path.join(COMP_DIR, ".runs") : "";
@@ -599,7 +610,7 @@ export function compBaseDeps(id, sha, rec) {
 /** 删掉一个组件放进去的文件。两个组件带了同一个依赖包（浏览器和 GPU 驱动都带 mesa）时，
  *  后装的那个跳过了已存在的文件、记录里没有它们 —— 所以删之前先看别的组件要不要用：要用的留下、记到它名下，
  *  不然卸一个，另一个就悄悄坏了。keep 里的路径不删：升级时新版里还有的同名文件（已经换成新内容） */
-function compRemoveFiles(id, rec, keep = null) {
+async function compRemoveFiles(id, rec, keep = null, beat = () => {}) {
   // 记录文件同 uid 可改：卸载/升级只认普通相对路径，别让 ../ 把前缀外的文件删了
   const safeRel = (r) => typeof r === "string" && r && !r.startsWith("/") && !r.split("/").includes("..");
   const files = (rec.files || []).filter(safeRel);
@@ -616,7 +627,8 @@ function compRemoveFiles(id, rec, keep = null) {
   // Python 运行时在旁边的 __pycache__ 里生成 .pyc（不在组件清单里）：删 .py 时一并删掉，不然卸载后留下几十 MB
   const pyc = new Map();
   const pycOf = (d) => { if (!pyc.has(d)) { let l = []; try { l = fs.readdirSync(path.join(PREFIX, d)); } catch {} pyc.set(d, l); } return pyc.get(d); };
-  for (const r of files) {
+  for (let i = 0; i < files.length; i++) {
+    const r = files[i];
     const keeper = others.find((o) => o.needs.has(r));
     if (keeper) { keeper.gained.push(r); continue; }
     if (keep && keep.has(r)) continue;    // 新版里还有这个路径：已经换成新内容，别删
@@ -628,6 +640,8 @@ function compRemoveFiles(id, rec, keep = null) {
       for (const f of pycOf(pc)) if (f.startsWith(stem) && f.endsWith(".pyc")) try { fs.unlinkSync(path.join(PREFIX, pc, f)); } catch {}
       dirs.add(pc);
     }
+    await breathe();                          // 删旧文件同样按时间让出 + 心跳（复核 P2-13）
+    if ((i & 255) === 0) beat(i + 1);
   }
   for (const o of others) {
     if (!o.gained.length) continue;
@@ -638,7 +652,11 @@ function compRemoveFiles(id, rec, keep = null) {
   }
   if (baseKept) log(`[comp] ${id}：${baseKept} 个文件现在归工具包，留下`);
   // 由深到浅删掉变空的目录（工具包自己的目录不空，自然删不掉）
-  for (const d of [...dirs].sort((a, b) => b.length - a.length)) { try { fs.rmdirSync(path.join(PREFIX, d)); } catch {} }
+  const dirsSorted = [...dirs].sort((a, b) => b.length - a.length);
+  for (let i = 0; i < dirsSorted.length; i++) {
+    try { fs.rmdirSync(path.join(PREFIX, dirsSorted[i])); } catch {}
+    if ((i & 1023) === 0) await breathe();
+  }
   const sk = rec.skill && skillDst(rec.skill);
   // 标记写着别的组件（那边接管了同名目录）就不删；没有标记的是旧版装的，照旧删
   let owner = sk ? (readSmall(path.join(sk, SKILL_OWNER), 512) || "").trim() : "";
@@ -797,7 +815,7 @@ export async function compRecover() {
     if (!rec || rec.state !== "installing") continue;
     // 恢复心跳：看门狗看到新鲜的 recover 心跳就放行探活失败（与应用侧 installingPhase 的 recover 对应）
     const mark = path.join(COMP_RUN_DIR, id + ".installing");
-    const beat = (n) => { try { fs.writeFileSync(mark, JSON.stringify({ id, phase: "recover", moved: n, at: Date.now() })); } catch {} };
+    const beat = (n) => { try { fs.writeFileSync(mark, JSON.stringify({ id, phase: "recover", moved: n, at: uptimeMs() })); } catch {} };
     const clean = () => { try { fs.rmSync(mark, { force: true }); } catch {} };
     beat(0);
     try {
@@ -818,22 +836,21 @@ export async function compRecover() {
         const prevFiles = new Set((prev && Array.isArray(prev.files) ? prev.files : []).filter(safeRel));
         const bak = path.join(stage, id + ".old");
         const tree = path.join(stage, id);
-        // 提交点之后被杀：compSwitch 在提交点把 committed 连同最终清单写进了记录。文件都还在就补 ok——
-        // 但 shared 要按安装收尾的同一口径再核一遍，别绕过「共享文件被删」的检查（复核 P0-1）
-        if (rec.committed) {
-          const missing = [...files].filter((r) => !fs.existsSync(path.join(PREFIX, r)));
-          const danglingDocs = (rec.shared || []).filter((r) => typeof r === "string" && docLinkDangling(r));
-          const goneShared = (rec.shared || []).filter((r) => typeof r === "string" && !danglingDocs.includes(r) && !fs.existsSync(path.join(PREFIX, r)));
-          if (!missing.length && !goneShared.length) {
+        // 「搬移其实已经完成」的两种形态：compSwitch 提交点落盘的 committed，或旧记录没有备份也没有暂存树。
+        // 文件都还在（断链文档软链不算缺，提交点会摘掉）、shared 按安装收尾同一口径复核过 → 补 ok 并收掉暂存；
+        // 不齐 / 共享没了 → 不删 $PREFIX（重装会补齐），留 installing 让界面显示可重装（复核 P0-1）
+        const missing = [...files].filter((r) => !docLinkDangling(r) && !fs.existsSync(path.join(PREFIX, r)));
+        const danglingShared = (rec.shared || []).filter((r) => typeof r === "string" && docLinkDangling(r));
+        const goneShared = (rec.shared || []).filter((r) => typeof r === "string" && !danglingShared.includes(r) && !fs.existsSync(path.join(PREFIX, r)));
+        if (rec.committed || (!fs.existsSync(bak) && !fs.existsSync(tree))) {
+          if (files.size && !missing.length && !goneShared.length) {
             rec.state = "ok"; rec.at = Date.now();
             if (compWriteRecord(id, rec)) log(`[comp] ${id}：上次安装实际已完成，记录补成 ok`);
             else log(`[comp] ${id}：上次安装的文件都在，但补写 ok 记录失败`);
-            compClearStage(id);   // 暂存树和压缩包一起收掉，别留几百 MB
-            return;
+          } else {
+            log(`[comp] ${id}：上次安装没收尾（${missing.length} 个文件不在、${goneShared.length} 个共享文件没了），记录留在 installing，可以重新安装`);
           }
-          // 文件不齐 / 共享依赖没了：不删 $PREFIX（重装会补齐），只清暂存；记录留在 installing，界面显示可重装
-          compClearStage(id);
-          log(`[comp] ${id}：上次安装没收尾（${missing.length} 个文件不在、${goneShared.length} 个共享文件没了），记录留在 installing，可以重新安装`);
+          compClearStage(id);   // 两条路都清暂存树和压缩包，别留几百 MB
           return;
         }
         if (fs.existsSync(bak)) {
@@ -857,8 +874,14 @@ export async function compRecover() {
             await breathe();
             if ((i & 255) === 0) beat(i + 1);
           }
-          if (restored) try { fs.rmSync(bak, { recursive: true, force: true }); } catch {}
-          else log(`[comp] ${id}：启动回滚时有备份没放回去，先留在 ${bak}`);
+          if (restored) {
+            try { fs.rmSync(bak, { recursive: true, force: true }); } catch {}
+          } else {
+            // 有备份没放回去：不删新文件、不写回旧记录（那会显示 ok 其实缺文件）——留 installing + 备份 + .prev，
+            // 下次启动 / 下次安装再恢复（复核 §3）
+            log(`[comp] ${id}：启动回滚时有备份没放回去，记录留在 installing，下次启动再试`);
+            return;
+          }
           // prev 丢了（写失败 / 被删）就没法区分新旧：宁可不删，别把旧版最后一份删掉
           const del = prev ? [...files].filter((r) => !inBak.has(r) && !prevFiles.has(r)) : [];
           if (!prev && files.size) log(`[comp] ${id}：启动回滚时没有旧记录可对照，${files.size} 个文件没敢删`);
@@ -868,22 +891,15 @@ export async function compRecover() {
             if ((i & 255) === 0) beat(i + 1);
           }
           writePrevOrDrop(id, prev);
-        } else if (fs.existsSync(tree)) {
-          // 备份都还没有（升级在备份前被杀）或备份已回滚：prev.files 里的旧版文件不动，只撤本次搬进去的；压缩包留着重装不用重下
+        } else {
+          // 只剩「无备份、有暂存树」：备份都还没有（升级在备份前被杀）或搬移中：prev.files 里的旧版文件不动，
+          // 只撤本次搬进去的；压缩包留着重装不用重下
           const del = [...files].filter((r) => !prevFiles.has(r));
           for (let i = 0; i < del.length; i++) {
             try { fs.rmSync(path.join(PREFIX, del[i]), { force: true }); } catch {}
             await breathe();
             if ((i & 255) === 0) beat(i + 1);
           }
-          writePrevOrDrop(id, prev);
-        } else if (files.size && [...files].every((r) => docLinkDangling(r) || fs.existsSync(path.join(PREFIX, r)))) {
-          // 提交点之后被杀（旧版没有 committed 标记）：文件其实都就位了，补成 ok。断链文档软链不算缺（提交点会摘掉）
-          rec.state = "ok"; rec.at = Date.now();
-          if (compWriteRecord(id, rec)) log(`[comp] ${id}：上次安装实际已完成，记录补成 ok`);
-          else log(`[comp] ${id}：上次安装的文件都在，但补写 ok 记录失败`);
-        } else {
-          for (const r of files) { try { fs.rmSync(path.join(PREFIX, r), { force: true }); } catch {} }
           writePrevOrDrop(id, prev);
         }
       });
@@ -943,6 +959,10 @@ function compMirrorUrl(b) {
 async function compRunInstall(id, b, job) {
   const stage = path.join(COMP_DIR, ".staging"), gz = path.join(stage, `${id}-${b.sha256.slice(0, 12)}.tar.gz`), tree = path.join(stage, id);
   fs.mkdirSync(stage, { recursive: true });
+  // 上一轮安装回滚失败留下的 .old + installing 记录：先按启动恢复同一条路收掉，再开始新的安装——
+  // 别让后面「清旧备份」的防御把旧版最后一份文件删了（复核 §3）
+  const left = compRecord(id);
+  if (left && left.state === "installing" && fs.existsSync(path.join(stage, id + ".old"))) await compRecover();
   // 上回留下的压缩包也要先核对：以前只看存不存在，一份写坏的（被并发清理打断过）会被反复拿去解包，怎么重试都失败
   if (fs.existsSync(gz)) {
     job.phase = "verifying"; job.done = 0; job.total = b.bytes;
@@ -1064,11 +1084,11 @@ async function compSwitch(id, b, tree, job) {
   try { fs.mkdirSync(COMP_RUN_DIR, { recursive: true }); } catch {}
   let beatTotal = 0;
   const beat = (moved, phase = "move") => {
-    try { fs.writeFileSync(mark, JSON.stringify({ id, phase, moved, at: Date.now() })); } catch {}
+    try { fs.writeFileSync(mark, JSON.stringify({ id, phase, moved, at: uptimeMs() })); } catch {}
     if (job) job.done = moved;                       // 界面进度条在 installing 阶段也动（单位是文件数，见 job.files）
-    log(`[comp] ${id} ${phase === "switch" ? "备份/切换" : "搬移"} ${moved}${beatTotal ? "/" + beatTotal : ""}`);   // 被杀后日志能看出停在哪批（组件安装报告 §5）
+    log(`[comp] ${id} ${phase} ${moved}${beatTotal ? "/" + beatTotal : ""}`);   // 被杀后日志能看出停在哪批（组件安装报告 §5）
   };
-  try { fs.writeFileSync(mark, JSON.stringify({ id, phase: "switch", moved: 0, at: Date.now() })); } catch {}
+  try { fs.writeFileSync(mark, JSON.stringify({ id, phase: "switch", moved: 0, at: uptimeMs() })); } catch {}
   try {
     const old = compRecord(id);
     const oldFiles = new Set(((old && old.files) || []).filter(safeRel));
@@ -1076,12 +1096,14 @@ async function compSwitch(id, b, tree, job) {
       requires: b.requires || [], skill: "", state: "installing", at: Date.now(), files: [], shared: [],
       // 依赖的底座包：卸工具包模块时据此判断有没有组件在用。不记的话要靠索引，刚启动 / 离线 / 索引里这个构建没了就判断不了（#104 05-001）
       ...(Array.isArray(b.baseDeps) ? { baseDeps: b.baseDeps.map((d) => (typeof d === "string" ? d : d && d.name)).filter(Boolean) } : {}) };
-    // 先按包内文件清单记下"将要放进去的文件"：搬到一半被杀也能按它卸干净
+    // 先按包内文件清单记下"将要放进去的文件"：搬到一半被杀也能按它卸干净。几千文件的清单遍历也让出（复核 P2-13）
     const list = [];
-    (function walk(rel) {
+    await (async function walk(rel) {
       for (const d of fs.readdirSync(path.join(tree, "usr", rel), { withFileTypes: true })) {
         const r = rel ? rel + "/" + d.name : d.name;
-        if (d.isDirectory()) walk(r); else list.push(r);
+        if (d.isDirectory()) { await walk(r); continue; }
+        list.push(r);
+        if ((list.length & 255) === 0) await breathe();
       }
     })("");
     beatTotal = list.length;
@@ -1108,7 +1130,9 @@ async function compSwitch(id, b, tree, job) {
     if (!compWriteRecord(id, rec)) throw new Error(tz("安装记录写不进去（存储满了或没有权限），这次安装没有继续"));
     // 旧版同路径文件先挪进备份：新版没全部就位前，$PREFIX 里的旧版文件一个都不删
     const bak = path.join(path.dirname(tree), id + ".old");
-    fs.rmSync(bak, { recursive: true, force: true });
+    // 到这里备份还在，说明 compRunInstall 开头那次恢复没放回去（rename 失败之类）：接着装会把残留备份和本次
+    // 备份混在一起，回滚时可能删掉旧版最后一份。停手报错，让用户卸载后重装（复核 §3）
+    if (fs.existsSync(bak)) throw new Error(tz("上次安装的备份还没恢复，请重试；不行就先卸载再重装"));
     const backed = [], moved = [];
     try {
       for (const r of replaceable) {
@@ -1117,9 +1141,10 @@ async function compSwitch(id, b, tree, job) {
         fs.renameSync(path.join(PREFIX, r), to);
         backed.push(r);
         await breathe();                                     // 备份也是同步搬文件：按时间让出，别占死事件循环（复核 P2-13）
-        if ((backed.length & 255) === 0) beat(backed.length, "switch");   // 心跳不断档：备份阶段也算安装中
+        if ((backed.length & 255) === 0) beat(backed.length, "backup");   // 心跳不断档、单独阶段：看门狗分得清「在备份」和「卡在 switch」（复核 P2-13）
       }
       const { skipped } = await compMoveIn(path.join(tree, "usr"), "", moved, [], orphans, beat);
+      if (job) job.done = moved.length;                      // 搬完把进度走满（beat 每 256 一拍，末尾这一截补上）
       if (skipped.length) log(`[comp] ${id}：${skipped.length} 个文件已经在了（工具包或别的组件放的），保留原样`);
     } catch (e) {
       // 回滚：备份原样放回、撤掉这次新放进去的文件、记录退回旧版。回滚同样分批 + 心跳：被杀在回滚半路是复核 P0-2 的输入
@@ -1137,15 +1162,22 @@ async function compSwitch(id, b, tree, job) {
         if ((i & 255) === 0) beat(i + 1, "switch");
       }
       // 还有没放回去的备份就先留着，别把旧版文件最后一份也删了
-      if (restored) { try { fs.rmSync(bak, { recursive: true, force: true }); } catch {} try { fs.rmSync(prevFile, { force: true }); } catch {} }
-      else log(`[comp] ${id}：回滚时有备份没放回去，先留在 ${bak}`);
-      if (old && !compWriteRecord(id, old)) log(`[comp] ${id}：回滚后旧记录没写回去，界面会显示装到一半`);
+      if (restored) {
+        try { fs.rmSync(bak, { recursive: true, force: true }); } catch {}
+        try { fs.rmSync(prevFile, { force: true }); } catch {}
+        if (old && !compWriteRecord(id, old)) log(`[comp] ${id}：回滚后旧记录没写回去，界面会显示装到一半`);
+      } else {
+        // 回滚失败：别再写回 ok 假装旧版完好——留 installing + 备份 + .prev，让启动恢复（compRecover）或
+        // 下次安装接手（复核 §3：界面按 damaged 显示，可重装可卸载，比「显示 ok 其实缺文件」诚实）
+        log(`[comp] ${id}：回滚时有备份没放回去，记录留在 installing，下次启动会再恢复`);
+      }
       throw e;
     }
     try { fs.rmSync(bak, { recursive: true, force: true }); } catch {}
     try { fs.rmSync(prevFile, { force: true }); } catch {}
-    // 新版全部就位（提交点）：这时才删旧版里新版不要的文件，别的组件也要用的转记到它们名下，旧技能清掉
-    if (old) compRemoveFiles(id, old, new Set(list));
+    // 新版全部就位（提交点）：这时才删旧版里新版不要的文件，别的组件也要用的转记到它们名下，旧技能清掉。
+    // 删旧文件同样分批 + 心跳：旧版独有文件也能有几千个（复核 P2-13）
+    if (old) await compRemoveFiles(id, old, new Set(list), (n) => beat(n, "switch"));
     // 搬完再查（顺序不定，搬的时候目标可能还没就位）：目标仍然断掉的文档软链不留下（196-真机.3）
     compDropDanglingDocs(rec);
     // 提交点把 committed 和最终清单一起落盘：之后被杀，启动恢复按它补 ok，不会再把这批已装好的文件当「没搬完」删掉（复核 P0-1）。
@@ -1201,14 +1233,14 @@ export async function compRemove(id) {
     stage = "clear-app-mapping";
     const unmapped = clearBridgeConfigMapping(id);
     let mcpName = "";
-    const out = await compFsExclusive(() => {
+    const out = await compFsExclusive(async () => {
       stage = "read-record";
       const { exists, rec } = compRemovalRecord(id);
       mcpName = rec && typeof rec.mcp === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(rec.mcp) ? rec.mcp : "";
       if (!exists && !retired && !unmapped) return { ok: false, message: "not installed" };
       stage = "remove-files";
       // installing / damaged 的完整记录仍有原受管文件清单，照既有管理器处理共享文件和技能。
-      if (rec) compRemoveFiles(id, rec);
+      if (rec) await compRemoveFiles(id, rec);
       else log(`[comp] ${id} 卸载恢复：安装记录缺失或损坏，未删除工具包内文件和技能`);
       stage = "remove-record";
       fs.rmSync(compRecFile(id), { force: true });

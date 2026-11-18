@@ -84,6 +84,34 @@ public class Stab2LHostTest {
         eql("安装 取最新：旧的不盖新的", GatewayService.beatBetter(t0 + 1000, t0 + 900, t0 + 500, "move"), t0 + 900);
         eql("安装 未来时间戳不参与（时间被回拨过）", GatewayService.beatBetter(t0, t0 - 500, t0 + 100, "move"), t0 - 500);
         eql("安装 非安装阶段的心跳不参与取最新", GatewayService.beatBetter(t0 + 1000, t0 + 500, t0 + 900, "downloading"), t0 + 500);
+        // ── 复核 P2-13：备份阶段也算安装中，看门狗分得清「在备份」和「卡在 switch」 ──
+        eq("安装 backup 阶段算安装中", GatewayService.installingPhase("backup"), true);
+
+        // ── 复核 P2-14：parseBeatAt 与 installingBeat 文件级（手写解析，桌面 JVM 能跑全链路）──
+        eq("安装 parseBeatAt 缺 at 字段返回 null", GatewayService.parseBeatAt("{\"id\":\"x\"}", t0) == null, true);
+        eq("安装 parseBeatAt 缺 phase 字段返回 null", GatewayService.parseBeatAt("{\"at\":" + (t0 - 1) + "}", t0) == null, true);
+        eq("安装 parseBeatAt 未来 at 不认", GatewayService.parseBeatAt("{\"phase\":\"move\",\"at\":" + (t0 + 1) + "}", t0) == null, true);
+        eq("安装 parseBeatAt 下载阶段不认", GatewayService.parseBeatAt("{\"phase\":\"downloading\",\"at\":" + (t0 - 1) + "}", t0) == null, true);
+        eq("安装 parseBeatAt 畸形字符串不抛", GatewayService.parseBeatAt("not-json-{", t0) == null, true);
+        eq("安装 parseBeatAt 正常", (long) GatewayService.parseBeatAt("{\"phase\":\"move\",\"at\":" + (t0 - 1) + "}", t0) == t0 - 1, true);
+        try {
+            java.io.File tmp = java.nio.file.Files.createTempDirectory("hb").toFile();
+            java.io.File runs = new java.io.File(tmp, "components/.runs");
+            if (!runs.mkdirs()) throw new RuntimeException("mkdirs");
+            java.nio.charset.Charset utf8 = java.nio.charset.StandardCharsets.UTF_8;
+            java.nio.file.Files.write(new java.io.File(runs, "a.installing").toPath(),
+                ("{\"id\":\"a\",\"phase\":\"move\",\"moved\":100,\"at\":" + (t0 + 900) + "}").getBytes(utf8));
+            java.nio.file.Files.write(new java.io.File(runs, "b.installing").toPath(),
+                ("{\"id\":\"b\",\"phase\":\"move\",\"moved\":1,\"at\":" + (t0 + 5000) + "}").getBytes(utf8));   // 未来时间戳
+            java.nio.file.Files.write(new java.io.File(runs, "c.installing").toPath(),
+                ("{\"id\":\"c\",\"phase\":\"downloading\",\"at\":" + (t0 + 950) + "}").getBytes(utf8));      // 阶段不放行
+            StringBuilder big = new StringBuilder("{\"id\":\"d\",\"phase\":\"move\",\"at\":" + t0 + ",\"pad\":\"");
+            for (int i = 0; i < 4200; i++) big.append('x');
+            java.nio.file.Files.write(new java.io.File(runs, "d.installing").toPath(), big.append("\"}").toString().getBytes(utf8));   // 超 4 KB
+            if (!new java.io.File(runs, "e.installing").mkdir()) throw new RuntimeException("mkdir");                                  // 目录
+            long[] got = GatewayService.installingBeat(tmp, t0 + 1000);
+            eq("安装 installingBeat 只取新鲜 move 心跳、挡掉未来/下载/超大/目录", got != null && got[0] == t0 + 900, true);
+        } catch (java.io.IOException e) { throw new RuntimeException(e); }
 
         // ── 独立审查 P2-4：界面页态决策 ──
         eq("UI 已证明：界面", MainActivity.uiPageDecision(true, false, false) == MainActivity.UI_LOAD, true);
