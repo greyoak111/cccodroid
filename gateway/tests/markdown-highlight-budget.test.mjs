@@ -61,11 +61,16 @@ test("streaming budget rejects by chars and lines before loading a library", asy
 });
 
 test("final medium code is eligible; very large final code stays copyable text", async () => {
-  const f = fixture(["x".repeat(3000), "x".repeat(12001), "line\n".repeat(160)]);
+  const medium = "x".repeat(3000), huge = "x".repeat(12001), long = "line\n".repeat(160), f = fixture([medium, huge, long]);
   f.api.enhanceMd(f.el); await settle();
   assert.equal(f.calls(), 1);
-  assert.equal(f.nodes[1].textContent.length, 12001);
-  assert.equal(f.nodes[2].textContent, "line\n".repeat(160));
+  // 3000 字节点真的被高亮成了库产物，不能只看调用次数（fixture 里 innerHTML 只有这里会被写）
+  assert.equal(f.nodes[0].innerHTML, "highlight:" + medium);
+  // 超过字数 / 行数预算的节点没有高亮产物，只被打上 .hl 标记，正文原样可复制
+  assert.equal(f.nodes[1].innerHTML, "");
+  assert.equal(f.nodes[2].innerHTML, "");
+  assert.equal(f.nodes[1].classList.contains("hl"), true);
+  assert.equal(f.nodes[2].classList.contains("hl"), true);
 });
 
 test("late script resolution rechecks streaming code that grew in place", async () => {

@@ -27,6 +27,12 @@ function worker() {
   return { w, ask(op, args = {}, transfer = []) { const id = ++seq; return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); w.postMessage({ id, op, ...args }, transfer); }); } };
 }
 const asArrayBuffer = wb => { const out = X.write(wb, { type: "array", bookType: "xlsx", compression: true }); return Uint8Array.from(new Uint8Array(out)).buffer; };
+// worker 线程卡死时不能让测试或 CI 一直等：基于 setTimeout 的拒绝超时
+function within(promise, ms, label) {
+  let timer;
+  const limit = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + " timed out after " + ms + "ms")), ms); });
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
+}
 
 test("pages are bounded by cells, rows and HTML, while all requested visible content stays available", () => {
   const wb = workbook(100, 200), m = M.create(wb, X);
@@ -185,10 +191,14 @@ test("ZIP budget rejects truncation, oversized entries, cumulative expansion and
   assert.equal(M.zipExpandsTooMuch(zip64), true);
 });
 
-test("twenty load/terminate cycles leave no live worker", async () => {
+test("二十次 load/terminate 循环后没有活着的 worker", async () => {
   for (let i = 0; i < 20; i++) {
     const w = worker();
-    await w.ask("load", { buffer: asArrayBuffer(workbook(1, 1)) });
-    assert.equal(await w.w.terminate(), 1);
+    try {
+      await within(w.ask("load", { buffer: asArrayBuffer(workbook(1, 1)) }), 10000, "load " + i);
+      assert.equal(await within(w.w.terminate(), 10000, "terminate " + i), 1);
+    } finally {
+      await w.w.terminate().catch(() => {});   // 断言失败 / 超时也要收掉这一轮的 worker
+    }
   }
 });

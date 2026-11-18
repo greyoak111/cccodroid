@@ -23,9 +23,14 @@ function classes(initial = []) {
 }
 
 function components() {
-  const src = read("08-extensions.js"), nodes = new Map();
+  const src = read("08-extensions.js"), nodes = new Map(), apiCalls = [], postCalls = [];
   let count = 0;
-  const make = id => ({ id, innerHTML: "", textContent: "", dataset: {}, classList: classes(), addEventListener() {}, querySelectorAll() { return []; } });
+  const make = id => {
+    const listeners = new Map();
+    return { id, innerHTML: "", textContent: "", dataset: {}, classList: classes(), listeners,
+      addEventListener(type, fn) { const list = listeners.get(type) || []; list.push(fn); listeners.set(type, list); },
+      querySelectorAll() { return []; } };
+  };
   const node = id => {
     if (id === "gh-auth" || id === "llm-dl") return null;
     if (!nodes.has(id)) nodes.set(id, make(id));
@@ -45,13 +50,18 @@ function components() {
   const listing = { supported: true, items: [item] };
   const ctx = {
     window: {}, document: { querySelectorAll: () => [] }, localStorage: { getItem: () => null },
-    $: node, t: fill, tk: x => x, esc: x => String(x ?? ""), api: async () => listing,
-    extOffNow: async () => ({ comp: [] }), pickLang: x => x, webUrl: () => false, pageOn: () => true,
+    $: node, t: fill, tk: x => x, esc: x => String(x ?? ""), api: async (...args) => { apiCalls.push(args); return listing; },
+    post: async (...args) => { postCalls.push(args); return { ok: true }; },
+    toast() {}, loadExtSkills() {},
+    extOffNow: async () => ({ comp: [] }), pickLang: x => x, webUrl: () => false, pageOn: () => true, isZh: () => false,
     setPageSub() {}, extSub() {}, paintStorage() {}, renderIdx() {}, loadGhField() {},
     setTimeout: () => 1, clearTimeout() {},
   };
   vm.runInNewContext(src + "\nthis.ui = { loadComponents };", ctx);
-  return { item, box, load: ctx.ui.loadComponents, card: () => cards[0], writes: () => count };
+  return {
+    item, box, load: ctx.ui.loadComponents, card: () => cards[0], writes: () => count,
+    listeners: id => nodes.get(id)?.listeners, apiCalls: () => apiCalls, postCalls: () => postCalls,
+  };
 }
 
 test("unchanged component polls retain nodes, detail expansion and focusable buttons", async () => {
@@ -82,6 +92,34 @@ test("component mutation invalidation permits failed or cancelled button state t
   const src = read("08-extensions.js");
   assert.match(src, /c === "reindex"[^\n]+_html = null/);
   assert.match(src, /cb\.disabled = true; \$\("comp-list"\)\._html = null;/);
+});
+
+test("组件卡片的 reindex / toggle 按钮点击会失效缓存并各触发一次重绘", async () => {
+  const u = components(); await u.load();
+  const click = async (c, id = "fixture", on = "0") => {
+    const btn = { dataset: { c, id, on }, disabled: false, classList: classes(), closest: sel => sel === "button[data-c]" ? btn : null };
+    // 依次调 #tab-ext 上注册的生产 event listener；只有组件按钮那一个会命中 button[data-c]
+    for (const list of u.listeners("tab-ext")?.values() || []) for (const fn of list) await fn({ target: btn });
+    assert.equal(btn.disabled, true, "clicked button is disabled while its action runs");
+  };
+  const calls = u.apiCalls().length, writes = u.writes();
+  await click("reindex");
+  // loadComponents 每次还会顺带刷新组件停用状态（extOffNow），所以是一次列表请求 + 一次 off 请求
+  assert.equal(u.apiCalls().length, calls + 2);
+  assert.ok(u.apiCalls().slice(calls).some(a => a[0] === "/api/components?refresh=1"), "reindex forces a fresh component index");
+  assert.equal(u.writes(), writes + 1, "one repaint after invalidation, not one per poll");
+  assert.equal(u.box._html, u.box.innerHTML);
+  assert.equal(u.postCalls().length, 0);
+
+  const calls2 = u.apiCalls().length, writes2 = u.writes();
+  await click("toggle");
+  // toggle 还会顺带刷新技能列表和停用状态；关键是组件列表确实重新取了一次
+  assert.ok(u.apiCalls().slice(calls2).some(a => a[0] === "/api/components"), "toggle repaints from the poll response");
+  assert.equal(u.writes(), writes2 + 1);
+  assert.equal(u.box._html, u.box.innerHTML);
+  const [postUrl, postBody] = u.postCalls()[0];
+  assert.equal(postUrl, "/api/ext/off");
+  assert.equal(postBody.kind, "comp"); assert.equal(postBody.id, "fixture"); assert.equal(postBody.on, false);
 });
 
 function scheduler() {

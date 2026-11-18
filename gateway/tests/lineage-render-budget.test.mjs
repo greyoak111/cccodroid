@@ -147,14 +147,19 @@ test("单选、取消和未知 ID 只更新选择层，不重新生成场景", (
 });
 
 test("选中、家族、跳过多选和定时任务保持不同的色调语义", () => {
-  const context = { pickable: s => !s.task && !s.trashed && !s.skip };
-  vm.runInNewContext(take("    function tones(", "    function chapterLabels(") + "this.tones = tones;", context);
+  // 直接跑生产 pickable：跳过判定来自 st.pick.skip 集合，而不是会话对象上的 s.skip 字段。
+  const context = { st: { pick: { skip: new Set(["s"]) } } };
+  vm.runInNewContext(take("    const pickable =", "    function togglePick(")
+    + take("    function tones(", "    function chapterLabels(") + "this.tones = tones;", context);
   assert.equal(context.tones({ id: "s" }, null, "s", new Set(["s"])).stroke, "var(--fg)");
   assert.equal(context.tones({ id: "s" }, null, "x", new Set(["x"])).on, false);
   const pick = { set: new Set(["s"]) };
   assert.equal(context.tones({ id: "s" }, pick, null, null).stroke, "var(--lm-blue)");
-  assert.equal(context.tones({ id: "s", skip: true }, pick, null, null).on, false);
+  // skip 集合里的 s 不可选；对象上带 skip 字段但不在集合里的 x 仍可选（旧 stub 用 s.skip，测不出生产语义）。
+  assert.equal(context.tones({ id: "s" }, pick, null, null).on, false);
+  assert.equal(context.tones({ id: "x", skip: true }, pick, null, null).on, true);
   assert.equal(context.tones({ id: "task", task: {} }, pick, null, null).on, false);
+  assert.equal(context.tones({ id: "trashed", trashed: true }, pick, null, null).on, false);
 });
 
 test("同值 set 保留缓存；原地修改、筛选使缓存失效；同日 now 变化只挪现在线；手势不被刷新清掉", () => {

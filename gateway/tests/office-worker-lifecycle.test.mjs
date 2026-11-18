@@ -11,23 +11,33 @@ const office = fs.readFileSync(path.join(web, "app/17-office.js"), "utf8");
 const viewer = fs.readFileSync(path.join(web, "app/16-viewer-git.js"), "utf8");
 function fixture() {
   const workers = [], jobs = new Map(), fails = [];
-  let seq = 0;
+  let seq = 0, hidden = false;
   class FakeWorker {
     constructor(url) { this.url = url; this.requests = []; this.terminated = 0; workers.push(this); }
-    postMessage(data, transfer) { this.requests.push({ data, transfer }); }
+    // 真实 Worker 会按 transfer 列表转移所有权：这里用 structuredClone 真 detach，才能断言 byteLength 归零
+    postMessage(data, transfer) {
+      this.requests.push({ data, transfer });
+      for (const b of transfer || []) { try { structuredClone(b, { transfer: [b] }); } catch {} }
+    }
     terminate() { this.terminated++; }
     reply(value, id = this.requests.at(-1).data.id) { this.onmessage?.({ data: { id, value } }); }
   }
   const VW = {};
+  const viewerEl = { classList: { contains: () => hidden } };
   const ctx = { VW, Worker: FakeWorker, AbortController, DOMException, console,
-    viewerEl: { classList: { contains: () => false } }, MutationObserver: class { observe() {} disconnect() {} },
+    viewerEl, MutationObserver: class { observe() {} disconnect() {} },
     t: x => x, setTimeout: f => { const id = ++seq; jobs.set(id, f); return id; }, clearTimeout: id => jobs.delete(id),
     vwSheetFail: (s, e) => { fails.push(e.message); ctx.closeViewerSheet(); } };
   vm.createContext(ctx);
   const start = office.indexOf("  function closeViewerSheet("), end = office.indexOf("  async function vwSheet()", start);
   vm.runInContext(office.slice(start, end) + "\nthis.api = { closeViewerSheet, sheetSession }; this.closeViewerSheet = closeViewerSheet;", ctx);
+  // vwTake 是「换文档 / 切版式」的统一入口：单独取出来在同一 context 里跑，closeViewerSheet 沿用生产实现
+  const takeAt = office.indexOf("  const vwTake = () =>");
+  assert.ok(takeAt >= 0, "vwTake source exists");
+  vm.runInContext(office.slice(takeAt, office.indexOf("\n", takeAt)) + "\nthis.api.vwTake = vwTake;", ctx);
   const session = () => { const s = ctx.api.sheetSession(); VW.sheet = s; return s; };
-  return { ctx, VW, workers, jobs, fails, session, close: ctx.api.closeViewerSheet };
+  return { ctx, VW, workers, jobs, fails, viewerEl, session, close: ctx.api.closeViewerSheet, take: ctx.api.vwTake,
+    hide() { hidden = true; }, show() { hidden = false; } };
 }
 
 test("terminate aborts file reading, rejects pending requests, clears all timers and ignores captured late callbacks", async () => {
@@ -42,6 +52,37 @@ test("terminate aborts file reading, rejects pending requests, clears all timers
   late({ data: { id: 1, value: { names: ["stale"] } } });
   await assert.rejects(s.ask("page", { sheet: 0 }), { name: "AbortError" });
   f.close(); assert.equal(w.terminated, 1);
+});
+
+test("load 传递的 workbook 缓冲区在页面侧已经 detach", async () => {
+  const f = fixture(), s = f.session(), w = f.workers[0];
+  const ab = new ArrayBuffer(8), p = s.ask("load", { buffer: ab }, [ab]);
+  assert.ok(w.requests[0].transfer, "the transfer list reaches the worker");
+  assert.equal(w.requests[0].transfer[0], ab);
+  assert.equal(ab.byteLength, 0, "the transferred buffer is detached from the page");
+  f.close();
+  await assert.rejects(p, { name: "AbortError" });
+  assert.equal(w.terminated, 1); assert.equal(s.dead, true); assert.equal(f.VW.sheet, null);
+});
+
+test("onmessageerror 调用保存的 handler：会话与定时器都被释放", () => {
+  const f = fixture(), s = f.session(), w = f.workers[0];
+  w.onmessageerror({});                       // 调生产代码保存的 handler，不是测试里另写的逻辑
+  assert.equal(w.terminated, 1); assert.equal(s.dead, true); assert.equal(f.VW.sheet, null);
+  assert.deepEqual(f.fails, ["读取失败"]); assert.equal(f.jobs.size, 0);
+});
+
+test("vwTake / closeViewerSheet 入口真实释放 sheet session", () => {
+  const f = fixture(), s = f.session(), w = f.workers[0];
+  const still = f.take();                     // 换文档 / 切版式入口
+  assert.equal(w.terminated, 1); assert.equal(s.dead, true); assert.equal(f.VW.sheet, null);
+  assert.equal(still(), true, "unchanged viewer keeps the new take valid");
+  f.hide(); assert.equal(still(), false, "a hidden viewer invalidates the returned guard");
+  f.show();
+  const s2 = f.session(), w2 = f.workers[1];
+  f.close(s2);                                // 关闭入口
+  assert.equal(w2.terminated, 1); assert.equal(s2.dead, true); assert.equal(f.VW.sheet, null);
+  assert.equal(f.jobs.size, 0);
 });
 
 test("rapid sheet and cell requests bound waiting closures and accept only the latest matching response", async () => {
@@ -101,8 +142,11 @@ test("fetch uses captured path/size and signal, and does not continue from an ab
 test("all document/layout/close entry points dispose of the sheet session", () => {
   assert.match(office, /const vwTake = \(\) => \{ closeViewerSheet\(\);/);
   assert.match(office, /VW\.gen = \(VW\.gen \|\| 0\) \+ 1;[^\n]*\n    closeViewerSheet\(\);/);
+  // openViewer 依赖整个查看器 DOM / 网络 / 布局状态，没法在只抽 sheet session 的 fixture 里直接跑；
+  // 这里把它对 closeViewerSheet 的调用锚定成相邻语句，行为侧由上面的 vwTake / closeViewerSheet 用例覆盖
   assert.match(viewer, /if \(VW\.dirty\) draftClear\(\);\n    closeViewerSheet\(\);\n    closeViewerPdf\(\);/);
-  assert.ok(office.includes('const gen = ++s.pageGen; ++s.cellGen;'));
+  // 换页换代语句必须落在 vwSheetShow 函数体内，而不是任意位置出现的同名片段
+  assert.match(office, /async function vwSheetShow\(i\) \{[\s\S]{0,400}?const gen = \+\+s\.pageGen; \+\+s\.cellGen;/);
 });
 
 test("one hundred session cycles release workers and promise timers", async () => {

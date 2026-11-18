@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Optional: node scripts/test-frontend-perf.mjs. Node built-ins + an installed Chromium only.
 // Synthetic APIs and workbooks, no gateway/user config/model traffic. GPU off; not WebView/IME acceptance.
+// PASS 只代表结构验收 + 一条宽松性能门槛（openMs < 5000ms），不是真机的流畅度/帧率/GPU/输入法结论。
+// Synthetic APIs and workbooks, no gateway/user config/model traffic. GPU off; not WebView/IME acceptance.
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -47,8 +49,8 @@ class CDP {
 function browserSetup() {
   localStorage.setItem("ccapp.lang", "zh"); localStorage.setItem("cc.motion", "off");
   window.__fixtureErrors = [];
-  addEventListener("error", e => __fixtureErrors.push(e.message));
-  addEventListener("unhandledrejection", e => __fixtureErrors.push(String(e.reason?.message || e.reason)));
+  addEventListener("error", e => __fixtureErrors.push(Date.now() + ":" + e.message));
+  addEventListener("unhandledrejection", e => __fixtureErrors.push(Date.now() + ":" + String(e.reason?.message || e.reason)));
   const Native = Worker;
   const stats = window.__sheetStats = { created: 0, terminated: 0, active: 0, detached: [], maxReply: 0 };
   window.Worker = class extends Native {
@@ -110,7 +112,8 @@ try {
   await cdp.call("Page.addScriptToEvaluateOnNewDocument", { source: "(" + browserSetup.toString() + ")();" });
   await navigate(fixture.origin + "/");
   await until(() => cdp.eval("!!(window.__cc?.srv.connected && __cc.state.sessions.length)"), "real app boot");
-  check("real app boots using only synthetic loopback APIs", true, { chromium: await cdp.eval("navigator.userAgent.match(/Chrome\\/([\\d.]+)/)?.[1]") });
+  const booted = await cdp.eval("!!(window.__cc?.srv.connected && __cc.state.sessions.length)");
+  check("real app boots using only synthetic loopback APIs", booted && blocked.length === 0, { chromium: await cdp.eval("navigator.userAgent.match(/Chrome\\/([\\d.]+)/)?.[1]"), blocked });
 
   await openSession("synthetic-tools", 760);
   check("760-step folded group creates no full card tree", await cdp.eval("document.querySelectorAll('#hist .tool').length <= 1"));
@@ -172,21 +175,28 @@ try {
     const before = fixture.state.agentCalls;
     await click("#hist .tg-page");
     check(outcome + " agent card is temporarily parked while request is in flight", await cdp.eval("!__agent.isConnected"));
-    fixture.releaseAgents(); await sleep(100);
+    fixture.releaseAgents();
+    await until(() => cdp.eval("!__agent.querySelector('.ts-now').textContent.includes('加载中')"), outcome + " agent response settled");
     await click("#hist .tg-page:last-child");
     check(outcome + " paging restores the identical agent node", await cdp.eval("__agent === document.querySelector('#hist .tg-entry .tool')"));
     fixture.state.agentFailure = false;
     await evaluate(() => { const button = __agent.querySelector(".ts-head"); button.click(); button.click(); });
     await until(() => fixture.state.agentCalls === before + 1, "parked agent retry"); fixture.releaseAgents();
     await until(() => cdp.eval("[...document.querySelectorAll('#hist .tool-sub .tool-arg')].some(e => e.textContent.includes('/synthetic/loaded'))"), "agent child response");
-    check(outcome + " parked response leaves a functioning retry loader", true);
+    const retried = await cdp.eval("[...document.querySelectorAll('#hist .tool-sub .tool-arg')].some(e => e.textContent.includes('/synthetic/loaded')) && ![...document.querySelectorAll('#hist .ts-now')].some(e => e.textContent.includes('加载中'))");
+    check(outcome + " parked response leaves a functioning retry loader", retried);
   }
   fixture.state.agentHold = true;
   await openSession("synthetic-loader-dispose", 100);
   const disposeCalls = fixture.state.agentCalls;
   await evaluate(() => { const g = document.querySelector("#hist .tgroup"); if (!g.classList.contains("open")) g.querySelector(".tg-head").click(); g.querySelector(".ts-head").click(); });
   await until(() => fixture.state.agentCalls > disposeCalls && cdp.eval("document.querySelector('#hist .ts-now')?.textContent.includes('加载中')"), "disposed agent request starts");
-  await cdp.eval("__cc.openSession('synthetic-replacement')"); fixture.releaseAgents(); await sleep(150);
+  const disposeReplies = fixture.state.agentReplies;
+  await cdp.eval("__cc.openSession('synthetic-replacement')");
+  await until(() => cdp.eval("__cc.view.sessionId === 'synthetic-replacement' && __cc.view.histOk === true"), "replacement session history reset");
+  fixture.releaseAgents();
+  await until(() => fixture.state.agentReplies > disposeReplies, "late agent response delivered");
+  await evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   check("late agent response cannot revive a reset history tree", await cdp.eval("!document.querySelector('#hist .tool-sub .tool')"));
   fixture.state.agentHold = false;
 
@@ -210,24 +220,66 @@ try {
   await click(".vw-more"); await until(() => cdp.eval("document.querySelectorAll('.vw-grid td').length === 2400"), "Excel second page");
   await click('.vw-grid td[data-a="A13"]'); await until(() => cdp.eval("document.querySelector('.vw-cellbar').textContent.includes('Cell 12:0')"), "Excel original cell detail");
   check("Excel pagination retains original addresses and values", await cdp.eval("document.querySelector('.vw-cellbar').textContent.includes('A13')"));
+  // 宽松门槛：只证明结构验收不可能带着卡死的打开通过；不是帧率结论。
+  check("100k-cell workbook opens under the loose 5s structural budget", excel.openMs < 5000, { openMs: Math.round(excel.openMs) });
   await click("#vw-close"); await until(() => cdp.eval("__sheetStats.active === 0 && document.querySelector('#viewer').classList.contains('hidden')"), "Excel normal close");
-  fixture.state.fileDelay = 250;
-  await evaluate(() => { __cc.openViewer("/synthetic/100k.xlsx", "sheet", 0); setTimeout(() => document.getElementById("vw-close").click(), 10); });
-  await sleep(350); fixture.state.fileDelay = 0;
-  check("Excel close cancels a delayed download without retaining a Worker", await cdp.eval("__sheetStats.active === 0"));
-  fixture.state.fileDelay = 150;
-  await evaluate(() => { __cc.openViewer("/synthetic/100k.xlsx", "sheet", 0); setTimeout(() => __cc.openViewer("/synthetic/replacement.xlsx", "sheet", 0), 10); });
+  // 关闭取消下载：下载挂在服务端不放行，先证 Worker 真的建了、请求真的在途，再点关闭等 abort 事件，不靠 sleep。
+  const closeBefore = await cdp.eval("({ ...__sheetStats })"), closeAborts = fixture.state.fileAborts, closeScripts = fixture.state.officeScripts;
+  fixture.state.fileHold = true;
+  await evaluate(() => { __cc.openViewer("/synthetic/100k.xlsx", "sheet", 0); });
+  await until(() => fixture.state.held.length === 1 && fixture.state.filePending === 1, "held workbook download in flight");
+  await until(() => cdp.eval("__sheetStats.created === " + (closeBefore.created + 1) + " && __sheetStats.active === 1"), "delayed workbook worker start");
+  // Worker 的三个脚本全部送达才算就绪；脚本加载中被 close 截断会报 NetworkError（Worker 内 importScripts 失败）
+  await until(() => fixture.state.officeScripts >= closeScripts + 3, "held workbook worker scripts delivered");
+  await click("#vw-close");
+  await until(() => fixture.state.fileAborts > closeAborts && fixture.state.held[0]?.aborted, "held download aborted by close");
+  await until(() => cdp.eval("__sheetStats.active === 0"), "canceled workbook worker terminated");
+  fixture.state.fileHold = false; fixture.state.held.length = 0;
+  check("Excel close cancels a held download without retaining a Worker",
+    await cdp.eval("__sheetStats.active === 0 && __sheetStats.created === " + (closeBefore.created + 1) + " && __sheetStats.terminated === " + (closeBefore.terminated + 1)));
+
+  // 迟到响应：旧下载挂在服务端，替换文档正常完成，再放行旧响应。服务器必须观察到真实 abort，屏幕上的必须是替换文档。
+  const lateBefore = await cdp.eval("({ ...__sheetStats })"), lateScripts = fixture.state.officeScripts;
+  fixture.state.fileHold = true;
+  await evaluate(() => { __cc.openViewer("/synthetic/100k.xlsx", "sheet", 0); });
+  await until(() => fixture.state.held.length === 1 && fixture.state.filePending === 1, "old workbook download held");
+  await until(() => cdp.eval("__sheetStats.created === " + (lateBefore.created + 1) + " && __sheetStats.active === 1"), "old workbook worker start");
+  // 替换文档会 terminate 旧 Worker：等旧 Worker 脚本全部送达后再换，避免截断在途 importScripts
+  await until(() => fixture.state.officeScripts >= lateScripts + 3, "old workbook worker scripts delivered");
+  fixture.state.fileHold = false;
+  await evaluate(() => { __cc.openViewer("/synthetic/replacement.xlsx", "sheet", 0); });
   await until(() => cdp.eval("document.querySelector('.vw-grid')?.textContent.includes('Replacement workbook')"), "replacement workbook");
-  fixture.state.fileDelay = 0;
-  check("late workbook response never overwrites a replacement document", await cdp.eval("__sheetStats.active === 1 && document.querySelector('#vw-name').textContent === 'replacement.xlsx'"));
+  await until(() => fixture.state.held[0]?.aborted, "old workbook request aborted by replacement open");
+  await until(() => cdp.eval("__sheetStats.active === 1 && __sheetStats.terminated === " + (lateBefore.terminated + 1)), "only replacement workbook worker remains");
+  fixture.releaseFiles();
+  await until(() => fixture.state.held[0]?.released, "held old response released");
+  await evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  check("late workbook response never overwrites a replacement document",
+    await cdp.eval("__sheetStats.active === 1 && __sheetStats.created === " + (lateBefore.created + 2) + " && document.querySelector('#vw-name').textContent === 'replacement.xlsx' && document.querySelector('.vw-grid')?.textContent.includes('Replacement workbook')"));
+  fixture.state.held.length = 0;
+
+  // 直接隐藏：先证 Worker 活着，再断言被回收（不是 0 === 0 的假通过）。
+  const hideBefore = await cdp.eval("({ ...__sheetStats })");
+  check("replacement workbook Worker is live before direct hiding", hideBefore.active === 1 && hideBefore.created > hideBefore.terminated, hideBefore);
   await evaluate(() => document.getElementById("viewer").classList.add("hidden"));
   await until(() => cdp.eval("__sheetStats.active === 0"), "idle hidden workbook cleanup");
-  check("direct viewer hiding terminates the idle parsed workbook", await cdp.eval("__sheetStats.created === __sheetStats.terminated"));
+  await until(() => cdp.eval("__sheetStats.terminated === " + (hideBefore.terminated + 1)), "hidden workbook worker terminated");
+  check("direct viewer hiding terminates the idle parsed workbook",
+    await cdp.eval("__sheetStats.active === 0 && __sheetStats.created === __sheetStats.terminated"));
+
+  const repeatBefore = await cdp.eval("({ ...__sheetStats })");
   for (let i = 0; i < 3; i++) {
+    const before = await cdp.eval("({ ...__sheetStats })");
     await evaluate(() => __cc.openViewer("/synthetic/replacement.xlsx", "sheet", 0));
-    await click("#vw-close"); await until(() => cdp.eval("__sheetStats.active === 0 && document.querySelector('#viewer').classList.contains('hidden')"), "repeated Excel close");
+    await until(() => cdp.eval("__sheetStats.created === " + (before.created + 1) + " && __sheetStats.active === 1"), "repeated workbook worker start " + i);
+    // 等到 Worker 真的 postMessage(load)：脚本和 importScripts 都已加载完，close 才不会截断在途脚本加载
+    await until(() => cdp.eval("__sheetStats.detached.length === " + (before.detached.length + 1)), "repeated workbook worker load posted " + i);
+    await click("#vw-close");
+    await until(() => cdp.eval("__sheetStats.active === 0 && document.querySelector('#viewer').classList.contains('hidden')"), "repeated Excel close " + i);
+    await until(() => cdp.eval("__sheetStats.terminated === " + (before.terminated + 1)), "repeated workbook worker terminate " + i);
   }
-  check("repeated workbook open/close drains every Worker", await cdp.eval("__sheetStats.created === __sheetStats.terminated && __sheetStats.active === 0"));
+  check("repeated workbook open/close drains every Worker",
+    await cdp.eval("__sheetStats.created === __sheetStats.terminated && __sheetStats.active === 0 && __sheetStats.created === " + (repeatBefore.created + 3)));
   check("complete app has no hidden initialization or rejected-promise errors", await cdp.eval("__fixtureErrors.length === 0"));
 
   for (const n of [100, 1000]) {
@@ -253,7 +305,7 @@ try {
       for (let i = 0; i < 30; i++) cv.dispatchEvent(new WheelEvent("wheel", { clientX: 400, deltaY: -1, ctrlKey: true, bubbles: true, cancelable: true }));
       await new Promise(resolve => requestAnimationFrame(resolve));
       const value = { same: svg === document.querySelector(".lm-main svg"), layouts: __counts.layout - before.layout, scenes: __counts.scene - before.scene, pathScale: path.getBoundingClientRect().width / p, ringScale: circle.getBoundingClientRect().width / c };
-      await new Promise(resolve => setTimeout(resolve, 220)); value.committed = __counts.layout - before.layout;
+      await __waitFor(() => __counts.layout === before.layout + 1, "zoom commit"); value.committed = __counts.layout - before.layout;
       value.k = __map.state().k; __map.pick(null); return value;
     });
     check(n + " map wheel burst previews existing SVG and commits one layout", preview.same && preview.layouts === 0 && preview.scenes === 0 && preview.committed === 1, preview);
@@ -270,10 +322,10 @@ try {
     });
     check(n + " map pinch reuses the graph and commits once", pinch.same && pinch.previewLayouts === 0 && pinch.commits === 1, pinch);
     const home = await evaluate(async () => {
-      __map.home(); await new Promise(resolve => setTimeout(resolve, 300));
+      __map.home(); await __waitFor(() => __raf.size === 0, "home animation");
       const cv = document.querySelector(".lm-canvas"), expected = __map.state().W;
       cv.dispatchEvent(new WheelEvent("wheel", { clientX: 400, deltaY: 80, ctrlKey: true, bubbles: true, cancelable: true }));
-      __map.home(); await new Promise(resolve => setTimeout(resolve, 300)); const state = __map.state();
+      __map.home(); await __waitFor(() => __raf.size === 0, "home animation after wheel"); const state = __map.state();
       return { state, expected, valid: state.tx >= Math.min(0, cv.clientWidth - expected) - .1 && state.tx <= .1 };
     });
     check(n + " map home exits uncommitted zoom with exact width and valid bounds", home.state.k === 1 && home.state.W === home.expected && home.valid, home);
@@ -295,12 +347,16 @@ try {
       __map.select("s2"); document.querySelector(".lm-canvas").dispatchEvent(new WheelEvent("wheel", { clientX: 400, deltaY: -1, ctrlKey: true, bubbles: true, cancelable: true })); __map.destroy();
       const pending = { raf: __raf.size, timers: __timers.size }, counts = JSON.stringify(__counts);
       __map.set(__model); __map.select("s2"); __map.home(); __map.pick(["s2"]);
-      await new Promise(resolve => setTimeout(resolve, 250)); return { pending, empty: document.getElementById("map").childElementCount === 0, stable: counts === JSON.stringify(__counts), snapshot: __map.snapshot() };
+      await __waitFor(() => __raf.size === 0 && __timers.size === 0, "destroy leaves no scheduled work");
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return { pending, empty: document.getElementById("map").childElementCount === 0, stable: counts === JSON.stringify(__counts), snapshot: __map.snapshot() };
     });
     check(n + " map destroy drains work and ignores late calls", dead.pending.raf === 0 && dead.pending.timers === 0 && dead.empty && dead.stable && dead.snapshot === null, dead);
   }
   assert.deepEqual(errors, []); assert.deepEqual(blocked, []); assert.deepEqual(fixture.state.writes, []);
-  check("no uncaught errors, external requests, chat calls or API writes", true);
+  check("no uncaught errors, external requests, chat calls or API writes",
+    fixture.state.writes.length === 0 && !fixture.state.requests.some(r => r.path === "/api/chat") && fixture.state.requests.every(r => fixture.isAllowed(r.path)),
+    { requests: fixture.state.requests, writes: fixture.state.writes });
   console.log(JSON.stringify({ scope: "Synthetic complete frontend/Worker/map; headless Chromium with GPU disabled, not Android WebView/GPU/IME or frame-rate acceptance", checks: checks.length, errors, blocked, apiWrites: fixture.state.writes, sourceHashes: fixture.state.hashes }));
 } catch (e) {
   console.error(e.stack || e); console.error(JSON.stringify({ passed: checks.map(c => c.name), errors, blocked, apiWrites: fixture?.state.writes }));

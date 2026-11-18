@@ -166,6 +166,11 @@ function fixture({ images = true, fold } = {}) {
 function setup(t, options) { const f = fixture(options); t.after(() => f.clean()); return f; }
 const rows = group => group.el.querySelectorAll(".tg-entry").length;
 const status = group => group.el.querySelector(".tg-head").querySelector(".tool-state");
+// 每页条目里的参数摘要就是 summarizeTool 的产物（/synthetic/<序号>），用它核对分页可达性
+const pageIds = group => group.el.querySelectorAll(".tg-entry").map(box => {
+  const arg = box.querySelector(".tool-arg")?.textContent || "", m = /\/synthetic\/(\d+)$/.exec(arg);
+  return m ? Number(m[1]) : -1;
+});
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); };
 function deferred() { let resolve, reject; const promise = new Promise((r, j) => { resolve = r; reject = j; }); return { promise, resolve, reject }; }
 
@@ -363,7 +368,9 @@ test("400 completed reveals remain bounded; pending permission stays visible the
   for (let i = 0; i < 400; i++) f.cards.get("t" + i).reveal();
   assert.equal(rows(group), 40); assert.equal(status(group).textContent, "完成");
   const first = f.cards.get("t0").reveal(), perm = f.document.createElement("div"); perm.className = "perm"; first.el.after(perm);
-  f.cards.get("t399").reveal(); assert.equal(rows(group), 41); assert.ok(perm.isConnected && perm.getClientRects().length);
+  const last = f.cards.get("t399").reveal();
+  assert.ok(last.el.isConnected && last.el.getClientRects().length, "the revealed last card is mounted and visible, not only counted");
+  assert.equal(rows(group), 41); assert.ok(perm.isConnected && perm.getClientRects().length);
   group.el.querySelector(".tg-head").click(); assert.ok(perm.isConnected && perm.getClientRects().length, "explicit fold must not hide pending permission");
   assert.equal(rows(group), 1); perm.classList.add("done");
   group.el.querySelector(".tg-head").click(); assert.equal(rows(group), 40); assert.equal(perm.isConnected, false);
@@ -373,4 +380,27 @@ test("400 completed reveals remain bounded; pending permission stays visible the
   group.el.querySelector(".tg-head").click(); group.el.querySelector(".tg-head").click();
   assert.equal(rows(group), 40); assert.ok(group.retained().nodes > 0); assert.ok(group.retained().chars > 0);
   group.dispose(); assert.equal(group.retained().nodes, 0); assert.equal(group.retained().chars, 0); assert.equal(f.cards.size, 0);
+});
+
+for (const count of [400, 760]) test("分页按钮能到达全部 " + count + " 条工具调用", t => {
+  const f = setup(t), group = f.group(count, false);
+  group.el.querySelector(".tg-head").click();                 // 收起状态先展开：首屏是最后一页
+  const buttons = group.el.querySelectorAll(".tg-page"), older = buttons[0], newer = buttons[1];
+  assert.equal(buttons.length, 2);
+  assert.match(older.textContent, /更早的/); assert.match(newer.textContent, /下一步/);
+  const seen = new Set();
+  const collect = () => {
+    const ids = pageIds(group);
+    assert.equal(ids.length, 40, "every page shows exactly the budgeted page size");
+    assert.ok(ids.every(id => id >= 0), "every shown entry exposes its tool argument");
+    ids.forEach(id => seen.add(id));
+  };
+  collect();
+  while (!older.hidden) { older.click(); collect(); }         // 一直往前翻到第一页
+  assert.equal(seen.size, count);
+  assert.deepEqual([...seen].sort((a, b) => a - b), Array.from({ length: count }, (_, i) => i));
+  const back = new Set(pageIds(group));                       // 当前停在第 0 页，先记下再往后翻
+  while (!newer.hidden) { newer.click(); pageIds(group).forEach(id => back.add(id)); }   // 再翻回最后一页
+  assert.equal(back.size, count);
+  assert.deepEqual([...back].sort((a, b) => a - b), Array.from({ length: count }, (_, i) => i));
 });

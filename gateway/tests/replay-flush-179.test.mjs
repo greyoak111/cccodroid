@@ -19,6 +19,9 @@ function run(n, { touch = false } = {}) {
     const node = () => ({ children: [], innerHTML: "", isConnected: true,
       append(...c) { this.children.push(...c); }, appendChild(c) { this.children.push(c); }, querySelectorAll() { return []; }, remove() {} });
     const document = { hidden: false, createElement: node };
+    // TextBlock 的释放改造（dispose/trackChatBlock）在 vm 里也要有这两个自由变量
+    const CHAT_BLOCKS = new WeakMap();
+    const trackChatBlock = (b) => { CHAT_BLOCKS.set(b.el, b); return b; };
     const setTimeout = (fn) => { const id = ++timerId; timers.set(id, fn); return id; };
     const clearTimeout = (id) => timers.delete(id);
     const requestAnimationFrame = (fn) => { const id = ++rafId; rafs.set(id, fn); return id; };
