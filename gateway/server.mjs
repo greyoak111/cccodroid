@@ -55,7 +55,7 @@ import { routePreview } from "./gw/preview.mjs";
 import { startStreamFix } from "./gw/streamfix.mjs";
 import { TERMS, routeTerminal } from "./gw/terminal.mjs";
 import { routeGit } from "./gw/git.mjs";
-import { routeComponents } from "./gw/components.mjs";
+import { compRecover, routeComponents } from "./gw/components.mjs";
 import { routeModules } from "./gw/modules.mjs";
 import { cleanOrphans, routeOrphans } from "./gw/orphans.mjs";
 import { customRefresh, routeCustom } from "./gw/custom.mjs";
@@ -196,6 +196,8 @@ server.listen(CFG.port, "127.0.0.1", () => {
   // 端口拿到了才收：以前在 listen 之前，旧网关还在跑时重复拉起的这个先改了它的恢复记录，再因 EADDRINUSE 退出（0.6.9 审计 195-T.2）。
   // 'listening' 先于任何连接派发，界面的第一个请求照样看得到恢复出来的队列
   try { recoverRunMark(); } catch (e) { log("恢复上次的运行标记失败：" + (e.stack || e.message)); }
+  // 组件安装中途被杀留下的 installing 记录 / .old 备份 / 半搬移文件：启动时回滚或收口（组件安装报告 §2）
+  compRecover().catch((e) => log("组件安装中断恢复失败：" + (e.stack || e.message)));
   // 界面地址也放到恢复之后：别让界面在队列恢复前先连进来。
   // App 探测到这台设备上 127.0.0.2 不通、界面改走 127.0.0.1 时（access.mjs 的 UI_HOST），主地址就是界面地址，不再另听一份
   if (UI_HOST !== "127.0.0.1") uiServer.listen(CFG.port, UI_HOST);

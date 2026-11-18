@@ -67,6 +67,9 @@ public class GatewayService extends Service {
     static final long PROOF_GRACE_MS = 20000;
     /** 过了宽限还连续这么久证明不了自己：结束重起（BUG-A01） */
     static final long UNPROVEN_KILL_MS = 15000;
+    /** 组件安装（switch/move）期间探活失败不算数的时长：网关在同步搬几千个文件，/__proof 答不上来是正常的。
+     *  网关落 components/.runs/<id>.installing 心跳，超过这时长没更新才按真卡死处理（组件安装报告 §1） */
+    static final long INSTALL_GRACE_MS = 120000;
     /** squatted() 的三种结论：端口空出来 / 端口上已经是能证明自己的网关 / 被别的应用占着 */
     static final int SQUAT_NO = 0, SQUAT_ADOPTED = 1, SQUAT_HIJACKED = 2;
 
@@ -475,6 +478,42 @@ public class GatewayService extends Service {
         return unprovenSince > 0 && now - spawnedAt >= PROOF_GRACE_MS && now - unprovenSince >= UNPROVEN_KILL_MS;
     }
 
+    /** 心跳阶段里值得放行探活失败的：switch（备份旧版 + 记录切换）与 move（搬文件）都可能长时间占着事件循环（组件安装报告 §1） */
+    static boolean installingPhase(String phase) { return "switch".equals(phase) || "move".equals(phase); }
+    /** 心跳还新鲜吗：at 要是个过去的时间，且距今不超过 INSTALL_GRACE_MS（at<=0 或未来时间都算不新鲜） */
+    static boolean installingFresh(long now, long at) { return at > 0 && at <= now && now - at < INSTALL_GRACE_MS; }
+
+    /** 读网关落的安装心跳（components/.runs/*.installing，JSON {id, phase, moved, at}），取 at 最新的一份。
+     *  返回 { 时间戳, 是否安装阶段 }；没有 / 读不了 / 超 4 KB 都当没有 */
+    static long[] installingBeat(File files) {
+        File[] list = new File(files, "components/.runs").listFiles();
+        long at = 0; String phase = "";
+        if (list != null) for (File f : list) {
+            if (!f.getName().endsWith(".installing")) continue;
+            try {
+                java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+                java.io.InputStream in = new java.io.FileInputStream(f);
+                byte[] buf = new byte[1024]; int c, total = 0;
+                while ((c = in.read(buf)) > 0) { total += c; if (total > 4096) break; b.write(buf, 0, c); }
+                in.close();
+                if (total > 4096) continue;
+                org.json.JSONObject j = new org.json.JSONObject(b.toString("UTF-8"));
+                long t = j.optLong("at", 0);
+                if (t > at) { at = t; phase = j.optString("phase", ""); }
+            } catch (Exception ignored) {}
+        }
+        if (at == 0) return null;
+        return new long[]{ at, installingPhase(phase) ? 1 : 0 };
+    }
+
+    /** 网关正在合法地长时间忙组件安装：探活失败暂时不算数（组件安装报告 §1）。
+     *  心跳超过 INSTALL_GRACE_MS 没更新才按真卡死处理，看门狗仍会结束它 */
+    private boolean installingGrace() {
+        Env e = env;
+        long[] beat = e == null ? null : installingBeat(e.files);
+        return beat != null && beat[1] == 1 && installingFresh(System.currentTimeMillis(), beat[0]);
+    }
+
     /** aliveDecision 的三种结论：继续观察 / 记下失联起点 / 结束重起 */
     static final int ALIVE_KEEP = 0, ALIVE_ARM = 1, ALIVE_KILL = 2;
 
@@ -498,6 +537,7 @@ public class GatewayService extends Service {
             if (stopping || paused) { killGateway(); continue; }   // 停止 / 停住：销毁后下一拍就退出了
             long now = System.currentTimeMillis();
             if (Env.proveGateway()) { unprovenSince = 0; continue; }
+            if (installingGrace()) { unprovenSince = 0; continue; }   // 组件安装合法占着事件循环：探活失败不算数
             int d = aliveDecision(false, now, spawnedAt, unprovenSince);
             if (d == ALIVE_KEEP) continue;                         // 刚起的网关还没监听好 / 连续失联还不够久
             if (d == ALIVE_ARM) { unprovenSince = now; continue; }
@@ -515,6 +555,7 @@ public class GatewayService extends Service {
             // 自己拉起的进程还活着：也要有证明。刚起的几秒网关还没监听好，给一段宽限；
             // 过了宽限还证明不了自己（卡死、端口被别人接了）就结束它重起 —— 以前根本不看证明结果（0.6.9 审计 13-02）
             if (Env.proveGateway()) { aliveUnprovenSince = 0; return true; }
+            if (installingGrace()) { aliveUnprovenSince = 0; return true; }   // 组件安装合法占着事件循环：探活失败不算数
             long now = System.currentTimeMillis();
             // 一次探活失败不算数：组件安装等重活会把事件循环占住一会儿，探活 1.5 秒超时很正常。
             // 和 waitGatewayExit 一样要求「连续」证明不了自己，别把正在干活的网关杀掉

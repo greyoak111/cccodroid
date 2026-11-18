@@ -44,7 +44,7 @@ after(() => {
   else fs.writeFileSync(DKOK, DKSAVED);
 });
 
-test("升级成功：新版覆盖旧版同名文件，旧版独有的删掉，别的组件共用的保留并转记", () => {
+test("升级成功：新版覆盖旧版同名文件，旧版独有的删掉，别的组件共用的保留并转记", async () => {
   put("bin/up-tool", "v1");
   put("share/up0610/data.txt", "old");
   put("share/up0610/oldonly.txt", "only-in-v1");
@@ -56,7 +56,7 @@ test("升级成功：新版覆盖旧版同名文件，旧版独有的删掉，�
     "bin/up-tool": "v2", "share/up0610/data.txt": "new",
     "share/up0610/keep.txt": "new-keep", "share/up0610/new.txt": "brand new",
   });
-  const rec = compSwitch("up0610", BUILD("2.0.0"), root);
+  const rec = await compSwitch("up0610", BUILD("2.0.0"), root);   // compSwitch 现在异步（分批搬移）
   assert.equal(rec.state, "installing");
   assert.equal(read("bin/up-tool"), "v2", "同路径换成新版");
   assert.equal(read("share/up0610/data.txt"), "new");
@@ -68,7 +68,7 @@ test("升级成功：新版覆盖旧版同名文件，旧版独有的删掉，�
   assert.ok(!fs.existsSync(path.join(STAGE, "up0610.old")), "备份目录清掉");
 });
 
-test("升级搬一半失败：旧版文件原样放回，记录退回 ok，备份清掉", () => {
+test("升级搬一半失败：旧版文件原样放回，记录退回 ok，备份清掉", async () => {
   put("bin/rb-tool", "v1");
   put("share/rb0610/a.txt", "old-a");
   compWriteRecord("rb0610", { id: "rb0610", version: "1.0.0", state: "ok", base: "dk0610", at: 1,
@@ -76,7 +76,7 @@ test("升级搬一半失败：旧版文件原样放回，记录退回 ok，备�
   fs.mkdirSync(LOCKED, { recursive: true });
   fs.chmodSync(LOCKED, 0o555);            // 新版有个文件要放进这里：rename 必失败
   const root = tree("rb0610", { "bin/rb-tool": "v2", "share/rb0610/a.txt": "new-a", "lib/locked0610/x.txt": "x" });
-  assert.throws(() => compSwitch("rb0610", BUILD("2.0.0"), root), /EACCES|EPERM/);
+  await assert.rejects(() => compSwitch("rb0610", BUILD("2.0.0"), root), /EACCES|EPERM/);
   assert.equal(read("bin/rb-tool"), "v1", "旧版程序放回来了");
   assert.equal(read("share/rb0610/a.txt"), "old-a", "旧版数据放回来了");
   const rec = compRecord("rb0610");
@@ -86,9 +86,9 @@ test("升级搬一半失败：旧版文件原样放回，记录退回 ok，备�
   assert.ok(!fs.existsSync(path.join(LOCKED, "x.txt")), "没搬进去的新文件不留");
 });
 
-test("首次安装：没有旧版也照常落位", () => {
+test("首次安装：没有旧版也照常落位", async () => {
   const root = tree("fi0610", { "bin/fi-tool": "hello" });
-  const rec = compSwitch("fi0610", BUILD("1.0"), root);
+  const rec = await compSwitch("fi0610", BUILD("1.0"), root);
   assert.equal(rec.state, "installing");
   assert.ok(rec.files.includes("bin/fi-tool"));
   assert.equal(read("bin/fi-tool"), "hello");

@@ -63,3 +63,17 @@ test("BUG-A05 订阅开始与网关换代时回收旧轮次文本，条数与字
   assert.ok(notify.includes("removeEldestEntry"), "runText 没有条数上限");
   assert.ok(notify.includes("RUN_TEXT_KEEP") && notify.includes("RUN_TEXT_CHARS"), "runText 缺上限常量");
 });
+
+test("组件安装报告 §1：安装心跳接进两处探活失败路径，时限 120 秒", () => {
+  assert.ok(gw.includes("static final long INSTALL_GRACE_MS = 120000"), "没放宽到 120 秒");
+  const wait = gw.slice(gw.indexOf("private int waitGatewayExit()"), gw.indexOf("private boolean alive()"));
+  assert.ok(wait.includes("installingGrace()"), "有界等待的探活失败没查安装心跳");
+  const alive = gw.slice(gw.indexOf("private boolean alive()"), gw.indexOf("private static boolean alivePid"));
+  assert.ok(alive.includes("installingGrace()"), "alive() 的探活失败没查安装心跳");
+  assert.ok(gw.includes("installingBeat(File files)") && gw.includes("installingPhase(String phase)")
+    && gw.includes("installingFresh(long now, long at)"), "心跳判定缺了纯逻辑件");
+  // 放宽要清零连续失联起点：宽限期一过从零重新累计，不能把安装期间的旧账一次清算
+  assert.ok(wait.includes("if (installingGrace()) { unprovenSince = 0; continue; }")
+    && alive.includes("if (installingGrace()) { aliveUnprovenSince = 0; return true; }"),
+    "安装放宽后没清零连续失联起点");
+});

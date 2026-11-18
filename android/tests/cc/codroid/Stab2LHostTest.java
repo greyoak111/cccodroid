@@ -62,6 +62,17 @@ public class Stab2LHostTest {
                 t0 + GatewayService.PROOF_GRACE_MS + GatewayService.UNPROVEN_KILL_MS,
                 t0, t0 + GatewayService.PROOF_GRACE_MS) == GatewayService.ALIVE_KILL, true);
 
+        // ── 组件安装报告 §1：安装阶段的心跳放宽「证明不了自己」的时限 ──
+        eq("安装 只有 switch / move 阶段算安装中", GatewayService.installingPhase("switch"), true);
+        eq("安装 只有 switch / move 阶段算安装中", GatewayService.installingPhase("move"), true);
+        eq("安装 downloading / verifying 不算", GatewayService.installingPhase("downloading"), false);
+        eq("安装 空阶段不算", GatewayService.installingPhase(""), false);
+        eq("安装 心跳 100 秒前还新鲜", GatewayService.installingFresh(t0 + 100_000, t0), true);
+        eq("安装 心跳刚过 120 秒不新鲜",
+            GatewayService.installingFresh(t0 + GatewayService.INSTALL_GRACE_MS, t0), false);
+        eq("安装 心跳是未来时间不新鲜", GatewayService.installingFresh(t0, t0 + 1), false);
+        eq("安装 心跳时间戳为 0 不新鲜", GatewayService.installingFresh(t0, 0), false);
+
         // ── 独立审查 P2-4：界面页态决策 ──
         eq("UI 已证明：界面", MainActivity.uiPageDecision(true, false, false) == MainActivity.UI_LOAD, true);
         eq("UI 端口空：界面", MainActivity.uiPageDecision(false, false, false) == MainActivity.UI_LOAD, true);
