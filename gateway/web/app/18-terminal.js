@@ -480,6 +480,14 @@
   let themeRaf = 0;
   new MutationObserver(() => {
     if (themeRaf || !TERM.inst.size) return;
-    themeRaf = requestAnimationFrame(() => { themeRaf = 0; const th = termTheme(); for (const a of TERM.inst.values()) a.xt.options.theme = th; });
+    themeRaf = requestAnimationFrame(() => {
+      themeRaf = 0;
+      const th = termTheme(), keys = Object.keys(th);
+      // 分栏宽度也写在根 style 上；颜色没变就别让 xterm 重建配色、刷新整屏。
+      for (const a of TERM.inst.values()) {
+        const prev = a.xt.options.theme;
+        if (!prev || Object.keys(prev).length !== keys.length || keys.some((k) => prev[k] !== th[k])) a.xt.options.theme = th;
+      }
+    });
   }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-skin", "style"] });
 

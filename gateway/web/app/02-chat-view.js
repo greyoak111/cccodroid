@@ -61,10 +61,20 @@
   const srv = { run: null, queue: [], runs: [], queueAll: [], intr: [], max: 3, connected: false };
   const runViews = new Map();     // runId → { av, startedAt }
   const TOOL_CARDS = new Map();   // tool_use id → 卡片（结果可能在另一页、另一个气泡里）
-  /** 历史页被裁掉：页里的卡片（含收着的子代理步骤）从索引里放掉，不然整页 DOM 还被这里拽着（审查 #49 P3-7） */
+  // 弱索引不拽住 DOM；移页/换会话的调用方都在摘节点前 dropCards(root)。
+  // 只清工具索引不够：工具组里的思考、回放刷新函数、尚未展开的子代理也有生命周期。
+  const CHAT_BLOCKS = new WeakMap();
+  function trackChatBlock(block) { CHAT_BLOCKS.set(block.el, block); return block; }
   function dropCards(root) {
-    for (const [k, c] of TOOL_CARDS) { const el = c.el || c.host; if (el && root.contains(el)) TOOL_CARDS.delete(k); }
-    for (const [k, c] of AG.cards) if (c.el && root.contains(c.el)) AG.cards.delete(k);
+    if (!root) return;
+    for (const el of [root, ...root.querySelectorAll(".txt, .think, .tool, .tgroup")]) CHAT_BLOCKS.get(el)?.dispose();
+    for (const [k, c] of TOOL_CARDS) {
+      const el = c.el || c.host;
+      if (el && root.contains(el)) { c.dispose?.(); if (TOOL_CARDS.get(k) === c) TOOL_CARDS.delete(k); }
+    }
+    for (const [k, c] of AG.cards) if (c.el && root.contains(c.el)) {
+      clearTimeout(c.tick); AG.dirty?.delete(c); AG.cards.delete(k);
+    }
   }
   // 工具结果按 tool_use id 单独留一份，不跟着卡片走（#120-4）：结果可能比卡片先到（在同一页里结果排在调用后面、
   // 但跨页时可能先渲染），也可能卡片所在页已经被 MAX_PAGES 窗口裁掉、等往上翻回来时才重建；
@@ -323,8 +333,8 @@
           sl.into = c;
         }
         tail.innerHTML = renderMd(vis.slice(fz));   // 光标不跟在每段正文后面：整条回复只留一个，见 AssistantView 的 liveTail
-        // 流式时每帧重高亮长代码块很贵（实测 1000 行单帧 179ms）：最多每 300ms 做一次，收尾时一定补上（0.6.9 审计 195-Q.1）
-        if (Date.now() - hlAt > 300) { hlAt = Date.now(); enhanceMd(tail); }
+        // 未闭合的尾块会反复换 DOM：限频之外再按字数/行数降级，长代码先显示原文。
+        if (Date.now() - hlAt > 300) { hlAt = Date.now(); enhanceMd(tail, true); }
         sl();
       } else {
         const sl = keepX();
@@ -373,7 +383,9 @@
     el.innerHTML = `<summary>${t("思考过程")} <span class="think-size"></span></summary><div class="think-body"></div>`;
     parent.appendChild(el);
     const body = el.querySelector(".think-body"), label = el.querySelector(".think-size");
-    let thinking = "", timer = 0, shown = 0, moreBtn = null, done = false;
+    let thinking = "", timer = 0, shown = 0, moreBtn = null, done = false, disposed = false;
+    function cancel() { if (timer) { clearTimeout(timer); timer = 0; } }
+    function dispose() { if (disposed) return; disposed = true; cancel(); thinking = ""; moreBtn = null; CHAT_BLOCKS.delete(el); }
 
     function moreSync(left) {
       if (!moreBtn) {
@@ -386,7 +398,7 @@
       moreBtn.style.display = left > 0 ? "block" : "none";
     }
     function render(mode) {
-      if (!el.open) return;
+      if (disposed || !el.open) return;
       if (mode === "tail") {
         body.textContent = thinking.length > THINK_TAIL ? "…" + thinking.slice(-THINK_TAIL) : thinking;
         shown = 0; moreSync(0);
@@ -398,32 +410,37 @@
       moreSync(left);
     }
     el.addEventListener("toggle", () => {
+      if (disposed) return;
       if (el.open) render(done ? "full" : "tail");
       else { body.textContent = ""; shown = 0; }
     });
     const tick = () => {
-      if (timer) return;
+      if (timer || disposed) return;
       timer = setTimeout(() => {
         timer = 0;
+        if (disposed) return;
         label.textContent = fmtChars(thinking.length);
         if (el.open && !done) { render("tail"); scrollDown(); }
       }, THINK_TICK);
     };
-    return {
+    const finish = () => {
+      cancel();
+      if (disposed) return;
+      done = true; el.classList.remove("live"); label.textContent = fmtChars(thinking.length);
+      if (el.open) render("full");
+    };
+    return trackChatBlock({
       kind: "think",
       el,
-      append(t) { thinking += t; if (!done) el.classList.add("live"); tick(); },
-      set(t) { thinking = t; done = true; el.classList.remove("live"); label.textContent = fmtChars(thinking.length); },
-      drop(n) { thinking = thinking.slice(0, Math.max(0, thinking.length - n)); label.textContent = fmtChars(thinking.length); if (el.open) render("tail"); return thinking.length; },
-      remove() { if (timer) { clearTimeout(timer); timer = 0; } el.remove(); },
-      finish() {
-        if (timer) { clearTimeout(timer); timer = 0; }
-        done = true;
-        el.classList.remove("live");
-        label.textContent = fmtChars(thinking.length);
-        if (el.open) render("full");
-      },
-    };
+      append(t) { if (disposed) return; thinking += t; if (!done) { el.classList.add("live"); tick(); } else finish(); },
+      set(t) { if (disposed) return; thinking = t; finish(); },
+      drop(n) { if (disposed) return 0; thinking = thinking.slice(0, Math.max(0, thinking.length - n)); label.textContent = fmtChars(thinking.length); if (el.open) render(done ? "full" : "tail"); return thinking.length; },
+      dispose,
+      remove() { dispose(); el.remove(); },
+      finish,
+      pause() { cancel(); },
+      resume() { if (!disposed && !done) tick(); },
+    });
   }
 
   function summarizeTool(name, input) {
@@ -444,26 +461,64 @@
    *  孙代理的步骤挂在它下面同样记着；结果、汇报、状态都按调用顺序存，展开时原样重放 */
   function LazyCard(id, name, input, live) {
     const calls = [];
-    const c = { lazy: true, id, name, input, live, calls, isAgent: name === "Agent" || name === "Task",
+    const c = { kind: "tool", lazy: true, id, name, input, live, calls, disposed: false, isAgent: name === "Agent" || name === "Task",
                 state: live ? "run" : "unknown", summary: summarizeTool(name, input), onChange: null };
     for (const k of ["result", "subText", "subProgress", "subDone", "stop", "fail", "finish", "subLazy"]) {
-      c[k] = (...a) => { calls.push([k, a]); if (k === "result") c.state = a[0] ? "ok" : "err"; if ((k === "stop" || k === "fail") && c.state === "run") c.state = "err"; };
+      c[k] = (...a) => {
+        if (c.disposed) return;
+        if (calls[calls.length - 1]?.[0] === k && ["subText", "subProgress", "subLazy", "finish"].includes(k)) calls[calls.length - 1][1] = a;
+        else calls.push([k, a]);
+        if (k === "result") {
+          c.state = a[0] ? "ok" : "err"; c.hasResult = true;
+          if (c.isAgent && a[0] && /^Async agent launched/.test(String(a[1] || "")) && !c.subEnded) {
+            const fin = AG.byTool.get(id)?.status;
+            c.state = fin && fin !== "running" ? (fin === "done" ? "ok" : "err") : "run";
+          }
+          c.attention = (!a[0] && live) || (a[0] && /\.(png|jpe?g|gif|webp)\b/i.test(String(a[1] || "")));
+        }
+        if (k === "subDone") {
+          if (c.isAgent) c.subEnded = true;
+          if (c.isAgent || c.hasResult || a[0] !== "completed") c.state = a[0] === "completed" ? "ok" : "err";
+        }
+        if ((k === "stop" || k === "fail") && c.state === "run") c.state = "err";
+        c.onChange && c.onChange();
+      };
     }
-    c.sub = (sid, sn, si) => { const n = LazyCard(sid, sn, si, live); n.host = c.host; calls.push(["sub", [sid, sn, si, n]]); if (sid) TOOL_CARDS.set(sid, n); return n; };
+    c.sub = (sid, sn, si) => {
+      if (c.disposed) return null;
+      const n = LazyCard(sid, sn, si, live); n.host = c.host;
+      calls.push(["sub", [sid, sn, si, n]]); if (sid) TOOL_CARDS.set(sid, n); return n;
+    };
+    c.dispose = () => {
+      if (c.disposed) return;
+      c.disposed = true;
+      for (const [k, a] of calls) if (k === "sub") a[3].dispose();
+      if (id && TOOL_CARDS.get(id) === c) TOOL_CARDS.delete(id);
+      calls.length = 0; input = null; c.input = null; c.host = null; c.onChange = null; c.reveal = null; c.bind = null;
+    };
+    c.remove = c.dispose;
     return c;
   }
   const SUB_SHOW = 50;
   function realize(c, list) {
+    if (c.disposed) return null;
+    const host = c.host, reveal = c.reveal, bind = c.bind;
     const b = ToolBlock(list, c.id, c.name, c.input, c.live);
-    for (const [k, a] of c.calls) {
-      if (k !== "sub") { b[k](...a); continue; }
-      const nb = b.sub(a[0], a[1], a[2]);            // b 的过程区是收着的：拿到的是新的 LazyCard，把旧的记录接过去
-      if (nb.lazy) nb.calls.push(...a[3].calls), nb.state = a[3].state;
-    }
+    bind?.(b);
+    const replay = (from, to) => {
+      for (const [k, a] of from.calls) {
+        if (k !== "sub") to[k](...a);
+        else replay(a[3], to.sub(a[0], a[1], a[2]));
+      }
+      from.dispose();       // 新卡已接管同号索引，旧 lazy 的闭包/子树不再保留
+    };
+    replay(c, b);
+    b.host = host; b.reveal = reveal;
     return b;
   }
 
   function ToolBlock(parent, id, name, input, live) {
+    let disposed = false;
     const card = document.createElement("div");
     card.className = "tool";
     card.innerHTML =
@@ -495,6 +550,7 @@
     };
     // 展开过程：先把收着时记下的步骤建成卡片、汇报排到最后，历史里的再去取
     const openSub = () => {
+      if (disposed) return;
       const s = subArea();
       s.box.classList.add("open");
       // 一次只建最近 SUB_SHOW 步（200 步全建要卡半秒多，压测实测），更早的点一下再建，插在最前面
@@ -509,11 +565,11 @@
           if (skipped) skipped.after(box); else s.list.prepend(box);
           const older = q.slice(0, cut);
           (s.older = s.older || []).push(older);              // 还没建的更早步骤：停止时也要收
-          older.open = () => { more.remove(); s.older = s.older.filter((x) => x !== older); for (const c of older) s.kids.push(realize(c, box)); };
-          more.addEventListener("click", (e) => { e.stopPropagation(); older.open(); });
+          older.open = () => { if (disposed) return; more.remove(); s.older = s.older.filter((x) => x !== older); for (const c of older) { const b = realize(c, box); if (b) s.kids.push(b); } older.length = 0; };
+          more.addEventListener("click", (e) => { e.stopPropagation(); if (!disposed) older.open?.(); });
         }
         // 建出来的卡记进 kids：停止时要连它们一起收成「中断」（审查 #52 UI07-01）
-        for (const c of q.slice(cut)) s.kids.push(realize(c, s.list));
+        for (const c of q.slice(cut)) { const b = realize(c, s.list); if (b) s.kids.push(b); }
       }
       if (s.text != null) paintSubText();
       if (s.lazy) { const f = s.lazy; s.lazy = null; f(); }
@@ -526,7 +582,7 @@
     };
     const subLabel = () => { sub.label.textContent = t("子代理过程") + (sub.n ? " · " + t("{n} 个步骤", { n: sub.n }) : ""); };
     const build = () => {           // 点开才把参数、结果铺进 DOM
-      if (built) return;
+      if (disposed || built) return;
       built = true;
       let html = `<div class="lbl">${t("参数")}</div><pre>${esc(JSON.stringify(input, null, 2))}</pre>`;
       if (result) html += `<div class="lbl">${t("结果")}</div><pre>${esc(result.text)}</pre>`;
@@ -534,7 +590,7 @@
       if (result) embedLocalImages(bodyEl);
     };
     card.querySelector(".tool-head").addEventListener("click", (e) => {
-      if (e.target.closest(".fpath")) return;          // 点的是"打开文件"，交给对话区的委托
+      if (disposed || e.target.closest(".fpath")) return;          // 点的是"打开文件"，交给对话区的委托
       card.classList.toggle("open");
       if (card.classList.contains("open")) build();
     });
@@ -545,6 +601,7 @@
       name, summary: summarizeTool(name, input), state: live ? "run" : "unknown",
       onChange: null,
       result(ok, text) {
+        if (disposed) return;
         result = { ok, text: String(text || "") };
         api.state = ok ? "ok" : "err";
         st.className = "tool-state " + (ok ? "ok" : "err");
@@ -587,12 +644,14 @@
       },
       // 停了这一轮：后台子代理（结果只是「已启动」）和它过程里还在跑的步骤也一起收成「中断」，别一直转圈计时（审查 #48 UI07-01）
       stop() {
+        if (disposed) return;
         if (!result || api.state === "run") { api.state = "err"; st.className = "tool-state err"; st.textContent = t("中断"); if (sub) sub.now.textContent = ""; api.onChange && api.onChange(); }
         if (sub) { for (const c of sub.queue) c.stop(); for (const c of (sub.older || []).flat()) c.stop(); for (const k of sub.kids) k.stop(); }
       },
       // 这一轮失败（不是用户中断）：还在转圈的卡收成「失败」，别一直亮着「运行中」（0.6.9 审计 195-BB.1）
       fail() {
-        if (!result && api.state === "run") { api.state = "err"; st.className = "tool-state err"; st.textContent = t("失败"); if (sub) sub.now.textContent = ""; api.onChange && api.onChange(); }
+        if (disposed) return;
+        if (api.state === "run") { api.state = "err"; st.className = "tool-state err"; st.textContent = t("失败"); if (sub) sub.now.textContent = ""; api.onChange && api.onChange(); }
         if (sub) {
           for (const c of sub.queue) c.fail ? c.fail() : c.stop();
           for (const c of (sub.older || []).flat()) c.fail ? c.fail() : c.stop();
@@ -600,10 +659,27 @@
         }
       },
       // 历史里没等到结果的卡保持「结果未知」，别覆盖成「—」冒充已结束（FIND-038）
-      finish() { if (!result && api.state === "unknown") st.textContent = t("状态未知"); },
+      finish() { if (disposed) return; if (!result && api.state === "unknown") st.textContent = t("状态未知"); },
+      dispose() {
+        if (disposed) return;
+        disposed = true; api.onChange = null;
+        if (id && TOOL_CARDS.get(id) === api) TOOL_CARDS.delete(id);
+        if (sub) {
+          for (const c of [...sub.queue, ...(sub.older || []).flat(), ...sub.kids]) c.dispose?.();
+          for (const older of sub.older || []) { older.length = 0; older.open = null; }
+          sub.queue.length = sub.kids.length = 0;
+          sub.older = []; sub.lazy = null; sub.text = null; sub.textEl = null;
+        }
+        for (const [node, cls] of [[st, "mo-tick"], [card, "mo-ok"]]) {
+          clearTimeout(node["_mo_" + cls]); delete node["_mo_" + cls]; node.classList.remove(cls);
+        }
+        result = null; input = null; api.reveal = null; api.bind = null; api.host = null; CHAT_BLOCKS.delete(card);
+      },
+      remove() { api.dispose(); card.remove(); },
       isAgent,
       // 子代理的一步：嵌套工具卡（注册进 TOOL_CARDS，结果和权限卡照常按 id 找到它）
       sub(sid, sname, sinput) {
+        if (disposed) return null;
         const s = subArea();
         s.n++; subLabel();
         const sum = summarizeTool(sname, sinput);
@@ -623,6 +699,7 @@
       openSub,
       // 联络卡要定位的孙代理在「更早的 n 步」里：把它所在的那一批建出来（#95 01-005）。找到了返回 true
       realizeFor(tid) {
+        if (disposed) return false;
         const b = sub?.older?.find((x) => x.some((c) => c.id === tid));
         if (b) b.open();
         return !!b;
@@ -630,13 +707,14 @@
       // 新版 claude 跑得久的普通命令（Bash 等）也会发 task_progress / task_notification，
       // id 是那张工具卡自己的：只有子代理卡才有「过程」可放，别的卡只更新状态，不挂空的「子代理过程」
       subText(text) {
-        if (!isAgent) return;
+        if (disposed || !isAgent) return;
         const s = subArea();
         s.text = String(text || "");
         if (s.box.classList.contains("open")) paintSubText();   // 收着就只记下，展开时再排版
       },
-      subProgress(desc) { if (desc && isAgent) subArea().now.textContent = desc; },
+      subProgress(desc) { if (!disposed && desc && isAgent) subArea().now.textContent = desc; },
       subDone(status) {
+        if (disposed) return;
         const ok = status === "completed";
         if (!isAgent) {
           if (result && result.ok === ok) return;          // 工具结果已经说清楚了
@@ -653,14 +731,17 @@
       // 历史里的子代理：点开「过程」时才去取
       // mk(工具调用 id) → 取那个代理过程的函数：过程里又派了孙代理的，孙代理的卡也要能点开取它自己的（审查 #48 UI07-02）
       subLazy(load, mk) {
+        if (disposed) return;
         const s = subArea();
         const run = async () => {
+          if (disposed) return;
           s.now.textContent = t("加载中…");
           const gen = view.gen;
+          const current = () => !disposed && gen === view.gen && card.isConnected && (!id || TOOL_CARDS.get(id) === api);
           try {
             const items = await load();
-            // 取的时候切走过、或这张卡已被裁掉 / 重建：回执作废，别把旧树里的卡写回全局索引（#90）
-            if (gen !== view.gen || !card.isConnected || (id && TOOL_CARDS.get(id) !== api)) return;
+            // 永久裁剪不能复活；分页暂存的卡仍归原组，翻回来允许重取。
+            if (!current()) { if (!disposed && api.host && TOOL_CARDS.get(id) === api && !card.isConnected) { s.lazy = run; s.now.textContent = ""; } return; }
             // 先按「收着」只记数据，再走 openSub 那套「一次只建最近 SUB_SHOW 步」；以前展开着来就逐项全建（#71）
             const wasOpen = s.box.classList.contains("open");
             s.box.classList.remove("open");
@@ -677,7 +758,8 @@
             s.now.textContent = items.length ? "" : t("没有记录");
             if (wasOpen) openSub();
           } catch (e) {
-            // 取失败（断网、网关重启）：把加载器放回去，收起再点开就重取；以前置空了，同一张卡再也取不到（#95 01-001）
+            if (!current()) { if (!disposed && api.host && TOOL_CARDS.get(id) === api && !card.isConnected) { s.lazy = run; s.now.textContent = ""; } return; }
+            // 取失败（断网、网关重启）：把加载器放回去，收起再点开就重取。
             s.now.textContent = e.message + " · " + t("收起再点开可重试"); s.lazy = run;
           }
         };
@@ -690,61 +772,162 @@
       const res = TOOL_RESULTS.get(id);
       if (res) api.result(res.ok, res.text);
     }
+    trackChatBlock(api);
     return api;
   }
-  /** 两段正文之间的工具调用（连同夹在中间的思考）收进一组：≥2 个工具时顶上出一行摘要
-   *  （几步 · 最近一步 · 状态），默认收起。有待确认的权限卡、失败后自动展开的卡、带图片预览的卡时，
-   *  样式（:has）让这一组保持展开。 */
+  // 折叠组只存调用数据；展开也只挂一页。失败、图片和权限所在条目单独保留，不能被分页藏住。
+  const TOOL_GROUP_PAGE = 40;
   function ToolGroup(parent) {
     const el = document.createElement("div");
     el.className = "tgroup single";
     el.innerHTML = `<button class="tg-head" type="button"></button><div class="tg-body"></div>`;
     parent.appendChild(el);
-    const head = el.firstChild, body = el.lastChild, members = [], inner = [];
-    let key = "";   // 第一个工具定了才有：用来记用户收没收（#87）
-    // 收起整组时，组里展开着的步骤、子代理过程、思考也一起收回去 —— 不然下次点开还是一大片摊着（群友 10-27）
-    head.addEventListener("click", () => {
-      // 失败、待确认时样式（:has）已经把组摊开了，组本身却没有 open：按眼前看到的来，第一下就收（审查 #48 UI07-05）
-      const showing = el.classList.contains("open") || body.getClientRects().length > 0;
-      el.classList.toggle("open", !showing);
-      // 带图片预览的卡（.tool-peek）会被样式一直撑开，光去掉 open 收不起来：记一个「用户收了」压过它（群友 11-02）
-      el.classList.toggle("shut", showing);
-      foldSet(key, !showing);
-      if (showing) {
-        body.querySelectorAll(".tool.open, .tool-sub.open").forEach((x) => x.classList.remove("open"));
-        body.querySelectorAll("details[open]").forEach((d) => { d.open = false; });
+    const head = el.firstChild, body = el.lastChild, entries = [], members = [], pinned = new Set(), shown = new Set(), counts = { run: 0, err: 0, unknown: 0, ok: 0 };
+    const older = document.createElement("button"), newer = document.createElement("button");
+    for (const b of [older, newer]) { b.type = "button"; b.className = "ts-older tg-page"; b.hidden = true; body.appendChild(b); }
+    let key = "", disposed = false, start = 0, follow = true, drawing = false, batching = false;
+    const attention = new Set();
+    const stash = document.createDocumentFragment();
+    const showing = () => members.length < 2 || el.classList.contains("open");
+    function mount(e) {
+      if (!e.box) { e.box = document.createElement("div"); e.box.className = "tg-entry"; }
+      if (e.block.lazy) {
+        if (e.mounting) return e.box;
+        let b;
+        e.mounting = true;
+        try { b = realize(e.block, e.box); } finally { e.mounting = false; }
+        if (!b) return;
+        e.block = b; b.host = el; b.reveal = () => reveal(e); b.onChange = () => changed(e);
+        if (b.state !== e.state) { counts[e.state]--; counts[b.state]++; e.state = b.state; }
+      } else if (e.block.el?.parentNode !== e.box) e.box.appendChild(e.block.el);
+      return e.box;
+    }
+    function draw() {
+      if (disposed || drawing) return;
+      drawing = true;
+      if (follow) start = Math.max(0, entries.length - TOOL_GROUP_PAGE);
+      start = Math.max(0, Math.min(start, Math.max(0, entries.length - TOOL_GROUP_PAGE)));
+      const end = Math.min(entries.length, start + TOOL_GROUP_PAGE), visible = showing();
+      for (const e of [...pinned]) {
+        const box = e.box;
+        if (!box?.querySelector(".perm:not(.done), .tool-peek") && !(visible && box?.querySelector(".tool.open"))) pinned.delete(e);
       }
-    });
-    function refresh() {
+      for (const e of shown) if (e.box?.querySelector(".perm:not(.done), .tool-peek")) pinned.add(e);
+      const wanted = new Set(pinned);
+      if (visible) for (let i = start; i < end; i++) wanted.add(entries[i]);
+      for (const e of shown) if (!wanted.has(e)) { stash.appendChild(e.box); shown.delete(e); }
+      let next = newer;
+      for (const e of [...wanted].sort((a, b) => b.at - a.at)) {
+        const box = mount(e); if (box && (box.parentNode !== body || box.nextSibling !== next)) body.insertBefore(box, next);
+        if (box) { shown.add(e); next = box; }
+      }
+      older.hidden = !visible || !start; newer.hidden = !visible || end >= entries.length;
+      older.textContent = t("更早的 {n} 步", { n: start });
+      newer.textContent = t("下一步") + " · " + t("{n} 个步骤", { n: entries.length - end });
+      drawing = false;
+    }
+    function summary() {
       const n = members.length;
       el.classList.toggle("single", n < 2);
       if (n < 2) return;
-      const lastM = members[n - 1];
-      const run = members.some((m) => m.state === "run"), err = members.some((m) => m.state === "err"),
-            unk = members.some((m) => m.state === "unknown");
-      // 有一步没等到结果就别说「完成」（FIND-038）：在跑 > 有失败 > 结果未知 > 完成
-      const [cls, txt] = run ? ["run", t("运行中")] : err ? ["err", t("有失败")] : unk ? ["unknown", t("状态未知")] : ["ok", t("完成")];
-      head.innerHTML = `<span class="chev">▶</span><span class="tg-count">${esc(t("{n} 个步骤", { n }))}</span>` +
-        `<span class="tool-arg">${esc(lastM.name + (lastM.summary ? " " + lastM.summary : ""))}</span>` +
-        `<span class="tool-state ${cls}">${esc(txt)}</span>`;
+      const last = members[n - 1].block;
+      const [cls, label] = counts.run ? ["run", t("运行中")] : counts.err ? ["err", t("有失败")] : counts.unknown ? ["unknown", t("状态未知")] : ["ok", t("完成")];
+      const html = `<span class="chev">▶</span><span class="tg-count">${esc(t("{n} 个步骤", { n }))}</span>` +
+        `<span class="tool-arg">${esc(last.name + (last.summary ? " " + last.summary : ""))}</span><span class="tool-state ${cls}">${esc(label)}</span>`;
+      if (head._html !== html) { head.innerHTML = html; head._html = html; }
     }
-    return {
-      kind: "tgroup",
-      body,
-      get lastInner() { return inner[inner.length - 1]; },
-      add(m) {
-        if (!members.length && m.id) {
-          key = "g:" + m.id;
-          const f = foldGet(key);      // 切回来重建：照用户上次的选择
-          if (f !== undefined) { el.classList.toggle("open", f); el.classList.toggle("shut", !f); }
+    function changed(e) {
+      // replay 会同步汇报子卡/结果；等新卡接管 entry 后由 mount 一次校准，不能重入实化。
+      if (disposed || e.mounting) return;
+      const state = e.block.state;
+      if (state !== e.state) { counts[e.state]--; counts[state]++; e.state = state; }
+      const show = e.block.lazy ? e.block.attention : e.block.el?.classList.contains("open") || e.block.el?.querySelector(".tool.open, .tool-peek");
+      if (show) attention.add(e);
+      if (!batching) { flushAttention(); summary(); }
+    }
+    function flushAttention() {
+      if (!attention.size) return;
+      const pending = [...attention]; attention.clear();
+      for (const e of pending) { pinned.add(e); mount(e); }
+      if (!el.classList.contains("shut")) el.classList.add("open");
+      draw();
+    }
+    function reveal(e) {
+      if (disposed) return null;
+      follow = false; start = Math.max(0, e.at - TOOL_GROUP_PAGE + 1);
+      el.classList.add("open"); el.classList.remove("shut"); draw();
+      return e.block;
+    }
+    older.addEventListener("click", () => { follow = false; start = Math.max(0, start - TOOL_GROUP_PAGE); draw(); });
+    newer.addEventListener("click", () => { start += TOOL_GROUP_PAGE; follow = start + TOOL_GROUP_PAGE >= entries.length; draw(); });
+    head.addEventListener("click", () => {
+      if (disposed) return;
+      const open = showing() || body.getClientRects().length > 0;
+      el.classList.toggle("open", !open); el.classList.toggle("shut", open); foldSet(key, !open);
+      if (open) {
+        for (const root of [body, stash]) {
+          root.querySelectorAll(".tool.open, .tool-sub.open").forEach((x) => x.classList.remove("open"));
+          root.querySelectorAll("details[open]").forEach((d) => { d.open = false; });
         }
-        members.push(m); inner.push(m); m.onChange = refresh; refresh();
-      },
-      addThink(b) { inner.push(b); if (b.el.parentNode !== body) body.appendChild(b.el); },
-      finish() { for (const b of inner) b.finish && b.finish(); refresh(); },
-      stop() { for (const m of members) m.stop(); },
-      fail() { for (const m of members) m.fail ? m.fail() : m.stop(); refresh(); },
+      }
+      draw();
+    });
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      for (const e of entries) { e.block.onChange = null; e.block.reveal = null; e.block.dispose?.(); e.box?.remove(); }
+      entries.length = members.length = 0; pinned.clear(); shown.clear(); attention.clear(); stash.replaceChildren(); CHAT_BLOCKS.delete(el);
     };
+    function add(m) {
+      if (disposed) { m.dispose?.(); return; }
+      if (!members.length && m.id) {
+        key = "g:" + m.id;
+        const f = foldGet(key);
+        if (f !== undefined) { el.classList.toggle("open", f); el.classList.toggle("shut", !f); }
+      }
+      const e = { block: m, state: m.state, box: null, at: entries.length };
+      entries.push(e); members.push(e); counts[m.state]++;
+      const bind = (c, path = []) => {
+        c.host = el;
+        c.reveal = () => {
+          let block = reveal(e);
+          for (const id of path) { block?.openSub?.(); block?.realizeFor?.(id); block = TOOL_CARDS.get(id); }
+          return block;
+        };
+        c.onChange = () => changed(e);
+        c.bind = (next) => bind(next, path);
+        const sub = c.sub; c.sub = (...a) => { const child = sub(...a); if (child) bind(child, [...path, child.id]); return child; };
+      };
+      bind(m);
+      summary(); if (showing() || members.length <= 2) draw();
+      return e;
+    }
+    return trackChatBlock({
+      kind: "tgroup", el, body,
+      get lastInner() { return entries[entries.length - 1]?.block; },
+      retained() { return { nodes: stash.querySelectorAll("*").length, chars: stash.textContent.length }; },
+      pause() { for (const e of entries) e.block.pause?.(); },
+      resume() { for (const e of entries) e.block.resume?.(); },
+      tool(id, name, input, live) {
+        const m = LazyCard(id, name, input, live), e = add(m);
+        if (!e) return null;
+        if (id && !m.disposed) TOOL_CARDS.set(id, m);
+        const res = id && TOOL_RESULTS.get(id);
+        if (res) { if (e.block.lazy) e.block.result(res.ok, res.text); else changed(e); }
+        return e.block;
+      },
+      add,
+      addThink(b) {
+        if (disposed) { b.dispose?.(); return; }
+        const e = { block: b, box: null, at: entries.length }; entries.push(e);
+        if (showing()) draw(); else { mount(e); stash.appendChild(e.box); }
+      },
+      finish() { if (disposed) return; batching = true; for (const e of entries) e.block.finish?.(); batching = false; flushAttention(); summary(); },
+      stop() { if (disposed) return; batching = true; for (const e of entries) if (e.block.kind === "think") e.block.finish(); for (const e of members) e.block.stop(); batching = false; flushAttention(); summary(); },
+      fail() { if (disposed) return; batching = true; for (const e of entries) if (e.block.kind === "think") e.block.finish(); for (const e of members) e.block.fail ? e.block.fail() : e.block.stop(); batching = false; flushAttention(); summary(); },
+      dispose,
+      remove() { dispose(); el.remove(); },
+    });
   }
   function toolResult(id, ok, text) {
     if (id) rememberResult(id, ok, text);   // 卡片现在没有、或以后被裁掉重建，结果都还在（#120-4）

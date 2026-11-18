@@ -97,9 +97,9 @@
   /** 顶层 Agent 卡对应的子代理卡：同一组步骤里派出的共用一张（排在那组后面） */
   function agCardFor(tool) {
     if (AG.cards.has(tool)) return AG.cards.get(tool);
-    const tc = TOOL_CARDS.get(tool);
-    if (!tc || !tc.el || !tc.el.isConnected) return null;
-    const anchor = tc.el.closest(".tgroup") || tc.el;
+    const tc = TOOL_CARDS.get(tool), at = tc?.host || tc?.el;
+    if (!at?.isConnected) return null;
+    const anchor = at.closest(".tgroup") || at;
     const next = anchor.nextElementSibling;
     const card = next && next.classList.contains("agc") && next._agc ? next._agc : AgentsCard(anchor, tool);
     card.tools.add(tool);
@@ -199,6 +199,7 @@
     for (const a of chain) {
       for (let i = 0; i < 30; i++) {               // 历史里上级的过程是异步取的：等它的卡建出来
         card = TOOL_CARDS.get(a.tool);
+        if (card?.reveal) card = card.reveal();
         if (card && !card.lazy && card.el?.isConnected) break;
         if (card?.lazy && up?.realizeFor?.(a.tool)) continue;   // 落在上级「更早的 n 步」里：干等不会变，直接把那批建出来（#95 01-005）
         await new Promise((r) => setTimeout(r, 100));

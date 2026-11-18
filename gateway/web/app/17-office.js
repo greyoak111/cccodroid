@@ -3,18 +3,20 @@
   // 两者都可以切到「原版式」—— 和 ppt / doc 等一样交给 LibreOffice 转成 PDF（网关缓存结果）。
   // 脚本加载用 01 段的 loadScript：这里以前另声明了一个同名的，把那边（带 css 参数）的盖掉了，
   // 对话里先出现公式时 KaTeX 的样式不加载（审查 #49 P1-1）
-  // docx / xlsx 是整份读进主线程解析的：超过这个大小就别硬来，改用 LibreOffice 或下载（195-C.3）
+  // 文件读取仍封顶；xlsx 交给 Worker 解析，不能因移出主线程就放松内存预算。
   const VW_OFFICE_MAX = 32 * 1024 * 1024;
-  async function vwFetchBuf(max) {
+  async function vwFetchBuf(max, signal) {
+    const path = VW.path, knownSize = VW.size;
     const tooBig = (size) => new Error(t("文件太大（{size}），不适合在应用里直接解析；可以用「原版式」转成 PDF 看，或下载后用别的应用打开。", { size: fmtSize(size) }));
     // 先按大小拦，别把 32MB 以上的文件整份读进内存再判：手机主线程可能直接卡死 / 内存不够（稳定性报告 FIND-024）。
     // 打开时一般已带 size；没有（0）就向网关补一次 stat。stat 失败按老路走，读回来那个判断还留着兜底
     if (max) {
-      let size = VW.size;
-      if (!size) { try { size = Number((await api("/api/file/stat?path=" + encodeURIComponent(VW.path))).size) || 0; } catch {} }
+      let size = knownSize;
+      if (!size) { try { size = Number((await api("/api/file/stat?path=" + encodeURIComponent(path), { signal })).size) || 0; } catch (e) { if (signal?.aborted) throw e; } }
       if (size > max) throw tooBig(size);
     }
-    const r = await fetch(fileUrl(VW.path));
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const r = await fetch(fileUrl(path), { signal });
     if (!r.ok) throw new Error("HTTP " + r.status);
     // 响应自己声明的大小也先看：Content-Length 超限就别读了（stat 之后文件可能刚被换过）（BUG-UIFS-006）
     if (max) {
@@ -48,7 +50,7 @@
     return b;
   }
   // 领一个号：同一文档里切版式（网页 ↔ 原版式）、换了文档、关了查看器，之前在途的读取 / 转换 / 安装回来都不许再写正文（审查 #48 04-F04、04-F05）
-  const vwTake = () => { VW.mgen = (VW.mgen || 0) + 1; const g = VW.gen, m = VW.mgen; return () => VW.gen === g && VW.mgen === m && !viewerEl.classList.contains("hidden"); };
+  const vwTake = () => { closeViewerSheet(); VW.mgen = (VW.mgen || 0) + 1; const g = VW.gen, m = VW.mgen; return () => VW.gen === g && VW.mgen === m && !viewerEl.classList.contains("hidden"); };
   const vwLoading = (msg) => { $("vw-body").innerHTML = `<div class="vw-empty">${msg || t("读取中…")}</div>`; };
   function vwFail(msg, withPdf) {
     $("vw-body").innerHTML = `<div class="vw-empty"><div>${esc(msg)}</div>
@@ -111,172 +113,144 @@
     $("vw-info").textContent = `${fmtSize(VW.size)} · ${t("{n} 字", { n: words.toLocaleString() })}`;
   }
 
-  const SHEET_MAX_R = 5000, SHEET_MAX_C = 200;
-  // 行、列各封顶还不够：两格隔得远（A1 和 CV1000）就是十万个空格子。按总格数分段画，余下的点「再显示」续上（#73）
-  const SHEET_CELLS = 20000;
-  // xlsx 是 ZIP：先扫中央目录，声明解压后的大小有上限，挡住“几十 KB 解出几百 MB”的压缩炸弹（199-A-02）。
-  // SheetJS 本身没有解压 / 共享字符串上限，只能在这之前拦。返回 true = 不要交给 SheetJS
-  function zipExpandsTooMuch(buf) {
-    const b = new Uint8Array(buf);
-    if (b.length < 22 || b[0] !== 0x50 || b[1] !== 0x4b) return false;   // 不是 ZIP（老 .xls 等）：交给 SheetJS 按原格式读
-    let eocd = -1;
-    for (let i = b.length - 22; i >= Math.max(0, b.length - 22 - 65535); i--) {
-      if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x05 && b[i + 3] === 0x06) { eocd = i; break; }
-    }
-    if (eocd < 0) return true;                                          // 结构都找不全：别硬解
-    const dv = new DataView(buf);
-    const count = dv.getUint16(eocd + 10, true);
-    let off = dv.getUint32(eocd + 16, true), total = 0;
-    for (let n = 0; n < count; n++) {
-      if (off + 46 > b.length || dv.getUint32(off, true) !== 0x02014b50) return true;
-      const usize = dv.getUint32(off + 24, true);
-      if (usize === 0xffffffff) return true;                            // ZIP64：肯定超过这里的上限
-      total += usize;
-      if (usize > 128 * 1024 * 1024 || total > 256 * 1024 * 1024) return true;
-      off += 46 + dv.getUint16(off + 28, true) + dv.getUint16(off + 30, true) + dv.getUint16(off + 32, true);
-    }
-    return false;
+  // zipExpandsTooMuch / SheetJS / 替格与合并处理均在 Worker；页面只收有界分页。
+  function closeViewerSheet(expected) {
+    const s = expected || VW.sheet;
+    // 旧读取失效只停自己，不能把后来新文件的 Worker 和页状态一起清掉。
+    if (VW.sheet === s) { VW.sheet = null; VW.sheetMore = null; VW.wb = VW.sheets = null; }
+    if (s) s.stop();
+  }
+  function sheetSession() {
+    const abort = new AbortController(), pending = new Map();
+    let worker, session, observer, reason, seq = 0, initialTimer = 0, dead = false;
+    const cancel = () => new DOMException("Aborted", "AbortError");
+    const stop = (err = cancel()) => {
+      if (dead) return;
+      dead = true; reason = err; observer?.disconnect(); clearTimeout(initialTimer); initialTimer = 0; abort.abort(); worker?.terminate();
+      if (worker) worker.onmessage = worker.onerror = worker.onmessageerror = null;
+      const waiting = pending.size;
+      for (const p of pending.values()) { clearTimeout(p.timer); p.reject(err); }
+      pending.clear();
+      if (!waiting && err.name !== "AbortError" && session && VW.sheet === session) vwSheetFail(session, err);
+    };
+    try { worker = new Worker("/office/sheet-worker.js"); }
+    catch (e) { stop(e); throw e; }
+    worker.onerror = (e) => { e.preventDefault?.(); stop(new Error(t("读取失败"))); };
+    worker.onmessageerror = () => stop(new Error(t("读取失败")));
+    worker.onmessage = ({ data }) => {
+      const p = data && pending.get(data.id); if (!p || dead) return;
+      clearTimeout(p.timer); pending.delete(data.id);
+      if (data.error) {
+        const e = new Error(data.error.code === "tooBig" ? t("这个表格文件内部展开后太大，不能安全打开。") : data.error.message || t("读取失败"));
+        p.reject(e);
+      } else p.resolve(data.value);
+    };
+    const ask = (op, args = {}, transfer = []) => new Promise((resolve, reject) => {
+      if (dead) return reject(reason || cancel());
+      if (op === "load") { clearTimeout(initialTimer); initialTimer = 0; }
+      // 连续点表签只保留最新读请求的等待闭包；旧回执找不到序号就丢弃。
+      if (op !== "load") for (const [id, p] of pending) if (p.op === op) { clearTimeout(p.timer); pending.delete(id); p.reject(cancel()); }
+      const id = ++seq;
+      const timer = setTimeout(() => stop(new Error(t("读取失败"))), 120000);
+      pending.set(id, { op, resolve, reject, timer });
+      try { worker.postMessage({ id, op, ...args }, transfer); }
+      catch (e) { clearTimeout(timer); pending.delete(id); reject(e); stop(e); }
+    });
+    session = { ask, stop, signal: abort.signal, get dead() { return dead; }, pageGen: 0, cellGen: 0 };
+    observer = new MutationObserver(() => { if (viewerEl.classList.contains("hidden")) closeViewerSheet(session); });
+    observer.observe(viewerEl, { attributes: true, attributeFilter: ["class"] });
+    initialTimer = setTimeout(() => stop(new Error(t("读取失败"))), 120000);   // stat / 下载无回包也要能退出
+    return session;
   }
   async function vwSheet() {
     const still = vwTake();
     vwActs([[t("原版式"), "aspdf"]]);
     vwLoading();
-    let wb;
+    let s;
     try {
-      await loadScript("/office/xlsx.full.min.js");
-      const ab = await vwFetchBuf(VW_OFFICE_MAX);
-      if (zipExpandsTooMuch(ab)) throw new Error(t("这个表格文件内部展开后太大，不能安全打开。"));
-      wb = window.XLSX.read(ab, { type: "array", cellStyles: true, cellNF: true });   // cellStyles 才读得出隐藏行列和列宽（审查 C-006）
+      s = sheetSession(); VW.sheet = s;
+      const ab = await vwFetchBuf(VW_OFFICE_MAX, s.signal);
+      if (!still() || VW.sheet !== s) return closeViewerSheet(s);
+      const r = await s.ask("load", { buffer: ab }, [ab]);
+      if (!still() || VW.sheet !== s) return closeViewerSheet(s);
+      if (!r || !Array.isArray(r.names) || r.names.length > 1000 || r.names.some((n) => typeof n !== "string")) throw new Error(t("读取失败"));
+      if (!r.names.length) { closeViewerSheet(); vwFail(t("（这张表是空的）"), true); return; }
+      VW.sheets = r.names;
+      $("vw-body").innerHTML = `<div class="vw-sheet"><div class="vw-grid-wrap"></div>
+        <div class="vw-cellbar tiny"></div>
+        <div class="vw-tabs">${VW.sheets.map((n, i) => `<button class="vw-tab" data-i="${i}">${esc(n)}</button>`).join("")}</div></div>`;
+      const box = $("vw-body").querySelector(".vw-sheet");
+      box.querySelector(".vw-tabs").addEventListener("click", (e) => {
+        const b = e.target.closest(".vw-tab"); if (b) vwSheetShow(Number(b.dataset.i));
+      });
+      box.querySelector(".vw-grid-wrap").addEventListener("click", async (e) => {
+        if (e.target.closest(".vw-more")) { VW.sheetMore?.(); return; }
+        const td = e.target.closest("td[data-c]"); if (!td || VW.sheet !== s) return;
+        box.querySelectorAll("td.sel").forEach((x) => x.classList.remove("sel")); td.classList.add("sel");
+        const gen = ++s.cellGen, page = s.pageGen, i = VW.sheetI;
+        try {
+          const cell = await s.ask("cell", { sheet: i, addr: td.dataset.a });
+          if (!still() || VW.sheet !== s) return closeViewerSheet(s);
+          if (gen !== s.cellGen || page !== s.pageGen) return;
+          box.querySelector(".vw-cellbar").textContent = `${cell.addr}  ${cell.text}${cell.formula ? `   =${cell.formula}` : ""}`;
+        } catch (e) {
+          if (!still() || VW.sheet !== s) closeViewerSheet(s);
+          else if (e.name !== "AbortError" && gen === s.cellGen && page === s.pageGen) vwSheetFail(s, e);
+        }
+      });
+      await vwSheetShow(0);
     } catch (e) {
-      if (still()) vwFail(t("这个表格读不出来：{msg}", { msg: e.message || String(e) }), true);
-      return;
+      if (s && (!still() || VW.sheet !== s)) closeViewerSheet(s);
+      else if (still()) { closeViewerSheet(s); vwFail(t("这个表格读不出来：{msg}", { msg: e.message || String(e) }), true); }
     }
-    if (!still()) return;
-    const meta = (wb.Workbook && wb.Workbook.Sheets) || [];
-    const names = wb.SheetNames.filter((n, i) => !(meta[i] && meta[i].Hidden));
-    VW.wb = wb; VW.sheets = names.length ? names : wb.SheetNames;
-    $("vw-body").innerHTML = `<div class="vw-sheet"><div class="vw-grid-wrap"></div>
-      <div class="vw-cellbar tiny"></div>
-      <div class="vw-tabs">${VW.sheets.map((n, i) => `<button class="vw-tab" data-i="${i}">${esc(n)}</button>`).join("")}</div></div>`;
-    const box = $("vw-body").querySelector(".vw-sheet");
-    box.querySelector(".vw-tabs").addEventListener("click", (e) => {
-      const b = e.target.closest(".vw-tab"); if (b) vwSheetShow(Number(b.dataset.i));
-    });
-    box.querySelector(".vw-grid-wrap").addEventListener("click", (e) => {
-      if (e.target.closest(".vw-more")) { VW.sheetMore && VW.sheetMore(); return; }
-      const td = e.target.closest("td[data-c]"); if (!td) return;
-      box.querySelectorAll("td.sel").forEach((x) => x.classList.remove("sel"));
-      td.classList.add("sel");
-      const X = window.XLSX, ws = wb.Sheets[VW.sheets[VW.sheetI]];
-      const addr = td.dataset.a || X.utils.encode_cell({ r: Number(td.parentNode.dataset.r), c: Number(td.dataset.c) });
-      const cell = ws[addr];
-      const val = sheetText(cell, wb);
-      box.querySelector(".vw-cellbar").textContent = `${addr}  ${val}${cell && cell.f ? `   =${cell.f}` : ""}`;
-    });
-    vwSheetShow(0);
   }
-  // Excel 的默认日期格式（编号 14）各地显示不同，SheetJS 一律写成美式 m/d/yy —— 这种按年-月-日显示
-  // wb：认工作簿的日期系统。1904 系统（Mac 版 Excel 的老文件）同一个数差 1462 天（#106 07-005）；
-  // 注意 parse_date_code 的第三个参数是回历开关，日期系统要放在第二个参数的 date1904 里
-  function sheetText(cell, wb) {
-    if (!cell) return "";
-    const w = cell.w != null ? cell.w : String(cell.v ?? "");
-    if (cell.t === "n" && cell.z && /^\d{1,2}\/\d{1,2}\/\d{2,4}( |$)/.test(w) && window.XLSX.SSF.is_date(cell.z)) {
-      const d = window.XLSX.SSF.parse_date_code(cell.v, wb?.Workbook?.WBProps?.date1904 ? { date1904: true } : undefined), p = (n) => String(n).padStart(2, "0");
-      if (!d) return w;
-      const time = /[hs]/i.test(cell.z.replace(/"[^"]*"/g, ""));   // 格式里没有时分秒就只显示日期
-      return `${d.y}-${p(d.m)}-${p(d.d)}${time ? ` ${p(d.H)}:${p(d.M)}${d.S ? ":" + p(d.S) : ""}` : ""}`;
-    }
-    return w;
+  function vwSheetFail(s, e) {
+    if (VW.sheet !== s) return;
+    closeViewerSheet();
+    vwFail(t("这个表格读不出来：{msg}", { msg: e.message || String(e) }), true);
   }
-  function vwSheetShow(i) {
-    const X = window.XLSX, wb = VW.wb, name = VW.sheets[i], ws = wb.Sheets[name];
-    VW.sheetI = i;
-    const box = $("vw-body").querySelector(".vw-sheet");
+  async function vwSheetShow(i) {
+    const s = VW.sheet, box = $("vw-body").querySelector(".vw-sheet");
+    if (!s || !box || !VW.sheets || !Number.isInteger(i) || i < 0 || i >= VW.sheets.length) return;
+    const gen = ++s.pageGen; ++s.cellGen;
+    VW.sheetI = i; VW.sheetMore = null;
+    const current = () => {
+      if (VW.sheet !== s || viewerEl.classList.contains("hidden")) { closeViewerSheet(s); return false; }
+      return s.pageGen === gen;
+    };
     box.querySelectorAll(".vw-tab").forEach((b) => b.classList.toggle("on", Number(b.dataset.i) === i));
     box.querySelector(".vw-cellbar").textContent = "";
     const wrap = box.querySelector(".vw-grid-wrap");
-    if (!ws || !ws["!ref"]) { wrap.innerHTML = `<div class="vw-empty">${t("（这张表是空的）")}</div>`; return; }
-    // 畸形文件的 !ref 可能让 decode_range 抛错：以前整个切换停在旧图 / 白屏（196 前端注入域）
-    let rg;
-    try { rg = X.utils.decode_range(ws["!ref"]); }
-    catch { wrap.innerHTML = `<div class="vw-empty">${t("这张表的范围信息坏了，读不出来")}</div>`; return; }
-    const r1 = Math.min(rg.e.r, rg.s.r + SHEET_MAX_R - 1), c1 = Math.min(rg.e.c, rg.s.c + SHEET_MAX_C - 1);
-    // 合并单元格：左上角那格带 rowspan/colspan，被盖住的格子不画
-    // 只处理落在显示窗口里的部分：畸形文件可以写一个盖住 A1:XFD1048576 的合并，或者成千上万个互相重叠的大合并，
-    // 全量展开会把界面卡死。合并裁到窗口内，累计展开的格数不超过窗口格数的两倍，超了后面的合并按普通格子画
-    const cols = ws["!cols"] || [], rows = ws["!rows"] || [];
-    const hid = (c) => cols[c] && cols[c].hidden;    // 隐藏的列和行一样不画，别当普通格子露出来
-    const hidR = (r) => rows[r] && rows[r].hidden;
-    const W = c1 - rg.s.c + 1, cov = new Uint8Array((r1 - rg.s.r + 1) * W), span = new Map(), src = new Map();
-    const covered = (r, c) => cov[(r - rg.s.r) * W + c - rg.s.c] === 1;
-    let budget = 2 * cov.length, n = 0;
-    for (const m of ws["!merges"] || []) {
-      if (++n > 20000) break;
-      if (!m || !m.s || !m.e || m.s.r > r1 || m.s.c > c1 || m.s.r < rg.s.r || m.s.c < rg.s.c || m.e.r < m.s.r || m.e.c < m.s.c) continue;
-      const er = Math.min(m.e.r, r1), ec = Math.min(m.e.c, c1), k0 = m.s.r + "," + m.s.c;
-      if (span.has(k0) || covered(m.s.r, m.s.c)) continue;      // 和前面的合并撞了左上角，别叠出错位的表
-      const area = (er - m.s.r + 1) * (ec - m.s.c + 1);
-      if ((budget -= area) < 0) break;
-      for (let r = m.s.r; r <= er; r++) cov.fill(1, (r - rg.s.r) * W + m.s.c - rg.s.c, (r - rg.s.r) * W + ec - rg.s.c + 1);
-      // 跨度只数没隐藏的行列；左上角那行 / 列被隐藏时，由第一个看得见的格子来画，内容仍取左上角（审查 #52 C-006）
-      let ar = -1, ac = -1, nr = 0, nc = 0;
-      for (let r = m.s.r; r <= er; r++) if (!hidR(r)) { if (ar < 0) ar = r; nr++; }
-      for (let c = m.s.c; c <= ec; c++) if (!hid(c)) { if (ac < 0) ac = c; nc++; }
-      if (!nr || !nc) continue;                         // 整块都藏起来了：盖住就行
-      const ka = ar + "," + ac;
-      span.set(ka, [nr, nc]);
-      if (ka !== k0) src.set(ka, m.s);
-      cov[(ar - rg.s.r) * W + ac - rg.s.c] = 2;          // 锚点自己要画
-    }
-    let h = `<table class="vw-grid"><colgroup><col class="rh">`;
-    for (let c = rg.s.c; c <= c1; c++) {
-      if (hid(c)) continue;
-      const w = cols[c] ? cols[c].wpx || (cols[c].wch ? cols[c].wch * 7 + 5 : 0) : 0;
-      h += `<col style="width:${w ? Math.max(24, Math.min(400, Math.round(w))) : 80}px">`;
-    }
-    h += `</colgroup><thead><tr><th class="corner"></th>`;
-    for (let c = rg.s.c; c <= c1; c++) if (!hid(c)) h += `<th>${X.utils.encode_col(c)}</th>`;
-    h += `</tr></thead><tbody>`;
-    const rowsHtml = (from, to) => {
-    let h = "";
-    for (let r = from; r <= to; r++) {
-      if (hidR(r)) continue;
-      h += `<tr data-r="${r}"><th>${r + 1}</th>`;
-      for (let c = rg.s.c; c <= c1; c++) {
-        const k = r + "," + c;
-        if (covered(r, c) || hid(c)) continue;
-        const cell = ws[X.utils.encode_cell(src.get(k) || { r, c })];
-        const sp = span.get(k);
-        const txt = sheetText(cell, wb);
-        const num = cell && (cell.t === "n" || cell.t === "d");
-        h += `<td data-c="${c}"${src.has(k) ? ` data-a="${X.utils.encode_cell(src.get(k))}"` : ""}${sp ? ` rowspan="${sp[0]}" colspan="${sp[1]}"` : ""}${num ? ` class="n"` : cell && cell.t === "e" ? ` class="err"` : ""}>${esc(txt)}</td>`;
-      }
-      h += `</tr>`;
-    }
-    return h;
+    wrap.innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
+    let page, busy = false;
+    const moreLabel = () => t("再显示 {n} 行（共 {total} 行）", { n: Math.min(page.step, page.remaining), total: page.total });
+    const moreHtml = () => page.done ? "" : `<button type="button" class="btn ghost sm vw-more">${esc(moreLabel())}</button>`;
+    const load = async (first) => {
+      if (busy || !current()) return;
+      busy = true;
+      const more = wrap.querySelector(".vw-more"); if (more) more.disabled = true;
+      try {
+        const r = await s.ask("page", { sheet: i, from: first ? null : page.next });
+        if (!current()) return;
+        if (r.empty || r.badRange) {
+          wrap.innerHTML = `<div class="vw-empty">${r.empty ? t("（这张表是空的）") : t("这张表的范围信息坏了，读不出来")}</div>`;
+          return;
+        }
+        if (typeof r.html !== "string" || r.html.length > 256 * 1024 || typeof r.header !== "string" || r.header.length > 32768 || !Number.isInteger(r.next) || (!first && r.next <= page.next && !r.done)) throw new Error(t("读取失败"));
+        page = r;
+        if (first) {
+          wrap.innerHTML = `<table class="vw-grid">${r.header}<tbody>${r.html}</tbody></table>${moreHtml()}${r.cut ? `<div class="vw-cut tiny">${t("表太大，只显示了前 {r} 行、{c} 列；完整内容请用「原版式」或下载后用别的应用看", { r: r.rows, c: r.cols })}</div>` : ""}`;
+          wrap.scrollTop = 0; wrap.scrollLeft = 0;
+          $("vw-info").textContent = `${fmtSize(VW.size)} · ${VW.sheets[i]} · ${r.range}`;
+        } else {
+          wrap.querySelector(".vw-grid tbody").insertAdjacentHTML("beforeend", r.html);
+          if (r.done) more?.remove(); else if (more) { more.textContent = moreLabel(); more.disabled = false; }
+        }
+        VW.sheetMore = r.done ? null : () => load(false);
+      } catch (e) { if (e.name !== "AbortError" && current()) vwSheetFail(s, e); }
+      finally { busy = false; }
     };
-    // 合并的 rowspan 跨段也没事：续上的行插进同一个 tbody，被盖住的格子本来就不画
-    let visC = 0; for (let c = rg.s.c; c <= c1; c++) if (!hid(c)) visC++;
-    const step = Math.max(50, Math.floor(SHEET_CELLS / Math.max(1, visC)));
-    let done = Math.min(r1, rg.s.r + step - 1);
-    h += rowsHtml(rg.s.r, done);
-    h += `</tbody></table>`;
-    const moreLabel = () => t("再显示 {n} 行（共 {total} 行）", { n: Math.min(step, r1 - done), total: r1 - rg.s.r + 1 });
-    if (done < r1) h += `<button type="button" class="btn ghost sm vw-more">${esc(moreLabel())}</button>`;
-    const cut = rg.e.r > r1 || rg.e.c > c1;
-    if (cut) h += `<div class="vw-cut tiny">${t("表太大，只显示了前 {r} 行、{c} 列；完整内容请用「原版式」或下载后用别的应用看", { r: r1 - rg.s.r + 1, c: c1 - rg.s.c + 1 })}</div>`;
-    wrap.innerHTML = h;
-    wrap.scrollTop = 0; wrap.scrollLeft = 0;
-    VW.sheetMore = () => {
-      if (VW.sheetI !== i || done >= r1) return;
-      const to = Math.min(r1, done + step);
-      wrap.querySelector(".vw-grid tbody").insertAdjacentHTML("beforeend", rowsHtml(done + 1, to));
-      done = to;
-      const more = wrap.querySelector(".vw-more");
-      if (done >= r1) more?.remove(); else if (more) more.textContent = moreLabel();
-    };
-    $("vw-info").textContent = `${fmtSize(VW.size)} · ${name} · ${X.utils.encode_range({ s: rg.s, e: rg.e })}`;
+    await load(true);
   }
 
   // ppt / doc / … 以及 docx、表格的「原版式」：网关用 LibreOffice 转成 PDF（第一次要等，之后读缓存）
@@ -485,6 +459,7 @@
     if (VW.dirty) draftClear();
     VW.dirty = false;
     VW.gen = (VW.gen || 0) + 1;    // 关了：还在途的读取 / 转换回来也别再往正文里写
+    closeViewerSheet();
     closeViewerPdf();
     vwMdStop();          // 长 Markdown 的分段 observer：以前要等下一次预览才断（审查 #49 P3-7）
     vwDropEd();

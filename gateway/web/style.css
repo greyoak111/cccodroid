@@ -292,7 +292,9 @@ td{color:var(--fg2)}
 /* 用户亲手收起的组：图片预览、展开着的卡都不再撑开它；只有待确认的权限卡还能把它摊开 */
 .tgroup.shut:not(.single):not(:has(.perm:not(.done))) .tg-body{display:none}
 .tgroup.shut:not(:has(.perm:not(.done))) .tg-head .chev{transform:none}
-.tg-body>.think{margin:6px 0}
+.tg-body>.think,.tg-entry>.think{margin:6px 0}
+.tg-page[hidden]{display:none}
+.tg-page{display:block;width:100%;text-align:start}
 .tgroup:not(.single) .tg-body{margin-inline-start:12px;padding-inline-start:8px;border-inline-start:1px solid var(--tool-line)}
 .tool-head{display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:12.5px;cursor:pointer;user-select:none}
 .tool-name{color:var(--tool);font-weight:600;font-family:var(--mono);font-size:12px}
@@ -887,6 +889,8 @@ a.weblink{overflow-wrap:anywhere}
 
 /* ── 待发队列：排在对话末尾，样子像一条还没送达的用户消息（照 Claude Desktop）── */
 #queued{display:flex;flex-direction:column;gap:2px}
+/* 队列是 flex 列，消息不能被左右 auto margin 压成内容最小宽度。 */
+#queued > .msg.user{width:100%}
 #queued.hidden{display:none !important}
 .q-head{
   display:flex;align-items:center;justify-content:space-between;gap:8px;
@@ -2311,6 +2315,8 @@ body{line-height:var(--phi)}
 
 /* 模型与思考强度：分段控件 + 统一搜索框；宽屏浮在型号按钮上方（宽 420、高 ≤ 宽×φ），窄屏仍是底部弹层 */
 .mp-panel{padding-inline:var(--g3)}
+/* 清单回填不能改变入场中按百分比位移的面板高度；沿用现有最大高度，入场只交给 MO。 */
+#model-pick .mp-panel{height:100%;animation:none}
 .mp-head{padding:2px 0 var(--g1)}
 .mp-head b{font-size:15px}
 .mp-lbl{margin:var(--g2) 0 var(--g1)}
@@ -2331,7 +2337,7 @@ body{line-height:var(--phi)}
 .mp-note{margin:var(--g2) 0 0;color:var(--fg3)}
 #model-pick.pop{background:transparent;animation:none}
 #model-pick.pop .mp-panel{position:fixed;margin:0;border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 40px var(--shadow);
-  padding:var(--g3) var(--g3) var(--g2);animation:fade .14s;background:var(--bg)}
+  padding:var(--g3) var(--g3) var(--g2);background:var(--bg)}
 #model-pick.pop .mp-list{min-height:0}
 /* 宽屏一行一个：左 id、右 名称 · 窗口 · 看图 */
 #model-pick.pop .mp-item{display:flex;align-items:baseline;gap:var(--g3)}

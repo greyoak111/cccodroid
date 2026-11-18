@@ -9,7 +9,7 @@ import vm from "node:vm";
 const src17 = fs.readFileSync(new URL("../web/app/17-office.js", import.meta.url), "utf8");
 
 function loadFetchBuf() {
-  const a = src17.indexOf("  async function vwFetchBuf(max) {");
+  const a = src17.indexOf("  async function vwFetchBuf(max, signal) {");
   assert.ok(a > 0, "17-office.js 里找不到 vwFetchBuf");
   const b = src17.indexOf("\n  }\n", a) + 4;
   assert.ok(b > a, "vwFetchBuf 函数体取不完整");

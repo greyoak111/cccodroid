@@ -137,7 +137,7 @@ function runHello(helloCount, resume, dropped) {
   const view = { sessionId: "s-a", gen: 0, runIds: new Set(), cids: new Set(), next: null, anchor: "", cursor: null, title: "", pendingMerge: null };
   const box = {
     view, state: { pendingModel: null }, Set, Map, t: (s) => s, uiTag: "synthetic-ui", helloCount, stick: false, busDropped: dropped,
-    WROTE: new Map(), TOOL_CARDS: new Map(), TOOL_RESULTS: new Map(), clearToolResults() {}, PERMS: new Map(), runViews: new Map(),
+    WROTE: new Map(), TOOL_CARDS: new Map(), TOOL_RESULTS: new Map(), clearToolResults() {}, dropCards() {}, PERMS: new Map(), runViews: new Map(),
     histEl: nodes(), liveEl: nodes(), olderEl: nodes(), statEl: nodes(), statLast: {}, statStop() {},
     stripHidden: () => ({}), paintTitle() {}, renderRunStrip() {}, renderPermBar() {}, agReset() {}, syncWindow() {}, pickViewRun() {}, renderQueue() {}, paintProjChip() {}, syncInterject() {}, saveUiState() {},
     applyState() {}, beginReplay() {}, updateCtx() {}, renderSessions() {}, loadOlder() {}, showWelcome() {}, renderInterrupted() {}, calmStatus() {}, refreshSessModel() {},

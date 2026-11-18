@@ -298,24 +298,31 @@
       const live = (c.id === "gh" && c.state === "ok") || (c.id === "llama-cpp" && c.state === "ok") ? desc.slice(desc.indexOf(c.id === "gh" ? '<div class="gh-auth"' : '<details class="llm-dl"')) : "";
       const more = (live ? desc.slice(0, desc.length - live.length) : desc) + '<div class="it-meta">' + meta + "</div>";
       const warn = (c.error ? '<div class="tiny err">' + esc(c.error) + "</div>" : "") + (miss.length && c.state !== "ok" ? '<div class="tiny warn">' + t("要先装：{names}", { names: listOf(miss) }) + "</div>" : "");
-      return (`<div class="item ccard${c.unsupported && !["ok", "removing", "configuring", "fetching-models"].includes(c.state) ? " dim" : ""}" data-tags="${esc(tags.join(" "))}">
+      return (`<div class="item ccard${c.unsupported && !["ok", "removing", "configuring", "fetching-models"].includes(c.state) ? " dim" : ""}" data-comp="${esc(c.id)}" data-tags="${esc(tags.join(" "))}">
         <div class="cc-top"><span class="icobox" style="--c:${cc}">${ei(ci)}</span><div class="grow"><b>${name}</b><div class="mono muted">${esc(ver || "")}${ver ? " · " : ""}${MB(c.state === "ok" ? c.installed : c.bytes)}</div></div>${c.verified ? `<span class="vmark" title="${esc(t("真机验证过"))}">${ei("shield")}</span>` : ""}</div>
         ${warn}${bar}${live}<div class="it-more">${more}</div>
         <div class="cc-foot">${sdot(dotSt, dotL)}<span class="cc-btns">${cbtn}</span></div></div>`)
         .replace(" data-c=\"install\"", " data-c=\"install\"" + (c.verified ? "" : " data-unverified=\"1\"") + (miss.length ? " disabled" : ""))
         .replace(" data-c=\"remove\"", " data-c=\"remove\"" + (used.length ? ' data-usedby="' + listOf(used) + '"' : ""));
     }).join("");
-    box.innerHTML = (r.allowUnsigned ? '<div class="tiny err">' + esc(t("组件签名检查已关闭（网关带了测试开关启动）")) + "</div>" : "") +
+    const next = (r.allowUnsigned ? '<div class="tiny err">' + esc(t("组件签名检查已关闭（网关带了测试开关启动）")) + "</div>" : "") +
       (html || '<div class="tiny">' + (r.indexError ? t("组件清单取不到：{msg}", { msg: esc(r.indexError) }) : t("暂时没有可装的组件。")) + "</div>") +
       (html && r.indexError ? '<div class="tiny err">' + t("部分组件清单取不到：{msg}", { msg: esc(r.indexError) }) + "</div>" : "") +
       (r.indexError ? '<div class="it-acts"><button class="btn ghost sm" data-c="reindex">' + t("重试") + "</button></div>" : "");
+    const changed = box._html !== next;
+    if (changed) {
+      const opened = new Set([...box.querySelectorAll(".ccard.open")].map((c) => c.dataset.comp));
+      box.innerHTML = next; box._html = next;
+      // 进度更新可以换卡片，用户刚展开的说明不能每秒被收回去。
+      for (const c of box.querySelectorAll(".ccard")) if (opened.has(c.dataset.comp)) c.classList.add("open");
+    }
     $("comp-count").textContent = (r.items || []).length || "";
     ext.nComp = (r.items || []).length; extSub();
     ext.compBytes = (r.items || []).filter((c) => c.installedVersion || c.state === "ok").reduce((s, c) => s + (c.installed || 0), 0); paintStorage();
     renderIdx("comp", [["inst", t("已装")], ["upd", t("要更新")], ...Object.entries(CAT()).map(([k, v]) => ["cat:" + k, v])]);
     if ($("gh-auth")) loadGhAuth(refresh);
     if ($("llm-dl")) {
-      $("llm-dl").addEventListener("toggle", () => { llmDl.open = $("llm-dl").open; if (llmDl.open) loadLlmDl(); });
+      if (changed) $("llm-dl").addEventListener("toggle", () => { llmDl.open = $("llm-dl").open; if (llmDl.open) loadLlmDl(); });
       if (llmDl.open) loadLlmDl();
     }
     // 有在跑的就一秒刷一次；抽屉关了 / 换了页签就停
@@ -1340,9 +1347,9 @@
     if (cb && cb.closest("#mod-list")) return;   // 模块按钮归上面的处理器
     if (cb && !cb.disabled) {
       const c = cb.dataset.c, id = cb.dataset.id;
-      if (c === "reindex") { cb.disabled = true; return loadComponents(true); }
+      if (c === "reindex") { cb.disabled = true; $("comp-list")._html = null; return loadComponents(true); }
       if (c === "toggle") {
-        cb.disabled = true;
+        cb.disabled = true; $("comp-list")._html = null;
         const r = await post("/api/ext/off", { kind: "comp", id, on: cb.dataset.on === "1" }).catch((err) => ({ ok: false, message: err.message }));
         toast(r.ok ? (cb.dataset.on === "1" ? t("已启用") : t("已停用") + " · " + OFF_TIP()) : t("失败：{msg}", { msg: r.message || "" }), !r.ok);
         loadExtSkills();     // 组件自带的技能跟着关 / 开
@@ -1368,7 +1375,7 @@
       if (c === "install" && cb.dataset.unverified && !confirm(t("{name} 还没人在真机上验证过，可能装不上或用不了。仍然安装？", { name: nm }))) return;
       if (c === "remove" && cb.dataset.usedby) return toast(t("{names} 要用它，先卸载那些组件", { names: cb.dataset.usedby }), true);
       if (c === "remove" && !confirm(t("卸载组件 {name}？会删掉它装进工具包的文件，你自己的文件不受影响。", { name: nm }))) return;
-      cb.disabled = true;
+      cb.disabled = true; $("comp-list")._html = null;
       if (c === "remove") {
         // 停服务可能要等一会儿；在下一次轮询回来前也不能再装、再卸或取消。
         compRemoving.add(id);

@@ -52,20 +52,31 @@
 
   function create(root, opts = {}) {
     const t = opts.t || fmt;
-    const st = { model: null, vis: [], BY: {}, sel: null, k: 1, tx: 0, ty: 0, raf: 0, W: 0, H: 0, AX: null, L: null, mode: "", placed: false, misc: !!opts.misc, band: opts.band || null, pick: null };
+    const st = { model: null, vis: [], BY: {}, sel: null, k: 1, tx: 0, ty: 0, raf: 0, W: 0, H: 0, AX: null, L: null, mode: "", placed: false, misc: !!opts.misc, band: opts.band || null, pick: null,
+      key: "", geo: null, drawn: null, drawK: 1, refs: [], sticky: [], text: [], dots: [], hits: [], frame: 0, zoomT: 0, dead: false, treeKey: "", treeRows: [], down: new Map(), titles: new Map() };
+    const listeners = [];
+    const listen = (el, type, fn, options) => { el.addEventListener(type, fn, options); listeners.push(() => el.removeEventListener(type, fn, options)); };
     root.classList.add("lmap");
     root.innerHTML = `<div class="lm-canvas"><div class="lm-main"></div><div class="lm-axis"></div><div class="lm-band"></div>
       <button class="lm-now" type="button"></button><div class="lm-card"></div></div><div class="lm-tree"></div>`;
     const cv = root.querySelector(".lm-canvas"), tree = root.querySelector(".lm-tree");
     const layer = { main: cv.querySelector(".lm-main"), axis: cv.querySelector(".lm-axis"), band: cv.querySelector(".lm-band"), now: cv.querySelector(".lm-now"), card: cv.querySelector(".lm-card") };
+    layer.main.style.transformOrigin = layer.axis.style.transformOrigin = "0 0";
     layer.now.textContent = t("回到现在");
     const wd = (ms) => { try { return new Date(ms).toLocaleDateString(opts.locale || undefined, { weekday: "short" }); } catch { return ""; } };
 
     // ── 数据：按开关筛出要画的会话 ──
     function filter() {
-      const m = st.model; if (!m) return;
+      const m = st.model;
+      if (!m) { st.vis = []; st.BY = {}; st.down.clear(); st.titles.clear(); return; }
       st.vis = m.sessions.filter((s) => (st.misc || !s.misc) && (!st.band || s.band === st.band));
       st.BY = Object.fromEntries(st.vis.map((s) => [s.id, s]));
+      st.down = new Map(); st.titles = new Map();
+      for (const s of st.vis) {
+        const title = clip(s.title); st.titles.set(s.id, { title, width: textW(title), full: textW(s.title) });
+        for (const id of [s.parent, ...(s.extra || []).map((e) => e.id), ...(s.reads || []).filter((r) => r.early).map((r) => r.id)])
+          if (id && st.BY[id]) { if (!st.down.has(id)) st.down.set(id, []); st.down.get(id).push(s.id); }
+      }
       if (st.sel && !st.BY[st.sel]) st.sel = null;
     }
     const startOf = (s) => (s.task ? s.task.runs[0].ts : s.from);
@@ -109,8 +120,8 @@
 
     // ── 布局：按带分；每带里按 DFS（主父）顺序给线找最高的空车道（时间段 + 标题宽度不重叠）。
     //    汇合出来的、读记录接手的，放在来源的下一层 ──
-    function layout() {
-      const AX = st.AX, V = st.vis, BY = st.BY;
+    function layout(AX) {
+      const V = st.vis, BY = st.BY;
       const keys = (st.model.bands || []).map((b) => b.key).filter((k) => V.some((s) => s.band === k));
       // 父子边只连同一项目带里的：会话经「移到项目」换带后 parent 还在，跨带的子会话是该带的根，
       // 不能被父带的 DFS 拉过去占车道（否则父带多一条空车道，子会话也画到父项目里）
@@ -128,7 +139,7 @@
         mine.filter((s) => !seen.has(s.id)).sort((a, b) => startOf(a) - startOf(b)).forEach(dfs);   // 汇合 / 接手的，排在来源后面
         for (const s of order) {
           const x0 = s.task ? AX.X(startOf(s)) - 8 : s.parent && BY[s.parent] ? AX.X(s.at || s.from) - 6 : AX.X(s.from) - 6;
-          const x1 = Math.max(AX.X(endOf(s)), x0 + textW(clip(s.title)) + 30) + 26;
+          const x1 = Math.max(AX.X(endOf(s)), x0 + st.titles.get(s.id).width + 30) + 26;
           let min = 0;
           if (sameBand(s) && pos[s.parent]) min = pos[s.parent].lane + 1;
           for (const id of srcOf(s)) if (pos[id] && BY[id].band === key) min = Math.max(min, pos[id].lane + 1);
@@ -149,19 +160,24 @@
     function family(id) {
       const BY = st.BY, out = new Set([id]);
       const ups = (s) => [s.parent, ...(s.extra || []).map((e) => e.id), ...(s.reads || []).filter((r) => r.early).map((r) => r.id)].filter((x) => x && BY[x]);
-      const up = (x) => ups(BY[x]).forEach((p) => { if (!out.has(p)) { out.add(p); if (p === BY[x].parent) up(p); } });
-      up(id);
-      const down = (x) => st.vis.forEach((k) => { if (!out.has(k.id) && ups(k).includes(x)) { out.add(k.id); down(k.id); } });
-      down(id);
+      const parents = [{ id, list: ups(BY[id]), at: 0 }], children = [id];
+      while (parents.length) {
+        const frame = parents[parents.length - 1];
+        if (frame.at === frame.list.length) { parents.pop(); continue; }
+        const p = frame.list[frame.at++];
+        if (!out.has(p)) { out.add(p); if (p === BY[frame.id].parent) parents.push({ id: p, list: ups(BY[p]), at: 0 }); }
+      }
+      while (children.length) for (const k of st.down.get(children.pop()) || []) if (!out.has(k)) { out.add(k); children.push(k); }
       return out;
     }
 
     const pickable = (s) => !!s && !s.task && !s.trashed && !(st.pick && st.pick.skip.has(s.id));
     function togglePick(id) {
-      const P = st.pick, s = st.BY[id]; if (!P || !pickable(s)) return;
+      const P = st.pick, s = st.BY[id]; if (st.dead || !P || !pickable(s)) return;
       if (P.set.has(id)) P.set.delete(id); else P.set.add(id);
       P.last = P.set.has(id) ? id : null;   // 刚勾上的那一个画勾时弹一下（只这一次）
-      if (st.mode === "tree") paintTree(); else paint();
+      for (const el of root.querySelectorAll(".lm-pk-new")) el.classList.remove("lm-pk-new");
+      if (st.mode === "tree") paintTree(); else { paintSelection(); place(); }
       P.last = null;
       P.onChange && P.onChange([...P.set]);
     }
@@ -170,8 +186,40 @@
 
     // ── 画（平板）──
     /** 画面的 SVG 片段（paint 上屏、snapshot 导出共用）：k 缩放、PK 多选、sel 选中 */
-    function scene(k, PK, sel) {
-      const AX = st.AX = buildAxis(k), L = st.L = layout(), BY = st.BY, fam = sel ? family(sel) : null;
+    function geometry(k, keep = true) {
+      if (st.geo && st.geo.k === k && st.geo.key === st.key) return st.geo;
+      const AX = buildAxis(k), value = { k, key: st.key, AX, L: layout(AX) };
+      if (keep) st.geo = value;
+      return value;
+    }
+    function tones(s, PK, sel, fam) {
+      const on = PK ? pickable(s) : !fam || fam.has(s.id), picked = !!(PK && PK.set.has(s.id)), chosen = s.id === sel;
+      return { on, picked, chosen, stroke: picked ? "var(--lm-blue)" : chosen ? "var(--fg)" : fam && on ? "var(--fg2)" : "var(--lm-track)",
+        width: picked ? 3.2 : chosen ? 2.6 : fam && on ? 2.2 : 2,
+        parent: fam && on && fam.has(s.parent) ? (picked ? "var(--lm-blue)" : chosen ? "var(--fg)" : "var(--fg2)") : "var(--lm-track)",
+        extra: fam && on ? "var(--fg2)" : "var(--lm-track)", arrow: fam && on ? "var(--fg2)" : "var(--fg3)" };
+    }
+    function toneStyle(v) {
+      return `--lm-stroke:${v.stroke};--lm-width:${v.width};--lm-parent:${v.parent};--lm-extra:${v.extra};--lm-arrow:${v.arrow};--lm-station-width:${v.chosen ? 2.2 : 1.8};--lm-task-stroke:${v.chosen ? "var(--fg2)" : "var(--lm-track)"};--lm-task-fill:${v.chosen ? "var(--fg)" : "var(--fg3)"}`;
+    }
+    function chapterLabels(s, x0, x1, AX, y) {
+      const cuts = [x0, ...s.ch.map((c) => AX.X(c.at)), x1], names = [...s.ch, s.open], html = [];
+      names.forEach((c, i) => {
+        const a = cuts[i] + (i ? 9 : -2), room = cuts[i + 1] - a - 10;
+        if (room < 10) return;
+        let txt = (i + 1) + " · " + (c.t || "");
+        if (textW(txt, 12) > room) { while (txt.length > 3 && textW(txt + "…", 12) > room) txt = txt.slice(0, -1); txt += "…"; }
+        if (room < 64) txt = String(i + 1);
+        const last = i === names.length - 1;
+        html.push(`<text class="t-title t-ch${c.ghost ? " ghost" : ""}${last ? " cur" : ""}" x="${a}" y="${y - 11}">${esc(txt)}</text>`);
+      });
+      return html.join("");
+    }
+    function pickMark(x, y) {
+      return `<circle cx="${x}" cy="${y}" r="6.5" fill="var(--bg)" stroke="var(--lm-blue)" stroke-width="2"/><path d="M${x - 3} ${y} l2.2 2.3 l4 -4.3" data-zoom-x="${x}" fill="none" stroke="var(--lm-blue)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+    function scene(k, PK, sel, geo = geometry(k)) {
+      const { AX, L } = geo, BY = st.BY, fam = sel ? family(sel) : null;
       const W = AX.width, H = L.height;
       const g = [], ax = [], lines = [], labels = [], hits = [], sts = [];
       for (const [ms, x] of AX.ticks) {
@@ -190,15 +238,14 @@
       for (const s of st.vis) {
         const P = L.pos[s.id]; if (!P) continue;
         // 多选时：选上的蓝线加粗、不能选的退暗，其余照常
-        const picked = PK && PK.set.has(s.id);
-        const on = PK ? pickable(s) : !fam || fam.has(s.id), isSel = s.id === sel, cls = on ? "" : "dim";
-        const stroke = picked ? "var(--lm-blue)" : isSel ? "var(--fg)" : fam && on ? "var(--fg2)" : TR;
-        const sw = picked ? 3.2 : isSel ? 2.6 : fam && on ? 2.2 : 2, y = P.y;
+        const v = tones(s, PK, sel, fam), { picked, on } = v, isSel = v.chosen, cls = on ? "" : "dim";
+        const stroke = "var(--lm-stroke)", sw = "var(--lm-width)", y = P.y, title = st.titles.get(s.id);
+        const group = `data-lineage-id="${esc(s.id)}" style="${toneStyle(v)}"`;
         if (s.task) {
           const a = AX.X(startOf(s)), b = AX.X(endOf(s));
-          lines.push(`<g class="${cls}"><line x1="${a}" y1="${y}" x2="${b}" y2="${y}" stroke="${isSel ? "var(--fg2)" : TR}" stroke-width="1.6" stroke-dasharray="3 5" stroke-linecap="round"/>${s.task.runs.map((r) => `<circle cx="${AX.X(r.ts)}" cy="${y}" r="3.2" fill="${isSel ? "var(--fg)" : "var(--fg3)"}"/>`).join("")}</g>`);
-          labels.push(`<text class="t-title ${cls}" x="${a - 4}" y="${y - 10}" data-sx="${a - 4}" data-ex="${b}" data-w="${textW(s.title) + 50}">${esc(s.title)} <tspan class="t-axis" dx="4">· ${esc(t("{n} 次", { n: s.task.runs.length }))}</tspan></text>`);
-          hits.push(`<line data-id="${esc(s.id)}" x1="${a - 6}" y1="${y}" x2="${b + 6}" y2="${y}" stroke="transparent" stroke-width="22"/><rect data-id="${esc(s.id)}" x="${a - 6}" y="${y - 26}" width="${Math.max(b - a, textW(s.title) + 40)}" height="22" fill="transparent"/>`);
+          lines.push(`<g class="${cls}" ${group}><line x1="${a}" y1="${y}" x2="${b}" y2="${y}" stroke="var(--lm-task-stroke)" stroke-width="1.6" stroke-dasharray="3 5" stroke-linecap="round"/>${s.task.runs.map((r) => `<circle cx="${AX.X(r.ts)}" cy="${y}" r="3.2" fill="var(--lm-task-fill)"/>`).join("")}</g>`);
+          labels.push(`<text data-lineage-label="${esc(s.id)}" class="t-title ${cls}" x="${a - 4}" y="${y - 10}" data-sx="${a - 4}" data-ex="${b}" data-w="${title.full + 50}">${esc(s.title)} <tspan class="t-axis" dx="4">· ${esc(t("{n} 次", { n: s.task.runs.length }))}</tspan></text>`);
+          hits.push(`<line data-id="${esc(s.id)}" x1="${a - 6}" y1="${y}" x2="${b + 6}" y2="${y}" stroke="transparent" stroke-width="22"/><rect data-id="${esc(s.id)}" x="${a - 6}" y="${y - 26}" width="${Math.max(b - a, title.full + 40)}" height="22" fill="transparent"/>`);
           continue;
         }
         let x0 = AX.X(s.from);
@@ -208,7 +255,7 @@
         if (P0) {
           // 分叉往前弯、回退往回弯；分出去后隔了一阵才开始的，中间一段细虚线；分叉点实心小点
           const xf = AX.X(s.at || s.from), yp = P0.y;
-          const pstroke = fam && on && fam.has(s.parent) ? stroke : TR;
+          const pstroke = "var(--lm-parent)";
           const pdash = BY[s.parent].trashed ? 'stroke-dasharray="4 4"' : "";
           const back = s.kind === "rewind", land = back ? xf + 6 : xf + 22;
           const curve = back ? `M${xf} ${yp} C${xf - 22} ${yp} ${xf - 16} ${y} ${land} ${y}` : `M${xf} ${yp} C${xf + 14} ${yp} ${xf + 4} ${y} ${land} ${y}`;
@@ -223,76 +270,136 @@
         const ex = (s.extra || []).filter((e) => L.pos[e.id]);
         for (const e of ex) {
           const ye = L.pos[e.id].y, xe = AX.X(e.ts || BY[e.id].to);
-          const stc = fam && on ? "var(--fg2)" : TR;
+          const stc = "var(--lm-extra)";
           conn += `<path d="M${xe} ${ye} C${xe + 16} ${ye} ${xe + 6} ${y} ${xe + 24} ${y} L${x0 - 7} ${y}" fill="none" stroke="${stc}" stroke-width="1.3"/><circle cx="${xe}" cy="${ye}" r="2.6" fill="${stc}"/>`;
         }
-        if (ex.length) conn += `<path d="M${x0 - 9} ${y - 4.5} L${x0 - 1} ${y} L${x0 - 9} ${y + 4.5}" fill="none" stroke="${fam && on ? "var(--fg2)" : "var(--fg3)"}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+        if (ex.length) conn += `<path d="M${x0 - 9} ${y - 4.5} L${x0 - 1} ${y} L${x0 - 9} ${y + 4.5}" fill="none" stroke="var(--lm-arrow)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
         // 读记录接手（改版前的旧会话）：来源在那一刻的位置 → 读者读的那一点，细点线。接手的常显，其余的选中时才画
         for (const r of s.reads || []) {
-          if (!L.pos[r.id] || !(r.early || (fam && fam.has(r.id) && on))) continue;
+          if (!L.pos[r.id]) continue;
           const yr = L.pos[r.id].y, xr = AX.X(r.ts), stc = fam && on && fam.has(r.id) ? "var(--fg2)" : TR;
-          conn += `<path d="M${xr} ${yr} C${xr + 10} ${yr} ${xr + 10} ${y} ${xr + 18} ${y}" fill="none" stroke="${stc}" stroke-width="1.3" stroke-dasharray="1.5 3" stroke-linecap="round"/><circle cx="${xr}" cy="${yr}" r="2.4" fill="none" stroke="${stc}" stroke-width="1.3"/>`;
+          const show = r.early || (fam && fam.has(r.id) && on);
+          conn += `<g data-read="${esc(r.id)}" data-early="${r.early ? 1 : 0}"${show ? "" : ' style="display:none"'}><path d="M${xr} ${yr} C${xr + 10} ${yr} ${xr + 10} ${y} ${xr + 18} ${y}" fill="none" stroke="${stc}" stroke-width="1.3" stroke-dasharray="1.5 3" stroke-linecap="round"/><circle cx="${xr}" cy="${yr}" r="2.4" fill="none" stroke="${stc}" stroke-width="1.3"/></g>`;
         }
         const dead = s.trashed;
         let body = `<line x1="${x0}" y1="${y}" x2="${x1}" y2="${y}" stroke="${dead ? "var(--fg3)" : stroke}" stroke-width="${sw}" stroke-linecap="round" ${dead ? 'stroke-dasharray="4 4" opacity=".55"' : ""}/>`;
         if (!P0 && !ex.length) body += `<circle cx="${x0}" cy="${y}" r="3.2" fill="${dead ? "var(--fg3)" : stroke}"/>`;
         // 站点 = 压缩处 = 下一章的开头；外面套一圈透明的大热区，点站直接跳到会话里那个位置
-        s.ch.forEach((c, i) => { body += `<circle cx="${AX.X(c.at)}" cy="${y}" r="4.6" fill="var(--bg)" stroke="${stroke}" stroke-width="${isSel ? 2.2 : 1.8}"/>`; if (!dead) sts.push(`<circle class="lm-st" data-st="${esc(s.id)}" data-n="${i + 2}" cx="${AX.X(c.at)}" cy="${y}" r="12" fill="transparent"/>`); });
-        if (isSel) {
-          // 选中：线上方逐章「章序 · 题名」，段太短只写序号；未建档的章灰字
-          const cuts = [x0, ...s.ch.map((c) => AX.X(c.at)), x1], names = [...s.ch, s.open];
-          names.forEach((c, i) => {
-            const a = cuts[i] + (i ? 9 : -2), room = cuts[i + 1] - a - 10;
-            if (room < 10) return;
-            let txt = (i + 1) + " · " + (c.t || "");
-            if (textW(txt, 12) > room) { while (txt.length > 3 && textW(txt + "…", 12) > room) txt = txt.slice(0, -1); txt += "…"; }
-            if (room < 64) txt = String(i + 1);
-            const last = i === names.length - 1;
-            labels.push(`<text class="t-title t-ch${c.ghost ? " ghost" : ""}${last ? " cur" : ""}" x="${a}" y="${y - 11}">${esc(txt)}</text>`);
-          });
-        }
-        if (picked) body += `<g class="${PK.last === s.id ? "lm-pk-new" : ""}"><circle cx="${x0}" cy="${y}" r="6.5" fill="var(--bg)" stroke="var(--lm-blue)" stroke-width="2"/><path d="M${x0 - 3} ${y} l2.2 2.3 l4 -4.3" fill="none" stroke="var(--lm-blue)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></g>`;
+        s.ch.forEach((c, i) => { body += `<circle cx="${AX.X(c.at)}" cy="${y}" r="4.6" fill="var(--bg)" stroke="${stroke}" stroke-width="var(--lm-station-width)"/>`; if (!dead) sts.push(`<circle class="lm-st" data-st="${esc(s.id)}" data-n="${i + 2}" cx="${AX.X(c.at)}" cy="${y}" r="12" fill="transparent"/>`); });
+        if (isSel) labels.push(`<g data-lineage-chapters="${esc(s.id)}">${chapterLabels(s, x0, x1, AX, y)}</g>`);
+        if (picked) body += `<g data-picked="1" class="${PK.last === s.id ? "lm-pk-new" : ""}">${pickMark(x0, y)}</g>`;
         if (s.running) body += `<circle cx="${x1}" cy="${y}" r="4" class="lm-run"><animate attributeName="r" values="3.4;5;3.4" dur="1.6s" repeatCount="indefinite"/></circle>`;
-        lines.push(`<g class="${cls}">${conn}${body}</g>`);
-        if (!isSel) labels.push(`<text class="t-title${dead || s.ghost ? " ghost" : ""}${picked ? " pk" : ""} ${cls}" x="${x0 - 2}" y="${y - 11}" data-sx="${x0 - 2}" data-ex="${x1}" data-w="${textW(clip(s.title)) + (dead ? 60 : 0)}">${esc(clip(s.title))}${dead ? ` <tspan class="t-axis" dx="4">${esc(t("回收站"))}</tspan>` : ""}</text>`);
+        lines.push(`<g class="${cls}" ${group} data-x0="${x0}" data-x1="${x1}" data-y="${y}">${conn}${body}</g>`);
+        labels.push(`<text data-lineage-label="${esc(s.id)}"${isSel ? ' style="display:none"' : ""} class="t-title${dead || s.ghost ? " ghost" : ""}${picked ? " pk" : ""} ${cls}" x="${x0 - 2}" y="${y - 11}" data-sx="${x0 - 2}" data-ex="${x1}" data-w="${title.width + (dead ? 60 : 0)}">${esc(title.title)}${dead ? ` <tspan class="t-axis" dx="4">${esc(t("回收站"))}</tspan>` : ""}</text>`);
         // 点按热区：比线粗得多的透明描边 + 标题那一块
-        hits.push(`<line data-id="${esc(s.id)}" x1="${x0}" y1="${y}" x2="${x1}" y2="${y}" stroke="transparent" stroke-width="22"/><rect data-id="${esc(s.id)}" x="${x0 - 4}" y="${y - 26}" width="${Math.max(x1 - x0, textW(clip(s.title)) + 8)}" height="22" fill="transparent"/>`);
+        hits.push(`<line data-id="${esc(s.id)}" x1="${x0}" y1="${y}" x2="${x1}" y2="${y}" stroke="transparent" stroke-width="22"/><rect data-id="${esc(s.id)}" x="${x0 - 4}" y="${y - 26}" width="${Math.max(x1 - x0, title.width + 8)}" height="22" fill="transparent"/>`);
       }
       return { W, H, L, g, ax, lines, labels, hits, sts };
     }
+    function indexScene() {
+      let style = root.querySelector("style[data-map-zoom]");
+      if (!style) {
+        style = document.createElement("style"); style.dataset.mapZoom = "1";
+        style.textContent = ".lmap .lm-main :is(path,line,rect,circle),.lmap .lm-axis :is(path,line){vector-effect:non-scaling-stroke}";
+        root.appendChild(style);
+      }
+      const labels = new Map([...layer.main.querySelectorAll("[data-lineage-label]")].map((el) => [el.dataset.lineageLabel, el]));
+      const chapters = new Map([...layer.main.querySelectorAll("[data-lineage-chapters]")].map((el) => [el.dataset.lineageChapters, el]));
+      const PK = st.pick, sel = PK ? null : st.sel, fam = sel ? family(sel) : null;
+      st.refs = [...layer.main.querySelectorAll("[data-lineage-id]")].map((line) => {
+        const id = line.dataset.lineageId, label = labels.get(id);
+        const s = st.BY[id], v = tones(s, PK, sel, fam);
+        const reads = [...line.querySelectorAll("[data-read]")], style = line.getAttribute("style");
+        return { s, line, label, text: label, chapters: chapters.get(id), picked: line.querySelector("[data-picked]"), reads, style, selected: label.style.display === "none",
+          state: [style, v.on, v.chosen, v.picked, ...reads.map((r) => !!(fam && v.on && fam.has(r.dataset.read)))].join("|") };
+      });
+      st.sticky = [...layer.main.querySelectorAll("text[data-sx]")].map((el) => ({ el, sx: +el.dataset.sx, ex: +el.dataset.ex, w: +el.dataset.w, x: +el.dataset.sx }));
+      st.text = [...layer.main.querySelectorAll("text"), ...layer.axis.querySelectorAll("text")];
+      for (const el of st.text) el._zoom = "1:" + el.getAttribute("x");
+      st.dots = [...layer.main.querySelectorAll("circle,[data-zoom-x]")];
+      st.hits = [...layer.main.querySelectorAll("rect[data-id]")].map((el) => ({ el, x: +el.getAttribute("x"), width: +el.getAttribute("width"),
+        title: st.titles.get(el.dataset.id)[st.BY[el.dataset.id].task ? "full" : "width"] + (st.BY[el.dataset.id].task ? 40 : 8) }));
+    }
+    function paintSelection() {
+      if (!st.drawn) return;
+      const PK = st.pick, sel = PK ? null : st.sel, fam = sel ? family(sel) : null;
+      let changedChapters = false;
+      for (const ref of st.refs) {
+        const { s, line, label, text } = ref, v = tones(s, PK, sel, fam), style = toneStyle(v);
+        const state = [style, v.on, v.chosen, v.picked, ...ref.reads.map((r) => !!(fam && v.on && fam.has(r.dataset.read)))].join("|");
+        if (ref.state === state) continue;
+        ref.state = state;
+        if (style !== ref.style) { line.setAttribute("style", style); ref.style = style; }
+        line.classList.toggle("dim", !v.on); text.classList.toggle("dim", !v.on); text.classList.toggle("pk", v.picked && !s.task);
+        label.style.display = v.chosen && !s.task ? "none" : "";
+        if (!s.task && ref.selected !== v.chosen) {
+          if (v.chosen) {
+            const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            group.dataset.lineageChapters = s.id;
+            group.innerHTML = chapterLabels(s, +line.dataset.x0, +line.dataset.x1, st.AX, +line.dataset.y);
+            label.parentNode.insertBefore(group, label); ref.chapters = group;
+            for (const el of group.children) el._zoom = "1:" + el.getAttribute("x");
+          } else { ref.chapters?.remove(); ref.chapters = null; }
+          ref.selected = v.chosen; changedChapters = true;
+        }
+        if (v.picked && !s.task) {
+          if (!ref.picked) {
+            const group = document.createElementNS("http://www.w3.org/2000/svg", "g"); group.dataset.picked = "1";
+            group.innerHTML = pickMark(+line.dataset.x0, +line.dataset.y); line.appendChild(group); ref.picked = group;
+            st.dots.push(...group.querySelectorAll("circle,[data-zoom-x]")); st.ratio = null;
+          }
+          ref.picked.classList.toggle("lm-pk-new", !!(PK.last === s.id));
+        } else if (ref.picked) { ref.picked.remove(); ref.picked = null; st.dots = st.dots.filter((el) => layer.main.contains(el)); }
+        for (const read of ref.reads) {
+          const on = !!(fam && v.on && fam.has(read.dataset.read));
+          read.style.display = read.dataset.early === "1" || on ? "" : "none";
+          for (const part of read.children) part.setAttribute("stroke", on ? "var(--fg2)" : "var(--lm-track)");
+        }
+      }
+      const html = sel ? card(sel) : "";
+      if (st.cardHtml !== html) { layer.card.innerHTML = html; st.cardHtml = html; }
+      root.classList.toggle("picking", !!PK);
+      if (changedChapters) st.text = [...layer.main.querySelectorAll("text"), ...layer.axis.querySelectorAll("text")];
+    }
     function paint() {
+      if (st.dead || !st.model) return;
+      const geo = geometry(st.k);
+      if (st.drawn === geo && layer.main.firstElementChild) { st.W = geo.AX.width; st.H = geo.L.height; paintSelection(); place(); return; }
       const PK = st.pick, sel = PK ? null : st.sel;
-      const { W, H, L, g, ax, lines, labels, hits, sts } = scene(st.k, PK, sel);
-      st.W = W; st.H = H;
+      const { W, H, L, g, ax, lines, labels, hits, sts } = scene(st.k, PK, sel, geo);
+      st.AX = geo.AX; st.L = L; st.W = W; st.H = H; st.drawn = geo; st.drawK = st.k;
       // 时间轴底色按整张图宽铺：原先 right:0 只有画布宽，往左拖到头时右边露出一截没底色的空白
-      layer.axis.style.width = Math.max(W, cv.clientWidth) + "px";
+      styleTo(layer.axis, "width", Math.max(W, cv.clientWidth) + "px");
       layer.main.innerHTML = `<svg width="${W}" height="${H}">${g.join("")}${lines.join("")}${labels.join("")}${hits.join("")}${sts.join("")}</svg>`;
       layer.axis.innerHTML = `<svg width="${W}" height="30">${ax.join("")}</svg>`;
       layer.band.innerHTML = L.bandY.map((b) => `<div style="top:${b.y + 4}px">${esc(bandName(b.key))}</div>`).join("");
-      layer.card.innerHTML = sel ? card(sel) : "";
+      st.cardHtml = sel ? card(sel) : ""; layer.card.innerHTML = st.cardHtml;
       root.classList.toggle("picking", !!PK);
-      st.sticky = layer.main.querySelectorAll ? [...layer.main.querySelectorAll("text[data-sx]")].map((el) => ({ el, sx: +el.dataset.sx, ex: +el.dataset.ex, w: +el.dataset.w, x: +el.dataset.sx })) : [];
-      place();
+      st.ratio = 1; indexScene(); place();
     }
 
     // ── 导出（规划书 §4 阶段 4）：整张图（不带选中、不带热区）画成独立的 SVG。
     // 颜色、字号这些靠样式表给的东西，先在页面里离屏摆一份读出计算后的值，逐个写进元素自己的 style —— 拿出去单独打开也是这个样子
     function snapshot(o = {}) {
-      if (!st.model || !st.vis.length) return null;
-      const keep = { AX: st.AX, L: st.L };
-      const S = scene(st.mode === "map" ? st.k : 1, null, null);
-      st.AX = keep.AX; st.L = keep.L;
+      if (st.dead || !st.model || !st.vis.length) return null;
+      const k = st.mode === "map" ? st.k : 1;
+      const S = scene(k, null, null, geometry(k, false));
       const box = document.createElement("div");
       box.className = "lm-canvas";
       box.style.cssText = "position:absolute;left:-200000px;top:0;visibility:hidden;display:block;pointer-events:none";
       box.innerHTML = `<div class="lm-main"><svg>${S.g.join("")}${S.lines.join("")}${S.labels.join("")}</svg></div><div class="lm-axis"><svg>${S.ax.join("")}</svg></div><div class="lm-band">${S.L.bandY.map((b) => `<div>${esc(bandName(b.key))}</div>`).join("")}</div>`;
       root.appendChild(box);
       try {
+        for (const el of box.querySelectorAll("[data-picked],[data-read]")) if (el.hasAttribute("data-picked") || el.style.display === "none") el.remove();
         const PROPS = ["fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-linecap", "stroke-linejoin", "paint-order", "opacity", "font-family", "font-size", "font-weight", "letter-spacing"];
-        for (const el of box.querySelectorAll("svg *")) {
+        // 先量完再覆盖：子图元的颜色会继承父组的变量，不能先清父组再量孩子。
+        const styles = [...box.querySelectorAll("svg *")].map((el) => {
           const cs = getComputedStyle(el);
-          el.setAttribute("style", PROPS.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(";"));
-          el.removeAttribute("class"); el.removeAttribute("data-sx"); el.removeAttribute("data-ex"); el.removeAttribute("data-w");
+          return [el, PROPS.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(";")];
+        });
+        for (const [el, style] of styles) {
+          el.setAttribute("style", style);
+          for (const attr of [...el.attributes]) if (attr.name === "class" || attr.name.startsWith("data-") || PROPS.includes(attr.name)) el.removeAttribute(attr.name);
         }
         const ser = new XMLSerializer(), inner = (sel) => [...box.querySelector(sel).childNodes].map((n) => ser.serializeToString(n)).join("");
         const bcs = getComputedStyle(box.querySelector(".lm-band > div") || box);
@@ -336,25 +443,69 @@
       const cw = cv.clientWidth, ch = cv.clientHeight;
       return { minX: Math.min(0, cw - st.W), maxX: 0, minY: Math.min(0, ch - st.H), maxY: 0 };
     }
+    const styleTo = (el, name, value) => { const key = "_map_" + name; if (el[key] !== value) { el[key] = value; el.style[name] = value; } };
     function place() {
-      layer.main.style.transform = `translate(${st.tx}px,${st.ty}px)`;
-      layer.axis.style.transform = `translateX(${st.tx}px)`;
-      layer.band.style.transform = `translateY(${st.ty}px)`;
-      // 标题吸附：线的起点拖出了左边，标题贴着左边（让过带名）跟着走，到线尾为止 —— 跨好几周的长会话一打开也认得出是谁
-      for (const L of st.sticky || []) {
-        let x = Math.max(L.sx, -st.tx + 132);
-        if (x + L.w > L.ex) x = Math.max(L.sx, L.ex - L.w);
-        if (x !== L.x) { L.x = x; L.el.setAttribute("x", x); }
+      if (st.dead || !st.AX) return;
+      const ratio = st.k / st.drawK, zoom = ratio === 1 ? "" : ` translateX(${LEFT}px) scaleX(${ratio}) translateX(${-LEFT}px)`;
+      styleTo(layer.main, "transform", `translate(${st.tx}px, ${st.ty}px)` + zoom);
+      styleTo(layer.axis, "transform", `translateX(${st.tx}px)` + zoom);
+      styleTo(layer.band, "transform", `translateY(${st.ty}px)`);
+      styleTo(layer.axis, "width", (LEFT + (Math.max(st.W, cv.clientWidth) - LEFT) / ratio) + "px");
+      // 标题吸附：预览缩放时文字保持原宽，不能被时间轴一起拉成扁字。
+      if (st.stickyTx !== st.tx || st.stickyRatio !== ratio || st.stickyList !== st.sticky) {
+        st.stickyTx = st.tx; st.stickyRatio = ratio; st.stickyList = st.sticky;
+        for (const L of st.sticky) {
+          let x = Math.max(L.sx, LEFT + (-st.tx + 132 - LEFT) / ratio);
+          if (x + L.w / ratio > L.ex) x = Math.max(L.sx, L.ex - L.w / ratio);
+          if (x !== L.x) { L.x = x; L.el.setAttribute("x", x); }
+        }
       }
-      const xn = st.AX ? st.AX.X(st.model.now) + st.tx : 0;
-      layer.now.classList.toggle("show", !!st.AX && (xn < 40 || xn > cv.clientWidth - 10));
+      if (ratio !== st.ratio) {
+        st.ratio = ratio;
+        for (const el of st.dots) {
+          const x = +(el.getAttribute("data-zoom-x") ?? el.getAttribute("cx"));
+          if (ratio === 1) el.removeAttribute("transform"); else el.setAttribute("transform", `translate(${x} 0) scale(${1 / ratio} 1) translate(${-x} 0)`);
+        }
+        for (const hit of st.hits) hit.el.setAttribute("width", Math.max(hit.width, hit.title / ratio));
+      }
+      if (st.textTx !== st.tx || st.textRatio !== ratio || st.textList !== st.text) {
+        st.textTx = st.tx; st.textRatio = ratio; st.textList = st.text;
+        for (const el of st.text) {
+          const x = +el.getAttribute("x"), key = ratio + ":" + x;
+          if (el._zoom === key) continue;
+          el._zoom = key;
+          if (ratio === 1) el.removeAttribute("transform"); else el.setAttribute("transform", `translate(${x} 0) scale(${1 / ratio} 1) translate(${-x} 0)`);
+        }
+      }
+      const xn = LEFT + (st.AX.X(st.model.now) - LEFT) * ratio + st.tx;
+      layer.now.classList.toggle("show", xn < 40 || xn > cv.clientWidth - 10);
+    }
+    function frame() {
+      if (st.dead || st.frame) return;
+      st.frame = requestAnimationFrame(() => { st.frame = 0; place(); });
+    }
+    function zoomTo(k, mid, base) {
+      st.k = k;
+      st.W = LEFT + (st.AX.width - LEFT - RIGHT) * (k / st.drawK) + RIGHT;
+      const b = bounds();
+      st.tx = Math.min(b.maxX, Math.max(b.minX, mid - (LEFT + k * base)));
+      frame();
+    }
+    function commitZoom() {
+      clearTimeout(st.zoomT); st.zoomT = 0;
+      cancelAnimationFrame(st.frame); st.frame = 0;
+      if (st.dead || !st.model || st.mode !== "map") return;
+      paint();
+      const b = bounds(); st.tx = Math.min(b.maxX, Math.max(b.minX, st.tx)); st.ty = Math.min(b.maxY, Math.max(b.minY, st.ty)); place();
     }
     const nowX = () => Math.min(0, Math.max(cv.clientWidth - st.W, cv.clientWidth - 160 - st.AX.X(st.model.now)));
     function animateTo(tx, ty) {
+      if (st.dead || !st.AX) return;
       const x0 = st.tx, y0 = st.ty, t0 = performance.now();
       cancelAnimationFrame(st.raf);
       // 每帧按当时的边界夹目标：动画途中视口变了（重新布局），别滑到新边界外面去（11-04 报告 三）
       const step = (now) => {
+        st.raf = 0; if (st.dead) return;
         const p = Math.min(1, (now - t0) / 260), e = 1 - Math.pow(1 - p, 3), b = bounds();
         const X = Math.min(b.maxX, Math.max(b.minX, tx)), Y = Math.min(b.maxY, Math.max(b.minY, ty));
         st.tx = x0 + (X - x0) * e; st.ty = y0 + (Y - y0) * e; place();
@@ -364,13 +515,17 @@
     }
     function settle() { const b = bounds(); animateTo(Math.min(b.maxX, Math.max(b.minX, st.tx)), Math.min(b.maxY, Math.max(b.minY, st.ty))); }
     const gesture = (k) => { if (opts.onGesture) opts.onGesture(k); };
-    function home() { st.k = 1; paint(); animateTo(nowX(), 0); gesture("home"); }
+    function home() {
+      if (st.dead || !st.model) return;
+      clearTimeout(st.zoomT); st.zoomT = 0; cancelAnimationFrame(st.frame); st.frame = 0;
+      st.k = 1; paint(); animateTo(nowX(), 0); gesture("home");
+    }
 
     // 选中某个会话：画亮一家子，并把它挪进视野（从外面跳进来时用）
     function reveal(id) {
       const P = st.L && st.L.pos[id], s = st.BY[id]; if (!P || !s) return;
       const cw = cv.clientWidth, chh = cv.clientHeight, b = bounds();
-      const x = st.AX.X(s.task ? endOf(s) : s.to), y = P.y;
+      const x = LEFT + (st.AX.X(s.task ? endOf(s) : s.to) - LEFT) * (st.k / st.drawK), y = P.y;
       const tx = x + st.tx > cw - 360 || x + st.tx < LEFT ? cw - 380 - x : st.tx;
       const ty = y + st.ty > chh - 220 || y + st.ty < 60 ? chh / 3 - y : st.ty;
       animateTo(Math.min(b.maxX, Math.max(b.minX, tx)), Math.min(b.maxY, Math.max(b.minY, ty)));
@@ -378,18 +533,19 @@
 
     // ── 手势 ──
     const pts = new Map();
-    let drag = null, pinch = null, lastTap = 0, pinchRaf = 0;
+    let drag = null, pinch = null, lastTap = 0;
     const rubber = (v, lo, hi) => (v > hi ? hi + (v - hi) * 0.35 : v < lo ? lo + (v - lo) * 0.35 : v);
     const stop = (e) => e.stopPropagation();
-    layer.card.addEventListener("pointerdown", stop);
-    layer.now.addEventListener("pointerdown", stop);
-    layer.now.addEventListener("click", home);
-    layer.card.addEventListener("click", (e) => {
+    listen(layer.card, "pointerdown", stop);
+    listen(layer.now, "pointerdown", stop);
+    listen(layer.now, "click", home);
+    listen(layer.card, "click", (e) => {
       const b = e.target.closest("[data-act]"); if (!b || b.classList.contains("off")) return;
       opts.onAct && opts.onAct(b.dataset.act, b.dataset.arg || st.sel, b, st.sel);
     });
-    cv.addEventListener("pointerdown", (e) => {
-      if (e.button > 0) return;
+    listen(cv, "pointerdown", (e) => {
+      if (st.dead || !st.AX || e.button > 0) return;
+      clearTimeout(st.zoomT); st.zoomT = 0;
       try { cv.setPointerCapture(e.pointerId); } catch {}
       cancelAnimationFrame(st.raf);
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -400,21 +556,13 @@
         drag = null;
       }
     });
-    cv.addEventListener("pointermove", (e) => {
+    listen(cv, "pointermove", (e) => {
       if (!pts.has(e.pointerId)) return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pinch && pts.size === 2) {
-        // 双指只缩时间：重画按帧合并，免得会话多时每个 move 都整张重建
-        if (pinchRaf) return;
-        pinchRaf = requestAnimationFrame(() => {
-          pinchRaf = 0; if (!pinch) return;
-          const [a, b] = [...pts.values()];
-          st.k = Math.min(3, Math.max(0.45, pinch.k0 * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d0));
-          paint();
-          const bd = bounds();
-          st.tx = Math.min(bd.maxX, Math.max(bd.minX, pinch.mid - (LEFT + st.k * pinch.base)));
-          place();
-        });
+        // 手势中复用整张图，松手再按新比例排一次车道；文字和圆点在 place 里抵消横向拉伸。
+        const [a, b] = [...pts.values()];
+        zoomTo(Math.min(3, Math.max(0.45, pinch.k0 * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d0)), pinch.mid, pinch.base);
         return;
       }
       if (!drag) return;
@@ -422,11 +570,13 @@
       drag.moved = Math.max(drag.moved, Math.hypot(dx, dy));
       drag.vx = (e.clientX - drag.lx) / Math.max(1, now - drag.lt); drag.vy = (e.clientY - drag.ly) / Math.max(1, now - drag.lt);
       drag.lx = e.clientX; drag.ly = e.clientY; drag.lt = now;
-      st.tx = rubber(drag.tx + dx, b.minX, b.maxX); st.ty = rubber(drag.ty + dy, b.minY, b.maxY); place();
+      st.tx = rubber(drag.tx + dx, b.minX, b.maxX); st.ty = rubber(drag.ty + dy, b.minY, b.maxY); frame();
     });
     const up = (e) => {
+      if (st.dead || !pts.has(e.pointerId)) return;
       pts.delete(e.pointerId);
-      if (pinch) { if (pts.size < 2) { pinch = null; gesture("zoom"); } return; }
+      if (pinch) { if (pts.size < 2) { pinch = null; commitZoom(); gesture("zoom"); } return; }
+      if (st.k !== st.drawK) commitZoom();
       if (!drag) return;
       const d = drag; drag = null;
       if (e.type === "pointercancel") return settle();
@@ -452,6 +602,7 @@
       if (performance.now() - d.lt > 80) return settle();   // 停住了再松手：不甩
       let vx = d.vx * 16, vy = d.vy * 16;
       const step = () => {
+        st.raf = 0; if (st.dead) return;
         const b = bounds();
         st.tx += vx; st.ty += vy; vx *= 0.92; vy *= 0.92;
         if (st.tx > b.maxX || st.tx < b.minX) vx *= 0.5;
@@ -461,28 +612,48 @@
       };
       st.raf = requestAnimationFrame(step);
     };
-    cv.addEventListener("pointerup", up);
-    cv.addEventListener("pointercancel", up);
+    listen(cv, "pointerup", up);
+    listen(cv, "pointercancel", up);
     // 鼠标 / 触控板：滚轮平移，按住 Ctrl 缩放时间
-    cv.addEventListener("wheel", (e) => {
-      e.preventDefault();
+    listen(cv, "wheel", (e) => {
+      e.preventDefault(); if (st.dead || !st.AX) return;
       cancelAnimationFrame(st.raf);   // 惯性 / 回弹 / 跳转动画还在走：滚轮接手，别被下一帧拉回去（11-04 报告 三）
       if (e.ctrlKey) {
         const r = cv.getBoundingClientRect(), mid = e.clientX - r.left, base = (mid - st.tx - LEFT) / st.k;
-        st.k = Math.min(3, Math.max(0.45, st.k * Math.exp(-e.deltaY / 300)));
-        paint(); st.tx = mid - (LEFT + st.k * base);
+        zoomTo(Math.min(3, Math.max(0.45, st.k * Math.exp(-e.deltaY / 300))), mid, base);
+        clearTimeout(st.zoomT); st.zoomT = setTimeout(commitZoom, 160);
         gesture("zoom");
-      } else { st.tx -= e.shiftKey ? e.deltaY : e.deltaX; st.ty -= e.shiftKey ? 0 : e.deltaY; gesture("pan"); }
-      const b = bounds(); st.tx = Math.min(b.maxX, Math.max(b.minX, st.tx)); st.ty = Math.min(b.maxY, Math.max(b.minY, st.ty)); place();
+      } else {
+        st.tx -= e.shiftKey ? e.deltaY : e.deltaX; st.ty -= e.shiftKey ? 0 : e.deltaY;
+        const b = bounds(); st.tx = Math.min(b.maxX, Math.max(b.minX, st.tx)); st.ty = Math.min(b.maxY, Math.max(b.minY, st.ty)); frame(); gesture("pan");
+      }
     }, { passive: false });
 
     // ── 手机：缩进树（行样式同会话页），只竖滚 ──
+    function paintTreeSelection() {
+      for (const row of st.treeRows) {
+        const s = st.BY[row.dataset.id], P = st.pick;
+        row.classList.toggle("sel", !P && s.id === st.sel);
+        row.classList.toggle("pk", !!P); row.classList.toggle("on", !!(P && P.set.has(s.id))); row.classList.toggle("no", !!(P && !pickable(s)));
+        const check = row.querySelector(".lm-ck"); check.style.display = P ? "" : "none"; check.classList.toggle("lm-pk-new", !!(P && P.last === s.id));
+      }
+      root.classList.toggle("picking", !!st.pick);
+    }
     function paintTree() {
+      if (st.dead || !st.model) return;
+      if (st.treeKey === st.key && tree.firstElementChild) { paintTreeSelection(); return; }
       const V = st.vis, BY = st.BY;
       // 同 layout()：跨带的父子不成边，子会话在自己那一带当根，否则自己的项目组会整个消失
       const sameBand = (s) => !!(s.parent && BY[s.parent] && BY[s.parent].band === s.band);
       const kids = {}; V.forEach((s) => { if (sameBand(s)) (kids[s.parent] = kids[s.parent] || []).push(s.id); });
-      const last = (s) => Math.max(endOf(s), ...(kids[s.id] || []).map((k) => last(BY[k])));
+      const latest = new Map(), visiting = new Set();
+      const last = (s) => {
+        if (latest.has(s.id)) return latest.get(s.id);
+        if (visiting.has(s.id)) return endOf(s);
+        visiting.add(s.id);
+        const value = Math.max(endOf(s), ...(kids[s.id] || []).map((k) => last(BY[k])));
+        visiting.delete(s.id); latest.set(s.id, value); return value;
+      };
       const rows = [];
       for (const b of st.model.bands || []) {
         const roots = V.filter((s) => s.band === b.key && !sameBand(s)).sort((x, y) => last(y) - last(x));
@@ -517,11 +688,12 @@
         if (s.trashed) meta = `<span>${esc(t("回收站"))}</span><span>${esc(range(s.from, s.to))}</span>`;
         const pk = st.pick ? (st.pick.set.has(s.id) ? " pk on" : pickable(s) ? " pk" : " pk no") : "";
         return `<div class="lm-trow${s.trashed || s.ghost ? " ghost" : ""}${!st.pick && s.id === st.sel ? " sel" : ""}${pk}" data-id="${esc(s.id)}"><div class="gut" style="width:${gw}px"><svg width="${gw}" height="80">${svg}</svg></div>
-          <div class="main"><div class="tt">${esc(s.title)}</div><div class="mm">${meta}</div></div>${pk ? `<span class="lm-ck${st.pick.last === s.id ? " lm-pk-new" : ""}"></span>` : ""}</div>`;
+          <div class="main"><div class="tt">${esc(s.title)}</div><div class="mm">${meta}</div></div><span class="lm-ck${st.pick && st.pick.last === s.id ? " lm-pk-new" : ""}"${pk ? "" : ' style="display:none"'}></span></div>`;
       }).join("") || `<div class="lm-empty">${esc(t("还没有会话"))}</div>`;
+      st.treeKey = st.key; st.treeRows = [...tree.querySelectorAll(".lm-trow")];
       root.classList.toggle("picking", !!st.pick);
     }
-    tree.addEventListener("click", (e) => {
+    listen(tree, "click", (e) => {
       const r = e.target.closest("[data-id]"); if (!r) return;
       const id = r.getAttribute("data-id");
       if (st.pick) return togglePick(id);
@@ -532,12 +704,18 @@
 
     // ── 尺寸：竖屏宽度跨过 600 换形态（横屏放宽到 440）；视口变了重新夹边界 ──
     function relayout() {
-      if (!st.model) return;
+      if (st.dead || !st.model) return;
+      clearTimeout(st.zoomT); st.zoomT = 0;
+      cancelAnimationFrame(st.frame); st.frame = 0;
       const w = root.clientWidth; if (!w) return;
       // 竖屏窄才用缩进树；手机横屏开着常驻侧栏时图只剩 ~580 宽，照样给满血地图（能拖能缩放，窄点不碍事）
       const mode = w < 440 || (w < PHONE && innerWidth <= innerHeight) ? "tree" : "map";
       root.classList.toggle("tree", mode === "tree");
-      if (mode !== st.mode) { st.mode = mode; st.placed = false; }
+      if (mode !== st.mode) {
+        for (const id of pts.keys()) { try { cv.releasePointerCapture(id); } catch {} }
+        st.mode = mode; st.placed = false; pts.clear(); drag = pinch = null;
+        cancelAnimationFrame(st.raf); st.raf = 0;
+      }
       if (mode === "tree") return paintTree();
       paint();
       if (!st.placed) { st.placed = true; st.tx = nowX(); st.ty = 0; place(); }
@@ -547,10 +725,11 @@
     if (ro) ro.observe(root);
 
     function select(id, opt = {}) {
+      if (st.dead || !st.model) return;
       if (id && !st.BY[id]) id = null;
       const prev = st.sel;
       st.sel = id;
-      if (st.mode === "tree") paintTree(); else if (st.model) paint();
+      if (st.mode === "tree") paintTree(); else if (st.model) { if (!st.drawn) paint(); else { paintSelection(); place(); } }
       // 动效：其余线退暗、卡片弹上来、逐章题名浮出（html[data-motion=on] 才有样式）
       if (id && id !== prev && document.documentElement.dataset.motion === "on") {
         root.classList.remove("mo-pick"); void root.offsetWidth; root.classList.add("mo-pick");
@@ -562,18 +741,32 @@
 
     return {
       set(model, o = {}) {
-        st.model = model;
+        if (st.dead) return;
         if ("misc" in o) st.misc = !!o.misc;
         if ("band" in o) st.band = o.band || null;
+        // set 的数据可能原地修改，不能只按对象身份缓存；同一份心跳则不再建图。
+        const key = JSON.stringify([model, st.misc, st.band]);
+        st.model = model;
+        if (key !== st.key) {
+          st.key = key; st.geo = st.drawn = st.AX = st.L = null; st.treeKey = ""; st.W = st.H = 0;
+          cancelAnimationFrame(st.raf); cancelAnimationFrame(st.frame); st.raf = st.frame = 0;
+          clearTimeout(st.zoomT); clearTimeout(st.moT); st.zoomT = st.moT = 0; root.classList.remove("mo-pick");
+          for (const id of pts.keys()) { try { cv.releasePointerCapture(id); } catch {} }
+          pts.clear(); drag = pinch = null;
+          st.refs = st.sticky = st.text = st.dots = st.hits = st.treeRows = []; st.stickyList = st.textList = null;
+          layer.main.replaceChildren(); layer.axis.replaceChildren(); layer.band.replaceChildren(); layer.card.replaceChildren(); tree.replaceChildren();
+          st.cardHtml = ""; filter();
+        }
         if (o.home) st.placed = false;
-        filter(); relayout();
+        relayout();
       },
       select,
       home,
       pick(ids, onChange, skip) {
+        if (st.dead) return;
         const was = !!st.pick;
         st.pick = ids ? { set: new Set(ids), onChange, skip: new Set(skip || []) } : null;
-        if (st.mode === "tree") paintTree(); else if (st.model) paint();
+        if (st.mode === "tree") paintTree(); else if (st.model) { if (!st.drawn) paint(); else { paintSelection(); place(); } }
         // 退出多选：原来选中的那条的卡片弹回来（和选线同一个动效）
         if (was && !ids && st.sel && st.mode === "map" && document.documentElement.dataset.motion === "on") {
           root.classList.remove("mo-pick"); void root.offsetWidth; root.classList.add("mo-pick");
@@ -582,7 +775,18 @@
       },
       snapshot,
       state: () => ({ pick: st.pick ? [...st.pick.set] : null, sel: st.sel, k: st.k, tx: st.tx, ty: st.ty, mode: st.mode, W: st.W, H: st.H, n: st.vis.length }),
-      destroy() { if (ro) ro.disconnect(); cancelAnimationFrame(st.raf); root.innerHTML = ""; root.classList.remove("lmap", "tree"); },
+      destroy() {
+        if (st.dead) return; st.dead = true;
+        if (ro) ro.disconnect();
+        for (const id of pts.keys()) { try { cv.releasePointerCapture(id); } catch {} }
+        cancelAnimationFrame(st.raf); cancelAnimationFrame(st.frame); clearTimeout(st.zoomT); clearTimeout(st.moT);
+        for (const off of listeners) off(); listeners.length = 0;
+        pts.clear(); drag = pinch = null;
+        st.model = st.geo = st.drawn = st.AX = st.L = st.pick = null; st.vis = []; st.BY = {};
+        st.refs = st.sticky = st.text = st.dots = st.hits = st.treeRows = []; st.stickyList = st.textList = null; st.down.clear(); st.titles.clear(); st.key = st.treeKey = st.cardHtml = "";
+        for (const el of Object.values(layer)) el.replaceChildren(); tree.replaceChildren(); st.W = st.H = 0;
+        root.innerHTML = ""; root.classList.remove("lmap", "tree", "picking", "mo-pick");
+      },
     };
   }
 

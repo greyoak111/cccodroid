@@ -179,6 +179,7 @@
     // 关了动效时看着就是一闪。还是新会话、首屏也还在，就把那块原样接回去（showWelcome 认它）
     const wel = !view.sessionId && histEl.childElementCount === 1 ? histEl.querySelector(":scope > .msg.welcome") : null;
     welKeep = wel || null;
+    dropCards(histEl); dropCards(liveEl);
     histEl.innerHTML = "";
     // typeof 守卫：bridge-config-ui 的测试单独切 resetView 出来跑，那里没有 histLoading
     if (view.sessionId && typeof histLoading === "function") histLoading();

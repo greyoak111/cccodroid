@@ -408,8 +408,9 @@
       const top = r.split("/")[0];
       if (!mark.has(top)) mark.set(top, r.includes("/") ? "modified" : f.kind);
     }
+    const visible = fsVisible();
     $("fs-list").querySelectorAll(".fs-item").forEach((el) => {
-      const e = fsVisible()[Number(el.dataset.i)];
+      const e = visible[Number(el.dataset.i)];
       const k = e && mark.get(e.name);
       if (k && !el.querySelector(".fs-git-dot")) el.querySelector(".it-title").insertAdjacentHTML("afterend", `<span class="fs-git-dot ${k}" title="${esc(gsTitle(k))}"></span>`);
     });
@@ -429,6 +430,7 @@
   async function openViewer(path, kind, size) {
     if (VW.dirty && !confirm(t("有未保存的修改，丢弃？"))) return;
     if (VW.dirty) draftClear();
+    closeViewerSheet();
     closeViewerPdf();
     vwDropEd();
     vwMdStop();          // 换文件：上一份的分段预览 observer、行号栏状态都别再留着（FIND-026）
