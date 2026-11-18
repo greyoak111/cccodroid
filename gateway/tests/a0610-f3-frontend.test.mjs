@@ -174,6 +174,6 @@ test("C28 195-O.5–O.7 / 197-5.12：跨午夜 / 换时区重算，补算进度�
   assert.ok(src11.includes("Intl.DateTimeFormat().resolvedOptions().timeZone"), "按运行时区判断");
   assert.ok(src11.includes("document.addEventListener(\"visibilitychange\""), "回到前台重算");
   assert.ok(src11.includes("x.importing, x.off, x.since"), "轮询比较补算 / 开关 / 起始时间");
-  assert.ok(src11.includes("const clearFrom = Math.ceil(usMonth0(y, m).getTime() / 3600e3) * 3600e3;"), "清除区间对到整点桶");
+  assert.ok(src11.includes("const clearFrom = usMonth0(y, m).getTime();"), "把准确的本地月界传给网关");
   assert.ok(src11.includes("已过重置时间，下一轮对话后刷新"), "重置时间过了不再说够用");
 });

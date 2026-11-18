@@ -15,22 +15,27 @@ import { onShutdown } from "./crashguard.mjs";
 // 电量、充电、亮屏和前台时长由 Java（Battery.java，经 Priv 套接字 op=battery）给，开发端没有这一层就只记 CPU。
 // 每 5 分钟采一次，按「小时」「天」两级桶存（8 天 / 120 天），周由天现算。
 // 系统自己的估算（dumpsys batterystats，按电源模型折成 mAh）要 Shizuku，只在用户点了才查一次 —— 那条命令本身就不轻。
-// ── 使用统计：每条发给 Claude 的消息、每轮回复、工具调用、token，按 UTC 小时分桶记下来 ──
-// 键是「1970 年起第几个小时」，前端按本地时区自己汇总成日 / 周 / 月（换时区也不乱）。
+// ── 使用统计：按 UTC 刻钟记录，前端换时区后仍能按本地日期分组 ──
+// hours 留给旧版只知道整点的记录；新记录和从会话补回的记录在 quarters，两个表不重复。
 // since：开始实时记录的时刻；它之前的小时可以从历史会话补算（imported 记补算时间，null = 还没补过）。
 // 桶：m 消息数、t 回复轮数、tl 工具调用、i 输入 token（含缓存）、o 输出 token、s 当时用过的会话、md 各模型的轮数；x = 补算来的
 //     （0.3.13 起）c 读缓存的输入 token（i 的一部分，算缓存命中）、mt 各模型的 token（i+o）、st 各会话的 token（i+o，用量页「最费的对话」）
 const USAGE_FILE = path.join(CFG.home, "ccapp-usage.json");
-const usageDefault = () => ({ v: 1, since: Date.now(), imported: null, off: false, hours: {} });
+const QUARTER_MS = 15 * 60_000;
+const usageQuarter = (ts) => Math.floor(ts / QUARTER_MS);
+const usageDefault = () => ({ v: 1, since: Date.now(), imported: null, off: false, hours: {}, quarters: {} });
 const USAGE = usageDefault();
 let USAGE_UNREADABLE = false, USAGE_WARNED = false;
 // hours 必须是普通对象：是数组/字符串时 usageAdd 会往它身上写属性，在 stdout data 回调里把网关带走（P1-14）。
 // 语法坏、形状不对一律留底成 .bad-* 再按默认值起（195-Z.2；以前解析失败不加保护，下一次 5 秒防抖就把原文件盖了）
 const usageShape = (j) => {
   if (!isObj(j)) return undefined;
-  if (j.hours !== undefined && !isObj(j.hours)) return undefined;
-  const u = { ...j, hours: j.hours || {} };
-  for (const [k, b] of Object.entries(u.hours)) if (!/^\d+$/.test(k) || !isObj(b)) delete u.hours[k];
+  const u = { ...j };
+  for (const name of ["hours", "quarters"]) {
+    if (j[name] !== undefined && !isObj(j[name])) return undefined;
+    u[name] = j[name] || {};
+    for (const [k, b] of Object.entries(u[name])) if (!/^\d+$/.test(k) || !isObj(b)) delete u[name][k];
+  }
   u.since = Number.isFinite(+u.since) ? +u.since : Date.now();
   u.imported = Number.isFinite(+u.imported) ? +u.imported : null;
   u.off = !!u.off;
@@ -61,8 +66,8 @@ onShutdown("用量", flushUsage);   // 退出流程 runShutdown() 会调；不�
 if (!fs.existsSync(USAGE_FILE)) { USAGE.v = 2; usageSave(true); }
 // 0.3.13 前的数据没有 c / mt / st：启动一会儿后从会话记录补上（不动别的数）
 else if ((USAGE.v || 1) < 2 && USAGE.imported) setTimeout(() => usageImport(true).catch((e) => log("使用统计补算失败：" + e.message)), 20000);
-function usageBucket(hours, h) {
-  return hours[h] || (hours[h] = { m: 0, t: 0, tl: 0, i: 0, o: 0, c: 0, s: [], md: {}, mt: {}, st: {} });
+function usageBucket(buckets, key) {
+  return buckets[key] || (buckets[key] = { m: 0, t: 0, tl: 0, i: 0, o: 0, c: 0, s: [], md: {}, mt: {}, st: {} });
 }
 function usageMerge(dst, src, sign) {
   for (const k of ["m", "t", "tl", "i", "o", "c"]) dst[k] = Math.max(0, (dst[k] || 0) + sign * (src[k] || 0));
@@ -72,9 +77,26 @@ function usageMerge(dst, src, sign) {
   }
   if (sign > 0) for (const id of src.s || []) if (!(dst.s ||= []).includes(id) && dst.s.length < 200) dst.s.push(id);
 }
+// 兼容原来的按小时接口，也用于给 v1 的整点记录补上后来增加的字段。
+function usageHourly(quarters, legacy = {}) {
+  const totals = {};
+  for (const [q, b] of Object.entries(quarters)) usageMerge(usageBucket(totals, Math.floor(+q / 4)), b, 1);
+  for (const [h, b] of Object.entries(legacy)) {
+    if (totals[h]) usageMerge(totals[h], b, 1);
+    else totals[h] = b;
+  }
+  return totals;
+}
+function removeImportedEdge(buckets, key) {
+  const b = buckets[key];
+  if (!b?.xi) return;
+  usageMerge(b, b.xi, -1);
+  delete b.xi;
+  if (!(b.m || b.t || b.tl || b.i || b.o || b.c)) delete buckets[key];
+}
 export function usageAdd(d, sid, model, ts) {
   if (USAGE.off) return;
-  const b = usageBucket(USAGE.hours, Math.floor((ts || Date.now()) / 3600e3));
+  const b = usageBucket(USAGE.quarters, usageQuarter(ts || Date.now()));
   for (const k of ["m", "t", "tl", "i", "o", "c"]) if (d[k]) b[k] = (b[k] || 0) + d[k];
   if (sid && !b.s.includes(sid) && b.s.length < 200) b.s.push(sid);
   if (model && d.t) b.md[model] = (b.md[model] || 0) + d.t;
@@ -169,10 +191,9 @@ function usageImport(extraOnly) {
   return usageImporting || (usageImporting = (async () => {
     const gen = usageGen, since0 = USAGE.since;
     // extraOnly：老数据（v1）补上 c / mt / st 三项，别的照旧（实时记下的、后来删掉的会话也还在）
-    const until = Math.floor((extraOnly ? Date.now() : since0) / 3600e3);
-    // 实时统计从 since 那一刻起记：since 所在的那个小时，since 之前的部分也要补（以前按整点切，整小时丢了，#102 04-011）
-    const before = extraOnly ? (ts) => Math.floor(ts / 3600e3) < until : (ts) => ts < since0;
-    const hours = {}, seenU = new Set(), seenTool = new Set(), msgs = new Map();
+    const until = usageQuarter(since0);
+    const cutoff = extraOnly ? Math.floor(Date.now() / 3600e3) * 3600e3 : since0;
+    const quarters = {}, seenU = new Set(), seenTool = new Set(), msgs = new Map();
     let files = 0, prompts = 0;
     let dirs = [];
     try { dirs = fs.readdirSync(PATHS.projects); } catch {}
@@ -187,22 +208,22 @@ function usageImport(extraOnly) {
           if (line.length < 20 || !/"type":"(user|assistant)"/.test(line)) continue;
           let e; try { e = JSON.parse(line); } catch { continue; }
           if (e.isSidechain || !e.timestamp) continue;
-          const ts = Date.parse(e.timestamp), h = Math.floor(ts / 3600e3);
-          if (!before(ts)) continue;
+          const ts = Date.parse(e.timestamp), q = usageQuarter(ts);
+          if (!(ts < cutoff)) continue;
           const m = e.message || {};
           if (e.type === "user" && m.role === "user") {
             if (e.isMeta || e.isCompactSummary || (e.uuid && seenU.has(e.uuid))) continue;
             if (!usageIsPrompt(usageText(m.content))) continue;
             if (e.uuid) seenU.add(e.uuid);
-            const b = usageBucket(hours, h);
+            const b = usageBucket(quarters, q);
             b.m++; prompts++;
             if (e.sessionId && !b.s.includes(e.sessionId) && b.s.length < 200) b.s.push(e.sessionId);
             pending = b;
           } else if (e.type === "assistant" && m.model && m.model !== "<synthetic>") {
             if (pending) { pending.t++; pending.md[m.model] = (pending.md[m.model] || 0) + 1; pending = null; }
-            for (const c of m.content || []) if (c && c.type === "tool_use" && c.id && !seenTool.has(c.id)) { seenTool.add(c.id); usageBucket(hours, h).tl++; }
+            for (const c of m.content || []) if (c && c.type === "tool_use" && c.id && !seenTool.has(c.id)) { seenTool.add(c.id); usageBucket(quarters, q).tl++; }
             // 同一条回复流式拆成好几行、每行都带 usage：按 message.id 只算一次（取最后一行的）
-            if (m.id && m.usage) msgs.set(m.id, [h, m.usage, m.model, e.sessionId]);
+            if (m.id && m.usage) msgs.set(m.id, [q, m.usage, m.model, e.sessionId]);
           }
         }
         // 子代理的 token 记在 <会话>/subagents/*.jsonl：实时统计（usageMeter 的 scanSubs）算它们，补算也要算，不然历史偏低（审查 B29）。
@@ -217,14 +238,14 @@ function usageImport(extraOnly) {
             let e; try { e = JSON.parse(line); } catch { continue; }
             const m = e.message || {};
             if (e.type !== "assistant" || !e.timestamp || !m.id || !m.usage || !m.model || m.model === "<synthetic>") continue;
-            const ts = Date.parse(e.timestamp), h = Math.floor(ts / 3600e3);
-            if (before(ts)) msgs.set(m.id, [h, m.usage, m.model, e.sessionId || sid]);
+            const ts = Date.parse(e.timestamp);
+            if (ts < cutoff) msgs.set(m.id, [usageQuarter(ts), m.usage, m.model, e.sessionId || sid]);
           }
         }
       }
     }
-    for (const [h, u, model, sid] of msgs.values()) {
-      const b = usageBucket(hours, h);
+    for (const [q, u, model, sid] of msgs.values()) {
+      const b = usageBucket(quarters, q);
       const i = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), o = u.output_tokens || 0;
       b.i += i; b.o += o; b.c += u.cache_read_input_tokens || 0;
       if (model) b.mt[model] = (b.mt[model] || 0) + i + o;
@@ -235,21 +256,22 @@ function usageImport(extraOnly) {
       return { files, prompts: 0, aborted: true };
     }
     if (extraOnly) {
-      for (const [k, b] of Object.entries(hours)) { const o = USAGE.hours[k]; if (o) { o.c = b.c; o.mt = b.mt; o.st = b.st; } }
+      for (const [k, b] of Object.entries(usageHourly(quarters))) { const o = USAGE.hours[k]; if (o) { o.c = b.c; o.mt = b.mt; o.st = b.st; } }
       USAGE.v = 2;
       usageSave(true);
       log("使用统计：给老数据补上了缓存命中、按型号与按会话的 token");
       return { files, prompts: 0 };
     }
     // 换掉上次补算的（since 之前的实时数据——比如清空后重新补——也一并以这次为准）
-    for (const k of Object.keys(USAGE.hours)) if (+k < until) delete USAGE.hours[k];
-    const edge = hours[until]; delete hours[until];
-    for (const [k, b] of Object.entries(hours)) USAGE.hours[k] = { ...b, x: 1 };
-    // 交界那个小时：实时记的（since 之后）加上补算的（since 之前）。上次补进去的记在 xi 里，重补时先减掉，不重复算
-    const live = USAGE.hours[until];
-    if (live?.xi) usageMerge(live, live.xi, -1);
-    if (edge) { const b = usageBucket(USAGE.hours, until); usageMerge(b, edge, 1); b.xi = edge; }
-    else if (live) delete live.xi;
+    const oldHour = Math.floor(until / 4);
+    for (const k of Object.keys(USAGE.hours)) if (+k < oldHour) delete USAGE.hours[k];
+    removeImportedEdge(USAGE.hours, oldHour);
+    for (const k of Object.keys(USAGE.quarters)) if (+k < until) delete USAGE.quarters[k];
+    const edge = quarters[until]; delete quarters[until];
+    for (const [k, b] of Object.entries(quarters)) USAGE.quarters[k] = { ...b, x: 1 };
+    // 交界刻钟里 since 之后是实时数据；重补时先减掉上次补入的那一份。
+    removeImportedEdge(USAGE.quarters, until);
+    if (edge) { const b = usageBucket(USAGE.quarters, until); usageMerge(b, edge, 1); b.xi = edge; }
     USAGE.imported = Date.now();
     USAGE.v = 2;
     usageSave(true);
@@ -493,7 +515,12 @@ export async function routeUsage(req, res, u, p) {
   // 我们只转交用户在授权页拿到的一次性授权码（等同于在终端里粘贴），不读、不存任何凭据。
   // ── Shizuku（调试提权）──
   // ── 使用统计 ──
-  if (req.method === "GET" && p === "/api/usage") return sendJson(res, 200, { since: USAGE.since, imported: USAGE.imported, off: !!USAGE.off, importing: !!usageImporting, hours: USAGE.hours, now: Date.now() });
+  if (req.method === "GET" && p === "/api/usage") {
+    const buckets = u.searchParams.get("detail") === "quarter"
+      ? { hours: USAGE.hours, quarters: USAGE.quarters }
+      : { hours: usageHourly(USAGE.quarters, USAGE.hours) };
+    return sendJson(res, 200, { since: USAGE.since, imported: USAGE.imported, off: !!USAGE.off, importing: !!usageImporting, ...buckets, now: Date.now() });
+  }
   if (req.method === "POST" && p.startsWith("/api/usage/")) {
     let b; try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
     const op = p.slice(11);
@@ -505,13 +532,15 @@ export async function routeUsage(req, res, u, p) {
     }
     if (op === "clear") {
       usageGen++;                  // 旧补算的结果作废（#119-5）
-      const before = { hours: USAGE.hours, since: USAGE.since, imported: USAGE.imported };
-      if (b.all) { USAGE.hours = {}; USAGE.since = Date.now(); USAGE.imported = Date.now(); }
+      const before = { hours: USAGE.hours, quarters: USAGE.quarters, since: USAGE.since, imported: USAGE.imported };
+      if (b.all) { USAGE.hours = {}; USAGE.quarters = {}; USAGE.since = Date.now(); USAGE.imported = Date.now(); }
       else {
         const from = Number(b.from), to = Number(b.to);
         if (!(from < to)) return sendJson(res, 400, { error: "bad range" });
-        USAGE.hours = { ...USAGE.hours };
-        for (const k of Object.keys(USAGE.hours)) if (+k * 3600e3 >= from && +k * 3600e3 < to) delete USAGE.hours[k];
+        // 旧整点记录跨越月界时无法拆开，只清完全落在所选月份里的桶。
+        const outside = (buckets, ms) => Object.fromEntries(Object.entries(buckets).filter(([k]) => +k * ms < from || (+k + 1) * ms > to));
+        USAGE.hours = outside(USAGE.hours, 3600e3);
+        USAGE.quarters = outside(USAGE.quarters, QUARTER_MS);
       }
       if (!usageSave(true)) { Object.assign(USAGE, before); return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }); }
       return sendJson(res, 200, { ok: true });
