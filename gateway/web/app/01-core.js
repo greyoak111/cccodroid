@@ -1016,15 +1016,28 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       document.head.appendChild(s);
     }));
   }
-  function enhanceMd(el) {
+  // 限频不能限制一次高亮造出的 token DOM；长块保留可复制的原文，别让着色阻塞输入。
+  function codeHighlightable(text, streaming) {
+    if (text.length > (streaming ? 2000 : 12000)) return false;
+    let lines = 1, at = -1;
+    while ((at = text.indexOf("\n", at + 1)) >= 0) if (++lines > (streaming ? 40 : 160)) return false;
+    return true;
+  }
+  function enhanceMd(el, streaming = false) {
     if (!el || !el.querySelector) return;
     if (el.querySelector("code[data-lang]:not(.hl)")) {
-      loadScript("/vendor/hljs/highlight.min.js").then(() => {
-        for (const c of el.querySelectorAll("code[data-lang]:not(.hl)")) {
+      const codes = [...el.querySelectorAll("code[data-lang]:not(.hl)")].filter((c) => {
+        if (codeHighlightable(c.textContent, streaming)) return true;
+        c.classList.add("hl"); return false;
+      });
+      if (codes.length) loadScript("/vendor/hljs/highlight.min.js").then(() => {
+        // 只处理这次画出的节点，别让旧流式回调按小预算标掉最终正文。
+        for (const c of codes) {
+          if (!el.contains(c) || c.classList.contains("hl")) continue;
           c.classList.add("hl");
-          const lang = window.hljs.getLanguage(c.dataset.lang) ? c.dataset.lang : null;
-          if (!lang || c.textContent.length > 200000) continue;      // 不认识的语言、超长的块不高亮
-          try { c.innerHTML = window.hljs.highlight(c.textContent, { language: lang, ignoreIllegals: true }).value; } catch {}
+          const text = c.textContent, lang = window.hljs.getLanguage(c.dataset.lang) ? c.dataset.lang : null;
+          if (!lang || !codeHighlightable(text, streaming)) continue;   // 等库回来时尾块可能已经长大，再核一次预算
+          try { c.innerHTML = window.hljs.highlight(text, { language: lang, ignoreIllegals: true }).value; } catch {}
         }
       }).catch(() => {});
     }

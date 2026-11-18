@@ -323,8 +323,8 @@
           sl.into = c;
         }
         tail.innerHTML = renderMd(vis.slice(fz));   // 光标不跟在每段正文后面：整条回复只留一个，见 AssistantView 的 liveTail
-        // 流式时每帧重高亮长代码块很贵（实测 1000 行单帧 179ms）：最多每 300ms 做一次，收尾时一定补上（0.6.9 审计 195-Q.1）
-        if (Date.now() - hlAt > 300) { hlAt = Date.now(); enhanceMd(tail); }
+        // 未闭合的尾块会反复换 DOM：限频之外再按字数/行数降级，长代码先显示原文。
+        if (Date.now() - hlAt > 300) { hlAt = Date.now(); enhanceMd(tail, true); }
         sl();
       } else {
         const sl = keepX();

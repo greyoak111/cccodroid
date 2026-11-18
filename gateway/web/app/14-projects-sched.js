@@ -327,6 +327,7 @@
     navMo("sched", SC.cur);
     const box = $("tab-sched");
     if (SC.cur) return renderTask(box);
+    box._taskId = null; box._taskHtml = null;
     setOv("");
     if (!SC.data && SC.err) { box.innerHTML = pageHead(esc(t("定时任务"))) + `<div class="panel">${emptyRow(t("定时任务读取失败：{msg}", { msg: SC.err }))}<div class="row"><button class="btn sm" data-a="sc-retry">${esc(t("重试"))}</button></div></div>`; return; }
     if (!SC.data) { box.innerHTML = pageHead(esc(t("定时任务"))) + `<div class="muted">${esc(t("加载中…"))}</div>`; return loadSched(); }
@@ -367,7 +368,7 @@
     const id = SC.cur;
     let d = SC.detail && SC.detail.task.id === id ? SC.detail : null;
     if (!d) {
-      box.innerHTML = pageHead("", "", true) + `<div class="muted">${esc(t("加载中…"))}</div>`;
+      if (box._taskId !== id) { box.innerHTML = pageHead("", "", true) + `<div class="muted">${esc(t("加载中…"))}</div>`; box._taskId = null; box._taskHtml = null; }
       // 先放局部，确认还在看这个任务再写全局：不然 A 的详情迟到把 SC.detail 改成 A，在 B 页点「立刻跑一次」跑的是 A（私下反馈 10-29）
       let d0;
       try { d0 = await api("/api/sched/" + encodeURIComponent(id)); }
@@ -396,7 +397,7 @@
       [t("有效期"), esc(x.freq && x.freq.kind === "once" ? t("跑完自动关") : x.until && x.until.kind === "date" && x.until.date ? t("到 {d} 为止", { d: x.until.date }) : x.until && x.until.kind === "count" ? t("跑满 {n} 次就关（已跑 {m} 次）", { n: +x.until.count || 1, m: x.runsDone || 0 }) : t("一直有效"))],
     ];
     const runs = (d.runs || []).filter((r) => SC.rflt === "all" || r.st !== "ok");
-    box.innerHTML = pageHead(esc(x.name), `<button class="btn sm ghost" data-a="edit">${pi("edit")}${esc(t("编辑"))}</button>${kebabBtn("tmenu")}`, true) +
+    const html = pageHead(esc(x.name), `<button class="btn sm ghost" data-a="edit">${pi("edit")}${esc(t("编辑"))}</button>${kebabBtn("tmenu")}`, true) +
       `<div class="panel"><div class="row"><div class="grow"><b>${esc(x.on ? t("开着") : t("关着"))}</b><div class="muted pj-sub">${esc(freqText(x.freq))} · ${esc(x.on ? (x.nextAt ? t("下次 {w}", { w: whenText(x.nextAt) }) : t("不会再跑")) : t("不会自己跑"))}</div></div>${swHtml(x.on, `data-sw="${esc(x.id)}"`)}</div>
         <div class="row"><div class="grow"><b>${esc(t("暂停一阵"))}</b><div class="muted pj-sub">${esc(pauseNow === "until" ? t("暂停到 {w}，到时间自动恢复", { w: whenText(x.pausedUntil) }) : t("到时间自动恢复"))}</div></div>
           <select data-pause>${[["none", t("不暂停")], ["skip", t("跳过下一次")], ["1d", t("暂停 1 天")], ["1w", t("暂停 1 周")], ...(pauseNow === "until" ? [["until", t("暂停中")]] : [])].map(([k, l]) => `<option value="${k}"${k === pauseNow ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></div></div>
@@ -405,6 +406,22 @@
       <div class="panel sc-kvp"><dl class="sc-kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl></div>
       <div class="pj-sec"><span class="grow">${esc(t("运行记录"))}</span>${segOf("rflt", [["all", t("全部")], ["bad", t("没成的")]], SC.rflt)}<button class="btn sm" data-a="run"${d.running ? " disabled" : ""}>${pi("play")}${esc(d.running ? t("在跑…") : t("立刻跑一次"))}</button></div>
       <div class="panel">${runs.length ? runs.map((r, i) => `<div class="row pj-row"${r.sid && !r.trial ? ` data-sid="${esc(r.sid)}"` : r.full ? ` data-full="${i}"` : ""}>${stIcon(r.st)}<div class="grow"><div class="t1">${esc(r.msg || "—")}</div><div class="muted pj-sub">${esc([whenText(r.at), r.dur ? durText(r.dur) : "", r.st !== "skip" ? costText(r.cost || 0) : "", r.trial ? t("试跑") : "", r.attempt ? t("第 {n} 次重试", { n: r.attempt }) : ""].filter(Boolean).join(" · "))}</div></div>${r.sid ? pi("chev", "pj-go") : ""}</div>`).join("") : emptyRow(t("还没跑过"))}${d.runsTotal > (d.runs || []).length ? `<div class="row muted pj-sub">${esc(t("只列出最近 {n} 次，一共跑过 {m} 次", { n: (d.runs || []).length, m: d.runsTotal }))}</div>` : ""}</div>`;
+    // 轮询没改内容就保留原节点；有变化时也只把同一次运行的全文展开态带过去。
+    const key = JSON.stringify([id, html, runs.map((r) => [r.at, r.attempt, r.full])]);
+    if (box._taskId === id && box._taskHtml === key) return;
+    const opened = box._taskId === id ? [...box.querySelectorAll("[data-full]")]
+      .filter((r) => r.querySelector(".sc-full")).map((r) => r._run) : [];
+    const scroll = $("page-body").scrollTop;
+    box.innerHTML = html; box._taskId = id; box._taskHtml = key;
+    for (const row of box.querySelectorAll("[data-full]")) {
+      const run = runs[+row.dataset.full]; row._run = run;
+      if (opened.some((r) => r && r.at === run.at && r.attempt === run.attempt && r.full === run.full)) appendRunFull(row, run);
+    }
+    $("page-body").scrollTop = scroll;
+  }
+  function appendRunFull(row, run) {
+    const full = document.createElement("div"); full.className = "sc-full"; full.innerHTML = renderMd(run.full);
+    row.querySelector(".grow").appendChild(full);
   }
   $("tab-sched").addEventListener("click", async (e) => {
     if (e.target.closest("input.sw")) return;       // 开关走 change
@@ -430,8 +447,7 @@
       if (old) return old.remove();
       const r = ((SC.detail && SC.detail.runs) || []).filter((x) => SC.rflt === "all" || x.st !== "ok")[+fr.dataset.full];
       if (!r || !r.full) return;
-      const div = document.createElement("div"); div.className = "sc-full"; div.innerHTML = renderMd(r.full);
-      fr.querySelector(".grow").appendChild(div);
+      appendRunFull(fr, r);
       return;
     }
     const tk = e.target.closest("[data-task]"); if (tk && !SC.cur) { SC.cur = tk.dataset.task; SC.detail = null; renderSched(); $("page-body").scrollTop = 0; return; }
@@ -464,7 +480,7 @@
     const ps = e.target.closest("[data-pause]");
     if (ps && SC.detail && ps.value !== "until") {
       try { const r = await jsend(`/api/sched/${encodeURIComponent(SC.detail.task.id)}/pause`, { mode: ps.value }); SC.detail.task = { ...SC.detail.task, ...r.task }; renderSched(); loadSched(); }
-      catch (err) { toast(err.message, true); renderSched(); }   // 没存上：重画回真正的状态（审查 E11）
+      catch (err) { toast(err.message, true); $("tab-sched")._taskHtml = null; renderSched(); }   // 控件已经改值：失效缓存，重画回真正的状态（审查 E11）
     }
   });
   async function runTaskNow(x, trial, btn) {
@@ -700,7 +716,7 @@
     closeDrawer();
     renderSideNav();
     refreshStatus();
-    if (name === "sessions") { loadSessions(); if (sess.mode === "trash") loadTrash(); }   // 回收站视图重进也要重读，别接着画上回的（#178-5）
+    if (name === "sessions") { renderSessions(); loadSessions(); if (sess.mode === "trash") loadTrash(); }   // 回收站视图重进也要重读，别接着画上回的（#178-5）
     if (name === "caps") loadCaps();
     if (name === "ext") loadExt();
     if (SUBNAVS[name]) paintSubnav(name);

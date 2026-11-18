@@ -82,6 +82,8 @@
   function renderSessions() {
     renderSideRecent();
     renderSideNav();
+    // 状态事件也会走这里；隐藏整页不建列表，重新进入时先画内存里的最新状态。
+    if (!pageOn("sessions")) return;
     const box = $("session-list");
     renderSessBar();
     $("sess-qbox").classList.toggle("hidden", sess.mode === "trash");
@@ -138,7 +140,10 @@
     if (q) {
       // 标题先在本地筛，内容命中等网关回来再补上
       // 命中的会话不在本地这 150 条里时，拿命中结果自带的字段去筛，别绕过当前的置顶 / 项目筛选（审查 B-05）
-      const list = (sess.hits || state.sessions.filter((s) => s.title.toLowerCase().includes(q.toLowerCase()))).filter((h) => keep(state.sessions.find((x) => x.id === h.id) || h));
+      const byId = new Map(), needle = q.toLowerCase();
+      // 同一 ID 可以在多个项目目录里；沿用 find 的首条优先级（最近修改的在前）。
+      for (const s of state.sessions) if (!byId.has(s.id)) byId.set(s.id, s);
+      const list = (sess.hits || state.sessions.filter((s) => s.title.toLowerCase().includes(needle))).filter((h) => keep(byId.get(h.id) || h));
       sess.visible = list.map((x) => x.id); pruneSel(); renderSessBar();
       box.innerHTML = (sess.hitsErr
           ? `<div class="tiny err">${esc(t("搜索失败：{msg}", { msg: sess.hitsErr }))} <button class="btn ghost sm" data-sess-search-retry>${esc(t("重试"))}</button></div>`

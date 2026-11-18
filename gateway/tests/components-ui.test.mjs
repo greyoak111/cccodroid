@@ -31,6 +31,7 @@ function ui(initial = item()) {
     if (!nodes.has(id)) nodes.set(id, {
       innerHTML: "", textContent: "", dataset: {}, listeners: {},
       classList: { toggle() {}, contains() { return false; }, add() {}, remove() {} },
+      querySelectorAll() { return []; },
       addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
     });
     return nodes.get(id);
