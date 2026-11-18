@@ -16,6 +16,23 @@ const take = (src, start, end) => {
   return src.slice(a, b);
 };
 
+test("表格先打开保存的活动表，活动表隐藏或缺失时选第一张可见表", async () => {
+  const book = { SheetNames: ["隐藏", "封面", "本期"], Workbook: { Sheets: [{ Hidden: 1 }, {}, {}], WBView: [{ activeTab: 2 }] } };
+  const VW = {}, opened = [];
+  const element = { querySelector() { return this; }, addEventListener() {} };
+  const ctx = {
+    VW, window: { XLSX: { read: () => book } }, vwTake: () => () => true,
+    vwActs() {}, vwLoading() {}, t: (s) => s, esc: (s) => s, $: () => element,
+    loadScript: async () => {}, vwFetchBuf: async () => new ArrayBuffer(0),
+    VW_OFFICE_MAX: 1, zipExpandsTooMuch: () => false, vwSheetShow: (i) => opened.push(VW.sheets[i]),
+  };
+  const show = vm.runInNewContext("(" + take(src17, "  async function vwSheet()", "  // Excel") + ")", ctx);
+  await show();
+  book.Workbook.WBView[0].activeTab = 0; await show();
+  delete book.Workbook.WBView; await show();
+  assert.deepEqual(opened, ["本期", "封面", "封面"]);
+});
+
 function load() {
   const code = `
 const VW = { path: "/w/f.docx", size: 0 };

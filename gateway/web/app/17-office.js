@@ -173,7 +173,8 @@
       const val = sheetText(cell, wb);
       box.querySelector(".vw-cellbar").textContent = `${addr}  ${val}${cell && cell.f ? `   =${cell.f}` : ""}`;
     });
-    vwSheetShow(0);
+    const active = wb.SheetNames[wb.Workbook?.WBView?.[0]?.activeTab];
+    vwSheetShow(Math.max(0, VW.sheets.indexOf(active)));
   }
   // Excel 的默认日期格式（编号 14）各地显示不同，SheetJS 一律写成美式 m/d/yy —— 这种按年-月-日显示
   // wb：认工作簿的日期系统。1904 系统（Mac 版 Excel 的老文件）同一个数差 1462 天（#106 07-005）；
