@@ -45,8 +45,8 @@ test("600 文件搬移：心跳出现、committed 落盘、进度按文件数走
   const mark = path.join(RUNS, ID + ".installing");
   let saw = 0;
   const p = compSwitch(ID, { source: "official", version: "2.0.0", base: "dk", bin: [], requires: [], baseDeps: [] }, tree, job);
-  // 和 compSwitch 交错跑：它每 256 条 / 每 40ms 让出事件循环，这里每圈查一次心跳文件
-  while (await Promise.race([p.then(() => true), new Promise((r) => setImmediate(() => r(false)))])) break;
+  // 让 compSwitch 先跑一拍（它每 256 条 / 每 40ms 让出事件循环），下面的轮询才能和它交错看到心跳
+  await new Promise((r) => setImmediate(r));
   for (let i = 0; i < 200 && fs.existsSync(mark); i++) {
     let j = null; try { j = JSON.parse(fs.readFileSync(mark, "utf8")); } catch {}
     // 只数 move 阶段且 moved>0 的心跳：开头的 switch beat(0) 不算数（复核 R2-P2-6：别让测试全绿但行为没测到）

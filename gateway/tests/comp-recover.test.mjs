@@ -18,7 +18,7 @@ const { compWriteRecord, compRecover, compClearStage } = m._compForTest;
 const ids = new Set([ID + "-bak", ID + "-tree", ID + "-done", ID + "-half", ID + "-ok", ID + "-other",
   ID + "-committed", ID + "-commshared", ID + "-halfbak", ID + "-idem", ID + "-noprev", ID + "-badarr", ID + "-after", ID + "-oldbase",
   ID + "-rbfail", ID + "-legacy", ID + "-prebak", ID + "-window", ID + "-clear",
-  ID + "-winupg", ID + "-orphan", ID + "-concurrent", ID + "-rdfail"]);
+  ID + "-winupg", ID + "-orphan", ID + "-concurrent", ID + "-rdfail", ID + "-nowin"]);
 const w = (rel, content) => { const f = path.join(PREFIX, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, content); return f; };
 after(() => {
   for (const id of ids) {
@@ -27,7 +27,7 @@ after(() => {
     fs.rmSync(path.join(stage, id), { recursive: true, force: true });
     fs.rmSync(path.join(stage, id + ".old"), { recursive: true, force: true });
     fs.rmSync(path.join(stage, id + "-ab12cd34ef56.tar.gz"), { force: true });
-    for (const r of ["bin/rec-old", "bin/rec-new", "share/rec/a", "share/rec/missing",
+    for (const r of ["bin/rec-old", "bin/rec-new", "share/rec/a", "share/rec/missing", "bin/nw-tool",
       "bin/a", "bin/b", "bin/new", "bin/x", "bin/c-new", "share/rec/gone",
       "bin/c-a", "bin/c-new", "bin/shared-name", "bin/newonly", "bin/rd-a", "bin/rd-new"]) fs.rmSync(path.join(PREFIX, r), { force: true });
   }
@@ -308,6 +308,22 @@ test("R2-P1-2 升级在备份前被杀（同路径旧文件在 + 有备份计划
   const got = JSON.parse(fs.readFileSync(path.join(COMP_DIR, id + ".json"), "utf8"));
   assert.equal(got.version, "1.0.0"); assert.equal(got.state, "ok", "退回旧记录而不是补成新版 ok");
   assert.equal(fs.readFileSync(path.join(PREFIX, "bin/a"), "utf8"), "v1-a", "旧内容不动");
+});
+
+test("R2-P1-2 窄窗口：记录没写 backup 字段 + 旧记录在 + 文件都在——退回旧版，不补成新版 ok", async () => {
+  const id = ID + "-nowin";
+  w("bin/nw-tool", "v1-tool");   // 同路径旧文件还在 = 看着像「搬完了」，实际 backup 计划都还没写
+  const prev = { id, source: "official", version: "1.0.0", state: "ok", at: 1, bin: [], files: ["bin/nw-tool"], shared: [] };
+  fs.writeFileSync(path.join(COMP_DIR, id + ".json.prev"), JSON.stringify(prev));
+  // 在写 backup 计划之前被杀：记录没有 backup 字段。文件都在 + 有旧记录时，
+  // complete 的 backupPlan.size === 0 分支必须再核 !prev，否则会补成假的 2.0.0 ok（复核 R2-P1-2）
+  const rec = { id, source: "official", version: "2.0.0", state: "installing", at: 2, bin: [], files: ["bin/nw-tool"], shared: [] };
+  assert.ok(compWriteRecord(id, rec));
+  fs.mkdirSync(path.join(stage, id, "usr", "bin"), { recursive: true });
+  await compRecover();
+  const got = JSON.parse(fs.readFileSync(path.join(COMP_DIR, id + ".json"), "utf8"));
+  assert.equal(got.version, "1.0.0"); assert.equal(got.state, "ok", "退回旧记录而不是补成新版 ok");
+  assert.equal(fs.readFileSync(path.join(PREFIX, "bin/nw-tool"), "utf8"), "v1-tool", "旧内容不动");
 });
 
 test("R2-P2-1 备份前被杀：备份计划里的孤儿文件不删，只撤确定搬进去的", async () => {

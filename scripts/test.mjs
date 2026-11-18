@@ -52,7 +52,10 @@ const env = { ...clean, CCAPP_TEST: "1", CCAPP_HOME: home, HOME: home, CCAPP_WOR
 
 // 异步起：被 timeout / Ctrl-C / 关终端打断时也要删掉临时目录（以前用 spawnSync，信号一来整个进程直接没了，4 天攒下 29 个，D10）。
 // 收到信号先转给测试进程，等它退出再删；SIGKILL 接不住，留给存储的自动清理（$TMPDIR 里 7 天没动的）
-const child = spawn(process.execPath, ["--test", "--test-concurrency=1", ...files.map((f) => path.join(TESTS, f))], { env, stdio: "inherit", cwd: ROOT });
+// CCAPP_TEST_COVERAGE=1 时给子进程加覆盖率旗标：体检测试套件用（哪些行/分支从没被断言摸过）
+const args = ["--test", "--test-concurrency=1"];
+if (process.env.CCAPP_TEST_COVERAGE) args.push("--experimental-test-coverage");
+const child = spawn(process.execPath, [...args, ...files.map((f) => path.join(TESTS, f))], { env, stdio: "inherit", cwd: ROOT });
 let stopped = null;
 for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { stopped = sig; try { child.kill(sig); } catch {} });
 child.on("exit", (code, signal) => {
