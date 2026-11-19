@@ -26,7 +26,7 @@ const usageQuarter = (ts) => Math.floor(ts / QUARTER_MS);
 const usageDefault = () => ({ v: 1, since: Date.now(), imported: null, off: false, hours: {}, quarters: {} });
 const USAGE = usageDefault();
 let USAGE_UNREADABLE = false, USAGE_WARNED = false;
-// hours 必须是普通对象：是数组/字符串时 usageAdd 会往它身上写属性，在 stdout data 回调里把网关带走（P1-14）。
+// hours / quarters 必须是普通对象：是数组/字符串时 usageAdd 会往上面写属性，在 stdout data 回调里把网关带走（P1-14）。
 // 语法坏、形状不对一律留底成 .bad-* 再按默认值起（195-Z.2；以前解析失败不加保护，下一次 5 秒防抖就把原文件盖了）
 const usageShape = (j) => {
   if (!isObj(j)) return undefined;
@@ -81,7 +81,11 @@ function usageMerge(dst, src, sign) {
 function usageHourly(quarters, legacy = {}) {
   const totals = {};
   for (const [q, b] of Object.entries(quarters)) usageMerge(usageBucket(totals, Math.floor(+q / 4)), b, 1);
+  // 降级再升级的窗口：旧版把补算写在 hours（带 x），新版写在 quarters（也带 x），
+  // 两段是同一份 since 之前的补算——quarters 里有补算时，合并视图只信 quarters，不然翻倍。
+  const hasNew = Object.values(quarters).some((b) => b.x);
   for (const [h, b] of Object.entries(legacy)) {
+    if (hasNew && b.x) continue;
     if (totals[h]) usageMerge(totals[h], b, 1);
     else totals[h] = b;
   }
