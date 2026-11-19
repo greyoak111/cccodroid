@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
-import { CFG, HERE, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
+import { CFG, HERE, LAST_LANG, log, tr, tz } from "./config.mjs";
 import { onShutdown } from "./crashguard.mjs";
 import { SETTINGS, saveSettings, capList } from "./settings-store.mjs";
 import { keepBad, writeAtomic } from "./statefile.mjs";
@@ -11,7 +11,7 @@ import { effectiveModel } from "./sessmodel.mjs";
 // 这个会话真跑时用哪家：钉的 → 项目默认 → 全局（和 run.mjs 的 pickProvider 一致；只看钉的会漏掉项目，#102 04-004）
 const runProvider = (sid) => providerById(effectiveModel(sid).provider) || PROVIDER;
 import { isLoginMode } from "./models.mjs";
-import { findSessionFile } from "./sessions.mjs";
+import { findSessionFile, sessionPresence } from "./sessions.mjs";
 import { sealSession } from "./integrity.mjs";
 import { killRunProcs, killTree, safeModePerm } from "./claude.mjs";
 import { goalCheck, tasksCheck } from "./goal.mjs";
@@ -26,6 +26,8 @@ import { RATE_LIMITS } from "./stream.mjs";
 
 // ── 生成与排队 ────────────────────────────────────────────────────────
 export const QUEUE = [];                 // 等着跑的消息：{ id, message, sessionId, follow, model, permissionMode, addDirs, at }
+const RESUMED = new WeakSet();           // 解除挂起与仅挪到队首有不同含义；不把这个操作标记写进运行状态
+export const wasResumed = (item) => RESUMED.has(item);
 export const RUN_SESSIONS = new Map();   // runId → sessionId（新会话要等 init 才知道自己的会话号）
 export const RUN_LANE = new Map();       // runId → 车道（跟在它后面排队的消息走同一条车道）
 
@@ -98,13 +100,18 @@ export function setPermMode(mode, { persist = true } = {}) {
 // 存中文键 + 变量，界面用同一份词典翻（状态经 SSE 下发，不经过 sendJson 的按请求翻译）
 export const RECOVER_WARNS = [];
 const warnRecover = (key, vars) => { if (!RECOVER_WARNS.some((w) => w.key === key)) RECOVER_WARNS.push({ key, vars: vars || {} }); };
+function holdForStorage(q) {
+  q.held = q.storageHold = true;
+  warnRecover("读取历史失败：{msg}", { msg: "I/O" });
+}
 export function snapshot() {
   return {
     run: runInfo(latestRun()),           // 旧字段：最近开始的那一轮
     runs: runList().map(runInfo),
     maxParallel: maxParallel(),
     tamper: tamperPending(),           // 应用文件被改过、已还原：界面提示一次（见 tamper.mjs）
-    queue: QUEUE.map((q) => ({ id: q.id, cid: q.cid, text: q.message.slice(0, 500), sessionId: q.sessionId, follow: q.follow, at: q.at, held: !!q.held, intr: !!q.intr, ...(q.sched ? { sched: true } : {}) })),
+    queue: QUEUE.map((q) => ({ id: q.id, cid: q.cid, text: q.message.slice(0, 500), sessionId: q.sessionId, follow: q.follow, at: q.at, held: !!q.held, intr: !!q.intr,
+      ...(q.sched ? { sched: true } : {}), ...(q.held && q.storageHold ? { storageHold: true } : {}) })),
     provider: PROVIDER.id,
     model: SETTINGS.model || PROVIDER.defaultModel || null,
     lastSessionId: LAST_SESSION ? LAST_SESSION.id : null,
@@ -167,7 +174,7 @@ const INTR_MAX = 20;
 const intrList = (v) => (Array.isArray(v) ? v : v ? [v] : []).filter((e) => e && typeof e === "object" && e.id).slice(-INTR_MAX);
 // 读的时候顺手丢掉会话已经不在了的（老版本回收时没清）：没建会话的照留
 export let INTERRUPTED = (() => {
-  try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))).filter((e) => { try { return !e.sessionId || !!findSessionFile(e.sessionId); } catch { return true; } }); } catch {}
+  try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))).filter((e) => { try { return !e.sessionId || !sessionGone(e.sessionId); } catch { return true; } }); } catch {}
   return [];
 })();
 /** 落盘成功回 true（写到一半被杀不留半个 JSON：临时文件 + fsync + 换名） */
@@ -260,10 +267,13 @@ function restoreQueue(m, commit) {
   for (const q of Array.isArray(m.queue) ? m.queue : []) {
     if (!q || !q.id || typeof q.message !== "string") continue;
     if (!q.sessionId && q.follow && RUN_SESSIONS.get(q.follow)) q.sessionId = RUN_SESSIONS.get(q.follow);
-    // 会话已经删了（进了回收站）：这条再也看不到、点不了 ⚡，留着只会让 queued 一直不为 0，工具包更新永远等「任务结束」（群友 10-31）
-    if (q.sessionId && !findSessionFile(q.sessionId)) { log(`  会话 ${q.sessionId} 已不在，丢掉它排着的一条消息`); continue; }
+    const at = q.sessionId && sessionPresence(q.sessionId);
+    // 确认删除后才清理；临时读错不能把唯一的待发正文从磁盘抹掉。
+    if (at === "missing") { log(`  会话 ${q.sessionId} 已不在，丢掉它排着的一条消息`); continue; }
     if (QUEUE.some((x) => x.id === q.id)) continue;
-    QUEUE.push({ ...q, held: true, intr: true });   // intr：前端据此说「被系统中断」而不是「点了停止」
+    const restored = { ...q, held: true, intr: true };
+    if (at === "unreadable") holdForStorage(restored);
+    QUEUE.push(restored);
   }
   if (QUEUE.length) log(`  排队的 ${QUEUE.length} 条消息已放回队列（挂起，等用户点 ⚡）`);
   // 中断记录已落盘：标记换成只剩排队消息的新版本（没有排队的就删掉）；写不上就留着旧的，下次再来
@@ -385,8 +395,9 @@ export function forceEnd(run) {
   return true;
 }
 
-export function abortRun(run, { hold = true } = {}) {
+export function abortRun(run, { hold = true, userStopped = false } = {}) {
   if (!run || run.ended) return false;
+  if (userStopped) run.userStopped = true;   // 起进程前可能同步收尾，必须先记下停止意图
   run.aborted = true;
   run.readyAbort?.abort();
   // 停止要和排队的消息严格隔开：此刻排着的一律挂起，不许这一轮一结束就自动发出去
@@ -468,24 +479,28 @@ function idleFire(sid) {
   enqueue({ message: "/compact", sessionId: sid, auto: "idle" });
 }
 
+export function sessionGone(sid) { return sessionPresence(sid) === "missing"; }
+
 /** 有空位就从队列里挑能跑的：车道空闲、且是这条车道上排在最前的（同一会话不许插队、不许同时跑两轮） */
-/** 会话确实没了：会话目录读得了、里面却找不到它。目录整个读不了（存储出错）不算——那时丢消息就是误删（同 195-Y.8） */
-export function sessionGone(sid) {
-  if (findSessionFile(sid)) return false;
-  try { fs.readdirSync(PATHS.projects); return true; } catch { return false; }
-}
 export function pump() {
   const blocked = new Set();
   for (let i = 0; i < QUEUE.length && RUNS.size < maxParallel(); ) {
     const q = QUEUE[i];
     if (q.held) { i++; continue; }                  // 停止时挂起的不自动发，也不挡后面新发的
     if (!startable(q)) { QUEUE.splice(i, 1); publishState(); continue; }
+    const lane = laneOfItem(q), key = sidOfLane(lane) || lane;
+    if (blocked.has(key) || laneRun(lane)) { blocked.add(key); i++; continue; }
     // 会话文件已经不在了（别的途径删的）：同启动恢复那道检查，不拿它去 --resume（195-W.1）。
     // 这次运行里起过的会话不算：claude 写记录文件比 init 晚，刚开的会话接着排的消息不能当成删了
     const qsid = sidForItem(q);
-    if (qsid && !SESSIONS.has(qsid) && sessionGone(qsid)) { log(`  会话 ${qsid} 已不在，丢掉它排着的一条消息`); QUEUE.splice(i, 1); saveRunMark(); publishState(); continue; }
-    const lane = laneOfItem(q), key = sidOfLane(lane) || lane;
-    if (blocked.has(key) || laneRun(lane)) { blocked.add(key); i++; continue; }
+    if (qsid) {
+      const at = sessionPresence(qsid);
+      if (at === "missing" && !SESSIONS.has(qsid)) {
+        log(`  会话 ${qsid} 已不在，丢掉它排着的一条消息`);
+        QUEUE.splice(i, 1); publishState(); continue;
+      }
+      if (at === "unreadable") { holdForStorage(q); publishState(); i++; continue; }
+    }
     blocked.add(key);
     const item = QUEUE.splice(i, 1)[0];
     startRun(item).catch((e) => {                   // startRun 同步占槽，RUNS.size 立刻算上它
@@ -641,10 +656,13 @@ export async function routeQueue(req, res, u, p) {
     else if (act === "remove") QUEUE.splice(i, 1);
     else if (act === "promote") {          // ⚡ 插话：塞进正在跑的这一轮（不打断）；塞不进就挪到队首
       const it = QUEUE.splice(i, 1)[0];
+      if (it.held) RESUMED.add(it);
       it.held = false;                      // 挂起的消息靠这个放行
+      const storageHold = it.storageHold;
+      delete it.storageHold;
       const lr = laneRun(laneOfItem(it));
-      // ⚡ 也一样：执行配置变了就宁可排队等这一轮结束，不要把消息塞进用旧接口/旧模型的进程
-      if (!(lr && sameExec(lr, it) && tryInject(lr, it))) {
+      // 读错后让 pump 先核对存储，不能绕过检查直接插话；执行配置变了也仍走排队。
+      if (!(lr && !storageHold && sameExec(lr, it) && tryInject(lr, it))) {
         QUEUE.unshift(it);
         // 那一轮答完了、只剩后台任务：这条只能等它结束。用户点了 ⚡ 就是不等——连同后台任务结束它，收尾后这条接着发。
         // 输入还开着也要结束：配置已经变了，继续等它不会变成能注入的状态（#139 回归）
