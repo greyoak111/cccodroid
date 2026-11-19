@@ -75,7 +75,7 @@ test("FIND-045：回放环溢出时前端留一句已截断", () => {
   const APP = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web", "app");
   const src = fs.readFileSync(path.join(APP, "18-terminal.js"), "utf8");
   assert.match(src, /const lost = typeof total === "number"/);
-  assert.match(src, /if \(lost\) xt\.write\(/);
+  assert.match(src, /xt\.write\("\\x18\\x1bc" \+ \(lost \? "\\x1b\[2m" \+ t\("…（已截断）"\)/, "回放环溢出提示已截断");
   assert.match(src, /t\("…（已截断）"\)/);
 });
 
