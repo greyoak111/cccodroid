@@ -255,9 +255,11 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       return a;
     }
     /** 播一个 CSS 关键帧：时长按档位；用 Web Animations 的话会和元素自己的 CSS 动画打架，这里走 class 切换 */
-    function play(el, cls, ttl) {
+    function play(el, cls, ttl, restart = true) {
       if (!on() || !el) return;
-      el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+      // 工具结果成批到达时，首次播放不用逐张强制排版。
+      if (restart) { el.classList.remove(cls); void el.offsetWidth; }
+      el.classList.add(cls);
       clearTimeout(el["_mo_" + cls]);
       // 摘类名时元素自己原本的动画（比如 .msg 的淡入）会被浏览器当成新动画重播一遍 —— 看着就是「又渲染了一次」。
       // 摘掉后把刚起头的那几个直接拨到结尾
@@ -410,7 +412,7 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
     if (!window.navigator.userActivation || navigator.userActivation.isActive) ccFocusInput();
   });
   const interjectEl = $("btn-interject");
-  const subEl = $("sub-title"), statEl = $("stat-chip"), modelEl = $("model-chip");
+  const subEl = $("sub-title"), statEl = $("stat-full"), modelEl = $("model-chip");
   const permEl = $("perm-chip"), drawerEl = $("drawer"), toastEl = $("toast");
   const popupEl = $("popup"), popupList = $("popup-list"), popupHead = $("popup-head");
   const ctxBar = $("ctxbar"), ctxFill = $("ctxfill"), ctxTxt = $("ctxtxt");
@@ -589,8 +591,24 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       });
       return;
     }
+    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = 0; }
     chatEl.scrollTop = chatEl.scrollHeight;
     progTop = chatEl.scrollTop;
+  }
+  // 工具事件可能同帧到一批，不要每增一张卡就写 DOM、再量聊天区。
+  // 显式发送、返回最新和重放的收尾仍走原来的 scrollDown。
+  let toolFollowGen = -1;
+  function queueToolFollow() {
+    if (busReplay) return scrollDown();
+    if (!stick || touching || view.next != null || document.hidden) return;
+    const gen = view.gen;
+    if (scrollRaf && toolFollowGen === gen) return;
+    if (scrollRaf) cancelAnimationFrame(scrollRaf);
+    toolFollowGen = gen;
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      if (gen === view.gen && view.next == null && !document.hidden && !busReplay) scrollDown();
+    });
   }
   function relTime(ms) {
     const d = Date.now() - ms;

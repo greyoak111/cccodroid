@@ -606,11 +606,12 @@
       onChange: null,
       result(ok, text) {
         if (disposed) return;
+        const repeat = !!result;
         result = { ok, text: String(text || "") };
         api.state = ok ? "ok" : "err";
         st.className = "tool-state " + (ok ? "ok" : "err");
         st.textContent = ok ? t("完成") : t("失败");
-        if (live && !busReplay) { MO.play(st, "mo-tick", 1400); if (ok) MO.play(card, "mo-ok", 1400); }
+        if (live && !busReplay) { MO.play(st, "mo-tick", 1400, repeat); if (ok) MO.play(card, "mo-ok", 1400, repeat); }
         // 后台子代理：工具结果只是「已启动」，真正跑完靠 sub_done
         // 状态也记成在跑：不然步骤组的摘要按「完成」算（审查 #48 UI07-03）
         if (isAgent && ok && /^Async agent launched/.test(result.text) && !(sub && sub.done)) {
