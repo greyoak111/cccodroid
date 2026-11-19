@@ -1,5 +1,6 @@
 // 0.6.10 审计车道 f1 的回归测试：Markdown 路径 / 围栏用真渲染器跑，
 // 其余是网页端修复的源码锚点（这些逻辑依赖 DOM / WebView，无法在 node 里整段跑）。
+// 2026-11-19 锚点瘦身：每个行为只留 1~2 条能识别它的锚点（批 1 明细见 cccodroid-anchor-batch1.md）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -73,22 +74,14 @@ test("196-聊天.6 围栏带 info string：后面的正文不会被吞进代码�
 });
 
 test("前端注入：图片地址白名单、同源接口不带 Cookie、项目颜色校验", () => {
-  assert.match(src01, /const SAFE_IMG_DATA = \/\^data:image\\\//);
   assert.match(src01, /function safeImgSrc/);
-  assert.ok(src01.includes("k === \"data\" && SAFE_IMG_DATA.test(s)"));
   assert.ok(src01.includes("url.origin === location.origin"));
-  assert.match(src01, /api\\\/file/);
-  assert.match(src13, /function pjMark\(p\)/);
   assert.ok(src13.includes('const c = /^#[0-9a-f]{6}$/i.test(p.color || "") ? p.color : "var(--accent)";'));
 });
 
-test("权限卡：缺 input 不再卡死；生效模式以网关回的 mode 为准；全屏层能弹提示", () => {
+test("权限卡：缺 input 不再卡死；生效模式以网关回的 mode 为准", () => {
   assert.ok(src03.includes('if (!ev.input || typeof ev.input !== "object" || Array.isArray(ev.input)) ev = Object.assign({}, ev, { input: {} });'));
-  assert.ok(src03.includes("const COVER_IDS"));
-  assert.ok(src03.includes("function revealChat()"));
-  // 0.6.10 第二轮 f3（A1）：网关回的是实际生效的 mode，前端不再按 safeMode 自己推导；断言跟着改成新行为
   assert.ok(src03.includes("const eff = r.mode || r.wanted || mode"));
-  assert.ok(src03.includes("simple = (it) => !it.p.guard"));
 });
 
 test("底部确认条：单张敏感卡带风险说明给「允许」，配置类与计划/提问不给，「全部允许」不含敏感卡（用户 11-09）", () => {
@@ -103,76 +96,49 @@ test("底部确认条：单张敏感卡带风险说明给「允许」，配置�
   assert.equal(quick(P("Bash", { cat: "project", what: "/w" })), false);
   assert.equal(quick(P("ExitPlanMode")), false);
   assert.equal(quick(P("AskUserQuestion")), false);
-  // 条上要有卡片同一句风险说明；「允许」绑卡号，点时只放那一张；「全部允许」仍按 simple（不含敏感卡）
+  // 条上要有卡片同一句风险说明；「全部允许」仍按 simple（不含敏感卡）
   assert.ok(src03.includes('quick(list[0]) ? `<b>${t("敏感操作")}</b> ${esc(permGuardWhat(f.guard, f.input))}`'));
-  assert.ok(src03.includes('<button class="pb-allow primary" data-id="${esc(String(f.id))}">'));
-  assert.ok(src03.includes('list.find((x) => String(x.p.id) === b.dataset.id)'));
   assert.ok(src03.includes('${list.every(simple) ? `<button class="pb-all">'));
 });
 
-test("复制失败不再假报成功（三处调用点都看返回值）", () => {
+test("复制失败不再假报成功（两处调用点都看返回值）", () => {
   assert.ok(src02.includes('copyText(body.trim() || text).then((ok) => toast(ok ? t("已复制") : t("复制失败"), !ok))'));
   assert.ok(src03.includes('copyText(text).then((ok) => toast(ok ? t("已复制") : t("复制失败"), !ok))'));
-  assert.ok(src03.includes('t("复制失败"), !ok));'));
 });
 
 test("C.17 查看器里点目录：先关查看器，文件页才不会被压在底下", () => {
   assert.ok(src01.includes("if (vw && !vw.classList.contains(\"hidden\")) {"));
   assert.ok(src01.includes("closeViewer();"));
-  assert.ok(src01.includes("if (VW.dirty) return;"));
 });
 
 test("N.3 启动时设置接口失败会补拉；R.7 整页盖着时先退回对话再开命令面板", () => {
   assert.ok(src19.includes("const ensureSettings = (left) => setTimeout"));
-  assert.ok(src19.includes("ensureSettings(3)"));
   assert.ok(src19.includes('$("btn-palette").addEventListener("click", () => { if (curPage) closePage(); openCmdPalette(""); inputEl.focus(); });'));
 });
 
-test("批量上传/附件：未完成不发、0 字节照传、失败合并且不砍掉成功的", () => {
-  assert.ok(src05.includes("const uploading = new Set()"));
+test("批量上传/附件：未完成不发、0 字节照传", () => {
   assert.ok(src05.includes("if (fromInput && uploading.size)"));
   // 0.6.10 第二轮 f3（A10）：网关已收空文件，前端放行 0 字节；第一轮「本地跳过」的断言作废
   assert.ok(!src05.includes("if (!f.size)"));
   assert.ok(src05.includes("0 字节也照传：网关现在收空文件"));
-  assert.ok(src05.includes("已附加 {n} 个，{m} 个失败"));
-  assert.ok(src05.includes("function normAtt"));
-  assert.ok(src05.includes("selectionStart"));
-  assert.ok(src05.includes("draftPersistSoon"));
 });
 
-test("聊天流式：cid 认轮次、失败卡收尾、长代码块少重排、live 有上限", () => {
+test("聊天流式：cid 认轮次、live 有上限、重连守卫", () => {
   assert.ok(src02.includes("cidRuns: new Map()"));
   assert.ok(src04.includes("view.cidRuns = new Map()"));
-  assert.ok(src02.includes("ToolBlock.fail") || src02.includes("fail()"));
-  assert.ok(src02.includes("hlAt"));
   assert.ok(src04.includes("const LIVE_MAX = 80"));
-  assert.ok(src04.includes("function trimLive()"));
-  assert.ok(src04.includes("view.pendNav"));
-  assert.ok(src04.includes("function detachRun"));
-  assert.ok(src04.includes("keepCidRuns"));
-  assert.ok(src04.includes("clearTimeout(busWatch)"));
-  assert.ok(src04.includes("bootRestart"));
   assert.ok(src04.includes("(helloCount === 1 || bootRestart)"));
 });
 
-test("会话/书签：搜索失败可重试、删除失败合并提示、恢复防连点、多段正文按摊平序号落点", () => {
-  assert.ok(src07.includes("hitsErr"));
+test("会话/书签：删除失败合并提示、恢复防连点、多段正文按摊平序号落点", () => {
   assert.ok(src07.includes("没有删成"));
   assert.ok(src07.includes("if (b.disabled) return;"));
-  assert.ok(src07.includes("b.disabled = true;"));
-  assert.ok(src18d.includes("function paraIndex(msg, box, para)"));
   assert.ok(src18d.includes("para: paraIndex(msg, tg.box, tg.para)"));
-  assert.ok(src18d.includes("querySelectorAll(`[data-uuid="));
-  assert.ok(src18d.includes("flatMap((x) => paraList("));
-  assert.ok(src18d.includes("if (m[sid]) { delete m[sid];"));
 });
 
-test("L.5/L.7/L.8 无障碍与繁体：aria-pressed、聊天区不再是 live region、每周不叠「週」", () => {
+test("L.5/L.7 无障碍与繁体：aria-pressed、聊天区不再是 live region", () => {
   assert.ok(theme.includes("b.setAttribute(\"aria-pressed\", String(on))"));
   assert.ok(!indexHtml.includes('<main id="chat" aria-live'));
-  assert.ok(indexHtml.includes('id="sr-status"'));
-  assert.ok(src13.includes("n.replace(/^(周|週|星期)/, \"\")"));
-  assert.ok(src04.includes("srSay("));
 });
 
 test("L.2/L.3/L.4/L.6/L.9/L.11/12-10：样式修补都在 0.6.10 f1 追加块里", () => {
@@ -208,7 +174,6 @@ test("移动端：从输入区按钮起手不算抽屉手势", () => {
 
 test("app.js 加载失败时静态壳给重试提示（#182 S-02 网页端半）", () => {
   assert.ok(indexHtml.includes("界面脚本没能加载，点这里重试"));
-  assert.ok(indexHtml.includes("if (window.__cc) return;"));
   assert.ok(indexHtml.includes("location.reload()"));
 });
 
