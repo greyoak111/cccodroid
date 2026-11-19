@@ -20,6 +20,8 @@ fs.writeFileSync(providerFile, JSON.stringify({ active: PID, providers: {
 } }));
 const cli = path.join(root, "fake-cli.sh");
 const sh = fs.existsSync("/system/bin/sh") ? "/system/bin/sh" : "/bin/sh";
+// 真实设备上跑过会话就有 projects 目录（claude 写记录时建）；sessionPresence 拿它区分「会话已删」和「存储读不了」
+fs.mkdirSync(path.join(home, ".claude", "projects"), { recursive: true });
 // 假 CLI 跑在 claude 那套 PATH 里（假 PREFIX/bin、/system/bin），Linux 上找不到 sleep 会悄悄跳过等待：用绝对路径，找不到就直接失败（#113）
 const SLEEP = ["/system/bin/sleep", "/bin/sleep", "/usr/bin/sleep"].find((p) => fs.existsSync(p));
 if (!SLEEP) throw new Error("找不到 sleep，假 CLI 的等待会失效");
