@@ -22,11 +22,12 @@ test("包内一行：目录/文件都有图标、名字、大小，目录名带�
   };
   vm.runInNewContext(src16.slice(a, b) + "\nglobalThis.__row = vwArcRow;", ctx);
   const row = ctx.__row;
-  const d = row({ name: "子目录", dir: true, kind: "dir", size: 0 });
+  const d = row({ name: "子目录", dir: true, kind: "dir", size: 0 }, 0);
   assert.ok(d.includes("[dir]") && d.includes("«子目录»/") && !d.includes("0B"), "目录行没有大小：" + d);
-  const f = row({ name: "读我.txt", kind: "text", size: 42 });
+  const f = row({ name: "读我.txt", kind: "text", size: 42 }, 3);
   assert.ok(f.includes("[text]") && f.includes("«读我.txt»") && f.includes("42B"), "文件行带大小：" + f);
-  assert.ok(f.includes('data-n="«读我.txt»"'), "点击认领靠 data-n：" + f);
+  assert.ok(f.includes('data-i="3"'), "点击认领靠 data-i 下标：" + f);
+  assert.ok(!f.includes("data-n="), "不再靠名字认领（含 \\r 的名字经 attribute 往返会失配）：" + f);
   assert.ok(!f.includes("/>"), "文件名后面不加斜杠");
 });
 
@@ -34,9 +35,11 @@ test("接线：archive 分支、返回/解压/退出动作、会话复用与清�
   assert.ok(src16.includes('if (VW.kind === "archive") return vwArcOpen();'), "openViewer 有 archive 分支");
   assert.ok(src16.includes('[[t("返回压缩包"), "arcback"]]') && src16.includes("VW.arc.path !== VW.path"), "嵌套预览时顶栏放返回按钮");
   assert.ok(src16.includes('if (a === "arcback") return openViewer(VW.arc.path, "archive"'), "返回走 openViewer 全套清理");
+  assert.ok(src16.includes("VW.arc.fileSize || VW.size"), "返回时标题栏用压缩包自己的大小，不用未压缩总量");
   assert.ok(src16.includes('if (a === "arcall") return arcExtractDlg({ path: VW.arc.path, entries: null, arc: VW.arc });'), "全部解压带会话");
   assert.ok(src16.includes('if (a === "arcexit") return closeViewer();'), "退出压缩包=关查看器");
   assert.ok(src16.includes("VW.arc.path === VW.path && VW.arc.info"), "返回时不重读，复用已有会话");
+  assert.ok(src16.includes("arc.entries[Number(row.dataset.i)]"), "点击按下标认领条目（不按名字）");
   assert.ok(src16.includes('r.kind === "archive" ? "other" : r.kind'), "包里的压缩包不再递归，当普通文件兜底");
   assert.ok(src17.includes("VW.arc = null"), "关查看器清掉压缩包会话");
 });
@@ -46,4 +49,6 @@ test("接线：文件页解压对话框与任务条支持查看器会话", () =>
   assert.ok(src06.includes("arc ? $(\"vw-arc-job\") : undefined"), "从查看器解压时进度条放查看器里");
   assert.ok(src06.includes("async function arcRunJob(kind, body, dest, box = $(\"fs-job\"))"), "任务条可指向别处");
   assert.ok(src06.includes("VW.arc && VW.arc.path === body.path") && src06.includes("VW.arc.password = pw"), "密码重试同步查看器会话");
+  assert.ok(src06.includes("const fromFiles = box === $(\"fs-job\")") && src06.includes("!state.fs.arc && fromFiles && !filesEl.classList.contains(\"hidden\")"), "查看器发起的任务收尾不刷文件页（不清搜索词）");
+  assert.ok(src06.includes("box.id ? document.getElementById(box.id)"), "任务进行中进度条按 id 重取当前节点");
 });

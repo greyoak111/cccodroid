@@ -560,7 +560,7 @@
       VW.zoom = Math.max(0.5, Math.min(4, VW.zoom * (a === "zoom+" ? 1.25 : 0.8)));
       return vwPdfRelayout();
     }
-    if (a === "arcback") return openViewer(VW.arc.path, "archive", VW.arc.info ? VW.arc.info.bytes : VW.size);   // 全套清理 + 重画列表（vwArcOpen 认出还是同一个包，不重读）
+    if (a === "arcback") return openViewer(VW.arc.path, "archive", VW.arc.fileSize || VW.size);   // 全套清理 + 重画列表（vwArcOpen 认出还是同一个包，不重读）
     if (a === "arcall") return arcExtractDlg({ path: VW.arc.path, entries: null, arc: VW.arc });
     if (a === "arcexit") return closeViewer();
   });
@@ -570,8 +570,9 @@
   // 后端 / 密码框 / 解压对话框复用文件页的 /api/arc/*、arcAskPassword、arcExtractDlg（06-files.js，同一个闭包）。
   // 会话（密码、编码、当前目录）只挂在 VW.arc 上：预览条目嵌套开别的文件时它不跟着重置，返回按钮靠它
   /** 包内一行：目录/文件图标、名字、大小（文件页 .fs-item 同款样式；测试从这里取） */
-  function vwArcRow(e) {
-    return `<div class="item fs-item" data-n="${esc(e.name)}" role="button" tabindex="0">
+  function vwArcRow(e, i) {
+    // 认领点击和文件页一样用下标：esc 后的名字塞进 attribute 再经 dataset 读回，含 \r 的名字会被浏览器按规范折成 \n，按名字找就静默失配（11-19 复核）
+    return `<div class="item fs-item" data-i="${i}" role="button" tabindex="0">
       <div class="fs-row">
         <span class="fs-ico">${kindIcon(e.kind)}</span>
         <span class="it-title">${esc(e.name)}${e.dir ? "/" : ""}</span>
@@ -580,7 +581,7 @@
   }
   async function vwArcOpen() {
     if (!(VW.arc && VW.arc.path === VW.path && VW.arc.info)) {
-      VW.arc = { path: VW.path, name: VW.path.split("/").pop(), dir: "", enc: "auto", password: "", info: null, entries: [], encodings: null, sel: null, seq: 0 };
+      VW.arc = { path: VW.path, name: VW.path.split("/").pop(), dir: "", enc: "auto", password: "", info: null, entries: [], encodings: null, sel: null, seq: 0, fileSize: VW.size };   // 返回时标题栏还显示压缩包自己的大小（info.bytes 是未压缩总量，会突然变大）
     }
     vwActs([[t("全部解压…"), "arcall"], [t("退出压缩包"), "arcexit"]]);
     if (VW.arc.info) return vwArcRender();   // 「返回压缩包」：直接重画，不重新读
@@ -635,11 +636,11 @@
       const row = e.target.closest(".fs-item");
       if (!row || !VW.arc) return;
       if (row.dataset.up) return vwArcLoad(arc.dir.includes("/") ? arc.dir.replace(/\/[^/]*$/, "") : "");
-      const e2 = arc.entries.find((x) => x.name === row.dataset.n);
+      const e2 = arc.entries[Number(row.dataset.i)];
       if (!e2) return;
       if (e2.dir) return vwArcLoad(arcJoin(arc.dir, e2.name));
       arc.sel = e2.name;
-      list.querySelectorAll(".fs-item").forEach((el) => el.classList.toggle("active", el.dataset.n === e2.name));
+      list.querySelectorAll(".fs-item").forEach((el) => el.classList.toggle("active", el === row));
       vwArcPrev();
     });
     const bar = $("vw-body").querySelector(".fs-arcbar");

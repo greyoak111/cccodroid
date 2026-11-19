@@ -99,8 +99,8 @@ export function formatCmd({ description, hint, body, extra, comments }) {
   const fm = [];
   for (const [key, label, value] of [["description", "description", description], ["hint", "argument-hint", hint]]) {
     const comment = comments?.[key];
-    if (value) fm.push(label + ": " + yq(value) + (comment ? " " + comment : ""));
-    else if (comment) fm.push(comment);
+    // 值被清空但注释还在：照旧写成 key 行（空值 + 注释），别让注释裸成一行——下次读会把它当 extra，位置漂移（11-19 复核）
+    if (value || comment) fm.push(label + ": " + yq(value || "") + (comment ? " " + comment : ""));
   }
   if (extra) fm.push(extra);
   const b = String(body || "").replace(/\r\n/g, "\n").replace(/\s+$/, "") + "\n";

@@ -520,20 +520,24 @@
         : (e.body && e.body.error) === "dest inside source" ? t("压缩包不能放进要压缩的文件夹里") : t("操作失败：{msg}", { msg: e.message }), true);
     }
     const label = kind === "extract" ? t("解压中") : t("压缩中");
-    box.classList.remove("hidden");
-    box.innerHTML = `<span class="tiny fs-job-t">${esc(label)}…</span><button class="btn ghost sm" type="button">${esc(t("取消"))}</button>`;
-    box.querySelector("button").onclick = () => arcPost("cancel", { id: j.id }).catch(() => {});
+    // 从查看器发起的任务收尾不刷文件页：文件页可见时 fsLoad 会清掉用户的搜索词（没带 keepQ）；进度条在查看器里
+    const fromFiles = box === $("fs-job");
+    // 任务进行中查看器换目录会把进度条节点整个重画掉：每轮按 id 重取当前节点，进度不丢（11-19 复核建议）
+    const jobBox = () => (box.isConnected ? box : (box.id ? document.getElementById(box.id) : box));
+    jobBox().classList.remove("hidden");
+    jobBox().innerHTML = `<span class="tiny fs-job-t">${esc(label)}…</span><button class="btn ghost sm" type="button">${esc(t("取消"))}</button>`;
+    jobBox().querySelector("button").onclick = () => arcPost("cancel", { id: j.id }).catch(() => {});
     while (j.state === "running") {
       await new Promise((r) => setTimeout(r, 600));
       try { j = await api("/api/arc/job?id=" + encodeURIComponent(j.id)); } catch { break; }
-      const tx = box.querySelector(".fs-job-t");
+      const tx = jobBox().querySelector(".fs-job-t");
       if (tx) tx.textContent = `${label} ${j.pct || 0}%`;
     }
-    box.classList.add("hidden"); box.innerHTML = "";
+    jobBox().classList.add("hidden"); jobBox().innerHTML = "";
     if (j.state === "done") {
       toast(kind === "extract" ? t("已解压到 {path}", { path: dest }) : t("已压缩为 {path}", { path: dest }));
       if (state.fs.multi) { state.fs.multi = null; }
-      if (!state.fs.arc && !filesEl.classList.contains("hidden")) await fsLoad(state.fs.path, { keepSel: true });
+      if (!state.fs.arc && fromFiles && !filesEl.classList.contains("hidden")) await fsLoad(state.fs.path, { keepSel: true });
       else renderFs();
     } else if (j.state === "cancelled") toast(t("已取消"));
     else if (j.wrongPassword) {

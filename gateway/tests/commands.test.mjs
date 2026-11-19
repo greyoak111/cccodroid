@@ -56,3 +56,14 @@ test("说明和参数提示中的 YAML 保留字写成字符串", () => {
     assert.equal(parseCmd(saved).hint, value);
   }
 });
+
+test("清空值但保留注释：注释仍钉在 key 行上，不漂成裸行", () => {
+  // 值被用户清空、注释还在：写成「key:  # 注释」的空值行，读回来注释还在 key 上，位置不漂（11-19 复核）
+  const src = "---\ndescription: # 只留注释\n---\n正文\n";
+  const saved = formatCmd(parseCmd(src));
+  assert.equal(saved, "---\ndescription:  # 只留注释\n---\n正文\n");
+  const again = formatCmd({ ...parseCmd(saved), description: "新说明" });
+  assert.match(again, /^description: 新说明 # 只留注释$/m);
+  // 没有注释的空值照旧不写行
+  assert.equal(formatCmd({ description: "", hint: "", body: "正文" }), "正文\n");
+});
