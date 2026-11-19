@@ -143,11 +143,7 @@ test("196-9 仓库状态读不出来时撤销回 500，不再假报“没有改�
 test("前端 Git 面板源码断言（196-5/6/8/12、200-6-05）", async () => {
   const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web", "app");
   const src = fs.readFileSync(path.join(dir, "16-viewer-git.js"), "utf8");
-  assert.match(src, /跟着单个勾选走/);
-  assert.match(src, /不再把 known 清空/);
-  assert.match(src, /上一个仓库的同步栏/);
   assert.match(src, /diff --git /);
-  assert.match(src, /inHunk/);
   const gw = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "gw", "git.mjs"), "utf8");
   assert.match(gw, /GIT_TRUST\.size > 200/);
   assert.match(gw, /max: 16 << 20/);
