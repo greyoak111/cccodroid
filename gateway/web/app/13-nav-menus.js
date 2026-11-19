@@ -100,7 +100,7 @@
   const NAV_ITEMS = ["sessions", "projects", "lineage", "sched", "bookmarks", "ext", "caps", "usage", "help", "changelog"];          // 侧栏「去哪」里能放的；设置走底部账户行
   var curPage = null;   // var：openSession 在启动早期就会调 closePage，别撞上 let 的暂时性死区
   // 轮询（下载进度、配对状态…）只在那一页开着时继续：整页关了、换页了就停
-  function pageOn(name) { return name === "settings" ? setOpen : curPage === name && !$("pages").classList.contains("hidden"); }
+  function pageOn(name) { return !document.hidden && (name === "settings" ? setOpen : !setOpen && curPage === name && !$("pages").classList.contains("hidden")); }
   (function () { try { const p = JSON.parse(localStorage.getItem("cc.navPins")); if (Array.isArray(p) && !localStorage.getItem("cc.navPinsV2")) { localStorage.setItem("cc.navPins", JSON.stringify([...new Set([...p.filter((k) => k !== "ext"), "projects", "sched"])])); } localStorage.setItem("cc.navPinsV2", "1"); } catch {} })();
   // 0.4.10 加了「脉络」：已有的固定项里补上它（只补一次，用户之后取消了不再加回来）
   (function () { try { const p = JSON.parse(localStorage.getItem("cc.navPins")); if (Array.isArray(p) && !localStorage.getItem("cc.navPinsV3") && !p.includes("lineage")) localStorage.setItem("cc.navPins", JSON.stringify([...p, "lineage"])); localStorage.setItem("cc.navPinsV3", "1"); } catch {} })();
@@ -463,15 +463,14 @@
   // 账户菜单：常用的在上，不可逆的放最下
   function acctMenu() {
     const st = state.serverStatus || {};
-    // 更新直达设置里的「更新」类目；有东西可下 / 可装就在右边标出来（状态是上次取的，顺手再取一次给下回用）
-    const pend = (lastUpd.items || []).filter((it) => it.state === "available" || it.state === "ready").length;
-    loadUpd();
+    const updLabel = () => { const n = (lastUpd.items || []).filter((it) => it.state === "available" || it.state === "ready").length; return n ? t("有 {n} 项可更新", { n }) : ""; };
+    const updateItem = { label: t("更新"), icon: SM.update, small: updLabel(), fn: () => openPage("settings", "update") };
     const items = [
       { label: t("设置"), icon: PAGES.settings.icon, fn: () => openPage("settings") },
       { label: t("头像与昵称"), icon: SM.edit, fn: () => openPage("settings", "general") },
       { label: t("切换接口 / 账户"), icon: SM.swap, fn: () => openPage("settings", "provider") },
       { label: t("用量"), icon: PAGES.usage.icon, fn: () => openPage("usage") },
-      { label: t("更新"), icon: SM.update, small: pend ? t("有 {n} 项可更新", { n: pend }) : "", fn: () => openPage("settings", "update") },
+      updateItem,
       "hr",
       { label: t("帮助"), icon: PAGES.help.icon, fn: () => openPage("help") },
       { label: t("更新日志"), icon: PAGES.changelog.icon, fn: () => openPage("changelog") },
@@ -490,7 +489,17 @@
     } });
     else if (st.keyMode === "login" && acctLogged === false) items.push("hr", { label: t("登录账户"), icon: SM.swap, fn: () => openPage("settings", "provider") });
     if (st.keyMode === "login") { acctEmailAt = 0; paintAcct(st); }
-    popMenu($("side-acct"), items, "up");
+    const anchor = $("side-acct"), menu = popMenu(anchor, items, "up");
+    if (!menu) return;
+    readUpdateStatus().then(() => {
+      if (OV.at(anchor) !== menu) return;
+      const row = menu.querySelector(`[data-i="${items.indexOf(updateItem)}"]`);
+      const text = updLabel();
+      let badge = row.querySelector("small");
+      if (!text) { badge?.remove(); return; }
+      if (!badge) { badge = document.createElement("small"); row.appendChild(badge); }
+      badge.textContent = text;
+    }).catch(() => {});
   }
 
   // ══ 项目与定时任务（照稿）════════════════════════════════════════
@@ -544,14 +553,20 @@
     if (curPage === "projects") renderProjects();
     if (curPage === "sessions") renderSessions();
   }
-  async function loadSched() {
-    const ok = latest("sched");   // hello 里也会拉一次：先发的慢、后发的快时，迟到的旧响应不许盖掉新的（0.6.10 审计 195-BB.4）
+  let schedRevision = 0;
+  function loadSched(changed = false) {
+    if (changed) { schedRevision++; latest("sched"); }
+    const rev = schedRevision;
+    return viewRead("sched-list", rev, () => rev === schedRevision, readSched);
+  }
+  async function readSched() {
+    const ok = latest("sched");   // 写后或事件刷新使旧快照失效（195-BB.4）
     let r;
-    try { r = await api("/api/sched"); } catch (e) { if (!ok()) return; SC.err = e.message || "?"; if (curPage === "sched" && !SC.cur) renderSched(); return; }
+    try { r = await api("/api/sched"); } catch (e) { if (!ok()) return; SC.err = e.message || "?"; if (pageVisible("sched") && !SC.cur) renderSched(); return; }
     if (!ok()) return;
     SC.data = r; SC.err = "";
-    if (curPage === "sched") renderSched();
-    if (curPage === "projects" && PJ.cur) renderProjects();
+    if (pageVisible("sched")) renderSched();
+    if (pageVisible("projects") && PJ.cur) renderProjects();
     if (curPage === "sessions") renderSessions();
     renderSideRecent();   // 侧栏要按定时任务的会话号过滤：任务列表晚到时补画一次
   }

@@ -154,6 +154,18 @@ test("表格成功加载：首屏分页、more 和单元格详情都写入页面
   f.close(); assert.equal(w.terminated, 1);
 });
 
+test("saved active sheet is opened first; invalid index falls back to the first visible sheet", async () => {
+  for (const [active, want] of [[1, 1], [2, 0]]) {
+    const f = fixture(), p = f.open(), w = f.workers[0];
+    f.fetches[0].resolve(new ArrayBuffer(8)); await settle();
+    w.reply({ names: ["First", "Second"], active }); await settle();
+    assert.equal(w.requests.at(-1).op, "page");
+    assert.equal(w.requests.at(-1).sheet, want);
+    w.reply({ empty: true }); await p;
+    f.close();
+  }
+});
+
 test("invalid old load owner is terminated but never clears or stops the later session", async () => {
   const f = fixture(), old = f.open(), oldSession = f.owner(), w = f.workers[0];
   f.fetches[0].resolve(new ArrayBuffer(8)); await settle();

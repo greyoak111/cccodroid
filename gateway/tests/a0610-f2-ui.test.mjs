@@ -35,7 +35,7 @@ test("195-E.3/E.9 删除正在用的接口后强制重拉型号；自定义接�
 
 test("195-E.8 每次打开设置页重取设置，不只吃启动时那一次", () => {
   const s = src("15-pages.js");
-  has(s, /function openSettings\(cat\)[\s\S]*?loadSettings\(\);/, "打开设置页重载");
+  has(s, /function openSettings\(cat\)[\s\S]*?refreshSettings\(false\);/, "打开设置页重载");
   assert.doesNotMatch(s, /openSettings[\s\S]{0,800}?loadProviders\(\); loadModels\(\);/, "不再绕过 loadSettings 单独拉");
 });
 
@@ -61,7 +61,7 @@ test("195-K.2/K.6/K.7/BB.4 已删项目保留在任务下拉；型号晚到补�
 
 test("195-K.8 脉络后台重取保持用户位置：只有头一回拿到图才归位", () => {
   const s = src("18b-lineage.js");
-  has(s, /const first = !LIN\.g;[\s\S]*?linPaint\(first\);/, "只有首次 linPaint(true)");
+  has(s, /const first = !LIN\.map;[\s\S]*?linPaint\(first\);/, "只有首次 linPaint(true)");
   assert.doesNotMatch(s, /LIN\.g = g; LIN\.stale = false;\s*\n\s*linPaint\(true\)/, "后台重取不再强制归位");
 });
 

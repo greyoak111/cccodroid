@@ -23,9 +23,11 @@ assert.ok(themeObserverSource.startsWith('  let themeRaf = 0;'));
 function fileHarness({ entries = [], q = '', response, api } = {}) {
   const state = { fs: { path: '/repo/src', entries, q } };
   const calls = [], paints = [];
+  let current = () => true;
   let nodes = [], visibleCalls = 0;
   const ctx = vm.createContext({
     state,
+    fsHere: () => current(),
     api: async url => { calls.push(url); return api ? api(url) : response; },
     $: id => {
       assert.equal(id, 'fs-list');
@@ -51,7 +53,8 @@ function fileHarness({ entries = [], q = '', response, api } = {}) {
     });
   }
   render();
-  return { state, calls, paints, render, run: () => ctx.fsGitDots(), get visibleCalls() { return visibleCalls; } };
+  return { state, calls, paints, render, run: () => ctx.fsGitDots(), get visibleCalls() { return visibleCalls; },
+    navigate(p) { current = () => false; state.fs.path = p; render(); } };
 }
 
 test('Git dots filter a thousand matching entries once per update and reuse cached status', async () => {
@@ -92,8 +95,7 @@ test('a late status for a previous directory never filters or paints the current
   const response = new Promise(r => { resolve = r; });
   const h = fileHarness({ entries: [{ name: 'main.js' }], q: 'main', api: () => response });
   const pending = h.run();
-  h.state.fs.path = '/repo/elsewhere';
-  h.render();
+  h.navigate('/repo/elsewhere');
   resolve({ root: '/repo', files: [{ path: 'src/main.js', kind: 'modified' }] });
   await pending;
   assert.equal(h.visibleCalls, 0);

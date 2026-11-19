@@ -36,6 +36,7 @@ test("接线：archive 分支、返回/解压/退出动作、会话复用与清�
   assert.ok(src16.includes('[[t("返回压缩包"), "arcback"]]') && src16.includes("VW.arc.path !== VW.path"), "嵌套预览时顶栏放返回按钮");
   assert.ok(src16.includes('if (a === "arcback") return openViewer(VW.arc.path, "archive"'), "返回走 openViewer 全套清理");
   assert.ok(src16.includes("VW.arc.fileSize || VW.size"), "返回时标题栏用压缩包自己的大小，不用未压缩总量");
+  assert.match(src16, /"arcback"[^\n]*archive: VW\.arc, filesOrigin: VW\.filesOrigin/, "返回显式传回原查看器压缩包会话");
   assert.ok(src16.includes('if (a === "arcall") return arcExtractDlg({ path: VW.arc.path, entries: null, arc: VW.arc });'), "全部解压带会话");
   assert.ok(src16.includes('if (a === "arcexit") return closeViewer();'), "退出压缩包=关查看器");
   assert.ok(src16.includes("VW.arc.path === VW.path && VW.arc.info"), "返回时不重读，复用已有会话");
@@ -46,9 +47,8 @@ test("接线：archive 分支、返回/解压/退出动作、会话复用与清�
 
 test("接线：文件页解压对话框与任务条支持查看器会话", () => {
   assert.ok(src06.includes("async function arcExtractDlg({ path, entries, arc })"), "解压对话框接受外部会话");
-  assert.ok(src06.includes("arc ? $(\"vw-arc-job\") : undefined"), "从查看器解压时进度条放查看器里");
-  assert.ok(src06.includes("async function arcRunJob(kind, body, dest, box = $(\"fs-job\"))"), "任务条可指向别处");
-  assert.ok(src06.includes("VW.arc && VW.arc.path === body.path") && src06.includes("VW.arc.password = pw"), "密码重试同步查看器会话");
-  assert.ok(src06.includes("const fromFiles = box === $(\"fs-job\")") && src06.includes("!state.fs.arc && fromFiles && !filesEl.classList.contains(\"hidden\")"), "查看器发起的任务收尾不刷文件页（不清搜索词）");
-  assert.ok(src06.includes("box.id ? document.getElementById(box.id)"), "任务进行中进度条按 id 重取当前节点");
+  const job = src06.slice(src06.indexOf("async function arcRunJob("), src06.indexOf("function fsSetMulti("));
+  assert.match(job, /origin\.here\(\) && VW\.path === origin\.arc\.path \? \$\("vw-arc-job"\)/, "进度条只在原包的查看器里按 id 重取");
+  assert.match(job, /!origin\.arc && origin\.here\(\)/, "查看器发起的任务收尾不刷文件页");
+  assert.match(job, /if \(pw != null && origin\.here\(\)\) \{\s*if \(origin\.archive\) origin\.archive\.password = pw;/, "密码重试只更新原会话");
 });

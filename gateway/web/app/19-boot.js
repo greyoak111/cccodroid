@@ -579,9 +579,6 @@
     let statusMissed = false;
     setInterval(() => { if (document.hidden) statusMissed = true; else refreshStatus(); }, 45000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden && statusMissed) { statusMissed = false; refreshStatus(); } });
-    // 设置里有几类（设备与权限、更新、通知、用量……）要等接口回话才显示：开机空下来先拉一遍，
-    // 打开设置时就是现成的，不再一项项往外冒（打开时照旧再刷一次）
-    setTimeout(() => { if (!setOpen) { loadProviders(); loadPriv(); loadUpd(); loadNotify(); loadDev(); loadQuota().catch(() => {}); } }, 2500);
     if (showWhatsNew()) noticeHold = true;     // 刚弹了更新说明：通知等下一次打开 / 切回来
     else loadNotices();
   })();

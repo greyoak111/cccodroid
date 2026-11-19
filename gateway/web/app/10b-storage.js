@@ -1,28 +1,45 @@
   // ── 设置 → 存储（D10）：网关 gw/storage.mjs 扫、清；这里只画和转发。六类：缓存 / 临时文件 / Claude Code 杂物 能清，
   // 会话、程序和文件只看大小，已有的清理入口汇总后跳回原处 ──
-  const ST = { r: null, poll: 0, picks: null, open: false };
+  const ST = { r: null, poll: 0, picks: null, open: false, result: null, cleanSeq: 0 };
   const CACHE_NAMES = { webview: () => t("内置浏览器"), npm: () => "npm", pip: () => "pip", gh: () => "GitHub CLI", pkg: () => t("pkg 下载的安装包"), apt: () => "apt", lineage: () => t("脉络索引") };
   const sz = (b) => (b ? fmtSize(b) : "0 B");
-  function stOut(cls, text) { const o = $("st-result"); o.className = "prov-state " + cls; o.textContent = text; }
+  function stPaintResult() {
+    if (!ST.result || !setVisible("storage")) return;
+    const o = $("st-result"); o.className = "prov-state " + ST.result.cls; o.textContent = ST.result.text;
+  }
+  function stOut(cls, text) { ST.result = { cls, text }; stPaintResult(); }
 
-  async function stLoad() {
+  function stLater(ms, visit) {
+    if (!setVisible("storage", visit)) return;
     clearTimeout(ST.poll);
-    let r;
-    try { r = await api("/api/storage"); } catch (e) { stOut("err", "✗ " + e.message); return; }
-    ST.r = r;
-    stPaint();
-    if (r.scanning) { ST.poll = setTimeout(stLoad, 1500); return; }
-    if (!r.scan && !ST.kicked) { ST.kicked = true; stScan(); }   // 第一次打开：自动扫一遍
+    ST.poll = setTimeout(() => { if (setVisible("storage", visit)) stLoad(); }, ms);
+  }
+  function stLoad() {
+    const visit = setVisit, live = () => setVisible("storage", visit);
+    return viewRead("storage", visit, live, async () => {
+      clearTimeout(ST.poll);
+      let r;
+      try { r = await api("/api/storage"); } catch (e) { if (live()) stOut("err", "✗ " + e.message); return; }
+      if (!live()) return;
+      ST.r = r;
+      stPaint();
+      if (r.scanning) stLater(1500, visit);
+      else if (!r.scan && !ST.kicked) { ST.kicked = true; stScan(); }   // 第一次打开：自动扫一遍
+    });
   }
   async function stScan() {
+    const visit = setVisit;
+    if (!setVisible("storage", visit)) return;
+    clearTimeout(ST.poll);
     $("st-scan").disabled = true;
     $("st-when").textContent = t("正在扫描…");
-    try { await post("/api/storage/scan", {}); } catch (e) { stOut("err", "✗ " + e.message); }
-    ST.poll = setTimeout(stLoad, 800);
+    try { await post("/api/storage/scan", {}); } catch (e) { if (setVisible("storage", visit)) stOut("err", "✗ " + e.message); }
+    stLater(800, visit);
   }
-  function stOnOpen() { stLoad(); }
+  function stOnOpen() { stPaintResult(); stLoad(); }
 
   function stPaint() {
+    if (!setVisible("storage")) return;
     const r = ST.r || {}, s = r.scan;
     $("st-scan").disabled = !!r.scanning;
     $("st-sum").textContent = s ? t("本应用共占 {app}，设备还剩 {free}", { app: sz(s.app), free: sz(s.device && s.device.free) }) : "";
@@ -88,13 +105,17 @@
   }
 
   async function stClean(cat, picks) {
+    const seq = ++ST.cleanSeq;
     stOut("", t("正在清理…"));
     let r;
-    try { r = await post("/api/storage/clean", picks ? { cat, picks } : { cat }); } catch (e) { return stOut("err", "✗ " + e.message); }
+    try { r = await post("/api/storage/clean", picks ? { cat, picks } : { cat }); }
+    catch (e) { if (seq === ST.cleanSeq) stOut("err", "✗ " + e.message); return; }
+    if (seq !== ST.cleanSeq) return;
     if (!r || !r.ok) return stOut("err", "✗ " + ((r && r.message) || t("失败")));
+    // 清理已经执行：离开时只记结果，回来仍能看到；不重启已离开的轮询。
     stOut("ok", t("✓ 删了 {n} 项，腾出 {size}", { n: r.n, size: sz(r.freed) }) + (r.skipped ? "；" + t("{n} 项没删（正在用或不在允许的范围里）", { n: r.skipped }) : ""));
     ST.picks = null;
-    ST.poll = setTimeout(stLoad, 800);
+    stLater(800, setVisit);
   }
 
   $("st-scan").addEventListener("click", stScan);

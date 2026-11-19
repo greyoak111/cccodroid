@@ -79,11 +79,11 @@
     </button>
   </div>
   <div id="hint-row">
-    <span id="proj-chip" class="chip proj hidden" role="button" tabindex="0"></span>
+    <button type="button" id="proj-chip" class="chip proj hidden"></button>
     <span id="model-chip">—</span>
     <span id="perm-chip" role="button" tabindex="0" title="切换权限模式" data-i18n-attr="title"></span>
-    <span id="stat-chip"></span>
-    <span id="draft-chip" class="hidden" role="button" tabindex="0" data-i18n>↩ 恢复刚才清掉的内容</span>
+    <button type="button" id="stat-chip" hidden><span id="stat-full" class="stat-full" dir="ltr"></span><span class="stat-short" dir="ltr" aria-hidden="true"></span></button>
+    <button type="button" id="draft-chip" class="hidden" aria-label="↩ 恢复刚才清掉的内容" title="↩ 恢复刚才清掉的内容" data-i18n-attr="aria-label,title"><span aria-hidden="true">↩</span><span class="draft-label" data-i18n>恢复</span></button>
   </div>
 </div>
 
@@ -1050,7 +1050,6 @@
 <script src="/langs.js"></script>
 <script src="/i18n.js"></script>
 <script src="/layout.js"></script>
-<script src="/lineage/map.js"></script>
 <script src="/app.js"></script>
 <script>
   // app.js 自身没加载出来（网关正在重启、静态文件缺失、脚本早退）时，静态壳会一直停在「连接中…」。

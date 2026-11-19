@@ -184,7 +184,8 @@
   }
 
   // 换外观时重画月报（theme.js 只改 html 的 data-theme / data-skin 和 <style id="user-accent"> 的内容，不发事件）
-  const usRepaint = () => { if (us.raw && $("us-card")) usRender(); };
+  const usReportOpen = () => pageVisible("usage") && !$("us-field").classList.contains("hidden");
+  const usRepaint = () => { if (us.raw && usReportOpen()) usRender(); };
   new MutationObserver(usRepaint)
     .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-skin"] });
   // 强调色只换那段 style 的文字、不碰 html 属性，得单独盯着（195-L.10）：第一次创建、之后每次改色都要重画
@@ -199,6 +200,7 @@
   usWatchAccent();
 
   function usRender() {
+    if (!usReportOpen()) return;
     // 还没读回来：月份标签说明在等/失败了，翻月和保存分享先灰掉，别看着能点、点了没反应（审查 F-009）
     const idle = !us.raw;
     for (const b of [$("us-prev"), $("us-next"), ...$("us-actions").querySelectorAll("button")]) b.disabled = idle;
@@ -235,6 +237,7 @@
   const usDash = { view: "chart", quota: null, energy: null };
   const MODEL_COLORS = ["#c96442", "#2f6aa8", "#d6a84a"];      // 按出现顺序固定分配；第 4 个起并进「其他」
   function usPaint() {
+    if (!pageVisible("usage")) return;
     const now = new Date(), d0 = usDay0(now), m0 = usMonth0(now.getFullYear(), now.getMonth());
     const today = us.raw ? usSum(d0, usAddDays(d0, 1)) : usEmpty(), month = us.raw ? usSum(m0, usAddDays(d0, 1)) : usEmpty();
     // 数字一排：额度（官方账户才有）、今天、本月、缓存命中
@@ -324,7 +327,10 @@
     box.addEventListener("pointerleave", () => box.querySelector(".tip")?.classList.remove("show"));
   }
   $("us-top").addEventListener("click", (e) => { const r = e.target.closest("[data-sid]"); if (r) openSession(r.dataset.sid); });
-  $("en-more").addEventListener("click", () => { $("en-field").classList.toggle("hidden"); if (!$("en-field").classList.contains("hidden")) $("en-field").scrollIntoView({ behavior: "smooth", block: "start" }); });
+  $("en-more").addEventListener("click", () => {
+    $("en-field").classList.toggle("hidden");
+    if (enDetailsOpen()) { loadEnergy(false); $("en-field").scrollIntoView({ behavior: "smooth", block: "start" }); }
+  });
   $("us-report-btn").addEventListener("click", () => { $("us-field").classList.toggle("hidden"); if (!$("us-field").classList.contains("hidden")) { usRender(); $("us-field").scrollIntoView({ behavior: "smooth", block: "start" }); } });
   $("us-csv").addEventListener("click", async () => {
     if (!us.raw) return;
@@ -336,16 +342,40 @@
       if (canSaveAs()) saveAs(r.file, "text/csv"); else toast(t("已保存：{name}", { name: r.file }));
     } catch (e) { toast(e.message, true); }
   });
-  async function loadUsage() {
-    try {
-      us.raw = await api("/api/usage?detail=quarter"); us.err = "";
-      if (/^✗/.test($("us-result").textContent)) $("us-result").textContent = "";   // 恢复了：旧的失败提示别留着
-      if (!us.month) { const n = new Date(); us.month = [n.getFullYear(), n.getMonth()]; }
-      usBuild(); usPaint();
-      if (!$("us-field").classList.contains("hidden")) usRender();
-      // 第一次打开：把装这个版本之前的历史会话补算进来
-      if (!us.raw.imported && !us.raw.importing && !us.busy) usImport(true);
-    } catch (e) { us.err = e.message || "?"; $("us-result").textContent = "✗ " + e.message; usPaint(); if (!$("us-field").classList.contains("hidden")) usRender(); }
+  function resumeUsage() {
+    if (!pageVisible("usage")) return;
+    if (us.importResult) { $("us-result").textContent = us.importResult; us.importResult = ""; }
+    usRebase();
+    loadUsage();
+  }
+  // 定时刷新、手动重试和写后重读共用同一条读取链；收包后才排下一拍。
+  let usageRevision = 0;
+  function loadUsage(poll = false, changed = false) {
+    if (changed) usageRevision++;
+    const visit = pageVisit, rev = usageRevision, live = () => pageVisible("usage", visit) && rev === usageRevision;
+    return viewRead("usage", visit + ":" + rev, live, async () => {
+      clearTimeout(us.poll);
+      const refresh = () => { usBuild(); usPaint(); usRender(); };
+      try {
+        if (poll && us.busy) return;
+        const r = await api("/api/usage?detail=quarter");
+        if (!live()) return;
+        // 15 分钟桶也要比较，小时桶不变不代表本地日界线附近的数没变。
+        const sig = (x) => JSON.stringify([x.hours, x.quarters, x.imported, x.importing, x.off, x.since]);
+        if (!usDayMoved() && poll && !us.err && us.raw && sig(r) === sig(us.raw)) return;
+        us.raw = r; us.err = "";
+        if (/^✗/.test($("us-result").textContent)) $("us-result").textContent = "";
+        if (!us.month) { const n = new Date(); us.month = [n.getFullYear(), n.getMonth()]; }
+        refresh();
+        if (!poll && !r.imported && !r.importing && !us.busy) usImport(true);
+      } catch (e) {
+        if (!live()) return;
+        if (!poll || !us.raw) { us.err = e.message || "?"; $("us-result").textContent = "✗ " + e.message; usPaint(); usRender(); }
+        else if (usDayMoved()) refresh();
+      } finally {
+        if (live() && us.raw) us.poll = setTimeout(() => { if (live()) loadUsage(true); }, 20000);
+      }
+    });
   }
   // 开着用量页时跟着刷新：token 现在是边跑边记的（gw/usage.mjs usageMeter），不用等这一轮结束、也不用退出重进。数没变就不重画
   // 本地日期 / 时区变了（跨午夜、换时区、夏令时）：日、周、月的分组全得按新的算（195-O.5–O.7、197-5.12）
@@ -357,34 +387,24 @@
     usSeen = s;
     return true;
   }
-  setInterval(async () => {
-    if (curPage !== "usage" || document.hidden || us.busy || !us.raw) return;
-    let r = null; try { r = await api("/api/usage?detail=quarter"); } catch {}
-    if (curPage !== "usage") return;
-    const moved = usDayMoved();
-    // 只比 hours 会漏掉补算进度 / 开关 / 起始时间的变化（195-O.7）
-    const sig = (x) => JSON.stringify([x.hours, x.quarters, x.imported, x.importing, x.off, x.since]);
-    if (!moved && (!r || sig(r) === sig(us.raw))) return;
-    if (r) us.raw = r;
-    usBuild(); usPaint();
-    if (!$("us-field").classList.contains("hidden")) usRender();
-  }, 20000);
-  // 从后台回来：挂后台期间可能跨了午夜 / 换了时区，按现在的本地日期重算一遍
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden || curPage !== "usage" || !us.raw) return;
-    usDayMoved(); usBuild(); usPaint();
-    if (!$("us-field").classList.contains("hidden")) usRender();
-  });
+  // 回来可能跨了午夜或换了时区，先按新的本地时间分组，不等请求回来。
+  function usRebase() { if (pageVisible("usage") && us.raw && usDayMoved()) { usBuild(); usPaint(); usRepaint(); } }
+  document.addEventListener("visibilitychange", usRebase);
   async function usImport(auto) {
+    if (us.busy) return;
     us.busy = true;
     $("us-result").textContent = t("正在从历史会话补算…");
+    let result, changed = false;
     try {
       const r = await post("/api/usage/import", {});
-      $("us-result").textContent = r.aborted ? t("补算期间使用统计被清空了，这次补算的结果已丢弃。")
+      result = r.aborted ? t("补算期间使用统计被清空了，这次补算的结果已丢弃。")
         : t("补算完成：{f} 个会话记录、{n} 条消息。", { f: r.files, n: usNum(r.prompts) });
-      us.busy = false;
-      if (!auto || r.prompts) loadUsage();
-    } catch (e) { us.busy = false; $("us-result").textContent = "✗ " + e.message; }
+      changed = !auto || !!r.prompts;
+    } catch (e) { result = "✗ " + e.message; }
+    us.busy = false;
+    if (pageVisible("usage")) $("us-result").textContent = result;
+    else us.importResult = result;
+    if (changed) loadUsage(false, true);
   }
   $("us-year").addEventListener("click", (e) => {
     const b = e.target.closest(".us-mb");
@@ -399,7 +419,7 @@
   $("us-off").addEventListener("change", async (e) => {
     const box = e.target, want = box.checked;
     box.disabled = true;
-    try { await post("/api/usage/set", { off: !want }); loadUsage(); }
+    try { await post("/api/usage/set", { off: !want }); loadUsage(false, true); }
     catch (err) { box.checked = !want; toast(err.message, true); }
     finally { box.disabled = !us.raw; }
   });
@@ -441,28 +461,38 @@
         const clearFrom = usMonth0(y, m).getTime();
         const clearTo = usMonth0(y, m + 1).getTime();
         await post("/api/usage/clear", { from: clearFrom, to: clearTo });
-        loadUsage();
+        loadUsage(false, true);
       } else if (act === "clear-all") {
         if (!confirm(t("清空全部使用统计？之后从现在重新开始记。"))) return;
         await post("/api/usage/clear", { all: true });
-        loadUsage();
+        loadUsage(false, true);
       }
     } catch (err) { toast(err.message, true); }
   });
 
-  async function loadEnergy() {
-    api("/api/energy?view=day").then((d) => { usDash.energy = d; usPaint(); }).catch(() => {});
-    // 快速切 小时 / 日 / 周：慢的那次迟到不许盖掉现在这一档（数据形状也不一样，会报类型错误）（审查 F-005）
+  const enDetailsOpen = () => pageVisible("usage") && !$("en-field").classList.contains("hidden");
+  async function loadEnergy(summary = true) {
+    const visit = pageVisit, live = () => pageVisible("usage", visit);
+    if (!live()) return;
+    const dayUrl = "/api/energy?view=day";
+    const day = summary ? sameGet(dayUrl) : null;
+    day?.then((d) => { if (live()) { usDash.energy = d; usPaint(); } }).catch(() => {});
+    if (!enDetailsOpen()) return;
+    // 快速切小时 / 日 / 周或离页后，旧回包不能写进新视图。
     const ok = latest("energy"), v = en.view;
-    try { const d = await api("/api/energy?view=" + v); if (!ok() || en.view !== v) return; d.view = v; en.data = d; en.sel = -1; enRender(); if (d.sys) enSys(d.sys); }
-    catch (e) { if (ok()) $("en-cap").textContent = "✗ " + e.message; }
+    const current = () => live() && enDetailsOpen() && ok() && en.view === v;
+    try {
+      const d = await (v === "day" && day ? day : sameGet("/api/energy?view=" + v));
+      if (!current()) return;
+      en.data = { ...d, view: v }; en.sel = -1; enRender(); if (d.sys) enSys(d.sys);
+    } catch (e) { if (current()) $("en-cap").textContent = "✗ " + e.message; }
   }
   $("en-seg").addEventListener("click", (e) => {
     const v = e.target.dataset && e.target.dataset.v;
     if (!v || v === en.view) return;
     en.view = v;
     $("en-seg").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x.dataset.v === v));
-    loadEnergy();
+    loadEnergy(false);
   });
   // 点柱子看那一格的明细，再点一下（或点同一格）回到合计
   $("en-charts").addEventListener("click", (e) => {

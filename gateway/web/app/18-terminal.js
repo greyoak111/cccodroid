@@ -45,6 +45,8 @@
 
   // 宽屏下窗格已经开着、被别的盖住：再点入口要把它提到最上面（审查 UI05-001）
   const raisePane = (id) => window.CCLayout && CCLayout.raise(id);
+  const termCovered = () => document.documentElement.classList.contains("term-under");
+  const termCurrent = (a) => TERM.cur === a.id && !termEl.classList.contains("hidden") && !termEl._moLeave;
   // 首次加载 xterm 时连点两下顶栏入口：两次都拿到空列表、各建一个终端（审查 UI05-004）
   // 收起后再打开：上一次已经作废，重新开一次（closeTerm 清掉了 TERM.opening）
   function openTerm(opts = {}) {
@@ -149,8 +151,13 @@
     let a = TERM.inst.get(id);
     if (!a) a = mountTerm(id);
     termAttach(a);
-    // 被别的窗格盖着时别抢焦点：按键会打进看不见的终端（审查 UI05-001）
-    requestAnimationFrame(() => { termFit(a); if (!document.documentElement.classList.contains("has-right") || termEl.classList.contains("ws-top")) a.xt.focus(); });
+    // 被盖住、切了标签或收起后，旧帧不再抢焦点（审查 UI05-001）。
+    const gen = TERM.gen;
+    requestAnimationFrame(() => {
+      if (gen !== TERM.gen || !termCurrent(a)) return;
+      termFit(a);
+      if (!termCovered()) a.xt.focus();
+    });
   }
 
   function mountTerm(id) {
@@ -167,7 +174,8 @@
     const fit = new window.FitAddon.FitAddon();
     xt.loadAddon(fit);
     xt.open(el);
-    const a = { id, el, xt, fit, es: null, ro: null, q: "", sending: Promise.resolve(), timer: 0, cols: 0, rows: 0 };
+    const a = { id, el, xt, fit, es: null, ro: null, q: "", sending: Promise.resolve(), timer: 0, cols: 0, rows: 0,
+      pendingOut: "", outTimer: 0 };
     TERM.inst.set(id, a);
     termScrubber(a);
 
@@ -215,42 +223,76 @@
     return a;
   }
 
-  /** 只有正在看的终端连着输出流：每个终端一条常驻 SSE，开到五六个就把同源连接占满，
-   *  输入、关闭、别的接口全排队（审查 #49 P2-7）。连上时网关先发 replay（整段缓冲），切回来照样接得上 */
-  function termDetach(a) { if (a.es) { try { a.es.close(); } catch {} a.es = null; } a.cols = a.rows = 0; }   // 再连上时补发一次 resize（195-H.1）
+  /** 只有正在看的终端连着输出流（当前标签）；其他标签不占用同源连接（审查 #49 P2-7）。
+   *  被同一工作区的别的窗格盖住时仍接收：回放环有限，不能靠断开连接来省绘制。 */
+  // 只限制这里的暂存；放不下就把整块交给 xterm，不丢数据、不切开单条 SSE。
+  const TERM_OUT_LIMIT = 64 * 1024;   // UTF-16 代码单元
+  function termFlush(a) {
+    if (a.outTimer) { clearTimeout(a.outTimer); a.outTimer = 0; }
+    if (!a.pendingOut) return;
+    const data = a.pendingOut;
+    a.pendingOut = "";
+    a.xt.write(data);
+  }
+  function termOutput(a, data) {
+    if (!data) return;
+    if (!a.es || !termCurrent(a) || !termCovered() || data.length >= TERM_OUT_LIMIT) {
+      termFlush(a); a.xt.write(data);
+      return;
+    }
+    if (a.pendingOut.length + data.length > TERM_OUT_LIMIT) termFlush(a);
+    a.pendingOut += data;
+    // xterm 还要处理进程的状态查询等，不能让低流量一直等到揭开才解析。
+    if (!a.outTimer) a.outTimer = setTimeout(() => termFlush(a), 100);
+  }
+  document.addEventListener("cc:term-uncovered", () => {
+    const a = TERM.inst.get(TERM.cur);
+    if (a && termCurrent(a)) termFlush(a);   // 不抢键盘焦点
+  });
+
+  function termDetach(a) {
+    const es = a.es;
+    a.es = null;
+    if (es) try { es.close(); } catch {}
+    termFlush(a);   // 切标签 / 收起前把尾段交给原实例，重连只补未收到的后缀。
+    a.cols = a.rows = 0;   // 再连上时补发一次 resize（195-H.1）
+  }
   function termAttach(a) {
     if (a.es || a.exited) return;
     const { id, xt } = a;
     const es = new EventSource(`/api/term/${encodeURIComponent(id)}/stream`);
     a.es = es;
     es.addEventListener("replay", (m) => {
-      // { data, total }：只补上次画过之后的新内容，xterm 里已有的回滚和历史留着（195-H.1）。
-      // 缺得太多（超过网关的环形缓冲）就只能整段重来
+      if (a.es !== es) return;
+      // { data, total }：seen 按已收到的网关字符（含暂存）计数，只补没收到的后缀。
       let j; try { j = JSON.parse(m.data); } catch { return; }
-      const data = typeof j === "string" ? j : j.data || "";
-      const total = typeof j === "string" ? null : j.total;
+      const data = typeof j === "string" ? j : j?.data;
+      if (typeof data !== "string") return;
+      const total = j?.total;
+      termFlush(a);
       if (typeof total === "number" && typeof a.seen === "number" && total >= a.seen && total - a.seen <= data.length) {
         if (total > a.seen) xt.write(data.slice(data.length - (total - a.seen)));
       } else {
-        // 缺口：断线期间丢的比回放环（256KB）还多（seen 有值），或者首次连接时缓冲里只剩尾段（seen 还没值，
-        // total 比回放数据多）。两种都重置后说一声，别让人以为输出是连着的（FIND-045 / BUG-G02）
+        // 断线缺口超过回放环，或首次连接只剩尾段：仍按原规则提示截断（BUG-G02）。
         const lost = typeof total === "number"
           && (typeof a.seen === "number" ? total > a.seen : total > data.length);
-        xt.reset();
-        if (lost) xt.write("\x1b[2m" + t("…（已截断）") + "\x1b[0m\r\n");
-        xt.write(data);
+        // CAN + RIS 结束未完成的转义并排队重置；直接 reset() 会越过尚待 xterm 解析的输出。
+        xt.write("\x18\x1bc" + (lost ? "\x1b[2m" + t("…（已截断）") + "\x1b[0m\r\n" : "") + data);
       }
-      if (typeof total === "number") a.seen = total;
+      a.seen = typeof total === "number" ? total : undefined;
     });
     es.addEventListener("o", (m) => {
+      if (a.es !== es) return;
       let s; try { s = JSON.parse(m.data); } catch { return; }
-      xt.write(s);
-      if (typeof a.seen === "number") a.seen += String(s).length;
+      if (typeof s !== "string") return;
+      termOutput(a, s);
+      if (typeof a.seen === "number") a.seen += s.length;
     });
     es.addEventListener("exit", (m) => {
+      if (a.es !== es) return;
       let code = null; try { code = JSON.parse(m.data).code; } catch {}
-      es.close(); if (a.es === es) a.es = null; a.exited = true;
-      xt.write("\r\n\x1b[2m" + t("[进程已退出，代码 {code}]", { code }) + "\x1b[0m\r\n");
+      a.es = null; es.close(); a.exited = true;
+      termOutput(a, "\r\n\x1b[2m" + t("[进程已退出，代码 {code}]", { code }) + "\x1b[0m\r\n");
       const x = TERM.list.find((y) => y.id === id);
       if (x) { x.alive = false; x.code = code; renderTermTabs(); }
     });
@@ -259,15 +301,15 @@
     let lost = false;
     es.onopen = () => { lost = false; };
     es.onerror = () => {
-      if (a.exited) return;   // 正常退出后连接关闭，不再补一句
+      if (a.es !== es) return;   // 已关闭或换过连接，不补提示
       if (es.readyState === EventSource.CLOSED) {
-        es.close(); if (a.es === es) a.es = null; a.exited = true;
+        a.es = null; es.close(); a.exited = true;
         const x = TERM.list.find((y) => y.id === id);
         if (x) { x.alive = false; renderTermTabs(); }
-        xt.write("\r\n\x1b[2m" + t("[与网关的连接已断开]") + "\x1b[0m\r\n");
+        termOutput(a, "\r\n\x1b[2m" + t("[与网关的连接已断开]") + "\x1b[0m\r\n");
         return;
       }
-      if (!lost) { lost = true; xt.write("\r\n\x1b[2m" + t("[与网关的连接断了，正在重连…]") + "\x1b[0m\r\n"); }
+      if (!lost) { lost = true; termOutput(a, "\r\n\x1b[2m" + t("[与网关的连接断了，正在重连…]") + "\x1b[0m\r\n"); }
     };
   }
 
@@ -310,12 +352,12 @@
         .then((r) => {
           // 进程已退出：网关回 409（195-H.5），说清楚，别当成网关在重启
           if (r.status === 409) {
-            if (!a.exitedHint) { a.exitedHint = true; a.xt.write("\r\n\x1b[2m" + t("[终端已退出，输入没有送出去]") + "\x1b[0m\r\n"); }
+            if (!a.exitedHint) { a.exitedHint = true; termOutput(a, "\r\n\x1b[2m" + t("[终端已退出，输入没有送出去]") + "\x1b[0m\r\n"); }
             return;
           }
           if (!r.ok) throw new Error("HTTP " + r.status);
         })
-        .catch(() => { if (!a.lostIn) { a.lostIn = true; a.xt.write("\r\n\x1b[2m" + t("[输入没送到终端，网关可能在重启]") + "\x1b[0m\r\n"); setTimeout(() => { a.lostIn = false; }, 3000); } }));
+        .catch(() => { if (!a.lostIn) { a.lostIn = true; termOutput(a, "\r\n\x1b[2m" + t("[输入没送到终端，网关可能在重启]") + "\x1b[0m\r\n"); setTimeout(() => { a.lostIn = false; }, 3000); } }));
     }, 6);
   }
 
@@ -438,7 +480,9 @@
     if (!a) return;
     if (k === "paste") {
       let s = "";
+      const gen = TERM.gen;
       try { s = await navigator.clipboard.readText(); } catch {}
+      if (gen !== TERM.gen || !termCurrent(a) || termCovered()) return;
       if (!s) s = prompt(t("粘贴到终端：")) || "";
       // 剪贴板里自带的括号粘贴结束标记会提前结束粘贴，后面的内容被 shell 当命令执行（199-4.02）：去掉
       if (s) a.xt.paste(s.replace(/\x1b\[20[01]~/g, ""));

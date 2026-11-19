@@ -415,13 +415,14 @@
       t("档位越高思考越久。这是默认值；单个会话在输入栏下面另选");
   }
 
-  async function loadSettings() {
+  async function loadSettings() { return refreshSettings(true); }
+  async function refreshSettings(lists) {
     try {
       // 读的时候有保存在排队 / 在路上，或者读的途中又点了保存：这份快照可能早于那次保存，
       // 拿它整份盖 state.settings 和控件，刚存上的值就在界面上退回去了。等保存排完再重读一次（UIFS-010 第二条）
       const busy = savePending > 0, gen = saveGen;
       const s = await api("/api/settings");
-      if (busy || gen !== saveGen) return saveQ.then(() => loadSettings());
+      if (busy || gen !== saveGen) return saveQ.then(() => refreshSettings(lists));
       state.settings = s;
       $("set-perm").value = state.settings.permissionMode || "default";
       // 输出风格清单由网关列（内置 + 自定义 .md），不再写死 —— 以前写死的 concise 根本不存在
@@ -435,10 +436,10 @@
       renderPermBar();
       renderDirs();
       fillMem();
-      await loadProviders();
+      if (lists) await loadProviders();
       // 清单拉成功时下拉框已经按网关算好的「实际生效」选上了；再拿原始设置盖一遍，
       // 存的值这家不支持（比如 high，这家只有 low/medium）就成了空白（审查 D-03）。拉失败才退回原始值
-      if ((await loadModels()) === false) {
+      if (lists && (await loadModels()) === false) {
         $("set-model").value = state.settings.model || "";
         $("set-effort").value = state.settings.effort || "";
       }
@@ -447,8 +448,6 @@
       $("set-static").checked = state.settings.staticCompat !== false;
       $("set-idlecompact").checked = state.settings.idleCompaction !== false;
       $("set-workisland").checked = state.settings.workIsland === true;
-      loadWorkIsland();
-      loadExecMode();
     } catch {}
   }
 
@@ -546,8 +545,11 @@
   // 执行方式：存在 files/.exec-mode，重启网关生效（36 的包选「直接执行」网关会拒）
   let execPid = 0;
   async function loadExecMode() {
+    const visit = setVisit;
+    if (!setVisible("run", visit)) return;
     try {
       const r = await api("/api/exec-mode");
+      if (!setVisible("run", visit)) return;
       execPid = r.pid || 0;
       $("set-exec").value = r.pref;
       $("set-exec").querySelector('option[value="direct"]').disabled = !!r.must;
@@ -557,6 +559,7 @@
     } catch {}
   }
   $("set-exec").addEventListener("change", async (e) => {
+    const visit = setVisit;
     try {
       await api("/api/exec-mode", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: e.target.value }) });
       if (confirm(t("执行方式已保存。现在重启网关让它生效吗？打开的终端会断开。"))) {
@@ -566,6 +569,7 @@
         const old = execPid;
         for (let i = 0; i < 40; i++) {
           await new Promise((r) => setTimeout(r, 750));
+          if (!setVisible("run", visit)) break;
           try { const r = await api("/api/exec-mode"); if (r.pid && r.pid !== old) break; } catch {}
         }
       }
@@ -579,7 +583,10 @@
   $("set-extimg").addEventListener("change", (e) => uiSet("extImg", e.target.checked ? null : "auto"));
   // 工作岛起没起来（195-P.4）：检测要几秒（pm 再加 am 探一次），开关 / 重试之后隔几秒再看
   async function loadWorkIsland() {
+    const visit = setVisit;
+    if (!setVisible("claude", visit)) return;
     const r = await api("/api/work-island").catch(() => null), box = $("wi-state");
+    if (!setVisible("claude", visit)) return;
     const show = !!(r && r.supported && r.wanted && !r.started && !r.detecting && r.error);
     box.classList.toggle("hidden", !show);
     if (!show) return;
@@ -587,7 +594,10 @@
       ? t("系统不允许本应用启动工作岛服务，所以没有显示。") + (r.error.detail ? "（" + r.error.detail + "）" : "")
       : t("没检测到「工作岛」应用：装好后点重试。");
   }
-  const wiLater = () => { for (const ms of [2000, 6000, 10000]) setTimeout(loadWorkIsland, ms); };
+  const wiLater = () => {
+    const visit = setVisit;
+    if (setVisible("claude", visit)) for (const ms of [2000, 6000, 10000]) setTimeout(() => { if (setVisible("claude", visit)) loadWorkIsland(); }, ms);
+  };
   $("wi-retry").addEventListener("click", async () => {
     await post("/api/work-island/retry").catch((e) => toast(e.message, true));
     $("wi-state").classList.add("hidden");
@@ -705,9 +715,7 @@
     } catch (e) {
       // 一次都没拿到过：说清楚读取失败、给重试，别只剩空标题（审查 F-008）
       state.capsErr = e.message || "?";
-      if (!state.caps) { renderCaps(); $("cap-tiles").innerHTML = `<div class="tile big"><span class="k">${esc(t("能力清单读取失败：{msg}", { msg: state.capsErr }))}</span><button class="btn sm ghost" id="caps-retry">${esc(t("重试"))}</button></div>`; }
-      // 读成过、这次刷新失败：旧清单照摆，顶上标明是上次的并给重试（审查 F-008 复测）
-      else renderCaps();
+      renderCaps();
     }
   }
 
@@ -741,6 +749,11 @@
   const capRows = (arr, fn) => arr?.length ? arr.map(fn).join("") : '<div class="row"><span class="tiny">' + t("（暂无数据，先发一条消息即可从 CLI 获取）") + "</span></div>";
 
   function renderCaps() {
+    if (!pageVisible("caps")) return;   // 聊天补全仍在启动时取得清单，只推迟整页 DOM。
+    if (!state.caps && state.capsErr) {
+      $("cap-tiles").innerHTML = `<div class="tile big"><span class="k">${esc(t("能力清单读取失败：{msg}", { msg: state.capsErr }))}</span><button class="btn sm ghost" id="caps-retry">${esc(t("重试"))}</button></div>`;
+      return;
+    }
     const c = state.caps || {};
     setPageSub("caps", c.version ? t("Claude Code {ver} · 这一轮能用的", { ver: c.version }) : t("这一轮 Claude 能用的"));
     const cmds = c.slashCommands || [];

@@ -55,12 +55,24 @@
     ],
   };
 
-  function openTour() {
-    localStorage.setItem(TOUR_SEEN, "1");
-    $("lin-how").classList.remove("new");
+  let tourRequest = 0;
+  async function openTour() {
+    const visit = pageVisit, request = ++tourRequest;
+    const live = () => request === tourRequest && pageVisible("lineage", visit);
+    if (!live()) return;
     const box = $("lin-tour");
     MO.cancel(box);
     box.classList.remove("hidden");
+    if (!TOUR.map) {
+      const message = (text, retry) => {
+        $("lt-panel").innerHTML = `<p role="status">${esc(text)}</p><div class="lt-btns"><button type="button" data-a="close">${esc(t("退出导览"))}</button>${retry ? `<button type="button" data-a="retry">${esc(t("重试"))}</button>` : ""}</div>`;
+      };
+      message(t("加载中…"), false);
+      try { await ensureLinMap(); } catch { if (live()) message(t("读取失败"), true); return; }
+      if (!live()) return;
+    }
+    localStorage.setItem(TOUR_SEEN, "1");
+    $("lin-how").classList.remove("new");
     if (!TOUR.map) {
       TOUR.map = CCLineageMap.create($("lt-map"), {
         t, locale: I18N.lang, misc: false,
@@ -89,6 +101,7 @@
     tourSync();
   }
   function closeTour() {
+    tourRequest++;
     // 淡出之后再拆地图；淡出途中又点开导览（openTour 先 cancel）就不拆，接着用
     MO.hide($("lin-tour"), "mo-out-fade", 150, () => {
       if (TOUR.map) { TOUR.map.destroy(); TOUR.map = null; }
@@ -139,6 +152,7 @@
     else if (a === "prev") tourGo(TOUR.i - 1);
     else if (a === "again") tourGo(0);
     else if (a === "close") closeTour();
+    else if (a === "retry") openTour();
   });
   $("lin-how").addEventListener("click", openTour);
   if (!localStorage.getItem(TOUR_SEEN)) $("lin-how").classList.add("new");

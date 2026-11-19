@@ -356,9 +356,15 @@
   }
 
   // ── 输入框 ────────────────────────────────────────────────────────
+  let growFrame = 0;
   function autoGrow() {
+    if (growFrame) { cancelAnimationFrame(growFrame); growFrame = 0; }
     inputEl.style.height = "auto";
     inputEl.style.height = Math.min(inputEl.scrollHeight, 180) + "px";
+  }
+  // 同帧预编辑或连续 input 只合并测高；草稿、补全和光标仍按原事件处理。
+  function growSoon() {
+    if (!growFrame) growFrame = requestAnimationFrame(() => { growFrame = 0; autoGrow(); });
   }
 
   /** 在光标处插入一段文本 */
@@ -406,7 +412,7 @@
   draftChip.addEventListener("click", draftRestore);
 
   inputEl.addEventListener("input", () => {
-    autoGrow();
+    growSoon();
     syncInterject();
     draftPersistSoon();
     const v = inputEl.value;

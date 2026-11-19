@@ -40,7 +40,7 @@
       const cur = state.providers.find((p) => p.id === r.active) || {};
       $("provider-info").textContent = t("当前在用：{name}", { name: pLabel(cur) || r.active });
       $("provider-info").title = cur.baseUrl || "";
-      renderProvCard();
+      if (setVisible("provider")) renderProvCard();
     } catch (e) {
       $("provider-info").textContent = t("读取接口清单失败：{msg}", { msg: e.message });
     }
@@ -107,9 +107,11 @@
   // ── 端侧小模型卡：llama.cpp 装没装、有没有 GPU、模型目录里有哪些、聊天 / 自定义模式、服务状态 ──
   async function renderLocalCard(box, p) {
     box.innerHTML = `<div class="sub">${esc(pLabel(p))}</div><div class="tiny">${t("读取中…")}</div>`;
+    const mine = box.firstChild, visit = setVisit, live = () => setVisible("provider", visit) && mine === box.firstChild && state.provView === p.id;
+    if (!live()) return;
     let j;
-    try { j = await api("/api/local"); } catch (e) { box.innerHTML += `<div class="prov-state err">${esc(e.message)}</div>`; return; }
-    if (state.provView !== p.id) return;
+    try { j = await api("/api/local"); } catch (e) { if (live()) box.innerHTML += `<div class="prov-state err">${esc(e.message)}</div>`; return; }
+    if (!live()) return;
     const gb = (n) => (n / 1073741824).toFixed(1) + " GB";
     const ok = (b) => b ? "✓" : "✗";
     const sv = j.server || {}, cu = j.custom || {};
@@ -180,7 +182,9 @@
     let st;
     // 查询期间换了卡：迟到的失败别去碰已经不在的节点（审查 D-06）。换走又换回同一家时卡片是重画过的，
     // 只比接口 id 会让旧回执盖到新卡上：认这一次画出来的节点（审查 #52 D-06）
-    const mine = box.querySelector("#login-state"), live = () => mine.isConnected && state.provView === p.id;
+    const mine = box.querySelector("#login-state"), visit = setVisit;
+    const live = () => setVisible("provider", visit) && mine.isConnected && state.provView === p.id;
+    if (!live()) return;
     try { st = await api("/api/login/status"); } catch (e) { if (live()) mine.textContent = t("查询失败：{msg}", { msg: e.message }); return; }
     if (!live()) return;
     paintLoginState(st, p);
@@ -248,8 +252,12 @@
   }
   /** 用量页的额度面板：只有用 Claude 账户登录时才显示，大数字 + 进度条 + 重置时间 */
   async function loadQuota() {
+    const page = pageVisit, cat = setVisit;
+    const live = () => pageVisible("usage", page) || setVisible("usage", cat) || setVisible("provider", cat);
+    if (!live()) return;
     let st = null;
-    try { st = await api("/api/login/status"); } catch {}
+    try { st = await sameGet("/api/login/status"); } catch {}
+    if (!live()) return;
     const box = $("quota-field"), l = st && st.loggedIn !== false && st.limits;
     box.classList.toggle("hidden", !(st && st.loggedIn));
     if (!l) {
@@ -284,8 +292,8 @@
     clearTimeout(quotaT);
     quotaT = setTimeout(() => {
       if (document.hidden) return;
-      const usageOpen = curPage === "usage" && !$("pages").classList.contains("hidden");
-      if (setOpen || usageOpen) loadQuota().catch(() => {});
+      const usageOpen = pageVisible("usage");
+      if (usageOpen || setVisible("provider") || setVisible("usage")) loadQuota().catch(() => {});
       if (usageOpen) loadAcctCard(false).catch(() => {}); else qbLoad(false).catch(() => {});   // 顶栏细条、速览卡
     }, 800);
   }
@@ -459,12 +467,14 @@
   }
   // 设置里的密钥卡底部只留一行摘要，明细在用量页（「额度与消费」）
   async function loadBill(p, force) {
-    const el = $("pc-bill"); if (!el) return;
+    const el = $("pc-bill"), visit = setVisit;
+    const live = () => setVisible("provider", visit) && state.provView === p.id && el === $("pc-bill");
+    if (!el || !live()) return;
     if (!el.innerHTML) el.innerHTML = `<div class="tiny">${t("查询余额…")}</div>`;
     let b;
     try { b = await api(`/api/billing?id=${encodeURIComponent(p.id)}${force ? "&refresh=1" : ""}`); }
-    catch (e) { el.innerHTML = `<div class="tiny">${esc(t("查询失败：{msg}", { msg: e.message }))}</div>`; return; }
-    if (state.provView !== p.id || !$("pc-bill")) return;
+    catch (e) { if (live()) el.innerHTML = `<div class="tiny">${esc(t("查询失败：{msg}", { msg: e.message }))}</div>`; return; }
+    if (!live()) return;
     const br = billBrief(b);
     el.innerHTML = `<div class="bill-head"><span class="sub">${t("余额与消费")}</span>
       <button class="btn sm ghost" data-gopage="usage">${t("在用量页查看")}</button></div>
@@ -621,17 +631,20 @@
   const usOther = new Map();   // id → { login, limits } / { bill }
   const usBrief = (id) => { const x = usOther.get(id); if (!x) return ""; const br = x.login ? loginBrief(x.limits) : billBrief(x.bill); return br.text || (x.login ? t("发一条消息后显示") : "—"); };
   async function loadAcctCard(force) {
-    if (!$("us-acct")) return;
+    const visit = pageVisit;
+    if (!$("us-acct") || !pageVisible("usage", visit)) return;
+    const ok = latest("acct-card"), live = () => pageVisible("usage", visit) && ok();
     const cur = await qbLoad(force);
-    if (curPage !== "usage") return;
+    if (!live()) return;
     $("us-acct-name").textContent = cur ? cur.name : "";
     $("us-acct-cur").innerHTML = !cur ? "" : cur.login ? quotaHtml(cur.limits)
       : cur.bill ? billRows(cur.bill, { id: cur.id }) : `<div class="tiny">${t("查不到这个接口的额度")}</div>`;
     let list = [];
-    try { list = (await api("/api/providers")).providers || []; } catch {}
+    try { list = (await sameGet("/api/providers")).providers || []; } catch {}
+    if (!live()) return;
     // 官方账户先问清登没登录再决定列不列：先列「读取中…」再删掉，行数一变下面的卡片就往上跳（#38）
-    const lst = list.some((p) => p.login && p.id !== (cur ? cur.id : state.serverStatus?.provider)) ? await api("/api/login/status").catch(() => null) : null;
-    if (curPage !== "usage") return;
+    const lst = list.some((p) => p.login && p.id !== (cur ? cur.id : state.serverStatus?.provider)) ? await sameGet("/api/login/status").catch(() => null) : null;
+    if (!live()) return;
     // 「其他」= 主卡那家以外的：主卡按会话那家算（可能不是全局），这里也按它排，别把会话那家列两遍、全局那家漏掉（#144-1）
     const others = list.filter((p) => p.id !== (cur ? cur.id : state.serverStatus?.provider) && !p.local && (p.login ? !!(lst && lst.loggedIn) : p.hasKey));
     const box = $("us-acct-others");
@@ -652,6 +665,7 @@
         const b = await api(`/api/billing?id=${encodeURIComponent(p.id)}${force ? "&refresh=1" : ""}`).catch(() => null);
         x = { bill: b && !b.error ? b : null };
       }
+      if (!live()) return;
       usOther.set(p.id, x);
       const d = box.querySelector(`details[data-id="${CSS.escape(p.id)}"]`);
       if (!d) return;
@@ -661,7 +675,7 @@
       el.classList.toggle("hot", br.lvl === 2);
       if (d.open) fill(d);
     }));
-    if (!box.querySelector("details")) box.innerHTML = "";
+    if (live() && !box.querySelector("details")) box.innerHTML = "";
   }
   // 提醒设置
   (function () {
