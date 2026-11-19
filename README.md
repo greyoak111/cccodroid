@@ -292,6 +292,7 @@ Layout:
   - zx-5426's red-team material let the 0.6.7 jailbreak check catch several kinds of wording written specifically to dodge detection. They also contributed 21 fix commits (segmented download writes, the stream fix, concurrent thumbnails, scheduled tasks, a stuck queue, ledger robustness and more), merged across 0.6.4–0.6.7.
   - 1fshi26's jailbreak research notes went into the 0.6.2 hardening: hooks and MCP servers in a project that would run on their own now ask you before loading.
   - FatBrother1 takes part in red-team testing.
+- **[ym2025szz](https://github.com/ym2025szz)**: computing resource support.
 
 Reports, device testing and code review are contributions too, and they're recorded here.
 
