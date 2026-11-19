@@ -467,7 +467,7 @@
     vwDropEd();
     gutStop();           // 行号栏的 ResizeObserver 与量过的行文本：关了查看器还挂在页面上（FIND-026）
     vwHtmlStop();
-    VW.text = ""; VW.wb = VW.sheets = null;   // 大文本、工作簿别跟着查看器一直挂在内存里（#56）
+    VW.text = ""; VW.wb = VW.sheets = null; VW.arc = null;   // 大文本、工作簿、压缩包会话别跟着查看器一直挂在内存里（#56）
     MO.hide(viewerEl, MO.paneOut(), 170, () => { $("vw-body").innerHTML = ""; });   // 内容等滑出去了再清，别先白一下
     // 文件面板开着就刷新一下：大小 / 修改时间可能变了
     // 正在看压缩包：刷新包内这一层，别用 fsLoad（它会清掉 state.fs.arc，把人踢出压缩包）

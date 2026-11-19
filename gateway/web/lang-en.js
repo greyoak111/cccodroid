@@ -3047,6 +3047,7 @@ window.I18N_DICT.en = {
   "已加密": "Encrypted",
   "全部解压…": "Extract all…",
   "退出压缩包": "Close archive",
+  "返回压缩包": "Back to archive",
   "这个版本没带 7-Zip，打不开这种压缩包": "This build doesn't include 7-Zip, so it can't open this kind of archive",
   "打不开压缩包：{msg}": "Couldn't open the archive: {msg}",
   "压缩后 {size}": "{size} compressed",

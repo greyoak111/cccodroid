@@ -3012,6 +3012,7 @@ window.I18N_DICT["fr"] = {
   "已加密": "Chiffré",
   "全部解压…": "Tout extraire…",
   "退出压缩包": "Fermer l’archive",
+  "返回压缩包": "Revenir à l’archive",
   "这个版本没带 7-Zip，打不开这种压缩包": "Cette version n’inclut pas 7-Zip et ne peut pas ouvrir ce type d’archive",
   "打不开压缩包：{msg}": "Impossible d’ouvrir l’archive : {msg}",
   "压缩后 {size}": "{size} compressé",

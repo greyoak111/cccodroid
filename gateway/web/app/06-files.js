@@ -457,20 +457,22 @@
     return v ? v.pw : null;
   }
 
-  /** 解压：目标默认「压缩包所在目录 / 包名」，可改成别处；已有同名的不覆盖，新来的改名 */
-  async function arcExtractDlg({ path, entries }) {
-    const arc = state.fs.arc && state.fs.arc.path === path ? state.fs.arc : null;
+  /** 解压：目标默认「压缩包所在目录 / 包名」，可改成别处；已有同名的不覆盖，新来的改名。
+   *  arc：查看器里的压缩包会话（16-viewer-git.js 传 VW.arc）；不传就按文件页当前的包取密码 / 编码 */
+  async function arcExtractDlg({ path, entries, arc }) {
+    const a = arc || (state.fs.arc && state.fs.arc.path === path ? state.fs.arc : null);
     const base = dirOf(path), stem = arcStem(path.split("/").pop());
     const what = entries ? (entries.length === 1 ? entries[0].split("/").pop() : t("选中的 {n} 项", { n: entries.length })) : t("全部");
     const v = await arcDialog(t("解压 {what}", { what }), `
       <div class="field"><label>${esc(t("解压到"))}</label><input name="dest" type="text" class="mono" value="${esc(base.replace(/\/$/, "") + "/" + stem)}" autocapitalize="off" spellcheck="false"></div>
       <div class="row-actions arc-quick"><button type="button" class="btn ghost sm" data-d="${esc(base.replace(/\/$/, "") + "/" + stem)}">./${esc(stem)}/</button><button type="button" class="btn ghost sm" data-d="${esc(base)}">${esc(t("当前目录"))}</button></div>
-      ${arc ? "" : `<div class="field"><label>${esc(t("密码（没加密就留空）"))}</label><input name="pw" type="password" autocomplete="off"></div>`}
+      ${a ? "" : `<div class="field"><label>${esc(t("密码（没加密就留空）"))}</label><input name="pw" type="password" autocomplete="off"></div>`}
       <div class="tiny mp-note">${esc(t("目标里已有同名的文件不会被覆盖，新解出来的会改名为「名字 (2)」。软链接不解出。"))}</div>`, t("解压"));
     if (!v) return;
     const dest = String(v.dest || "").trim().replace(/\/+$/, "") || "/";
     if (!dest.startsWith("/")) return toast(t("要写完整路径（以 / 开头）"), true);
-    arcRunJob("extract", { path, dest, entries: entries || undefined, enc: arc ? arc.enc : "auto", password: (arc ? arc.password : v.pw) || undefined }, dest);
+    // 从查看器发起时进度条放查看器里（文件页的 fs-job 被查看器盖着看不见）
+    arcRunJob("extract", { path, dest, entries: entries || undefined, enc: a ? a.enc : "auto", password: (a ? a.password : v.pw) || undefined }, dest, arc ? $("vw-arc-job") : undefined);
   }
   document.addEventListener("click", (e) => {   // 对话框里的快捷目标
     const b = e.target.closest("#arc-dlg [data-d]");
@@ -509,15 +511,14 @@
     f.querySelector(".arc-hn").classList.toggle("hidden", s.value !== "7z");
   });
 
-  /** 后台任务（解压 / 压缩）：页脚显示进度，可取消；做完刷新当前目录 */
-  async function arcRunJob(kind, body, dest) {
+  /** 后台任务（解压 / 压缩）：页脚显示进度，可取消；做完刷新当前目录。box 不传就是文件页的 fs-job */
+  async function arcRunJob(kind, body, dest, box = $("fs-job")) {
     let j;
     try { j = await arcPost(kind, body); }
     catch (e) {
       return toast(e.status === 409 ? t("已经有同名的文件或文件夹") : e.status === 403 ? t("不能解压或压缩到这个位置") : e.status === 501 ? t("这个版本没带 7-Zip")
         : (e.body && e.body.error) === "dest inside source" ? t("压缩包不能放进要压缩的文件夹里") : t("操作失败：{msg}", { msg: e.message }), true);
     }
-    const box = $("fs-job");
     const label = kind === "extract" ? t("解压中") : t("压缩中");
     box.classList.remove("hidden");
     box.innerHTML = `<span class="tiny fs-job-t">${esc(label)}…</span><button class="btn ghost sm" type="button">${esc(t("取消"))}</button>`;
@@ -538,7 +539,11 @@
     else if (j.wrongPassword) {
       if (kind === "extract") {
         const pw = await arcAskPassword(body.path.split("/").pop(), !!body.password);
-        if (pw != null) { if (state.fs.arc && state.fs.arc.path === body.path) state.fs.arc.password = pw; arcRunJob(kind, { ...body, password: pw }, dest); }
+        if (pw != null) {
+          if (state.fs.arc && state.fs.arc.path === body.path) state.fs.arc.password = pw;
+          else if (typeof VW !== "undefined" && VW.arc && VW.arc.path === body.path) VW.arc.password = pw;   // 从查看器解压：会话在 VW.arc
+          arcRunJob(kind, { ...body, password: pw }, dest, box);
+        }
       } else toast(t("密码不对"), true);
     } else toast(j.code === "ENOSPC" ? t("存储空间不够") : t("操作失败：{msg}", { msg: j.error || "?" }), true);
   }

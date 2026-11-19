@@ -3012,6 +3012,7 @@ window.I18N_DICT["id"] = {
   "已加密": "Terenkripsi",
   "全部解压…": "Ekstrak semua…",
   "退出压缩包": "Tutup arsip",
+  "返回压缩包": "Kembali ke arsip",
   "这个版本没带 7-Zip，打不开这种压缩包": "Versi ini tidak menyertakan 7-Zip, jadi tidak bisa membuka arsip jenis ini",
   "打不开压缩包：{msg}": "Tidak bisa membuka arsip: {msg}",
   "压缩后 {size}": "{size} terkompresi",

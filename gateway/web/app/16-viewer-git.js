@@ -462,6 +462,13 @@
       });
       return;
     }
+    if (VW.kind === "archive") return vwArcOpen();
+    vwFallback();
+  }
+
+  /** 没有内置预览的兜底：当作文本 / 安装（apk）/ 分享 */
+  function vwFallback(path = VW.path) {
+    if (VW.arc && VW.arc.path === VW.path) VW.arc = null;   // 这个压缩包没打开成：别留着「返回压缩包」
     vwActs([]);
     $("vw-body").innerHTML = `<div class="vw-empty">
       <div>${t("这种文件没有内置预览。")}</div>
@@ -474,7 +481,9 @@
   /** 顶栏右侧的按钮：[文字, 动作, 是否高亮] */
   function vwActs(list) {
     const base = [[t("插入 @路径"), "insert"]];
-    $("vw-acts").innerHTML = list.concat(base).map(([l, a, on]) =>
+    // 从压缩包里预览某个条目：最左边放「返回压缩包」
+    const back = (VW.arc && VW.arc.path !== VW.path) ? [[t("返回压缩包"), "arcback"]] : [];
+    $("vw-acts").innerHTML = back.concat(list, base).map(([l, a, on]) =>
       `<button class="btn ${on ? "" : "ghost"} sm" data-a="${a}">${esc(l)}</button>`).join("") +
       `<button class="btn ghost sm vw-ico" data-a="share" title="${esc(t("分享"))}" aria-label="${esc(t("分享"))}">${shareIco()}</button>`;
   }
@@ -551,7 +560,130 @@
       VW.zoom = Math.max(0.5, Math.min(4, VW.zoom * (a === "zoom+" ? 1.25 : 0.8)));
       return vwPdfRelayout();
     }
+    if (a === "arcback") return openViewer(VW.arc.path, "archive", VW.arc.info ? VW.arc.info.bytes : VW.size);   // 全套清理 + 重画列表（vwArcOpen 认出还是同一个包，不重读）
+    if (a === "arcall") return arcExtractDlg({ path: VW.arc.path, entries: null, arc: VW.arc });
+    if (a === "arcexit") return closeViewer();
   });
+
+  // ── 压缩包浏览（查看器内）：和文件页同款效果 ──
+  // 聊天 / 列表点开压缩包走这里：包内条目列表、逐级目录、选中预览（解到缓存嵌套开查看器）、单个/全部解压。
+  // 后端 / 密码框 / 解压对话框复用文件页的 /api/arc/*、arcAskPassword、arcExtractDlg（06-files.js，同一个闭包）。
+  // 会话（密码、编码、当前目录）只挂在 VW.arc 上：预览条目嵌套开别的文件时它不跟着重置，返回按钮靠它
+  /** 包内一行：目录/文件图标、名字、大小（文件页 .fs-item 同款样式；测试从这里取） */
+  function vwArcRow(e) {
+    return `<div class="item fs-item" data-n="${esc(e.name)}" role="button" tabindex="0">
+      <div class="fs-row">
+        <span class="fs-ico">${kindIcon(e.kind)}</span>
+        <span class="it-title">${esc(e.name)}${e.dir ? "/" : ""}</span>
+        <span class="fs-meta">${e.dir ? "" : fmtSize(e.size)}</span>
+      </div></div>`;
+  }
+  async function vwArcOpen() {
+    if (!(VW.arc && VW.arc.path === VW.path && VW.arc.info)) {
+      VW.arc = { path: VW.path, name: VW.path.split("/").pop(), dir: "", enc: "auto", password: "", info: null, entries: [], encodings: null, sel: null, seq: 0 };
+    }
+    vwActs([[t("全部解压…"), "arcall"], [t("退出压缩包"), "arcexit"]]);
+    if (VW.arc.info) return vwArcRender();   // 「返回压缩包」：直接重画，不重新读
+    $("vw-body").innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
+    return vwArcLoad("");
+  }
+  async function vwArcLoad(dir) {
+    const arc = VW.arc;
+    if (!arc) return;
+    const seq = ++arc.seq;
+    let r;
+    try {
+      if (!arc.encodings) arc.encodings = (await api("/api/arc/info").catch(() => ({}))).encodings;
+      r = await arcPost("list", { path: arc.path, dir, enc: arc.enc, password: arc.password || undefined });
+    } catch (e) {
+      if (arc.seq !== seq || VW.arc !== arc) return;
+      if (!arc.info) vwFallback();   // 一层都没进过：打不开就退回普通兜底（不再留「返回压缩包」）
+      return toast(e.status === 501 ? t("这个版本没带 7-Zip，打不开这种压缩包") : t("打不开压缩包：{msg}", { msg: e.message }), true);
+    }
+    if (arc.seq !== seq || VW.arc !== arc) return;
+    if (r.needPassword) {
+      const pw = await arcAskPassword(arc.name, r.wrongPassword && arc.password);
+      if (pw == null) { if (!arc.info) vwFallback(); return; }
+      arc.password = pw;
+      return vwArcLoad(dir);
+    }
+    Object.assign(arc, { dir: r.dir, info: r, entries: r.entries, sel: null });
+    vwArcRender();
+  }
+  function vwArcRender() {
+    const arc = VW.arc;
+    if (!arc) return;
+    const i = arc.info;
+    const encSel = i.kind === "zip" && i.legacy
+      ? `<select class="fs-arcenc" aria-label="${esc(t("文件名编码"))}" title="${esc(t("文件名乱码就换一个编码"))}">${(arc.encodings || ["auto"]).map((x) =>
+          `<option value="${esc(x)}" ${x === (arc.enc === "auto" ? i.encoding : arc.enc) ? "selected" : ""}>${esc(x === "auto" ? t("自动") : x.toUpperCase())}</option>`).join("")}</select>` : "";
+    const up = arc.dir ? `<div class="item fs-item" data-up="1" role="button" tabindex="0"><div class="fs-row"><span class="fs-ico">${kindIcon("dir")}</span><span class="it-title">..</span></div></div>` : "";
+    $("vw-body").innerHTML = `<div class="vw-arc">
+      <div class="fs-arcbar">
+        ${arcCrumbs(arc)}
+        <span class="tiny">${esc(i.type || i.kind)} · ${t("{n} 个条目", { n: i.total })} · ${fmtSize(i.bytes)}${i.encrypted ? " · " + t("已加密") : ""}</span>
+        ${encSel}
+        <span id="vw-arc-job" class="fs-job hidden"></span>
+      </div>
+      <div class="vw-arc-list list compact">
+        ${up}${arc.entries.map(vwArcRow).join("") || `<div class="tiny">${t("（空目录）")}</div>`}
+      </div>
+      <div id="vw-arc-prev" class="fs-preview"></div>
+    </div>`;
+    const list = $("vw-body").querySelector(".vw-arc-list");
+    list.addEventListener("click", (e) => {
+      const row = e.target.closest(".fs-item");
+      if (!row || !VW.arc) return;
+      if (row.dataset.up) return vwArcLoad(arc.dir.includes("/") ? arc.dir.replace(/\/[^/]*$/, "") : "");
+      const e2 = arc.entries.find((x) => x.name === row.dataset.n);
+      if (!e2) return;
+      if (e2.dir) return vwArcLoad(arcJoin(arc.dir, e2.name));
+      arc.sel = e2.name;
+      list.querySelectorAll(".fs-item").forEach((el) => el.classList.toggle("active", el.dataset.n === e2.name));
+      vwArcPrev();
+    });
+    const bar = $("vw-body").querySelector(".fs-arcbar");
+    bar.addEventListener("click", (e) => {
+      const c = e.target.closest(".crumb");
+      if (!c) return;
+      if (c.dataset.ad != null) return vwArcLoad(c.dataset.ad);
+      closeViewer();   // 「…」= 压缩包所在目录：查看器关掉就回到之前的位置（聊天 / 文件页）
+    });
+    bar.querySelector(".fs-arcenc")?.addEventListener("change", (ev) => { arc.enc = ev.target.value; vwArcLoad(arc.dir); });
+    vwArcPrev();
+  }
+  function vwArcPrev() {
+    const arc = VW.arc;
+    const box = $("vw-arc-prev");
+    if (!arc || !box) return;
+    const e = arc.entries.find((x) => x.name === arc.sel);
+    if (!e) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+    const entry = arcJoin(arc.dir, e.name);
+    const when = e.mtime ? new Date(e.mtime).toLocaleString() : "";
+    box.classList.remove("hidden");
+    box.innerHTML = `<div class="fs-prev-head">
+        <span class="mono">${esc(e.name)}</span>
+        <span class="tiny">${fmtSize(e.size)}</span>
+        ${e.link ? "" : `<button class="btn sm" data-a="open">${t("打开")}</button>`}
+        <button class="btn ghost sm" data-a="unpack">${t("解压…")}</button>
+      </div>
+      <div class="fs-prev-body"><div class="tiny">${[e.packed ? t("压缩后 {size}", { size: fmtSize(e.packed) }) : "", when, e.enc ? t("已加密") : "", e.link ? t("软链接（不解出）") : ""].filter(Boolean).map(esc).join(" · ")}</div></div>`;
+    box.querySelector('[data-a="unpack"]').addEventListener("click", () => arcExtractDlg({ path: arc.path, entries: [entry], arc }));
+    box.querySelector('[data-a="open"]')?.addEventListener("click", async (ev) => {
+      const b = ev.currentTarget; b.disabled = true; b.textContent = t("解出中…");
+      try {
+        const r = await arcPost("preview", { path: arc.path, entry, enc: arc.enc, password: arc.password || undefined });
+        if (r.needPassword) {
+          const pw = await arcAskPassword(arc.name, r.wrongPassword);
+          if (pw != null) { arc.password = pw; vwArcPrev(); }
+          return;
+        }
+        openViewer(r.path, r.kind === "archive" ? "other" : r.kind, r.size);
+      } catch (err) {
+        toast(err.status === 401 ? t("密码不对") : err.status === 413 ? t("文件太大，没法直接预览，请解压出来再看") : err.status === 507 ? t("存储空间不够") : t("解出失败：{msg}", { msg: err.message }), true);
+      } finally { if (b.isConnected) { b.disabled = false; b.textContent = t("打开"); } }
+    });
+  }
 
   /** 按字节认编码（审查 B06）：以前一律当 UTF-8 读，UTF-16 / GBK 的字节变成替代字符，保存时连原文一起写坏；UTF-8 的 BOM 也会丢。
    *  enc 非空 = 不是 UTF-8：照它解出来给人看，但只读 —— 浏览器只会编 UTF-8，存回去必然有损 */
