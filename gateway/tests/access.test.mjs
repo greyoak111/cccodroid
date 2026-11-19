@@ -1,4 +1,4 @@
-// 网关访问控制（gw/access.mjs）：令牌、Host、Origin。端口由 scripts/test.mjs 固定为 8799
+// 网关访问控制（gw/access.mjs）：令牌、Host、Origin。端口 = CCAPP_PORT（scripts/test.mjs 按池设 8799+i）
 import "../gw/config.mjs";   // 放最前：没走 scripts/test.mjs（没有临时 home）就在这里拦下，下面一行都不跑
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -7,12 +7,13 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { BOOT, COOKIE, EMPTY_SHA, SESSION, TOKEN, UI_HOST, cookieHostOk, denyReason, proof, sigOk, staticMac, tokenOk } from "../gw/access.mjs";
 
+const PORT = process.env.CCAPP_PORT || "8799";
 // 连接进的监听地址默认跟着 Host 走（真实情况）；转发场景单独给 local
 const req = (headers, local) => ({ headers, socket: { localAddress: local || (String(headers.host || "").startsWith(UI_HOST) ? UI_HOST : "127.0.0.1") } });
-const url = (p) => new URL("http://127.0.0.1:8799" + p);
-const HOST = "127.0.0.1:8799";
+const url = (p) => new URL(`http://127.0.0.1:${PORT}` + p);
+const HOST = `127.0.0.1:${PORT}`;
 // cccodroid（测试里设了 CCAPP_PREFIX）的界面走专用地址，会话 Cookie 只在这里认
-const UIH = process.env.CCAPP_PREFIX ? UI_HOST + ":8799" : HOST;
+const UIH = process.env.CCAPP_PREFIX ? `${UI_HOST}:${PORT}` : HOST;
 
 test("令牌：生成在 CCAPP_HOME 里，64 位十六进制、文件只有自己能读", () => {
   assert.match(TOKEN, /^[0-9a-f]{64}$/);
@@ -44,8 +45,8 @@ test("Host 不对：421", () => {
 test("Origin 不对：403（没有 Origin 的同源请求不拦）", () => {
   assert.equal(denyReason(req({ host: HOST, origin: "http://evil.example" }), url("/")), 403);
   assert.equal(denyReason(req({ host: HOST, origin: "null" }), url("/")), 403);
-  assert.equal(denyReason(req({ host: HOST, origin: "http://127.0.0.1:8799" }), url("/")), null);
-  assert.equal(denyReason(req({ host: "LOCALHOST:8799" }), url("/")), null);
+  assert.equal(denyReason(req({ host: HOST, origin: `http://127.0.0.1:${PORT}` }), url("/")), null);
+  assert.equal(denyReason(req({ host: `LOCALHOST:${PORT}` }), url("/")), null);
 });
 
 test("静态页不要令牌，/api/ 要", () => {
@@ -78,15 +79,15 @@ test("证明：回启动号和 HMAC，随机数不合格式就不答", () => {
 });
 
 test("界面专用地址（GHSA-hwmm 1）：cccodroid 里 Cookie 只在 127.0.0.2 上认，127.0.0.1 / localhost 上来的不认", () => {
-  assert.equal(denyReason(req({ host: UI_HOST + ":8799" }), url("/")), null);           // 这个地址本身放行
+  assert.equal(denyReason(req({ host: `${UI_HOST}:${PORT}` }), url("/")), null);           // 这个地址本身放行
   assert.equal(denyReason(req({ host: UI_HOST + ":1234" }), url("/")), 421);
   if (!process.env.CCAPP_PREFIX) return;
   const ck = `${COOKIE}=${SESSION}`;
   assert.equal(denyReason(req({ host: HOST, cookie: ck }), url("/api/state")), 403);
-  assert.equal(denyReason(req({ host: "localhost:8799", cookie: ck }), url("/api/state")), 403);
-  assert.equal(denyReason(req({ host: UI_HOST + ":8799", cookie: ck }), url("/api/state")), null);
+  assert.equal(denyReason(req({ host: `localhost:${PORT}`, cookie: ck }), url("/api/state")), 403);
+  assert.equal(denyReason(req({ host: `${UI_HOST}:${PORT}`, cookie: ck }), url("/api/state")), null);
   assert.equal(cookieHostOk(req({ host: HOST })), false);
-  assert.equal(cookieHostOk(req({ host: UI_HOST + ":8799" })), true);
+  assert.equal(cookieHostOk(req({ host: `${UI_HOST}:${PORT}` })), true);
   // 令牌头不受地址限制（终端里的工具、claude 都走 127.0.0.1）
   assert.equal(denyReason(req({ host: HOST, "x-cc-token": TOKEN }), url("/api/state")), null);
 });
@@ -108,7 +109,7 @@ test("按次签名（GHSA-hwmm 附录 B）：对的放行一次，重放、改�
   assert.equal(okReq.ccBodySha, bh, "放行后记下体哈希，读体时核（http.mjs）");
   assert.equal(denyReason(R({ "x-cc-sig": sig("/api/status", Date.now(), undefined, { method: "POST", body: bh }), "x-cc-body": EMPTY_SHA }, UI_HOST, "POST"), url("/api/status")), 403);
   assert.equal(sigOk(sig("/api/status"), "/api/file?path=/x"), false);
-  assert.equal(denyReason(req({ host: UI_HOST + ":8799", cookie: `${COOKIE}=${SESSION}` }, "127.0.0.1"), url("/api/state")), process.env.CCAPP_PREFIX ? 403 : null, "Host 写 127.0.0.2、连接其实进的 127.0.0.1（转发）：Cookie 不认");                               // 签的是别的路径
+  assert.equal(denyReason(req({ host: `${UI_HOST}:${PORT}`, cookie: `${COOKIE}=${SESSION}` }, "127.0.0.1"), url("/api/state")), process.env.CCAPP_PREFIX ? 403 : null, "Host 写 127.0.0.2、连接其实进的 127.0.0.1（转发）：Cookie 不认");                               // 签的是别的路径
   assert.equal(sigOk(sig("/api/file?path=%2Fa"), "/api/file?path=%2Fa"), true);
   assert.equal(sigOk(sig("/api/status", Date.now() - 120e3), "/api/status"), false);                // 过期
   for (const bad of ["", "x", "1.2.3", sig("/api/status").replace(/.$/, "g")]) assert.equal(sigOk(bad, "/api/status"), false);

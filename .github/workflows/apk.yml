@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # 网关测试（gateway/tests/，node scripts/test.mjs）：约 8 分钟跑完；不过就不打包
+  # 网关测试（gateway/tests/，node scripts/test.mjs）：scripts/test.mjs 内建分池并行（默认 min(4, 核数)，CCAPP_TEST_POOLS 可覆盖），4 核 runner 上约 4~5 分钟；不过就不打包
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

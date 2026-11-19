@@ -9,7 +9,13 @@ import path from "node:path";
 import { PATHS } from "../gw/config.mjs";
 import { listSessions } from "../gw/sessions.mjs";
 
-const dir = path.join(PATHS.projects, "zz-bg-list-test");
+// 这个测试对「整个 projects 目录」做绝对计数（total===N、limit 名额），
+// 别的测试文件留在 projects 里的会话会污染计数。把 PATHS.projects 换成本文件
+// 私有的临时目录，让 listSessions 只扫到本文件的 fixtures（每文件独立进程，不影响别人）。
+const realProjects = PATHS.projects;
+const tmpRoot = fs.mkdtempSync(path.join(process.env.CCAPP_TMP, "bg-list-"));
+PATHS.projects = tmpRoot;
+const dir = path.join(tmpRoot, "zz-bg-list-test");
 fs.mkdirSync(dir, { recursive: true });
 const now = Date.now();
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -67,5 +73,6 @@ test("正文里出现 sessionKind 字样不误伤", () => {
 });
 
 test("清理", () => {
-  fs.rmSync(dir, { recursive: true, force: true });
+  PATHS.projects = realProjects;
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
