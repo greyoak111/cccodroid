@@ -65,10 +65,11 @@ export const PEEK_CACHE = new Map();   // 标题/cwd 取自文件开头，写进
 // 开的那条对话）；bg 是用户自己甩到后台的会话，在 /resume 里带「bg」标记照常显示，这里不能一起藏掉。
 // 同样不按 isSidechain / 标题猜：用户从工具调用里接出来的会话、被复用成任务的会话都不能因此消失。
 const HIDDEN_KINDS = new Set(["daemon", "daemon-worker"]);
-const KIND_CACHE = new Map();   // 文件 → { size, mtimeMs, ino, kind }：分类要扫每个文件的开头，缓存住
-function sessionKindOf(file, st) {
+const KIND_MAX = 5000;
+let KIND_CACHE = new Map();   // 上一轮的热记录；读完整轮再换表，避免未命中逐个挤走后面还要读的记录
+function sessionKindRecord({ file, size, mtime, ino }) {
   const hit = KIND_CACHE.get(file);
-  if (hit && st && hit.size === st.size && hit.mtimeMs === st.mtimeMs && (hit.ino == null || st.ino == null || hit.ino === st.ino)) return hit.kind;
+  if (hit && hit.size === size && hit.mtime === mtime && hit.ino === ino) return hit;
   let kind = "", fd = null;
   try {
     fd = fs.openSync(file, "r");
@@ -90,13 +91,10 @@ function sessionKindOf(file, st) {
       if (typeof ev.sessionKind === "string") kind = ev.sessionKind;
       break;
     }
-  } catch {} finally {
+  } catch { return null; } finally {
     if (fd != null) try { fs.closeSync(fd); } catch {}
   }
-  const rec = { size: st?.size, mtimeMs: st?.mtimeMs, ino: st?.ino, kind };
-  KIND_CACHE.set(file, rec);
-  if (KIND_CACHE.size > 5000) KIND_CACHE.delete(KIND_CACHE.keys().next().value);
-  return kind;
+  return { size, mtime, ino, kind };
 }
 /** st：调用方已经 stat 过就传进来。缓存带上 size/mtime/inode：同尺寸原地改写、删消息重写也能察觉（200-15-08） */
 export function peekSession(file, st = null) {
@@ -179,10 +177,15 @@ export function listSessions(limit = 150) {
     }
   }
 
-  // 先滤守护进程会话，再排序、截断：反过来的话，最近的守护会话会占掉 limit 名额，把用户自己的对话挤出去
-  for (const s of found) s.hidden = HIDDEN_KINDS.has(sessionKindOf(s.file, { size: s.size, mtimeMs: s.mtime, ino: s.ino }));
-  const visible = found.filter((s) => !s.hidden);
-  visible.sort((a, b) => b.mtime - a.mtime);
+  // 最近的保留给下次，扫描时不要截断：仍须核对所有守护进程会话、置顶和总数。
+  found.sort((a, b) => b.mtime - a.mtime);
+  const next = new Map(), visible = [];
+  for (const s of found) {
+    const rec = sessionKindRecord(s);
+    if (rec && next.size < KIND_MAX) next.set(s.file, rec);
+    if (!HIDDEN_KINDS.has(rec?.kind)) visible.push(s);
+  }
+  KIND_CACHE = next;
   const shown = visible.filter((s, i) => i < limit || PINS[s.id]);
   const out = shown.map((s) => {
     const meta = peekSession(s.file, { size: s.size, mtimeMs: s.mtime, ino: s.ino }), ab = archiveBrief(s.id, s.size, lineageCached(s.id)?.compacts?.length || 0);
@@ -389,6 +392,30 @@ export function findSessionFile(id, cwd) {
     if (fs.existsSync(full)) return { file: full, project: d.name };
   }
   return null;
+}
+
+/** 恢复待发消息时用：existsSync 把读错也当作不存在。没能检查完项目目录时宁可保留消息。 */
+export function sessionPresence(id) {
+  if (typeof id !== "string" || !SID_RE.test(id)) return "missing";
+  let dirs;
+  try { dirs = fs.readdirSync(PATHS.projects, { withFileTypes: true }); }
+  catch { return "unreadable"; }
+  let result = "missing";
+  for (const dir of dirs) {
+    if (!dir.isDirectory()) continue;
+    const file = path.join(PATHS.projects, dir.name, id + ".jsonl");
+    try {
+      const st = fs.statSync(file, { throwIfNoEntry: false });
+      if (!st) continue;
+      if (!st.isFile()) { result = "unreadable"; continue; }
+      fs.accessSync(file, fs.constants.R_OK);
+      return "present";
+    } catch (e) {
+      // 有一处读错仍继续找：同一会话可能被复制到另一个项目。
+      if (e.code !== "ENOENT") result = "unreadable";
+    }
+  }
+  return result;
 }
 
 // ── 路由：/api/sessions/search /api/sessions /api/sessions/trash /api/trash /api/trash/restore /api/trash/purge /api/sessions/export /api/sessions/import /api/session/ ──

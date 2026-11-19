@@ -1141,7 +1141,7 @@ export async function routeRun(req, res, u, p) {
     // 输入已经关了（见 IDLE_CLOSE_MS）：stop_task 送不进去，只能连 claude 带它的后台任务一起结束。排着的消息不挂起，结束就发
     if (run && run.idle && !run.inputOpen && !run.ended && run.bgList.some((t) => t.id === String(b.taskId || ""))) {
       log(`■ 停后台任务 ${String(b.taskId).slice(0, 12)}：这一轮的输入已关，结束整个进程`);
-      abortRun(run, { hold: false });
+      abortRun(run, { hold: false, userStopped: true });
       return sendJson(res, 200, { ok: true, whole: true });
     }
     if (!run || !run.stopTask || !run.stopTask(String(b.taskId || ""))) return sendJson(res, 409, { error: "gone", message: tz("这个后台任务已经结束了") });
@@ -1152,7 +1152,8 @@ export async function routeRun(req, res, u, p) {
     const b = JSON.parse((await readBody(req)) || "{}");
     if (b.clearQueue) QUEUE.length = 0;
     // 带 id 只停那一轮；不带 id（旧前端）停掉全部
-    const killed = b.id ? abortRun(RUNS.get(String(b.id))) : runList().map(abortRun).some(Boolean);
+    const stop = (run) => abortRun(run, { userStopped: true });
+    const killed = b.id ? stop(RUNS.get(String(b.id))) : runList().map(stop).some(Boolean);
     if (b.clearQueue) publishState();
     return sendJson(res, 200, { ok: true, killed });
   }
