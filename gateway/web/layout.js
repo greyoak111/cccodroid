@@ -39,6 +39,8 @@
   const fk = (k) => (fv.length ? k + "_f" : k);
   let tier = 1, avoid = null, hooks = {}, ovCover = false, ready = false, land = false, rotate = false;   // ovCover：app.js 的浮层管理说有弹层盖着
   const recent = [];                                       // 打开顺序，最后一个在最上面
+  let splitDrag = null;
+  const splitValue = (key) => (splitDrag?.key === key ? splitDrag.value : null) ?? localStorage.getItem(key);
   const isOpen = (id) => { const el = $(id); return !!el && !el.classList.contains("hidden"); };
   const rtl = () => root.getAttribute("dir") === "rtl";
   const docked = () => tier >= 3 && !rotate && localStorage.getItem(LS_DOCK) !== "0";
@@ -46,7 +48,7 @@
   // 常驻侧栏宽度：拖过就用拖的（像素），没拖过按窗口宽度给个默认；总要给对话留够 MIN_CHAT
   function leftWidth() {
     if (!docked()) return 0;
-    const saved = parseFloat(localStorage.getItem(fk(LS_LW)));
+    const saved = parseFloat(splitValue(fk(LS_LW)));
     if (!(saved > 0) && fv.length) {          // 侧栏右缘落在（第一条）折痕上，铰链宽度也算进侧栏
       const f = rtl() ? fv[fv.length - 1] : fv[0];
       return Math.round(rtl() ? innerWidth - f.x : f.x + f.w);
@@ -60,7 +62,7 @@
   // 浮层侧栏（竖屏 / 窄屏，盖在对话上面的那种）宽度：拖过就用拖的，没拖过按窗口给大一点（约 62%），右边总留一条能点着关掉
   function drawerWidth() {
     const max = Math.max(260, Math.min(MAX_SIDE, Math.round(innerWidth * 0.86), innerWidth - 56));
-    const saved = parseFloat(localStorage.getItem(LS_DW));
+    const saved = parseFloat(splitValue(LS_DW));
     const w = saved > 0 ? saved : Math.max(320, innerWidth * 0.62);
     return Math.round(Math.max(Math.min(MIN_SIDE, max), Math.min(max, w)));
   }
@@ -68,7 +70,7 @@
   function rightWidth() {
     const lw = leftWidth(), avail = innerWidth - lw;
     let rw;
-    const saved = parseFloat(localStorage.getItem(fk(LS_RATIO)));
+    const saved = parseFloat(splitValue(fk(LS_RATIO)));
     let av = avoid;
     if (fv.length) { const f = rtl() ? fv[0] : fv[fv.length - 1]; av = rtl() ? f.x : f.x + f.w; }   // 窗格左缘落在（最后一条）折痕上
     if (saved > 0 && saved < 1) rw = avail * saved;
@@ -114,7 +116,7 @@
     if (dock && !wasDocked && (isOpen("drawer") === false || $("drawer")._moShut) && hooks.openDrawer) hooks.openDrawer();
     if (dock && !wasDocked && ready && hooks.dockIn) hooks.dockIn();   // 启动时那次不放
     root.style.setProperty("--lw", leftWidth() + "px");
-    const gf = fv.length && dock && !(parseFloat(localStorage.getItem(fk(LS_LW))) > 0) ? (rtl() ? fv[fv.length - 1] : fv[0]) : null;
+    const gf = fv.length && dock && !(parseFloat(splitValue(fk(LS_LW))) > 0) ? (rtl() ? fv[fv.length - 1] : fv[0]) : null;
     root.style.setProperty("--fgap", (gf ? Math.round(gf.w) : 0) + "px");
     root.style.setProperty("--dw", drawerWidth() + "px");
 
@@ -134,10 +136,12 @@
     const top = open[open.length - 1];
     for (const id of PANES) { const el = $(id); if (el) el.classList.toggle("ws-top", right && id === top); }
     // 终端被盖住：它的文本视图跟着让位（审查 UI05-002），键盘焦点也交出来，不然按键打进看不见的终端（UI05-001）
-    root.classList.toggle("term-under", right && top !== "term");
-    if (right && top !== "term" && $("term") && $("term").contains(document.activeElement)) document.activeElement.blur();
+    const termUnder = right && top !== "term", termWasUnder = root.classList.contains("term-under");
+    root.classList.toggle("term-under", termUnder);
+    if (termUnder && $("term") && $("term").contains(document.activeElement)) document.activeElement.blur();
     renderTabs(right ? open : [], top);
     placeBrowser();
+    if (termWasUnder && !termUnder && isOpen("term")) document.dispatchEvent(new Event("cc:term-uncovered"));
 
     // 查看器里的 PDF 靠 window resize 重排；终端自己有 ResizeObserver
     if (was !== tier || right) { clearTimeout(rz); rz = setTimeout(() => { busy = true; dispatchEvent(new Event("resize")); busy = false; }, 120); }
@@ -200,52 +204,76 @@
     for (const id of PANES.concat(COVERS.filter((c) => c !== "drawer"), "drawer")) { const el = $(id); if (el) mo.observe(el, { attributes: true, attributeFilter: ["class"], attributeOldValue: true }); }
   }
 
-  // 分隔条：拖动改右侧宽度，比例记在 localStorage；双击回到默认
+  // 三种分隔条共用一套拖动：帧内只取最后一个坐标，apply() 读临时值，结束才写盘。
+  function bindSplit(s, pref, prop, measure) {
+    const drawer = pref === LS_DW, right = pref === LS_RATIO;
+    const key = () => drawer ? pref : fk(pref);
+    const cls = right ? "ws-drag" : "side-drag";
+    const active = () => drawer ? isOpen("drawer") && !root.classList.contains("dock-l")
+      : root.classList.contains(right ? "has-right" : "dock-l");
+    const matches = (e) => splitDrag?.handle === s && splitDrag.pointer === e.pointerId;
+    s.addEventListener("pointerdown", (e) => {
+      if (splitDrag || e.button !== 0 || !active()) return;
+      splitDrag = { handle: s, pointer: e.pointerId, key: key(), value: null, x: null, frame: 0 };
+      try { s.setPointerCapture(e.pointerId); } catch {}
+      root.classList.add(cls); e.preventDefault(); if (drawer) e.stopPropagation();
+    });
+    s.addEventListener("pointermove", (e) => {
+      if (!matches(e)) return;
+      const d = splitDrag;
+      d.x = e.clientX;
+      if (!d.frame) d.frame = requestAnimationFrame(() => {
+        d.frame = 0;
+        // 折痕 / 分栏形态变了，不用新形态的几何值覆盖旧宽度。
+        if (d.key !== key() || !active()) return;
+        const [width, value] = measure(d.x);
+        d.value = value;
+        root.style.setProperty(prop, width + "px");
+        if (!drawer) placeBrowser();
+      });
+    });
+    const end = (e) => {
+      if (!matches(e)) return;
+      const d = splitDrag;
+      if (d.frame) cancelAnimationFrame(d.frame);
+      // cancel / lostpointercapture 的坐标可能是 0；用最后一次 move。没移动的点击不保存。
+      if (d.x != null && d.key === key() && active()) {
+        d.value = measure(e.type === "pointerup" ? e.clientX : d.x)[1];
+      }
+      splitDrag = null;
+      root.classList.remove(cls);
+      if (d.value == null) return;
+      localStorage.setItem(d.key, d.value);
+      if (drawer) root.style.setProperty(prop, drawerWidth() + "px"); else apply();
+    };
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) s.addEventListener(type, end);
+    if (drawer) s.addEventListener("click", (e) => e.stopPropagation()); // 别让点击漏到遮罩上把抽屉关了
+    s.addEventListener("dblclick", (e) => { if (drawer) e.stopPropagation(); localStorage.removeItem(key()); apply(); });
+  }
+
   function splitter() {
     const s = $("ws-split");
     if (!s) return;
-    let drag = false;
-    s.addEventListener("pointerdown", (e) => { drag = true; try { s.setPointerCapture(e.pointerId); } catch {} root.classList.add("ws-drag"); e.preventDefault(); });
-    s.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      const lw = leftWidth(), avail = innerWidth - lw;
-      let rw = rtl() ? e.clientX : innerWidth - e.clientX;
-      rw = Math.max(MIN_PANE, Math.min(avail - MIN_CHAT, rw));
-      localStorage.setItem(fk(LS_RATIO), (rw / avail).toFixed(4));
-      root.style.setProperty("--rw", rw + "px");
-      placeBrowser();
+    bindSplit(s, LS_RATIO, "--rw", (x) => {
+      const avail = innerWidth - leftWidth();
+      const rw = Math.max(MIN_PANE, Math.min(avail - MIN_CHAT, rtl() ? x : innerWidth - x));
+      return [rw, (rw / avail).toFixed(4)];
     });
-    const end = () => { if (!drag) return; drag = false; root.classList.remove("ws-drag"); apply(); };
-    s.addEventListener("pointerup", end);
-    s.addEventListener("pointercancel", end);
-    s.addEventListener("dblclick", () => { localStorage.removeItem(fk(LS_RATIO)); apply(); });
   }
 
-  // 侧栏右边缘的拖拽条：拖动改常驻侧栏宽度，记在 localStorage；双击回到默认
   function sideSplitter() {
     const s = document.createElement("div");
     s.id = "side-split";
     s.setAttribute("role", "separator");
     s.setAttribute("aria-orientation", "vertical");
     document.body.appendChild(s);
-    let drag = false;
-    s.addEventListener("pointerdown", (e) => { drag = true; try { s.setPointerCapture(e.pointerId); } catch {} root.classList.add("side-drag"); e.preventDefault(); });
-    s.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      let lw = rtl() ? innerWidth - e.clientX : e.clientX;
-      const rw = root.classList.contains("has-right") ? MIN_PANE : 0;
-      lw = Math.round(Math.max(MIN_SIDE, Math.min(MAX_SIDE, innerWidth - MIN_CHAT - rw, lw)));
-      localStorage.setItem(fk(LS_LW), String(lw));
-      root.style.setProperty("--lw", lw + "px");
-      placeBrowser();
+    bindSplit(s, LS_LW, "--lw", (x) => {
+      const rp = root.classList.contains("has-right") ? MIN_PANE : 0;
+      const w = Math.round(Math.max(MIN_SIDE, Math.min(MAX_SIDE, innerWidth - MIN_CHAT - rp, rtl() ? innerWidth - x : x)));
+      return [w, String(w)];
     });
-    const end = () => { if (!drag) return; drag = false; root.classList.remove("side-drag"); apply(); };
-    s.addEventListener("pointerup", end);
-    s.addEventListener("pointercancel", end);
-    s.addEventListener("dblclick", () => { localStorage.removeItem(fk(LS_LW)); apply(); });
   }
 
-  // 浮层侧栏右边缘的拖拽条（和常驻侧栏同款）：拖动改宽度，记在 localStorage；双击回到默认
   function drawerSplitter() {
     const panel = document.querySelector("#drawer .drawer-panel");
     if (!panel) return;
@@ -254,21 +282,11 @@
     s.setAttribute("role", "separator");
     s.setAttribute("aria-orientation", "vertical");
     panel.appendChild(s);
-    let drag = false;
-    s.addEventListener("pointerdown", (e) => { drag = true; try { s.setPointerCapture(e.pointerId); } catch {} root.classList.add("side-drag"); e.preventDefault(); e.stopPropagation(); });
-    s.addEventListener("pointermove", (e) => {
-      if (!drag) return;
+    bindSplit(s, LS_DW, "--dw", (x) => {
       const max = Math.max(260, Math.min(MAX_SIDE, Math.round(innerWidth * 0.86), innerWidth - 56));
-      let w = rtl() ? innerWidth - e.clientX : e.clientX;
-      w = Math.round(Math.max(Math.min(MIN_SIDE, max), Math.min(max, w)));
-      localStorage.setItem(LS_DW, String(w));
-      root.style.setProperty("--dw", w + "px");
+      const w = Math.round(Math.max(Math.min(MIN_SIDE, max), Math.min(max, rtl() ? innerWidth - x : x)));
+      return [w, String(w)];
     });
-    const end = () => { if (!drag) return; drag = false; root.classList.remove("side-drag"); };
-    s.addEventListener("pointerup", end);
-    s.addEventListener("pointercancel", end);
-    s.addEventListener("click", (e) => e.stopPropagation());          // 别让点击漏到遮罩上把抽屉关了
-    s.addEventListener("dblclick", (e) => { e.stopPropagation(); localStorage.removeItem(LS_DW); apply(); });
   }
 
   let busy = false, raf = 0;
