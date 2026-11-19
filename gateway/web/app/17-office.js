@@ -93,7 +93,10 @@
     let r;
     try {
       await loadScript("/office/mammoth.browser.min.js");
-      r = await window.mammoth.convertToHtml({ arrayBuffer: await vwFetchBuf(VW_OFFICE_MAX) });
+      if (!still()) return;
+      const arrayBuffer = await vwFetchBuf(VW_OFFICE_MAX);
+      if (!still()) return;
+      r = await window.mammoth.convertToHtml({ arrayBuffer });
     } catch (e) {
       if (still()) vwFail(t("这个文档读不出来：{msg}", { msg: e.message || String(e) }), true);
       return;
@@ -290,6 +293,7 @@
       const el = $("vw-body").querySelector(".vw-lo-line");
       if (el) el.textContent = j.install.line || "";
       await new Promise((ok) => setTimeout(ok, 1500));
+      if (!still()) return;
       try { j = await api("/api/office/info"); } catch {}
     }
     if (!still()) return;
@@ -312,77 +316,91 @@
   }
 
   async function vwPdf(url, extra) {
-    const still = vwTake();
+    const still = vwTake(), src = url || fileUrl(VW.path);
+    closeViewerPdf();
     vwActs([["−", "zoom-"], ["+", "zoom+"]].concat(extra || [], !url ? [[t("PDF 工具箱"), "pdftools"]] : []));
-    $("vw-body").innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
-    let lib, doc;
+    vwLoading();
+    let doc, p1;
     try {
-      lib = await loadPdfjs();
-      const task = lib.getDocument({
-        url: url || fileUrl(VW.path), cMapUrl: "/pdfjs/cmaps/", cMapPacked: true, wasmUrl: "/pdfjs/wasm/",
+      const lib = await loadPdfjs();
+      if (!still()) return;
+      // 在等待首个回执之前就登记 loading task：下载未完成时也能在离开后 cancel。
+      const task = VW.pdfTask = lib.getDocument({
+        url: src, cMapUrl: "/pdfjs/cmaps/", cMapPacked: true, wasmUrl: "/pdfjs/wasm/",
         isEvalSupported: false,
         // 图片像素封顶：PDF 里写一张 12000×12000 的图就会被全尺寸解码，渲染进程一下涨上 GB（199-A-01）
         maxImageSize: 16e6,
       });
       task.onPassword = (cb, reason) => {
+        if (!still() || VW.pdfTask !== task) return;
         const pw = prompt(reason === 2 ? t("密码不对，再输一次：") : t("这个 PDF 有密码："));
-        if (pw == null) task.destroy(); else cb(pw);
+        if (still() && VW.pdfTask === task) cb(pw == null ? new Error(t("已取消")) : pw);
       };
       doc = await task.promise;
+      if (!still()) return;
+      p1 = await doc.getPage(1);   // 坏页树或空文档也走统一的失败分支
     } catch (e) {
-      if (still()) $("vw-body").innerHTML = `<div class="vw-empty">${t("PDF 打不开：{msg}", { msg: esc(e.message || String(e)) })}</div>`;
-      return;
-    }
-    if (!still() || VW.pdf) { doc.loadingTask.destroy(); return; }
-    VW.pdf = doc;
-    let p1;
-    try { p1 = await doc.getPage(1); }
-    catch (e) {
-      // getPage(1) 也可能被拒（页树损坏、/Count 0）；以前在 try 外，会让查看器永远停在「读取中…」
-      if (still()) $("vw-body").innerHTML = `<div class="vw-empty">${t("PDF 打不开：{msg}", { msg: esc(e.message || String(e)) })}</div>`;
+      if (still()) {
+        closeViewerPdf();
+        $("vw-body").innerHTML = `<div class="vw-empty">${t("PDF 打不开：{msg}", { msg: esc(e.message || String(e)) })}</div>`;
+      }
       return;
     }
     if (!still()) return;
+    VW.pdf = doc;
     const vp = p1.getViewport({ scale: 1 });
     VW.pdfRatio = vp.height / vp.width;
-    $("vw-body").innerHTML = `<div class="vw-pdf"><div class="vw-pages"></div></div><div class="vw-pageno tiny"></div>`;
-    const pages = $("vw-body").querySelector(".vw-pages");
+    $("vw-body").innerHTML = `<div class="vw-pdf" style="position:relative"><div class="vw-pages"></div></div><div class="vw-pageno tiny"></div>`;
+    const scroller = $("vw-body").querySelector(".vw-pdf"), pages = scroller.firstElementChild;
+    const layout = VW.pdfLayout = { scroller, rows: [], label: $("vw-body").querySelector(".vw-pageno"), width: 0 };
     // 页数封顶：每页一个占位节点，几万页的 PDF（页数也能伪造）会把界面卡死（11-04 报告 三）
     const PDF_MAX_PAGES = 3000, np = Math.min(doc.numPages, PDF_MAX_PAGES);
     for (let i = 1; i <= np; i++) {
       const h = document.createElement("div");
       h.className = "vw-page";
       h.dataset.n = i;
+      layout.rows.push(h);
       pages.appendChild(h);
     }
     if (doc.numPages > np) pages.insertAdjacentHTML("beforeend", `<div class="tiny muted" style="text-align:center;padding:12px">${esc(t("还有 {n} 项", { n: doc.numPages - np }))}</div>`);
-    const scroller = $("vw-body").querySelector(".vw-pdf");
-    VW.pdfObs = new IntersectionObserver((ents) => {
+    layout.observer = new IntersectionObserver((ents) => {
+      if (VW.pdfLayout !== layout) return;
       for (const en of ents) {
         if (en.isIntersecting) vwPdfRender(en.target);
         else vwPdfRelease(en.target);
       }
     }, { root: scroller, rootMargin: "1200px 0px" });
-    vwPdfRelayout();
     scroller.addEventListener("scroll", vwPdfPageNo, { passive: true });
-    vwPdfPageNo();
+    // 分隔条拖动也会改变窗格宽度，不一定有 window.resize。
+    layout.resize = new ResizeObserver(() => {
+      if (VW.pdfLayout !== layout) return;
+      vwPdfPageNo();
+      clearTimeout(layout.timer);
+      if (layout.width !== vwPdfWidth(scroller)) layout.timer = setTimeout(vwPdfRelayout, 150);
+    });
+    layout.resize.observe(scroller);
+    vwPdfRelayout();
   }
 
+  const vwPdfWidth = (scroller) => Math.max(1, Math.floor((scroller.clientWidth - 16) * VW.zoom));
   function vwPdfRelayout() {
-    const scroller = $("vw-body").querySelector(".vw-pdf");
-    if (!scroller || !VW.pdf) return;
-    const w = Math.floor((scroller.clientWidth - 16) * VW.zoom);
+    const layout = VW.pdfLayout;
+    if (!layout) return;
+    const { scroller, rows, observer } = layout, w = vwPdfWidth(scroller);
     scroller.classList.toggle("wide", VW.zoom > 1);
+    if (layout.width === w) return;
+    layout.width = w;
     const keep = scroller.scrollTop / Math.max(1, scroller.scrollHeight);
-    for (const h of scroller.querySelectorAll(".vw-page")) {
+    for (const h of rows) {
       const ratio = Number(h.dataset.ratio) || VW.pdfRatio;
       h.style.width = w + "px";
       h.style.height = Math.round(w * ratio) + "px";
-      vwPdfRelease(h);
-      VW.pdfObs.unobserve(h);
-      VW.pdfObs.observe(h);
+      if (h.dataset.state) vwPdfRelease(h);
+      observer.unobserve(h);
+      observer.observe(h);
     }
     scroller.scrollTop = keep * scroller.scrollHeight;
+    vwPdfPageNo();
   }
 
   async function vwPdfRender(h) {
@@ -395,9 +413,14 @@
       if (VW.pdf !== doc || (h._gen || 0) !== gen) return;
       const v1 = page.getViewport({ scale: 1 });
       const ratio = v1.height / v1.width;
-      if (Math.abs(ratio - (Number(h.dataset.ratio) || VW.pdfRatio)) > 0.001) {
+      if (ratio !== (Number(h.dataset.ratio) || VW.pdfRatio)) {
         h.dataset.ratio = ratio;
-        h.style.height = Math.round(h.clientWidth * ratio) + "px";
+        const layout = VW.pdfLayout;
+        h.style.height = Math.round(layout.width * ratio) + "px";
+        if (!layout.frame) layout.frame = requestAnimationFrame(() => {
+          layout.frame = 0;
+          if (VW.pdfLayout === layout) vwPdfPageNo();
+        });
       }
       // 画布像素封顶：放大很多倍时别分配几百 MB 的画布
       const dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -443,39 +466,53 @@
   }
 
   function vwPdfPageNo() {
-    const sc = $("vw-body").querySelector(".vw-pdf"), el = $("vw-body").querySelector(".vw-pageno");
-    if (!sc || !el || !VW.pdf) return;
-    const mid = sc.scrollTop + sc.clientHeight / 3;
-    let n = 1;
-    for (const h of sc.querySelectorAll(".vw-page")) { if (h.offsetTop <= mid) n = Number(h.dataset.n); else break; }
-    el.textContent = `${n} / ${VW.pdf.numPages}`;
+    const layout = VW.pdfLayout;
+    if (!layout) return;
+    const { scroller, rows, label } = layout;
+    const y = scroller.scrollTop + scroller.clientHeight / 3;
+    // 以相对滚动容器的真实位置二分：页高、旋转、缩放和间距都已经包含在 offsetTop 中。
+    let lo = 0, hi = rows.length;
+    while (lo < hi) {
+      const m = (lo + hi) >>> 1;
+      if (rows[m].offsetTop <= y) lo = m + 1; else hi = m;
+    }
+    const n = Math.max(1, lo);
+    if (layout.number !== n) { layout.number = n; label.textContent = `${n} / ${VW.pdf.numPages}`; }
   }
 
   function closeViewerPdf() {
-    VW.pdfObs?.disconnect(); VW.pdfObs = null;
-    if (VW.pdf) { try { VW.pdf.loadingTask.destroy(); } catch {} VW.pdf = null; }
+    const { pdfLayout: layout, pdfTask: task } = VW;
+    VW.pdf = VW.pdfLayout = VW.pdfTask = null;
+    if (layout) {
+      layout.observer.disconnect(); layout.resize.disconnect();
+      clearTimeout(layout.timer); cancelAnimationFrame(layout.frame);
+      layout.scroller.removeEventListener("scroll", vwPdfPageNo);
+      for (const h of layout.rows) if (h.dataset.state) vwPdfRelease(h);
+    }
+    if (task) {
+      task.onPassword = null;
+      task.destroy().catch(() => {});
+    }
   }
 
   function closeViewer() {
-    if (VW.dirty && !confirm(t("有未保存的修改，丢弃？"))) return;
+    if (VW.closing || viewerEl.classList.contains("hidden") || (VW.dirty && !confirm(t("有未保存的修改，丢弃？")))) return;
     if (VW.dirty) draftClear();
-    VW.dirty = false;
+    const origin = VW.filesOrigin;
+    VW.filesOrigin = null;
+    VW.dirty = false; VW.closing = true;
     VW.gen = (VW.gen || 0) + 1;    // 关了：还在途的读取 / 转换回来也别再往正文里写
     closeViewerSheet();
     closeViewerPdf();
     vwMdStop();          // 长 Markdown 的分段 observer：以前要等下一次预览才断（审查 #49 P3-7）
     vwDropEd();
     gutStop();           // 行号栏的 ResizeObserver 与量过的行文本：关了查看器还挂在页面上（FIND-026）
+    clearTimeout(VW.wt);
     vwHtmlStop();
+    stopPaneMedia($("vw-body"));
     VW.text = ""; VW.wb = VW.sheets = null; VW.arc = null;   // 大文本、工作簿、压缩包会话别跟着查看器一直挂在内存里（#56）
     MO.hide(viewerEl, MO.paneOut(), 170, () => { $("vw-body").innerHTML = ""; });   // 内容等滑出去了再清，别先白一下
-    // 文件面板开着就刷新一下：大小 / 修改时间可能变了
-    // 正在看压缩包：刷新包内这一层，别用 fsLoad（它会清掉 state.fs.arc，把人踢出压缩包）
-    if (!filesEl.classList.contains("hidden")) {
-      if (state.fs.arc) arcLoad(state.fs.arc.dir, { keepSel: true });
-      else if (state.fs.path) fsLoad(state.fs.path, { keepSel: true, keepQ: true });
-    }
+    fsViewerChanged(origin, false);
   }
   $("vw-close").addEventListener("click", closeViewer);
-  window.addEventListener("resize", () => { if (VW.pdf) { clearTimeout(VW.rt); VW.rt = setTimeout(vwPdfRelayout, 200); } });
 

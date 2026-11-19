@@ -391,20 +391,22 @@
   /** 文件面板：给改过的文件标个色点（不是仓库就什么都不做） */
   let fsDots = null, fsDotsAt = 0;
   async function fsGitDots() {
-    const dir = state.fs.path;
+    const dir = state.fs.path, here = fsHere;
+    if (!here()) return;
     let s;
     // 选中、过滤都会重画列表：同一目录 5 秒内复用上次的结果，别每点一下就跑一次 git status
     if (fsDots && fsDots.dir === dir && Date.now() - fsDotsAt < 5000) s = fsDots.s;
     else {
       try { s = await api(`/api/git/status?dir=${encodeURIComponent(dir)}`); } catch { return; }
+      if (!here()) return;
       fsDots = { dir, s }; fsDotsAt = Date.now();
     }
-    if (!s || s.notRepo || s.error || dir !== state.fs.path) return;
+    if (!s || s.notRepo || s.error) return;
     const rel = dir.replace(/\/$/, "").replace(/^\/sdcard(?=\/|$)/, "/storage/emulated/0");
-    const here = path => { const full = s.root + "/" + path; return full.startsWith(rel + "/") ? full.slice(rel.length + 1) : null; };
+    const inDir = path => { const full = s.root + "/" + path; return full.startsWith(rel + "/") ? full.slice(rel.length + 1) : null; };
     const mark = new Map();
     for (const f of s.files) {
-      const r = here(f.path); if (r == null) continue;
+      const r = inDir(f.path); if (r == null) continue;
       const top = r.split("/")[0];
       if (!mark.has(top)) mark.set(top, r.includes("/") ? "modified" : f.kind);
     }
@@ -419,7 +421,7 @@
   const viewerEl = $("viewer");
   const VW = {
     path: "", kind: "", size: 0, mode: "", text: "", mtime: 0, dirty: false,
-    pdf: null, pdfObs: null, zoom: 1, wrap: localStorage.getItem("cc.vw.wrap") !== "0",
+    pdf: null, pdfTask: null, pdfLayout: null, zoom: 1, wrap: localStorage.getItem("cc.vw.wrap") !== "0",
   };
   const VW_EDIT_MAX = 16 * 1024 * 1024;
   // 明摆着是二进制的扩展名：不给「当作文本打开」（11MB 的 APK 解成一千多万字塞进编辑框，主线程卡死，群反馈 11-03）
@@ -427,18 +429,21 @@
   const isMd = (p) => /\.(md|markdown|mdx)$/i.test(p);
   const isHtml = (p) => /\.html?$/i.test(p);
 
-  async function openViewer(path, kind, size) {
+  async function openViewer(path, kind, size, { filesOrigin = fsViewerOrigin(path), archive = null } = {}) {
     if (VW.dirty && !confirm(t("有未保存的修改，丢弃？"))) return;
     if (VW.dirty) draftClear();
     closeViewerSheet();
     closeViewerPdf();
+    // 换了文档就换代：同一路径重开也不是旧回执的查看器。
+    const gen = VW.gen = (VW.gen || 0) + 1;
+    stopPaneMedia($("vw-body"));
+    clearTimeout(VW.wt);
     vwDropEd();
     vwMdStop();          // 换文件：上一份的分段预览 observer、行号栏状态都别再留着（FIND-026）
     gutStop();
     vwHtmlStop();
     Object.assign(VW, { path, kind: kind || "other", size: size || 0, text: "", mtime: 0, dirty: false, saving: false, zoom: 1, git: null, gitInfo: "", gitMarks: null, plainMd: false, wb: null, sheets: null, ready: false, eol: "" });
-    // 换了文档就换代：上一个文档还在途的读取、转换、保存回执一律作废（审查 C-001、04-F04、04-F05）
-    VW.gen = (VW.gen || 0) + 1;
+    Object.assign(VW, { filesOrigin, arc: archive, closing: false, mode: "" });
     vwActs([]);    // 上一个文档的「保存」先撤掉：读取中点它会把空正文存进新文件（私下反馈 10-29）
     $("vw-name").textContent = path.split("/").pop();
     $("vw-name").title = path;
@@ -457,7 +462,7 @@
       $("vw-body").innerHTML = `<div class="vw-media"><${tag} src="${fileUrl(path)}" controls autoplay></${tag}></div>`;
       // 读不出来（格式不支持、文件没了、解码失败）时别只给一块空白：换成失败说明和分享入口（稳定性报告 FIND-025）
       $("vw-body").querySelector("video,audio")?.addEventListener("error", () => {
-        if (VW.path !== path || viewerEl.classList.contains("hidden")) return;
+        if (gen !== VW.gen || viewerEl.classList.contains("hidden")) return;
         vwFail(t("读取失败"));
       });
       return;
@@ -501,7 +506,7 @@
   }
   $("vw-acts").addEventListener("click", (e) => {
     const b = e.target.closest("[data-a]");
-    if (!b) return;
+    if (!b || VW.closing) return;
     const a = b.dataset.a;
     if (a === "insert") {
       insertAtCursor("@" + VW.path);
@@ -522,7 +527,8 @@
     if (a === "html") {
       if (VW.dirty) {
         if (!confirm(t("预览显示的是磁盘上的文件。先保存你的修改再预览？"))) return;
-        return vwSave(false).then(() => { if (!VW.dirty) { localStorage.setItem("cc.vw.htmlmode", "html"); vwHtml(); } });
+        const gen = VW.gen;
+        return vwSave(false).then(() => { if (gen === VW.gen && VW.mode === "edit" && !VW.dirty) { localStorage.setItem("cc.vw.htmlmode", "html"); vwHtml(); } });
       }
       localStorage.setItem("cc.vw.htmlmode", "html");
       return vwHtml();
@@ -560,7 +566,7 @@
       VW.zoom = Math.max(0.5, Math.min(4, VW.zoom * (a === "zoom+" ? 1.25 : 0.8)));
       return vwPdfRelayout();
     }
-    if (a === "arcback") return openViewer(VW.arc.path, "archive", VW.arc.fileSize || VW.size);   // 全套清理 + 重画列表（vwArcOpen 认出还是同一个包，不重读）
+    if (a === "arcback") return openViewer(VW.arc.path, "archive", VW.arc.fileSize || VW.size, { archive: VW.arc, filesOrigin: VW.filesOrigin });   // 复用会话，不重读
     if (a === "arcall") return arcExtractDlg({ path: VW.arc.path, entries: null, arc: VW.arc });
     if (a === "arcexit") return closeViewer();
   });
@@ -568,7 +574,7 @@
   // ── 压缩包浏览（查看器内）：和文件页同款效果 ──
   // 聊天 / 列表点开压缩包走这里：包内条目列表、逐级目录、选中预览（解到缓存嵌套开查看器）、单个/全部解压。
   // 后端 / 密码框 / 解压对话框复用文件页的 /api/arc/*、arcAskPassword、arcExtractDlg（06-files.js，同一个闭包）。
-  // 会话（密码、编码、当前目录）只挂在 VW.arc 上：预览条目嵌套开别的文件时它不跟着重置，返回按钮靠它
+  // 会话（密码、编码、当前目录）只挂在 VW.arc 上：打开它自己的条目/返回时显式保留，打开不相关文件时丢弃。
   /** 包内一行：目录/文件图标、名字、大小（文件页 .fs-item 同款样式；测试从这里取） */
   function vwArcRow(e, i) {
     // 认领点击和文件页一样用下标：esc 后的名字塞进 attribute 再经 dataset 读回，含 \r 的名字会被浏览器按规范折成 \n，按名字找就静默失配（11-19 复核）
@@ -591,19 +597,22 @@
   async function vwArcLoad(dir) {
     const arc = VW.arc;
     if (!arc) return;
-    const seq = ++arc.seq;
+    const seq = ++arc.seq, gen = VW.gen;
+    const current = () => gen === VW.gen && VW.arc === arc && arc.seq === seq;
     let r;
     try {
       if (!arc.encodings) arc.encodings = (await api("/api/arc/info").catch(() => ({}))).encodings;
+      if (!current()) return;
       r = await arcPost("list", { path: arc.path, dir, enc: arc.enc, password: arc.password || undefined });
     } catch (e) {
-      if (arc.seq !== seq || VW.arc !== arc) return;
+      if (!current()) return;
       if (!arc.info) vwFallback();   // 一层都没进过：打不开就退回普通兜底（不再留「返回压缩包」）
       return toast(e.status === 501 ? t("这个版本没带 7-Zip，打不开这种压缩包") : t("打不开压缩包：{msg}", { msg: e.message }), true);
     }
-    if (arc.seq !== seq || VW.arc !== arc) return;
+    if (!current()) return;
     if (r.needPassword) {
       const pw = await arcAskPassword(arc.name, r.wrongPassword && arc.password);
+      if (!current()) return;
       if (pw == null) { if (!arc.info) vwFallback(); return; }
       arc.password = pw;
       return vwArcLoad(dir);
@@ -671,16 +680,20 @@
       <div class="fs-prev-body"><div class="tiny">${[e.packed ? t("压缩后 {size}", { size: fmtSize(e.packed) }) : "", when, e.enc ? t("已加密") : "", e.link ? t("软链接（不解出）") : ""].filter(Boolean).map(esc).join(" · ")}</div></div>`;
     box.querySelector('[data-a="unpack"]').addEventListener("click", () => arcExtractDlg({ path: arc.path, entries: [entry], arc }));
     box.querySelector('[data-a="open"]')?.addEventListener("click", async (ev) => {
-      const b = ev.currentTarget; b.disabled = true; b.textContent = t("解出中…");
+      const b = ev.currentTarget, gen = VW.gen, seq = arc.seq;
+      const current = () => VW.gen === gen && VW.arc === arc && arc.seq === seq && b.isConnected;
+      b.disabled = true; b.textContent = t("解出中…");
       try {
         const r = await arcPost("preview", { path: arc.path, entry, enc: arc.enc, password: arc.password || undefined });
+        if (!current()) return;
         if (r.needPassword) {
           const pw = await arcAskPassword(arc.name, r.wrongPassword);
-          if (pw != null) { arc.password = pw; vwArcPrev(); }
+          if (current() && pw != null) { arc.password = pw; vwArcPrev(); }
           return;
         }
-        openViewer(r.path, r.kind === "archive" ? "other" : r.kind, r.size);
+        openViewer(r.path, r.kind === "archive" ? "other" : r.kind, r.size, { archive: arc, filesOrigin: VW.filesOrigin });
       } catch (err) {
+        if (!current()) return;
         toast(err.status === 401 ? t("密码不对") : err.status === 413 ? t("文件太大，没法直接预览，请解压出来再看") : err.status === 507 ? t("存储空间不够") : t("解出失败：{msg}", { msg: err.message }), true);
       } finally { if (b.isConnected) { b.disabled = false; b.textContent = t("打开"); } }
     });
@@ -786,6 +799,7 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       mtime = Number(r.headers.get("x-mtime")) || 0;
       const bytes = new Uint8Array(await r.arrayBuffer());
+      if (gen !== VW.gen) return;
       // 二进制当文本解码会卡死界面（扩展名没认出来的也在这里拦）
       if (vwLooksBinary(bytes)) {
         if (gen === VW.gen) { vwActs([]); $("vw-body").innerHTML = `<div class="vw-empty"><div>${t("这是二进制文件，当作文本打开会把界面卡住。")}</div><button class="btn ghost sm" data-a="share">${shareIco()}${t("分享")}</button></div>`; }
@@ -834,12 +848,13 @@
 
   /** 这个文件在不在 git 仓库里、改没改（编辑器顶栏显示「已修改 +3 −1」） */
   async function vwGitCheck() {
-    const p = VW.path;
+    const p = VW.path, gen = VW.gen, seq = VW.gitSeq = (VW.gitSeq || 0) + 1;
+    const current = () => gen === VW.gen && seq === VW.gitSeq;
     VW.git = null;
     VW.gitMarks = null;   // 先清：下面哪条路提前走了，都不能留着上一个文件的行号标记（#177-6）
     let s;
     try { s = await api("/api/git/status?dir=" + encodeURIComponent(p)); } catch { return; }
-    if (p !== VW.path || !s || s.notRepo || s.error) return;
+    if (!current() || !s || s.notRepo || s.error) return;
     const real = p.replace(/^\/sdcard(?=\/)/, "/storage/emulated/0");
     const rel = real.startsWith(s.root + "/") ? real.slice(s.root.length + 1) : null;
     if (rel == null) return;
@@ -852,7 +867,7 @@
     if (f && (f.kind === "modified" || f.kind === "renamed") && !f.binary) {
       try {
         const r = await api("/api/git/diff?" + new URLSearchParams({ dir: p, file: p }));
-        if (p === VW.path) { VW.gitMarks = gutMarks(r.diff); gutSchedule(); }
+        if (current()) { VW.gitMarks = gutMarks(r.diff); gutSchedule(); }
       } catch {}
     } else gutSchedule();
   }
@@ -1263,16 +1278,16 @@
     return fileUrl("/" + out.join("/"));
   }
   async function vwMdEditor() {
-    const path = VW.path, body = $("vw-body");
+    const gen = VW.gen, body = $("vw-body");
     body.innerHTML = `<div class="vw-empty">${t("读取中…")}</div>`;
     let m;
     try { m = await loadMdEdit(); } catch (e) {
-      if (VW.path !== path || VW.mode !== "edit") return;
+      if (VW.gen !== gen || VW.mode !== "edit") return;
       toast(t("编辑器加载失败，改用纯文本：{msg}", { msg: e.message || String(e) }), true);
       VW.plainMd = true;   // 只管这一个文件：换个文件（openViewer）就再试一次加载（#177-9）
       return vwRenderText("edit");
     }
-    if (VW.path !== path || VW.mode !== "edit" || VW.ed) return;
+    if (VW.gen !== gen || VW.mode !== "edit" || VW.ed) return;
     body.innerHTML = `<div class="vw-mded"></div><div class="vw-mdbar">${MDBAR.map((b) => b
       ? `<button type="button" data-md="${b[0]}" title="${esc(t(b[1]))}" aria-label="${esc(t(b[1]))}">${b[2]}</button>`
       : '<span class="sep"></span>').join("")}</div>`;
@@ -1304,7 +1319,7 @@
     if (!VW.ready || !VW.mtime && VW.size) return toast(t("文件还没读完，等一下再保存"), true);
     if (VW.saving) return;
     if (VW.enc) return toast(t("这个文件是 {enc} 编码，存回去会损坏原文，只能查看", { enc: VW.enc }), true);
-    const text = vwText(), gen = VW.gen, path = VW.path;
+    const text = vwText(), gen = VW.gen, path = VW.path, origin = VW.filesOrigin;
     // 一字未改就不写盘：CRLF 文件即使不编辑，textarea 也会把换行规整成 LF，存一次整份文件就变了（195-C.4）
     if (!VW.dirty && !force) return toast(t("没有改动"));
     let r;
@@ -1314,14 +1329,16 @@
         // 原文带 BOM / 纯 CRLF 换行的照样带回去
         method: "POST", body: (VW.bom ? "\uFEFF" : "") + (VW.eol === "\r\n" ? text.replace(/\r?\n/g, "\r\n") : text),
       });
-    } catch (e) { VW.saving = false; return toast(t("保存失败：{msg}", { msg: e.message }), true); }
-    VW.saving = false;
-    if (gen !== VW.gen) { if (r.ok) toast(t("已保存")); return; }   // 已经换了别的文件：别动现在这个的状态
+    } catch (e) {
+      if (gen === VW.gen) VW.saving = false;
+      return toast(t("保存失败：{msg}", { msg: e.message }), true);
+    }
     if (r.status === 409) {
       let c = {};
       try { c = await r.json(); } catch {}
       // JSON 体迟到期间又换了文件：这不是现在这份文件的冲突，别让旧文件的确认框去清新文件的稿 / 重新载入（UIFS-007）
       if (gen !== VW.gen) return;
+      VW.saving = false;
       // 原文件不在了（比如刚在文件面板里改了名）：问清楚再按原名另存，修改先留在编辑器里（#145-2）
       if (c.error === "gone") {
         if (confirm(t("原文件已经不在了（被改名、移动或删除）。\n确定：按原来的名字另存一份\n取消：先不存，修改留在编辑器里"))) return vwSave(true);
@@ -1334,8 +1351,10 @@
     }
     let j = {};
     try { j = await r.json(); } catch {}
-    // 同上：解析期间换了文件，旧回执的 mtime / size 不能写到新文件上（UIFS-007）
+    // 已经写到磁盘：只刷新最初对应的列表。换了文件也不能去改现在查看器的状态（UIFS-007）。
+    if (r.ok && origin && origin.path === path) fsViewerChanged(origin, true);
     if (gen !== VW.gen) { if (r.ok) toast(t("已保存")); return; }
+    VW.saving = false;
     if (!r.ok) return toast(t("保存失败：{msg}", { msg: j.error || r.status }), true);
     VW.mtime = j.mtime; VW.size = j.size;
     // 保存在途时又改了：存下去的只是那一刻的版本，新改的还没存，别把「未保存」清掉（审查 C-002）
@@ -1351,13 +1370,16 @@
     vwActs([]);
     $("vw-body").innerHTML = `<div class="vw-img"><img src="${fileUrl(VW.path)}" alt=""></div>`;
     const box = $("vw-body").querySelector(".vw-img");
-    const img = box.querySelector("img");
+    const img = box.querySelector("img"), gen = VW.gen;
     // 坏图 / 读不了：说清楚，给个重试（审查 C-011）
     img.addEventListener("error", () => {
+      if (gen !== VW.gen || !img.isConnected) return;
       box.innerHTML = `<div class="vw-empty"><div>${t("图片读不出来（文件损坏，或格式不支持）")}</div><button class="btn ghost sm" data-a="img-retry">${t("重试")}</button></div>`;
       box.querySelector('[data-a="img-retry"]').onclick = () => vwImage();
     });
-    img.addEventListener("load", () => { $("vw-info").textContent = `${img.naturalWidth}×${img.naturalHeight} · ${fmtSize(VW.size)}`; });
+    img.addEventListener("load", () => {
+      if (gen === VW.gen && img.isConnected) $("vw-info").textContent = `${img.naturalWidth}×${img.naturalHeight} · ${fmtSize(VW.size)}`;
+    });
     img.addEventListener("click", (e) => {
       // 放大时以点到的位置为中心
       const r = img.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
