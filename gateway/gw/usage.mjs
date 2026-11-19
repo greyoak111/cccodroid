@@ -77,15 +77,19 @@ function usageMerge(dst, src, sign) {
   }
   if (sign > 0) for (const id of src.s || []) if (!(dst.s ||= []).includes(id) && dst.s.length < 200) dst.s.push(id);
 }
+// 降级再升级的窗口：旧版把补算写在 hours（带 x），新版写在 quarters（也带 x），
+// 两段是同一份 since 之前的补算——quarters 里有补算时，旧 hours 里带 x 的桶只信 quarters，不然翻倍。
+function usageLegacyHours(quarters, legacy) {
+  if (!Object.values(quarters).some((b) => b.x)) return legacy;
+  const out = {};
+  for (const [h, b] of Object.entries(legacy)) if (!b.x) out[h] = b;
+  return out;
+}
 // 兼容原来的按小时接口，也用于给 v1 的整点记录补上后来增加的字段。
 function usageHourly(quarters, legacy = {}) {
   const totals = {};
   for (const [q, b] of Object.entries(quarters)) usageMerge(usageBucket(totals, Math.floor(+q / 4)), b, 1);
-  // 降级再升级的窗口：旧版把补算写在 hours（带 x），新版写在 quarters（也带 x），
-  // 两段是同一份 since 之前的补算——quarters 里有补算时，合并视图只信 quarters，不然翻倍。
-  const hasNew = Object.values(quarters).some((b) => b.x);
-  for (const [h, b] of Object.entries(legacy)) {
-    if (hasNew && b.x) continue;
+  for (const [h, b] of Object.entries(usageLegacyHours(quarters, legacy))) {
     if (totals[h]) usageMerge(totals[h], b, 1);
     else totals[h] = b;
   }
@@ -521,7 +525,7 @@ export async function routeUsage(req, res, u, p) {
   // ── 使用统计 ──
   if (req.method === "GET" && p === "/api/usage") {
     const buckets = u.searchParams.get("detail") === "quarter"
-      ? { hours: USAGE.hours, quarters: USAGE.quarters }
+      ? { hours: usageLegacyHours(USAGE.quarters, USAGE.hours), quarters: USAGE.quarters }
       : { hours: usageHourly(USAGE.quarters, USAGE.hours) };
     return sendJson(res, 200, { since: USAGE.since, imported: USAGE.imported, off: !!USAGE.off, importing: !!usageImporting, ...buckets, now: Date.now() });
   }
