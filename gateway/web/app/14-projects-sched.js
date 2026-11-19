@@ -9,7 +9,13 @@
     if (!id || id === globalProv()) return Promise.resolve(MODELS);
     if (PJ.pm[id]) return Promise.resolve(PJ.pm[id]);
     const g = PJ.pmGen;
-    return api("/api/models?browse=" + encodeURIComponent(id)).then((r) => { if (r.providers) state.provList = r.providers; const ms = r.models || []; if (g === PJ.pmGen) PJ.pm[id] = ms; return ms; })
+    const url = "/api/models?browse=" + encodeURIComponent(id);
+    return viewRead(url + ":project", g, () => g === PJ.pmGen, async () => {
+      const r = await api(url);
+      const ms = r.models || [];
+      if (g === PJ.pmGen) { if (r.providers) state.provList = r.providers; PJ.pm[id] = ms; }
+      return ms;
+    })
       .catch(() => { if (g === PJ.pmGen) PJ.pm[id] = []; return []; });   // 失败也记终态，别让「没缓存 → 再拉 → 回执重画」无限循环
   }
   const usableProvs = () => (state.provList || []).filter((p) => p.usable && !p.hidden);
@@ -30,6 +36,7 @@
     MO.play($("tab-" + name), narrow ? (into ? "mo-in-push" : "mo-in-back") : (into ? "mo-in-pane" : "mo-in-pane-back"), 1400);
   }
   async function renderProjects() {
+    if (!pageVisible("projects")) return;
     navMo("projects", PJ.cur);
     const box = $("tab-projects");
     if (PJ.cur) return renderProject(box);
@@ -51,18 +58,22 @@
   }
   const staleRow = (msg, act) => `<div class="panel">${emptyRow(t("刷新失败，显示的是上次读到的：{msg}", { msg }))}<div class="row"><button class="btn sm" data-a="${act}">${esc(t("重试"))}</button></div></div>`;
   async function renderProject(box) {
-    const id = PJ.cur;
-    let d = PJ.detail && PJ.detail.project && PJ.detail.project.id === id ? PJ.detail : null;
+    const id = PJ.cur, visit = pageVisit, seq = PJ.openSeq;
+    const live = () => pageVisible("projects", visit) && PJ.cur === id && PJ.openSeq === seq;
+    if (!live()) return;
+    const d = PJ.detail?.project?.id === id ? PJ.detail : null;
     if (!d) {
-      box.innerHTML = pageHead("", "", true) + `<div class="muted">${esc(t("加载中…"))}</div>`;
-      // 先放局部变量，确认还在看这个项目再写全局：先点甲再点乙，甲迟到会把页面画成甲、保存却写进乙（审查 E02）
-      let d0;
-      try { d0 = await api("/api/projects/" + encodeURIComponent(id)); } catch (e) { if (PJ.cur === id) box.innerHTML = pageHead("", "", true) + `<div class="muted">${esc(e.message)}</div>`; return; }
-      if (PJ.cur !== id) return;
-      // 指令读不出来：不能当成空的，不然一保存就把原来的 CLAUDE.md 盖掉（审查 E06）
-      try { const r = await api("/api/projects/" + encodeURIComponent(id) + "/instr"); d0.instr = r.text || ""; } catch (e) { d0.instr = ""; d0.instrErr = e.message || "?"; }
-      if (PJ.cur !== id) return;
-      d = PJ.detail = d0;
+      const url = "/api/projects/" + encodeURIComponent(id);
+      return viewRead(url, visit + ":" + seq, live, async () => {
+        box.innerHTML = pageHead("", "", true) + `<div class="muted">${esc(t("加载中…"))}</div>`;
+        let data;
+        try { data = await api(url); } catch (e) { if (live()) box.innerHTML = pageHead("", "", true) + `<div class="muted">${esc(e.message)}</div>`; return; }
+        if (!live()) return;
+        // 指令读不出来时依然禁止覆盖原文（审查 E06）。
+        try { const r = await api(url + "/instr"); data.instr = r.text || ""; }
+        catch (e) { data.instr = ""; data.instrErr = e.message || "?"; }
+        if (live()) { PJ.detail = data; renderProject(box); }
+      });
     }
     // 定时任务、模型清单刷新会重画整页：正在改、还没保存的指令草稿接着留着（审查 E03）
     const oldTa = box.querySelector(".pj-instr");
@@ -70,12 +81,12 @@
     const p = d.project;
     setOv(p.name); setPageSub("projects", p.path);
     // 拉回来是空清单（端侧模型删光了）也算拉过：以前按「空 = 没拉过」判断，回执重画又拉，一直循环（#143-2）
-    if (!MODELS.length && !PJ.mLoaded) api("/api/models").then((r) => { MODELS = r.models || []; PJ.mLoaded = true; PJ.effLevels = r.effortLevels || []; if (PJ.cur === id && curPage === "projects") renderProject(box); }).catch(() => {});
+    if (!MODELS.length && !PJ.mLoaded) api("/api/models").then((r) => { MODELS = r.models || []; PJ.mLoaded = true; PJ.effLevels = r.effortLevels || []; if (live()) renderProject(box); }).catch(() => {});
     const opt = (v, l, cur) => `<option value="${esc(v)}"${v === (cur || "") ? " selected" : ""}>${esc(l)}</option>`;
     const follow = t("跟随全局");
     // 项目指定了别家：型号清单换成那家的（没拉过先拉，拉回来重画）
     const pms = p.provider && p.provider !== globalProv() ? PJ.pm[p.provider] : MODELS;
-    if (!pms) provModelsOf(p.provider).then(() => { if (PJ.cur === id && curPage === "projects") renderProject(box); });
+    if (!pms) provModelsOf(p.provider).then(() => { if (live()) renderProject(box); });
     const PMS = pms || [];
     const provSel = `<select data-def="provider">${provChoices(follow, p.provider).map(([v, l]) => opt(v, l, p.provider)).join("")}</select>`;
     const modelSel = `<select data-def="model">${opt("", follow, p.model)}${PMS.map((m) => opt(m.id, prettyModel(m.id), p.model)).join("")}${p.model && !PMS.some((m) => m.id === p.model) ? opt(p.model, prettyModel(p.model), p.model) : ""}</select>`;
@@ -133,7 +144,7 @@
     if (a === "pj-retry") { PJ.err = ""; renderProjects(); return loadProjects(); }
     const card = e.target.closest("[data-pj]"); if (card) return openProject(card.dataset.pj);
     const sid = e.target.closest("[data-sid]"); if (sid) return goSession(sid.dataset.sid);
-    const tk = e.target.closest("[data-task]"); if (tk) { SC.cur = tk.dataset.task; SC.detail = null; return openPage("sched"); }
+    const tk = e.target.closest("[data-task]"); if (tk) { SC.openSeq = (SC.openSeq || 0) + 1; SC.cur = tk.dataset.task; SC.detail = null; return openPage("sched"); }
     const p = PJ.detail && PJ.detail.project; if (!p) return;
     if (a === "chat") return newChatIn(p.id);
     if (a === "pmenu") return projMenu(p, e.target.closest("[data-a]"));
@@ -169,7 +180,7 @@
     try { const r = await jsend("/api/projects/" + encodeURIComponent(p.id), patch, "PATCH"); Object.assign(p, r.project); toast(t("已保存")); loadProjects(); if (k === "provider") renderProject($("tab-projects")); }
     catch (err) { e.target.value = p[k] || ""; toast(err.message, true); }   // 没存上：下拉框回到真正存着的值（审查 E11）
   });
-  function openProject(id) { PJ.cur = id; PJ.detail = null; if (curPage !== "projects") openPage("projects"); else { renderProjects(); $("page-body").scrollTop = 0; } }
+  function openProject(id) { PJ.openSeq = (PJ.openSeq || 0) + 1; PJ.cur = id; PJ.detail = null; if (curPage !== "projects") openPage("projects"); else { renderProjects(); $("page-body").scrollTop = 0; } }
   /** 在项目里开新对话：换到空白会话，记下项目，发第一条时网关在项目目录里跑 */
   function newChatIn(id) {
     closePage(); closeDrawer();
@@ -330,7 +341,7 @@
     box._taskId = null; box._taskHtml = null;
     setOv("");
     if (!SC.data && SC.err) { box.innerHTML = pageHead(esc(t("定时任务"))) + `<div class="panel">${emptyRow(t("定时任务读取失败：{msg}", { msg: SC.err }))}<div class="row"><button class="btn sm" data-a="sc-retry">${esc(t("重试"))}</button></div></div>`; return; }
-    if (!SC.data) { box.innerHTML = pageHead(esc(t("定时任务"))) + `<div class="muted">${esc(t("加载中…"))}</div>`; return loadSched(); }
+    if (!SC.data) { box.innerHTML = pageHead(esc(t("定时任务"))) + `<div class="muted">${esc(t("加载中…"))}</div>`; return; }
     const D = SC.data, tasks = D.tasks || [];
     const on = tasks.filter((x) => x.on), nx = on.map((x) => x.nextAt).filter(Boolean).sort((a, b) => a - b)[0];
     setPageSub("sched", t("{n} 个开着", { n: on.length }) + (nx ? " · " + t("下次 {w}", { w: whenText(nx) }) : ""));
@@ -366,16 +377,21 @@
   }
   async function renderTask(box) {
     const id = SC.cur;
-    let d = SC.detail && SC.detail.task.id === id ? SC.detail : null;
+    const d = SC.detail?.task.id === id ? SC.detail : null;
     if (!d) {
-      if (box._taskId !== id) { box.innerHTML = pageHead("", "", true) + `<div class="muted">${esc(t("加载中…"))}</div>`; box._taskId = null; box._taskHtml = null; }
-      else box._taskHtml = null;   // 同一任务刷新窗口内 SC.detail 被清空：旧 DOM 的操作会静默失效，拉回来必须整块重画
-      // 先放局部，确认还在看这个任务再写全局：不然 A 的详情迟到把 SC.detail 改成 A，在 B 页点「立刻跑一次」跑的是 A（私下反馈 10-29）
-      let d0;
-      try { d0 = await api("/api/sched/" + encodeURIComponent(id)); }
-      catch (e) { if (SC.cur !== id) return; SC.cur = null; toast(t("任务详情读取失败：{msg}", { msg: e.message }), true); return renderSched(); }   // 说清楚为什么退回列表（审查 E08）
-      if (SC.cur !== id) return;
-      d = SC.detail = d0;
+      const visit = pageVisit, seq = SC.openSeq, url = "/api/sched/" + encodeURIComponent(id);
+      const live = () => pageVisible("sched", visit) && SC.cur === id && SC.openSeq === seq;
+      return viewRead(url, visit + ":" + seq, live, async () => {
+        if (box._taskId !== id) { box.innerHTML = pageHead("", "", true) + `<div class="muted">${esc(t("加载中…"))}</div>`; box._taskId = null; }
+        box._taskHtml = null;   // 详情刚失效，按钮要在新快照回来后重绑
+        let data;
+        try { data = await api(url); }
+        catch (e) {
+          if (live()) { SC.cur = null; toast(t("任务详情读取失败：{msg}", { msg: e.message }), true); renderSched(); }
+          return;
+        }
+        if (live()) { SC.detail = data; renderTask(box); }
+      });
     }
     const x = d.task, p = x.projectId && pjById(x.projectId);
     setOv(x.name); setPageSub("sched", freqText(x.freq));
@@ -429,17 +445,17 @@
     const a = e.target.closest("[data-a]")?.dataset.a;
     if (a === "back") { SC.cur = null; SC.detail = null; renderSched(); $("page-body").scrollTop = 0; return; }
     if (a === "new") return taskDlg(null);
-    if (a === "sc-retry") { SC.err = ""; if (!SC.data) return renderSched(); renderSched(); return loadSched(); }
+    if (a === "sc-retry") { SC.err = ""; renderSched(); return loadSched(); }
     if (a === "bgset") return openPage("settings", "run");
     if (a === "budget") {
       const D = SC.data || {}, cur = (D.budget && D.budget.daily) || 0;
       const v = prompt(t("每日上限（美元，0 = 不设）。定时任务当天累计花费到这里就跳过其余任务。"), String(cur));
       if (v == null) return;
-      try { await jsend("/api/sched/budget", { daily: +v || 0 }, "PUT"); loadSched(); } catch (err) { toast(err.message, true); }
+      try { await jsend("/api/sched/budget", { daily: +v || 0 }, "PUT"); loadSched(true); } catch (err) { toast(err.message, true); }
       return;
     }
     const ms = e.target.closest("[data-missed]");
-    if (ms) { try { await jsend("/api/sched/missed", { taskId: ms.dataset.id, at: +ms.dataset.at, act: ms.dataset.missed }); toast(ms.dataset.missed === "run" ? t("已开始补跑") : t("这次就算了")); } catch (err) { toast(err.message, true); } return loadSched(); }
+    if (ms) { try { await jsend("/api/sched/missed", { taskId: ms.dataset.id, at: +ms.dataset.at, act: ms.dataset.missed }); toast(ms.dataset.missed === "run" ? t("已开始补跑") : t("这次就算了")); } catch (err) { toast(err.message, true); } return loadSched(true); }
     const sid = e.target.closest("[data-sid]"); if (sid) return goSession(sid.dataset.sid);
     // 没存成对话的那几次：结果只在运行记录里，点开看全文（#173-2）
     const fr = e.target.closest("[data-full]");
@@ -451,7 +467,7 @@
       appendRunFull(fr, r);
       return;
     }
-    const tk = e.target.closest("[data-task]"); if (tk && !SC.cur) { SC.cur = tk.dataset.task; SC.detail = null; renderSched(); $("page-body").scrollTop = 0; return; }
+    const tk = e.target.closest("[data-task]"); if (tk && !SC.cur) { SC.openSeq = (SC.openSeq || 0) + 1; SC.cur = tk.dataset.task; SC.detail = null; renderSched(); $("page-body").scrollTop = 0; return; }
     const d = SC.detail; if (!d || d.task.id !== SC.cur) return;
     if (a === "edit") return taskDlg(d.task);
     if (a === "run") return runTaskNow(d.task, false, e.target.closest("[data-a]"));
@@ -470,17 +486,17 @@
       if (sl.checked && !confirm(t("用订阅账户跑定时任务？\n\n定时任务会在没人看着的时候自动跑。无人值守使用以 Anthropic 条款为准，请自己确认你的用法符合条款；条款以后收紧，这一项可能要关掉。"))) { sl.checked = false; return; }
       try { await jsend("/api/sched/allow-login", { on: sl.checked }, "PUT"); toast(sl.checked ? t("已允许用订阅账户跑定时任务") : t("已关闭：订阅账户不跑定时任务")); }
       catch (err) { sl.checked = !sl.checked; toast(err.message, true); }
-      return loadSched();
+      return loadSched(true);
     }
     const sw = e.target.closest("[data-sw]");
     if (sw) {
       try { const r = await jsend("/api/sched/" + encodeURIComponent(sw.dataset.sw), { on: sw.checked }, "PATCH"); toast(sw.checked ? t("已打开：{f}", { f: freqText(r.task.freq) }) : t("已关掉")); if (SC.detail) SC.detail.task = { ...SC.detail.task, ...r.task }; }
       catch (err) { sw.checked = !sw.checked; toast(err.message, true); }
-      return loadSched();
+      return loadSched(true);
     }
     const ps = e.target.closest("[data-pause]");
     if (ps && SC.detail && ps.value !== "until") {
-      try { const r = await jsend(`/api/sched/${encodeURIComponent(SC.detail.task.id)}/pause`, { mode: ps.value }); SC.detail.task = { ...SC.detail.task, ...r.task }; renderSched(); loadSched(); }
+      try { const r = await jsend(`/api/sched/${encodeURIComponent(SC.detail.task.id)}/pause`, { mode: ps.value }); SC.detail.task = { ...SC.detail.task, ...r.task }; renderSched(); loadSched(true); }
       catch (err) { toast(err.message, true); $("tab-sched")._taskHtml = null; renderSched(); }   // 控件已经改值：失效缓存，重画回真正的状态（审查 E11）
     }
   });
@@ -505,7 +521,7 @@
       "hr",
       { label: t("删除"), icon: PI.trash, danger: true, fn: async () => {
         if (!confirm(t("删除定时任务「{n}」？它的运行记录在界面上就看不到了，存下的对话不受影响。", { n: x.name }))) return;
-        try { await api("/api/sched/" + encodeURIComponent(x.id), { method: "DELETE" }); SC.cur = null; SC.detail = null; await loadSched(); renderSched(); toast(t("已删除")); } catch (err) { toast(err.message, true); }
+        try { await api("/api/sched/" + encodeURIComponent(x.id), { method: "DELETE" }); SC.cur = null; SC.detail = null; await loadSched(true); renderSched(); toast(t("已删除")); } catch (err) { toast(err.message, true); }
       } },
     ]);
   }
@@ -618,7 +634,7 @@
       try {
         const r = edit ? await jsend("/api/sched/" + encodeURIComponent(x.id), b, "PATCH") : await jsend("/api/sched", b);
         OV.close(o); toast(edit ? t("已保存") : t("已创建：{f}", { f: freqText(r.task.freq) }));
-        SC.cur = r.task.id; SC.detail = null; await loadSched();
+        SC.openSeq = (SC.openSeq || 0) + 1; SC.cur = r.task.id; SC.detail = null; await loadSched(true);
         if (curPage !== "sched") openPage("sched"); else renderSched();
       } catch (err) { btn.disabled = false; toast(err.message, true); }
     });
@@ -672,7 +688,7 @@
   // 网关推来的：任务变了 / 跑完了的提醒（App 在前台时只弹一句，后台由外壳发系统通知）
   let schedT = 0;
   function onSchedEvent(ev) {
-    clearTimeout(schedT); schedT = setTimeout(() => { if (SC.detail && SC.cur) SC.detail = null; loadSched(); }, 400);
+    clearTimeout(schedT); schedT = setTimeout(() => { if (SC.cur) { SC.openSeq = (SC.openSeq || 0) + 1; SC.detail = null; } loadSched(true); }, 400);
     if (ev.type === "sched_note" && !document.hidden) {
       const msg = ev.title + (ev.text ? "：" + ev.text.slice(0, 60) : "");
       if (ev.sessionId) toastAct(msg, t("打开"), () => openSession(ev.sessionId)); else toast(msg, !ev.ok);
@@ -685,23 +701,66 @@
   let schedPoll = 0;
   function schedPollSet(on) {
     clearTimeout(schedPoll); schedPoll = 0;
-    if (!on) return;
+    if (!on || !pageVisible("sched")) return;
+    const visit = pageVisit;
     schedPoll = setTimeout(async () => {
-      schedPoll = 0;
-      if (!pageOn("sched")) return;
-      if (!document.hidden) { try { await loadSched(); } catch {} }
-      if (pageOn("sched")) schedPollSet(true);
+      if (!pageVisible("sched", visit)) return;
+      try { await loadSched(); } catch {}
+      if (pageVisible("sched", visit)) schedPollSet(true);
     }, 5000);
   }
+
+  // UI 读取可合并在途请求，不缓存结果、不合并写操作。重进时等旧读退出，再取新快照。
+  const pageReads = new Map();
+  function viewRead(key, ticket, live, read) {
+    if (!live()) return Promise.resolve();
+    const pending = pageReads.get(key);
+    if (pending) {
+      if (pending.ticket === ticket) return pending.done;
+      const next = () => viewRead(key, ticket, live, read);
+      return pending.done.then(next, next);
+    }
+    const done = read().finally(() => pageReads.delete(key));
+    pageReads.set(key, { ticket, done });
+    return done;
+  }
+  const sameGet = (url) => viewRead(url, 0, () => true, () => api(url));
+  let pageVisit = 0;
+  function pageVisible(name, visit = pageVisit) {
+    return visit === pageVisit && pageOn(name);
+  }
+  function pausePageReads(name, leaving) {
+    pageVisit++;
+    if (name === "usage") clearTimeout(us.poll);
+    if (name === "lineage") linPause(leaving);
+    if (name === "ext") pauseExtReads();
+    if (name === "sched") schedPollSet(false);
+  }
+  function resumePageReads(name) {
+    if (!name || !pageVisible(name)) return;
+    if (name === "usage") { resumeUsage(); loadEnergy(); loadQuota(); loadAcctCard(false); }
+    if (name === "lineage") { loadLineage(); pfResume(); }
+    if (name === "ext") { loadModules(); loadComponents(); }
+    if (name === "sched") { renderSched(); loadSched(); schedPollSet(true); }
+    if (name === "projects") renderProjects();
+    if (name === "sessions") renderSessions();
+    if (name === "caps") renderCaps();
+    if (name === "changelog") loadChangelogVersion();
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { pausePageReads(curPage, false); if (setOpen) pauseSetReads(); }
+    else if (setOpen) enterSetCat(setCatOpen, true);
+    else resumePageReads(curPage);
+  });
   /** 打开整页：窄屏收起侧栏、盖住对话；宽屏侧栏照旧常驻，高亮当前项 */
   function openPage(name, cat) {
     if (!PAGES[name] || name === "settings") return openSettings(cat);
     OV.closeAll();
     const prev = curPage;
+    if (prev && prev !== name) pausePageReads(prev, true);
     curPage = name;
     document.documentElement.classList.add("pg-on");   // 整页盖着时藏起会话的上下文用量条（#39：小数缩放下整页上沿和顶栏差一丝，条会漏出来）
     document.documentElement.classList.toggle("pg-lineage", name === "lineage");   // 脉络页整页不滚（地图自己接手势）
-    if (name !== "lineage") closeTour();   // 离开脉络页：导览一起收掉
     // 从对话进整页：窄屏从右边推进来（盖住对话），宽屏只在对话那一块浮上来；整页之间切换：新的那一页浮上来
     const pg = $("pages"), fromChat = pg.classList.contains("hidden") || !!pg._moLeave;
     MO.cancel(pg);
@@ -718,25 +777,24 @@
     renderSideNav();
     refreshStatus();
     if (name === "sessions") { renderSessions(); loadSessions(); if (sess.mode === "trash") loadTrash(); }   // 回收站视图重进也要重读，别接着画上回的（#178-5）
-    if (name === "caps") loadCaps();
+    if (name === "caps") { renderCaps(); loadCaps(); }
     if (name === "ext") loadExt();
     if (SUBNAVS[name]) paintSubnav(name);
     if (name === "help") loadHelp();
-    if (name === "changelog") loadChangelog();
+    if (name === "changelog") { loadChangelog(); loadChangelogVersion(); }
     if (name === "bookmarks") loadBookmarks();
-    if (name === "usage") { loadQuota(); loadUsage(); loadEnergy(); loadAcctCard(false); }
+    if (name === "usage") { loadQuota(); resumeUsage(); loadEnergy(); loadAcctCard(false); }
     if (name === "projects") { if (prev !== name && !PJ.cur) PJ.detail = null; renderProjects(); loadProjects(); loadSched(); }
     if (name === "sched") { renderSched(); loadSched(); loadProjects(); }
     schedPollSet(name === "sched");   // 离开就停，进来就开始补拉（195-BB.4）
-    if (name === "lineage") { if (prev !== name) { linPickEnd(); linProfClose(true); } if (LIN.g) linPaint(prev !== name); else linState(t("加载中…")); loadLineage(); }   // 头一回进：图还没取回来先说一声，别空白（#38）
+    if (name === "lineage") { if (prev !== name) linPickEnd(); if (LIN.g && LIN.map) linPaint(prev !== name); else linState(t("加载中…")); loadLineage(); }   // 头一回进：图还没取回来先说一声，别空白（#38）
   }
   function closePage() {
     if (!curPage) return;
+    pausePageReads(curPage, true);
     curPage = null;
-    schedPollSet(false);
     pageTitleOv = "";
     document.documentElement.classList.remove("pg-lineage", "pg-on");
-    closeTour();
     // 回到对话：窄屏整页滑出去、底下的对话从左边一点点回来；宽屏淡掉
     const pg = $("pages");
     MO.leave(pg, innerWidth < 680 ? "mo-out-push" : "mo-out-fade", 170, () => pg.classList.add("hidden"));

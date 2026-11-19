@@ -3,6 +3,20 @@
   // 一问一答和杂项一起默认收起，读记录接手的画细点线。
   const LIN = { g: null, map: null, band: localStorage.getItem("cc.linBand") || "", misc: localStorage.getItem("cc.linMisc") === "1", focus: null, poll: 0, runKey: "", reload: 0 };
 
+  async function ensureLinMap() {
+    const src = "/lineage/map.js";
+    if (typeof window.CCLineageMap?.create !== "function") await loadScript(src);
+    if (typeof window.CCLineageMap?.create !== "function") {
+      delete loadOnce[src];
+      throw new Error(t("读取失败"));
+    }
+  }
+  function linPause(leaving) {
+    clearTimeout(LIN.poll); clearTimeout(LIN.reload); clearTimeout(FILL.poll);
+    if (leaving) { LIN.focus = null; closeTour(); linProfClose(true); }
+    else if (!TOUR.map && !$("lin-tour").classList.contains("hidden")) closeTour();
+  }
+
   function linMap() {
     if (LIN.map || !window.CCLineageMap) return LIN.map;
     LIN.map = CCLineageMap.create($("lin-map"), {
@@ -39,45 +53,61 @@
     // 网关回 200 也可能一个都没恢复（failed 里写着原因）：照实说（审查 B-04）
     if (act === "restore") return post("/api/trash/restore", { ids: [arg || sel] }).then((r) => {
       if (r && r.failed && r.failed.length) return toast(t("恢复失败：{msg}", { msg: r.failed[0].error === "exists" ? t("同名会话已存在") : r.failed[0].error }), true);
-      toast(t("已恢复")); loadSessions(); loadLineage();
+      toast(t("已恢复")); loadSessions(); lineageDirty();
     }, (e) => toast(e.message, true));
   }
 
   /** 从别处跳进脉络页并选中某个会话（会话菜单「在脉络中查看」） */
   function openLineage(id) { LIN.focus = id || null; openPage("lineage"); }
 
-  async function loadLineage() {
-    clearTimeout(LIN.poll);
-    let g;
-    try { g = await api("/api/lineage"); } catch (e) { return linState(t("读不到脉络：{e}", { e: e.message })); }
-    if (g.building) {
-      // 首次整理（大户十几秒）：显示进度，接着问
-      linState(t("正在整理会话记录… {d}/{n}", { d: g.done || 0, n: g.total || "?" }));
-      if (pageOn("lineage")) LIN.poll = setTimeout(loadLineage, 800);
-      return;
-    }
-    // 头一回拿到图才归位到「现在」；会话变了后的后台重取保持用户拖着的位置（195-K.8）
-    const first = !LIN.g;
-    LIN.g = g; LIN.stale = false;
-    linPaint(first);
-    linFill();
-    // 第一次来：提一句「怎么看」，不强拉进导览
-    if (!localStorage.getItem("cc.linTourSeen") && !LIN.hinted) { LIN.hinted = true; toast(t("第一次来？点右上「怎么看」，两分钟学会看脉络")); }
+  function loadLineage() {
+    const visit = pageVisit, live = () => pageVisible("lineage", visit);
+    return viewRead("lineage", visit, live, async () => {
+      clearTimeout(LIN.poll);
+      let g;
+      try { [g] = await Promise.all([sameGet("/api/lineage"), ensureLinMap()]); }
+      catch (e) {
+        if (!live()) return;
+        linState(t("读不到脉络：{e}", { e: e.message }));
+        const b = document.createElement("button"); b.type = "button"; b.className = "btn ghost sm"; b.textContent = t("重试");
+        b.onclick = () => { linState(t("加载中…")); loadLineage(); };
+        $("lin-state").append(" ", b);
+        return;
+      }
+      if (!live()) return;
+      if (g.building) {
+        linState(t("正在整理会话记录… {d}/{n}", { d: g.done || 0, n: g.total || "?" }));
+        LIN.poll = setTimeout(() => { if (live()) loadLineage(); }, 800);
+        return;
+      }
+      // 头一回画图才归位到「现在」；后台重取保持用户拖着的位置（195-K.8）
+      const first = !LIN.map;
+      LIN.g = g; LIN.stale = false;
+      linPaint(first);
+      linFill();
+      if (!localStorage.getItem("cc.linTourSeen") && !LIN.hinted) { LIN.hinted = true; toast(t("第一次来？点右上「怎么看」，两分钟学会看脉络")); }
+    });
   }
 
   // ── 补档（gw/backfill.mjs）：没题名的旧章，用全局默认模型按压缩摘要补起题名；先报预估，用户点头才跑 ──
-  const FILL = { st: null, poll: 0, was: false };
-  async function linFill() {
-    clearTimeout(FILL.poll);
-    let r;
-    try { r = await api("/api/lineage/backfill"); } catch { return; }
+  const FILL = { st: null, poll: 0, was: false, revision: 0 };
+  function linFill(changed = false) {
+    if (changed) FILL.revision++;
+    const visit = pageVisit, rev = FILL.revision, live = () => pageVisible("lineage", visit) && FILL.revision === rev;
+    return viewRead("lineage-backfill", visit + ":" + rev, live, async () => {
+      clearTimeout(FILL.poll);
+      const r = await api("/api/lineage/backfill").catch(() => null);
+      if (live() && r?.job && r.estimate) paintFill(r, live);
+    });
+  }
+  function paintFill(r, live) {
     FILL.st = r;
     const j = r.job, el = $("lin-fill");
     if (j.running) {
       el.textContent = t("补档中 {d}/{n} · 停止", { d: j.done, n: j.total });
       el.classList.remove("hidden"); el.classList.add("on");
       FILL.was = true;
-      if (pageOn("lineage")) FILL.poll = setTimeout(linFill, 2000);
+      FILL.poll = setTimeout(() => { if (live()) linFill(); }, 2000);
       return;
     }
     el.classList.remove("on");
@@ -85,7 +115,7 @@
       // 刚跑完：报结果、重画（新题名进图）
       FILL.was = false;
       toast(j.error && !j.ok ? t("补档没跑成：{e}", { e: j.error }) : t("补好 {n} 章题名", { n: j.ok }) + (j.failed ? t("，{n} 章没起成", { n: j.failed }) : ""), !!(j.error && !j.ok));
-      loadLineage();
+      lineageDirty();
     }
     const n = r.estimate.chapters;
     el.textContent = t("补档 · {n} 章", { n });
@@ -93,7 +123,7 @@
   }
   $("lin-fill").addEventListener("click", async () => {
     const r = FILL.st; if (!r) return;
-    if (r.job.running) { await post("/api/lineage/backfill", { action: "stop" }).catch(() => {}); return linFill(); }
+    if (r.job.running) { await post("/api/lineage/backfill", { action: "stop" }).catch(() => {}); return linFill(true); }
     const e = r.estimate, num = (x) => x.toLocaleString(I18N.lang);
     const msg = t("用全局默认的 {m}（{p}）给 {s} 个会话的 {c} 章补起题名。", { m: r.modelName || r.model || "?", p: r.provider, s: e.sessions, c: e.chapters })
       + "\n\n" + t("素材是每章结束时的压缩摘要，不重读全文。预计 {k} 次调用，输入约 {i} token、输出约 {o} token（按上限估，实际通常更少）。", { k: e.calls, i: num(e.tokensIn), o: num(e.tokensOut) })
@@ -104,7 +134,7 @@
       if (!s.ok && s.message === "nothing") toast(t("没有要补的章了"));
       else if (!s.ok && s.message === "bridge") toast(t("本地 DNS 桥启动失败，无法连接 API。"), true);
     } catch (err) { toast(err.message, true); }
-    linFill();
+    linFill(true);
   });
   const mdOf = (ms) => { const d = new Date(ms), p = (n) => String(n).padStart(2, "0"); return p(d.getMonth() + 1) + "-" + p(d.getDate()); };
   function linState(msg) {
@@ -156,7 +186,7 @@
   }
 
   function linPaint(fresh) {
-    const g = LIN.g; if (!g || !pageOn("lineage")) return;
+    const g = LIN.g; if (!g || !pageVisible("lineage")) return;
     const m = linModel(g), map = linMap();
     if (!map) return linState(t("脉络组件没加载出来，重新打开 App 试试"));
     linState(m.sessions.length ? "" : t("还没有会话。聊过几次之后，这里会画出它们之间的来龙去脉。"));
@@ -175,7 +205,10 @@
     setPageSub("lineage", t("{n} 个会话 · {m} 处亲缘", { n: shown.length, m: rel }) + (isFinite(first) ? " · " + t("{d} 起", { d: mdOf(first) }) : ""));
     LIN.runKey = m.sessions.filter((s) => s.running).map((s) => s.id).join();
     map.set(m, { misc: LIN.misc, band: LIN.band, home: fresh && !LIN.focus });
-    if (LIN.focus) { const id = LIN.focus; LIN.focus = null; requestAnimationFrame(() => map.select(id, { reveal: true })); }
+    if (LIN.focus) {
+      const id = LIN.focus, visit = pageVisit;
+      requestAnimationFrame(() => { if (pageVisible("lineage", visit) && LIN.focus === id) { LIN.focus = null; map.select(id, { reveal: true }); } });
+    }
   }
 
   // 项目条和「显示杂项」
@@ -191,12 +224,18 @@
   // 会话变了（建档、跑完、改名…）：脉络页开着就顺手重取，合并成一次
   function lineageDirty() {
     // 页面没开不重取，但记一笔：档号跳转用的是缓存的图，脏了要先重取（#154-4）
-    if (!pageOn("lineage")) { LIN.stale = true; return; }
-    clearTimeout(LIN.reload); LIN.reload = setTimeout(loadLineage, 1200);
+    LIN.stale = true;
+    const visit = pageVisit;
+    if (!pageVisible("lineage", visit)) return;
+    clearTimeout(LIN.reload);
+    LIN.reload = setTimeout(async () => {
+      await pageReads.get("lineage")?.done;
+      if (pageVisible("lineage", visit)) loadLineage();
+    }, 1200);
   }
   // 运行状态变了：蓝点跟着动，不用重取
   function lineageRuns() {
-    if (!pageOn("lineage") || !LIN.g) return;
+    if (!pageVisible("lineage") || !LIN.g) return;
     const key = srv.runs.filter((r) => !r.idle).map((r) => r.sessionId).filter(Boolean).sort().join();
     if (key !== LIN.runKey.split(",").filter(Boolean).sort().join()) linPaint(false);
   }

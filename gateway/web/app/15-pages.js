@@ -1,21 +1,19 @@
   // ── 设置：弹窗。宽屏居中（左分类、右内容）；窄屏铺满，先列分类，点进去看一类，返回键回分类 ──
   var setOpen = false;
   var setCatShown = "-";   // 上次画的是哪一类：null = 窄屏的分类列表，"-" = 刚打开还没画过
-  let setFrom = null;
+  let setFrom = null, setBaseRead;
   function openSettings(cat) {
-    setFrom = document.activeElement;
+    if (!setOpen) { setFrom = document.activeElement; if (curPage) pausePageReads(curPage, false); }
     OV.closeAll();
     setOpen = true;
     MO.cancel($("set-ov"));
     $("set-ov").classList.remove("hidden");
     setCatOpen = cat || (pagesNarrow() ? null : setCatOpen || "general");
-    loadQuota().catch(() => {});
+    // 基础设置仍重读；各分类的额外读取由 enterSetCat 发起。
+    setBaseRead = refreshSettings(false);
     paintSetCats();
     renderSideNav();
     closeDrawer();
-    // 每次打开设置页都重取设置（loadSettings 里也会重拉厂商和型号）：启动时那一次失败/竞态，
-    // 以前就一直显示默认或旧值（195-E.8）
-    loadSettings(); loadPriv(); loadUpd(); loadNotify(); loadDev(); loadReconcile(false); loadEnvFacts(); loadFonts(); renderTbList(); renderAccent(); renderMsgActs();
     // 焦点进模态：不然键盘 / 读屏还停在被盖住的背景上（审查 P2-12）
     // 窄屏的分类列表没有选中项、关闭键也藏着：落到第一个看得见的控件（审查 #52 P2-12）
     requestAnimationFrame(() => { if (setOpen) focusInto($("set-ov"), $("set-cats").querySelector("button.on:not(.hidden)")); });
@@ -23,6 +21,7 @@
   function closeSettings() {
     if (!setOpen) return;
     setOpen = false;
+    pauseSetReads();
     const ov = $("set-ov");
     MO.leave(ov, ov.classList.contains("narrow") ? "mo-out-push" : "mo-out-fade", 170, () => ov.classList.add("hidden"));
     setCatShown = "-";
@@ -31,6 +30,9 @@
     if ($("set-ov").contains(document.activeElement)) document.activeElement.blur();
     if (setFrom && setFrom.isConnected && setFrom.getClientRects().length) try { setFrom.focus({ preventScroll: true }); } catch {}
     setFrom = null;
+    // 有些按钮关设置后立即换整页；等本次点击处理完再判断是否需要恢复原页。
+    const visit = pageVisit;
+    Promise.resolve().then(() => { if (visit === pageVisit) resumePageReads(curPage); });
   }
   // Esc 关设置（窄屏先回分类列表）；菜单、弹层开着时 OV 在捕获阶段先接走了（审查 P2-12）
   addEventListener("keydown", (e) => { if (e.key === "Escape" && setOpen && !e.defaultPrevented) { e.preventDefault(); setBack(); } });
@@ -132,6 +134,45 @@
   // ── 设置分类：宽屏左栏分类 + 右边一类的内容；窄屏先是分类列表，点进去才是内容 ──
   var setCatOpen = null;
   const pagesNarrow = () => innerWidth < 680;
+  let setVisit = 0;
+  function setVisible(cat, visit = setVisit) {
+    return setOpen && !document.hidden && setCatOpen === cat && visit === setVisit;
+  }
+  function pauseSetReads() {
+    setVisit++;
+    clearTimeout(ST.poll); clearTimeout(privPoll); clearTimeout(updPoll);
+    clearTimeout(devPoll); clearTimeout(fixTimer); clearTimeout(envFactsTimer);
+  }
+  // 设备和更新没有静态设置项。发现前也能进；不支持时显示说明，而不是把正在看的分类拿掉。
+  const setDiscover = new Set(["device", "update"]);
+  function setDiscovery(cat, text) {
+    const pane = document.querySelector(`.set-cat[data-cat="${cat}"]:not(.mo-ghost)`);
+    const hasFields = pane.querySelector(":scope > .sblock:not(.hidden), :scope > .srow:not(.hidden)");
+    let el = pane.querySelector(".set-discovery");
+    if (!el) { el = document.createElement("p"); el.className = "tiny set-discovery"; el.setAttribute("role", "status"); pane.appendChild(el); }
+    el.classList.toggle("hidden", !!hasFields);
+    if (text) el.textContent = text;
+  }
+  function enterSetCat(cat, resumed = false) {
+    const visit = setVisit, live = () => setVisible(cat, visit);
+    if (!cat || !live()) return;
+    if (setDiscover.has(cat)) setDiscovery(cat, t("查询中…"));
+    switch (cat) {
+      case "general": loadFonts(); renderTbList(); renderAccent(); renderMsgActs(); break;
+      case "provider": setBaseRead.then(() => { if (live()) { loadProviders(); loadModels(); } }); break;
+      case "claude": loadWorkIsland(); break;
+      case "run": loadExecMode(); loadPriv(); break;
+      case "storage": stOnOpen(); break;
+      case "usage": loadQuota(); break;
+      case "trouble": loadReconcile(false); loadEnvFacts(); break;
+      case "device":
+        Promise.all([loadPriv(), resumed ? undefined : loadNotify(), loadDev()]).then(() => { if (live()) setDiscovery(cat, t("不可用")); });
+        break;
+      case "update":
+        (resumed ? loadUpd() : updOnOpen()).then(() => { if (live()) setDiscovery(cat, t("不可用")); });
+        break;
+    }
+  }
   // 各类内容是异步填的：有行显示 / 隐藏就在下一帧重画分类（代替原来打开后固定等 900ms 再画一次）
   let setCatRaf = 0;
   new MutationObserver(() => { if (!setOpen || setCatRaf) return; setCatRaf = requestAnimationFrame(() => { setCatRaf = 0; paintSetCats(); }); })
@@ -148,16 +189,14 @@
       }
     }
     const narrow = pagesNarrow(), cats = [...document.querySelectorAll("#set-cats [data-cat]")];
-    // 一类里一项都没显示（比如开发端没有通知 / 更新）就连分类一起藏起来
-    const empty = (k) => ![...document.querySelectorAll(`.set-cat[data-cat="${k}"] > :is(.srow, .sblock)`)].some((f) => !f.classList.contains("hidden"));
+    const empty = (k) => !setDiscover.has(k) && !document.querySelector(`.set-cat[data-cat="${k}"]:not(.mo-ghost) > :is(.srow, .sblock):not(.hidden)`);
     cats.forEach((b) => b.classList.toggle("hidden", empty(b.dataset.cat)));
     if (!narrow && (!setCatOpen || empty(setCatOpen))) setCatOpen = "general";
     $("tab-settings").classList.toggle("set-list", narrow && !setCatOpen);
     $("tab-settings").classList.toggle("set-one", narrow && !!setCatOpen);
     cats.forEach((b) => b.classList.toggle("on", b.dataset.cat === setCatOpen));
-    // 每次进「更新」这一类都重新查一遍（不只读上回的结果）；离开再进来才算一次
-    if (setCatOpen === "update" && setCatShown !== "update") updOnOpen();
-    if (setCatOpen === "storage" && setCatShown !== "storage") stOnOpen();
+    const changed = setCatShown !== setCatOpen;
+    if (changed) pauseSetReads();
     if (setCatShown !== "-" && setCatShown !== setCatOpen) {
       const cur = setCatOpen && document.querySelector(`.set-cat[data-cat="${setCatOpen}"]`);
       if (narrow) { if (cur) MO.play(cur, "mo-in-push", 1400); else if (!setCatOpen) MO.play($("set-cats"), "mo-in-back", 1400); }
@@ -169,6 +208,8 @@
     $("set-ov").classList.toggle("narrow", narrow);
     $("set-back").classList.toggle("hidden", !narrow);
     $("set-x").classList.toggle("hidden", narrow);
+    if (changed) enterSetCat(setCatOpen);
+    else if (setDiscover.has(setCatOpen)) setDiscovery(setCatOpen);
   }
   $("set-cats").addEventListener("click", (e) => {
     const b = e.target.closest("[data-cat]"); if (!b) return;
@@ -363,6 +404,21 @@
   // 第一次点开才取。五十多版、上百 KB：每版只先放标题和一个估了高度的空壳，进到视口上下一屏多的范围才渲染正文，
   // 离远了收回成量好高度的空壳 —— DOM 里任何时候只有眼前那几版。目录、滚动高亮、搜索和帮助页同一套，搜索查原文不用渲染。
   const CL = { lang: "", list: [], low: [], h: [], io: null };
+  function paintChangelogVersion() {
+    const cur = lastUpd.items?.find((x) => x.id === "app")?.current;
+    for (const h of $("cl-body").querySelectorAll("h3[data-v]")) {
+      const badge = h.querySelector(".pill");
+      if (h.dataset.v === cur && !badge) {
+        const el = document.createElement("span"); el.className = "pill acc"; el.textContent = t("当前版本"); h.children[0].after(el);
+      } else if (h.dataset.v !== cur && badge) badge.remove();
+    }
+  }
+  async function loadChangelogVersion() {
+    const visit = pageVisit;
+    if (!pageVisible("changelog", visit)) return;
+    if (!lastUpd.items) await readUpdateStatus().catch(() => {});
+    if (pageVisible("changelog", visit)) paintChangelogVersion();
+  }
   async function loadChangelog() {
     // 同帮助页：繁体没有单独一份，回落英文（0.6.10 审计 195-L.1）
     const lang = ((window.I18N && I18N.lang) || "zh") === "zh" ? "zh" : "en";
@@ -383,15 +439,14 @@
       return;
     }
     CL.lang = lang; CL.list = list; CL.h = []; CL.low = list.map((x) => ("v" + x.v + "\n" + x.md).toLowerCase());
-    const cur = ((lastUpd && lastUpd.items) || []).find((x) => x.id === "app")?.current || "";
     // 估高：按这一栏能放几个字折行，再加段落间距；渲染时量出真高，差的那点在 clShow 里补回滚动位置
     const w = Math.max(240, body.clientWidth || 600), cpl = w / (lang === "zh" ? 14.5 : 7.4);
     const est = (md) => Math.round(md.split("\n").reduce((h, l) => h + (l.trim() ? Math.max(1, Math.ceil(l.length / cpl)) * 24.5 : 10), 0));
-    body.innerHTML = list.map((x, i) => `<section class="help-sec cl-sec" data-sec="c${i}"><h3><span>v${esc(x.v)}</span>` +
-      (x.v === cur ? `<span class="pill acc">${esc(t("当前版本"))}</span>` : "") +
+    body.innerHTML = list.map((x, i) => `<section class="help-sec cl-sec" data-sec="c${i}"><h3 data-v="${esc(x.v)}"><span>v${esc(x.v)}</span>` +
       `<span class="cl-date">${esc(x.date || t("未发布"))}</span></h3><div class="cl-md" data-i="${i}" style="height:${est(x.md)}px"></div></section>`).join("");
     toc.innerHTML = list.map((x, i) => `<button type="button" data-sec="c${i}">v${esc(x.v)}</button>`).join("");
     $("cl-q").value = "";
+    paintChangelogVersion();
     CL.io = new IntersectionObserver((ents) => ents.forEach((e) => clShow(e.target, e.isIntersecting)), { root: $("page-body"), rootMargin: "120% 0px" });
     body.querySelectorAll(".cl-md").forEach((el) => CL.io.observe(el));
     spyToc("changelog");

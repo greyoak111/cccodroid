@@ -50,7 +50,10 @@
   const OFF_TIP = () => t("停用后 Claude 看不到它，命令文件还在，随时可以启用。");
   async function loadModules() {
     clearTimeout(modTimer);
-    const [r, xoff] = await Promise.all([api("/api/devkit/modules").catch(() => null), extOffNow()]);
+    const visit = pageVisit, live = () => pageVisible("ext", visit);
+    if (!live()) return;
+    const [r, xoff] = await Promise.all([sameGet("/api/devkit/modules").catch(() => null), extOffNow()]);
+    if (!live()) return;
     const modOff = new Set(xoff.mod || []);
     const on = !!(r && r.supported && r.modular);
     $("mod-field").classList.toggle("hidden", !on);
@@ -107,7 +110,7 @@
       return rowItem(esc(pickLang(m.name) || m.id) + tag, '<span class="mono">' + (m.key || []).map(esc).join(" ") + "</span>",
         '<span class="num">' + size + "</span>" + acts, { more: desc, extra: bar });
     }).join("");
-    if (moving && pageOn("ext")) modTimer = setTimeout(loadModules, 1500);
+    if (moving && pageOn("ext")) modTimer = setTimeout(() => { if (live()) loadModules(); }, 1500);
     // 装 / 卸完成后（列表里不再有进行中的那块）再刷组件卡；模块 POST 一返回任务才刚起，不能当场刷
     if (!moving && modTouched && pageOn("ext")) { modTouched = false; loadComponents(); }
   }
@@ -161,12 +164,13 @@
     if (bar._html !== inner) {
       bar._html = inner; bar.innerHTML = inner;
       bar.classList.toggle("hidden", chips.length < 2 && !cur);    // 只有一类时没什么可切的
-      for (const it of items) it.classList.toggle("hidden", !!cur && !it.dataset.tags.split(" ").includes(cur));
     }
+    for (const it of items) it.classList.toggle("hidden", !!cur && !it.dataset.tags.split(" ").includes(cur));
   }
   $("tab-ext").addEventListener("click", (e) => {
     const c = e.target.closest(".idx-chip"); if (!c) return;
     extPick[c.dataset.sec] = c.dataset.idx; renderIdx(c.dataset.sec);
+    if (c.dataset.sec === "comp") syncCatalog();
   });
   // 节头照设计稿：图标块 + 标题，下面一句说明（原来是节里第一行小字，挪进标题里）；节不再折叠，靠顶上的分区导航跳
   for (const d of document.querySelectorAll("#tab-ext details.ext-sec")) {
@@ -211,16 +215,22 @@
       toast(t("已检查组件更新"));
     });
   });
+  function pauseExtReads() {
+    clearTimeout(compTimer); clearTimeout(modTimer); clearTimeout(ghAuth.timer);
+    compLoad++;
+    pauseCatalog();
+  }
   async function loadComponents(refresh) {
+    if (!pageOn("ext")) return "stale";
     const request = ++compLoad;
     clearTimeout(compTimer);
     const r = await api("/api/components" + (refresh ? "?refresh=" + (refresh === true ? 1 : refresh) : "")).catch((e) => ({ supported: true, items: [], indexError: e.message }));
     const compOff = new Set((await extOffNow()).comp || []);
     // 完成后的刷新比卸载中的轮询新；旧响应不能把已恢复的卡片盖回去。
-    if (request !== compLoad) return "stale";
+    if (request !== compLoad || !pageOn("ext")) return "stale";
     const outcome = { err: r.indexError || "" };
     $("comp-field").classList.toggle("hidden", !r.supported);
-    if (!r.supported) return loadGhField();
+    if (!r.supported) { syncCatalog(); return loadGhField(); }
     const box = $("comp-list");
     const btn = (c, id, label) => `<button data-c="${c}" data-id="${esc(id)}">${label}</button>`;
     const html = (r.items || []).map((c) => {
@@ -272,7 +282,7 @@
       if (webUrl(c.homepage) && c.state !== "ok") desc += '<div class="tiny"><a class="weblink" href="' + esc(c.homepage) + '">' + esc(c.homepage) + "</a></div>";
       if (c.state === "ok" && c.bin.length) desc += '<div class="tiny">' + t("命令：") + " " + c.bin.map((b) => "<code>" + esc(b) + "</code>").join(" ") + "</div>";
       if (c.id === "gh" && c.state === "ok") desc += '<div class="gh-auth" id="gh-auth">' + ghAuth.html + "</div>";
-      if (c.id === "llama-cpp" && c.state === "ok") desc += '<details class="llm-dl" id="llm-dl"' + (llmDl.open ? " open" : "") + "><summary>" + t("下载模型") + '</summary><div id="llm-dl-body">' + llmDl.html + "</div></details>";
+      if (c.id === "llama-cpp" && c.state === "ok") desc += '<details class="llm-dl" id="llm-dl"><summary>' + t("下载模型") + '</summary><div id="llm-dl-body"></div></details>';
       const used = (c.usedBy || []).map((d) => esc(pickLang(d.name) || d.id));
       const cat = c.category && CAT()[c.category] ? c.category : "other";
       const tags = ["cat:" + cat];
@@ -320,15 +330,13 @@
       const opened = new Set([...box.querySelectorAll(".ccard.open")].map((c) => c.dataset.comp));
       // live 区（GitHub 登录状态、模型下载面板）是缓存外原地更新的：整块重画会把它们打回初始值，
       // 记下来写回，别让用户在 #llm-url 里的输入和展开态被一秒一次的轮询吞掉
-      const gh = $("gh-auth"), dl = $("llm-dl"), url = $("llm-url");
-      const ghHtml = gh ? gh.innerHTML : null, dlHtml = dl ? dl.innerHTML : null, dlOpen = dl ? dl.open : false, urlVal = url ? url.value : null;
+      const gh = $("gh-auth"), dl = box.querySelectorAll("#llm-dl")[0], ghHtml = gh ? gh.innerHTML : null;
       const active = document.activeElement, activeId = active && active.id && box.contains(active) ? active.id : null;
       box.innerHTML = next; box._html = next;
       // 进度更新可以换卡片，用户刚展开的说明不能每秒被收回去。
       for (const c of box.querySelectorAll(".ccard")) if (opened.has(c.dataset.comp)) c.classList.add("open");
       if (ghHtml != null && $("gh-auth")) $("gh-auth").innerHTML = ghHtml;
-      if (dlHtml != null && $("llm-dl")) { $("llm-dl").innerHTML = dlHtml; $("llm-dl").open = dlOpen; }
-      if (urlVal != null && $("llm-url")) $("llm-url").value = urlVal;
+      if (dl && $("llm-dl")) $("llm-dl").replaceWith(dl);
       if (activeId && box.querySelector("#" + activeId)) box.querySelector("#" + activeId).focus();
     }
     $("comp-count").textContent = (r.items || []).length || "";
@@ -336,16 +344,14 @@
     ext.compBytes = (r.items || []).filter((c) => c.installedVersion || c.state === "ok").reduce((s, c) => s + (c.installed || 0), 0); paintStorage();
     renderIdx("comp", [["inst", t("已装")], ["upd", t("要更新")], ...Object.entries(CAT()).map(([k, v]) => ["cat:" + k, v])]);
     if ($("gh-auth")) loadGhAuth(refresh);
-    if ($("llm-dl")) {
-      if (changed) $("llm-dl").addEventListener("toggle", () => { llmDl.open = $("llm-dl").open; if (llmDl.open) loadLlmDl(); });
-      if (llmDl.open) loadLlmDl();
-    }
+    syncCatalog();
     // 有在跑的就一秒刷一次；抽屉关了 / 换了页签就停
     if ((compRemoving.size || (r.items || []).some((c) => c.progress || ["removing", "configuring", "fetching-models"].includes(c.state))) && pageOn("ext"))
-      compTimer = setTimeout(loadComponents, 1000);
+      compTimer = setTimeout(() => { if (request === compLoad && pageOn("ext")) loadComponents(); }, 1000);
     // 先显示的是上回存下的列表、网关还在后台拉新索引：两秒后再要一次，拉完自然停
     else if (r.refreshing && pageOn("ext"))
-      compTimer = setTimeout(loadComponents, 2000);    return outcome;
+      compTimer = setTimeout(() => { if (request === compLoad && pageOn("ext")) loadComponents(); }, 2000);
+    return outcome;
   }
 
   // ── 自定义组件：用户自己导入 Linux arm64 程序。选文件 → 网关分析（ELF 类型、缺的库）→ 勾要用的命令 → 安装（补库、写入口和技能）──
@@ -483,10 +489,32 @@
   });
 
   // ── llama-cpp 组件下的「下载模型」子卡：内置目录按家族折叠（网关里固定 sha256），一键下载 / 取消 / 删除；也能贴 .gguf 直链 ──
-  const llmDl = { open: false, html: "", timer: 0, fam: new Set(), items: new Map(), big: 6, url: "" };
-  async function loadLlmDl() {
+  const llmDl = { visible: false, visit: 0, timer: 0, fam: new Set(), items: new Map(), big: 6, url: "" };
+  function catalogOpen() {
+    const dl = $("llm-dl");
+    return !!dl?.open && pageOn("ext") && !$("comp-field").classList.contains("hidden") && !dl.closest(".ccard")?.classList.contains("hidden");
+  }
+  function pauseCatalog() {
     clearTimeout(llmDl.timer);
-    const r = await api("/api/local/catalog").catch((e) => ({ items: [], err: e.message }));
+    llmDl.visible = false;
+    llmDl.visit++;
+  }
+  function syncCatalog() {
+    if (!catalogOpen()) { if (llmDl.visible) pauseCatalog(); return; }
+    if (!llmDl.visible) { llmDl.visible = true; loadLlmDl(); }
+  }
+  // toggle 不冒泡；用捕获监听真实详情节点，组件父卡更新不再触发目录读取。
+  $("tab-ext").addEventListener("toggle", (e) => { if (e.target.id === "llm-dl" && e.target === $("llm-dl")) syncCatalog(); }, true);
+  function loadLlmDl(changed = false) {
+    if (changed) llmDl.visit++;
+    const visit = llmDl.visit, live = () => catalogOpen() && visit === llmDl.visit;
+    return viewRead("llm-catalog", visit, live, async () => {
+      clearTimeout(llmDl.timer);
+      const r = await api("/api/local/catalog").catch((e) => ({ items: [], err: e.message }));
+      if (live()) paintCatalog(r, live);
+    });
+  }
+  function paintCatalog(r, live) {
     const GB = (n) => (n / 1073741824).toFixed(1) + " GB";
     const TAG = { think: t("会先思考"), code: t("偏写代码") };
     llmDl.big = r.big || 6;
@@ -515,7 +543,7 @@
     const fams = [];
     for (const m of r.items || []) if (!m.custom && !fams.includes(m.fam)) fams.push(m.fam);
     const custom = (r.items || []).filter((m) => m.custom);
-    llmDl.html = '<div class="tiny dim">' + t("模型放在 /sdcard/cccodroid/models，下好后到 设置 → 模型服务 → 端侧小模型 使用。本机内存 {ram} GB。都是 Q4_K_M 量化；手机上 1–4B 比较实用，超过 6B 会很慢。", { ram: r.ram || "?" }) + "</div>" +
+    const html = '<div class="tiny dim">' + t("模型放在 /sdcard/cccodroid/models，下好后到 设置 → 模型服务 → 端侧小模型 使用。本机内存 {ram} GB。都是 Q4_K_M 量化；手机上 1–4B 比较实用，超过 6B 会很慢。", { ram: r.ram || "?" }) + "</div>" +
       (r.err ? '<div class="tiny err">' + esc(r.err) + "</div>" : "") +
       fams.map((f) => {
         const list = r.items.filter((m) => !m.custom && m.fam === f);
@@ -533,19 +561,18 @@
       const typing = document.activeElement && document.activeElement.id === "llm-url";
       // 正打字的输入框原地不动，只换它前面的节点：把聚焦的元素挪到新位置，多数 WebView 上会丢焦点、收输入法（审查 F9）
       if (typing) {
-        const box = document.createElement("div"); box.innerHTML = llmDl.html; box.querySelector(".llm-url").remove();
+        const box = document.createElement("div"); box.innerHTML = html; box.querySelector(".llm-url").remove();
         const keep = body.querySelector(".llm-url");
         for (const x of [...body.childNodes]) if (x !== keep) x.remove();
         keep.before(...box.childNodes);
       }
-      else body.innerHTML = llmDl.html;
+      else body.innerHTML = html;
       body.querySelectorAll(".llm-fam").forEach((d) => d.addEventListener("toggle", () => { d.open ? llmDl.fam.add(d.dataset.fam) : llmDl.fam.delete(d.dataset.fam); }));
       // 正打字的输入框是原地保留的：每次轮询都 addEventListener 会越积越多（195-6.04）
       const inp = $("llm-url"); if (inp) inp.oninput = () => { llmDl.url = inp.value; };
     }
     const busy = (r.items || []).some((m) => m.job && m.job.phase !== "error");
-    if (busy && llmDl.open && $("llm-dl") && pageOn("ext"))
-      llmDl.timer = setTimeout(loadLlmDl, 1000);
+    if (busy) llmDl.timer = setTimeout(() => { if (live()) loadLlmDl(); }, 1000);
   }
   $("tab-ext").addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-lm]");
@@ -563,25 +590,30 @@
     if (!r.ok) toast(t("失败：{msg}", { msg: r.message || "" }), true);
     else if (op === "url") llmDl.url = "";
     if (op === "url" && $("llm-url")) $("llm-url").blur();
-    loadLlmDl();
+    loadLlmDl(true);
   });
 
   // ── gh 登录卡：设备码流程。令牌只在 gh 自己那儿，网关只回账号名与状态 ──
   const ghAuth = { html: "", at: 0, timer: 0, polling: false };
   // 没有组件系统的地方（开发端）：gh 在 PATH 里就单独给一张 GitHub 卡片，登录卡同一套
   async function loadGhField() {
+    const visit = pageVisit;
     const st = await api("/api/gh/auth").catch(() => null);
+    if (!pageVisible("ext", visit)) return;
     $("gh-field").classList.toggle("hidden", !(st && st.installed));
     if (!st || !st.installed) return;
     $("gh-field-box").innerHTML = '<div class="item"><div class="it-title">GitHub CLI（gh）</div><div class="gh-auth" id="gh-auth">' + ghAuth.html + "</div></div>";
-    loadGhAuth(true);
+    loadGhAuth(true, st);
   }
-  async function loadGhAuth(force) {
+  async function loadGhAuth(force, data) {
+    const visit = pageVisit, live = () => pageVisible("ext", visit);
+    if (!live()) return;
     clearTimeout(ghAuth.timer);
     // 组件列表下载时一秒刷一次，gh auth status 要联网验令牌，别跟着每秒跑
     if (!force && !ghAuth.polling && Date.now() - ghAuth.at < 30000) return;
     ghAuth.at = Date.now();
-    const r = await api("/api/gh/auth").catch((e) => ({ installed: true, accounts: [], error: e.message }));
+    const r = data || await api("/api/gh/auth").catch((e) => ({ installed: true, accounts: [], error: e.message }));
+    if (!live()) return;
     const j = r.job, wasPolling = ghAuth.polling;
     ghAuth.polling = !!j && ["starting", "waiting"].includes(j.state);
     if (wasPolling && j && j.state === "done") toast(j.git ? t("GitHub 已登录，git 推送已配好") : t("GitHub 已登录，但 git 凭据没配上，可在终端运行 gh auth setup-git"), !j.git);
@@ -607,8 +639,7 @@
     ghAuth.html = h;
     const box = $("gh-auth");
     if (box) box.innerHTML = h;
-    if (ghAuth.polling && box && pageOn("ext"))
-      ghAuth.timer = setTimeout(loadGhAuth, 2000);
+    if (ghAuth.polling && box) ghAuth.timer = setTimeout(() => { if (live()) loadGhAuth(); }, 2000);
   }
 
   async function loadExtPlugins() {
@@ -1527,18 +1558,20 @@
       </div>`).join("") + (j.steps.some((s) => s.state === "handed") ? `<div class="tiny">${esc(t("交给应用的那几步在「设置 → 更新」里看进度，做完后再点「核对记录」。"))}</div>` : "");
     box.classList.remove("hidden");
   }
-  async function followFix() {
+  async function followFix(visit = setVisit, j) {
+    const live = () => setVisible("trouble", visit);
+    if (!live()) return;
     clearTimeout(fixTimer);
-    const j = await api("/api/reconcile/fix").catch(() => null);
-    if (!j || !j.ok) return;
+    j ||= await sameGet("/api/reconcile/fix").catch(() => null);
+    if (!live() || !j?.ok) return;
     paintFix(j);
-    if (j.running) { fixTimer = setTimeout(followFix, 1500); return; }
+    if (j.running) { fixTimer = setTimeout(() => followFix(visit), 1500); return; }
     const failed = j.steps.filter((s) => s.state === "fail").length;
     // 交给应用的还在做：网关没再核（核了也是旧结果），进度留在这里，不换回旧的核对结果（0.6.11 真机）
     if (j.steps.some((s) => s.state === "handed")) return toast(t("交给应用的步骤还在进行，做完后再点「核对记录」"), !!failed);
     toast(failed ? t("修补结束，有 {n} 步没成", { n: failed }) : t("修补结束"), !!failed);
     // 结果停留几秒给人看清，再换回最新的核对结果（网关已经自动再核过）
-    fixTimer = setTimeout(() => loadReconcile(false).then((r) => r && paintReconcile(r, true)), failed ? 8000 : 3000);
+    fixTimer = setTimeout(async () => { if (live()) { const r = await loadReconcile(false); if (r && live()) paintReconcile(r, true); } }, failed ? 8000 : 3000);
   }
   $("reconcile-box").addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-rcfix]");
@@ -1547,29 +1580,34 @@
     const list = all ? (box._fixable || []) : [{ msg: b.dataset.msg, act: b.dataset.act }];
     const plan = [...new Set(list.map((f) => "· " + f.msg + "\n   → " + fixWhat(f.act)))].join("\n");
     if (!confirm((all ? t("按下面的顺序修补，做完自动再核对一次：") : t("修补这一项：")) + "\n\n" + plan + "\n\n" + t("重装要联网下载；你自己的文件、会话和设置不受影响。继续？"))) return;
+    const visit = setVisit;
     b.disabled = true;
     const r = await post("/api/reconcile/fix", { keys: all ? "all" : [b.dataset.rcfix] }).catch((err) => ({ ok: false, message: err.message }));
     if (!r.ok) { b.disabled = false; return toast(r.message || t("失败"), true); }
-    paintFix(r);
-    fixTimer = setTimeout(followFix, 1000);
+    if (setVisible("trouble", visit)) { paintFix(r); fixTimer = setTimeout(() => followFix(visit), 1000); }
   });
   async function loadReconcile(run) {
+    const visit = setVisit, live = () => setVisible("trouble", visit);
+    if (!live()) return;
     const r = await api("/api/reconcile" + (run ? "?run=1" : "")).catch(() => null);
+    if (!live()) return;
     if (r) paintReconcile(r, run);
     // 修补还在跑（比如关掉设置再打开）：接着显示进度
-    if (r && r.supported) api("/api/reconcile/fix").then((j) => { if (j && j.ok && j.running) followFix(); }).catch(() => {});
+    if (r?.supported) sameGet("/api/reconcile/fix").then((j) => { if (j?.ok && j.running) followFix(visit, j); }).catch(() => {});
     return r;
   }
   $("btn-reconcile").addEventListener("click", async () => {
     // 按钮是「核对」：已有结果时点它也要重新核，不能第一次只把面板收起来（195-M.6）
+    const visit = setVisit;
     toast(t("正在核对…"));
     const r = await loadReconcile(true);
+    if (!setVisible("trouble", visit)) return;
     if (!r) toast(t("核对失败"), true);
     else if (!r.supported) toast(t("这里没有工具包，不用核对"));
   });
   // 本机自检（195-M.1）：看上次结果，点「重新自检」不等过期立刻重跑；跑着的时候每 5 秒刷新一次
   let envFactsTimer = 0;
-  function paintEnvFacts(r) {
+  function paintEnvFacts(r, visit) {
     $("envfacts-row").classList.toggle("hidden", !r.supported);
     const el = $("envfacts-state"), b = $("btn-envfacts");
     b.disabled = !!r.running;
@@ -1582,15 +1620,18 @@
     if (r.fail.length) lines.push(`<details><summary>${esc(t("失败项"))}</summary>${r.fail.map((f) => `<div><code>${esc(f)}</code></div>`).join("")}</details>`);
     el.innerHTML = lines.join("");
     clearTimeout(envFactsTimer);
-    if (r.running) envFactsTimer = setTimeout(() => { if (!$("set-ov").classList.contains("hidden")) loadEnvFacts(); }, 5000);
+    if (r.running) envFactsTimer = setTimeout(() => { if (setVisible("trouble", visit)) loadEnvFacts(); }, 5000);
   }
   async function loadEnvFacts() {
-    const r = await api("/api/env-facts").catch(() => null);
-    if (r) paintEnvFacts(r);
+    const visit = setVisit;
+    if (!setVisible("trouble", visit)) return;
+    const r = await sameGet("/api/env-facts").catch(() => null);
+    if (r && setVisible("trouble", visit)) paintEnvFacts(r, visit);
   }
   $("btn-envfacts").addEventListener("click", async () => {
+    const visit = setVisit;
     const r = await post("/api/env-facts/rerun").catch((e) => (toast(e.message, true), null));
-    if (r) paintEnvFacts(r);
+    if (r && setVisible("trouble", visit)) paintEnvFacts(r, visit);
   });
   const LEDGER_KIND = () => ({ verify: t("校验"), repair: t("修复"), install: t("安装"), uninstall: t("卸载"), recover: t("恢复"), "safe-mode": t("安全模式"), logs: t("日志") });
   $("btn-ledger").addEventListener("click", async () => {

@@ -41,7 +41,7 @@
     try {
       const r = await post("/api/lineage/extra", { child: P.child, add: P.ids });
       toast(t("已补记 {n} 个来源", { n: r.n || P.ids.length }));
-      linPickEnd(); loadLineage();
+      linPickEnd(); lineageDirty();
     } catch (e) { toast(e.message === "too_many" ? t("这个会话补记的来源已经满了（最多 {n} 个）", { n: 32 }) : e.message, true); }
   });
 
@@ -60,7 +60,7 @@
     const drops = LIN.g.edges.filter((e) => e.child === id && e.kind === "merge");
     if (drops.length) items.push("hr", ...drops.map((e) => ({ label: t("撤掉来源：{t}", { t: name(e.parent) }), icon: SM.trash, fn: async () => {
       if (!confirm(t("不再把「{a}」记成「{b}」的来源？会话本身不受影响。", { a: name(e.parent), b: (node && node.title || "").slice(0, 20) }))) return;
-      try { await post("/api/lineage/extra", { child: id, drop: e.parent }); toast(t("已撤掉")); loadLineage(); } catch (err) { toast(err.message, true); }
+      try { await post("/api/lineage/extra", { child: id, drop: e.parent }); toast(t("已撤掉")); lineageDirty(); } catch (err) { toast(err.message, true); }
     } })));
     return items;
   }

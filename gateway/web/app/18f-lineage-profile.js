@@ -10,9 +10,19 @@
   const pfHm = (ms) => { const d = new Date(ms), p = (x) => String(x).padStart(2, "0"); return p(d.getHours()) + ":" + p(d.getMinutes()); };
   const pfIco = (p) => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
 
+  function pfVisible(visit = pageVisit) {
+    const el = $("lin-prof");
+    return pageVisible("lineage", visit) && !el.classList.contains("hidden") && !el._moLeave;
+  }
+  function pfResume() {
+    if (!pfVisible()) return;
+    if (PF.turn >= 0 && !PF.det) pfTurn(PF.turn, true);
+    else if (!PF.data) pfLoad(0);
+  }
+
   /** 打开某个会话的剖面；n 不给就看最新一章 */
   function linProfOpen(id, n, push) {
-    const node = pfNode(id); if (!node) return;
+    const node = pfNode(id); if (!node || !pageVisible("lineage")) return;
     if (MG.pick) linPickEnd();
     const el = $("lin-prof"), was = !el.classList.contains("hidden") && !el._moLeave;
     if (push && was) { PF.stack.push({ id: PF.id, n: PF.n }); MO.ghost($("lp-wrap"), "back", false); $("lp-wrap").classList.remove(...PF_IN); }
@@ -70,7 +80,8 @@
       return `<button type="button" data-n="${c.n}" class="${c.n === PF.n ? "on" : ""}${c.title ? "" : " ghost"}" title="${esc(c.title || c.q || "")}"><i>${esc(short)}·${c.n}</i>${name ? " " + esc(name) : ""}</button>`;
     }).join("");
     seg.parentElement.classList.toggle("hidden", node.chapters.length < 2);
-    requestAnimationFrame(() => seg.querySelector(".on")?.scrollIntoView({ inline: "center", block: "nearest" }));
+    const visit = pageVisit;
+    requestAnimationFrame(() => { if (pfVisible(visit)) seg.querySelector(".on")?.scrollIntoView({ inline: "center", block: "nearest" }); });
   }
   $("lp-chs").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-n]"); if (!b) return;
@@ -82,14 +93,15 @@
   });
 
   async function pfLoad(dir) {
-    const my = ++PF.seq, body = $("lp-body");
+    const my = ++PF.seq, visit = pageVisit, body = $("lp-body");
+    const live = () => my === PF.seq && pfVisible(visit);
     PF.data = null;
     if (dir) pfSwap("pane", dir);
     body.innerHTML = `<div class="lp-wait">${esc(t("正在读这一章…"))}</div>`;
     let r;
     try { r = await api(`/api/lineage/profile?id=${encodeURIComponent(PF.id)}&ch=${PF.n}`); }
-    catch (e) { if (my === PF.seq) body.innerHTML = `<div class="lp-wait">${esc(t("读不出来：{e}", { e: e.message }))}</div>`; return; }
-    if (my !== PF.seq) return;
+    catch (e) { if (live()) body.innerHTML = `<div class="lp-wait">${esc(t("读不出来：{e}", { e: e.message }))}</div>`; return; }
+    if (!live()) return;
     PF.data = r;
     pfPaint(true);
   }
@@ -160,18 +172,19 @@
     e.preventDefault(); row.click();
   });
 
-  async function pfTurn(i) {
+  async function pfTurn(i, resume = false) {
     const u = PF.data && PF.data.turns[i]; if (!u) return;
     PF.turn = i; PF.det = null; PF.open = {};
-    const body = $("lp-body"), my = ++PF.seq;
-    PF.scroll = body.scrollTop;
-    pfSwap("push"); pfHead();
+    const body = $("lp-body"), my = ++PF.seq, visit = pageVisit;
+    const live = () => my === PF.seq && PF.turn === i && pfVisible(visit);
+    if (!resume) { PF.scroll = body.scrollTop; pfSwap("push"); }
+    pfHead();
     body.scrollTop = 0;
     body.innerHTML = `<div class="lp-wait">${esc(t("正在读这一轮…"))}</div>`;
     let d;
     try { d = await api(`/api/lineage/turn?id=${encodeURIComponent(PF.id)}&from=${u.off}&to=${u.end}`); }
-    catch (e) { if (my === PF.seq) body.innerHTML = `<div class="lp-wait">${esc(t("读不出来：{e}", { e: e.message }))}</div>`; return; }
-    if (my !== PF.seq || PF.turn !== i) return;
+    catch (e) { if (live()) body.innerHTML = `<div class="lp-wait">${esc(t("读不出来：{e}", { e: e.message }))}</div>`; return; }
+    if (!live()) return;
     PF.det = d;
     pfPaintTurn(true);
   }
