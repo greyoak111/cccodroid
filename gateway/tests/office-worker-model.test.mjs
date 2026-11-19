@@ -152,7 +152,7 @@ test("real XLSX library stays in worker and replies only with names/page/cell, f
     try {
       const loaded = await w.ask("load", { buffer: ab }, [ab]); clearInterval(timer);
       assert.equal(ab.byteLength, 0, "input transfers ownership");
-      assert.deepEqual(Object.keys(loaded), ["names"]); assert.deepEqual(loaded.names, ["Visible"]);
+      assert.deepEqual(Object.keys(loaded), ["names", "active"]); assert.deepEqual(loaded.names, ["Visible"]); assert.equal(loaded.active, 0);
       const p = await w.ask("page", { sheet: 0, from: null });
       assert.ok(p.html.includes("R0C0")); assert.ok((p.html.match(/<td /g) || []).length <= 1200);
       const cell = await w.ask("cell", { sheet: 0, addr: "CV200" });
