@@ -2559,6 +2559,11 @@ textarea.pj-field{min-height:89px;resize:vertical;line-height:1.618}
 @media (max-width:599px){
   html:not(.fold-table) #hint-row{margin-top:0}
   html:not(.fold-table) #composer{padding-bottom:calc(var(--safe-b) + 1px)}
+  /* 紧凑底栏（默认，issue #239）：字号略放大、触控盒收紧，把一截还给消息区；设置里关掉（html.bar-roomy）回 48px 大触控目标 */
+  html:not(.fold-table):not(.bar-roomy) #hint-row{font-size:12px;line-height:1.4}
+  html:not(.fold-table):not(.bar-roomy) #hint-row > :is(button,#model-chip,#perm-chip){min-width:26px;min-height:26px}
+  html:not(.fold-table):not(.bar-roomy) #hint-row #perm-chip{min-width:26px}
+  html:not(.fold-table):not(.bar-roomy) #hint-row #model-chip{min-width:min(24%,max(40px,3.6em))}
 }
 /* 用互不覆盖的实际触控盒取代 48px 外扩层，不占上面的输入框或相邻按钮。 */
 #hint-row > :is(button,#model-chip,#perm-chip){display:inline-flex;align-items:center;min-width:32px;min-height:48px;box-sizing:border-box;cursor:pointer}

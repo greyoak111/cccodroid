@@ -91,3 +91,13 @@ test("v0.7.12 会话里点 APK 直接走安装，不进压缩包浏览（.apk �
   has(s, /return vwInstallApk\(r\.path\);/, "APK 点开直接安装");
   has(s, /r\.kind === "archive"/, "APK 分支在压缩包浏览之前");
 });
+
+test("issue #239 紧凑聊天底栏：CSS 默认紧凑、bar-roomy 回大触控；开关走 uiGet/uiSet", () => {
+  const css = src("../style.css");
+  has(css, /bar-roomy/, "紧凑切换类");
+  has(css, /:not\(\.bar-roomy\) #hint-row\{font-size:12px/, "窄屏默认 12px");
+  has(css, /:not\(\.bar-roomy\) #hint-row > :is\(button,#model-chip,#perm-chip\)\{min-width:26px;min-height:26px/, "紧凑触控盒 26px");
+  const s = src("01-core.js");
+  has(s, /classList\.toggle\("bar-roomy", uiGet\("barDense"\) === false\)/, "默认紧凑、显式关才回大触控");
+  has(s, /e\.detail && e\.detail\.key === "barDense"/, "开关变化即时生效");
+});

@@ -679,6 +679,10 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       .catch((e) => toast(t("保存失败：{msg}", { msg: (e.body && e.body.error) || e.message }), true));
     document.dispatchEvent(new CustomEvent("cc:ui", { detail: { key: k } }));
   }
+  // 窄屏聊天底栏：默认紧凑（CSS 无类即紧凑）；设置里关掉 → html.bar-roomy 回 48px 大触控目标（issue #239）
+  const denseBar = () => document.documentElement.classList.toggle("bar-roomy", uiGet("barDense") === false);
+  denseBar();
+  document.addEventListener("cc:ui", (e) => { if (e.detail && e.detail.key === "barDense") denseBar(); });
   // ── 外链图片点一下才加载（0.5.12）：md 里写的 http(s) 图一渲染就会去请求对方服务器，对方能看到 IP 和读的时间。
   //   默认先画成一个按钮，点了才加载；点过的地址本次记住。设置里关掉（extImg = "auto"）就照旧直接加载。
   //   本机地址、相对路径、data:/blob: 不拦

@@ -1649,6 +1649,8 @@ window.I18N_DICT.en = {
   "求索": "Qiusuo",
   "深浅": "Light / dark",
   "浅": "Light",
+  "紧凑聊天底栏": "Compact chat bar",
+  "窄屏时底栏更矮、字号略大，把一截还给消息区；关掉则用 48px 的大触控目标": "On narrow screens the bar is shorter with slightly larger text, leaving more room for messages; turn off for 48px touch targets",
   "深": "Dark",
   "新对话默认；输入栏下也能临时切": "Default for new chats; switch anytime under the input bar",
   "上下文到多少 token 时压缩": "Compact when context reaches this many tokens",

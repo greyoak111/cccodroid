@@ -1616,6 +1616,8 @@ window.I18N_DICT["id"] = {
   "求索": "Qiusuo",
   "深浅": "Terang / gelap",
   "浅": "Terang",
+  "紧凑聊天底栏": "Bilah obrolan ringkas",
+  "窄屏时底栏更矮、字号略大，把一截还给消息区；关掉则用 48px 的大触控目标": "Di layar sempit bilah lebih pendek dengan teks sedikit lebih besar, memberi ruang lebih untuk pesan; matikan untuk target sentuh 48px",
   "深": "Gelap",
   "新对话默认；输入栏下也能临时切": "Default untuk percakapan baru; bisa diganti sementara di bawah bilah input",
   "上下文到多少 token 时压缩": "Padatkan saat konteks mencapai jumlah token ini",
