@@ -87,11 +87,10 @@
   function paintModel(name) {
     state.chipModel = name;
     const eff = curEffort();
-    // 照设计稿拆成两片：型号（claude-opus-5-5 显示成 Opus 5.5）、思考强度；会话用的不是全局那家时前面再加一片接口名
-    const pretty = prettyModel(name), pv = curProv(), other = pv && globalProv() && pv !== globalProv();
-    modelEl.innerHTML = (other ? `<span class="chip chip-prov">${esc(provLabel(pv))}</span>` : "") +
-      `<span class="chip">${esc(pretty)}</span>${eff ? `<span class="chip">${esc(eff)}</span>` : ""}`;
-    modelEl.title = (other ? provLabel(pv) + " · " : "") + name;
+    // 照设计稿拆成两片：型号（claude-opus-5-5 显示成 Opus 5.5）、思考强度；接口名不占底栏（在选择器里看），免得长名字撑多行
+    const pretty = prettyModel(name);
+    modelEl.innerHTML = `<span class="chip">${esc(pretty)}</span>${eff ? `<span class="chip">${esc(eff)}</span>` : ""}`;
+    modelEl.title = name;
     // #model-chip 是 display:contents，本身没有盒子，title 落不到实际上屏的 chip 上
     modelEl.querySelectorAll(".chip").forEach((c) => { c.title = modelEl.title; });
   }
