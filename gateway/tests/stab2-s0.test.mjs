@@ -81,6 +81,8 @@ test("P01 留底成功的老路子不变：坏文件挪成 .bad-*，之后照常
 });
 
 test("P01 档案：首次读档失败又没留底 → 交档如实失败、原档案保住；故障过去后接回旧条目，再交档两条都在", () => {
+  // 池内共享 home：前面测过档案的用例可能留下 .bad 残留，先清掉（bads 计数只看本用例产生的）
+  for (const n of fs.readdirSync(CFG.home)) if (n.startsWith("ccapp-archive.json.bad-")) fs.rmSync(path.join(CFG.home, n), { force: true });
   const FILE = path.join(CFG.home, "ccapp-archive.json");
   const A = { v: 1, sessions: { "aaaaaaaa-0000-4000-8000-000000000001": { title: "旧题名 A", chapters: { 1: { title: "旧题名 A", hist: [] } } } } };
   fs.writeFileSync(FILE, JSON.stringify(A));
