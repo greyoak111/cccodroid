@@ -20,7 +20,7 @@ test("中断记录写不上 → 运行标记原样留着；下次能写了再恢
   assert.deepEqual(JSON.parse(fs.readFileSync(MARK, "utf8")), mark, "来源不能丢");
   // 下一次启动（内存从头来）
   fs.rmSync(INTR, { recursive: true, force: true });
-  Q.setInterrupted([]); Q.QUEUE.length = 0;
+  Q._resetRunMarkForTest(); Q.setInterrupted([]); Q.QUEUE.length = 0;
   Q.recoverRunMark();
   assert.deepEqual(JSON.parse(fs.readFileSync(INTR, "utf8")).map((e) => e.id), ["x1"]);
   assert.deepEqual(Q.QUEUE.map((q) => q.id), ["q1"]);

@@ -597,7 +597,21 @@ export function trashSession(id) {
   if (!validTrashId(id)) return { ok: false, error: "bad id" };
   if (SID_BUSY.has(id)) return { ok: false, error: "busy" };
   const slot = slotOf(id);
-  if (absent(slot) && reconcileSlot(id, false)) return { ok: false, error: "exists", message: occupied().message };
+  if (absent(slot)) {
+    const pending = reconcileSlot(id, false);
+    if (pending) {
+      if (pending.tx?.phase === "purging") return { ok: false, error: "purge_pending" };
+      if (!hasLiveCopy(id)) {
+        // 回收通知上次没落盘（notify）：把没跑完的钩子补完，按已删除返回；ready 的整条都在回收站，重删直接算成功。
+        // 补跑失败就把底层错误报出来，别给误导性的「同名会话已存在」（复核 P2-3）
+        if (pending.tx?.phase === "notify") {
+          try { completeTrash(slot, pending); } catch (e) { return { ok: false, error: "write_failed", message: e.message }; }
+        }
+        return { ok: true };
+      }
+      return { ok: false, error: "exists", message: occupied().message };
+    }
+  }
   const found = findSessionFile(id);
   if (!found) return { ok: false, error: "not found" };
   const { file, project } = found;
@@ -795,7 +809,11 @@ function restoreUnlocked(id) {
   }
   if (!main) return { ok: false, error: "not found" };
   if (fileId(main) !== meta.tx.file || fileId(attached) !== meta.tx.side) throw new Error(`Trash files changed: ${id}`);
-  if (absent(side)) return { ok: false, error: "exists" }; // 不能吃掉早期留下的附件或同号导入正在写的数据
+  if (absent(side)) {
+    // 旧版「主记录已进回收站、附件还留在项目目录」的中断状态：那目录正是没搬完的附件（主记录在格子里
+    // 说明没有同号活副本），恢复时认作本会话附件、只搬回主记录，别让用户卡在无法恢复也无法清理（复核 P2-2）
+    if (!(meta.tx?.legacyNoSide && !attached)) return { ok: false, error: "exists" }; // 不能吃掉早期留下的附件或同号导入正在写的数据
+  }
   if (meta.tx.phase === "notify") meta = completeTrash(slot, meta);
   fs.mkdirSync(dir, { recursive: true });
   syncDir(PATHS.projects);

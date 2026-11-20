@@ -365,6 +365,23 @@ test("已经删掉正文但还未收口的条目仍可重试，不用等满 30 �
   assert(ops.inTrash(other.sid));
 });
 
+test("P2-3：回收通知没落盘的重删补跑钩子、按已删除返回，不再报「同名会话已存在」", () => {
+  const s = makeSession();
+  const hook = () => { throw new Error("钩子写盘失败"); };
+  TRASH_HOOKS.push(hook);
+  try {
+    assert.throws(() => ops.trashSession(s.sid), /钩子写盘失败/);
+  } finally { TRASH_HOOKS.pop(); }
+  // 文件已进回收站、phase 停在 notify：重删应补跑钩子并成功，而不是 409
+  assert.equal(readJson(metaOf(s.sid)).tx.phase, "notify");
+  assert(ops.listTrash().some((m) => m.id === s.sid));
+  assert.equal(ops.trashSession(s.sid).ok, true);
+  assert.equal(readJson(metaOf(s.sid)).tx.phase, "ready");
+  assert.equal(findSessionFile(s.sid), null);
+  // 再来一次仍是幂等成功
+  assert.equal(ops.trashSession(s.sid).ok, true);
+});
+
 test("旧版槽位按落点恢复；附件归属不明时不清理", async () => {
   for (const phase of ["intent", "ready", "restore-tail", "split"]) {
     const s = withSide(makeSession());
@@ -381,14 +398,13 @@ test("旧版槽位按落点恢复；附件归属不明时不清理", async () =>
         await assert.rejects(ops.purgeTrash([s.sid]), /无法确认归属/);
         assert.equal(fs.readFileSync(insideOf(s.sid), "utf8"), s.text);
         assert.equal(fs.readFileSync(s.extra, "utf8"), "附件");
-        assert.equal(ops.restoreSession(s.sid).error, "exists");
-        fs.renameSync(s.side, s.side + "-kept");
+        // P2-2：附件留在项目目录是旧版中断留下的合法状态，恢复时认作本会话附件、只搬回主记录
       }
       assert(ops.restoreSession(s.sid).ok);
     }
     assert(!fs.existsSync(slotOf(s.sid)));
     assert.equal(fs.readFileSync(s.file, "utf8"), s.text);
-    assert.equal(fs.readFileSync(phase === "split" ? path.join(s.side + "-kept", "data.txt") : s.extra, "utf8"), "附件");
+    assert.equal(fs.readFileSync(s.extra, "utf8"), "附件");
   }
 });
 

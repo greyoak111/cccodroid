@@ -134,3 +134,31 @@ test("a queue checkpoint canonicalizes the resolved session without changing its
     assert.equal(queued.lane, 'n:root');
   `);
 });
+
+test("P2-1：清中断记录没落盘时如实失败，不带快照的旧 runs 不再下次复活", (t) => {
+  const f = fixture(t);
+  f.put(MARK, { runs: [{ id: "stale", text: "old prompt", startedAt: 1, unstarted: true }],
+    queue: [{ id: "keep-q", message: "saved queued prompt" }] });
+  // 第一次启动：INTR 能写、运行标记写不进 → 忽略操作必须失败，卡片与旧 runs 都还留着
+  f.boot(`
+    failingRename((file) => file === MARK);
+    Q.recoverRunMark();
+    assert.deepEqual(Q.INTERRUPTED.map((e) => e.id), ['stale']);
+    assert.equal(Q.setInterrupted([]), false);
+    assert.deepEqual(get(INTR).map((e) => e.id), ['stale']);
+    assert.equal('interrupted' in get(MARK), false);
+  `);
+  // 第二次启动（存储恢复）：卡片还在（上次忽略确实没落盘），这次忽略成功，旧 runs 随标记重写一并清掉
+  f.boot(`
+    Q.recoverRunMark();
+    assert.deepEqual(Q.INTERRUPTED.map((e) => e.id), ['stale']);
+    assert.equal(Q.setInterrupted([]), true);
+    assert.equal(fs.existsSync(INTR), false);
+    assert.deepEqual(get(MARK).runs, []);
+  `);
+  // 第三次启动：卡片不复活
+  f.boot(`
+    Q.recoverRunMark();
+    assert.deepEqual(Q.INTERRUPTED, []);
+  `);
+});

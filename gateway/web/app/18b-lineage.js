@@ -52,7 +52,7 @@
     }
     // 网关回 200 也可能一个都没恢复（failed 里写着原因）：照实说（审查 B-04）
     if (act === "restore") return post("/api/trash/restore", { ids: [arg || sel] }).then((r) => {
-      if (r && r.failed && r.failed.length) return toast(t("恢复失败：{msg}", { msg: r.failed[0].error === "exists" ? t("同名会话已存在") : r.failed[0].error }), true);
+      if (r && r.failed && r.failed.length) return toast(t("恢复失败：{msg}", { msg: restoreFailMsg(r.failed[0].error) }), true);
       toast(t("已恢复")); loadSessions(); lineageDirty();
     }, (e) => toast(e.message, true));
   }

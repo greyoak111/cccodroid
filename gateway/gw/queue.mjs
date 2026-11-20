@@ -146,6 +146,8 @@ export function saveRunMark() {
   return writeRunMark(dirty ? INTERRUPTED : null);
 }
 let markedInterrupted = null;
+// 只给测试用：模拟「重启是新进程」——恢复时记下的标记快照同步状态归零（真实重启本来就是新的模块状态）
+export function _resetRunMarkForTest() { markedInterrupted = null; }
 function warnRunMarkWrite() {
   warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
   return false;
@@ -284,8 +286,9 @@ export function recoverRunMark() {
     // 上次没处理的中断记录留着；同一个会话以这次的为准。
     const sids = new Set(fresh.map((r) => r.sessionId).filter(Boolean)), ids = new Set(fresh.map((r) => r.id));
     INTERRUPTED = intrList([...interrupted.filter((e) => !ids.has(e.id) && !(e.sessionId && sids.has(e.sessionId))), ...fresh]);
-    // 若原标记已有快照，连同它的 runs 已覆盖这个版本；在队列恢复之前不用再写标记。
-    if (hasSnapshot) markedInterrupted = INTERRUPTED;
+    // 无论原标记带不带快照，都记下「标记必须与这份回执一致」：之后 INTR 的任何变化都会先同步标记；
+    // 标记写不进时清 INTR 也会一并失败，不留「界面说已忽略、旧 runs 还在盘上、下次启动复活」的窗口（复核 P2-1）。
+    markedInterrupted = INTERRUPTED;
     committed = persistInterrupted();
     // 旧版本留下的运行标记里没有这个标记：接着补上（FIND-040）
     for (const e of fresh) if (e.sessionId) markIncomplete(e.sessionId, e.id);
@@ -687,8 +690,10 @@ export async function routeQueue(req, res, u, p) {
   if (req.method === "POST" && p === "/api/interrupted/dismiss") {
     // 带 id 只忽略那一条；不带（旧界面）全清
     let b; try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
-    setInterrupted(b && typeof b.id === "string" ? INTERRUPTED.filter((e) => e.id !== b.id) : []);
-    publishState();
+    const saved = setInterrupted(b && typeof b.id === "string" ? INTERRUPTED.filter((e) => e.id !== b.id) : []);
+    const pub = publishState();   // 回执文件写不进时，运行标记里的中断快照是第二份权威（兜底）
+    // 两份权威都落不了盘就当没忽略：界面别把「下次启动还会回来」的卡片报成已忽略（复核 P2-1）
+    if (!saved && !pub) return sendJson(res, 500, { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") });
     return sendJson(res, 200, { ok: true });
   }
   if (req.method === "POST" && p.startsWith("/api/queue/")) {

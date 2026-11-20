@@ -1,4 +1,9 @@
   // ── 会话管理 ──────────────────────────────────────────────────────
+  // 恢复失败原因译成能看懂的话：三处恢复入口（列表 / 会话页 / 脉络）共用，别把 purge_pending 原样露给用户（复核 P2-4）
+  function restoreFailMsg(error) {
+    const known = { exists: t("同名会话已存在"), purge_pending: t("正在彻底删除中，不能恢复"), busy: t("这个会话正在生成中。"), write_failed: t("没保存上：存储满了或没有权限"), not_found: t("回收站里没有这个会话") };
+    return known[error] || error;
+  }
   /** 拉会话列表；成功返回 true。删完紧接着刷新时，删之前发出的那次慢请求迟到也不许把删掉的又画回来（审查 #48 S08-03） */
   async function loadSessions() {
     const ok = latest("sessions");
@@ -281,7 +286,7 @@
           <span>${Math.round((m.size || 0) / 1024)} KB</span>
         </div>
         <div class="it-acts">
-          <button data-a="restore">${t("恢复")}</button>
+          ${m.purgePending ? `<span class="tiny">${t("正在彻底删除（等存储恢复）")}</span>` : `<button data-a="restore">${t("恢复")}</button>`}
           <button data-a="purge">${t("彻底删除")}</button>
         </div>
       </div>`).join("");
@@ -432,7 +437,7 @@
       if (b.disabled) return;
       b.disabled = true;   // 连点两次的第二次会撞「同名会话已存在」（0.6.9 审计 196-会话.4）
       const r = await post("/api/trash/restore", { ids: [id] }).catch((err) => ({ failed: [{ error: err.message }] }));
-      if (r.failed && r.failed.length) toast(t("恢复失败：{msg}", { msg: r.failed[0].error === "exists" ? t("同名会话已存在") : r.failed[0].error }), true);
+      if (r.failed && r.failed.length) toast(t("恢复失败：{msg}", { msg: restoreFailMsg(r.failed[0].error) }), true);
       else toast(t("已恢复"));
       return loadTrash();
     }

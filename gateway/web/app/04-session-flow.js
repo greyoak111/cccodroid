@@ -210,7 +210,7 @@
   }
   async function restoreAndOpen(id) {
     const r = await post("/api/trash/restore", { ids: [id] }).catch((e) => ({ failed: [{ error: e.message }] }));
-    if (r && r.failed && r.failed.length) return toast(t("恢复失败：{msg}", { msg: r.failed[0].error === "exists" ? t("同名会话已存在") : r.failed[0].error }), true);
+    if (r && r.failed && r.failed.length) return toast(t("恢复失败：{msg}", { msg: restoreFailMsg(r.failed[0].error) }), true);
     toast(t("已恢复")); loadSessions(); lineageDirty();
     openSession(id);
   }
