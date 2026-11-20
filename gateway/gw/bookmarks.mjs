@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { CFG, PATHS, log, tz } from "./config.mjs";
-import { isObj, loadState, saveState } from "./statefile.mjs";
+import { isObj, loadState, saveState, stateUnread } from "./statefile.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { NAMES, findSessionFile, peekSession } from "./sessions.mjs";
 import { archivedTitle } from "./archive-store.mjs";
@@ -41,9 +41,13 @@ function save() {
 /** 会话彻底删掉时清掉它的书签（195-A.7） */
 export function forgetBookmarks(sid) {
   if (!sid) return true;
-  const n = BM.length;
+  if (stateUnread(FILE)) BM = loadState(FILE, { shape: bmShape, fallback: () => [], max: 4 << 20 }).data;
+  if (stateUnread(FILE)) return false;
+  const before = BM;
   BM = BM.filter((b) => b.sid !== sid);
-  return BM.length === n ? true : save();
+  if (BM.length === before.length || save()) return true;
+  BM = before;
+  return false;
 }
 
 /** 文件尾部倒着找：最后一条 role 相同、正文以 head 开头的消息 → { uuid, off }。只看最后 8 MB（刚答完的那几条） */
@@ -83,7 +87,11 @@ export async function routeBookmarks(req, res, u, p) {
     let canList = true;
     try { fs.accessSync(PATHS.projects, fs.constants.R_OK); } catch { canList = false; }
     if (!canList) return sendJson(res, 200, { items: BM.map(pub), unreadable: true });
-    const trash = new Set(listTrash().map((t) => t.id)), out = [], meta = new Map();
+    // 回收站暂时读不全时也不能把没列出的条目当成已彻底删除。
+    let trash;
+    try { trash = new Set(listTrash({ strict: true }).map((t) => t.id)); }
+    catch { return sendJson(res, 200, { items: BM.map(pub), unreadable: true }); }
+    const out = [], meta = new Map();
     let gone = 0;
     for (const b of BM) {
       if (!meta.has(b.sid)) {

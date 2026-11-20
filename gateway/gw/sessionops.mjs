@@ -7,17 +7,18 @@ import { Worker } from "node:worker_threads";
 import { zipReadCore } from "./zipcore.mjs";
 import { CFG, LAST_LANG, PATHS, PREFIX, log, tr, tz } from "./config.mjs";
 import { NAMES, PEEK_CACHE, PINS, findSessionFile, peekSession, saveNames, savePins } from "./sessions.mjs";
+import { agentsDir } from "./agents.mjs";
 import { claudeBlocked, claudeCmd, claudeEnv, killTree } from "./claude.mjs";
 import { sealed } from "./edition.mjs";
 import { sessionRetention } from "./retention.mjs";
 import { LAST_SESSION, TRASH_HOOKS, forgetSession, runOfSession } from "./runs.mjs";
 import { forgetChild, recordPrimary } from "./lineage-store.mjs";
 import { lineageForget } from "./lineage.mjs";
-import { checkSession, neutralizeMarkers, resealAfterEdit, sealSession, isInjected } from "./integrity.mjs";
+import { checkSession, forgetSeal, neutralizeMarkers, resealAfterEdit, sealSession, isInjected } from "./integrity.mjs";
 import { ucPending } from "./userconf.mjs";
 import { forEachLine, lineWriter, writeAll, zipEntries, zipExtract, zipToFile } from "./bigfile.mjs";
-import { archiveDb, archiveImport, saveArchive } from "./archive-store.mjs";
-import { isObj, loadState, saveState, writeAtomic } from "./statefile.mjs";
+import { archiveDb, archiveForget, archiveImport, saveArchive } from "./archive-store.mjs";
+import { isObj, loadState, saveState, stateUnread } from "./statefile.mjs";
 import { noteManaged } from "./sessmanaged.mjs";
 
 // ── 会话管理：回收站 / 导出 / 导入 ─────────────────────────────────────
@@ -158,7 +159,7 @@ const UNDO = new Map();
 // 以前只在内存里：网关重启后守卫失效，删那条合并气泡会把上一轮的回复一起删掉（195-A.1）。落盘保存
 const ORPHAN_FILE = path.join(CFG.home, "ccapp-session-orphans.json");
 const ORPHAN_HEADS = new Map();
-{
+function loadOrphans() {
   const r = loadState(ORPHAN_FILE, {
     shape: (j) => {
       if (!isObj(j)) return undefined;
@@ -168,8 +169,12 @@ const ORPHAN_HEADS = new Map();
     },
     fallback: () => ({}),
   });
-  for (const [k, v] of Object.entries(r.data)) if (v.length) ORPHAN_HEADS.set(k, new Set(v));
+  // 读盘故障解除后再补旧表；不能拿空的回落值当成已清理。
+  if (r.bad && !r.kept) return false;
+  for (const [k, v] of Object.entries(r.data)) if (v.length && !ORPHAN_HEADS.has(k)) ORPHAN_HEADS.set(k, new Set(v));
+  return true;
 }
+loadOrphans();
 function saveOrphans() {
   const o = {};
   for (const [k, s] of ORPHAN_HEADS) if (s.size) o[k] = [...s].slice(-200);
@@ -449,47 +454,216 @@ function dirBytes(dir) {
   return total;
 }
 
+// meta.json 仍是回收站条目的入口。tx.v=1：moving → notify → ready → restoring 或 purging。
+// 文件搬移以 dev/ino 判断实际落点，不靠「上一步写到哪」。notify 是可重放的提交后钩子；
+// purging 一旦落盘就不可恢复，条目保留到文件和状态表都清理成功。
+const TRASH_PHASES = new Set(["moving", "notify", "ready", "restoring", "purging"]);
+const SID_BUSY = new Map();   // 跨异步解包 / 加载清理模块；同步搬移不让出事件循环
+const validTrashId = (id) => typeof id === "string" && id !== ".edits" && SID_RE.test(id);
+const validProject = (name) => typeof name === "string" && /^(?!\.+$)[A-Za-z0-9._-]{1,255}$/.test(name);
+const validName = (name) => typeof name === "string" && name && name !== "." && name !== ".." && !/[/\\\0]/.test(name);
+const isEditFor = (name, id) => name.startsWith(id + ".") && /^\d+\.jsonl$/.test(name.slice(id.length + 1));
+function holdTrashId(id) {
+  let resolve;
+  const done = new Promise((r) => { resolve = r; });
+  SID_BUSY.set(id, done);
+  return () => { SID_BUSY.delete(id); resolve(); };
+}
+const absent = (f) => { try { return fs.lstatSync(f, { bigint: true }); } catch (e) { if (e.code === "ENOENT") return null; throw e; } };
+const fileId = (st) => st ? `${st.dev}:${st.ino}` : null;
+const validFileId = (s) => typeof s === "string" && /^\d+:\d+$/.test(s);
+const slotOf = (id) => path.join(TRASH_DIR, id);
+const mainIn = (slot, id) => path.join(slot, id + ".jsonl");
+const sideIn = (slot) => path.join(slot, "dir");
+const metaIn = (slot) => path.join(slot, "meta.json");
+function syncDir(dir) {
+  const fd = fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
+function trashError(code, message) { return Object.assign(new Error(message), { code }); }
+const occupied = () => trashError("exists", tz("同名会话已存在"));
+function writeTrash(slot, meta) {
+  if (!saveState(metaIn(slot), meta, { pretty: false })) throw trashError("write_failed", tz("没保存上：存储满了或没有权限"));
+  syncDir(slot);
+}
+function setTrashPhase(slot, meta, phase, extra = {}) {
+  const next = { ...meta, tx: { ...meta.tx, phase, ...extra } };
+  writeTrash(slot, next);
+  return next;
+}
+function readTrash(slot, id) {
+  const st = absent(slot);
+  if (!st) return null;
+  if (!st.isDirectory()) throw new Error(`Invalid trash slot: ${id}`);
+  const mp = metaIn(slot), mst = absent(mp);
+  if (!mst) {
+    // 崩溃可能留下只建了目录、或只写了一半临时元数据的占位；里面不能有会话数据。
+    if (fs.readdirSync(slot).every((n) => /^\.meta\.json\.tmp-[\da-z-]+$/.test(n))) return null;
+    throw new Error(`Trash metadata missing: ${id}`);
+  }
+  if (!mst.isFile()) throw new Error(`Invalid trash metadata: ${id}`);
+  const m = JSON.parse(fs.readFileSync(mp, "utf8"));
+  if (!isObj(m) || m.id !== id) throw new Error(`Invalid trash metadata: ${id}`);
+  const tx = m.tx;
+  if (tx !== undefined && (!isObj(tx) || tx.v !== 1 || !TRASH_PHASES.has(tx.phase) ||
+      !validFileId(tx.file) || (tx.side !== null && !validFileId(tx.side)) || !validProject(m.project) ||
+      (tx.phase === "restoring" && !validProject(tx.target)) ||
+      (tx.phase === "purging" && (!Array.isArray(tx.files) || tx.files.some((f) => !Array.isArray(f) || !cleanupPathOk(f[0], m) || !validFileId(f[1]))))))
+    throw new Error(`Invalid trash transaction: ${id}`);
+  return m;
+}
+function removeSlot(slot) {
+  // 事务仍未完成时不能用 rm -r 删整格：meta 必须最后删。调用方先确认数据已搬回 / 删除。
+  for (const n of fs.readdirSync(slot)) {
+    if (n === "meta.json") continue;
+    if (!/^\.meta\.json\.tmp-[\da-z-]+$/.test(n)) throw new Error(`Trash slot still contains data: ${path.basename(slot)}`);
+    fs.rmSync(path.join(slot, n));
+  }
+  syncDir(slot);
+  fs.rmSync(metaIn(slot), { force: true });
+  fs.rmdirSync(slot);
+  syncDir(TRASH_DIR);
+}
+function moveTrashEntry(src, dst, want) {
+  if (fileId(absent(src)) !== want) throw new Error(`Trash source changed: ${path.basename(src)}`);
+  if (absent(dst)) throw occupied();
+  fs.renameSync(src, dst);
+}
+function syncMove(slot, dir) { syncDir(dir); syncDir(slot); }
+function projectParts(project, id) {
+  const dir = path.join(PATHS.projects, project);
+  return { dir, file: path.join(dir, id + ".jsonl"), side: path.join(dir, id) };
+}
+function trashIds() {
+  try { return fs.readdirSync(TRASH_DIR).filter(validTrashId); }
+  catch (e) { if (e.code === "ENOENT") return []; throw e; }
+}
+// existsSync / findSessionFile 把 I/O 失败也当成没有：删按 SID 共用的状态之前不能这样判断。
+function hasLiveCopy(id, except) {
+  let dirs;
+  try { dirs = fs.readdirSync(PATHS.projects, { withFileTypes: true }); }
+  catch (e) { if (e.code === "ENOENT") return false; throw e; }
+  return dirs.some((d) => d.isDirectory() && d.name !== except && !!absent(projectParts(d.name, id).file));
+}
+function updateTrashTable(table, save, id, value) {
+  const before = Object.getOwnPropertyDescriptor(table, id);
+  if (before?.value === value) return true;
+  if (value === undefined) delete table[id]; else table[id] = value;
+  if (save()) return true;
+  if (before) Object.defineProperty(table, id, before); else delete table[id];
+  return false;
+}
+function notifyTrash(id) {
+  let failure;
+  for (const f of TRASH_HOOKS) {
+    try { f(id); } catch (e) { failure ??= e; log(`回收后续处理出错：${e.message}`); }
+  }
+  if (failure) throw failure;
+}
+function completeTrash(slot, meta) {
+  const { id, project, tx } = meta;
+  if (fileId(absent(mainIn(slot, id))) !== tx.file || fileId(absent(sideIn(slot))) !== tx.side)
+    throw new Error(`Trash files changed: ${id}`);
+  // 不能用旧的删除事件清掉同号新会话的引用，也不能当作钩子已成功而丢掉撤销依据。
+  if (hasLiveCopy(id)) throw occupied();
+  let ok = updateTrashTable(PINS, savePins, id, undefined);
+  ok = updateTrashTable(NAMES, saveNames, id, undefined) && ok;
+  if (LAST_SESSION?.id === id) ok = forgetSession() && ok;
+  notifyTrash(id);
+  if (!ok) throw trashError("write_failed", tz("没保存上：存储满了或没有权限"));
+  syncDir(CFG.home);
+  PEEK_CACHE.delete(projectParts(project, id).file);
+  return setTrashPhase(slot, meta, "ready");
+}
+function settleTrashMove(slot, meta) {
+  const { id, project, tx } = meta;
+  const { dir, file, side } = projectParts(project, id);
+  const mf = mainIn(slot, id), sd = sideIn(slot);
+  const inFile = fileId(absent(mf)), inSide = fileId(absent(sd));
+  if (inFile === tx.file && inSide === tx.side) {
+    syncMove(slot, dir);
+    return setTrashPhase(slot, meta, "notify");
+  }
+  // 只有一段成功：先把附件归位，再放回主记录。若中途同名路径被占，拒绝覆盖并保留事务。
+  if (inSide) moveTrashEntry(sd, side, tx.side);
+  else if (fileId(absent(side)) !== tx.side) throw new Error(`Trash attachment changed: ${id}`);
+  if (inFile) moveTrashEntry(mf, file, tx.file);
+  else if (fileId(absent(file)) !== tx.file) throw new Error(`Trash transcript changed: ${id}`);
+  syncMove(slot, dir);
+  removeSlot(slot);
+  return null;
+}
 export function trashSession(id) {
+  if (!validTrashId(id)) return { ok: false, error: "bad id" };
+  if (SID_BUSY.has(id)) return { ok: false, error: "busy" };
+  const slot = slotOf(id);
+  if (absent(slot) && reconcileSlot(id, false)) return { ok: false, error: "exists", message: occupied().message };
   const found = findSessionFile(id);
   if (!found) return { ok: false, error: "not found" };
-  const meta = peekSession(found.file);
-  const slot = path.join(TRASH_DIR, id);
-  fs.rmSync(slot, { recursive: true, force: true });
-  fs.mkdirSync(slot, { recursive: true });
-  const st = fs.statSync(found.file);
-  const side = path.join(PATHS.projects, found.project, id);
-  const sideSize = dirBytes(side);
-  // 先写 meta 再挪文件：反过来的话，挪完、写 meta 之前被杀，回收站里就是个没 meta 的孤儿——列不出、恢复不了、过期也不清（审查 中3）。
-  // 这样被杀在中间，原会话还在原处，回收站这格没有 jsonl，listTrash 不列它，下次删同一个会话时整格重建。
-  // meta 用临时文件 + fsync + 换名：掉电后整条会话列不出/恢复不了/永不清（195-A.14）
-  const metaFile = path.join(slot, "meta.json");
-  if (!writeAtomic(metaFile, JSON.stringify({
-    id, project: found.project, title: NAMES[id] || meta.title, renamed: !!NAMES[id], pinned: PINS[id] || 0,
-    cwd: meta.cwd, mtime: st.mtimeMs, size: st.size, sideSize, total: st.size + sideSize, deletedAt: Date.now(),
-  }))) { fs.rmSync(slot, { recursive: true, force: true }); return { ok: false, error: "write_failed", message: tz("没保存上：存储满了或没有权限") }; }
-  fs.renameSync(found.file, path.join(slot, id + ".jsonl"));
-  if (fs.existsSync(side)) fs.renameSync(side, path.join(slot, "dir"));
-  if (PINS[id]) { delete PINS[id]; savePins(); }
-  PEEK_CACHE.delete(found.file);
-  delete NAMES[id]; saveNames();
-  // 删的正好是「最近跑过的那条」：别让前端下次打开时又指回去（会显示「找不到这个会话」而不是欢迎页）
-  if (LAST_SESSION && LAST_SESSION.id === id) forgetSession();
-  for (const f of TRASH_HOOKS) { try { f(id); } catch (e) { log(`回收后续处理出错：${e.message}`); } }
+  const { file, project } = found;
+  if (!validProject(project)) throw new Error("Invalid project directory");
+  // 这些状态只按会话号索引；已有另一份活记录时不能先挪文件、到通知阶段才拒绝。
+  if (hasLiveCopy(id, project)) return { ok: false, error: "exists", message: occupied().message };
+  const { dir, side } = projectParts(project, id);
+  const st = absent(file), sideSt = absent(side);
+  if (!st?.isFile() || (sideSt && !sideSt.isDirectory())) throw new Error("Invalid session files");
+  const { title, cwd } = peekSession(file), sideSize = dirBytes(side);
+  const meta = { id, project, title: NAMES[id] || title, renamed: !!NAMES[id], pinned: PINS[id] || 0,
+    cwd, mtime: Number(st.mtimeNs) / 1e6, size: Number(st.size), sideSize, total: Number(st.size) + sideSize, deletedAt: Date.now(),
+    tx: { v: 1, phase: "moving", file: fileId(st), side: fileId(sideSt) } };
+  fs.mkdirSync(TRASH_DIR, { recursive: true });
+  fs.mkdirSync(slot);   // 不覆盖上一代回收站条目
+  try {
+    writeTrash(slot, meta);
+    syncDir(TRASH_DIR);
+    syncDir(CFG.home);
+  } catch (e) {
+    // 还没搬过任何东西；保留意图亦无害，恢复时按现有落点撤销。
+    try { removeSlot(slot); } catch (err) { log(`回收占位清理失败 ${id}: ${err.message}`); }
+    if (e.code === "write_failed") return { ok: false, error: e.code, message: e.message };
+    throw e;
+  }
+  try {
+    moveTrashEntry(file, mainIn(slot, id), meta.tx.file);
+    if (sideSt) moveTrashEntry(side, sideIn(slot), meta.tx.side);
+  } catch (e) {
+    try { settleTrashMove(slot, meta); } catch (err) { throw new Error(`回收失败，等待恢复 ${id}: ${e.message}; ${err.message}`, { cause: e }); }
+    throw e;
+  }
+  syncMove(slot, dir);
+  completeTrash(slot, setTrashPhase(slot, meta, "notify"));
   return { ok: true };
 }
-/** 会话号在不在回收站里：打开失败时界面据此说「在回收站，可恢复」而不是悄悄开新对话（#173） */
-export function inTrash(id) { return SID_RE.test(String(id || "")) && fs.existsSync(path.join(TRASH_DIR, id, id + ".jsonl")); }
+/** 只把有证据的槽位当成明确删除，读错不能触发任何撤销。 */
+export function trashPresence(id) {
+  if (!validTrashId(id)) return "missing";
+  const slot = slotOf(id);
+  try {
+    const m = readTrash(slot, id);
+    if (!m) return "missing";
+    const st = absent(mainIn(slot, id));
+    const tx = m.tx;
+    if (tx && tx.phase !== "purging" && (tx.phase === "moving" || tx.phase === "restoring" || fileId(st) !== tx.file)) return "unreadable";
+    if (st?.isFile() || tx?.phase === "purging") return hasLiveCopy(id) ? "unreadable" : "present";
+    return !tx && legacyRestoreTail(slot, m) ? "present" : "missing";
+  } catch { return "unreadable"; }
+}
+export const inTrash = (id) => trashPresence(id) === "present";
 
-export function listTrash() {
-  let ids = [];
-  try { ids = fs.readdirSync(TRASH_DIR); } catch { return []; }
+export function listTrash({ strict = false } = {}) {
   const out = [];
-  for (const id of ids) {
-    if (!fs.existsSync(path.join(TRASH_DIR, id, id + ".jsonl"))) continue;   // 删到一半被打断的空格子
+  for (const id of trashIds()) {
     try {
-      const m = JSON.parse(fs.readFileSync(path.join(TRASH_DIR, id, "meta.json"), "utf8"));
-      if (m && typeof m === "object") out.push({ ...m, size: m.total != null ? m.total : m.size });   // 老条目没有 total，仍报主记录大小
-    } catch {}
+      const slot = slotOf(id), m = readTrash(slot, id);
+      if (!m || (!m.tx && !absent(mainIn(slot, id)) && !legacyRestoreTail(slot, m))) continue;
+      const { tx, ...item } = m;
+      if (tx?.phase === "purging") item.purgePending = true;
+      out.push({ ...item, size: m.total ?? m.size });   // 老条目没有 total，仍报主记录大小
+    } catch (e) {
+      // 单格读错不挡住其他会话；用户明确选「清空」时不能跳过故障还报成功。
+      if (strict) throw e;
+      log(`回收站条目读不了 ${id}: ${e.message}`);
+    }
   }
   return out.sort((a, b) => b.deletedAt - a.deletedAt);
 }
@@ -517,108 +691,255 @@ function rewriteCwd(file, cwd, sid) {
   resealAfterEdit(sid, file, dirty);
 }
 
-export function restoreSession(id) {
-  if (!SID_RE.test(id)) return { ok: false, error: "bad id" };
-  const slot = path.join(TRASH_DIR, id);
-  let meta;
-  try { meta = JSON.parse(fs.readFileSync(path.join(slot, "meta.json"), "utf8")); } catch { return { ok: false, error: "not found" }; }
-  const sideIn = path.join(slot, "dir"), hasSide = fs.existsSync(sideIn);
-  const done = findSessionFile(id);
-  // 标题/置顶先落盘：以前挪完文件再 saveNames/savePins，写失败也把 meta.json 删了，标题和置顶从此无法恢复（195-Y.2）
-  const n0 = NAMES[id], p0 = PINS[id];
-  if (meta.renamed && meta.title) NAMES[id] = meta.title;
-  if (meta.pinned) PINS[id] = meta.pinned;
-  let saved = true;
-  if (meta.renamed && meta.title) saved = saveNames() && saved;
-  if (meta.pinned) saved = savePins() && saved;
-  if (!saved) {
-    if (n0 === undefined) delete NAMES[id]; else NAMES[id] = n0;
-    if (p0 === undefined) delete PINS[id]; else PINS[id] = p0;
+function saveRestoreMeta(meta) {
+  const { id, title, renamed, pinned } = meta;
+  if ((renamed && title && !updateTrashTable(NAMES, saveNames, id, title)) ||
+      (pinned && !updateTrashTable(PINS, savePins, id, pinned))) return false;
+  syncDir(CFG.home);
+  return true;
+}
+function finishRestore(slot, meta, file) {
+  removeSlot(slot);
+  // 原 cwd 不见了则沿用以前的补救；改写会换掉 inode，要在搬移事务收口之后做。
+  if (meta.cwd && !isDirPath(meta.cwd)) {
+    try { rewriteCwd(file, realWorkspace(), meta.id); } catch (e) { log(`恢复会话：cwd 改写失败（${e.code || e.message}），保留原 cwd`); }
+  }
+}
+function settleRestore(slot, meta) {
+  const { id, tx } = meta;
+  const { dir, file, side } = projectParts(tx.target, id);
+  const mf = mainIn(slot, id), sd = sideIn(slot);
+  const inFile = fileId(absent(mf)), inSide = fileId(absent(sd));
+  if (!inFile && fileId(absent(file)) === tx.file) {
+    if (inSide && inSide === tx.side) moveTrashEntry(sd, side, tx.side); // 老版已放回主记录，只差附件
+    else if (inSide || fileId(absent(side)) !== tx.side) throw new Error(`Restore attachment changed: ${id}`);
+    syncMove(slot, dir);
+    finishRestore(slot, meta, file);
+    return null;
+  }
+  if (inFile !== tx.file) throw new Error(`Restore transcript changed: ${id}`);
+  if (inSide !== tx.side) moveTrashEntry(side, sd, tx.side);
+  syncMove(slot, dir);
+  // 会话仍在回收站。撤回刚为恢复写入的名字/置顶，不重放删除事件。
+  if (!hasLiveCopy(id)) {
+    if (!updateTrashTable(NAMES, saveNames, id, undefined) || !updateTrashTable(PINS, savePins, id, undefined))
+      throw trashError("write_failed", tz("没保存上：存储满了或没有权限"));
+    syncDir(CFG.home);
+  }
+  return setTrashPhase(slot, meta, "ready");
+}
+// 旧版没有 inode，只认原项目里大小、时间均吻合的记录。
+function legacyMainMatches(st, meta) {
+  return st?.isFile() && Number(st.size) === meta.size && Math.abs(Number(st.mtimeNs) / 1e6 - meta.mtime) < 1;
+}
+function legacyRestoreTail(slot, meta) {
+  const { id, project } = meta;
+  if (!validProject(project) || !Number.isFinite(meta.mtime) || hasLiveCopy(id, project)) return false;
+  const { file, side } = projectParts(project, id);
+  return !absent(mainIn(slot, id)) && absent(sideIn(slot))?.isDirectory() && !absent(side) && legacyMainMatches(absent(file), meta);
+}
+function reconcileSlot(id, hooks = true) {
+  const slot = slotOf(id);
+  let m = readTrash(slot, id);
+  if (!m) { if (absent(slot)) removeSlot(slot); return null; }
+  if (!m.tx) {
+    const main = absent(mainIn(slot, id)), side = absent(sideIn(slot));
+    if (!main) {
+      // 老版可能在第一段换名前退出。只在原主记录吻合、槽里也没附件时清掉旧占位。
+      if (!side && validProject(m.project) && legacyMainMatches(absent(projectParts(m.project, id).file), m)) {
+        removeSlot(slot);
+        return null;
+      }
+      return m; // 证据不足时不动原路径
+    }
+    if (!main.isFile() || (side && !side.isDirectory())) throw new Error(`Invalid legacy trash files: ${id}`);
+    const project = validProject(m.project) ? m.project : projectSlug(realWorkspace());
+    // 老版没有事务。完整槽位可以升级，旧版漏在项目目录里的附件不能凭 SID 判定归属。
+    m = { ...m, project, tx: { v: 1, phase: "notify", file: fileId(main), side: fileId(side), ...(!side ? { legacyNoSide: true } : {}) } };
+    if (m.total == null) m.total = m.size + (side ? dirBytes(sideIn(slot)) : 0);
+    writeTrash(slot, m);
+  }
+  if (m.tx.phase === "moving") m = settleTrashMove(slot, m);
+  else if (m.tx.phase === "restoring") m = settleRestore(slot, m);
+  if (hooks && m?.tx?.phase === "notify") m = completeTrash(slot, m);
+  return m;
+}
+/** 只能在网关拿到主端口后跑：先修文件供队列恢复使用，再在队列恢复之后重放通知。 */
+export function recoverTrash({ hooks = true } = {}) {
+  for (const id of trashIds()) {
+    if (SID_BUSY.has(id)) continue;
+    try { reconcileSlot(id, hooks); } catch (e) { log(`回收站恢复失败 ${id}: ${e.message}`); }
+  }
+}
+function restoreUnlocked(id) {
+  const slot = slotOf(id), before = readTrash(slot, id);
+  let meta = reconcileSlot(id, false);
+  if (!meta) return before?.tx?.phase === "restoring" ? { ok: true } : { ok: false, error: "not found" };
+  if (meta.tx?.phase === "purging") return { ok: false, error: "purge_pending" };
+  const target = validProject(meta.project) ? meta.project : projectSlug(realWorkspace());
+  const { dir, file, side } = projectParts(target, id);
+  const mf = mainIn(slot, id), sd = sideIn(slot), main = absent(mf), attached = absent(sd);
+  if (runOfSession(id)) return { ok: false, error: "busy" };
+  if (hasLiveCopy(id)) {
+    // 老版先放回主记录留下的附件尾巴：只在原项目、记录身份吻合、附件目标空着时补回。
+    if (main || !attached?.isDirectory() || absent(side) || hasLiveCopy(id, target)) return { ok: false, error: "exists" };
+    const live = absent(file);
+    if (!live?.isFile() || (meta.tx ? fileId(live) !== meta.tx.file || fileId(attached) !== meta.tx.side : !legacyRestoreTail(slot, meta)))
+      return { ok: false, error: "exists" };
+    if (!meta.tx) notifyTrash(id);  // 旧版有可能没跑完 post-commit 钩子；失败时槽位仍可辨认、重试
+    if (!saveRestoreMeta(meta)) return { ok: false, error: "write_failed" };
+    const normalized = meta.tx ? meta : { ...meta, tx: { v: 1, file: fileId(live), side: fileId(attached) } };
+    const restoring = setTrashPhase(slot, normalized, "restoring", { target });
+    settleRestore(slot, restoring);
+    return { ok: true };
+  }
+  if (!main) return { ok: false, error: "not found" };
+  if (fileId(main) !== meta.tx.file || fileId(attached) !== meta.tx.side) throw new Error(`Trash files changed: ${id}`);
+  if (absent(side)) return { ok: false, error: "exists" }; // 不能吃掉早期留下的附件或同号导入正在写的数据
+  if (meta.tx.phase === "notify") meta = completeTrash(slot, meta);
+  fs.mkdirSync(dir, { recursive: true });
+  syncDir(PATHS.projects);
+  const restoring = setTrashPhase(slot, meta, "restoring", { target });
+  if (!saveRestoreMeta(meta)) {
+    settleRestore(slot, restoring);
     return { ok: false, error: "write_failed" };
   }
-  let target = null;
-  if (done) {
-    // 旧版先放回主记录、附件没放回去就报错的半截：主记录已在、回收站这格只剩附件 —— 把附件补回去收尾（#98 03-014）
-    const tail = !fs.existsSync(path.join(slot, id + ".jsonl")) && hasSide && !fs.existsSync(path.join(path.dirname(done.file), id));
-    if (!tail) { if (n0 === undefined) delete NAMES[id]; else NAMES[id] = n0; if (p0 === undefined) delete PINS[id]; else PINS[id] = p0; saveNames(); savePins(); return { ok: false, error: "exists" }; }
-    fs.renameSync(sideIn, path.join(path.dirname(done.file), id));
-    target = done.file;
-  } else {
-    const dir = path.join(PATHS.projects, SID_RE.test(meta.project || "") ? meta.project : projectSlug(realWorkspace()));
-    fs.mkdirSync(dir, { recursive: true });
-    // 先放附件、再放主记录：主记录放不回去就把附件挪回回收站，这一格照旧在列表里，可以再点恢复（#98 03-014）
-    if (hasSide) fs.renameSync(sideIn, path.join(dir, id));
-    try { fs.renameSync(path.join(slot, id + ".jsonl"), path.join(dir, id + ".jsonl")); }
-    catch (e) { if (hasSide) try { fs.renameSync(path.join(dir, id), sideIn); } catch {} throw e; }
-    target = path.join(dir, id + ".jsonl");
+  try {
+    if (attached) moveTrashEntry(sd, side, meta.tx.side);
+    moveTrashEntry(mf, file, meta.tx.file);
+  } catch (e) {
+    try { settleRestore(slot, restoring); } catch (err) { throw new Error(`恢复失败，等待恢复 ${id}: ${e.message}; ${err.message}`, { cause: e }); }
+    throw e;
   }
-  // 原来的 cwd 已经不在了（项目目录被删/拔卡）：恢复出来的会话能读、--resume 却找不到（195-2.2）。
-  // 和导入一样把 cwd 改写到当前工作区，写临时文件再换名
-  if (target && meta.cwd && !(isDirPath(meta.cwd))) {
-    try { rewriteCwd(target, realWorkspace(), id); } catch (e) { log(`恢复会话：cwd 改写失败（${e.code || e.message}），保留原 cwd`); }
-  }
-  fs.rmSync(slot, { recursive: true, force: true });
+  syncMove(slot, dir);
+  finishRestore(slot, restoring, file);
   return { ok: true };
+}
+export function restoreSession(id) {
+  if (!validTrashId(id)) return { ok: false, error: "bad id" };
+  if (SID_BUSY.has(id)) return { ok: false, error: "busy" };
+  return restoreUnlocked(id);
 }
 
 /** claude 放后台命令输出的地方：它的 TMPDIR（claudeEnv 给的 $PREFIX/tmp）下的 claude-<uid> */
 export const claudeTmpRoot = () => path.join(PREFIX ? path.join(PREFIX, "tmp") : CFG.home, "claude-" + process.getuid());
-/** 彻底删掉一个会话时把它散在别处的数据一起清掉：删消息备份、file-history、子代理联络簿、档案、书签、会话模型、封签、脉络 */
-async function forgetSessionData(id, meta) {
-  try { for (const f of fs.readdirSync(EDITS_DIR)) if (f.startsWith(id + ".")) fs.rmSync(path.join(EDITS_DIR, f), { force: true }); } catch {}
-  try { fs.rmSync(path.join(CFG.home, ".claude", "file-history", id), { recursive: true, force: true }); } catch {}
-  // claude 按会话号另存的几处（2.1.311 实测）：环境快照、任务清单、调试日志，和 $TMPDIR/claude-<uid>/<项目>/<会话号> 下的后台命令输出（D10）
-  for (const rel of [["session-env", id], ["tasks", id], ["debug", id + ".txt"]]) { try { fs.rmSync(path.join(CFG.home, ".claude", ...rel), { recursive: true, force: true }); } catch {} }
-  try {
-    const t = claudeTmpRoot();
-    for (const slug of fs.readdirSync(t)) fs.rmSync(path.join(t, slug, id), { recursive: true, force: true });
-  } catch {}
-  const cwd = meta && meta.cwd;
-  if (cwd) {
-    try { fs.rmSync(path.join(cwd, ".cccodroid", "agents", String(id).slice(0, 8)), { recursive: true, force: true }); } catch {}
-    try { const { agentsDir } = await import("./agents.mjs"); fs.rmSync(agentsDir(cwd, id), { recursive: true, force: true }); } catch {}
+function readDirIfPresent(dir) {
+  try { return fs.readdirSync(dir, { withFileTypes: true }); }
+  catch (e) { if (e.code === "ENOENT") return []; throw e; }
+}
+function exactCleanupPaths({ id, cwd }) {
+  const c = (...parts) => path.join(CFG.home, ".claude", ...parts);
+  const files = [c("file-history", id), c("session-env", id), c("tasks", id), c("debug", id + ".txt")];
+  // 联络簿只用 SID 前八位；保留存在同前缀会话时有歧义的目录。
+  if (typeof cwd === "string" && path.isAbsolute(cwd) && validName(id.slice(0, 8))) {
+    files.push(path.join(cwd, ".cccodroid", "agents", id.slice(0, 8)), agentsDir(cwd, id));
   }
-  forgetChild(id);
-  // 动态 import：sessionops 不能在这些模块的顶层再引它们（会和 sessions / sessionops 绕成环）
-  await Promise.all([
-    import("./archive-store.mjs").then((m) => m.archiveForget(id)).catch(() => {}),
-    import("./sessmodel.mjs").then((m) => m.forgetSessModel(id)).catch(() => {}),
-    import("./bookmarks.mjs").then((m) => m.forgetBookmarks(id)).catch(() => {}),
-    import("./integrity.mjs").then((m) => m.forgetSeal(id)).catch(() => {}),
-  ]);
+  return files;
+}
+function cleanupPathOk(file, meta) {
+  if (typeof file !== "string" || !path.isAbsolute(file) || path.normalize(file) !== file) return false;
+  const { id } = meta;
+  const tmp = path.relative(claudeTmpRoot(), file).split(path.sep);
+  return exactCleanupPaths(meta).includes(file) ||
+    (path.dirname(file) === EDITS_DIR && isEditFor(path.basename(file), id)) ||
+    (tmp.length === 2 && validName(tmp[0]) && tmp[1] === id);
+}
+function cleanupFiles(id, meta) {
+  const files = exactCleanupPaths(meta);
+  const head = id.slice(0, 8);
+  if (files.length > 4) {
+    const collision = trashIds().some((x) => x !== id && x.startsWith(head)) || readDirIfPresent(PATHS.projects).some((d) =>
+      d.isDirectory() && readDirIfPresent(path.join(PATHS.projects, d.name)).some((s) => s.name.startsWith(head) && s.name.endsWith(".jsonl") && s.name !== id + ".jsonl"));
+    if (collision) files.length = 4;
+  }
+  for (const d of readDirIfPresent(claudeTmpRoot())) if (d.isDirectory() && validName(d.name)) files.push(path.join(claudeTmpRoot(), d.name, id));
+  for (const d of readDirIfPresent(EDITS_DIR)) if (isEditFor(d.name, id)) files.push(path.join(EDITS_DIR, d.name));
+  return [...new Set(files)].flatMap((f) => {
+    const st = absent(f);
+    return st ? [[f, fileId(st)]] : [];
+  });
+}
+function removeCleanupFile(file, want, strict = false) {
+  const st = absent(file);
+  if (st && fileId(st) !== want) {
+    if (strict) throw new Error(`Trash file changed: ${path.basename(file)}`);
+    return;   // 路径已经被新一代使用，不能再按原路径删
+  }
+  if (st) fs.rmSync(file, { recursive: true, force: true });
+  const dir = path.dirname(file);
+  if (absent(dir)) syncDir(dir);
+}
+async function purgeUnlocked(id) {
+  // 加载后再读状态。下面的检查、写意图、实际清理不让出事件循环。
+  const [{ forgetSessModel }, { forgetBookmarks }] = await Promise.all([import("./sessmodel.mjs"), import("./bookmarks.mjs")]);
+  const slot = slotOf(id);
+  let meta = reconcileSlot(id, false);
+  if (!meta) return false;
+  if (!meta.tx) throw new Error(`Cannot purge an incomplete legacy trash slot: ${id}`);
+  if (runOfSession(id)) throw trashError("busy", tz("这个会话正在生成中。"));
+  const detached = hasLiveCopy(id);
+  if (meta.tx.phase === "notify" && !detached) meta = completeTrash(slot, meta);
+  if (meta.tx.phase !== "purging") {
+    const main = mainIn(slot, id), side = sideIn(slot);
+    if (fileId(absent(main)) !== meta.tx.file || fileId(absent(side)) !== meta.tx.side) throw new Error(`Trash files changed: ${id}`);
+    if (!detached && meta.tx.legacyNoSide && absent(projectParts(meta.project, id).side))
+      throw new Error(`旧回收站条目的附件仍在项目目录，无法确认归属：${id}`);
+    // 同号已经有活会话，清理范围只能是回收站这格，不能碰共用的文件和状态表。
+    meta = setTrashPhase(slot, meta, "purging", { files: detached ? [] : cleanupFiles(id, meta), detached });
+  }
+  if (detached && !meta.tx.detached) meta = setTrashPhase(slot, meta, "purging", { detached: true });
+  // 换名成功但 fsync 失败后的重试也要先确认意图持久化，不能留下看似可恢复的半格。
+  syncDir(slot);
+  if (!meta.tx.detached) {
+    for (const [f, want] of meta.tx.files) removeCleanupFile(f, want);
+    for (const [name, forget] of [["archive", archiveForget], ["bookmarks", forgetBookmarks], ["session model", forgetSessModel], ["seal", forgetSeal], ["lineage", forgetChild]]) {
+      if (!forget(id)) throw trashError("write_failed", `回收站清理失败 ${id}: ${name}`);
+    }
+    if (stateUnread(ORPHAN_FILE) && !loadOrphans()) throw trashError("write_failed", `回收站清理失败 ${id}: orphan messages`);
+    if (ORPHAN_HEADS.has(id)) {
+      const before = ORPHAN_HEADS.get(id);
+      ORPHAN_HEADS.delete(id);
+      if (!saveOrphans()) { ORPHAN_HEADS.set(id, before); throw trashError("write_failed", `回收站清理失败 ${id}: orphan messages`); }
+    }
+    UNDO.delete(id);
+    syncDir(CFG.home);
+  }
+  if (meta.tx.side) removeCleanupFile(sideIn(slot), meta.tx.side, true);
+  removeCleanupFile(mainIn(slot, id), meta.tx.file, true);
+  removeSlot(slot);
+  return true;
 }
 
 export async function purgeTrash(ids) {
   let n = 0;
-  for (const id of ids) {
-    if (!SID_RE.test(id)) continue;
-    const slot = path.join(TRASH_DIR, id);
-    if (!fs.existsSync(slot)) continue;
-    let meta = {}; try { meta = JSON.parse(fs.readFileSync(path.join(slot, "meta.json"), "utf8")); } catch {}
-    fs.rmSync(slot, { recursive: true, force: true });
-    await forgetSessionData(id, meta);
-    n++;
+  const failed = [], selected = [];
+  // 一次批量操作先锁住整批：等待前一条清理时，后面的槽位不能被恢复又换成同 ID 的新一代。
+  for (const id of new Set(ids)) {
+    if (!validTrashId(id)) continue;
+    if (SID_BUSY.has(id)) { failed.push(`${id}: busy`); continue; }
+    selected.push([id, holdTrashId(id)]);
   }
+  for (const [id, release] of selected) {
+    try { if (await purgeUnlocked(id)) n++; }
+    catch (e) { failed.push(`${id}: ${e.message}`); }
+    finally { release(); }
+  }
+  if (failed.length) throw Object.assign(new Error(`回收站清理失败：${failed.join("；").slice(0, 500)}`), { purged: n });
   return n;
 }
 
-/** 回收站里放满 30 天的自动清掉（网关启动时跑一次） */
+/** 回收站里放满 30 天的自动清掉，也重试已经确认但未收口的彻底删除。 */
 export async function expireTrash() {
   try {
-    // 老条目没有 total：启动时补算一次整格占用（含附件），界面不再少报（196-真机.2）
-    try {
-      for (const id of fs.readdirSync(TRASH_DIR)) {
-        const mp = path.join(TRASH_DIR, id, "meta.json");
-        let m; try { m = JSON.parse(fs.readFileSync(mp, "utf8")); } catch { continue; }
-        if (m && m.total == null) { m.total = dirBytes(path.join(TRASH_DIR, id)); writeAtomic(mp, JSON.stringify(m)); }
-      }
-    } catch {}
+    recoverTrash();
     const cut = Date.now() - TRASH_KEEP_DAYS * 86400000;
-    const old = listTrash().filter((m) => m.deletedAt < cut).map((m) => m.id);
-    if (old.length) log(`回收站：清掉 ${await purgeTrash(old)} 个放满 ${TRASH_KEEP_DAYS} 天的会话`);
-    // 删消息留的备份也一样
-    try { for (const f of fs.readdirSync(EDITS_DIR)) { const p = path.join(EDITS_DIR, f); if (fs.statSync(p).mtimeMs < cut) fs.rmSync(p, { force: true }); } } catch {}
-  } catch (e) { log("回收站清理失败: " + (e.code || e.message)); }
+    const old = listTrash().filter((m) => !SID_BUSY.has(m.id) && (m.purgePending || m.deletedAt < cut)).map((m) => m.id);
+    if (old.length) log(`回收站：清掉 ${await purgeTrash(old)} 个会话`);
+    for (const f of readDirIfPresent(EDITS_DIR)) {
+      const p = path.join(EDITS_DIR, f.name);
+      if (fs.statSync(p).mtimeMs < cut) fs.rmSync(p, { force: true });
+    }
+  } catch (e) { log("回收站清理失败: " + e.message); }
 }
 
 /** claude 给 cwd 起项目目录名的规则：非字母数字一律换成 -。
@@ -805,38 +1126,51 @@ export async function importSessions(file) {
   };
   try { for (const s of manifest.sessions || []) {
     const id = String(s.id || "");
-    if (!SID_RE.test(id)) continue;
+    if (!validTrashId(id)) continue;
     const main = byName.get(`sessions/${id}.jsonl`);
     if (!main) continue;
-    // 同号的会话在回收站里：先恢复它，再按「已存在」跳过。以前直接跳过，提示已存在、列表里却看不到（195-A.5）
-    if (!findSessionFile(id) && fs.existsSync(path.join(TRASH_DIR, id))) { try { restoreSession(id); } catch {} }
-    if (findSessionFile(id)) { absorbMeta(s, id); res.skipped.push(id); continue; }
-    const dst = path.join(dir, id + ".jsonl"), side = path.join(dir, id), hadSide = fs.existsSync(side);
+    // 彻底删除、恢复和两个同号导入不能在解包期间交错。失败的删除在发布新会话前先收口，
+    // 否则旧档案/封签/文件检查点仍按 SID 共用，后续重试就分不清新旧。
+    while (SID_BUSY.has(id)) await SID_BUSY.get(id);
+    const release = holdTrashId(id);
     try {
-      // 先解到临时名，整条会话（含子代理记录）都解完再改名：中途失败不留半截会话
-      await zipExtract(file, main, dst + ".part", budget, fixCwd);
-      const pre = `sessions/${id}/`;
-      for (const e of bySide.get(id) || []) {
-        if (!e.name.startsWith(pre)) continue;
-        const rel = e.name.slice(pre.length);
-        if (rel.split("/").some((x) => !x || x === "." || x === "..")) continue;   // 防目录穿越
-        const out = path.join(side, rel);
-        fs.mkdirSync(path.dirname(out), { recursive: true });
-        await zipExtract(file, e, out, budget);
+      if (absent(slotOf(id))) {
+        const pending = reconcileSlot(id, false);
+        if (pending?.tx?.phase === "purging") await purgeUnlocked(id);
+        else if (pending && !hasLiveCopy(id)) {
+          const restored = restoreUnlocked(id);
+          if (!restored.ok) throw new Error(`恢复回收站会话失败 ${id}: ${restored.error}`);
+        }
       }
-      fs.renameSync(dst + ".part", dst);
-    } catch (err) {
-      fs.rmSync(dst + ".part", { force: true });
-      if (!hadSide) fs.rmSync(side, { recursive: true, force: true });
-      throw err;
-    }
-    // 导入的会话按 mtime 排：沿用包里的旧时间会被排到最近 150 条之外、折进旧月份，用户看不到（196-会话.5）。
-    // 改成「现在导入的」，列表里立刻能看到
-    try { const now = new Date(); fs.utimesSync(dst, now, now); } catch {}
-    sealSession(id, dst, { flag: "imported" });   // 包里的历史谁都能写：第一次接着聊时提醒模型（见 integrity.mjs）
-    absorbMeta(s, id);
-    noteManaged(id);    // 用户自己导进来的，当应用会话
-    res.imported.push(id);
+      if (hasLiveCopy(id)) { absorbMeta(s, id); res.skipped.push(id); continue; }
+      const dst = path.join(dir, id + ".jsonl"), side = path.join(dir, id), hadSide = fs.existsSync(side);
+      try {
+        // 先解到临时名，整条会话（含子代理记录）都解完再改名：中途失败不留半截会话
+        await zipExtract(file, main, dst + ".part", budget, fixCwd);
+        const pre = `sessions/${id}/`;
+        for (const e of bySide.get(id) || []) {
+          if (!e.name.startsWith(pre)) continue;
+          const rel = e.name.slice(pre.length);
+          if (rel.split("/").some((x) => !x || x === "." || x === "..")) continue;   // 防目录穿越
+          const out = path.join(side, rel);
+          fs.mkdirSync(path.dirname(out), { recursive: true });
+          await zipExtract(file, e, out, budget);
+        }
+        if (hasLiveCopy(id)) throw occupied();
+        fs.renameSync(dst + ".part", dst);
+      } catch (err) {
+        fs.rmSync(dst + ".part", { force: true });
+        if (!hadSide && !hasLiveCopy(id)) fs.rmSync(side, { recursive: true, force: true });
+        throw err;
+      }
+      // 导入的会话按 mtime 排：沿用包里的旧时间会被排到最近 150 条之外、折进旧月份，用户看不到（196-会话.5）。
+      // 改成「现在导入的」，列表里立刻能看到
+      try { const now = new Date(); fs.utimesSync(dst, now, now); } catch {}
+      sealSession(id, dst, { flag: "imported" });   // 包里的历史谁都能写：第一次接着聊时提醒模型（见 integrity.mjs）
+      absorbMeta(s, id);
+      noteManaged(id);    // 用户自己导进来的，当应用会话
+      res.imported.push(id);
+    } finally { release(); }
   } } catch (e) { e.imported = res.imported; throw e; }
   finally {
     namesSaved = saveNames();

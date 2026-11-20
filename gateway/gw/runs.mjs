@@ -11,7 +11,8 @@ export const SESSIONS = new Map();   // 内存里记录本次运行见过的会�
 export const RUNS = new Map();
 export const runList = () => [...RUNS.values()];
 export const latestRun = () => { let r = null; for (const x of RUNS.values()) if (!r || x.startedAt >= r.startedAt) r = x; return r; };
-/** 会话进了回收站之后要做的事（sessionops.trashSession 调）：清中断记录、通知界面、定时任务放下 lastSid…
+/** 会话进了回收站之后同步调用 f(id)：清中断记录、通知界面、定时任务放下 lastSid…
+ *  只在搬移提交后调用；崩溃或钩子抛错时可能重放，钩子要能重复执行。
  *  放在这里而不是 sessionops：queue / sched 都已经引用这个模块，不会绕成循环引用（#173） */
 export const TRASH_HOOKS = [];
 export const runOfSession = (sid) => (sid && runList().find((r) => r.sessionId === sid)) || null;
@@ -83,6 +84,7 @@ export function rememberSession(id) {
   writeAtomic(LAST_SESSION_FILE, JSON.stringify(LAST_SESSION));
 }
 export function forgetSession() {
+  try { fs.rmSync(LAST_SESSION_FILE, { force: true }); } catch { return false; }
   LAST_SESSION = null;
-  try { fs.rmSync(LAST_SESSION_FILE, { force: true }); } catch {}
+  return true;
 }

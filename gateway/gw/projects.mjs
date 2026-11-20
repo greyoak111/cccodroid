@@ -280,7 +280,12 @@ export async function routeProjects(req, res, u, p) {
       // 删目录前先把对话收进回收站（可恢复）。有一条没收进去就不删目录：以前吞掉错误照删（0.6.9 审计 195 第二批 R2/R5）。
       // 会话不只看最近 5000 条（更早的也在这个目录里）
       const failed = [];
-      for (const s of listSessions(1e6)) if (inDir(s)) { try { trashSession(s.id); } catch (e) { failed.push(`${s.id.slice(0, 8)}: ${e.message}`); } }
+      for (const s of listSessions(1e6)) if (inDir(s)) {
+        try {
+          const r = trashSession(s.id);
+          if (!r.ok) failed.push(`${s.id.slice(0, 8)}: ${r.message || r.error}`);
+        } catch (e) { failed.push(`${s.id.slice(0, 8)}: ${e.message}`); }
+      }
       if (failed.length) return sendJson(res, 500, { error: "trash_failed", message: tz("有 {n} 个对话没能移进回收站，目录没删：{why}", { n: failed.length, why: failed.slice(0, 3).join("；") }) });
       try { fs.rmSync(r, { recursive: true, force: true }); } catch (e) { return sendJson(res, 500, { error: e.message }); }
     }

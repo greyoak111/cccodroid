@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import readline from "node:readline";
 import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
-import { SID_RE, TRASH_KEEP_DAYS, inTrash, exportSessions, deleteMessage, forkSession, importSessions, listTrash, locateUserTurn, purgeTrash, realWorkspace, restoreSession, rewindFiles, rewindFixup, trashSession, undoDelete } from "./sessionops.mjs";
+import { SID_RE, TRASH_KEEP_DAYS, inTrash, exportSessions, deleteMessage, forkSession, importSessions, listTrash, locateUserTurn, purgeTrash, realWorkspace, restoreSession, rewindFiles, rewindFixup, trashPresence, trashSession, undoDelete } from "./sessionops.mjs";
 import { goalStateOf, tasksOf } from "./goal.mjs";
 import { backfillAgents, readAgentIndex, settleAgentRecs } from "./agents.mjs";
 import { bodyToFile, forEachLine } from "./bigfile.mjs";
@@ -415,7 +415,8 @@ export function sessionPresence(id) {
       if (e.code !== "ENOENT") result = "unreadable";
     }
   }
-  return result;
+  // 不把回收搬移未收口时短暂不可见的历史当作已删除；队列可等存储恢复再判断。
+  return result === "missing" && trashPresence(id) === "unreadable" ? "unreadable" : result;
 }
 
 // ── 路由：/api/sessions/search /api/sessions /api/sessions/trash /api/trash /api/trash/restore /api/trash/purge /api/sessions/export /api/sessions/import /api/session/ ──
@@ -474,10 +475,14 @@ export async function routeSessions(req, res, u, p) {
   }
   if (req.method === "POST" && p === "/api/trash/purge") {
     const b = JSON.parse((await readBody(req)) || "{}");
-    const ids = b.all ? listTrash().map((m) => m.id) : [].concat(b.ids || []).map(String);
-    const n = await purgeTrash(ids);
-    log(`回收站：彻底删除 ${n} 个会话`);
-    return sendJson(res, 200, { ok: true, purged: n });
+    try {
+      const ids = b.all ? listTrash({ strict: true }).map((m) => m.id) : [].concat(b.ids || []).map(String);
+      const n = await purgeTrash(ids);
+      log(`回收站：彻底删除 ${n} 个会话`);
+      return sendJson(res, 200, { ok: true, purged: n });
+    } catch (e) {
+      return sendJson(res, 500, { ok: false, error: e.message, message: tz("删除失败：{msg}", { msg: e.message }), purged: e.purged ?? 0 });
+    }
   }
   if (req.method === "POST" && p === "/api/sessions/export") {
     const b = JSON.parse((await readBody(req)) || "{}");
@@ -613,7 +618,7 @@ export async function routeSessions(req, res, u, p) {
       try { r = trashSession(id); } catch (e) { return sendJson(res, 500, { error: e.message }); }
       if (r.ok) log(`会话进回收站 ${id.slice(0, 8)}`);
       // 写不进 meta 是服务端/存储问题，别报成 404（195-N.1）
-      return sendJson(res, r.ok ? 200 : r.error === "write_failed" ? 500 : 404, r);
+      return sendJson(res, r.ok ? 200 : r.error === "write_failed" ? 500 : ["busy", "exists"].includes(r.error) ? 409 : 404, r);
     }
 
     if (req.method === "POST" && action === "rename") {

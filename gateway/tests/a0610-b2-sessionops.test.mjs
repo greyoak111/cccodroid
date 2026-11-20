@@ -5,15 +5,21 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { Readable } from "node:stream";
 import { CFG, PATHS } from "../gw/config.mjs";
-import { findSessionFile } from "../gw/sessions.mjs";
+import { NAMES, PINS, findSessionFile, routeSessions, saveNames, savePins, sessionPresence } from "../gw/sessions.mjs";
+import { LAST_SESSION, TRASH_HOOKS, rememberSession } from "../gw/runs.mjs";
 import * as ops from "../gw/sessionops.mjs";
 import { archiveDb, archiveImport, saveArchive } from "../gw/archive-store.mjs";
 import * as sessmodel from "../gw/sessmodel.mjs";
 import * as integration from "../gw/integrity.mjs";
 import { lineageDb, recordPrimary } from "../gw/lineage-store.mjs";
 
-const EDITS = path.join(CFG.home, ".ccapp-trash", ".edits");
+const TRASH = path.join(CFG.home, ".ccapp-trash"), EDITS = path.join(TRASH, ".edits");
+const slotOf = (id) => path.join(TRASH, id);
+const metaOf = (id) => path.join(slotOf(id), "meta.json");
+const insideOf = (id) => path.join(slotOf(id), id + ".jsonl");
 // 共用临时 home：跑完清掉本测试留下的会话（含恢复/导入回去的），别影响后面的用量补算
 after(() => fs.rmSync(path.join(PATHS.projects, "-b2-ops"), { recursive: true, force: true }));
 const ORPHANS = path.join(CFG.home, "ccapp-session-orphans.json");
@@ -74,6 +80,156 @@ test("会话文件不在时删消息回错误而不是抛（200-8-04 的异常�
 });
 
 // ── 回收站 ──
+const diskError = () => Object.assign(new Error("测试磁盘 I/O 错误"), { code: "EIO" });
+function failRename(t, when) {
+  const rename = fs.renameSync;
+  return t.mock.method(fs, "renameSync", (a, b) => { if (when(a, b)) throw diskError(); return rename(a, b); });
+}
+function withSide(s) {
+  const side = path.join(path.dirname(s.file), s.sid), extra = path.join(side, "data.txt");
+  fs.mkdirSync(side);
+  fs.writeFileSync(extra, "附件");
+  return { ...s, side, extra, text: fs.readFileSync(s.file, "utf8") };
+}
+async function request(route, method, url, body) {
+  const req = Object.assign(Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]), { method });
+  const u = new URL(url, "http://fixture.invalid");
+  let code, data;
+  await route(req, { writeHead(c) { code = c; }, end(b) { data = JSON.parse(b); } }, u, u.pathname);
+  return { code, ...data };
+}
+// 子进程只用 runner 的临时 HOME/前缀：真实换名后在指定位置退出，绕过异常回滚，模拟中断。
+function interrupt(sid, action, method, file) {
+  const code = `import fs from 'node:fs';
+    const ops = await import(${JSON.stringify(new URL("../gw/sessionops.mjs", import.meta.url).href)});
+    const [sid, action, method, file] = JSON.parse(process.argv[1]);
+    const run = fs[method];
+    fs[method] = (...args) => {
+      const result = run(...args);
+      if (args[method === 'renameSync' && action === 'trashSession' ? 1 : 0] === file) process.exit(97);
+      return result;
+    };
+    await ops[action](action === 'purgeTrash' ? [sid] : sid);
+    process.exit(98);`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code, JSON.stringify([sid, action, method, file])], { encoding: "utf8", timeout: 8000 });
+  assert.equal(r.status, 97, r.stderr || String(r.error ?? "没走到中断点"));
+}
+
+test("回收失败保留正文、附件和状态；连回滚也失败则由恢复收口", (t) => {
+  const seen = [];
+  TRASH_HOOKS.push((id) => seen.push(id));
+  try {
+    for (const at of ["meta", "main", "side", "rollback"]) {
+      const s = withSide(makeSession());
+      NAMES[s.sid] = "保留标题"; PINS[s.sid] = 314;
+      assert(saveNames()); assert(savePins());
+      const fail = failRename(t, (a, b) => at === "meta" ? b === metaOf(s.sid) : at === "main" ? a === s.file :
+        a === s.side || (at === "rollback" && a === insideOf(s.sid)));
+      if (at === "meta") assert.equal(ops.trashSession(s.sid).error, "write_failed");
+      else assert.throws(() => ops.trashSession(s.sid), /磁盘 I\/O/);
+      fail.mock.restore();
+      assert.deepEqual(seen, []);
+      if (at === "rollback") {
+        assert.equal(fs.readFileSync(insideOf(s.sid), "utf8"), s.text);
+        assert.equal(sessionPresence(s.sid), "unreadable", "待恢复的会话不能被当成已丢失");
+        ops.recoverTrash({ hooks: false });
+      }
+      assert.equal(fs.readFileSync(s.file, "utf8"), s.text);
+      assert.equal(fs.readFileSync(s.extra, "utf8"), "附件");
+      assert.equal(NAMES[s.sid], "保留标题");
+      assert.equal(PINS[s.sid], 314);
+      assert.equal(fs.existsSync(slotOf(s.sid)), false);
+      assert.deepEqual(seen, []);
+      if (at === "rollback") {
+        assert(ops.trashSession(s.sid).ok);
+        assert.equal(readJson(PATHS.names)[s.sid], undefined);
+        assert(ops.restoreSession(s.sid).ok);
+        assert.equal(readJson(PATHS.names)[s.sid], "保留标题");
+        assert.equal(readJson(path.join(CFG.home, "ccapp-session-pins.json"))[s.sid], 314);
+        assert.deepEqual(seen, [s.sid]);
+      }
+      delete NAMES[s.sid]; delete PINS[s.sid];
+    }
+    assert(saveNames()); assert(savePins());
+  } finally { TRASH_HOOKS.pop(); }
+});
+
+test("重启先收口文件，再重放已经提交的回收通知；半截恢复可重试", () => {
+  // 不监听端口、不启动真实网关；核对启动位置，下面用退出的子进程验两阶段的磁盘行为。
+  const server = fs.readFileSync(new URL("../server.mjs", import.meta.url), "utf8");
+  assert.match(server, /server\.listen\(CFG\.port[^\n]*\{\n[\s\S]*?recoverTrash\(\{ hooks: false \}\);[^\n]*\n[^\n]*recoverRunMark\(\);[^\n]*\n[^\n]*recoverTrash\(\);/);
+  const partial = withSide(makeSession()), committed = withSide(makeSession());
+  const seen = [];
+  TRASH_HOOKS.push((id) => { if (id === partial.sid || id === committed.sid) seen.push(id); });
+  try {
+    interrupt(partial.sid, "trashSession", "renameSync", insideOf(partial.sid));
+    interrupt(committed.sid, "trashSession", "renameSync", path.join(slotOf(committed.sid), "dir"));
+    ops.recoverTrash({ hooks: false });
+    assert.equal(fs.readFileSync(partial.file, "utf8"), partial.text);
+    assert.equal(fs.readFileSync(partial.extra, "utf8"), "附件");
+    assert.equal(fs.existsSync(slotOf(partial.sid)), false);
+    assert.equal(readJson(metaOf(committed.sid)).tx.phase, "notify");
+    assert.deepEqual(seen, []);
+    ops.recoverTrash(); ops.recoverTrash();
+    assert.deepEqual(seen, [committed.sid]);
+    interrupt(committed.sid, "restoreSession", "renameSync", path.join(slotOf(committed.sid), "dir"));
+    assert.equal(fs.existsSync(committed.extra), true);
+    assert.equal(sessionPresence(committed.sid), "unreadable");
+    ops.recoverTrash({ hooks: false });
+    assert.equal(fs.existsSync(committed.extra), false);
+    assert.equal(readJson(metaOf(committed.sid)).tx.phase, "ready");
+    assert(ops.restoreSession(committed.sid).ok);
+    assert.equal(fs.readFileSync(committed.file, "utf8"), committed.text);
+    assert.equal(fs.readFileSync(committed.extra, "utf8"), "附件");
+    assert.deepEqual(seen, [committed.sid]);
+  } finally { TRASH_HOOKS.pop(); }
+});
+
+test("回收提交后移除最近会话或执行通知失败，保留 notify 直到重试成功", (t) => {
+  const s = makeSession(), last = path.join(CFG.home, "ccapp-last-session.json");
+  rememberSession(s.sid);
+  const rm = fs.rmSync;
+  const fail = t.mock.method(fs, "rmSync", (p, o) => { if (p === last) throw diskError(); return rm(p, o); });
+  let attempts = 0, hookFails = false;
+  TRASH_HOOKS.push((id) => { if (id === s.sid) { attempts++; if (hookFails) throw diskError(); } });
+  try {
+    assert.throws(() => ops.trashSession(s.sid), { code: "write_failed" });
+    assert.equal(LAST_SESSION?.id, s.sid);
+    assert.equal(readJson(last).id, s.sid);
+    assert.equal(readJson(metaOf(s.sid)).tx.phase, "notify");
+    fail.mock.restore();
+    hookFails = true;
+    assert.throws(() => ops.restoreSession(s.sid), /磁盘 I\/O/);
+    assert.equal(readJson(metaOf(s.sid)).tx.phase, "notify");
+    assert.equal(LAST_SESSION, null);
+    assert.equal(fs.existsSync(last), false);
+    hookFails = false;
+    ops.recoverTrash();
+    assert(ops.restoreSession(s.sid).ok);
+    assert.equal(attempts, 3, "恢复会话不再重发删除通知");
+  } finally { TRASH_HOOKS.pop(); }
+});
+
+test("项目回收会话未成功时，不删除磁盘上的项目目录", async (t) => {
+  const { routeProjects } = await import("../gw/projects.mjs");
+  const cwd = fs.mkdtempSync(path.join(CFG.workspace, "trash-project-"));
+  const projectData = path.join(cwd, "保留.txt");
+  fs.writeFileSync(projectData, "项目数据");
+  const made = await request(routeProjects, "POST", "/api/projects", { name: "回收回归", mode: "dir", path: cwd });
+  assert.equal(made.code, 200, JSON.stringify(made));
+  const s = makeSession({ cwd });
+  const projectUrl = `/api/projects/${made.project.id}`;
+  const fail = failRename(t, (_a, b) => b === metaOf(s.sid));
+  const result = await request(routeProjects, "DELETE", projectUrl + "?withDir=1");
+  fail.mock.restore();
+  assert.equal(result.code, 500);
+  assert.equal(result.error, "trash_failed");
+  assert.equal(fs.readFileSync(projectData, "utf8"), "项目数据");
+  assert.equal(findSessionFile(s.sid)?.file, s.file);
+  assert.equal((await request(routeProjects, "DELETE", projectUrl)).code, 200);
+  fs.rmSync(cwd, { recursive: true });
+});
+
 test("回收站 meta 原子写、占用含附件目录；老条目按主记录大小报（195-A.14、196-真机.2）", () => {
   const s = makeSession();
   const sideDir = path.join(path.dirname(s.file), s.sid);
@@ -125,10 +281,12 @@ test("恢复时标题写盘失败：不挪文件、不删回收站，（Y.2）",
 });
 
 // ── 彻底删除 ──
-test("彻底删除清掉 archive、sessmodel、书签、封签、脉络、.edits、file-history、agents（195-A.7、197-2.3/2.4、196-真机.1、195-Y.3）", async () => {
+test("彻底删除各处状态：写盘失败可在同一进程重试，不把内存缺项当成清理成功", async (t) => {
   const cwd = path.join(CFG.workspace, "b2-ops-cwd");
   fs.mkdirSync(cwd, { recursive: true });
-  const s = makeSession({ cwd });
+  const s = makeSession({ cwd, q2: "要删的第二问" });
+  assert(ops.deleteMessage(s.sid, s.q2, 0, "user").ok);
+  assert(readJson(ORPHANS)[s.sid]);
   // 各处都放一点该会话的数据
   archiveImport(s.sid, { chapters: { 1: { title: "章一" } } }); saveArchive();
   assert.ok(archiveDb().sessions[s.sid]);
@@ -148,8 +306,33 @@ test("彻底删除清掉 archive、sessmodel、书签、封签、脉络、.edits
   const keep = [C("session-env", other), path.join(ops.claudeTmpRoot(), "-b2-slug", other)];
   for (const d of keep) fs.mkdirSync(d, { recursive: true });
   assert.equal(ops.trashSession(s.sid).ok, true);
+  const clean = makeSession();
+  assert(ops.trashSession(clean.sid).ok);
+  const stores = [
+    ["ccapp-archive.json", "archive", (v) => v.sessions[s.sid]],
+    [path.basename(bmFile), "bookmarks", (v) => v.find((b) => b.sid === s.sid)],
+    ["ccapp-session-models.json", "session model", (v) => v[s.sid]],
+    ["ccapp-session-seals.json", "seal", (v) => v[s.sid]],
+    ["ccapp-lineage.json", "lineage", (v) => v.edges[s.sid]],
+    [path.basename(ORPHANS), "orphan messages", (v) => v[s.sid]],
+  ];
+  for (const [i, [basename, label, entry]] of stores.entries()) {
+    const file = path.join(CFG.home, basename);
+    const fail = failRename(t, (_a, b) => b === file);
+    const response = await request(routeSessions, "POST", "/api/trash/purge", { ids: i ? [s.sid] : [s.sid, clean.sid] });
+    fail.mock.restore();
+    assert.equal(response.code, 500);
+    assert.equal(response.ok, false);
+    assert.equal(response.purged, i ? 0 : 1);
+    assert.ok(response.error.includes(label), response.error);
+    assert.ok(entry(readJson(file)), `${label} 尚未写盘`);
+    assert.ok(fs.existsSync(insideOf(s.sid)), "失败时保留最后一份正文以及清理记录");
+    assert.equal(ops.listTrash().find((m) => m.id === s.sid)?.purgePending, true);
+    assert.equal(ops.restoreSession(s.sid).error, "purge_pending");
+  }
   assert.equal(await ops.purgeTrash([s.sid]), 1);
-  assert.equal(fs.existsSync(path.join(CFG.home, ".ccapp-trash", s.sid)), false);
+  assert.equal(fs.existsSync(slotOf(s.sid)), false);
+  for (const [basename, label, entry] of stores) assert.equal(entry(readJson(path.join(CFG.home, basename))), undefined, label);
   assert.equal(archiveDb().sessions[s.sid], undefined);
   assert.equal(readJson(path.join(CFG.home, "ccapp-session-models.json"))[s.sid], undefined);
   assert.equal(readJson(bmFile).some((b) => b.sid === s.sid), false);
@@ -163,7 +346,114 @@ test("彻底删除清掉 archive、sessmodel、书签、封签、脉络、.edits
   for (const d of keep) { assert.equal(fs.existsSync(d), true, d); fs.rmSync(d, { recursive: true, force: true }); }
 });
 
+test("已经删掉正文但还未收口的条目仍可重试，不用等满 30 天", async (t) => {
+  const pending = makeSession(), other = makeSession();
+  assert(ops.trashSession(pending.sid).ok);
+  assert(ops.trashSession(other.sid).ok);
+  interrupt(pending.sid, "purgeTrash", "rmSync", insideOf(pending.sid));
+  assert(!fs.existsSync(insideOf(pending.sid)));
+  assert(ops.inTrash(pending.sid));
+  const read = fs.readFileSync;
+  const fail = t.mock.method(fs, "readFileSync", (f, ...args) => { if (f === metaOf(other.sid)) throw diskError(); return read(f, ...args); });
+  assert.equal(ops.listTrash().find((m) => m.id === pending.sid)?.purgePending, true);
+  const all = await request(routeSessions, "POST", "/api/trash/purge", { all: true });
+  assert.equal(all.code, 500, "用户选清空时不能跳过一格却报成功");
+  assert.equal(all.purged, 0);
+  await ops.expireTrash();
+  fail.mock.restore();
+  assert(!fs.existsSync(slotOf(pending.sid)));
+  assert(ops.inTrash(other.sid));
+});
+
+test("旧版槽位按落点恢复；附件归属不明时不清理", async () => {
+  for (const phase of ["intent", "ready", "restore-tail", "split"]) {
+    const s = withSide(makeSession());
+    const st = fs.statSync(s.file);
+    fs.mkdirSync(slotOf(s.sid), { recursive: true });
+    fs.writeFileSync(metaOf(s.sid), JSON.stringify({ id: s.sid, project: path.basename(path.dirname(s.file)), cwd: CFG.workspace,
+      title: "旧版", size: st.size, mtime: st.mtimeMs, deletedAt: Date.now() }));
+    if (phase === "ready" || phase === "split") fs.renameSync(s.file, insideOf(s.sid));
+    if (phase === "ready" || phase === "restore-tail") fs.renameSync(s.side, path.join(slotOf(s.sid), "dir"));
+    if (phase === "intent") ops.recoverTrash({ hooks: false });
+    else {
+      assert(ops.listTrash().some((m) => m.id === s.sid));
+      if (phase === "split") {
+        await assert.rejects(ops.purgeTrash([s.sid]), /无法确认归属/);
+        assert.equal(fs.readFileSync(insideOf(s.sid), "utf8"), s.text);
+        assert.equal(fs.readFileSync(s.extra, "utf8"), "附件");
+        assert.equal(ops.restoreSession(s.sid).error, "exists");
+        fs.renameSync(s.side, s.side + "-kept");
+      }
+      assert(ops.restoreSession(s.sid).ok);
+    }
+    assert(!fs.existsSync(slotOf(s.sid)));
+    assert.equal(fs.readFileSync(s.file, "utf8"), s.text);
+    assert.equal(fs.readFileSync(phase === "split" ? path.join(s.side + "-kept", "data.txt") : s.extra, "utf8"), "附件");
+  }
+});
+
+test("同号槽位不能覆盖；旧版槽位彻底删除不碰同号活副本的状态", async () => {
+  const s = withSide(makeSession());
+  assert(ops.trashSession(s.sid).ok);
+  const old = readJson(metaOf(s.sid)); delete old.tx;
+  fs.writeFileSync(metaOf(s.sid), JSON.stringify(old));
+  fs.writeFileSync(s.file, s.text.replace(s.q, "新对话"));
+  const hist = path.join(CFG.home, ".claude", "file-history", s.sid);
+  fs.mkdirSync(hist, { recursive: true });
+  fs.writeFileSync(path.join(hist, "new"), "新检查点");
+  assert(archiveImport(s.sid, { title: "新档案", chapters: {} })); assert(saveArchive());
+  NAMES[s.sid] = "新标题"; assert(saveNames());
+  assert.equal(ops.trashSession(s.sid).error, "exists");
+  assert.equal(ops.restoreSession(s.sid).error, "exists");
+  assert.equal(fs.readFileSync(insideOf(s.sid), "utf8"), s.text);
+  assert.equal(await ops.purgeTrash([s.sid]), 1);
+  assert.match(fs.readFileSync(s.file, "utf8"), /新对话/);
+  assert.equal(fs.readFileSync(path.join(hist, "new"), "utf8"), "新检查点");
+  assert.equal(archiveDb().sessions[s.sid].title, "新档案");
+  assert.equal(readJson(PATHS.names)[s.sid], "新标题");
+});
+
 // ── 导出 / 导入 / 分叉 ──
+test("失败的清理先收口；批量清理锁住后面的同号导入，最终只发布一份", async (t) => {
+  const first = makeSession(), s = withSide(makeSession());
+  const pack = (name) => {
+    const f = path.join(CFG.home, name + ".zip");
+    fs.writeFileSync(f, ops.zipBuild([
+      { name: "manifest.json", data: JSON.stringify({ format: "cccodroid-sessions", sessions: [{ id: s.sid, archive: { title: name, chapters: {} } }] }) },
+      { name: `sessions/${s.sid}.jsonl`, data: s.text.replace(s.q, name) },
+      { name: `sessions/${s.sid}/data.txt`, data: name },
+    ]));
+    return f;
+  };
+  const a = pack("zip-a"), b = pack("zip-b");
+  const hist = path.join(CFG.home, ".claude", "file-history", s.sid);
+  fs.mkdirSync(hist, { recursive: true });
+  assert(archiveImport(s.sid, { title: "旧档案", chapters: {} })); assert(saveArchive());
+  assert(ops.trashSession(first.sid).ok);
+  assert(ops.trashSession(s.sid).ok);
+  const rm = fs.rmSync;
+  const fail = t.mock.method(fs, "rmSync", (f, o) => { if (f === hist) throw diskError(); return rm(f, o); });
+  await assert.rejects(ops.purgeTrash([s.sid]), /磁盘 I\/O/);
+  await assert.rejects(ops.importSessions(a), /磁盘 I\/O/);
+  assert.equal(findSessionFile(s.sid), null);
+  fail.mock.restore();
+  const purge = ops.purgeTrash([first.sid, s.sid]);
+  assert.equal(ops.restoreSession(s.sid).error, "busy");
+  const [n, ra, rb] = await Promise.all([purge, ops.importSessions(a), ops.importSessions(b)]);
+  assert.equal(n, 2);
+  assert.deepEqual([...ra.imported, ...rb.imported], [s.sid]);
+  assert.deepEqual([...ra.skipped, ...rb.skipped], [s.sid]);
+  const winner = ra.imported.length ? "zip-a" : "zip-b";
+  const f = findSessionFile(s.sid).file;
+  assert.match(fs.readFileSync(f, "utf8"), new RegExp(winner));
+  assert.equal(fs.readFileSync(path.join(path.dirname(f), s.sid, "data.txt"), "utf8"), winner);
+  assert.equal(archiveDb().sessions[s.sid].title, winner);
+  assert(!fs.existsSync(slotOf(s.sid)));
+  assert(!fs.existsSync(hist));
+  fs.rmSync(f);
+  fs.rmSync(path.join(path.dirname(f), s.sid), { recursive: true });
+});
+
 test("导出先写 .part 再换名、0600；导入回收站里同号会话先恢复再跳过（197-9.9、195-A.5）", async () => {
   const s = makeSession({ q: "导出这个会话" });
   const out = await ops.exportSessions([s.sid]);

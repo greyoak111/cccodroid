@@ -21,11 +21,13 @@ const shape = (j) => {
   }
   return out;
 };
-const DB = loadState(FILE, { shape, fallback: () => ({}) }).data;
+const { data: DB, bad, kept } = loadState(FILE, { shape, fallback: () => ({}) });
+let dirty = bad && !kept;
 function saveNow() {
   const ids = Object.keys(DB);
   if (ids.length > MAX) for (const id of ids.sort((a, b) => (DB[a].at || 0) - (DB[b].at || 0)).slice(0, ids.length - MAX)) delete DB[id];
   const ok = saveState(FILE, DB, { pretty: false });
+  dirty = !ok;
   if (!ok) log("未完成标记没保存上（存储满了或没有权限）");
   return ok;
 }
@@ -37,8 +39,10 @@ export function markIncomplete(sid, runId) {
 }
 /** 这一轮走到了结果（答完或报错）：不再是「没跑完」 */
 export function clearIncomplete(sid) {
-  if (sid && DB[sid]) { delete DB[sid]; return saveNow(); }
-  return true;
+  if (!sid) return true;
+  if (Object.hasOwn(DB, sid)) { delete DB[sid]; dirty = true; }
+  // 回收通知可能重放：上一遍只在内存里删了，仍得重试落盘。
+  return !dirty || saveNow();
 }
 export function incompleteOf(sid) { return (sid && DB[sid]) || null; }
 /** 历史页末尾的持久提示；atEnd = 这一页读到了记录末尾，live = 这个会话正在生成（那时的「没跑完」是上一轮的，先不挂） */
