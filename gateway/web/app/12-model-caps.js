@@ -448,7 +448,6 @@
       $("set-static").checked = state.settings.staticCompat !== false;
       $("set-idlecompact").checked = state.settings.idleCompaction !== false;
       $("set-workisland").checked = state.settings.workIsland === true;
-      $("set-dense").checked = uiGet("barDense") !== false;   // 紧凑聊天底栏（issue #239）
     } catch {}
   }
 
@@ -578,7 +577,6 @@
     loadExecMode();
   });
   $("set-idlecompact").addEventListener("change", (e) => saveSettings({ idleCompaction: e.target.checked }));
-  $("set-dense").addEventListener("change", (e) => uiSet("barDense", e.target.checked));   // 紧凑聊天底栏（issue #239）
   // 敏感操作再确认没有开关：一直开着，只在设置里说明它管什么（反破甲 11-03）
   const extSync = () => { $("set-extimg").checked = uiGet("extImg") !== "auto"; };
   extSync(); document.addEventListener("cc:ui", (e) => { if (e.detail.key === "extImg" || e.detail.key == null) extSync(); });

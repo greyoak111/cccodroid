@@ -13,8 +13,7 @@
   function setPermChip(m) {
     if (!m) return;
     state.permissionMode = m;
-    permEl.innerHTML = (m === "bypassPermissions" ? '<svg class="ei" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.01"/></svg>' : "") +
-      `<span class="hint-perm-label">${esc(modeLabel(m))}</span>`;
+    permEl.innerHTML = (m === "bypassPermissions" ? '<svg class="ei" viewBox="0 0 24 24"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.01"/></svg>' : "") + esc(modeLabel(m));
     permEl.classList.toggle("danger", m === "bypassPermissions");
   }
 
@@ -847,8 +846,7 @@
         }
         g.tool(id, name, input, live);
         keepTail();
-        if (live) queueToolFollow();
-        else scrollDown();
+        scrollDown();
       },
       error(msg) {
         undot(); any = true; last = null;

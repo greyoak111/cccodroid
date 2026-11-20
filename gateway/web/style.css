@@ -2554,51 +2554,19 @@ textarea.pj-field{min-height:89px;resize:vertical;line-height:1.618}
 #sheet.pop .sheet-item{padding:8px var(--g2);font-size:14px}
 /* 窄屏底部弹层也别太高：最多到屏高 ÷ φ 附近，列表内滚 */
 #sheet:not(.pop) .sheet-panel{max-height:min(calc(100% - var(--safe-t, 0px)),80vh)}
-/* 底栏只排一行：先省略长接口/项目名，不用换行或缩小字号挤出空间。 */
-#hint-row{container-type:inline-size;box-sizing:border-box;flex-wrap:nowrap;white-space:nowrap;gap:4px;font-size:11.5px;line-height:1.6;margin-top:var(--g1)}
-@media (max-width:599px){
-  html:not(.fold-table) #hint-row{margin-top:0}
-  html:not(.fold-table) #composer{padding-bottom:calc(var(--safe-b) + 1px)}
-  /* 紧凑底栏（默认，issue #239）：字号略放大、触控盒收紧，把一截还给消息区；设置里关掉（html.bar-roomy）回 48px 大触控目标 */
-  html:not(.fold-table):not(.bar-roomy) #hint-row{font-size:12px;line-height:1.4}
-  html:not(.fold-table):not(.bar-roomy) #hint-row > :is(button,#model-chip,#perm-chip){min-width:26px;min-height:26px}
-  html:not(.fold-table):not(.bar-roomy) #hint-row #perm-chip{min-width:26px}
-  html:not(.fold-table):not(.bar-roomy) #hint-row #model-chip{min-width:min(24%,max(40px,3.6em))}
-}
-/* 用互不覆盖的实际触控盒取代 48px 外扩层，不占上面的输入框或相邻按钮。 */
-#hint-row > :is(button,#model-chip,#perm-chip){display:inline-flex;align-items:center;min-width:32px;min-height:48px;box-sizing:border-box;cursor:pointer}
-#hint-row > :is(button,#model-chip,#perm-chip):focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-#hint-row :is(.chip,#perm-chip,button){border:0;border-radius:0;padding:0;background:none;font-size:inherit;line-height:inherit}
-#hint-row #model-chip{position:relative;flex:0 10 auto;min-width:min(24%,max(44px,3.8em));gap:.25em;color:var(--accent)}
-#hint-row #model-chip .chip{min-width:0;overflow:hidden;text-overflow:ellipsis;color:inherit}
-#hint-row #model-chip .chip-prov{color:var(--fg2);flex-shrink:5;max-width:12em}
-#hint-row #model-chip > :first-child:not(.chip-prov) + .chip:last-child,
-#hint-row #model-chip > .chip:nth-child(3):last-child{flex-shrink:0;max-width:5em}
-#hint-row #perm-chip{flex:0 1 auto;min-width:44px;max-width:64%;color:var(--fg3)}
-#hint-row #perm-chip:empty,#hint-row #stat-chip[hidden]{display:none}
-#hint-row #perm-chip svg{flex:none}
-#hint-row .hint-perm-label{min-width:0;overflow:hidden;text-overflow:ellipsis}
-#hint-row #perm-chip.danger{min-width:min(33%,max(44px,calc(4em + 16px)));color:var(--err);font-weight:600;background:none}
-#hint-row #proj-chip{position:relative;flex:0 5 auto;justify-content:center;color:var(--accent);background:none}
-#hint-row #proj-chip :is(.pj-fold,.pj-chev){flex:none}
-#hint-row #proj-chip .pj-name{min-width:0;overflow:hidden;text-overflow:ellipsis}
-#hint-row #stat-chip{flex:0 1 auto;max-width:43%;color:var(--fg3)}
-#hint-row #stat-chip > span,#hint-row .draft-label{min-width:0;overflow:hidden;text-overflow:ellipsis}
-#hint-row .stat-short{display:none}
-#hint-row #draft-chip{flex:0 2 auto;gap:.2em;justify-content:center;color:var(--accent)}
-.pop-menu.hint-stat .pm-head{font-size:13px;white-space:normal;overflow-wrap:anywhere;text-align:start}
-/* 按聊天栏的宽度缩略统计，平板分栏也能独立生效。 */
-@container (max-width:480px){
-  #hint-row #model-chip .chip-prov{max-width:9em}
-  #hint-row #stat-chip{flex:none;max-width:8ch}
-  #hint-row .stat-full{display:none}
-  #hint-row .stat-short{display:block}
-  #hint-row #proj-chip{max-width:6em}
-}
-@container (max-width:25em){
-  #hint-row #model-chip .chip-prov,#hint-row #proj-chip .pj-name{position:absolute;width:1px;height:1px;clip-path:inset(50%)}
-  #hint-row #proj-chip .pj-chev,#hint-row .draft-label{display:none}
-}
+/* 输入框下面一行：回到老版的无框样式（用户定）——纯文字，型号强调色，权限虚线下划线，各项之间隔一个点 */
+#hint-row{gap:0;font-size:11.5px;line-height:1.6;margin-top:var(--g1)}
+#hint-row > *:not(.hidden):not(:empty) ~ *:not(.hidden):not(:empty)::before{content:"·";color:var(--fg3);margin:0 7px;display:inline-block;text-decoration:none}
+#hint-row #model-chip .chip-prov{color:var(--fg2)}
+#hint-row .chip,#hint-row #perm-chip,#hint-row #draft-chip,#hint-row #proj-chip{border:0;border-radius:0;padding:0;background:none;font-size:inherit;line-height:inherit}
+#hint-row #model-chip{color:var(--accent);cursor:pointer}
+#hint-row #model-chip .chip{color:inherit}
+#hint-row #model-chip .chip + .chip::before{content:"·";margin:0 .45em;color:var(--fg3)}
+#hint-row #perm-chip{color:var(--fg3);cursor:pointer}
+#hint-row #perm-chip,#hint-row #perm-chip *{text-decoration:none}
+#hint-row #perm-chip.danger{color:var(--err);font-weight:600;background:none}
+#hint-row #proj-chip{color:var(--accent);background:none}
+#hint-row #stat-chip{font-size:11px}
 /* 月报卡片下面的「保存图片 / 分享」别贴着卡片 */
 #us-actions{margin-top:var(--g4)}
 #us-actions > .row-actions{margin-bottom:var(--g3)}
@@ -2718,7 +2686,8 @@ html .msg.welcome.bot .bubble h1.wl-greet{font-size:clamp(19px,4.2cqi,31px);marg
 html.wel #composer-inner{flex-wrap:wrap;align-items:center;row-gap:2px}
 html.wel #input{order:-1;flex:1 1 100%;padding:6px var(--g1) 4px}
 html.wel #btn-send{margin-inline-start:auto}
-html.wel #hint-row #model-chip{margin-inline-start:auto}
+html.wel #hint-row #model-chip > .chip:first-child{margin-inline-start:auto}
+html.wel #hint-row #proj-chip:not(.hidden) ~ #model-chip > .chip:first-child{margin-inline-start:0}
 /* 你发出的附件：气泡上方一排缩略图 / 文件卡片，不再把「@路径」露在正文里 */
 .u-refs{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--g1);max-width:min(85%,680px);margin-bottom:var(--g1)}
 .u-ref{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--bg2);color:var(--fg2);border-radius:12px;padding:7px 11px;font-size:12.5px;line-height:1.3;cursor:pointer;max-width:240px}
@@ -3651,9 +3620,11 @@ html[dir="rtl"] #perm-menu button{text-align:right}
 /* L.9 辅助文字对比度：深色主题提亮到 ≥4.5:1，浅色主题压深；自定义皮肤自己定义 --fg3，不受影响 */
 :root{--fg3:#8a857a}
 html[data-theme="light"]{--fg3:#6f6a60}
-/* L.11 触控目标：用量条视觉仍 16px，命中区向下扩到 48px */
+/* L.11 触控目标：用量条视觉仍 16px，命中区向下扩到 48px；chip 用透明伪元素外扩，视觉不变 */
 #ctxbar{overflow:visible}
 #ctxbar::after{content:"";position:absolute;left:0;right:0;top:0;height:48px}
+#hint-row #model-chip .chip,#hint-row #perm-chip,#hint-row #draft-chip{position:relative}
+#hint-row #model-chip .chip::after,#hint-row #perm-chip::after,#hint-row #draft-chip::after{content:"";position:absolute;left:-4px;right:-4px;top:50%;height:48px;margin-top:-24px}
 /* 200-12-10 RTL 下上下文进度条的双色文字分界要跟着从右往左，和填充方向一致 */
 html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270deg,#111 var(--p,0%),var(--fg) var(--p,0%))}
 /* 压缩包（06-files.js）：包内顶栏、多选勾、页脚进度、对话框 */
@@ -3736,6 +3707,10 @@ html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270
 #popup-list{overflow-x:hidden}
 #popup-head > span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pgroup{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 输入栏 chip：长型号 / 长项目名省略；项目名单独包了一层 */
+#hint-row #model-chip .chip{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#hint-row #proj-chip .pj-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* 文件工具条：窄窗格里搜索框先保底，其余控件折行 */
 .fs-tools{flex-wrap:wrap}

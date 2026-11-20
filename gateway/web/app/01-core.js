@@ -255,11 +255,9 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       return a;
     }
     /** 播一个 CSS 关键帧：时长按档位；用 Web Animations 的话会和元素自己的 CSS 动画打架，这里走 class 切换 */
-    function play(el, cls, ttl, restart = true) {
+    function play(el, cls, ttl) {
       if (!on() || !el) return;
-      // 工具结果成批到达时，首次播放不用逐张强制排版。
-      if (restart) { el.classList.remove(cls); void el.offsetWidth; }
-      el.classList.add(cls);
+      el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
       clearTimeout(el["_mo_" + cls]);
       // 摘类名时元素自己原本的动画（比如 .msg 的淡入）会被浏览器当成新动画重播一遍 —— 看着就是「又渲染了一次」。
       // 摘掉后把刚起头的那几个直接拨到结尾
@@ -412,7 +410,7 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
     if (!window.navigator.userActivation || navigator.userActivation.isActive) ccFocusInput();
   });
   const interjectEl = $("btn-interject");
-  const subEl = $("sub-title"), statEl = $("stat-full"), modelEl = $("model-chip");
+  const subEl = $("sub-title"), statEl = $("stat-chip"), modelEl = $("model-chip");
   const permEl = $("perm-chip"), drawerEl = $("drawer"), toastEl = $("toast");
   const popupEl = $("popup"), popupList = $("popup-list"), popupHead = $("popup-head");
   const ctxBar = $("ctxbar"), ctxFill = $("ctxfill"), ctxTxt = $("ctxtxt");
@@ -591,24 +589,8 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       });
       return;
     }
-    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = 0; }
     chatEl.scrollTop = chatEl.scrollHeight;
     progTop = chatEl.scrollTop;
-  }
-  // 工具事件可能同帧到一批，不要每增一张卡就写 DOM、再量聊天区。
-  // 显式发送、返回最新和重放的收尾仍走原来的 scrollDown。
-  let toolFollowGen = -1;
-  function queueToolFollow() {
-    if (busReplay) return scrollDown();
-    if (!stick || touching || view.next != null || document.hidden) return;
-    const gen = view.gen;
-    if (scrollRaf && toolFollowGen === gen) return;
-    if (scrollRaf) cancelAnimationFrame(scrollRaf);
-    toolFollowGen = gen;
-    scrollRaf = requestAnimationFrame(() => {
-      scrollRaf = 0;
-      if (gen === view.gen && view.next == null && !document.hidden && !busReplay) scrollDown();
-    });
   }
   function relTime(ms) {
     const d = Date.now() - ms;
@@ -679,10 +661,6 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       .catch((e) => toast(t("保存失败：{msg}", { msg: (e.body && e.body.error) || e.message }), true));
     document.dispatchEvent(new CustomEvent("cc:ui", { detail: { key: k } }));
   }
-  // 窄屏聊天底栏：默认紧凑（CSS 无类即紧凑）；设置里关掉 → html.bar-roomy 回 48px 大触控目标（issue #239）
-  const denseBar = () => document.documentElement.classList.toggle("bar-roomy", uiGet("barDense") === false);
-  denseBar();
-  document.addEventListener("cc:ui", (e) => { if (e.detail && e.detail.key === "barDense") denseBar(); });
   // ── 外链图片点一下才加载（0.5.12）：md 里写的 http(s) 图一渲染就会去请求对方服务器，对方能看到 IP 和读的时间。
   //   默认先画成一个按钮，点了才加载；点过的地址本次记住。设置里关掉（extImg = "auto"）就照旧直接加载。
   //   本机地址、相对路径、data:/blob: 不拦

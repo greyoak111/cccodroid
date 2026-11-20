@@ -79,11 +79,11 @@
     </button>
   </div>
   <div id="hint-row">
-    <button type="button" id="proj-chip" class="chip proj hidden"></button>
+    <span id="proj-chip" class="chip proj hidden" role="button" tabindex="0"></span>
     <span id="model-chip">—</span>
     <span id="perm-chip" role="button" tabindex="0" title="切换权限模式" data-i18n-attr="title"></span>
-    <button type="button" id="stat-chip" hidden><span id="stat-full" class="stat-full" dir="ltr"></span><span class="stat-short" dir="ltr" aria-hidden="true"></span></button>
-    <button type="button" id="draft-chip" class="hidden" aria-label="↩ 恢复刚才清掉的内容" title="↩ 恢复刚才清掉的内容" data-i18n-attr="aria-label,title"><span aria-hidden="true">↩</span><span class="draft-label" data-i18n>恢复</span></button>
+    <span id="stat-chip"></span>
+    <span id="draft-chip" class="hidden" role="button" tabindex="0" data-i18n>↩ 恢复刚才清掉的内容</span>
   </div>
 </div>
 
@@ -467,11 +467,6 @@
                 <option value="ss-dark" data-i18n>拾色 · 深色</option>
               </select>
             </div>
-          </div>
-          <!-- 紧凑聊天底栏（issue #239）：窄屏默认紧凑，关掉回 48px 大触控目标 -->
-          <div class="srow">
-            <div class="sl"><b data-i18n>紧凑聊天底栏</b><p data-i18n>窄屏时底栏更矮、字号略大，把一截还给消息区；关掉则用 48px 的大触控目标</p></div>
-            <div class="sc"><input type="checkbox" class="sw" id="set-dense"></div>
           </div>
           <!-- 构成浅色的纸色（0.6.2）：只在构成 · 浅色时显示，算色在 theme.js gcPaint -->
           <div class="srow gp-row" id="gp-row">
