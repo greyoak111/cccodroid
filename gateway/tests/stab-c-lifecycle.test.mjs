@@ -404,60 +404,133 @@ test("FIND-018：网关还能应答（连接断在浏览器侧）就不改文案
 
 // ── FIND-017：回前台无条件拿状态对账，再按需重连 ────────────────────────────
 
-function loadVisibility({ state = { runs: [] } } = {}) {
-  const listeners = {}, applied = [], finishes = [], removed = [];
-  let connect = 0;
+function loadVisibility({ state = { runs: [] }, api = () => Promise.resolve(state) } = {}) {
+  const listeners = {}, applied = [], connections = [], timers = new Map();
+  let next = 0;
   const runViews = new Map();
   const box = {
-    view: { sessionId: "s-a" }, srv: { runs: [] }, runViews, runSid: new Map(), Set, Map, JSON,
+    view: { sessionId: "s-a", gen: 1 }, srv: { runs: [] }, runViews, runSid: new Map(), PERMS: new Map(),
     statRun: null, statEl: { textContent: "" }, statLast: {}, statStop() {},
-    api: () => Promise.resolve(state),
-    applyState: (s) => { applied.push(s); box.srv.runs = s.runs || (s.run ? [s.run] : []); },
-    connectBus: () => { connect++; },
+    api,
+    record: (s) => applied.push(s),
+    connectBus: (resume) => connections.push(resume),
     document: { hidden: false, addEventListener: (name, fn) => { listeners[name] = fn; } },
     es: { readyState: 1 },
-    t: (s) => s,
+    setTimeout(fn, ms) { const id = ++next; timers.set(id, { fn, ms }); return id; },
+    clearTimeout: (id) => timers.delete(id),
   };
-  const h = load(cut(src04, "  /** 回前台把界面状态和网关对一遍", "  // ── 维护者通知"),
-    box, ["reconcileRunViews"]);
-  return { h, listeners, applied, runViews, fires: () => connect, box };
+  // Run the actual applyState through its state assignment; rendering is covered separately.
+  const apply = cut(src04, "  function applyState(s) {", "    srv.intr =");
+  Object.assign(box, { showTamper() {}, showRecoverWarn() {} });
+  const h = load(cut(src04, "  /** 回前台把界面状态和网关对一遍", "  // ── 维护者通知") + apply + "    record(s);\n  }", box, ["applyState"]);
+  return { h, listeners, applied, runViews, connections, box, timers,
+    expire() { for (const [id, timer] of timers) { timers.delete(id); timer.fn(); } } };
 }
 
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
-test("FIND-017：回前台连 OPEN 也拉一次 /api/state，网关没了的轮次收尾，不再挂着生成中", async () => {
-  const { listeners, applied, runViews, fires, h } = loadVisibility();
-  const av = { finish() { av.finished = true; }, empty: false, remove() {} };
-  runViews.set("r1", { av, startedAt: 100, timer: { stop() {} }, out: 3 });
-  listeners.visibilitychange();
+function activeView(startedAt = 100) {
+  const rv = { startedAt, out: 3, finished: 0, stopped: 0 };
+  rv.av = { finish() { rv.finished++; }, empty: false };
+  rv.timer = { stop() { rv.stopped++; } };
+  return rv;
+}
+
+test("FIND-017：先贴合网关的忙闲，等 SSE 尾帧；超时才重读历史", async () => {
+  const f = loadVisibility(), rv = activeView(), newer = activeView(Date.now() + 60000);
+  f.runViews.set("r1", rv); f.runViews.set("r2", newer);
+  f.box.srv.runs = [{ id: "r1" }];
+  f.listeners.visibilitychange();
   await flush();
-  assert.equal(applied.length, 1, "没拉状态");
-  assert.equal(av.finished, true, "网关那边没了的轮次没收尾");
-  assert.equal(runViews.get("r1").av, undefined);
-  assert.equal(fires(), 0, "连接是开的，不该重连");
-  // 快照之后才起的轮次不归这次对账管
-  const av2 = { finish() { av2.finished = true; }, empty: false, remove() {} };
-  runViews.set("r2", { av: av2, startedAt: Date.now() + 60000, timer: { stop() {} } });
-  h.reconcileRunViews(Date.now());
-  assert.equal(av2.finished, undefined);
+  assert.equal(f.applied.length, 1);
+  assert.equal(f.box.srv.runs.length, 0, "忙闲立即更新");
+  assert.equal(rv.finished, 0, "不能吞掉在途正文");
+  assert.equal(f.runViews.get("r1").av, rv.av);
+  assert.deepEqual(f.connections, []);
+  assert.equal([...f.timers.values()][0].ms, 2000);
+  f.expire();
+  assert.equal(rv.finished, 1);
+  assert.equal(rv.stopped, 1);
+  assert.equal(f.runViews.get("r1").av, undefined);
+  assert.equal(f.runViews.get("r1").out, 3);
+  assert.equal(newer.finished, 0);
+  assert.deepEqual(f.connections, [false], "整轮重放重新读取历史");
+});
+
+test("FIND-017：等到了 run_end 则不重复收尾，也不重拨", async () => {
+  const f = loadVisibility(), rv = activeView();
+  f.runViews.set("r1", rv);
+  f.listeners.visibilitychange();
+  await flush();
+  const end = loadRunEnd({ runViews: f.runViews });
+  end.onRunEnd({ runId: "r1", sessionId: "s-a" });
+  f.expire();
+  assert.equal(rv.finished, 1);
+  assert.equal(rv.stopped, 1);
+  assert.deepEqual(f.connections, []);
+});
+
+test("FIND-017：超时后的迟到 run_end 仍收权限卡、记统计并认领会话", async () => {
+  const f = loadVisibility();
+  f.box.view.sessionId = null;
+  f.runViews.set("r1", activeView());
+  f.listeners.visibilitychange();
+  await flush();
+  f.expire();
+  assert.deepEqual(f.connections, [], "没有会话号就不清掉已显示的内容");
+  const perms = new Map([["p1", { runId: "r1", done: false }]]);
+  const end = loadRunEnd({ runViews: f.runViews, perms, viewSid: null });
+  end.view.runIds.add("r1");
+  end.onRunEnd({ runId: "r1", sessionId: "s-new" });
+  assert.equal(end.view.sessionId, "s-new");
+  assert.deepEqual(end.calls.statSave, [["s-new", "1.0s"]]);
+  assert.deepEqual(end.calls.permDone, [["p1", "stopped"]]);
+});
+
+test("FIND-017：较新的 SSE 状态不会被在途快照盖掉", async () => {
+  let resolve;
+  const f = loadVisibility({ api: () => new Promise((r) => { resolve = r; }) });
+  const rv = activeView();
+  f.runViews.set("r1", rv);
+  f.listeners.visibilitychange();
+  f.h.applyState({ runs: [{ id: "r1" }] });
+  resolve({ runs: [] });
+  await flush();
+  f.expire();
+  assert.equal(f.applied.length, 1);
+  assert.equal(f.box.srv.runs[0].id, "r1");
+  assert.equal(rv.finished, 0);
+  assert.deepEqual(f.connections, []);
 });
 
 test("FIND-017：网关说还在跑的轮次不动；连接不是 OPEN 时补一次重连", async () => {
-  const { listeners, runViews, fires, box } = loadVisibility({ state: { runs: [{ id: "r1", sessionId: "s-a" }] } });
-  const av = { finish() { av.finished = true; }, empty: false, remove() {} };
-  runViews.set("r1", { av, startedAt: 100, timer: { stop() {} } });
-  box.es = null;
-  listeners.visibilitychange();
+  const f = loadVisibility({ state: { runs: [{ id: "r1", sessionId: "s-a" }] } }), rv = activeView();
+  f.runViews.set("r1", rv);
+  f.box.es = null;
+  f.listeners.visibilitychange();
   await flush();
-  assert.equal(av.finished, undefined, "网关说还在跑，不能收尾");
-  assert.equal(fires(), 1);
+  f.expire();
+  assert.equal(rv.finished, 0);
+  assert.deepEqual(f.connections, [true]);
 });
 
-test("FIND-017：后台（document.hidden）切前台事件不做事", async () => {
-  const { listeners, applied, fires, box } = loadVisibility();
-  box.document.hidden = true;   // 监听器闭包里读的是全局 document → box.document
-  listeners.visibilitychange();
+test("FIND-017：切到另一会话丢弃迟到快照；隐藏时取消未到的对账", async () => {
+  let resolve;
+  const f = loadVisibility({ api: () => new Promise((r) => { resolve = r; }) }), rv = activeView();
+  f.runViews.set("r1", rv);
+  f.listeners.visibilitychange();
+  f.box.view.gen++;
+  resolve({ runs: [] });
   await flush();
-  assert.equal(applied.length, 0);
-  assert.equal(fires(), 0);
+  assert.equal(f.applied.length, 0);
+  f.listeners.visibilitychange();
+  resolve({ runs: [] });
+  await flush();
+  assert.equal(f.timers.size, 1);
+  f.box.document.hidden = true;
+  f.listeners.visibilitychange();
+  f.expire();
+  assert.equal(f.timers.size, 0);
+  assert.equal(rv.finished, 0);
+  assert.deepEqual(f.connections, []);
 });
