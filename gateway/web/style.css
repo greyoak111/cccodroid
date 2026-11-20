@@ -2907,6 +2907,9 @@ html[data-skin="shise"] .icon-btn{border-radius:50%}
 /* 输入框：container-high 底的大胶囊，没有边和投影；聚焦也不描边（M3 的 filled 文本框靠底色认） */
 html[data-skin="shise"] #composer-inner,html[data-skin="shise"].wel #composer-inner{background:var(--input-bg);border:0;border-radius:28px;box-shadow:none}
 html[data-skin="shise"] #btn-send{width:40px;height:40px;flex-basis:40px}
+/* 行高由 40 的发送键定：mini 键（32）和插话键（34）把盒高补到 40，单行时和发送键垂直居中（原先贴底，比中心低 3px）；多行时仍贴底 */
+html[data-skin="shise"] #composer-inner .mini-btn{margin-block:4px}
+html[data-skin="shise"] #btn-interject{margin-block:3px}
 html[data-skin="shise"] #btn-interject{border:0;background:var(--ss-sc);color:var(--ss-on-sc)}
 html[data-skin="shise"] #btn-interject:active{background:var(--ss-pc);color:var(--ss-on-pc)}
 /* 用户气泡：主色容器，右下角收小（指向说话的人），字用 on-primary-container */
