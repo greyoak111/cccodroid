@@ -155,7 +155,7 @@
     if (f) {
       const full = p.path.replace(/\/$/, "") + "/" + f.dataset.file;
       if (f.dataset.dir) return openFiles(full);
-      // 项目摘要里只有名字和是不是目录，没有类型：走 openPath 先问一次 stat，和文件浏览器进同一个查看器（#145-1）
+      // 项目摘要里只有名字和是不是目录，没有类型：走 openPath 先问一次 stat（APK 直接安装，其余进查看器；#145-1）
       return openPath(full);
     }
     if (a === "instr-undo") { box.querySelector(".pj-instr").value = PJ.detail.instr || ""; box.querySelector(".pj-save").classList.add("hidden"); return; }

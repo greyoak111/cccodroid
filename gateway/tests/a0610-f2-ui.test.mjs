@@ -90,5 +90,11 @@ test("v0.7.12 会话里点 APK 直接走安装，不进压缩包浏览（.apk �
   const s = src("01-core.js");
   has(s, /return vwInstallApk\(r\.path\);/, "APK 点开直接安装");
   has(s, /r\.kind === "archive"/, "APK 分支在压缩包浏览之前");
+  // 真正比一次顺序：openPath 函数体里，安装分支必须先于 openViewer 出现
+  const a = s.indexOf("async function openPath(p) {"), b = s.indexOf("const onPathLink = ", a);
+  assert.ok(a >= 0 && b > a, "openPath 与 onPathLink 边界");
+  const body = s.slice(a, b);
+  const iInst = body.indexOf("vwInstallApk"), iVw = body.indexOf("openViewer(");
+  assert.ok(iInst > 0 && iVw > iInst, "APK 安装分支必须先于 openViewer");
 });
 

@@ -1616,7 +1616,7 @@ window.I18N_DICT["id"] = {
   "求索": "Qiusuo",
   "深浅": "Terang / gelap",
   "浅": "Terang",
-      "深": "Gelap",
+  "深": "Gelap",
   "新对话默认；输入栏下也能临时切": "Default untuk percakapan baru; bisa diganti sementara di bawah bilah input",
   "上下文到多少 token 时压缩": "Padatkan saat konteks mencapai jumlah token ini",
   "附加目录": "Direktori tambahan",

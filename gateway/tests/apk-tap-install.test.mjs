@@ -1,4 +1,4 @@
-// v0.7.12：会话里点 APK 直接走安装确认，不进压缩包浏览。用 node:vm 真执行 openPath 的分支（同 chat-frame-budget 的做法）。
+// v0.7.12：会话里点 APK 直接走安装确认，不进压缩包浏览。用 node:vm 真执行 openPath 的分支。
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import assert from "node:assert/strict";
@@ -30,6 +30,13 @@ test("APK 点开走安装，不碰查看器", async () => {
   const b = fixture({ dir: false, kind: "archive", path: "/sdcard/Download/foo.apk", size: 1 });
   await b.openPath("/sdcard/Download/foo.apk");
   assert.equal(b.installed, "/sdcard/Download/foo.apk", "应调 vwInstallApk");
+  assert.equal(b.opened, undefined, "不该开查看器");
+});
+
+test("APK 大写后缀同样走安装（正则带 i）", async () => {
+  const b = fixture({ dir: false, kind: "archive", path: "/sdcard/Download/foo.APK", size: 1 });
+  await b.openPath("/sdcard/Download/foo.APK");
+  assert.equal(b.installed, "/sdcard/Download/foo.APK", "应调 vwInstallApk");
   assert.equal(b.opened, undefined, "不该开查看器");
 });
 

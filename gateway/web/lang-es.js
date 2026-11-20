@@ -1616,7 +1616,7 @@ window.I18N_DICT["es"] = {
   "求索": "Qiusuo",
   "深浅": "Claro / oscuro",
   "浅": "Claro",
-      "深": "Oscuro",
+  "深": "Oscuro",
   "新对话默认；输入栏下也能临时切": "Predeterminado para chats nuevos; cámbialo bajo la barra de entrada",
   "上下文到多少 token 时压缩": "Compactar cuando el contexto llegue a estos tokens",
   "附加目录": "Directorios adicionales",

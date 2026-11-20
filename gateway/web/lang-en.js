@@ -1649,7 +1649,7 @@ window.I18N_DICT.en = {
   "求索": "Qiusuo",
   "深浅": "Light / dark",
   "浅": "Light",
-      "深": "Dark",
+  "深": "Dark",
   "新对话默认；输入栏下也能临时切": "Default for new chats; switch anytime under the input bar",
   "上下文到多少 token 时压缩": "Compact when context reaches this many tokens",
   "附加目录": "Extra directories",
