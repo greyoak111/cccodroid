@@ -543,9 +543,15 @@ RECOVER_HOOKS.push((runs, evidence) => {
 
 // 会话进了回收站：接着它的任务放下 lastSid，详情里标「原来的对话已删除」，下一次新开（#173-3）
 TRASH_HOOKS.push((id) => {
-  let n = 0;
-  for (const t of DB.tasks) if (t.lastSid === id) { t.lostSid = id; t.lastSid = null; n++; }
-  if (n) { save(); publish({ type: "sched", op: "edit" }); }
+  const before = [];
+  for (const t of DB.tasks) if (t.lastSid === id) { before.push([t, t.lostSid]); t.lostSid = id; t.lastSid = null; }
+  if (!before.length) return;
+  // 回收站依据钩子的结果决定是否完成。写失败后保留重试依据，别把内存里的修改当成已落盘。
+  if (!store()) {
+    for (const [t, lostSid] of before) { t.lastSid = id; if (lostSid === undefined) delete t.lostSid; else t.lostSid = lostSid; }
+    throw new Error(tz("没保存上：存储满了或没有权限"));
+  }
+  publish({ type: "sched", op: "edit" });
 });
 
 // 一轮结束：记运行记录、改会话名、通知、重试

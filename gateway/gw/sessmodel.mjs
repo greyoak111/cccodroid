@@ -7,7 +7,7 @@
 // 存储：home/ccapp-session-models.json  { 会话号: { model, effort, provider, at } }，留最近 3000 条。
 import path from "node:path";
 import { CFG, log, tz } from "./config.mjs";
-import { isObj, loadState, saveState } from "./statefile.mjs";
+import { isObj, loadState, saveState, stateUnread } from "./statefile.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { PROVIDER, providerById } from "./providers.mjs";
 import { SETTINGS } from "./settings-store.mjs";
@@ -50,7 +50,16 @@ function save() {
 export function flushSessModel() { clearTimeout(saveT); saveT = 0; return saveNow(); }
 onShutdown("会话模型", flushSessModel);   // 退出流程 runShutdown() 会调；不再靠 server.mjs 记得（196-状态写.2）
 /** 会话彻底删掉时清掉它钉的模型/接口（196-真机.1） */
-export function forgetSessModel(sid) { if (sid && DB[sid]) { delete DB[sid]; return saveNow(); } return true; }
+export function forgetSessModel(sid) {
+  if (stateUnread(FILE)) DB = loadState(FILE, { shape: sessShape, fallback: () => ({}) }).data;
+  if (stateUnread(FILE)) return false;
+  if (!sid || !Object.hasOwn(DB, sid)) return true;
+  const before = DB[sid];
+  delete DB[sid];
+  if (saveNow()) return true;
+  DB[sid] = before;
+  return false;
+}
 
 /** 这个会话记下的选择；没记过、或记的那家已经不在了，返回 null */
 export function sessModel(sid) {

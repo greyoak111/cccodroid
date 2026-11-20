@@ -51,9 +51,13 @@ export function saveArchive() {
 /** 会话彻底删掉时清掉它的档案（195-A.7 / Y.3） */
 export function archiveForget(id) {
   const db = archiveDb();
-  if (!db.sessions[id]) return true;
+  if (!DB) return false; // 读不了原档案，不把回落空表当作已经清理
+  if (!Object.hasOwn(db.sessions, id)) return true;
+  const before = db.sessions[id];
   delete db.sessions[id];
-  return saveArchive();
+  if (saveArchive()) return true;
+  db.sessions[id] = before; // 下次清理不能把内存中缺项当作已落盘
+  return false;
 }
 
 /** 会话包里带来的档案（导出时随会话一起放进 manifest，#98 03-001）：只收认得的字段、按类型过一遍；

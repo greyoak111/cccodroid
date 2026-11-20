@@ -84,7 +84,11 @@ export function dropExtra(child, id) {
 /** 会话彻底删掉时清掉它作为「子」的记录（它作为别人的父的记录留着：子会话那边画成「源自已删除的会话」） */
 export function forgetChild(child) {
   const db = lineageDb();
-  if (!db.edges[child]) return true;
+  if (!DB) return false;
+  if (!Object.hasOwn(db.edges, child)) return true;
+  const before = db.edges[child];
   delete db.edges[child];
-  return save();
+  if (save()) return true;
+  db.edges[child] = before;
+  return false;
 }

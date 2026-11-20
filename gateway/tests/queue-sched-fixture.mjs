@@ -12,7 +12,7 @@ const gw = new URL("../gw/", import.meta.url).href;
 
 // Each boot is a fresh module graph over the same synthetic home. No live startup,
 // test CLI, or network is needed to observe checkpoints and held queue state.
-export function fixture(t, { sched = false } = {}) {
+export function fixture(t, { sched = false, queueFirst = false } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "queue-sched-home-"));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const put = (file, data) => fs.writeFileSync(path.join(home, file), JSON.stringify(data));
@@ -34,7 +34,7 @@ export function fixture(t, { sched = false } = {}) {
       const NOW = ${NOW}, AT = ${AT};
       Date.now = () => NOW;
       const gw = ${JSON.stringify(gw)};
-      await import(new URL('providers.mjs', gw));
+      if (!${queueFirst}) await import(new URL('providers.mjs', gw));
       const Q = await import(new URL('queue.mjs', gw));
       const { _schedForTest: S, routeSched } = ${sched} ? await import(new URL('sched.mjs', gw)) : {};
       const { RUNS, maxParallel } = await import(new URL('runs.mjs', gw));

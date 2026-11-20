@@ -46,7 +46,7 @@ import { API_KEY, PROVIDER, routeProviders } from "./gw/providers.mjs";
 import { fetchModels, normEffort, routeModels } from "./gw/models.mjs";
 import { listSessions, routeSessions } from "./gw/sessions.mjs";
 import { bridgeProc, killTree, reapOrphans, routeClaude } from "./gw/claude.mjs";
-import { expireTrash } from "./gw/sessionops.mjs";
+import { expireTrash, recoverTrash } from "./gw/sessionops.mjs";
 import { routeCaps, builtinCommands } from "./gw/caps.mjs";
 import { NEXT, sendJson, serveStatic } from "./gw/http.mjs";
 import { UPLOAD_DIR, routeFiles } from "./gw/files.mjs";
@@ -195,7 +195,10 @@ server.listen(CFG.port, "127.0.0.1", () => {
   // 上一任留下的运行标记：等所有模块都求值完再收（放在 queue.mjs 顶层会撞循环引用——sessionops 的 SID_RE 还没初始化，带会话的排队消息一恢复网关就崩，11-02 群友日志）。
   // 端口拿到了才收：以前在 listen 之前，旧网关还在跑时重复拉起的这个先改了它的恢复记录，再因 EADDRINUSE 退出（0.6.9 审计 195-T.2）。
   // 'listening' 先于任何连接派发，界面的第一个请求照样看得到恢复出来的队列
+  // 先修好回收站搬到一半的记录，免得队列把它当成已丢失；队列恢复后再重放回收通知。
+  try { recoverTrash({ hooks: false }); } catch (e) { log("恢复回收站文件失败：" + e.message); }
   try { recoverRunMark(); } catch (e) { log("恢复上次的运行标记失败：" + (e.stack || e.message)); }
+  try { recoverTrash(); } catch (e) { log("恢复回收站状态失败：" + e.message); }
   // 组件安装中途被杀留下的 installing 记录 / .old 备份 / 半搬移文件：启动时回滚或收口（组件安装报告 §2）
   compRecover().catch((e) => log("组件安装中断恢复失败：" + (e.stack || e.message)));
   // 界面地址也放到恢复之后：别让界面在队列恢复前先连进来。

@@ -119,7 +119,7 @@ export function snapshot() {
     recoverWarns: RECOVER_WARNS,
   };
 }
-export const publishState = () => { saveRunMark(); publish({ type: "state", ...snapshot() }); };
+export const publishState = () => { const saved = saveRunMark(); publish({ type: "state", ...snapshot() }); return saved; };
 
 // ── 被系统杀掉后接得上（A2）──────────────────────────────────────────
 // 正在跑的这一轮 + 排队的消息，每次状态变化都落盘；正常收尾、队列清空时删掉。
@@ -189,11 +189,13 @@ function writeRunMark(interrupted) {
 const INTR_MAX = 20;
 const intrList = (v) => (Array.isArray(v) ? v : v ? [v] : []).filter((e) => e && typeof e === "object" && e.id).slice(-INTR_MAX);
 // 读的时候顺手丢掉会话已经不在了的（老版本回收时没清）：没建会话的照留
-export let INTERRUPTED = (() => {
-  try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))).filter((e) => { try { return !e.sessionId || !sessionGone(e.sessionId); } catch { return true; } }); } catch {}
+const diskInterrupted = (() => {
+  try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))); } catch {}
   return [];
 })();
-let savedInterrupted = INTERRUPTED;
+export let INTERRUPTED = diskInterrupted.filter((e) => { try { return !e.sessionId || !sessionGone(e.sessionId); } catch { return true; } });
+// 加载时滤掉的中断卡也要落盘；否则恢复同号会话后旧卡会回来。
+let savedInterrupted = INTERRUPTED.length === diskInterrupted.length ? INTERRUPTED : diskInterrupted;
 function persistInterrupted() {
   // 若运行标记里已有权威快照，先更新它，才提交另一份。否则两次写之间被结束，旧快照会盖掉新回执。
   if (markedInterrupted && markedInterrupted !== INTERRUPTED && !writeRunMark(INTERRUPTED)) return false;
@@ -211,22 +213,29 @@ export function setInterrupted(list) {
 }
 /** 这个会话又跑起来了：去掉它的中断记录。没建立会话的（sid 为空）互相分不清，一律不在这里清 ——
  *  界面「重发」「忽略」时按记录 id 单独清（/api/interrupted/dismiss）。以前空会话号会把别的未建会话的中断记录一起清掉（#149-2） */
+function dropInterrupted(sid) {
+  if (!sid) return false;
+  const left = INTERRUPTED.filter((e) => e.sessionId !== sid);
+  if (left.length === INTERRUPTED.length) return false;
+  INTERRUPTED = left;
+  return true;
+}
 export function clearInterrupted(sid) {
-  if (!sid) return;
-  const left = INTERRUPTED.filter((e) => (e.sessionId || "") !== (sid || ""));
-  if (left.length !== INTERRUPTED.length) setInterrupted(left);
+  if (dropInterrupted(sid)) persistInterrupted();
 }
 // 会话进了回收站：它的中断记录没用了（不然启动时还会拿它当目标会话打开、挂一张「继续」卡，#173-5）；
 // 正开着它的界面收到 session_gone 自己退回新对话（服务端删的：项目连目录删、定时任务不存对话、别的窗口，#173-4）
 TRASH_HOOKS.push((id) => {
-  clearInterrupted(id);
-  clearIncomplete(id);   // 会话进回收站：未完成标记跟着清掉，别留给同号的将来（FIND-040）
+  dropInterrupted(id);
+  const incompleteSaved = clearIncomplete(id);   // 别把旧未完成标记留给同号的将来（FIND-040）
   // 排着的消息也丢掉：不然名额一空就拿已删的会话号去 --resume，claude 报 No conversation found，这条消息悄悄没了（0.6.9 审计 195-W.1）
   const n0 = QUEUE.length;
   for (let k = QUEUE.length - 1; k >= 0; k--) if (sidForItem(QUEUE[k]) === id) QUEUE.splice(k, 1);
-  if (QUEUE.length !== n0) { log(`  会话 ${id} 进了回收站，丢掉它排着的 ${n0 - QUEUE.length} 条消息`); saveRunMark(); }
+  if (QUEUE.length !== n0) log(`  会话 ${id} 进了回收站，丢掉它排着的 ${n0 - QUEUE.length} 条消息`);
   publish({ type: "session_gone", id });
-  publishState();
+  // 状态先从界面撤下，但磁盘未更新时不能把回收通知标成完成。
+  const saved = publishState();
+  if (!incompleteSaved || !saved || INTERRUPTED !== savedInterrupted) throw new Error(tz("没保存上：存储满了或没有权限"));
 });
 /** 启动时要认领投递结果的模块在这里挂（定时任务记失败、去重）。若销账失败，钩子可返回仍需保留的交接证据。 */
 export const RECOVER_HOOKS = [];
