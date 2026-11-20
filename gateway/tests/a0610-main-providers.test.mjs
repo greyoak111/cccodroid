@@ -61,6 +61,45 @@ test("P1-2：改了端点主机又没给新 Key → 旧 Key 清掉；同主机�
   assert.deepEqual(JSON.parse(r2.out), { a: false, b: false, k: "NEW" });
 });
 
+test("P1-2 补：旧密钥按对话/清单端点各自的来源绑定 —— 互换主机、清单挪源、换端口协议 → 清；同源改路径 → 不动", () => {
+  const cfg = { "ccapp-providers.json": { active: "deepseek", providers: { "custom-1": { label: "a", baseUrl: "https://a.example", modelsUrl: "https://b.example", apiKey: "OLD" } } } };
+  const s = (b) => scenario(cfg, `
+    const fs = (await import('node:fs')).default;
+    const a = P.upsertProvider("custom-1", ${JSON.stringify(b)});
+    const k1 = JSON.parse(fs.readFileSync(process.env.CCAPP_HOME + "/ccapp-providers.json", "utf8")).providers["custom-1"].apiKey ?? null;
+    console.log(JSON.stringify({ cleared: !!a.keyCleared, k1, k2: P.PROVIDERS_CFG.providers["custom-1"].apiKey ?? null }));`);
+  // 全部只碰占位密钥与本地配置，不向任何测试端点发请求
+  for (const b of [
+    { baseUrl: "https://b.example", modelsUrl: "https://a.example" },   // 两端点互换主机：主机集合没变，但两把 Key 的接收方都换了
+    { modelsUrl: "https://a.example" },                                  // 清单源挪到对话源：集合变小，但清单那把的接收方变了
+    { modelsUrl: "" },                                                   // 清单删掉（回落对话源），此前却绑定过 b 源
+    { modelsUrl: "https://c.example" },                                  // 清单源挪到第三家主机
+    { baseUrl: "https://a.example:8443" },                               // 同主机换端口 = 另一个来源
+    { baseUrl: "http://a.example" },                                     // 明文 http 也算换了来源
+  ]) {
+    const r = s(b);
+    assert.equal(r.rc, 0, r.err);
+    assert.deepEqual(JSON.parse(r.out), { cleared: true, k1: null, k2: null });
+  }
+  // 同源只改路径：接收方没变 → 不动
+  const r = s({ baseUrl: "https://a.example/x/y", modelsUrl: "https://b.example/n" });
+  assert.equal(r.rc, 0, r.err);
+  assert.deepEqual(JSON.parse(r.out), { cleared: false, k1: "OLD", k2: "OLD" });
+  // 没配过清单源的老接口：新增指向别处的清单 → 清；新增同源清单 → 不动
+  const cfg2 = { "ccapp-providers.json": { active: "deepseek", providers: { "custom-1": { label: "a", baseUrl: "https://a.example", apiKey: "OLD" } } } };
+  const s2 = (b) => scenario(cfg2, `
+    const fs = (await import('node:fs')).default;
+    const a = P.upsertProvider("custom-1", ${JSON.stringify(b)});
+    const k1 = JSON.parse(fs.readFileSync(process.env.CCAPP_HOME + "/ccapp-providers.json", "utf8")).providers["custom-1"].apiKey ?? null;
+    console.log(JSON.stringify({ cleared: !!a.keyCleared, k1, k2: P.PROVIDERS_CFG.providers["custom-1"].apiKey ?? null }));`);
+  const r3 = s2({ modelsUrl: "https://b.example" });
+  assert.equal(r3.rc, 0, r3.err);
+  assert.deepEqual(JSON.parse(r3.out), { cleared: true, k1: null, k2: null });
+  const r4 = s2({ modelsUrl: "https://a.example/models" });
+  assert.equal(r4.rc, 0, r4.err);
+  assert.deepEqual(JSON.parse(r4.out), { cleared: false, k1: "OLD", k2: "OLD" });
+});
+
 test("P1-8：老配置没有 nextCustom、最大号被删过，但会话钉选还记着它 → 新接口不复用这个号", () => {
   const r = scenario({
     "ccapp-providers.json": { active: "deepseek", providers: { "custom-1": { baseUrl: "https://a.example", apiKey: "k" } } },

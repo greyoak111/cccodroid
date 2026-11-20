@@ -666,11 +666,14 @@ export function upsertProvider(id, b, prepare) {
     if (!cur.label) cur.label = id;
     if (!/^https?:\/\//.test(cur.baseUrl || "")) return { error: "bad_baseUrl", message: tz("端点地址要以 http:// 或 https:// 开头") };
     cur.baseUrl = cur.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");   // claude 自己会补 /v1/messages
-    // 改了端点（或模型清单）的主机、这次又没给新 Key：旧 Key 不能跟着送去新主机，清掉，要用户重新填（0.6.9 审计 P1-2）
-    const host = (u) => { try { return new URL(u).host.toLowerCase(); } catch { return ""; } };
+    // 改了端点（或模型清单）的来源、这次又没给新 Key：旧 Key 不能跟着送去新来源，清掉，要用户重新填（0.6.9 审计 P1-2）。
+    // 对话与模型清单端点各自按 origin（协议+主机+端口）绑定比较：同源改路径不动 Key；
+    // 两端点互换主机这种「集合整体没变、但各自接收方都变了」的情况也照样清
+    const origin = (u) => { try { return new URL(u).origin; } catch { return u || ""; } };
     const prev = PROVIDERS_RAW.providers[id] || {};
-    const hostsOf = (v) => [host(v.baseUrl), host(v.modelsUrl)].filter(Boolean);
-    if (!isNew && cur.apiKey && !("apiKey" in b && str(b.apiKey)) && hostsOf(cur).some((h) => !hostsOf(prev).includes(h))) {
+    const newRecipient = origin(cur.baseUrl) !== origin(prev.baseUrl) ||
+      origin(cur.modelsUrl || cur.baseUrl) !== origin(prev.modelsUrl || prev.baseUrl);
+    if (!isNew && cur.apiKey && !("apiKey" in b && str(b.apiKey)) && newRecipient) {
       delete cur.apiKey;
       keyCleared = true;
     }
