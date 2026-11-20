@@ -527,8 +527,13 @@
     if (a === "html") {
       if (VW.dirty) {
         if (!confirm(t("预览显示的是磁盘上的文件。先保存你的修改再预览？"))) return;
-        const gen = VW.gen;
-        return vwSave(false).then(() => { if (gen === VW.gen && VW.mode === "edit" && !VW.dirty) { localStorage.setItem("cc.vw.htmlmode", "html"); vwHtml(); } });
+        // 对比和源码都能发起保存；旧回执不能把用户后来打开的文档或版式切走。
+        const { gen, mgen } = VW;
+        return vwSave(false).then((saved) => {
+          if (saved !== true || gen !== VW.gen || mgen !== VW.mgen || VW.closing || viewerEl.classList.contains("hidden") || VW.dirty) return;
+          localStorage.setItem("cc.vw.htmlmode", "html");
+          return vwHtml();
+        });
       }
       localStorage.setItem("cc.vw.htmlmode", "html");
       return vwHtml();
@@ -1012,6 +1017,7 @@
   async function vwShowDiff() {
     VW.text = vwText();
     vwDropEd();
+    VW.mgen = (VW.mgen || 0) + 1;
     VW.mode = "diff";
     vwRenderActs();
     $("vw-body").innerHTML = `<div class="vw-diff">${VW.dirty ? `<div class="tiny">${t("还有没保存的修改；这里对比的是磁盘上的版本和上次提交。")}</div>` : ""}<div class="tiny">${t("读取中…")}</div></div>`;
@@ -1029,6 +1035,7 @@
   async function vwHtml() {
     vwDropEd();
     vwHtmlStop();
+    VW.mgen = (VW.mgen || 0) + 1;
     VW.mode = "html";
     vwRenderActs();
     const p = VW.path, n = VW.pvSeq = (VW.pvSeq || 0) + 1;
@@ -1133,6 +1140,7 @@
     vwDropEd();
     vwMdStop();          // 从预览切走：分段渲染的 observer 别跟着文字一起留着（FIND-026）
     gutStop();           // 行号栏的 observer / 行文本也一起放下，等新的编辑框建好再挂（FIND-026）
+    VW.mgen = (VW.mgen || 0) + 1;
     VW.mode = mode;
     if (mode === "edit" && isMd(VW.path) && !VW.plainMd && !VW.enc) { vwRenderActs(); return vwMdEditor(); }
     if (mode === "md") vwMdPreview(VW.text);
@@ -1349,13 +1357,14 @@
       draftClear();
       return vwLoadText("edit");
     }
-    let j = {};
+    let j;
     try { j = await r.json(); } catch {}
+    const saved = r.ok && j?.ok === true;
     // 已经写到磁盘：只刷新最初对应的列表。换了文件也不能去改现在查看器的状态（UIFS-007）。
-    if (r.ok && origin && origin.path === path) fsViewerChanged(origin, true);
-    if (gen !== VW.gen) { if (r.ok) toast(t("已保存")); return; }
+    if (saved && origin && origin.path === path) fsViewerChanged(origin, true);
+    if (gen !== VW.gen) { if (saved) toast(t("已保存")); return; }
     VW.saving = false;
-    if (!r.ok) return toast(t("保存失败：{msg}", { msg: j.error || r.status }), true);
+    if (!saved) return toast(t("保存失败：{msg}", { msg: j?.error || r.status }), true);
     VW.mtime = j.mtime; VW.size = j.size;
     // 保存在途时又改了：存下去的只是那一刻的版本，新改的还没存，别把「未保存」清掉（审查 C-002）
     // 切到预览时没有编辑器，VW.text 就是缓冲本身（存着更新的版本）：那时不能拿回执里的旧版盖掉它（审查 B07）
@@ -1364,6 +1373,7 @@
     vwRenderActs();
     toast(t("已保存"));
     vwGitCheck();                     // 存完改动行数变了
+    return true;
   }
 
   function vwImage() {

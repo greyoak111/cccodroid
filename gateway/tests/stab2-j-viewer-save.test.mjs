@@ -24,23 +24,33 @@ const flush = () => new Promise((r) => setImmediate(r));
 
 function load() {
   const code = `
-const VW = { ready: true, mtime: 5, size: 100, saving: false, enc: "", path: "/w/A.txt", gen: 1,
-  dirty: true, bom: false, eol: "", text: "A2" };
-const toasts = [], confirms = [], clears = [], loads = [], fetchCalls = [];
+const VW = { ready: true, mtime: 5, size: 100, saving: false, enc: "", path: "/w/A.html", gen: 1, mgen: 1,
+  mode: "edit", dirty: true, bom: false, eol: "", text: "A2" };
+const toasts = [], confirms = [], clears = [], loads = [], fetchCalls = [], previews = [], prefs = new Map();
+let click, accepting = false;
 const t = (s) => String(s);
 const toast = (m) => toasts.push(m);
 const vwText = () => VW.text;
-const confirm = (m) => { confirms.push(m); return false; };
+const confirm = (m) => { confirms.push(m); return accepting; };
 const draftClear = () => { clears.push(1); };
 const vwLoadText = (m) => { loads.push(m); };
 const vwInfo = () => {};
 const vwRenderActs = () => {};
 const vwGitCheck = () => {};
-const $ = () => null;
+const vwHtml = () => previews.push(VW.path);
+const vwDropEd = () => {};
+const esc = (s) => s, api = async () => ({ diff: "" });
+const viewerEl = { classList: { contains: () => false } };
+const localStorage = { setItem: (k, v) => prefs.set(k, v) };
+const body = { innerHTML: "", querySelector: () => null };
+const $ = (id) => id === "vw-acts" ? { addEventListener: (_, fn) => { click = fn; } } : id === "vw-body" ? body : null;
 const fetch = (u, o) => { fetchCalls.push(u); return __fetchImpl(u, o); };
+${take(src16, '  $("vw-acts").addEventListener("click"', "  // ── 压缩包浏览")}
+${take(src16, "  async function vwShowDiff() {", "  // ── HTML 预览")}
 ${take(src16, "  async function vwSave(force) {", "  function vwImage() {")}
-globalThis.__h = { vwSave, VW, toasts, confirms, clears, loads, fetchCalls,
-  setFetch: (f) => { __fetchImpl = f; } };
+globalThis.__h = { vwSave, vwShowDiff, VW, toasts, confirms, clears, loads, fetchCalls, previews, prefs,
+  preview: () => click({ target: { closest: () => ({ dataset: { a: "html" } }) } }),
+  confirmWith: (value) => { accepting = value; }, setFetch: (f) => { __fetchImpl = f; } };
 `;
   const ctx = {};
   ctx.__fetchImpl = () => { throw new Error("没有设置 fetch 桩"); };
@@ -59,7 +69,7 @@ test("UIFS-007 正常回执的 JSON 体迟到期间换了文件：旧 mtime / si
   const p = h.vwSave(false);
   await flush();                 // fetch 已回，正在等 json()
   switchToB(h);
-  late.ok({ mtime: 111, size: 222 });
+  late.ok({ ok: true, mtime: 111, size: 222 });
   await p;
   assert.equal(h.VW.mtime, 7, "B 的 mtime 不能被 A 的回执盖掉");
   assert.equal(h.VW.size, 200, "B 的大小也不能被盖掉");
@@ -85,7 +95,7 @@ test("UIFS-007 409 的 JSON 体迟到期间换了文件：不拿旧冲突去清�
 
 test("UIFS-007 没有换文件：正常回执照旧落 mtime / size、清未保存标记（回归）", async () => {
   const h = load();
-  h.setFetch(() => ({ ok: true, status: 200, json: async () => ({ mtime: 111, size: 222 }) }));
+  h.setFetch(() => ({ ok: true, status: 200, json: async () => ({ ok: true, mtime: 111, size: 222 }) }));
   await h.vwSave(false);
   assert.equal(h.VW.mtime, 111);
   assert.equal(h.VW.size, 222);
@@ -101,4 +111,56 @@ test("UIFS-007 没有换文件：409 选取消仍清稿并重新载入（回归�
   assert.equal(h.VW.dirty, false);
   assert.equal(h.clears.length, 1);
   assert.deepEqual([...h.loads], ["edit"]);
+});
+
+test("HTML 对比页的未保存修改：等保存成功才打开预览", async () => {
+  const h = load(), late = later();
+  h.confirmWith(true);
+  h.setFetch(() => ({ ok: true, status: 200, json: () => late.p }));
+  await h.vwShowDiff();
+  const p = h.preview();
+  assert.equal(h.fetchCalls.length, 1);
+  assert.deepEqual([...h.previews], []);
+  late.ok({ ok: true, mtime: 111, size: 222 });
+  await p;
+  assert.equal(h.VW.dirty, false);
+  assert.deepEqual([...h.previews], ["/w/A.html"]);
+  assert.equal(h.prefs.get("cc.vw.htmlmode"), "html");
+});
+
+test("HTTP 成功但没确认写入：保留草稿、不打开预览", async () => {
+  const h = load();
+  h.confirmWith(true);
+  h.setFetch(() => ({ ok: true, status: 200, json: async () => ({ ok: false, error: "write failed" }) }));
+  await h.preview();
+  assert.equal(h.VW.dirty, true);
+  assert.equal(h.VW.mtime, 5);
+  assert.match(h.toasts.at(-1), /保存失败/);
+  assert.deepEqual([...h.previews], []);
+});
+
+test("保存回执迟到：切换同一文档的版式后不打开预览", async () => {
+  const h = load(), late = later();
+  h.confirmWith(true);
+  h.setFetch(() => ({ ok: true, status: 200, json: () => late.p }));
+  const p = h.preview();
+  await h.vwShowDiff();
+  late.ok({ ok: true, mtime: 111, size: 222 });
+  await p;
+  assert.equal(h.VW.mode, "diff");
+  assert.equal(h.VW.dirty, false);
+  assert.deepEqual([...h.previews], []);
+});
+
+test("保存期间有新编辑：旧回执不清新草稿，也不打开预览", async () => {
+  const h = load(), late = later();
+  h.confirmWith(true);
+  h.setFetch(() => ({ ok: true, status: 200, json: () => late.p }));
+  const p = h.preview();
+  h.VW.text = "A3";
+  late.ok({ ok: true, mtime: 111, size: 222 });
+  await p;
+  assert.equal(h.VW.dirty, true);
+  assert.equal(h.VW.text, "A3");
+  assert.deepEqual([...h.previews], []);
 });
