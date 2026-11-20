@@ -7,14 +7,18 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import childProcess, { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { _setSealed } from "../gw/edition.mjs";
+import { _setSealed, sealed } from "../gw/edition.mjs";
 import { RETENTION_DAYS, sessionRetention } from "../gw/retention.mjs";
 import { settingsArgs } from "../gw/claude.mjs";
+import { rewindFiles } from "../gw/sessionops.mjs";
 import { ensureSessionRetention } from "../gw/extensions.mjs";
 import { sealPrepare, sealCleanup } from "../gw/seal.mjs";
-import { ucPending } from "../gw/userconf.mjs";
+import { ucKeep, ucPending } from "../gw/userconf.mjs";
 
 const F = path.join(CFG.home, ".claude", "settings.json");
 const had = fs.existsSync(F) ? fs.readFileSync(F) : null;
@@ -49,7 +53,6 @@ test("启动补写：没有文件就新建；有别的键照留并留 .bak；用
 
   put(JSON.stringify({ model: "x", hooks: { Stop: [] } }, null, 2));
   ucPending(); // 当前样子先让卡片看见（hooks 是要问的键），再认下，模拟用户已确认过
-  const { ucKeep } = await import("../gw/userconf.mjs");
   ucKeep([".claude/settings.json"]);
   r = await ensureSessionRetention();
   assert.equal(r.changed, true);
@@ -75,6 +78,44 @@ test("每轮 --settings 带核过的保留期（项目设置压不过它）", ()
   assert.equal(flagSettings().cleanupPeriodDays, 120);
   put('{"cleanupPeriodDays":0}');
   assert.equal(flagSettings().cleanupPeriodDays, RETENTION_DAYS, "写坏的值不往下传");
+});
+
+test("回退试算和执行都只把核过的保留期传给 CLI", async (t) => {
+  const before = sealed(), calls = [];
+  const spawn = t.mock.method(childProcess, "spawn", (_cmd, argv) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough(); child.stderr = new PassThrough();
+    child.stdin = new Writable({ write(chunk, _encoding, done) {
+      calls.push({ argv, request: JSON.parse(chunk).request });
+      child.stdout.write(JSON.stringify({ type: "control_response", response: { subtype: "success", response: { canRewind: true, filesChanged: [] } } }) + "\n");
+      done();
+      queueMicrotask(() => child.emit("close", 0));
+    } });
+    return child;
+  });
+  syncBuiltinESMExports();
+  try {
+    for (const [isSealed, userDays, days] of [[true, undefined, RETENTION_DAYS], [false, 120, 120], [false, "30", RETENTION_DAYS]]) {
+      _setSealed(isSealed);
+      if (userDays === undefined) fs.rmSync(F, { force: true }); else put(JSON.stringify({ cleanupPeriodDays: userDays }));
+      // 前面的测试也改过临时用户配置。先按正常确认流程认下当前版本，不绕过回退检查。
+      const pending = !isSealed && ucPending();
+      if (pending) assert.deepEqual(ucKeep(pending.rels, pending.ticket), []);
+      const sid = "retention-rewind-fixture", uuid = "retention-rewind-turn";
+      for (const dry of [true, false]) {
+        assert.deepEqual(await rewindFiles(sid, uuid, dry), { ok: true, canRewind: true, filesChanged: [] });
+        const { argv, request } = calls.at(-1);
+        assert.deepEqual(request, { subtype: "rewind_files", user_message_id: uuid, dry_run: dry });
+        assert.equal(argv[argv.indexOf("--resume") + 1], sid);
+        assert.equal(argv.includes("--setting-sources"), isSealed);
+        assert.equal(argv.filter((x) => x === "--settings").length, 1);
+        assert.deepEqual(JSON.parse(argv[argv.indexOf("--settings") + 1]), { cleanupPeriodDays: days });
+      }
+    }
+  } finally {
+    _setSealed(before);
+    spawn.mock.restore(); syncBuiltinESMExports();
+  }
 });
 
 test("发行版回填不再照搬用户写的 cleanupPeriodDays（由 settingsArgs 统一给）", () => {

@@ -9,6 +9,7 @@ import { CFG, LAST_LANG, PATHS, PREFIX, log, tr, tz } from "./config.mjs";
 import { NAMES, PEEK_CACHE, PINS, findSessionFile, peekSession, saveNames, savePins } from "./sessions.mjs";
 import { claudeBlocked, claudeCmd, claudeEnv, killTree } from "./claude.mjs";
 import { sealed } from "./edition.mjs";
+import { sessionRetention } from "./retention.mjs";
 import { LAST_SESSION, TRASH_HOOKS, forgetSession, runOfSession } from "./runs.mjs";
 import { forgetChild, recordPrimary } from "./lineage-store.mjs";
 import { lineageForget } from "./lineage.mjs";
@@ -301,7 +302,9 @@ export async function rewindFiles(sid, userUuid, dryRun) {
   const blocked = await claudeBlocked();
   if (blocked) return { ok: false, error: blocked };
   return new Promise((resolve) => {
-    const [cmd0, args0] = claudeCmd(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--resume", sid]);
+    // 试算也会 --resume，和普通对话一样不能让默认或项目保留期清扫会话。
+    const [cmd0, args0] = claudeCmd(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--resume", sid,
+      "--settings", JSON.stringify({ cleanupPeriodDays: sessionRetention().days })]);
     const child = spawn(cmd0, args0, { cwd: fs.existsSync(CFG.workspace) ? CFG.workspace : CFG.home, env: claudeEnv(), stdio: ["pipe", "pipe", "pipe"], detached: true });
     let buf = "", done = false, err = "", exited = false;
     const finish = (r) => { if (done) return; done = true; clearTimeout(t); try { child.stdin.end(); } catch {} setTimeout(() => { if (!exited) killTree(child); }, 3000); resolve(r); };
