@@ -133,18 +133,35 @@ const TEXT_KEEP = 64 << 10;     // 运行标记里每轮留的提问字数（标
 //   两样都没有 → 没打招呼就没了（系统回收、强行停止）
 const APP_ID = (() => { try { return crypto.createHash("sha256").update(fs.readFileSync(path.join(HERE, "FILES"))).digest("hex").slice(0, 16); } catch { return ""; } })();
 let STOPPING = false;
-onShutdown("运行标记", () => { STOPPING = true; if (RUNS.size) saveRunMark(); });
+let recoveryHandoffs = [];   // 调度账本暂时写不了时，从旧运行标记带到下一次启动的交接证据
+export function forgetRecoveryHandoff(taskId, at) {
+  recoveryHandoffs = recoveryHandoffs.filter((s) => s.taskId !== taskId || s.scheduledAt !== at);
+}
+onShutdown("运行标记", () => { STOPPING = true; if (RUNS.size || INTERRUPTED !== savedInterrupted) saveRunMark(); });
 export function saveRunMark() {
   // 「有任务」标记跟着同步：在跑的，加上排着、会自己发出去的（挂起等 ⚡ 的不算）。外壳据此判断划掉时能不能停服务（审查 0601b）
   runFlag(RUNS.size > 0 || QUEUE.some((q) => !q.held));
+  const dirty = INTERRUPTED !== savedInterrupted && !persistInterrupted();
+  // 回执暂时写不上时不能冻结整份运行标记：把回执、当前轮次和待发项一起原子写下。
+  return writeRunMark(dirty ? INTERRUPTED : null);
+}
+let markedInterrupted = null;
+function warnRunMarkWrite() {
+  warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
+  return false;
+}
+function writeRunMark(interrupted) {
   try {
-    if (!RUNS.size && !QUEUE.length) { fs.rmSync(RUN_MARK, { force: true }); return true; }
+    if (!RUNS.size && !QUEUE.length && !interrupted && !recoveryHandoffs.length) {
+      fs.rmSync(RUN_MARK, { force: true }); markedInterrupted = null; return true;
+    }
     const live = runList().filter((r) => !r.ended);
     const ok = writeAtomic(RUN_MARK, JSON.stringify({
       ...(APP_ID ? { app: APP_ID } : {}), ...(STOPPING ? { stop: true } : {}),
       // done：已经答完、只是进程还留着等后台任务回报，而且任务也都清零了 —— 这时被结束不算中断
       // text 以前截 4000 字、别的都不存：没建会话的「重发」长消息后半截悄悄没了，项目 / 模型 / 权限也回落全局（195-AA.5）。
       // 现在存到 64K（更长的标 textCut，界面要说），连同发送参数 req、定时任务身份 sched（AA.3）
+      ...(interrupted ? { interrupted } : {}), ...(recoveryHandoffs.length ? { schedHandoffs: recoveryHandoffs } : {}),
       runs: live.map((r) => ({ id: r.id, sessionId: r.sessionId, ...(r.cwd ? { cwd: r.cwd } : {}), text: r.text.slice(0, TEXT_KEEP), ...(r.text.length > TEXT_KEEP ? { textCut: true } : {}),
         startedAt: r.startedAt, ...(r.req && Object.keys(r.req).length ? { req: r.req } : {}), ...(r.sched ? { sched: r.sched } : {}),
         // 有副作用、还没等到结果的工具（FIND-039/049）：恢复后由「继续」卡提示，界面才知道哪些操作不能当没发生
@@ -158,14 +175,13 @@ export function saveRunMark() {
       // 落盘时把会话号补实（#97 02-005；跟的那条被撤销时按车道找首条跑出来的会话，#120-1）
       // 送进去还没等到结果的斜杠命令也留下，挂起（可能已经办了一半，等用户点 ⚡ 再发）
       queue: [...live.flatMap((r) => [...(r.pendingInject || []).map((it) => ({ ...it, injected: false })), ...(r.slashFlight || []).map((it) => ({ ...it, injected: false, held: true }))]), ...QUEUE]
-        .map((q) => { const sid = q.sessionId || sidForItem(q); return sid ? { ...q, sessionId: sid } : q; }),
+        .map((q) => { const sid = sidForItem(q); return sid ? { ...q, sessionId: sid, lane: "s:" + sid } : q; }),
     }));
-    if (!ok) warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
-    return ok;
+    if (ok) markedInterrupted = interrupted;
+    return ok || warnRunMarkWrite();
   } catch {
     // 写不上（满盘、没有权限）：这一轮被结束时可能恢复不了，得让界面知道（FIND-041）
-    warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
-    return false;
+    return warnRunMarkWrite();
   }
 }
 // 中断记录是个列表：并行时一次会断好几轮，每个会话都要有自己的「继续」卡（群友 Yhaizg 11-01：升级时三个会话在跑，只提示了一个）
@@ -177,18 +193,21 @@ export let INTERRUPTED = (() => {
   try { return intrList(JSON.parse(fs.readFileSync(INTR_FILE, "utf8"))).filter((e) => { try { return !e.sessionId || !sessionGone(e.sessionId); } catch { return true; } }); } catch {}
   return [];
 })();
+let savedInterrupted = INTERRUPTED;
+function persistInterrupted() {
+  // 若运行标记里已有权威快照，先更新它，才提交另一份。否则两次写之间被结束，旧快照会盖掉新回执。
+  if (markedInterrupted && markedInterrupted !== INTERRUPTED && !writeRunMark(INTERRUPTED)) return false;
+  try {
+    if (!INTERRUPTED.length) fs.rmSync(INTR_FILE, { force: true });
+    else if (!writeAtomic(INTR_FILE, JSON.stringify(INTERRUPTED))) return warnRunMarkWrite();
+    savedInterrupted = INTERRUPTED;
+    return true;
+  } catch { return warnRunMarkWrite(); }
+}
 /** 落盘成功回 true（写到一半被杀不留半个 JSON：临时文件 + fsync + 换名） */
 export function setInterrupted(list) {
   INTERRUPTED = intrList(list);
-  try {
-    if (!INTERRUPTED.length) { fs.rmSync(INTR_FILE, { force: true }); return true; }
-    const ok = writeAtomic(INTR_FILE, JSON.stringify(INTERRUPTED));
-    if (!ok) warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
-    return ok;
-  } catch {
-    warnRecover("运行状态没保存上（存储可能满了或没有权限）：App 被系统结束时，这一轮可能没法恢复或继续。");
-    return false;
-  }
+  return persistInterrupted();
 }
 /** 这个会话又跑起来了：去掉它的中断记录。没建立会话的（sid 为空）互相分不清，一律不在这里清 ——
  *  界面「重发」「忽略」时按记录 id 单独清（/api/interrupted/dismiss）。以前空会话号会把别的未建会话的中断记录一起清掉（#149-2） */
@@ -209,8 +228,7 @@ TRASH_HOOKS.push((id) => {
   publish({ type: "session_gone", id });
   publishState();
 });
-/** 上一任没跑完的轮次记成中断之后要知道的模块（定时任务记一次失败运行，AA.3）在这里挂；钩子出错不影响恢复。
- *  标记写不掉时下次启动会再给一遍同样的轮次：钩子自己按 run id 去重 */
+/** 启动时要认领投递结果的模块在这里挂（定时任务记失败、去重）。若销账失败，钩子可返回仍需保留的交接证据。 */
 export const RECOVER_HOOKS = [];
 /** 启动时调一次：上一任留下的标记 → 中断记录 + 挂起的队列。
  *  标记是唯一的来源：中断记录和队列都落了盘才把它换掉 / 删掉。以前一读完就删，
@@ -236,48 +254,56 @@ export function recoverRunMark() {
     if (!r || !r.sessionId || !r.sealBase || !Number.isFinite(r.sealBase.size) || typeof r.sealBase.hash !== "string") continue;
     try { const f = findSessionFile(String(r.sessionId), typeof r.cwd === "string" ? r.cwd : undefined)?.file; if (f) sealSession(String(r.sessionId), f, { base: r.sealBase }); } catch (e) { log(`[封签] ${e.message}`); }
   }
-  // 并行时可能同时断了好几轮：每个会话各记一条，各挂各的「继续」卡
-  const runs = (Array.isArray(m.runs) ? m.runs : m.run ? [m.run] : []).filter((r) => r && r.id && !r.done).sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
-  for (const r of runs) {
-    if (r.sessionId) RUN_SESSIONS.set(r.id, r.sessionId);
+  // 已完成的轮次也能替排队项补全会话号，但不生成中断卡。
+  const runs = (Array.isArray(m.runs) ? m.runs : m.run ? [m.run] : []).filter((r) => r && r.id).sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+  const queued = (Array.isArray(m.queue) ? m.queue : []).filter((q) => q && q.id && typeof q.message === "string");
+  for (const r of runs) if (r.sessionId) RUN_SESSIONS.set(r.id, r.sessionId);
+  const cause = m.app && APP_ID && m.app !== APP_ID ? "update" : m.stop ? "stop" : null;
+  const now = Date.now(), fresh = runs.filter((r) => !r.done).map((r) => {
     log(`⚠️ 上一轮没跑完就被结束了（会话 ${r.sessionId || "未建立"}），已标为中断`);
-  }
-  if (runs.length) {
-    const cause = m.app && APP_ID && m.app !== APP_ID ? "update" : m.stop ? "stop" : null;
-    const now = Date.now(), fresh = runs.map((r) => {
-      const e = { ...r, at: now, ...(cause ? { cause } : {}), ...(r.unstarted && !r.why ? { why: "unstarted" } : {}) };
-      // 标记可能被手改坏：台账只收字符串、条数和长度都封顶（FIND-039/049）
-      const side = Array.isArray(r.sideTools) ? r.sideTools.filter((x) => typeof x === "string").slice(-20).map((s) => s.slice(0, 200)) : [];
-      if (side.length) e.sideTools = side; else delete e.sideTools;
-      return e;
-    });
-    // 上次没处理的中断记录留着；同一个会话以这次的为准
+    const e = { ...r, at: now, ...(cause ? { cause } : {}), ...(r.unstarted && !r.why ? { why: "unstarted" } : {}) };
+    // 标记可能被手改坏：台账只收字符串、条数和长度都封顶（FIND-039/049）
+    const side = Array.isArray(r.sideTools) ? r.sideTools.filter((x) => typeof x === "string").slice(-20).map((s) => s.slice(0, 200)) : [];
+    if (side.length) e.sideTools = side; else delete e.sideTools;
+    return e;
+  });
+  const hasSnapshot = Array.isArray(m.interrupted);
+  const interrupted = hasSnapshot ? intrList(m.interrupted) : INTERRUPTED;
+  let committed = true;
+  markedInterrupted = null;
+  if (fresh.length || hasSnapshot) {
+    // 上次没处理的中断记录留着；同一个会话以这次的为准。
     const sids = new Set(fresh.map((r) => r.sessionId).filter(Boolean)), ids = new Set(fresh.map((r) => r.id));
-    if (!setInterrupted([...INTERRUPTED.filter((e) => !ids.has(e.id) && !(e.sessionId && sids.has(e.sessionId))), ...fresh])) {
-      log("⚠️ 中断记录没写上，运行标记留着，下次启动再恢复");
-      return restoreQueue(m, false);
-    }
+    INTERRUPTED = intrList([...interrupted.filter((e) => !ids.has(e.id) && !(e.sessionId && sids.has(e.sessionId))), ...fresh]);
+    // 若原标记已有快照，连同它的 runs 已覆盖这个版本；在队列恢复之前不用再写标记。
+    if (hasSnapshot) markedInterrupted = INTERRUPTED;
+    committed = persistInterrupted();
     // 旧版本留下的运行标记里没有这个标记：接着补上（FIND-040）
     for (const e of fresh) if (e.sessionId) markIncomplete(e.sessionId, e.id);
-    for (const h of RECOVER_HOOKS) { try { h(fresh); } catch (e) { log("中断恢复钩子出错: " + e.message); } }
   }
-  restoreQueue(m, true);
+  restoreQueue(queued);
+  // 投递证据也包括已完成的轮次、恢复时因会话不存在而丢掉的队列项；不依赖中断回执写成功。
+  const handoffs = Array.isArray(m.schedHandoffs) ? m.schedHandoffs.filter((s) => s && typeof s.taskId === "string" && Number.isFinite(s.scheduledAt)) : [];
+  recoveryHandoffs = [];
+  for (const h of RECOVER_HOOKS) {
+    try { recoveryHandoffs.push(...(h(fresh, { runs, queue: queued, handoffs }) || [])); }
+    catch (e) { log("中断恢复钩子出错: " + e.message); }
+  }
+  // 第一次回执写失败时保留原件；以后状态变了，saveRunMark 把未提交的回执和新工作一起存。
+  if (committed && !saveRunMark()) log("⚠️ 运行标记没更新上，下次启动会再恢复一次（按 id 去重）");
 }
-function restoreQueue(m, commit) {
-  for (const q of Array.isArray(m.queue) ? m.queue : []) {
-    if (!q || !q.id || typeof q.message !== "string") continue;
-    if (!q.sessionId && q.follow && RUN_SESSIONS.get(q.follow)) q.sessionId = RUN_SESSIONS.get(q.follow);
-    const at = q.sessionId && sessionPresence(q.sessionId);
+function restoreQueue(queued) {
+  for (const q of queued) {
+    const sid = q.sessionId || RUN_SESSIONS.get(q.follow) || (typeof q.lane === "string" && sidOfLane(q.lane));
+    const at = sid && sessionPresence(sid);
     // 确认删除后才清理；临时读错不能把唯一的待发正文从磁盘抹掉。
-    if (at === "missing") { log(`  会话 ${q.sessionId} 已不在，丢掉它排着的一条消息`); continue; }
+    if (at === "missing") { log(`  会话 ${sid} 已不在，丢掉它排着的一条消息`); continue; }
     if (QUEUE.some((x) => x.id === q.id)) continue;
-    const restored = { ...q, held: true, intr: true };
+    const restored = { ...q, ...(sid ? { sessionId: sid, lane: "s:" + sid } : {}), held: true, intr: true };
     if (at === "unreadable") holdForStorage(restored);
     QUEUE.push(restored);
   }
   if (QUEUE.length) log(`  排队的 ${QUEUE.length} 条消息已放回队列（挂起，等用户点 ⚡）`);
-  // 中断记录已落盘：标记换成只剩排队消息的新版本（没有排队的就删掉）；写不上就留着旧的，下次再来
-  if (commit && !saveRunMark()) log("⚠️ 运行标记没更新上，下次启动会再恢复一次（按 id 去重）");
 }
 
 // 逐字增量太碎：攒 40ms 合成一条再发，其它事件到来前先冲掉，保证顺序不乱
@@ -518,7 +544,7 @@ const MSG_MAX = 2000000;                        // 字（UTF-16 码元）：两�
 const SID_OK = /^[A-Za-z0-9_-]{1,80}$/;
 /** 字符串数组：只留字符串，条数、每条长度、总长都有上限（总长见 settings-store 的 capList） */
 export const strList = (a, n, len, total) => capList(a, n, len, total);
-export function enqueue(body) {
+export function enqueue(body, commitHandoff) {
   const item = {
     id: newRunId(),
     message: String(body.message || ""),
@@ -539,6 +565,18 @@ export function enqueue(body) {
       allowedTools: body.allowedTools || null, disallowedTools: body.disallowedTools || null, timeoutMs: body.timeoutMs || 0, limitCost: +body.limitCost || 0 } : {}),
     ...(body.auto ? { auto: body.auto } : {}),
   };
+  // 定时计划的交接：先把待发项落盘，再销掉计划收据。两步都成功之前不广播、不运行。
+  if (commitHandoff) {
+    QUEUE.push(item);
+    if (!saveRunMark() || !commitHandoff(item)) {
+      QUEUE.pop();
+      saveRunMark();
+      return null;
+    }
+    publish({ type: "state", ...snapshot() });
+    pump();
+    return item;
+  }
   // 插话（"inject"，旧前端叫 "interrupt"）：不打断。消息直接写进正在跑的 claude 的 stdin，
   // claude 会在当前这一步（比如一次工具调用）结束后把它并进对话，同一轮里接着干 —— 和终端里边干边打字一样。
   // 塞不进去（这一轮已在收尾、或者不是同一个会话）就排到队首，这一轮一结束马上发。
