@@ -85,3 +85,9 @@ test("195-N.8 帮助/更新日志加载失败说清楚是哪一步并给重试",
   has(s, /更新日志加载失败：\{msg\}/, "更新日志失败文案");
   has(s, /id="cl-retry"[\s\S]*?loadChangelog\(\);/, "更新日志重试");
 });
+
+test("v0.7.12 会话里点 APK 直接走安装，不进压缩包浏览（.apk 从 v0.7.9 起按 archive 分类）", () => {
+  const s = src("01-core.js");
+  has(s, /return vwInstallApk\(r\.path\);/, "APK 点开直接安装");
+  has(s, /r\.kind === "archive"/, "APK 分支在压缩包浏览之前");
+});

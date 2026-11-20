@@ -1114,6 +1114,8 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       }
       return openFiles(r.path);
     }
+    // APK 也算压缩包（v0.7.9 起按 archive 分类），但会话里点它要的是安装，不是浏览包内（文件页有单独的「打开压缩包」按钮，两不耽误）
+    if (r.kind === "archive" && /\.apk$/i.test(r.path) && canShare()) return vwInstallApk(r.path);
     openViewer(r.path, r.kind, r.size);
   }
   const onPathLink = (e) => {
