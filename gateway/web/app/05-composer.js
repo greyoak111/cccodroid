@@ -360,6 +360,8 @@
     inputEl.style.height = "auto";
     inputEl.style.height = Math.min(inputEl.scrollHeight, 180) + "px";
   }
+  // 切换皮肤（如拾色把非首屏 #input 的上下 padding 调成 8px 以对齐 40px 发送键）或字号时重算行内高度，免得旧高度把单行文字压偏或裁切
+  new MutationObserver(() => autoGrow()).observe(document.documentElement, { attributes: true, attributeFilter: ["data-skin", "data-fs"] });
 
   /** 在光标处插入一段文本 */
   function insertAtCursor(s) {
