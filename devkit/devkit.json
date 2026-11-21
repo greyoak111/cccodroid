@@ -165,10 +165,6 @@
       "crystal",
       "ldc"
     ],
-    "haskell": [
-      "ghc",
-      "cabal-install"
-    ],
     "legacy": [
       "tcl",
       "gforth",
@@ -603,27 +599,6 @@
         "nim",
         "crystal",
         "ldc2"
-      ]
-    },
-    "haskell": {
-      "groups": [
-        "haskell"
-      ],
-      "full": false,
-      "name": {
-        "zh": "Haskell",
-        "en": "Haskell"
-      },
-      "desc": {
-        "zh": "GHC 9.12 与 cabal（装后约 2.8 GB）：按需安装，写函数式程序。",
-        "en": "GHC 9.12 and cabal (~2.8 GB installed): install on demand for functional programming."
-      },
-      "uses": [],
-      "key": [
-        "ghc",
-        "ghci",
-        "runghc",
-        "cabal"
       ]
     },
     "legacy": {
