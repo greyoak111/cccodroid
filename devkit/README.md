@@ -62,7 +62,7 @@ node devkit.mjs modules --plan <plan> --build --target <包名> --out DIR   # �
 - 合并时检查：同一路径在两块里内容必须相同；alternatives 同组不能两块各给一个（依赖块已给、优先级不低的，打包时就跳过）。
 - CI 按「划分 → 整包 → 各块」走，同一个 Release 里整包（旧 App 用）和模块（新 App 用）出自同一份快照。
 - adb 单独成组并进基础模块：Shizuku 的无线调试自启动要用它。
-- 目前的可选模块：命令行增强（`cli`）、C/C++ 构建（`build`）、安卓打包（`android`）、GPU 图形（`graphics`）、音视频（`media`）、文档与数据（`extra`）、Go 语言（`go`，含 gopls / goimports / gofumpt / gotestsum / govulncheck / golangci-lint / dlv）、Node.js 生态（`node`，pnpm / yarn / bun / deno）。`clang` 与 `libllvm` 这类多块共用的大家伙由划分自动提成共享层（`lib-clang`、`lib-libllvm`）。
+- 目前的可选模块：命令行增强（`cli`，含 `tmux`/`git-lfs`/`fontconfig-utils`）、C/C++ 构建（`build`，含 `bison`/`flex`/`gperf`/`libtool`/`ccache`）、Autotools 与 Perl（`autotools`，`full: false`）、安卓打包（`android`）、GPU 图形（`graphics`）、音视频（`media`）、文档与数据（`extra`）、Go 语言（`go`，含 gopls / goimports / gofumpt / gotestsum / govulncheck / golangci-lint / dlv）、Node.js 生态（`node`，pnpm / yarn / bun / deno）、Rust 语言（`rust`，`full: false`，含 `rust-analyzer`，与 `build` 共享 `clang`/`libllvm` 层）、Python 现代工具（`python-tools`，`full: false`，`uv` / `ruff`）。`clang` 与 `libllvm` 这类多块共用的大家伙由划分自动提成共享层（`lib-clang`、`lib-libllvm`）。
 - 模块可以标 `"full": false`：整包里不放它，从整包升级上来的用户也不会自动装上（要用再到扩展页加）。后加的大模块（`go`、`node`）都这么标，免得只认整包的旧版 App 和整包用户升级时平白多下几百 MB。
 
 ## 组件（`component`）
