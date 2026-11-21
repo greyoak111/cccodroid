@@ -7,7 +7,7 @@
 
 | 部分 | 来源 | 处理方式 |
 |---|---|---|
-| 256 个包：clang/lld/cmake/ninja/make、git/ssh、gdb/strace、python、node+npm、JDK 21、aapt2/d8/apksigner、bash/coreutils/grep/sed/awk、rg/fd/bat/delta/helix/yq/jq/sqlite… | [Termux 官方仓库](https://packages.termux.dev)，构建配方开源：[termux-packages](https://github.com/termux/termux-packages) | 构建时下载，校验哈希，**原样**打进 tar，只做前缀改写（见下） |
+| 273 个包：clang/lld/cmake/ninja/make、git/ssh、gdb/strace、python、node+npm、JDK 21、aapt2/d8/apksigner、bash/coreutils/grep/sed/awk、rg/fd/bat/delta/helix/yq/jq/sqlite… | [Termux 官方仓库](https://packages.termux.dev)，构建配方开源：[termux-packages](https://github.com/termux/termux-packages) | 构建时下载，校验哈希，**原样**打进 tar，只做前缀改写（见下） |
 | `android.jar`（编译 APK 用的平台存根） | Google 官方 SDK 仓库 `platform-36_r02.zip` | **不入包**，许可协议不允许再分发。由用户在设备上自行下载并同意许可，与 Claude Code 本体同样处理 |
 
 **不再使用的：** C4droid 的 GCC 和原 `dshtc/prefix` 里的那批工具，全部被上表取代。
@@ -39,7 +39,7 @@ node devkit.mjs build --target <10字符包名> [--groups ...]     # 产出 out/
 - `devkit.lock.json`：每个包的版本、文件名、SHA256、配方链接，加上仓库快照时间
 - `SBOM.tsv`：同上，表格形式
 
-分组见 `devkit.json`：不加 `--groups` 时**全部分组都打进去**，即整包；按模块分块打见下面「模块」一节。包括 `graphics`（Mesa、Vulkan 加载器等 9 个公共图形包，2026-10-15 并入，GPU 与浏览器组件共用）和 `media`（ffmpeg，2026-10-15 夜并入：+30 包，下载 +21 MB，解开后 +87 MB；带 MediaCodec 硬件编码）。共 256 个包（devkit-2026.10.28；10.22.1 起基础模块补了 patch、ed、dos2unix、lsof、nano、inetutils、net-tools、tree，10.22.3 补上单独的 which 包），从 Termux 仓库下载约 447 MB，整包 gz 约 680 MB（10.22.2 修了 venv 用的 ensurepip pip wheel），解包后约 1.9 GB。
+分组见 `devkit.json`：不加 `--groups` 时**全部分组都打进去**，即整包；按模块分块打见下面「模块」一节。包括 `graphics`（Mesa、Vulkan 加载器等 9 个公共图形包，2026-10-15 并入，GPU 与浏览器组件共用）和 `media`（ffmpeg，2026-10-15 夜并入：+30 包，下载 +21 MB，解开后 +87 MB；带 MediaCodec 硬件编码）。共 273 个包（devkit-2026.11.21；10.22.1 起基础模块补了 patch、ed、dos2unix、lsof、nano、inetutils、net-tools、tree，10.22.3 补上单独的 which 包），从 Termux 仓库下载约 447 MB，整包 gz 约 680 MB（10.22.2 修了 venv 用的 ensurepip pip wheel），解包后约 1.9 GB。
 `extra` 组（typst、duckdb、imagemagick）依赖很重，作为选装。
 
 ## 发一版
