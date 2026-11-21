@@ -366,7 +366,7 @@
         if (sus < 2) return;
         sus = 0;
         const last = Number(sessionStorage.getItem(FZ_AT)) || 0;
-        if (now - last < 60000) toast(t("滚动好像卡住了，可以点顶栏的雪花按钮脱困"), true);   // 刚自动救过一次，别来回跳
+        if (now - last < 60000) toast(t("滚动好像卡住了，可以长按顶栏标题约 0.6 秒脱困"), true);   // 刚自动救过一次，别来回跳
         else unfreeze("auto");
       }, 350);
     }, { capture: true, passive: true });

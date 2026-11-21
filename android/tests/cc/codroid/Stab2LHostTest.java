@@ -151,6 +151,24 @@ public class Stab2LHostTest {
         eq("A04 低重要度渠道仍会显示：可用",
             DeviceTools.notifyUsable(true, android.app.NotificationManager.IMPORTANCE_LOW), true);
 
+        // ── known-issues #10：Apk.pickSigner 在 history 为空时依次回退 contents / legacy ──
+        byte[] certOld = new byte[]{1, 2}, certCur = new byte[]{3, 4}, certLegacy = new byte[]{5, 6};
+        eq("APK 单签有轮换历史：取最后一张",
+            java.util.Arrays.equals(Apk.pickSigner(false, new byte[][]{certOld, certCur}, new byte[][]{certOld}, new byte[][]{certLegacy}), certCur), true);
+        eq("APK 单签 history 为空（无 v3 lineage）：回退 contents[0]",
+            java.util.Arrays.equals(Apk.pickSigner(false, new byte[0][], new byte[][]{certCur}, new byte[][]{certLegacy}), certCur), true);
+        eq("APK 单签 history 与 contents 都空：回退 legacy[0]",
+            java.util.Arrays.equals(Apk.pickSigner(false, null, null, new byte[][]{certLegacy}), certLegacy), true);
+        eq("APK 多签：优先取 contents[0]",
+            java.util.Arrays.equals(Apk.pickSigner(true, new byte[][]{certOld}, new byte[][]{certCur}, new byte[][]{certLegacy}), certCur), true);
+        eq("APK 全为空返回 null",
+            Apk.pickSigner(false, null, null, null) == null, true);
+
+        // ── GatewayService：killGateway 期间若收到新启动请求则放弃停机 ──
+        eq("STOP 仍停机且启动代次未变：继续 stopSelf", GatewayService.shouldFinishStop(true, 5, 5), true);
+        eq("STOP 期间 onStartCommand 把 stopping 复位：放弃停机", GatewayService.shouldFinishStop(false, 5, 6), false);
+        eq("STOP 期间启动代次递增：放弃停机", GatewayService.shouldFinishStop(true, 5, 6), false);
+
         if (fail > 0) { System.out.println(fail + " 条失败"); System.exit(1); }
         System.out.println("全部通过");
     }

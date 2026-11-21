@@ -32,7 +32,8 @@ const SECRET_NAMES = new Set([
   "ccapp-providers.json", "ccapp-config.json", "ccapp-seed.json",
   "keystore.json", "debug.keystore", "id_ed25519", "id_rsa", "id_ecdsa",
 ]);
-const SECRET_RE = /(^|\/)(\.ssh|\.gnupg|\.aws|\.config\/gcloud)(\/|$)/;
+// 大小写不敏感：/sdcard（FUSE）不区分大小写，.SSH / ID_RSA 等同样指向敏感路径（与列目录 L479、preview.mjs 保持一致）
+const SECRET_RE = /(^|\/)(\.ssh|\.gnupg|\.aws|\.config\/gcloud)(\/|$)/i;
 
 /** 读文件和列目录共用的路径政策：应用私有目录（home、运行时、工具链、整个应用数据目录；工作区除外）、种子文件和凭据目录一律不碰。
  *  私有目录按目录身份判（gw/pathguard.mjs）：/data/data/<包名> 与 /data/user/0/<包名> 这类别名一并认得（0.6.9 审计 P0-1） */
@@ -63,7 +64,7 @@ export function safeFilePath(p) {
     try { if (tp === String(p)) throw e; real = resolve(tp); } catch (e2) { return { error: "not found", detail: e2.message }; }
   }
 
-  if (pathBlocked(real) || SECRET_NAMES.has(path.basename(real))) return { error: "forbidden", status: 403 };
+  if (pathBlocked(real) || SECRET_NAMES.has(path.basename(real).toLowerCase())) return { error: "forbidden", status: 403 };
 
   let st; try { st = fs.statSync(real); } catch (e) { return { error: e.message }; }
   if (st.isDirectory()) return { error: "is a directory", status: 400 };
@@ -89,7 +90,7 @@ export function safeWritePath(p) {
   let ds; try { ds = fs.statSync(dir); } catch (e) { return { error: e.message, status: 400 }; }
   if (!ds.isDirectory()) return { error: "not a directory", status: 400 };
   if (zoneOf(dir) === "private") return { error: "forbidden", status: 403 };
-  if (SECRET_NAMES.has(name) || SECRET_RE.test(dst)) return { error: "forbidden", status: 403 };
+  if (SECRET_NAMES.has(name.toLowerCase()) || SECRET_RE.test(dst)) return { error: "forbidden", status: 403 };
   return { file: dst, size: 0, mtime: 0, fresh: true };
 }
 
@@ -346,23 +347,32 @@ export async function routeFiles(req, res, u, p) {
     if (!path.isAbsolute(from)) return sendJson(res, 400, { error: "absolute path required" });
     if (!name || name === "." || name === ".." || /[\/\0]/.test(name)) return sendJson(res, 400, { error: "bad name" });
     if (Buffer.byteLength(name) > 255) return sendJson(res, 400, { error: "name too long", message: tz("文件名太长（最多 255 字节，中文一个字算 3 个）") });
-    let st; try { st = fs.lstatSync(from); } catch { return sendJson(res, 404, { error: "not found" }); }
-    // 源：文件走 safeFilePath；目录借它父目录下的一个虚拟子路径过一遍 safeWritePath 的根目录检查
-    const src = st.isDirectory() ? safeWritePath(path.join(from, ".probe-" + Date.now())) : safeFilePath(from);
-    if (src.error) return sendJson(res, src.status || 400, { error: src.error });
-    // 也别把装着应用私有目录（或工作区）的上级挪走：按目录身份判，别名也认得
-    if (st.isDirectory() && holdsPrivate(from)) return sendJson(res, 403, { error: "forbidden" });
-    const dst = safeWritePath(path.join(path.dirname(from), name));
+    const srcBase = path.basename(from);
+    if (!srcBase || srcBase === "." || srcBase === "..") return sendJson(res, 400, { error: "bad path" });
+    // 父目录按真实路径规整：与 /api/file/delete 同一口径，既保证 renameSync 同源不跨别名，也让目录软链 / 悬空软链可改名自身
+    let srcDir; try { srcDir = fs.realpathSync(path.dirname(from)); } catch { return sendJson(res, 404, { error: "not found" }); }
+    const srcPath = path.join(srcDir, srcBase);
+    let st; try { st = fs.lstatSync(srcPath); } catch { return sendJson(res, 404, { error: "not found" }); }
+    if (st.isSymbolicLink()) {
+      if (zoneOf(srcDir) === "private" || SECRET_NAMES.has(srcBase.toLowerCase()) || SECRET_RE.test(srcPath)) return sendJson(res, 403, { error: "forbidden" });
+    } else {
+      // 源：文件走 safeFilePath；目录借它父目录下的一个虚拟子路径过一遍 safeWritePath 的根目录检查
+      const src = st.isDirectory() ? safeWritePath(path.join(srcPath, ".probe-" + Date.now())) : safeFilePath(srcPath);
+      if (src.error) return sendJson(res, src.status || 400, { error: src.error });
+      // 也别把装着应用私有目录（或工作区）的上级挪走：按目录身份判，别名也认得
+      if (st.isDirectory() && holdsPrivate(srcPath)) return sendJson(res, 403, { error: "forbidden" });
+    }
+    const dst = safeWritePath(path.join(srcDir, name));
     if (dst.error) return sendJson(res, dst.status || 400, { error: dst.error });
     if (!dst.fresh) {
       // /sdcard 不区分大小写：只改大小写时 lstat 看到的是原文件，不能当“同名已存在”拒掉（200-8-05）。
       // 比 dev+ino 确认是同一个文件才放行
       let a = null, b = null;
-      try { a = fs.lstatSync(from); b = fs.lstatSync(dst.file); } catch {}
+      try { a = fs.lstatSync(srcPath); b = fs.lstatSync(dst.file); } catch {}
       if (!(a && b && a.dev === b.dev && a.ino === b.ino)) return sendJson(res, 409, { error: "exists", message: tz("已经有同名的文件或文件夹") });
     }
-    try { fs.renameSync(from, dst.file); } catch (e) { return sendJson(res, 500, { error: e.message }); }
-    log(`[file] 重命名 ${from} → ${dst.file}`);
+    try { fs.renameSync(srcPath, dst.file); } catch (e) { return sendJson(res, 500, { error: e.message }); }
+    log(`[file] 重命名 ${srcPath} → ${dst.file}`);
     return sendJson(res, 200, { ok: true, path: dst.file, kind: fileKind(dst.file, st.isDirectory()) });
   }
   // 删除：文件页长按「删除」、多选「删除选中」逐个调这里。永久删除（不进回收站），界面先弹确认。
@@ -376,7 +386,7 @@ export async function routeFiles(req, res, u, p) {
     let dir; try { dir = fs.realpathSync(path.dirname(raw)); } catch { return sendJson(res, 404, { error: "not found" }); }
     const target = path.join(dir, name);
     let st; try { st = fs.lstatSync(target); } catch { return sendJson(res, 404, { error: "not found" }); }
-    if (path.dirname(target) === target || zoneOf(dir) === "private" || SECRET_NAMES.has(name) || SECRET_RE.test(target) ||
+    if (path.dirname(target) === target || zoneOf(dir) === "private" || SECRET_NAMES.has(name.toLowerCase()) || SECRET_RE.test(target) ||
         (!st.isSymbolicLink() && pathBlocked(target))) return sendJson(res, 403, { error: "forbidden" });
     if (st.isDirectory() && holdsPrivate(target)) return sendJson(res, 403, { error: "forbidden", message: tz("这个文件夹装着应用自己的目录或工作区，不能删") });
     try { fs.rmSync(target, { recursive: st.isDirectory(), force: false }); }

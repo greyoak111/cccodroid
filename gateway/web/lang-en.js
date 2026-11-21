@@ -3287,4 +3287,5 @@ window.I18N_DICT.en = {
   "结果超过 512 MB，请减少页数或分辨率。": "Output exceeds 512 MB. Reduce pages or resolution.",
   "个文件": "file(s)",
   "上次安装的备份还没恢复，请重试；不行就先卸载再重装": "The backup from the last install hasn\"t been restored. Retry, or uninstall and reinstall.",
+  "滚动好像卡住了，可以长按顶栏标题约 0.6 秒脱困": "Scroll seems stuck — long-press the top bar title (~0.6s) to unfreeze",
 };

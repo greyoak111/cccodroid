@@ -518,9 +518,7 @@ function compDropDanglingDocs(rec) {
 }
 /** 卸载 / 升级后扫一遍 share/doc/，把已经断掉的软链清掉（目标可能刚被这次卸载删了，或是旧工具包留下的）。
  *  只删软链本身；返回清掉的条数。 */
-function compSweepDanglingDocs() {
-  const root = path.join(PREFIX, "share/doc");
-  try { if (!fs.lstatSync(root).isDirectory()) return 0; } catch { return 0; }
+export function compSweepDanglingDocs() {
   let n = 0;
   const walk = (rel) => {
     let list; try { list = fs.readdirSync(path.join(PREFIX, rel), { withFileTypes: true }); } catch { return; }
@@ -535,7 +533,9 @@ function compSweepDanglingDocs() {
       }
     }
   };
-  walk("share/doc");
+  for (const base of ["share/doc", "glibc/share/doc"]) {
+    try { if (fs.lstatSync(path.join(PREFIX, base)).isDirectory()) walk(base); } catch {}
+  }
   if (n) log(`[comp] 清掉 ${n} 个悬空的文档软链`);
   return n;
 }

@@ -3249,4 +3249,5 @@ window.I18N_DICT["id"] = {
   "结果超过 512 MB，请减少页数或分辨率。": "Hasil melebihi 512 MB. Kurangi halaman atau resolusi.",
   "个文件": "berkas",
   "上次安装的备份还没恢复，请重试；不行就先卸载再重装": "Cadangan dari pemasangan sebelumnya belum dipulihkan. Coba lagi, atau hapus lalu pasang ulang.",
+  "滚动好像卡住了，可以长按顶栏标题约 0.6 秒脱困": "Gulir tampak macet — tekan lama judul bilah atas (~0,6 detik) untuk memulihkan",
 };

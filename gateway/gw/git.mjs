@@ -179,18 +179,28 @@ function gitRun(cwd, args, { input, timeout = 30000, max = GIT_MAX } = {}, extra
  *  https 的凭据靠 gh auth setup-git（扩展页 GitHub 登录时配好的）；ssh 用本机钥匙。
  *  绝不能停下来等人输入：GIT_TERMINAL_PROMPT=0 已在 git() 里；ssh 没配过 core.sshCommand 时加 BatchMode
  *  （配过的——比如开发端走 443 端口的包装脚本——别用环境变量盖掉它）。 */
-async function gitNet(root, args) {
+async function gitNet(root, args, { timeout = 180000 } = {}) {
   const sc = await git(root, ["config", "core.sshCommand"]);
   const env = sc.out.trim() ? {} : { GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20" };
   return new Promise((resolve) => {
-    // detached 让 git 当进程组长：超时 execFile 只杀 git，pre-push 钩子/ssh 还在同一个组里，
-    // 由下面按 -pid 整组杀掉；不 detached 的话钩子会继续写仓库、和用户重试撞在一起
-    const child = execFile("git", [...GIT_PRE, ...args],
-      { cwd: root, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", LC_ALL: "C.UTF-8", ...env }, timeout: 180000, maxBuffer: 4 << 20, encoding: "utf8", detached: true },
-      (err, out, errOut) => {
-        if (err && err.killed) { try { process.kill(-child.pid, "SIGKILL"); } catch {} }
-        resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, out: out || "", err: (errOut || (err && err.killed ? "timeout" : err?.message) || "").trim() });
-      });
+    // 必须用 spawn 而不是 execFile：execFile 忽略 detached（见 L151），超时后 kill(-pid) 会因不同进程组报 ESRCH，
+    // pre-push 钩子和 ssh 子进程都会泄漏。新开进程组后超时按 -pid 整组杀掉，等 close 收尾
+    const max = 4 << 20;
+    let timedOut = false, spawnErr = null, over = false;
+    const out = [], errs = []; let outLen = 0, errLen = 0;
+    const child = spawn("git", [...GIT_PRE, ...args],
+      { cwd: root, env: { ...termEnv(), GIT_TERMINAL_PROMPT: "0", LC_ALL: "C.UTF-8", ...env }, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const killGroup = () => { try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch {} } };
+    const timer = setTimeout(() => { timedOut = true; killGroup(); }, timeout);
+    child.stdout.on("data", (d) => { outLen += d.length; if (outLen > max) { over = true; killGroup(); } else out.push(d); });
+    child.stderr.on("data", (d) => { errLen += d.length; if (errLen <= max) errs.push(d); });
+    child.on("error", (e) => { spawnErr = e; });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const errOut = Buffer.concat(errs).toString("utf8");
+      const err = errOut || (timedOut ? "timeout" : spawnErr ? spawnErr.message : over ? "output too large" : "");
+      resolve({ code: timedOut || spawnErr || over ? (code || 1) : (code ?? 1), out: Buffer.concat(out).toString("utf8"), err: String(err).trim() });
+    });
   });
 }
 function gitNetHuman(err) {
@@ -362,6 +372,7 @@ async function handleGit(req, res, p, u) {
   if (act === "log") {
     const n = Math.min(200, Math.max(1, +q("n") || 50)), skip = Math.max(0, +q("skip") || 0);
     const file = q("file") ? gitRel(root, q("file")) : "";
+    if (q("file") && file == null) return sendJson(res, 400, { error: "outside repo" });
     const r = await git(root, ["log", `-n${n}`, `--skip=${skip}`, "--format=%H%x1f%h%x1f%an%x1f%at%x1f%s%x1f%D%x1e", ...(file ? ["--follow", "--", file] : [])]);
     if (r.code) {
       // 真的是还没有提交才回空列表；仓库坏了、没权限这类失败不能画成“还没有提交记录”（196 Git 域第 3 条）

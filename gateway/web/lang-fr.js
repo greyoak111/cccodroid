@@ -3249,4 +3249,5 @@ window.I18N_DICT["fr"] = {
   "结果超过 512 MB，请减少页数或分辨率。": "La sortie dépasse 512 Mo. Réduisez les pages ou la résolution.",
   "个文件": "fichier(s)",
   "上次安装的备份还没恢复，请重试；不行就先卸载再重装": "La sauvegarde de la dernière installation n\"a pas encore été restaurée. Réessayez, sinon désinstallez puis réinstallez.",
+  "滚动好像卡住了，可以长按顶栏标题约 0.6 秒脱困": "Le défilement semble bloqué : appuyez longuement (~0,6 s) sur le titre de la barre supérieure pour débloquer",
 };

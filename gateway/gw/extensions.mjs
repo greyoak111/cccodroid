@@ -179,6 +179,25 @@ export async function removeMcp(name) {
   return r.code === 0 ? { ok: true } : { ok: false, message: cliMsg(r) };
 }
 
+/** stdio MCP 参数拼回单行命令行时按需加引号，避免含空格 / 引号的参数在编辑保存时被切碎 */
+export function quoteStdioArg(v) {
+  const s = String(v);
+  if (s === "") return '""';
+  if (!/[\s"'\\]/.test(s)) return s;
+  return '"' + s.replace(/([\\"])/g, "\\$1") + '"';
+}
+/** 拆单行 stdio MCP 命令行：支持双引号内转义（\"、\\）与单引号，与 quoteStdioArg 互逆 */
+export function parseStdioTarget(target) {
+  const out = [];
+  const re = /"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+)/g;
+  for (let m; (m = re.exec(String(target || ""))); ) {
+    if (m[1] != null) out.push(m[1].replace(/\\([\\"])/g, "$1"));
+    else if (m[2] != null) out.push(m[2]);
+    else out.push(m[3]);
+  }
+  return out;
+}
+
 /** 编辑表单预填：命令/地址 + 现有环境变量、请求头的名字。值可能是令牌，不发到前端（留空 = 保留原值）。
  *  停用名单里的也能编辑（改名单里的定义，启用时按新定义加回）。 */
 export async function getMcp(b) {
@@ -188,7 +207,7 @@ export async function getMcp(b) {
   if (!def) return { ok: false, message: tz("找不到这条 MCP 配置（账户连接器不能编辑）") };
   const stdio = def.type !== "http" && def.type !== "sse";
   return { ok: true, name, transport: stdio ? "stdio" : def.type,
-    target: stdio ? [def.command, ...(Array.isArray(def.args) ? def.args : [])].filter((x) => x != null).join(" ") : String(def.url || ""),
+    target: stdio ? [def.command, ...(Array.isArray(def.args) ? def.args : [])].filter((x) => x != null).map(quoteStdioArg).join(" ") : String(def.url || ""),
     envNames: Object.keys(def.env || {}), headerNames: Object.keys(def.headers || {}) };
 }
 
@@ -228,7 +247,7 @@ export async function editMcp(b) {
     delete nd.command; delete nd.args; delete nd.env;
     if (!Object.keys(nd.headers).length) delete nd.headers;
   } else {
-    const parts = target.match(/"[^"]*"|'[^']*'|\S+/g).map((x) => x.replace(/^(["'])(.*)\1$/, "$2"));
+    const parts = parseStdioTarget(target);
     if (!parts.length) return { ok: false, message: tz("缺少命令或地址") };
     // claude 对 stdio 条目不存 headers（实测 add-json 静默剥掉）：这里显式删，
     // 别让「保存成功」之后令牌悄悄没了（前端在切 transport 时会先弹确认）

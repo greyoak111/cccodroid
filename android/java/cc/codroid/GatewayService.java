@@ -57,12 +57,15 @@ public class GatewayService extends Service {
     /** 空闲退出的宽限拍数：刚被闹钟叫醒时网关还没起来、任务还没进队列，先别数空闲（watchFreeze 每 2 秒减一） */
     private volatile int idleGrace;
     private Thread supervisor;
+    private Thread freezeWatcher;
     /** 生命周期锁：停止 / 销毁与启动准备并发时，靠它原子地交接进程（BUG-A03）；划掉后的空闲查询也在它下面复核代次（BUG-A02） */
     private final Object life = new Object();
     /** 服务代次：每次停止 / 销毁 +1；准备中的 spawnGateway 见到它变了就放弃启动（BUG-A03） */
     private long lifeGen;
     /** 启动请求代次：每次 onStartCommand +1；划掉后的空闲查询据此发现服务又被拉起过（BUG-A02） */
     private long startSeq;
+    /** 最近一次 onStartCommand 的 startId：停机收尾改用 stopSelfResult，避免杀掉刚到来的新启动请求 */
+    private int lastStartId;
     /** 自己拉起的网关刚起来时的宽限：这几秒还答不了身份证明（同 alive()） */
     static final long PROOF_GRACE_MS = 20000;
     /** 过了宽限还连续这么久证明不了自己：结束重起（BUG-A01） */
@@ -163,12 +166,13 @@ public class GatewayService extends Service {
             }
         }, "freeze-watch");
         t.setDaemon(true);
+        freezeWatcher = t;
         t.start();
     }
 
     @Override public int onStartCommand(Intent i, int flags, int id) {
         // 又收到一次启动请求（用户回到界面、闹钟、粘性重建）：划掉后的空闲查询查到一半也要作废重判（BUG-A02）
-        synchronized (life) { startSeq++; }
+        synchronized (life) { startSeq++; lastStartId = id; }
         // 只认自己通知里那个「停止」：服务是导出的，有跨用户权限的进程（shell、别的拿了 Shizuku 的应用）也能发；对不上就当普通启动（审查 v0.5.9 B5）
         String ik = i == null ? null : i.getStringExtra(MainActivity.IK);
         boolean mine = ik != null && java.security.MessageDigest.isEqual(ik.getBytes(), MainActivity.intentKey(this).getBytes());
@@ -177,6 +181,15 @@ public class GatewayService extends Service {
         // 粘性重建出来的服务紧接着又被冻住，通知卡在「正在启动…」（红魔，11-03 用户反馈）。
         // 定时任务不靠这个：到点由系统闹钟（SchedAlarm）拉起；下次打开界面也会拉起
         if (i == null && !busy()) { Log.i(TAG, "粘性重建时没有任务在跑，不再拉起"); shutdown(); return START_NOT_STICKY; }
+        // 上一次 shutdownIfIdle 可能还在锁外等 killGateway（最多 5 秒）或尚未 onDestroy：
+        // 系统复用同一个 Service 实例回调 onStartCommand，必须复位 stopping，否则新起的 supervise 会立即退出、
+        // shutdownIfIdle 收尾也会把刚拉起的服务停掉
+        synchronized (life) {
+            if (stopping) {
+                stopping = false;
+                lifeGen++;
+            }
+        }
         // 开机重新激活 Shizuku 也只认自己的开机广播带来的口令（11-01 独立审查低-6）
         // 有人明确要服务（打开界面、闹钟、开机）：划掉时记的「跑完就停」作罢。口令对不上的 STOP 不算（服务是导出的，审查 0601b）
         if (i != null && !ACTION_STOP.equals(i.getAction())) closeWhenIdle = false;
@@ -184,6 +197,7 @@ public class GatewayService extends Service {
         // 给约 60 秒宽限，等网关起来、任务进队列（.run-active 落盘）再开始数空闲（0.6.9 审计 13-01）
         if (i == null || ACTION_ALARM.equals(i.getAction())) { closeWhenIdle = true; idleGrace = 30; }
         if (i != null && ACTION_BOOT.equals(i.getAction()) && mine) ShizukuSetup.get(this).reactivateAsync(true);
+        if (freezeWatcher == null || !freezeWatcher.isAlive()) watchFreeze();
         if (supervisor == null || !supervisor.isAlive()) {
             supervisor = new Thread(this::supervise, "gateway-supervisor");
             supervisor.start();
@@ -225,15 +239,24 @@ public class GatewayService extends Service {
     /** 停机；给了 seenSeq（划掉后的空闲查询）就先在锁里复核用户没回来、服务没被重新拉起，不能停就返回 false。
      *  代次和 stopping 在锁里定，退出锁才去杀进程 / 停前台：别让等这把锁的主线程跟着等网关收尾的 5 秒 */
     private boolean shutdownIfIdle(Long seenSeq) {
+        final long mySeq;
+        final int myStartId;
         synchronized (life) {
             if (seenSeq != null && !idleQueryStillValid(MainActivity.appForeground(), seenSeq, startSeq)) return false;
+            mySeq = startSeq;
+            myStartId = lastStartId;
             lifeGen++;
             stopping = true;
         }
         killGateway();
+        // killGateway 最多等 5 秒：期间如果用户重开界面或闹钟再次调起 onStartCommand，服务已复活，不能继续停掉它
+        synchronized (life) {
+            if (!shouldFinishStop(stopping, mySeq, startSeq)) return false;
+        }
         ShizukuSetup.get(this).onExit();
         stopForeground(true);
-        stopSelf();
+        if (myStartId > 0) stopSelfResult(myStartId);
+        else stopSelf();
         return true;
     }
 
@@ -473,6 +496,11 @@ public class GatewayService extends Service {
     /** 划掉后的空闲查询查完还能不能按空闲停机：查询期间用户回到前台、或服务又被重新拉起过，都不能停（BUG-A02） */
     static boolean idleQueryStillValid(boolean foreground, long seenStartSeq, long nowStartSeq) {
         return !foreground && seenStartSeq == nowStartSeq;
+    }
+
+    /** killGateway 返回后复核还能不能继续停前台并 stopSelf：若期间有新启动请求把服务救活则放弃停机 */
+    static boolean shouldFinishStop(boolean stoppingNow, long seqAtStart, long seqNow) {
+        return stoppingNow && seqAtStart == seqNow;
     }
 
     /** 自己拉起的网关还活着、却一直证明不了自己：过了启动宽限，又连续失联这么久，就该结束重起（BUG-A01） */
