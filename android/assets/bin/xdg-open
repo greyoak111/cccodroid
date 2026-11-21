@@ -1,3 +1,0 @@
-#!/system/bin/sh
-# 打开 http/https 链接（经 cccodroid 前台确认后交给系统浏览器）
-exec node "$(dirname "$0")/cli-bridge.mjs" open-url "$@"

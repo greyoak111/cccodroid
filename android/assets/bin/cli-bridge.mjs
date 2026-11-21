@@ -28,12 +28,24 @@ function readStdin() {
   });
 }
 
+function isSafeHttpUrl(raw) {
+  if (typeof raw !== "string" || !raw || /[\s\u0000-\u001f\u007f]/.test(raw)) return false;
+  let u;
+  try { u = new URL(raw); } catch { return false; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  if (u.username || u.password) return false;
+  const auth = raw.slice(u.protocol.length + 2).split(/[/?#]/, 1)[0];
+  if (auth.includes("@")) return false;
+  if (!u.hostname || u.hostname === ".") return false;
+  return true;
+}
+
 async function main() {
   const [cmd, ...args] = process.argv.slice(2);
   if (cmd === "open-url") {
     const url = (args.find((a) => !a.startsWith("-")) || "").trim();
-    if (!/^https?:\/\/.+$/i.test(url)) {
-      process.stderr.write("xdg-open: only http:// and https:// URLs are supported\n");
+    if (!isSafeHttpUrl(url)) {
+      process.stderr.write("xdg-open: only valid http:// and https:// URLs without whitespace or credentials are supported\n");
       process.exit(1);
     }
     const r = await send({ op: "open_url", url });

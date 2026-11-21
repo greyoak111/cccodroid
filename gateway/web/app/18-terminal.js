@@ -502,8 +502,9 @@
     TERM.tvCut = b.length > 3000;   // 只导出最后 3000 行：复制提示不能说「已复制全部」（195-H.3）
     for (let i = Math.max(0, b.length - 3000); i < b.length; i++) {
       const ln = b.getLine(i);
-      const s = ln?.translateToString(true) ?? "";
-      // 自动折行拼回同一行：长 OAuth 网址或命令在文本视图里不会被换行符劈成两截
+      const nextWrapped = !!b.getLine(i + 1)?.isWrapped;
+      // 下一行是软折行续行时保留本行末尾空格（translateToString(false)），防止折行恰好落在空格列上导致词粘连；逻辑行末再 trimRight
+      const s = ln?.translateToString(!nextWrapped) ?? "";
       if (ln?.isWrapped && lines.length) lines[lines.length - 1] += s;
       else lines.push(s);
     }

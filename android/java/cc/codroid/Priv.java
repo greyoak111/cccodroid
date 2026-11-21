@@ -546,14 +546,17 @@ final class Priv {
                     long t0 = System.currentTimeMillis();
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                     String who = caller(pid), url = req.optString("url", "").trim();
-                    if (!url.matches("(?i)^https?://.+")) {
+                    android.net.Uri uri = DeviceTools.safeHttpUri(url);
+                    if (uri == null) {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("url 只收 http / https"));
                     } else if (!ask(url, who, "cli:open_url", false)) {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("用户没有允许打开（cccodroid 不在前台时也会直接拒绝）"));
                     } else {
                         resp = DeviceTools.openUrl(ctx, url);
                     }
-                    audit(t0, who, new JSONObject().put("argv", new JSONArray().put("[open_url] " + clip(url))), resp.optBoolean("ok", true) ? 0 : 1, System.currentTimeMillis() - t0);
+                    // 审计只记 scheme://host，不落完整 URL（避免 OAuth 设备码 / query token 进日志）
+                    String auditTarget = uri == null ? "(invalid)" : uri.getScheme().toLowerCase(java.util.Locale.ROOT) + "://" + uri.getHost();
+                    audit(t0, who, new JSONObject().put("argv", new JSONArray().put("[open_url] " + auditTarget)), resp.optBoolean("ok", true) ? 0 : 1, System.currentTimeMillis() - t0);
                     break;
                 }
                 case "clip_set": {

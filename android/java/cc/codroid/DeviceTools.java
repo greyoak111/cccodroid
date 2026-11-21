@@ -311,10 +311,29 @@ final class DeviceTools {
         return new JSONObject().put("ok", true).put("apps", out);
     }
 
-    /** 终端 / CLI 桥接（xdg-open / termux-open-url）：只放行 http / https，走与设备工具同一套前景/通知拉起逻辑 */
+    /** 严格校验 http/https 地址：禁空白与控制字符、要求非空有效主机、禁内嵌凭据（user:pass@host） */
+    static Uri safeHttpUri(String u) {
+        if (u == null || u.isEmpty()) return null;
+        for (int i = 0; i < u.length(); i++) {
+            char c = u.charAt(i);
+            if (c <= 0x20 || c == 0x7f || Character.isWhitespace(c)) return null;
+        }
+        Uri uri = Uri.parse(u);
+        String scheme = uri.getScheme();
+        if (scheme == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) return null;
+        if (uri.getUserInfo() != null) return null;
+        String auth = uri.getEncodedAuthority();
+        if (auth != null && auth.indexOf('@') >= 0) return null;
+        String host = uri.getHost();
+        if (host == null || host.isEmpty() || ".".equals(host)) return null;
+        return uri;
+    }
+
+    /** 终端 / CLI 桥接（xdg-open / termux-open-url）：严格校验 http / https，走与设备工具同一套前景/通知拉起逻辑 */
     static JSONObject openUrl(Context c, String u) throws Exception {
-        if (u == null || !u.matches("(?i)^https?://.+")) return fail(Tr.t("url 只收 http / https"));
-        return launch(c, new Intent(Intent.ACTION_VIEW, Uri.parse(u)), u);
+        Uri uri = safeHttpUri(u);
+        if (uri == null) return fail(Tr.t("url 只收 http / https"));
+        return launch(c, new Intent(Intent.ACTION_VIEW, uri), uri.getScheme() + "://" + uri.getHost());
     }
 
     /** 固定几类「打开并预填」：不收任意 action，免得模型拼出拨打、静默发送之类的东西 */
