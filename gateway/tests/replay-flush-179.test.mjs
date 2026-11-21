@@ -31,6 +31,7 @@ function run(n, { touch = false } = {}) {
     const REPLAY_FLUSH = new Set();
     let busReplay = true, stick = true, touching = ${touch}, scrollRaf = 0, progTop = -1, replayCtx = null;
     const liveCtx = () => {}, safeSplit = () => -1, renderMd = (s) => s, enhanceMd = () => {}, setHtml = (el, h) => { el.innerHTML = h; };
+    const syncLivePerms = () => {};   // #249 起 endReplay 会补画漏收的权限卡；本测试只关心滚动，stub 掉
     const STREAM_TICK = 33, STREAM_STEPS = 8;
     ${scroll}
     ${block}
