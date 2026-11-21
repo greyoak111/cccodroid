@@ -186,4 +186,14 @@ test("样式覆写守卫：灯箱按钮重置底色、.btn.danger 自带底与�
   const src12 = fs.readFileSync(new URL("../web/app/12-model-caps.js", import.meta.url), "utf8");
   assert.match(src12, /<div class="seg-scroll mp-scroll"><div class="seg mp-seg">/);
   assert.match(src12, /<div class="seg-scroll mp-scroll"><div class="seg mp-seg mp-provseg">/);
+
+  // 9. 通用 .seg-scroll 兜底横滚/触控/隐藏滚动条；定时任务编辑弹层的 busy/until 分段包在 .seg-scroll 内；.pj-sec 可折行；拾色 .seg 圆角 18px 折行不削角；非拾色单行 #input 补齐 34px 居中
+  assert.match(css, /^\.seg-scroll\{[^}]*overflow-x:auto[^}]*overscroll-behavior-x:contain[^}]*touch-action:pan-x[^}]*scrollbar-width:none/m);
+  assert.match(css, /^\.seg-scroll::-webkit-scrollbar\{display:none\}/m);
+  assert.match(css, /html\[data-skin="shise"\] \.seg\{[^}]*border-radius:18px/);
+  assert.match(css, /\.pj-sec\{[^}]*flex-wrap:wrap/);
+  assert.match(css, /#input\{font-size:15px;line-height:24px;padding:5px 0\}/);
+  const src14 = fs.readFileSync(new URL("../web/app/14-projects-sched.js", import.meta.url), "utf8");
+  assert.match(src14, /<div class="seg-scroll">\$\{segOf\("busy",/);
+  assert.match(src14, /<div class="seg-scroll">\$\{segOf\("until",/);
 });
