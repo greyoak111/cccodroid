@@ -40,8 +40,17 @@ test("前提：官方账户没填 Key 是订阅登录，项目默认那家不是
   assert.equal(isLoginMode(providerById(api.id)), false);
 });
 
+// 接着的会话得真有记录文件：会话不在了的任务开跑前会放下 lastSid、新开一个（#173-3），
+// 且单独跑本文件时 ~/.claude/projects 尚未创建，sessionPresence 会判 unreadable（见 bgseal.test.mjs）
+const realSid = () => {
+  const sid = crypto.randomUUID(), d = path.join(CFG.home, ".claude", "projects", "-sched-real");
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, sid + ".jsonl"), JSON.stringify({ type: "user", sessionId: sid, uuid: crypto.randomUUID(), message: { role: "user", content: "hi" } }) + "\n");
+  return sid;
+};
+
 test("会话钉了官方账户、项目默认 API：没许可就跳过，许可了才入队", async () => {
-  const sid = crypto.randomUUID();
+  const sid = realSid();
   setSessModel(sid, { provider: "anthropic" });
   S.DB.allowLogin = false;
   const t = mk("s0520-a", sid);
@@ -54,13 +63,6 @@ test("会话钉了官方账户、项目默认 API：没许可就跳过，许可�
   drop(t, it2);
 });
 
-// 接着的会话得真有记录文件：会话不在了的任务开跑前会放下 lastSid、新开一个（#173-3）
-const realSid = () => {
-  const sid = crypto.randomUUID(), d = path.join(CFG.home, ".claude", "projects", "-sched-real");
-  fs.mkdirSync(d, { recursive: true });
-  fs.writeFileSync(path.join(d, sid + ".jsonl"), JSON.stringify({ type: "user", sessionId: sid, uuid: crypto.randomUUID(), message: { role: "user", content: "hi" } }) + "\n");
-  return sid;
-};
 test("入队后会话被改钉到官方账户：开跑前再核一次，拦下", async () => {
   const sid = realSid();
   S.DB.allowLogin = false;
