@@ -131,7 +131,7 @@
       // 构成首屏右侧那块斜切色块（--gc-wedge）原来写死成半透明红，自定颜色时漏了没跟着换；照原版的透明度从强调色派生
       const wedge = `rgba(${hex2rgb(acc).map((v) => Math.round(v * 255)).join(",")},${lum(BAR[skin][name]) > 0.4 ? .13 : .1})`;
       // 选择器带两个属性：压过各外观自己那段（同样两个属性），这段 style 插在 style.css 后面，同分时后者赢
-      css = `html[data-theme][data-skin]{--accent:${acc};--accent-btn:${acc};--accent-dim:${dim};--on-accent:${on};--active-bg:${soft};--gc-red:${acc};--gc-wedge:${wedge};--zy-blue:${acc}}`;
+      css = `html[data-theme][data-skin]{--accent:${acc};--accent-btn:${acc};--accent-dim:${dim};--on-accent:${on};--active-bg:${soft};--gc-red:${acc};--gc-wedge:${wedge};--zy-blue:${acc};--zy-on-blue:${on}}`;
     }
     // 外壳自己画的东西（加载动画、安装页、对话框）也跟着换：把浅色、深色底上实际用的颜色交过去，空串 = 用外观原色
     const a = app();

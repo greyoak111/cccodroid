@@ -136,14 +136,15 @@ html.tb-still #tb-tools,html.tb-still #tb-tools *,html.tb-still #btn-more path{t
 #chat .who,#chat .who *,#chat button,#chat button *,#chat .tool-head,#chat .tool-head *,#chat .code-lang{-webkit-user-select:none;user-select:none}
 input,textarea,[contenteditable="true"],#composer input,#composer textarea,#composer [contenteditable="true"],
 #drawer input,#drawer textarea,#drawer [contenteditable="true"]{-webkit-user-select:text;user-select:text}
-#ctxfill{height:100%;width:0;background:var(--accent-btn);transition:width .4s}
+#ctxfill{height:100%;width:0;background:linear-gradient(90deg,var(--accent-dim),var(--accent));transition:width .4s}
+/* 正常态（逐月除外，逐月保留下方灰阶渐变）：实心 --accent-btn 铺条，字按 --p 分两色；只对 #ctxctx 设透明，不扫 #ctxq，保留 #ctxq.warm / .hot 预警色 */
+html:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxfill{background:var(--accent-btn)}
+html:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxtxt{background:linear-gradient(90deg,var(--on-accent) var(--p,0%),var(--fg2) var(--p,0%));-webkit-background-clip:text;background-clip:text;color:transparent}
+html:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxtxt > #ctxctx{color:transparent}
+html[dir="rtl"]:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxtxt{background:linear-gradient(270deg,var(--on-accent) var(--p,0%),var(--fg2) var(--p,0%))}
 /* 快满 / 满了：不换成纯黄纯红那种跳出来的色块，改用按每套主题深浅调过的暖色 / 红色（不用深色 --accent-dim，免得压暗左半段导致 #111 读不清） */
 #ctxbar.warn #ctxfill{background:var(--ctx-warn)}
 #ctxbar.danger #ctxfill{background:linear-gradient(90deg,var(--ctx-warn),var(--ctx-err))}
-/* 正常态（除逐月浅灰条外）：同样按进度分界线分两色——压在实心强调条上用 --on-accent，空白处用 --fg2（拾色深浅两档原本 1.02–1.38:1 几乎看不清） */
-html:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxtxt{background:linear-gradient(90deg,var(--on-accent) var(--p,0%),var(--fg2) var(--p,0%));-webkit-background-clip:text;background-clip:text;color:transparent}
-html:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxtxt *,html:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxtxt *::before{color:transparent!important}
-html[dir="rtl"]:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxtxt{background:linear-gradient(270deg,var(--on-accent) var(--p,0%),var(--fg2) var(--p,0%))}
 /* 这时字一半压在暖色 / 红色上、一半落在空白处：不再加描边衬底（观感差，10-28 用户定去掉），
    改成按进度分界线把同一行字分两色——压在条上的是近黑（各主题暖色 / 红色上对比度都 ≥5:1），空白处是正文色 */
 #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(90deg,#111 var(--p,0%),var(--fg) var(--p,0%));-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -2769,7 +2770,7 @@ html.pg-on #ctxbar{visibility:hidden}   /* 整页盖着时不露会话的用量�
 html[data-skin="zhuyue"]{
   --bg:#111111; --bg2:#1a1a1a; --bg3:#1f1f1f; --bg4:#292929; --line:#2b2b2b;
   --fg:#f2f2f2; --fg2:#bdbdbd; --fg3:#7a7a7a;
-  --accent:#f2f2f2; --accent-dim:#5a5a5a; --on-accent:#111111; --zy-blue:#3a8ef6;
+  --accent:#f2f2f2; --accent-dim:#5a5a5a; --on-accent:#111111; --zy-blue:#3a8ef6; --zy-on-blue:#111111;
   --ok:#3ecf7a; --err:#f25a5a; --warn:#f0a020; --tool:#4a95f7; --purple:#a78bfa;
   --bar-bg:#111111; --bar-bg2:#111111; --veil:rgba(17,17,17,.86);
   --strong:#ffffff; --code-bg:#1a1a1a; --think-bg:#1a1a1a; --more-bg:#1f1f1f; --more-line:#333333;
@@ -2782,7 +2783,7 @@ html[data-skin="zhuyue"]{
 html[data-skin="zhuyue"][data-theme="light"]{
   --bg:#ffffff; --bg2:#f5f5f5; --bg3:#f0f0f0; --bg4:#e8e8e8; --line:#eeeeee;
   --fg:#141414; --fg2:#5c5c5c; --fg3:#888888;
-  --accent:#141414; --accent-dim:#cfcfcf; --on-accent:#ffffff; --zy-blue:#2b80f7;
+  --accent:#141414; --accent-dim:#cfcfcf; --on-accent:#ffffff; --zy-blue:#2b80f7; --zy-on-blue:#111111;
   --ok:#16a34a; --err:#dc2626; --warn:#b45309; --tool:#2b80f7; --purple:#7650c0;
   --bar-bg:#ffffff; --bar-bg2:#ffffff; --veil:rgba(255,255,255,.88);
   --strong:#000000; --code-bg:#f7f7f7; --think-bg:#f7f7f7; --more-bg:#f0f0f0; --more-line:#e5e5e5;
@@ -3089,7 +3090,7 @@ html[data-theme="light"] .lmap{--lm-track:#c4c4c4;--lm-grid:#f4f4f4}
 .lt-panel .lt-note{font-size:12px;color:var(--fg3);margin-top:4px}
 .lt-panel .lt-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
 .lt-panel .lt-btns button{border:1px solid var(--line);background:none;color:var(--fg2);border-radius:8px;padding:5px 12px;font-size:12.5px;cursor:pointer}
-.lt-panel .lt-btns button.pri{background:var(--accent-btn);border-color:transparent;color:var(--on-accent)}
+.lt-panel .lt-btns button.pri{background:var(--zy-blue,var(--accent-btn));border-color:transparent;color:var(--zy-on-blue,var(--on-accent))}
 .lt-panel .lt-btns button:active{opacity:.8}
 /* 窄屏：项目条独占一行，「怎么看 / 补档 / 显示杂项」换到下一行，长语言也不出屏 */
 @media (max-width:599px){

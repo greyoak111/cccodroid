@@ -113,8 +113,12 @@ test("五套外观 × 深浅两档：主按钮 / 危险按钮 / 上下文条全�
       expectContrast(".btn (--on-accent / --accent-btn)", v["--on-accent"], v["--accent-btn"], 4.5);
       expectContrast(".btn.danger (--err-fg / --err-bg)", v["--err-fg"], v["--err-bg"], 4.5);
       expectContrast(".btn.danger-fill (--on-err / --err-btn)", v["--on-err"], v["--err-btn"], 4.5);
+      expectContrast("#ctxbar normal unfilled (--fg2 / --bg2)", v["--fg2"], v["--bg2"], 4.5);
       expectContrast("#ctxbar.warn (#111 / --ctx-warn)", "#111111", v["--ctx-warn"], 4.5);
       expectContrast("#ctxbar.danger (#111 / --ctx-err)", "#111111", v["--ctx-err"], 4.5);
+      if (skin === "zhuyue") {
+        expectContrast(".lt-panel button.pri (--zy-on-blue / --zy-blue)", v["--zy-on-blue"], v["--zy-blue"], 4.5);
+      }
     }
   }
 });
@@ -150,9 +154,10 @@ test("样式覆写守卫：灯箱按钮重置底色、.btn.danger 自带底与�
   assert.match(bd[1], /background:var\(--err-bg\)/);
   assert.match(bd[1], /border:1px solid var\(--err-line\)/);
 
-  // 3. .btn.danger-fill 和 .lt-panel button.pri 不再写死 #fff
+  // 3. .btn.danger-fill 和 .lt-panel button.pri 不再写死 #fff（逐月保留品牌蓝 + --zy-on-blue）
   assert.match(css, /\.btn\.danger-fill\{background:var\(--err-btn\);color:var\(--on-err\)\}/);
-  assert.match(css, /\.lt-panel \.lt-btns button\.pri\{background:var\(--accent-btn\);border-color:transparent;color:var\(--on-accent\)\}/);
+  assert.match(css, /\.lt-panel \.lt-btns button\.pri\{background:var\(--zy-blue,var\(--accent-btn\)\);border-color:transparent;color:var\(--zy-on-blue,var\(--on-accent\)\)\}/);
+  assert.ok(themeSrc.includes("--zy-on-blue:${on}"), "自定义强调色应同步覆盖 --zy-on-blue");
 
   // 4. #fs-multi.on 用 --accent-btn 而非低对比度的 --accent
   assert.match(css, /#fs-multi\.on\{background:var\(--accent-btn\);color:var\(--on-accent\);border-color:var\(--accent-btn\)\}/);
@@ -162,8 +167,11 @@ test("样式覆写守卫：灯箱按钮重置底色、.btn.danger 自带底与�
   assert.match(css, /html\[data-skin="goucheng"\] \.btn\.ghost\.danger/);
   assert.match(css, /html\[data-skin="shise"\] :is\(#pages,#set-ov\) \.btn\.ghost/);
 
-  // 6. 上下文条正常态（非逐月）也按 --p 双色切字，清零时同步重置 --p
-  assert.match(css, /html:not\(\[data-skin="zhuyue"\]\) #ctxbar:not\(\.warn\):not\(\.danger\) #ctxtxt\{background:linear-gradient\(90deg,var\(--on-accent\) var\(--p,0%\),var\(--fg2\) var\(--p,0%\)\)/);
+  // 6. 上下文条正常态（非逐月）用实心条 + --p 双色切字；只对 #ctxctx 设透明、绝不扫 #ctxtxt *（避免拍没 #ctxq 额度速览）；逐月保留灰阶渐变；清零时同步重置 --p
+  assert.match(css, /html:not\(\[data-skin="zhuyue"\]\) #ctxbar:not\(\.warn\):not\(\.danger\) #ctxfill\{background:var\(--accent-btn\)\}/);
+  assert.match(css, /html\[data-skin="zhuyue"\] #ctxbar:not\(\.warn\):not\(\.danger\) #ctxfill\{background:linear-gradient\(90deg,var\(--bg4\),color-mix\(in srgb,var\(--accent\) 30%,var\(--bg4\)\)\)\}/);
+  assert.match(css, /html:not\(\[data-skin="zhuyue"\]\) #ctxbar:not\(\.warn\):not\(\.danger\) #ctxtxt > #ctxctx\{color:transparent\}/);
+  assert.doesNotMatch(css, /:not\(\.warn\):not\(\.danger\) #ctxtxt \*/, "正常态不可用 #ctxtxt * 覆盖 #ctxq.warm / .hot");
   assert.match(css, /#ctxbar\.warn #ctxfill\{background:var\(--ctx-warn\)\}/);
   assert.ok(src04.includes('ctxFill.style.width = "0%"; ctxBar.style.setProperty("--p", "0%");'), "清空上下文条时应同步把 --p 归零");
 });
