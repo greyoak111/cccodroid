@@ -179,4 +179,11 @@ test("样式覆写守卫：灯箱按钮重置底色、.btn.danger 自带底与�
   assert.match(css, /html\[data-skin="shise"\]:not\(\.wel\) #input\{padding:8px 0\}/);
   const src05 = fs.readFileSync(new URL("../web/app/05-composer.js", import.meta.url), "utf8");
   assert.match(src05, /new MutationObserver\(\(\) => autoGrow\(\)\)\.observe\(document\.documentElement, \{ attributes: true, attributeFilter: \["data-skin", "data-fs"\] \}\)/);
+
+  // 8. 模型与思考强度弹层的思考强度 / 接口分段需包在独立横滚容器 .mp-scroll 内，避免被拾色皮肤 .seg{overflow:hidden} 锁死横向滚动
+  assert.match(css, /\.mp-scroll\{[^}]*overflow-x:auto[^}]*touch-action:pan-x/);
+  assert.match(css, /\.mp-seg\{display:flex;min-width:100%;width:max-content;box-sizing:border-box\}/);
+  const src12 = fs.readFileSync(new URL("../web/app/12-model-caps.js", import.meta.url), "utf8");
+  assert.match(src12, /<div class="seg-scroll mp-scroll"><div class="seg mp-seg">/);
+  assert.match(src12, /<div class="seg-scroll mp-scroll"><div class="seg mp-seg mp-provseg">/);
 });

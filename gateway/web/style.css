@@ -2330,10 +2330,12 @@ body{line-height:var(--phi)}
 .mp-head{padding:2px 0 var(--g1)}
 .mp-head b{font-size:15px}
 .mp-lbl{margin:var(--g2) 0 var(--g1)}
-.mp-eff{padding:0}
-/* 两排都是单行横滚：接口配多了、语言长了都不折行，不挤占下面的模型列表；横滑手势见到能横滚的元素会让路 */
-.mp-seg{display:flex;width:100%;box-sizing:border-box;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none}
-.mp-seg::-webkit-scrollbar{display:none}
+.mp-eff{padding:0;min-width:0}
+.mp-prov{min-width:0}
+/* 两排都是单行横滚：用外层 .mp-scroll 承接横向滚动，避免拾色皮肤 .seg{overflow:hidden} 锁死滚动、也让各皮肤底色与圆角随内容完整延伸；横滑手势见到能横滚的元素会让路 */
+.mp-scroll{width:100%;max-width:100%;min-width:0;flex:1 1 100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;touch-action:pan-x;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.mp-scroll::-webkit-scrollbar{display:none}
+.mp-seg{display:flex;min-width:100%;width:max-content;box-sizing:border-box}
 .mp-seg button{flex:1 0 auto;padding:6px 8px}
 .mp-provseg button{padding:6px 10px}
 .mp-provseg button.off:not(.on){opacity:.5}
