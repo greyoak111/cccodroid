@@ -42,7 +42,18 @@
       "pkg-config",
       "gdb",
       "strace",
-      "patchelf"
+      "patchelf",
+      "bison",
+      "flex",
+      "gperf",
+      "libtool",
+      "ccache"
+    ],
+    "autotools": [
+      "autoconf",
+      "automake",
+      "m4",
+      "perl"
     ],
     "vcs": [
       "git",
@@ -73,7 +84,10 @@
       "jq",
       "sqlite",
       "mandoc",
-      "bash-completion"
+      "bash-completion",
+      "fontconfig-utils",
+      "tmux",
+      "git-lfs"
     ],
     "graphics": [
       "mesa",
@@ -112,6 +126,14 @@
       "yarn",
       "bun",
       "deno"
+    ],
+    "rust": [
+      "rust",
+      "rust-analyzer"
+    ],
+    "python-tools": [
+      "uv",
+      "ruff"
     ]
   },
   "exclude": [
@@ -177,8 +199,8 @@
         "en": "CLI extras"
       },
       "desc": {
-        "zh": "rg、fd、bat、delta、helix、jq/yq、sqlite、man：Claude 搜代码、看差异更快，终端里也更好用。",
-        "en": "rg, fd, bat, delta, helix, jq/yq, sqlite, man: faster code search and diffs for Claude, nicer terminal."
+        "zh": "rg、fd、bat、delta、helix、jq/yq、sqlite、man、tmux、git-lfs、fc-list：Claude 搜代码、看差异更快，终端和字体排查也更顺手。",
+        "en": "rg, fd, bat, delta, helix, jq/yq, sqlite, man, tmux, git-lfs, fc-list: faster code search/diffs, terminal multiplexer, Git LFS and font lookup."
       },
       "uses": [
         "search"
@@ -192,7 +214,11 @@
         "jq",
         "yq",
         "sqlite3",
-        "man"
+        "man",
+        "tmux",
+        "git-lfs",
+        "fc-list",
+        "fc-match"
       ]
     },
     "build": {
@@ -204,8 +230,8 @@
         "en": "C/C++ build"
       },
       "desc": {
-        "zh": "clang、lld、cmake、ninja、make、gdb、strace、patchelf：在手机上编译、调试原生程序。",
-        "en": "clang, lld, cmake, ninja, make, gdb, strace, patchelf: compile and debug native programs on the phone."
+        "zh": "clang、lld、cmake、ninja、make、bison、flex、gperf、libtool、ccache、gdb、strace、patchelf：在手机上编译、调试原生程序。",
+        "en": "clang, lld, cmake, ninja, make, bison, flex, gperf, libtool, ccache, gdb, strace, patchelf: compile and debug native programs on the phone."
       },
       "uses": [
         "native-build"
@@ -219,9 +245,38 @@
         "cmake",
         "ninja",
         "pkg-config",
+        "bison",
+        "flex",
+        "gperf",
+        "libtool",
+        "ccache",
         "gdb",
         "strace",
         "patchelf"
+      ]
+    },
+    "autotools": {
+      "groups": [
+        "autotools"
+      ],
+      "full": false,
+      "name": {
+        "zh": "Autotools 与 Perl",
+        "en": "Autotools & Perl"
+      },
+      "desc": {
+        "zh": "autoconf、automake、m4、perl（约 75 MB）：从源码跑 ./configure / autoreconf 编译经典 GNU 项目时按需安装。",
+        "en": "autoconf, automake, m4 and perl (~75 MB): install on demand when building classic GNU/autotools projects from source."
+      },
+      "uses": [
+        "native-build"
+      ],
+      "key": [
+        "autoconf",
+        "automake",
+        "autoreconf",
+        "m4",
+        "perl"
       ]
     },
     "android": {
@@ -353,6 +408,48 @@
         "bun",
         "deno"
       ]
+    },
+    "rust": {
+      "groups": [
+        "rust"
+      ],
+      "full": false,
+      "name": {
+        "zh": "Rust 语言",
+        "en": "Rust"
+      },
+      "desc": {
+        "zh": "rustc、cargo、clippy、rustfmt、rust-analyzer（会复用 C/C++ 构建的 clang/lld/libllvm 共享层）：写、查、编 Rust 项目。",
+        "en": "rustc, cargo, clippy, rustfmt and rust-analyzer (reuses the clang/lld/libllvm shared layer with C/C++ build)."
+      },
+      "uses": [],
+      "key": [
+        "rustc",
+        "cargo",
+        "rust-analyzer",
+        "rustfmt",
+        "cargo-clippy"
+      ]
+    },
+    "python-tools": {
+      "groups": [
+        "python-tools"
+      ],
+      "full": false,
+      "name": {
+        "zh": "Python 现代工具",
+        "en": "Python tools"
+      },
+      "desc": {
+        "zh": "uv、ruff（约 54 MB）：极速 Python 包管理、虚拟环境与代码检查格式化，不改动基础 Python/pip。",
+        "en": "uv and ruff (~54 MB): fast Python package/venv manager and linter/formatter without altering base Python/pip."
+      },
+      "uses": [],
+      "key": [
+        "uv",
+        "uvx",
+        "ruff"
+      ]
     }
   },
   "external": [
@@ -412,11 +509,20 @@
     "usr/libexec/termux/command-not-found": "# 命令没找到（bash.bashrc 的 command_not_found_handle 调它）：模块化工具包（cccodroid 0.3.9 起）里，\n# 看看这个命令是不是在还没装的模块里，告诉用户去哪装。整包工具包没有 modules.json，就只报找不到\nu=$(cd \"$(dirname \"$0\")/../..\" && pwd)\nif [ -f \"$u/libexec/devkit/modules.json\" ] && [ -x \"$u/bin/node\" ]; then\n  \"$u/bin/node\" -e '\nconst [f, cmd] = process.argv.slice(1), u = require(\"path\").dirname(require(\"path\").dirname(require(\"path\").dirname(f)));\nconst mj = JSON.parse(require(\"fs\").readFileSync(f, \"utf8\"));\nconst m = (mj.modules || []).find((x) => x.kind === \"module\" && (x.commands || []).includes(cmd) && !require(\"fs\").existsSync(u + \"/\" + x.dir + \"/.ok\"));\nif (!m) process.exit(1);\n// 连同还没装的依赖（共享层）一起算\nconst ok = (x) => x.kind === \"base\" || require(\"fs\").existsSync(u + \"/\" + x.dir + \"/.ok\");\nconst mb = Math.round([m, ...(m.deps || []).map((d) => mj.modules.find((x) => x.id === d)).filter((x) => x && !ok(x))].reduce((s, x) => s + (x.installed || 0), 0) / 1048576);\nconsole.error(cmd + \"：在工具包的「\" + m.name.zh + \"」模块里，还没装。到 扩展 → 工具包模块 装上即可（约 \" + mb + \" MB）。\");\nconsole.error(cmd + \": part of the \\u201c\" + m.name.en + \"\\u201d toolkit module, which is not installed. Install it under Extensions \\u2192 Toolkit modules (about \" + mb + \" MB).\");\n' \"$u/libexec/devkit/modules.json\" \"$1\" && exit 127\nfi\necho \"$1: command not found\" >&2\nexit 127"
   },
   "fetch": {
-    "usr/lib/python3.14/ensurepip/_bundled/pip-26.2.1-py3-none-any.whl": {
-      "url": "https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/pip-26.2.1-py3-none-any.whl",
-      "sha256": "71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e",
+    "usr/lib/python3.14/ensurepip/_bundled/pip-26.2.2-py3-none-any.whl": {
+      "url": "https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl",
+      "sha256": "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70",
       "why": "Termux 的 python 删了 ensurepip 自带的 wheel（指望 pkg 装 python-pip），没有它 python -m venv 建不出带 pip 的环境。版本须与 ensurepip/__init__.py 的 _PIP_VERSION 一致（devkit.mjs 构建时核对，对不上直接失败；python 升级后照报错换 wheel）"
     }
+  },
+  "pip": {
+    "why": "Android 没有标准 /usr/share/zoneinfo 目录树，Python 的 zoneinfo.ZoneInfo 离线需要纯 Python tzdata 包（#208）",
+    "wheels": [
+      {
+        "url": "https://files.pythonhosted.org/packages/0a/66/9a06c2227fedfd4919f0eaaa8b94377d9730882a7e4f95823c9a331ab5e1/tzdata-2026.6-py2.py3-none-any.whl",
+        "sha256": "0a10eec6e13ef16b627fabed9a5f2ba61a62b1c67f327305f4e7e412a70b4aec"
+      }
+    ]
   },
   "_doc_fetch": "fetch：仓库之外的上游原件，按哈希核对后放进包里",
   "_doc_drop": "drop：解包时丢掉的文件（Termux App 专属脚本）；stubs：替换成小脚本的命令（pkg/apt 转交应用自带的实现）",

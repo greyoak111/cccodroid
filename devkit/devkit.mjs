@@ -1189,6 +1189,25 @@ if (cmd === "build" || cmd === "component") {
   for (const [p, text] of Object.entries(EXTRAS ? MAN.stubs || {} : {})) {
     tw.add({ name: p, type: "0", mode: 0o755, mtime: 0, data: Buffer.from("#!" + R.to + "files/usr/bin/sh\n" + text.replace(/\n?$/, "\n")) });
   }
+  // 登录 shell 默认时区（#208）：Java 在 Android 上不设 TZ 时默认 GMT；从 getprop 取系统时区，不覆盖用户显式设置的 TZ
+  if (EXTRAS) {
+    if (!seenDirs.has("usr/etc")) { seenDirs.add("usr/etc"); tw.add({ name: "usr/etc/", type: "5", mode: 0o755, mtime: 0 }); }
+    if (!seenDirs.has("usr/etc/profile.d")) { seenDirs.add("usr/etc/profile.d"); tw.add({ name: "usr/etc/profile.d/", type: "5", mode: 0o755, mtime: 0 }); }
+    tw.add({
+      name: "usr/etc/profile.d/cccodroid-tz.sh",
+      type: "0",
+      mode: 0o644,
+      mtime: 0,
+      data: Buffer.from(
+        "# Default TZ from Android system property unless user already set TZ (#208)\n" +
+        'if [ -z "${TZ:-}" ] && [ -x /system/bin/getprop ]; then\n' +
+        '  _cc_tz=$(/system/bin/getprop persist.sys.timezone 2>/dev/null)\n' +
+        '  [ -n "$_cc_tz" ] && export TZ="$_cc_tz"\n' +
+        "  unset _cc_tz\n" +
+        "fi\n"
+      ),
+    });
+  }
   // 仓库之外的上游原件（如 ensurepip 的 pip wheel）：下载、核对哈希、原样放进去
   // mode 可给（如 755 的可执行文件），source 只是记账用（默认 pypi），和解包体积也会算进 installed
   let fetchedBytes = 0;
@@ -1241,8 +1260,9 @@ if (cmd === "build" || cmd === "component") {
   // 典型用途：matplotlib 的 postinst 会现场 `pip install matplotlib` 去 PyPI 拉 cycler / six 这些 ——
   // 不钉版本、离线就装坏、拉下来的文件也不进组件记录（卸载删不掉）。打进组件后 pip 判定已满足，不再联网。
   // console_scripts 照 pip 的样子生成入口脚本；.data/ 下只认 purelib / platlib / scripts / data。
-  if (COMP && COMP.pip) {
-    const pyv = (BASE.packages.find((p) => p.name === "python") || {}).version;
+  const PIP_SPEC = COMP ? COMP.pip : EXTRAS ? MAN.pip : null;
+  if (PIP_SPEC) {
+    const pyv = COMP ? (BASE.packages.find((p) => p.name === "python") || {}).version : (idx.pkgs.get("python") || {}).version;
     if (!pyv) throw new Error("pip：底座里没有 python");
     const sp = `usr/lib/python${pyv.match(/^\d+\.\d+/)[0]}/site-packages`;
     const py = R.to + "files/usr/bin/python3";
@@ -1252,7 +1272,7 @@ if (cmd === "build" || cmd === "component") {
       dir(name); tw.add({ name, type: "0", mode, mtime: 0, data }); fetchedBytes += data.length;
     };
     fs.mkdirSync(CACHE, { recursive: true });
-    for (const w of COMP.pip.wheels) {
+    for (const w of PIP_SPEC.wheels) {
       const file = decodeURIComponent(w.url.split("/").pop());
       const dest = path.join(CACHE, file);
       let b = fs.existsSync(dest) ? fs.readFileSync(dest) : null;
@@ -1291,7 +1311,7 @@ if (cmd === "build" || cmd === "component") {
         const top = m[3].split(".")[0];
         put(`usr/bin/${m[1]}`, Buffer.from(`#!${py}\nimport re\nimport sys\nfrom ${m[2]} import ${top}\nif __name__ == "__main__":\n    sys.argv[0] = re.sub(r"(-script\\.pyw|\\.exe)?$", "", sys.argv[0])\n    sys.exit(${m[3]}())\n`), 0o755);
       }
-      lock.push({ name: dist.replace(/_/g, "-").toLowerCase(), version: ver, source: "pypi", homepage: `https://pypi.org/project/${dist}/`, recipe: "-", file: w.url, sha256: w.sha256, size: b.length, why: COMP.pip.why });
+      lock.push({ name: dist.replace(/_/g, "-").toLowerCase(), version: ver, source: "pypi", homepage: `https://pypi.org/project/${dist}/`, recipe: "-", file: w.url, sha256: w.sha256, size: b.length, why: PIP_SPEC.why });
       console.log(`  pip：${file}  ${n} 个文件`);
     }
   }
