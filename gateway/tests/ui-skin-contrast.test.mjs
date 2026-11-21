@@ -174,4 +174,9 @@ test("样式覆写守卫：灯箱按钮重置底色、.btn.danger 自带底与�
   assert.doesNotMatch(css, /:not\(\.warn\):not\(\.danger\) #ctxtxt \*/, "正常态不可用 #ctxtxt * 覆盖 #ctxq.warm / .hot");
   assert.match(css, /#ctxbar\.warn #ctxfill\{background:var\(--ctx-warn\)\}/);
   assert.ok(src04.includes('ctxFill.style.width = "0%"; ctxBar.style.setProperty("--p", "0%");'), "清空上下文条时应同步把 --p 归零");
+
+  // 7. 拾色皮肤下 #btn-send 为 40px，非首屏单行 #input（line-height:24px）需 padding:8px 0 补齐至 40px 与按钮垂直居中；切皮肤/字号时 autoGrow 重算高度
+  assert.match(css, /html\[data-skin="shise"\]:not\(\.wel\) #input\{padding:8px 0\}/);
+  const src05 = fs.readFileSync(new URL("../web/app/05-composer.js", import.meta.url), "utf8");
+  assert.match(src05, /new MutationObserver\(\(\) => autoGrow\(\)\)\.observe\(document\.documentElement, \{ attributes: true, attributeFilter: \["data-skin", "data-fs"\] \}\)/);
 });
