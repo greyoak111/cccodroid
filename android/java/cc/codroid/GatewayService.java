@@ -435,6 +435,7 @@ public class GatewayService extends Service {
         pb.environment().put("CCAPP_SPAWN_KEY", "stdin");
         // 界面地址探测的结果（见 Env.checkHost）：回退设备上让网关把界面地址并进主地址（gateway/gw/access.mjs 的 UI_HOST）
         pb.environment().put("CCAPP_UI_HOST", Env.HOST);
+        if (WorkIslandNotifications.supported()) pb.environment().put("CCAPP_NATIVE_WORK_ISLAND", "1");
         pb.redirectInput(ProcessBuilder.Redirect.PIPE);
         pb.directory(env.app);
         pb.redirectErrorStream(true);

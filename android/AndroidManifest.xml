@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <!-- 锁屏验证（Consent.java）：安卓 11+ 用 BiometricPrompt 验过锁屏才把安全开关存到下次启动。
          平台从 28 起要求调用方声明 USE_BIOMETRIC（普通权限，装时自动授予，不弹框；更老的系统不认这条，无影响）。
          本应用不调 FingerprintManager，废弃的 USE_FINGERPRINT 不需要；缺这条时 authenticate() 会直接抛
@@ -43,6 +44,7 @@
 
     <!-- 软件包可见性（30 起）：查 Shizuku 装没装、设备工具列应用 / 打开别的应用 -->
     <queries>
+        <provider android:authorities="miui.statusbar.notification.public" />
         <package android:name="moe.shizuku.privileged.api" />
         <!-- 可选集成「工作岛」：设置里开启后，网关用 pm list packages 检测它装没装 -->
         <package android:name="com.dafeiyu.workisland" />

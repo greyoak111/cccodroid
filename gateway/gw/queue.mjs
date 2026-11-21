@@ -17,7 +17,7 @@ import { killRunProcs, killTree, safeModePerm } from "./claude.mjs";
 import { goalCheck, tasksCheck } from "./goal.mjs";
 import { LAST_SESSION, RUNS, SESSIONS, TRASH_HOOKS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { BOOT, publish } from "./bus.mjs";
+import { BOOT, notifyWorkIslandReply, publish } from "./bus.mjs";
 import { execIntent, lostProvider, pickProvider, startRun } from "./run.mjs";
 import { cleanMergeFrom } from "./merge.mjs";
 import { LOCAL_CMD_RE } from "./modelcmd.mjs";
@@ -402,7 +402,7 @@ export const START_GUARDS = [];
 const startable = (q) => START_GUARDS.every((g) => { try { return g(q) !== false; } catch (e) { log("开跑核对出错: " + e.message); return true; } });
 /** 一轮结束时要知道的模块（定时任务记运行记录）在这里挂；钩子出错不影响收尾 */
 export const END_HOOKS = [];
-export function endRun(run, fields = {}) {
+export function endRun(run, fields = {}, replyText = null) {
   if (run.ended) return;
   if (run.limitTimer) clearTimeout(run.limitTimer);
   for (const h of END_HOOKS) { try { h(run, fields); } catch (e) { log("结束钩子出错: " + e.message); } }
@@ -411,7 +411,12 @@ export function endRun(run, fields = {}) {
   RUNS.delete(run.id);
   if (!RUNS.size && !QUEUE.some((q) => !q.held)) runFlag(false);
   // at：真正结束的时刻。断线后增量补发的 run_end 晚到几分钟，回复用时不能按收到的时刻算（#142-4）
-  publish({ type: "run_end", at: Date.now(), runId: run.id, sessionId: run.sessionId, aborted: !!run.aborted, ...(run.auto ? { auto: run.auto } : {}), ...(run.sched ? { sched: true } : {}), ...fields });
+  const at = Date.now();
+  // Private live-only notification; never put this text in fields or publish().
+  if (replyText && run.id && run.sessionId && !run.aborted && !fields.failed && !fields.isError) {
+    notifyWorkIslandReply(run.id, run.sessionId, replyText, at);
+  }
+  publish({ type: "run_end", at, runId: run.id, sessionId: run.sessionId, aborted: !!run.aborted, ...(run.auto ? { auto: run.auto } : {}), ...(run.sched ? { sched: true } : {}), ...fields });
   goalCheck(run.sessionId);
   tasksCheck(run.sessionId);
   run.log = [];

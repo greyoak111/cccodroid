@@ -167,7 +167,16 @@
     try { localStorage.setItem(PROF_KEY, JSON.stringify(p)); } catch (e) { toast(t("保存失败"), true); }
     paintAcct(state.serverStatus); paintProf();
   }
+  let sentIslandAvatar;
+  function syncIslandAvatar() {
+    const avatar = profile().av || "";
+    if (avatar !== sentIslandAvatar && window.CCApp?.islandAvatar) {
+      window.CCApp.islandAvatar(avatar);
+      sentIslandAvatar = avatar;
+    }
+  }
   function paintProf() {
+    syncIslandAvatar();
     const b = $("prof-av"); if (!b) return;
     paintAv(b);
     const i = $("prof-name"); if (document.activeElement !== i) i.value = profile().name || "";

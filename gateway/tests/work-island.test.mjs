@@ -3,6 +3,43 @@ import "../gw/config.mjs";   // 放最前：没走 scripts/test.mjs（没有临�
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createWorkIsland } from "../gw/work-island-core.mjs";
+import { _islandForTest } from "../gw/work-island.mjs";
+import { EventEmitter } from "node:events";
+import { BOOT, previewWorkIsland, publishWorkIsland, routeBus } from "../gw/bus.mjs";
+
+test("原生工作岛：重连使用当前帧，试播不重放，收起清空快照", async () => {
+  async function connect(lastId) {
+    const req = Object.assign(new EventEmitter(), { method: "GET", headers: { "last-event-id": lastId } });
+    const lines = [];
+    await routeBus(req, { writeHead() {}, write(buf) { lines.push(String(buf)); return true; } }, new URL("http://localhost/api/events"), "/api/events");
+    const frames = () => lines.flatMap(s => s.split("\n")).filter(s => s.startsWith("data: ")).map(s => JSON.parse(s.slice(6)));
+    return { frames, close: () => req.emit("close") };
+  }
+  const frame = _islandForTest.nativeFrame("UPDATE", "整理清单", "清单 2/5", 1000, "planning", { todoDone: 2, todoTotal: 5, sessionId: "sessionA", confirmation: "plan" }, 2000);
+  assert.equal(frame.expires, 1000 + 12 * 3600e3);
+  assert.equal(_islandForTest.nativeFrame("DONE", "完成", "", 0, "done", undefined, 2000), null);
+  const first = await connect(`${BOOT}.0`);
+  try {
+    publishWorkIsland(frame);
+    previewWorkIsland();
+    assert.deepEqual(first.frames().slice(-2), [{ type: "work_island", frame }, { type: "work_island_preview" }]);
+    const next = await connect(`${BOOT}.0`);
+    try {
+      assert.deepEqual(next.frames().at(-1), { type: "sync", workIsland: frame, workIslandMode: false });
+      assert.ok(!next.frames().some(e => e.type === "work_island_preview"));
+      publishWorkIsland(_islandForTest.nativeFrame("IDLE"));
+      assert.deepEqual(next.frames().at(-1), { type: "work_island", frame: null });
+    } finally { next.close(); }
+  } finally { first.close(); publishWorkIsland(null); }
+});
+
+test("ColorOS 仍用原来的前台服务", () => {
+  const { amArgs } = _islandForTest;
+  assert.deepEqual(amArgs("IDLE", undefined, undefined, undefined, undefined, undefined, "com.dafeiyu.workisland"), [
+    "start-foreground-service", "--user", "0", "-n", "com.dafeiyu.workisland/.IslandService",
+    "-a", "com.dafeiyu.workisland.IDLE",
+  ]);
+});
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -231,4 +268,36 @@ test("子任务：不转发描述原文", () => {
   core.handleEvent({ type: "sub_progress", desc: "读 /sdcard/私密/日记.md" });
   assert.equal(sent.at(-1).text, "子任务…");
   assert.ok(!sent.some((x) => String(x.text).includes("日记")));
+});
+
+
+test("原生工作岛：并行确认不串会话，保留真实清单，完成立即撤岛", () => {
+  const { core, sent, setRuns } = make({ rich: true });
+  const a = { id: "a", sessionId: "sA", perms: new Map() };
+  const b = { id: "b", sessionId: "sB", perms: new Map() };
+  setRuns([a, b]);
+  core.handleEvent({ type: "run_start", runId: a.id, sessionId: a.sessionId });
+  core.handleEvent({ type: "tasks", sessionId: a.sessionId, tasks: [{ status: "completed" }, { status: "pending" }] });
+  core.handleEvent({ type: "phase", runId: a.id, phase: "text" });
+  assert.equal(sent.at(-1).extra.todoDone, 1);
+  assert.equal(sent.at(-1).extra.todoTotal, 2);
+  b.perms.set("p", { tool: "ExitPlanMode", sessionId: b.sessionId, input: { plan: "private" } });
+  core.handleEvent({ type: "perm_request", runId: b.id, sessionId: b.sessionId, tool: "ExitPlanMode" });
+  assert.equal(sent.at(-1).extra.sessionId, b.sessionId);
+  assert.equal(sent.at(-1).extra.confirmation, "plan");
+  assert.equal(sent.at(-1).extra.todoTotal, undefined);
+  assert.ok(!JSON.stringify(sent.at(-1)).includes("private"));
+  b.perms.clear();
+  core.handleEvent({ type: "perm_resolved", runId: b.id });
+  assert.equal(sent.at(-1).extra.sessionId, a.sessionId);
+  assert.equal(sent.at(-1).extra.todoTotal, 2);
+  core.handleEvent({ type: "tasks", sessionId: a.sessionId, tasks: null });
+  core.handleEvent({ type: "phase", runId: a.id, phase: "text" });
+  assert.equal(sent.at(-1).extra.todoTotal, undefined);
+  setRuns([b]);
+  core.handleEvent({ type: "run_end", runId: a.id });
+  assert.equal(sent.at(-1).extra.sessionId, b.sessionId);
+  setRuns([]);
+  core.handleEvent({ type: "run_end", runId: b.id });
+  assert.equal(sent.at(-1).action, "IDLE");
 });

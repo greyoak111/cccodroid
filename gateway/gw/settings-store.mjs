@@ -37,6 +37,8 @@ export const SETTINGS = {
   idleCompaction: true,
   // 工作岛：把 Claude 的工作状态送到 ColorOS 16 灵动岛（可选，默认关；见 gw/work-island.mjs）
   workIsland: false,
+  // 回复预览会把正文显示在通知中；必须明确选择开启。
+  workIslandReplyPreview: false,
   // 端侧小模型：chat = 纯聊天（不给工具，提示只有几十 token）；custom = 用户自己的 ~/.cccodroid/local-mode.json
   localMode: "chat",
   // 自动起名用的型号（#60）：null = 跟对话同一型号；"off" = 不自动起；其他 = 全局那家清单里的某个型号（见 autotitle.mjs）

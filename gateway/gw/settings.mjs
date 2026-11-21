@@ -13,12 +13,13 @@ import { idleDisarmAll, publishState, pump, setPermMode, strList } from "./queue
 export { SETTINGS, saveSettings } from "./settings-store.mjs";
 import { SETTINGS, saveSettings, outputStyles } from "./settings-store.mjs";
 import { clampAutoCompact } from "./stream.mjs";
+import { revokeWorkIslandReply } from "./bus.mjs";
 
 // 设置回执只带认识的字段：设置文件能手改、能从旧版 / 分享的预置带过来，里面可能有类凭据字段。
 // 以前直接展开 SETTINGS，GET 和保存回执会把它们原样送回界面（FIND-052）。
 const VIEW_KEYS = ["model", "permissionMode", "guard", "addDirs", "outputStyle", "effort", "allowedTools", "disallowedTools",
   "autoCompactWindow", "provider", "memGuard", "autoClean", "maxParallel", "staticCompat", "idleCompaction", "workIsland",
-  "localMode", "titleModel", "hiddenProviders", "permNotice", "permMigrated"];
+  "workIslandReplyPreview", "localMode", "titleModel", "hiddenProviders", "permNotice", "permMigrated"];
 const settingsView = () => Object.fromEntries(VIEW_KEYS.filter((k) => k in SETTINGS).map((k) => [k, SETTINGS[k]]));
 
 // ── 路由：/api/settings ──
@@ -26,6 +27,10 @@ export async function routeSettings(req, res, u, p) {
   // 工作岛：设置页看它起没起来、没起来的原因，点「重试」重新检测（195-P.4）
   if (p === "/api/work-island" && req.method === "GET") return sendJson(res, 200, (await import("./work-island.mjs")).workIslandStatus());
   if (p === "/api/work-island/retry" && req.method === "POST") return sendJson(res, 200, (await import("./work-island.mjs")).retryWorkIsland());
+  if (p === "/api/work-island/preview" && req.method === "POST") {
+    const ok = (await import("./work-island.mjs")).tryWorkIslandPreview();
+    return sendJson(res, ok ? 200 : 409, { ok });
+  }
   // ── 设置 ──
   // 执行方式（targetSdk 28 / 36 双方案）：偏好写在 files/.exec-mode，由 Env.java 读，GatewayService 每次拉起网关都重读 ——
   // 所以改完重启网关就生效。targetSdk ≥ 29 的包只能经加载器，选「直接」会被拒
@@ -64,6 +69,9 @@ export async function routeSettings(req, res, u, p) {
     if (req.method === "GET") return sendJson(res, 200, { ...settingsView(), maxParallel: maxParallel(), maxParallelCap: MAX_PARALLEL_CAP, workspace: CFG.workspace, outputStyles: outputStyles() });
     if (req.method === "POST") {
       const b = JSON.parse((await readBody(req)) || "{}");
+      if ("workIslandReplyPreview" in b && typeof b.workIslandReplyPreview !== "boolean") {
+        return sendJson(res, 400, { error: "workIslandReplyPreview must be a boolean" });
+      }
       // 先校验、再动内存（FIND-051）：未知厂商、正在生成时切厂商都要在改任何设置之前拦下。
       // 否则 model 已经写进 SETTINGS、permissionMode 还会经 setPermMode 当场落盘，最后返回 400/409 却留下半套设置。
       if ("provider" in b) {
@@ -109,6 +117,9 @@ export async function routeSettings(req, res, u, p) {
       // 敏感操作再确认没有关闭口子：设置接口不提供全局关掉这一层的能力，要放行走确认卡片逐次允许
       if ("idleCompaction" in b) { SETTINGS.idleCompaction = !!b.idleCompaction; if (!SETTINGS.idleCompaction) idleDisarmAll(); }
       if ("workIsland" in b) SETTINGS.workIsland = !!b.workIsland;
+      // Disabling takes effect immediately, even if the settings file cannot be written.
+      if (b.workIslandReplyPreview === false) SETTINGS.workIslandReplyPreview = false;
+      if (b.workIslandReplyPreview === false || ("workIsland" in b && SETTINGS.workIsland !== true)) revokeWorkIslandReply();
       // 存储的自动清理（D10）：开关 + 频次（每天 / 每周 / 每月）
       if (b.autoClean && typeof b.autoClean === "object") {
         const a = SETTINGS.autoClean || {};
@@ -165,8 +176,13 @@ export async function routeSettings(req, res, u, p) {
           .then((m) => m.applyWorkIslandSetting())
           .catch((e) => log("工作岛设置应用失败: " + e.message));
       }
-      if (!saveSettings())
+      const wasPreview = SETTINGS.workIslandReplyPreview;
+      if (b.workIslandReplyPreview === true) SETTINGS.workIslandReplyPreview = true;
+      if (!saveSettings()) {
+        // Unlike ordinary settings, a failed opt-in must not start exposing reply text.
+        SETTINGS.workIslandReplyPreview = wasPreview;
         return sendJson(res, 500, { error: tz("设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）") });
+      }
       log(`设置已更新 provider=${PROVIDER.id} model=${SETTINGS.model || "(默认)"} effort=${SETTINGS.effort} autoCompact=${SETTINGS.autoCompactWindow || "(默认)"} workIsland=${SETTINGS.workIsland}`);
       return sendJson(res, 200, { ok: true, settings: settingsView(), provider: PROVIDER.id, upstream: CFG.upstream });
     }

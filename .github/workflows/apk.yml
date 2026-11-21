@@ -50,8 +50,8 @@ jobs:
     # 测试失败后整个运行要挂几十分钟才收尾（PR #204：20:23 就失败了，21:00 运行才结束）。
     environment: ${{ (github.ref == 'refs/heads/main' && github.event_name != 'pull_request') && 'apk-release' || 'apk-ci' }}
     env:
-      BUILD_TOOLS: "35.0.0"
-      PLATFORM: "android-35"
+      BUILD_TOOLS: "36.0.0"
+      PLATFORM: "android-36.1"
       NDK: "27.2.12479018"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0

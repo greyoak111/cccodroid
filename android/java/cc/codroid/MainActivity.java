@@ -1952,6 +1952,9 @@ public class MainActivity extends Activity {
             }
             /** 界面里的外观设置（auto / light / dark），下次启动时安装页照着上色 */
             /** 界面最终用的语言（i18n.js 解析过的 code，不是 auto）：外壳的通知、安装页、更新文案跟着换 */
+            @android.webkit.JavascriptInterface public void islandAvatar(String k, String data) {
+                if (Env.bridgeOk(k) && WorkIslandNotifications.supported()) WorkIslandNotifications.saveAvatar(MainActivity.this, data);
+            }
             @android.webkit.JavascriptInterface public void langPref(String k, String code) { if (!Env.bridgeOk(k)) return; Tr.set(code); }
             @android.webkit.JavascriptInterface public void themePref(String k, String p) { if (!Env.bridgeOk(k)) return;
                 if ("auto".equals(p) || "light".equals(p) || "dark".equals(p))

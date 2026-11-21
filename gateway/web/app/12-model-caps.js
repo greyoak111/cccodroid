@@ -448,6 +448,7 @@
       $("set-static").checked = state.settings.staticCompat !== false;
       $("set-idlecompact").checked = state.settings.idleCompaction !== false;
       $("set-workisland").checked = state.settings.workIsland === true;
+      $("set-wi-reply").checked = state.settings.workIslandReplyPreview === true;
     } catch {}
   }
 
@@ -512,7 +513,7 @@
     const v = { model: ["set-model", S.model || ""], titleModel: ["set-titlemodel", S.titleModel || ""], effort: ["set-effort", S.effort || ""], outputStyle: ["set-style", S.outputStyle || ""],
       maxParallel: ["set-parallel", S.maxParallel || 3] };
     const c = { staticCompat: ["set-static", S.staticCompat !== false], idleCompaction: ["set-idlecompact", S.idleCompaction !== false],
-      workIsland: ["set-workisland", S.workIsland === true] };
+      workIsland: ["set-workisland", S.workIsland === true], workIslandReplyPreview: ["set-wi-reply", S.workIslandReplyPreview === true] };
     for (const k of Object.keys(patch || {})) {
       if (v[k] && $(v[k][0])) $(v[k][0]).value = v[k][1];
       if (c[k] && $(c[k][0])) $(c[k][0]).checked = c[k][1];
@@ -587,6 +588,10 @@
     if (!setVisible("claude", visit)) return;
     const r = await api("/api/work-island").catch(() => null), box = $("wi-state");
     if (!setVisible("claude", visit)) return;
+    $("wi-preview").classList.toggle("hidden", !r?.native);
+    $("wi-xiaomi-hint").classList.toggle("hidden", !r?.native);
+    $("wi-reply-settings").classList.toggle("hidden", !r?.native);
+    $("set-wi-reply").disabled = r?.wanted !== true;
     const show = !!(r && r.supported && r.wanted && !r.started && !r.detecting && r.error);
     box.classList.toggle("hidden", !show);
     if (!show) return;
@@ -598,12 +603,17 @@
     const visit = setVisit;
     if (setVisible("claude", visit)) for (const ms of [2000, 6000, 10000]) setTimeout(() => { if (setVisible("claude", visit)) loadWorkIsland(); }, ms);
   };
+  $("wi-preview").addEventListener("click", async () => {
+    try { await post("/api/work-island/preview"); }
+    catch (e) { toast(e.message || String(e), true); }
+  });
   $("wi-retry").addEventListener("click", async () => {
     await post("/api/work-island/retry").catch((e) => toast(e.message, true));
     $("wi-state").classList.add("hidden");
     wiLater();
   });
   $("set-workisland").addEventListener("change", (e) => saveSettings({ workIsland: e.target.checked }).then(wiLater));
+  $("set-wi-reply").addEventListener("change", (e) => saveSettings({ workIslandReplyPreview: e.target.checked }));
   $("set-parallel").addEventListener("change", (e) => {
     const v = Math.round(Number(e.target.value));
     if (!(v >= 1)) { e.target.value = state.settings.maxParallel || 3; return; }

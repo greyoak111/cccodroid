@@ -1,5 +1,5 @@
 // ── 工作岛（可选集成）──────────────────────────────────────────────────────
-// 在网关进程里直接订阅事件总线，把 Claude 的工作状态经 am 送给「工作岛」应用。
+// 小米走宿主已有的通知事件流；ColorOS 仍经 am 送给「工作岛」应用。
 //
 // 约束：
 //  · 不另起进程：没有 detached child、没有 PID 文件、没有看门狗。
@@ -11,15 +11,15 @@ import fs from "node:fs";
 import { execFile, execFileSync } from "node:child_process";
 import { SETTINGS } from "./settings-store.mjs";
 import { runList } from "./runs.mjs";
-import { onPublish } from "./bus.mjs";
+import { onPublish, previewWorkIsland, publishWorkIsland, publishWorkIslandMode } from "./bus.mjs";
 import { LAST_LANG, log } from "./config.mjs";
 import { createWorkIsland } from "./work-island-core.mjs";
 
 const PKG = process.env.WORK_ISLAND_PKG || "com.dafeiyu.workisland";
-const SVC = PKG + "/.IslandService";
+const NATIVE = !process.env.WORK_ISLAND_PKG && process.env.CCAPP_NATIVE_WORK_ISLAND === "1";
 
-function amArgs(action, title, text, since, state, extra) {
-  const a = ["start-foreground-service", "--user", "0", "-n", SVC, "-a", PKG + "." + action];
+function amArgs(action, title, text, since, state, extra, pkg = PKG) {
+  const a = ["start-foreground-service", "--user", "0", "-n", pkg + "/.IslandService", "-a", pkg + "." + action];
   if (title) a.push("--es", "title", title);
   if (text) a.push("--es", "text", text);
   if (state) a.push("--es", "state", state);
@@ -30,6 +30,21 @@ function amArgs(action, title, text, since, state, extra) {
     a.push("--ei", "todoTotal", String(extra.todoTotal));
   }
   return a;
+}
+
+function nativeFrame(action, title, text, since, state, extra, now = Date.now()) {
+  if (action === "IDLE" || action === "DONE") return null;
+  const expires = Math.min(since || now, now) + 12 * 3600e3;
+  return { action, title, text, since, state, expires, todoDone: extra?.todoDone, todoTotal: extra?.todoTotal,
+    sessionId: extra?.sessionId, confirmation: extra?.confirmation };
+}
+
+function nativeSend(...args) { publishWorkIsland(nativeFrame(...args)); }
+
+export function tryWorkIslandPreview() {
+  if (!NATIVE || process.env.CCAPP_WORK_ISLAND === "0") return false;
+  previewWorkIsland();
+  return true;
 }
 
 let warned = false;
@@ -97,11 +112,12 @@ function isAndroid() {
 function detectApp(cb) {
   if (process.env.CCAPP_WORK_ISLAND === "1") return cb(true);
   if (process.env.CCAPP_WORK_ISLAND === "0") return cb(false);
+  if (NATIVE) return cb(true);
   // pm 默认按“当前用户”查；应用 uid 会撞 INTERACT_ACROSS_USERS（asks to run as user 10），
   // 必须显式 --user 0。但 Android 16 上包可见性会把 pm list 裁成「只剩自己」，
   // 列不出来不等于没装——再用 am 探一次服务（显式组件不受 list 过滤影响）。
   const probe = () => execFile("/system/bin/am",
-    ["start-foreground-service", "--user", "0", "-n", SVC, "-a", PKG + ".IDLE"],
+    amArgs("IDLE"),
     { timeout: 4000 }, (e2, out2, err2) => {
       const msg = String(err2 || "");
       // 明确的「找不到」或「系统不许从应用身份起」都算用不了；超时之类的错误当作装了，交给后续 am 重试。
@@ -121,7 +137,7 @@ const seam = {
   exec: (args, timeout, cb) => execFile("/system/bin/am", args, { timeout }, cb),
   execSync: (args, timeout) => execFileSync("/system/bin/am", args, { timeout, stdio: "ignore" }),
 };
-export const _islandForTest = { seam, send: amSend, sendSync: amSendSync, state: () => ({ started, detecting, core, unsub, amQ: amQ.length, amBusy: !!amBusy }) };
+export const _islandForTest = { seam, amArgs, nativeFrame, send: amSend, sendSync: amSendSync, state: () => ({ started, detecting, core, unsub, amQ: amQ.length, amBusy: !!amBusy }) };
 
 export function startWorkIsland() {
   if (started || detecting) return;
@@ -142,14 +158,16 @@ export function startWorkIsland() {
       return;
     }
     core = createWorkIsland({
-      send: amSend,
-      sendSync: amSendSync,
+      send: NATIVE ? nativeSend : amSend,
+      sendSync: NATIVE ? nativeSend : amSendSync,
       runs: runList,
+      rich: NATIVE,
       lang: () => LAST_LANG,
     });
     unsub = onPublish((ev) => {
       try { core.handleEvent(ev); } catch {}
     });
+    if (NATIVE) publishWorkIslandMode(true);
     const live = runList().filter((r) => r && !r.ended);
     if (live.length) core.start(live[0]);        // 开设置时已经有轮次在跑
     else core.stop(true, true);                  // 没有轮次：先发一次 IDLE，收掉上一任网关被 SIGKILL 后留下的胶囊（195-P.1）
@@ -159,6 +177,7 @@ export function startWorkIsland() {
 }
 
 export function stopWorkIsland(sync = false) {
+  if (NATIVE) publishWorkIslandMode(false);
   started = false;
   detecting = false;
   gen++;                                         // 在途检测的结果作废（#124-1）
@@ -176,7 +195,7 @@ export function stopWorkIslandSync() {
 
 /** 设置页显示用：开着没有、跑起来没有、没起来是为什么（195-P.4） */
 export function workIslandStatus() {
-  return { supported: seam.android(), wanted: SETTINGS.workIsland === true, started: started && !detecting, detecting, error: started ? null : lastErr };
+  return { supported: seam.android(), native: NATIVE && process.env.CCAPP_WORK_ISLAND !== "0", wanted: SETTINGS.workIsland === true, started: started && !detecting, detecting, error: started ? null : lastErr };
 }
 /** 「重试」：关了再开，重新检测（装好应用、或系统放开之后） */
 export function retryWorkIsland() {

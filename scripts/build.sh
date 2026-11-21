@@ -159,6 +159,26 @@ if [ -n "$TARGET_SDK" ]; then
   grep -q "android:targetSdkVersion=\"$TARGET_SDK\"" "$MANIFEST" || { echo "✗ 清单里改不动 targetSdkVersion"; exit 1; }
   echo "  targetSdk $TARGET_SDK"
 fi
+# Optional Xiaomi local Super Island identity. Keep the checked-in manifest unconfigured.
+if [ -n "${XIAOMI_ISLAND_APP_ID:-}${XIAOMI_ISLAND_BUSINESS:-}${XIAOMI_ISLAND_DEBUG:-}" ]; then
+  node --input-type=module - "$MANIFEST" "$A/build/AndroidManifest.xml" <<'JS'
+import fs from 'node:fs';
+const { XIAOMI_ISLAND_APP_ID: id, XIAOMI_ISLAND_BUSINESS: business, XIAOMI_ISLAND_DEBUG: debug } = process.env;
+if (!/^[0-9]{1,32}$/.test(id ?? '') || !/^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/.test(business ?? '') || !['true', 'false'].includes(debug)) {
+  console.error('小米超级岛：必须同时配置有效的 App ID、场景编码和 Debug 标识。');
+  process.exit(1);
+}
+const xml = fs.readFileSync(process.argv[2], 'utf8');
+if ((xml.match(/<\/application>/g) ?? []).length !== 1) throw new Error('Invalid application manifest');
+fs.writeFileSync(process.argv[3], xml.replace('</application>', [
+  `    <meta-data android:name="com.xiaomi.xms.APP_ID" android:value="${id}" />`,
+  `    <meta-data android:name="com.xiaomi.xms.BUILD_TYPE_DEBUG" android:value="${debug}" />`,
+  `    <meta-data android:name="cc.codroid.xiaomi.WORK_ISLAND_BUSINESS" android:value="${business}" />`,
+  '</application>',
+].join('\n    ')));
+JS
+  MANIFEST="$A/build/AndroidManifest.xml"
+fi
 $AAPT2 link -o "$A/build/unsigned.apk" -I "$AJAR" \
   --manifest "$MANIFEST" -A "$A/assets" "$A/build/res.zip"
 # FILES 里的每个文件都得真进了包（aapt2 会丢点开头的、_ 开头目录这类）：少一个，装好后 AppFiles 每次启动都判「被改过」、整个重铺

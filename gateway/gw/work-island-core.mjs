@@ -103,6 +103,12 @@ const EN = {
   toolTitle: (n) => EN_TOOL_TITLES[n] || "Using a tool",
 };
 
+function confirmation(tool) {
+  if (tool === "ExitPlanMode") return "plan";
+  if (tool === "AskUserQuestion") return "question";
+  return tool === "Bash" || tool === "PowerShell" ? "command" : "operation";
+}
+
 function humanDuration(sec, zh) {
   if (zh) return sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
   return sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`;
@@ -147,6 +153,7 @@ export function createWorkIsland(opts = {}) {
   const graceMs = opts.graceMs ?? 3000;
   const idleMs = opts.idleMs ?? 8000;
   const throttleMs = opts.throttleMs ?? 1500;
+  const rich = opts.rich === true;
 
   const L = () => (String(lang() || "zh").startsWith("zh") ? ZH : EN);
   const liveRuns = () => (runs() || []).filter((r) => r && !r.ended);
@@ -196,27 +203,46 @@ export function createWorkIsland(opts = {}) {
 
   function update(text, title, state, extra) {
     if (!active) return;
+    if (rich) {
+      if (extra && "todoTotal" in extra) active.progress = extra.todoTotal > 0 ? extra : null;
+      const waiting = liveRuns().find(r => permCount(r));
+      const req = waiting && (Array.isArray(waiting.perms) ? waiting.perms[0] : waiting.perms.values().next().value);
+      if (req) {
+        state = "waiting";
+        title = L().waiting;
+        text = L().perm("");
+      }
+      extra = {
+        ...(!req || waiting.id === active.id ? { ...active.progress, ...extra } : {}),
+        sessionId: (req && (req.sessionId || waiting.sessionId)) || extra?.sessionId || active.sessionId,
+        ...(req ? { confirmation: confirmation(req.tool) } : {}),
+      };
+    }
     const t = title || L().working;
     const x = text || "";
     const st = state || "working";
     const progress = extra && extra.todoTotal ? `|${extra.todoDone}/${extra.todoTotal}` : "";
-    const key = t + "|" + x + "|" + st + progress;
+    const key = t + "|" + x + "|" + st + progress + (rich ? `|${extra.sessionId || ""}|${extra.confirmation || ""}` : "");
     if (key === active.last) return;
     active.last = key;
     sendUpdate(t, x, active.startedAt, st, extra);
   }
 
   function start(run, text) {
+    const id = run?.id || (rich ? run?.runId : null) || "";
     if (active) {
       // 并行会话：显示换到另一轮时，计时按那一轮自己的开始时间算（0.6.9 审计 195-P.5）
-      if (run && run.id && run.id !== active.id) {
-        active.id = run.id;
+      if (id && id !== active.id) {
+        active.id = id;
+        active.sessionId = run.sessionId;
+        active.progress = null;
+        if (rich) text ||= L().start;
         active.startedAt = Number(run.startedAt) || active.startedAt;
         active.last = "";
       }
       // 已经在显示了：state 快照每次都会走到这里，别把「等你确认」之类刷回「正在干活」（#97 02-010）。
       // 状态变化由各自的事件（perm_resolved、phase…）来改；但快照里已经有待确认的请求时要说出来
-      if (permCount(run)) update(L().perm(""), L().waiting, "waiting");
+      if (permCount(run) || (rich && liveRuns().some(permCount))) update(L().perm(""), L().waiting, "waiting");
       else if (text) update(text);
       return;
     }
@@ -224,17 +250,20 @@ export function createWorkIsland(opts = {}) {
     if (doneTimer) { clearTimeout(doneTimer); doneTimer = null; }
     if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
     active = {
-      id: (run && run.id) || "",
+      id,
+      sessionId: run?.sessionId,
       startedAt: Number(run && run.startedAt) || clock(),
       last: "",
     };
-    if (permCount(run)) update(L().perm(""), L().waiting, "waiting");
+    if (permCount(run) || (rich && liveRuns().some(permCount))) update(L().perm(""), L().waiting, "waiting");
     else update(text || L().start, L().working, "working");
   }
 
   function finish(reason) {
     if (!active) return;
     const ms = Math.max(0, clock() - active.startedAt);
+    if (rich) { stop(false, true); return; }
+    const sessionId = active.sessionId;
     active = null;
     clearPending();
     if (doneTimer) clearTimeout(doneTimer);
@@ -247,7 +276,7 @@ export function createWorkIsland(opts = {}) {
       const human = humanDuration(sec, L() === ZH);
       const text = L().took(human) + (reason ? ` · ${reason}` : "");
       shown = true;
-      emit("DONE", L().done, text, 0, "done");
+      emit("DONE", L().done, text, 0, "done", rich ? { sessionId } : undefined);
       if (idleTimer) clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
         idleTimer = null;
@@ -262,14 +291,21 @@ export function createWorkIsland(opts = {}) {
       case "run_start":
         start(ev);
         break;
+      case "session_created":
+        if (rich && active?.id === ev.runId && active.sessionId !== ev.sessionId) {
+          active.sessionId = ev.sessionId;
+          update(L().start);
+        }
+        break;
       case "state":
-        if (ev.run) start(ev.run);
+        if (ev.run) start((rich && liveRuns().find(r => r.id === active?.id)) || ev.run);
         else if (active && !liveRuns().length) finish("");
         break;
       case "run_busy":
         update(L().resume, L().working, "working");
         break;
       case "phase":
+        if (rich && ev.runId && active?.id !== ev.runId) break;
         if (ev.phase === "wait") update(L().wait, L().titleWait, "thinking");
         else if (ev.phase === "think") update(L().think, L().titleThink, "thinking");
         else if (ev.phase === "text") update(L().text, L().titleText, "writing");
@@ -277,16 +313,21 @@ export function createWorkIsland(opts = {}) {
         else if (ev.phase === "retry") update(L().wait, L().titleRetry, "thinking");
         break;
       case "tool_use": {
+        if (rich && ev.runId && active?.id !== ev.runId) break;
         const todo = todoProgress(ev, L());
         if (todo) update(todo.text, todo.title, todo.state, todo.extra);
         else update(L().tool(L().toolName(ev.name)), L().toolTitle(ev.name), toolState(ev.name));
         break;
       }
       case "tasks": {
+        if (rich && ev.sessionId && active?.sessionId !== ev.sessionId) break;
         // TaskCreate / TaskUpdate 的清单（goal.mjs 的 tasksCheck）：只数数字，不转发 subject / active 原文。
         // tasks 为 null 表示清单被清空，这时什么也不做，等下一个事件刷新。
         const list = Array.isArray(ev.tasks) ? ev.tasks : null;
-        if (!list || !list.length) break;
+        if (!list?.length) {
+          if (rich && active?.progress) update(L().resume, L().working, "working", { todoTotal: 0 });
+          break;
+        }
         const total = list.length;
         const done = list.filter((t) => t && t.status === "completed").length;
         update(L().todo(done, total), L().todoTitle, "planning",
@@ -294,7 +335,8 @@ export function createWorkIsland(opts = {}) {
         break;
       }
       case "perm_request":
-        update(L().perm(L().toolName(ev.tool || ev.name)), L().waiting, "waiting");
+        update(L().perm(rich ? "" : L().toolName(ev.tool || ev.name)), L().waiting, "waiting",
+          rich ? { confirmation: confirmation(ev.tool || ev.name), sessionId: ev.sessionId } : undefined);
         break;
       case "perm_resolved":
         update(L().resume, L().working, "working");
@@ -315,7 +357,13 @@ export function createWorkIsland(opts = {}) {
         break;
       case "run_end":
         if (!active) break;
-        if (liveRuns().length) break;   // 还有别的轮次在跑
+        if (liveRuns().length) {
+          if (rich) {
+            const next = liveRuns().find(r => r.id === active.id) || liveRuns()[0];
+            start(next, L().resume);
+          }
+          break;
+        }
         finish(ev.aborted ? L().aborted : "");
         break;
     }

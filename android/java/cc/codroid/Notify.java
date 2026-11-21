@@ -1,6 +1,11 @@
 package cc.codroid;
 
+import android.app.KeyguardManager;
 import android.app.Notification;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import android.os.PowerManager;
+import android.service.notification.StatusBarNotification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -25,7 +30,7 @@ import org.json.JSONObject;
  *   等权限确认 / 计划批准 / 选择题 → 单独一个渠道的通知，带命令摘要（不弹横幅）。
  * 通知里只放「拒绝」和「打开查看」：通知只能显示截断的摘要，看不全的命令不该在这里放行。
  *
- * 数据来源：订阅网关的事件流（/api/events），网关协议不动。每条 state 事件都带当前全部待确认项，
+ * 数据来源：订阅网关的事件流（/api/events）。每条 state 事件都带当前全部待确认项，
  * 和已发出的通知比对 —— 新的发、答掉的撤，断线重连或重放都不会重复。
  * 跑在 GatewayService 里：界面被关了、只剩前台服务时也能发。
  */
@@ -47,6 +52,22 @@ final class Notify {
     private final Context ctx;
     private final NotificationManager nm;
     private final SharedPreferences sp;
+    private final WorkIslandNotifications workIsland;
+    private boolean islandSynced;
+    private boolean islandMode;
+    private JSONObject liveReply;
+    private volatile boolean screenObserver;
+    private static final String REPLY_MARKER = "cccodroid.workIslandReply";
+    private final BroadcastReceiver onScreenState = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent intent) {
+            synchronized (Notify.this) {
+                if (!screenObserver) return;
+                boolean screenOff = Intent.ACTION_SCREEN_OFF.equals(intent.getAction());
+                if (screenOff) redactReplies();
+                workIsland.refreshIcons(!screenOff && unlocked());
+            }
+        }
+    };
     private Thread loop;
     private volatile boolean stopping;
 
@@ -66,6 +87,7 @@ final class Notify {
     private Notify(Context c) {
         ctx = c;
         nm = c.getSystemService(NotificationManager.class);
+        workIsland = WorkIslandNotifications.supported() ? new WorkIslandNotifications(ctx, nm, this::unlocked) : null;
         sp = c.getSharedPreferences("notify", Context.MODE_PRIVATE);
         NotificationChannel done = new NotificationChannel(CH_DONE, Tr.t("任务完成"), NotificationManager.IMPORTANCE_DEFAULT);
         done.setDescription(Tr.t("应用在后台时，一轮任务跑完提醒一下"));
@@ -87,18 +109,31 @@ final class Notify {
             .put("chAsk", a == null || a.getImportance() != NotificationManager.IMPORTANCE_NONE);
     }
 
-    void set(JSONObject req) {
+    synchronized void set(JSONObject req) {
         SharedPreferences.Editor e = sp.edit();
         if (req.has("done")) e.putBoolean("done", req.optBoolean("done", true));
         if (req.has("ask")) e.putBoolean("ask", req.optBoolean("ask", true));
         e.apply();
         if (!askOn()) clearAsks();
+        if (!doneOn()) redactReplies();
     }
 
     // 服务快速停了又起（审查 #105 06-006）：以前先看旧线程还活着就返回、stopping 却没复位，旧线程随后退出，就再没人订阅了。
     // 现在先复位让旧线程接着干；它恰好已经走出循环的，退出时自己看到没在停，再起一条
     synchronized void start() {
         stopping = false;
+        if (workIsland != null && !screenObserver) {
+            // Remove stale private notifications left by a previous process.
+            redactReplies();
+            workIsland.cancel();
+            try {
+                IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
+                filter.addAction(Intent.ACTION_SCREEN_ON);
+                filter.addAction(Intent.ACTION_USER_PRESENT);
+                ctx.registerReceiver(onScreenState, filter, Context.RECEIVER_NOT_EXPORTED);
+                screenObserver = true;
+            } catch (RuntimeException ignored) { /* no observer: no snippets or avatars */ }
+        }
         if (loop != null && loop.isAlive()) return;
         spawn();
     }
@@ -108,7 +143,23 @@ final class Notify {
         loop.start();
     }
 
-    synchronized void stop() { stopping = true; }
+    synchronized void stop() {
+        stopping = true;
+        resetIsland();
+        if (screenObserver) {
+            ctx.unregisterReceiver(onScreenState);
+            screenObserver = false;
+        }
+    }
+
+    private void resetIsland() {
+        islandSynced = false;
+        if (workIsland != null) {
+            liveReply = null;
+            redactReplies();
+            workIsland.cancel();
+        }
+    }
 
     /** 界面回到前台：确认通知都撤掉（卡片就在眼前） */
     void onForeground() { clearAsks(); }
@@ -132,7 +183,7 @@ final class Notify {
         while (!stopping) {
             HttpURLConnection c = null;
             try {
-                c = Env.gateway("/api/events");
+                c = Env.gateway(workIsland == null ? "/api/events" : "/api/events?notify=1");
                 c.setConnectTimeout(3000);
                 c.setReadTimeout(45_000);            // 网关每 15 秒一个心跳，45 秒没动静就当断了
                 if (lastId != null) c.setRequestProperty("Last-Event-ID", lastId);
@@ -153,6 +204,7 @@ final class Notify {
                 // 网关还没起来 / 正在重启：安静地等，别刷日志
             } finally {
                 if (c != null) c.disconnect();
+                synchronized (this) { resetIsland(); }
             }
             sleep(2000);
         }
@@ -164,6 +216,23 @@ final class Notify {
             JSONObject ev = new JSONObject(json);
             String type = ev.optString("type");
             synchronized (this) {
+                if (workIsland != null && !stopping) {
+                    if ("sync".equals(type)) {
+                        islandSynced = true;
+                        setIslandMode(ev.optBoolean("workIslandMode"));
+                        renderIsland(ev.optJSONObject("workIsland"));
+                    } else if (islandSynced && "work_island".equals(type)) {
+                        renderIsland(ev.optJSONObject("frame"));
+                    } else if (islandSynced && "work_island_mode".equals(type)) {
+                        setIslandMode(ev.optBoolean("enabled"));
+                    } else if (islandSynced && islandMode && "work_island_reply".equals(type)) {
+                        liveReply = ev;
+                    } else if ("work_island_reply_clear".equals(type)) {
+                        redactReplies();
+                    } else if (islandSynced && "work_island_preview".equals(type)) {
+                        workIsland.preview(openIntent("", 82));
+                    }
+                }
                 if ("hello".equals(type) || "state".equals(type)) {
                     if ("hello".equals(type)) {
                         // 订阅期间网关重启过（启动号变了）：旧轮次等不到终止事件，文本回收（BUG-A05）
@@ -182,6 +251,53 @@ final class Notify {
         } catch (Exception e) {
             Log.w(TAG, "通知：事件解析失败", e);
         }
+    }
+
+    private void renderIsland(JSONObject frame) {
+        workIsland.render(frame, openIntent(frame == null ? "" : validatedSid(frame), 81));
+    }
+
+    private void setIslandMode(boolean on) {
+        if (islandMode != on) clearAsks();
+        islandMode = on;
+        if (!on) redactReplies();
+        syncAsks();
+    }
+
+    private boolean unlocked() {
+        KeyguardManager keyguard = ctx.getSystemService(KeyguardManager.class);
+        PowerManager power = ctx.getSystemService(PowerManager.class);
+        return screenObserver && power != null && power.isInteractive() && keyguard != null
+            && !keyguard.isKeyguardLocked() && !keyguard.isDeviceLocked();
+    }
+
+    private void redactReplies() {
+        liveReply = null;
+        // Do not recreate dismissed notifications. Only replace currently posted snippets in place.
+        for (StatusBarNotification entry : nm.getActiveNotifications()) {
+            if (!TAG_DONE.equals(entry.getTag())) continue;
+            Notification current = entry.getNotification();
+            if (current.extras.getBoolean(REPLY_MARKER)) {
+                nm.notify(TAG_DONE, entry.getId(), islandDone(false, current.contentIntent, ""));
+            }
+        }
+    }
+
+    private Notification islandDone(boolean failed, PendingIntent open, String reply) {
+        String title = failed ? Tr.t("出错了") : Tr.t("已完成");
+        String status = failed ? title : Tr.t("这一轮跑完了");
+        Notification.Builder b = new Notification.Builder(ctx, CH_DONE)
+            .setSmallIcon(WorkIslandNotifications.icon(ctx)).setContentTitle(title)
+            .setContentText(reply.isEmpty() ? status : reply)
+            .setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(true);
+        if (!reply.isEmpty()) {
+            android.os.Bundle marker = new android.os.Bundle();
+            marker.putBoolean(REPLY_MARKER, true);
+            b.addExtras(marker).setStyle(new Notification.BigTextStyle().bigText(reply))
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setPublicVersion(islandDone(false, open, ""));
+        }
+        return b.build();
     }
 
     /** 并行多会话：state 里的 runs 是所有正在跑的轮次（旧网关只有 run） */
@@ -218,6 +334,8 @@ final class Notify {
     private void onRunEnd(JSONObject ev) {
         String runId = ev.optString("runId");
         String text = runText.remove(runId);
+        JSONObject reply = liveReply;
+        liveReply = null;
         // 只撤这一轮的确认项：别的会话可能还在等（紧跟着的 state 事件会再对齐一次）
         for (java.util.Iterator<JSONObject> it = pending.values().iterator(); it.hasNext(); )
             if (runId.equals(it.next().optString("runId"))) it.remove();
@@ -229,7 +347,20 @@ final class Notify {
         if (ev.optBoolean("aborted") || !ev.optString("auto").isEmpty() || MainActivity.visible || !doneOn()) return;
         // 网关的 run_end 用 failed / isError 表示没成（审查 #105 06-004：以前只看 error 字段，网关从来不带，一律报「已完成」）
         boolean failed = ev.optBoolean("failed") || ev.optBoolean("isError") || ev.has("error") && !ev.isNull("error");
-        String sid = sidOf(ev);
+        String sid = validatedSid(ev);
+        if (workIsland != null && (islandMode || !islandSynced)) {
+            String snippet = "";
+            long age = reply == null ? Long.MAX_VALUE : System.currentTimeMillis() - reply.optLong("at");
+            if (!failed && islandSynced && !sid.isEmpty() && reply != null && age >= 0 && age < 10_000
+                && runId.equals(reply.optString("runId")) && sid.equals(validatedSid(reply)) && unlocked()) {
+                snippet = clip(reply.optString("text"), 160);
+            }
+            int id = sid.isEmpty() ? ID_DONE : sid.hashCode();
+            PendingIntent open = openIntent(sid, 0);
+            nm.notify(TAG_DONE, id, islandDone(failed, open, snippet));
+            if (!snippet.isEmpty() && !unlocked()) redactReplies();
+            return;
+        }
         // 每个会话各留最新一条：并行时几个会话先后跑完，不互相顶掉
         nm.notify(TAG_DONE, sid.isEmpty() ? ID_DONE : sid.hashCode(), new Notification.Builder(ctx, CH_DONE)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
@@ -256,6 +387,19 @@ final class Notify {
     }
 
     private Notification askNote(JSONObject p) {
+        if (workIsland != null && (islandMode || !islandSynced)) {
+            String title;
+            switch (p.optString("tool")) {
+                case "Bash": case "PowerShell": title = Tr.t("命令待确认 · 点此打开会话"); break;
+                case "ExitPlanMode": title = Tr.t("计划待批准 · 点此打开会话"); break;
+                case "AskUserQuestion": title = Tr.t("提问待回答 · 点此打开会话"); break;
+                default: title = Tr.t("操作待确认 · 点此打开会话");
+            }
+            return new Notification.Builder(ctx, CH_ASK)
+                .setSmallIcon(WorkIslandNotifications.icon(ctx)).setContentTitle(Tr.t("待确认"))
+                .setContentText(title).setContentIntent(openIntent(validatedSid(p), 1))
+                .setAutoCancel(true).build();
+        }
         String tool = p.optString("tool");
         JSONObject in = p.optJSONObject("input");
         if (in == null) in = new JSONObject();
@@ -322,6 +466,11 @@ final class Notify {
 
     /** 会话号：JSON 里是 null 时 optString 会给出字符串 "null"，要单独判 */
     private static String sidOf(JSONObject o) { return o.isNull("sessionId") ? "" : o.optString("sessionId", ""); }
+
+    private static String validatedSid(JSONObject o) {
+        String sid = sidOf(o);
+        return sid.matches("[A-Za-z0-9_-]{1,80}") ? sid : "";
+    }
 
     private PendingIntent openIntent(String sessionId, int req) {
         Intent i = MainActivity.internal(ctx, ACTION_OPEN)

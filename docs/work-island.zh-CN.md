@@ -19,6 +19,12 @@
 
 ---
 
+## 小米原生超级岛（联调）
+
+支持的 HyperOS 设备由 cccodroid 本体发送，不用安装伴侣应用或接入 MiPush。在设置 → **工作岛（实时状态）** 点击「试播 15 秒」。原生模式下，头像用于胶囊，展开卡右侧是工作状态图；有真实清单时才显示进度条，锁屏仅显示状态。
+
+**联调设备需加入小米设备白名单；正式版需获小米场景权限。** 设备可联调不等于安装包已获授权。开发构建可通过 `XIAOMI_ISLAND_APP_ID`、`XIAOMI_ISLAND_BUSINESS`、`XIAOMI_ISLAND_DEBUG`（`true` 或 `false`）三项注入小米配置，必须对应发通知的包名、签名和场景。未配置或系统不放行时使用 Android 实时通知。见[小米接入流程](https://dev.mi.com/xiaomihyperos/documentation/detail?pId=2132)。
+
 ## 组成
 
 | 部分 | 位置 | 作用 |

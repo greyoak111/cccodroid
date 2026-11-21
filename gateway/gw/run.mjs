@@ -39,6 +39,8 @@ import { checkAppFiles } from "./appfiles.mjs";
 import { pathBlocked } from "./files.mjs";
 import { holdsPrivate } from "./pathguard.mjs";
 import { guarded } from "./crashguard.mjs";
+import { workIslandStatus } from "./work-island.mjs";
+import { trackWorkIslandReply } from "./work-island-reply.mjs";
 // 权限确认等多久没人答就按拒绝收掉（0.6.9 审计 P1-4）。测试可用 CCAPP_PERM_WAIT_MS 改短
 const PERM_WAIT_MS = Number(process.env.CCAPP_PERM_WAIT_MS) > 0 ? Number(process.env.CCAPP_PERM_WAIT_MS) : 30 * 60e3;
 import { UC_SEALED, ucAfterRun, ucBeforeRun, ucKeep, ucPending, ucPutNote, ucRevert, ucSetRevertNote, ucTakeNote } from "./userconf.mjs";
@@ -806,6 +808,12 @@ export async function startRun(item) {
   // lastResult 只证明「它那一轮」答完了：后台回报 / 插话会在同一进程里再起一轮，
   // 那一轮还没出 result 就异常退出时，不能拿旧的 result 报成功（#96 02-002）。resultStale 记「之后又动起来了」
   let buf = "", stderr = "", lastResult = null, resultStale = false;
+  const replyEnabled = () => {
+    if (SETTINGS.workIsland !== true || SETTINGS.workIslandReplyPreview !== true) return false;
+    const { native, started } = workIslandStatus();
+    return native && started;
+  };
+  const replyPreview = !isCmd && !run.auto && !run.sched && replyEnabled() ? trackWorkIslandReply() : null;
   // 开了 --include-partial-messages，正文已经逐字发过，assistant 事件别重复整段
   const flags = { gotDelta: false, isCmd };
   // 新会话的记录文件是 claude 在 init 之后才建的：等它在磁盘上真正出现再广播 session_created。
@@ -886,6 +894,8 @@ export async function startRun(item) {
       else { run.slashMark.bg = false; run.slashMark.yielded = true; }
     }
     run.lastSlash = !!slashDone;
+    if (!slashDone) replyPreview?.result(r, run.sessionId);
+    else replyPreview?.feed({ type: "user" }, run.sessionId);
     run.meter.result(r, !isCmd && !slashDone);   // 斜杠命令不算一轮对话，但 /compact 这类真花了的 token 照记
     // 定时任务的单次花费上限：后台回报 / 插话会在同一进程里接着花，每出一个 result 就核一次，超了当场停（#98 03-010）。
     // 一轮之内 claude 不报花费，这一轮本身超出的部分只能在它答完时发现
@@ -923,7 +933,8 @@ export async function startRun(item) {
     if (it) { emit({ type: "inject", text: it.message, cid: it.cid, itemId: it.id }); saveRunMark(); }
   };
   const feed = (line) => {
-    let ev; try { ev = JSON.parse(line); } catch { return; }
+    let ev; try { ev = JSON.parse(line); } catch { replyPreview?.feed({ type: "error" }, run.sessionId); return; }
+    replyPreview?.feed(ev, run.sessionId);
     // 上一条事件之后文件可能已经建好：control_request 这类会提前 return 的分支也要先核一次
     noteSessionFile(ev.type);
     if (ev.type === "control_request") {
@@ -1056,6 +1067,7 @@ export async function startRun(item) {
     try { sealSession(run.sessionId, sfile(), { clear: !!integNote && !run.aborted && !!lastResult && !lastResult.is_error, base: run.sealBase?.sid === run.sessionId && run.sealBase.hash ? run.sealBase : null }); } catch (e) { log(`${runTag(run)} [封签] ${e.message}`); }
     run.inputOpen = false;
     run.perms.clear();                // 卡片随 run_end 一起作废（前端按 run_end 收起）
+    const incompleteReply = run.pendingInject.length || run.slashFlight.length || run.bgTasks;
     requeuePending();
     const ms = Date.now() - t0;
     // 定时任务已经花掉的（崩了、没出 result 也一样）：按 0 记会让它当作没花钱再重试（DeepSeek 复核 #1）
@@ -1084,6 +1096,7 @@ export async function startRun(item) {
       if (!isCmd && !P.local && !lastResult.is_error) settlePathNote(run.sessionId, run.paths);
       // 新会话第一轮答完就在后台起个标题，不等第二条消息（#60，见 autotitle.mjs）；定时任务的会话不起
       if (!isCmd && !P.local && !run.sched && !lastResult.is_error) autoTitle(run.sessionId, P, model);
+      const replyText = code === 0 && !signal && !incompleteReply && !run.lastSlash && !localCmd && replyEnabled() ? replyPreview?.text : null;
       return endRun(run, {
         durationMs: ms,
         // claude 按内置的 Anthropic 价目表算账；第三方厂商的价格差得远，报出来能高一二十倍，干脆不报
@@ -1102,7 +1115,7 @@ export async function startRun(item) {
         localCommand: localCmd,
         resultText: localCmd ? String(lastResult.result || "") : "",
         ...(run.sched ? { finalText: String(lastResult.result || "").slice(0, 4000), costRaw: P.nativeModels ? Number(lastResult.total_cost_usd || 0) : 0 } : {}),
-      });
+      }, replyText);
     }
     const hint = code !== 0 || signal ? exitHint(code, signal) : tz("生成结束但没有返回结果");
     log(`${runTag(run)} ✖ ${hint}${stderr ? " :: " + stderr.trim().slice(-300) : ""}`);

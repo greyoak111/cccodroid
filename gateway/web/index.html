@@ -608,8 +608,12 @@
             <div class="sc"><input type="checkbox" class="sw" id="set-idlecompact"></div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>工作岛（ColorOS 灵动岛）</b><p data-i18n>把 Claude 的工作状态显示在 ColorOS 16 的流体云 / 灵动岛上</p><p class="clamp" data-i18n>需要另外安装「工作岛」应用。开启后，正在干活、等待确认、任务完成会出现在岛上的胶囊里；完成后 8 秒自动收起。目前仅在 ColorOS 16 / Android 16 上测试过。</p><div class="tiny warn hidden" id="wi-state"><span id="wi-state-txt"></span> <button class="btn sm ghost" id="wi-retry" data-i18n>重试</button></div></div>
+            <div class="sl"><b data-i18n>工作岛（实时状态）</b><p data-i18n>通过伴侣应用显示 Claude 的工作状态</p><p class="clamp" data-i18n>支持的小米设备由 cccodroid 直接发送实时通知；ColorOS 仍使用原工作岛。</p><p class="tiny hidden" id="wi-xiaomi-hint" data-i18n>小米原生超级岛：联调设备需加入小米设备白名单；正式版需获小米场景权限。未启用原生模式时使用 Android 实时通知。</p><button class="btn sm ghost hidden" id="wi-preview" data-i18n>试播 15 秒</button><div class="tiny warn hidden" id="wi-state"><span id="wi-state-txt"></span> <button class="btn sm ghost" id="wi-retry" data-i18n>重试</button></div></div>
             <div class="sc"><input type="checkbox" class="sw" id="set-workisland"></div>
+          </div>
+          <div class="srow hidden" id="wi-reply-settings">
+            <div class="sl"><b id="wi-reply-label" data-i18n>工作岛回复预览</b><p data-i18n>开启后，符合条件的回复正文摘要可能显示在系统通知中。仅在支持原生工作岛且工作岛已开启时生效。</p></div>
+            <div class="sc"><input type="checkbox" class="sw" id="set-wi-reply" aria-labelledby="wi-reply-label"></div>
           </div>
           <div class="sblock" id="dir-field">
             <div class="srow head">

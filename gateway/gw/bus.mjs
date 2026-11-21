@@ -31,6 +31,34 @@ export function onPublish(fn) {
   return () => SUBSCRIBERS.delete(fn);
 }
 
+// The native notification reader consumes the current frame at sync, then live updates.
+let workIsland = null;
+let workIslandMode = false;
+export function publishWorkIslandMode(enabled) {
+  workIslandMode = enabled;
+  broadcastWorkIsland({ type: "work_island_mode", enabled });
+}
+export function publishWorkIsland(frame) {
+  workIsland = frame;
+  broadcastWorkIsland({ type: "work_island", frame });
+}
+export function previewWorkIsland() {
+  broadcastWorkIsland({ type: "work_island_preview" });
+}
+const NATIVE_NOTIFIERS = new WeakSet();
+export function notifyWorkIslandReply(runId, sessionId, text, at) {
+  const line = Buffer.from(`data: ${JSON.stringify({ type: "work_island_reply", runId, sessionId, text, at })}\n\n`);
+  for (const c of BUS.clients) if (NATIVE_NOTIFIERS.has(c) && !c.__q) busWrite(c, line);
+}
+export function revokeWorkIslandReply() {
+  const line = Buffer.from('data: {"type":"work_island_reply_clear"}\n\n');
+  for (const c of BUS.clients) if (NATIVE_NOTIFIERS.has(c)) busWrite(c, line);
+}
+function broadcastWorkIsland(ev) {
+  const line = Buffer.from(`data: ${JSON.stringify(ev)}\n\n`);
+  for (const c of BUS.clients) busWrite(c, line);
+}
+
 export function publish(ev) {
   const seq = ++BUS.seq;
   // 环里直接存字节：上限按字节算（以前按 UTF-16 字符数，中文一字三字节，32MB 的线实际放进去近百 MB，0.6.9 审计 200-H-3），推给各连接也不用每次再转
@@ -79,7 +107,7 @@ export async function routeBus(req, res, u, p) {
     // 要补发的先按条取成快照（这一刻的样子；之后的增量走下面的队列），再按对端的接收速度逐条写：
     // 以前拼成一整个字符串一次写出，整轮重放几十 MB 时就是双份内存，对端不收还全堆在缓冲里（审查 v0513b 低-4）
     const head = "retry: 1500\n\n" + `data: ${JSON.stringify({ type: "hello", boot: BOOT, resume, uiTag: uiTag(), ...snapshot() })}\n\n`;
-    const tail = `id: ${BOOT}.${BUS.seq}\ndata: {"type":"sync"}\n\n`;
+    const tail = `id: ${BOOT}.${BUS.seq}\ndata: ${JSON.stringify({ type: "sync", workIsland, workIslandMode })}\n\n`;
     let lines;
     if (resume) {
       lines = [head];
@@ -110,6 +138,7 @@ export async function routeBus(req, res, u, p) {
     if (BUS.clients.size >= CLIENTS_MAX) { const old = BUS.clients.values().next().value; BUS.clients.delete(old); try { old.destroy(); } catch {} }
     res.__q = [];                     // 补发期间新来的事件先排在这里，补完接着发，顺序不乱
     BUS.clients.add(res);
+    if (u.searchParams.get("notify") === "1" && req.ccBodySha) NATIVE_NOTIFIERS.add(res);
     (async () => {
       for (const l of lines) {
         if (res.destroyed) return;
