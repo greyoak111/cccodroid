@@ -1431,11 +1431,13 @@ public class MainActivity extends Activity {
     }
 
     private boolean ping() {
+        HttpURLConnection c = null;
         try {
-            HttpURLConnection c = Env.gateway("/api/status");
+            c = Env.gateway("/api/status");
             c.setConnectTimeout(800); c.setReadTimeout(1500);
             return c.getResponseCode() == 200;
         } catch (Exception e) { return false; }
+        finally { if (c != null) c.disconnect(); }
     }
 
     // ── 系统栏：铺满窗口，顶部占位交给页面自己避让 ─────────────────────

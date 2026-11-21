@@ -50,6 +50,13 @@ final class Env {
         catch (Exception e) { return ""; }
     }
 
+    /** 连本机回环网关一律直连（Proxy.NO_PROXY）：系统默认 nonProxyHosts 通常只豁免 127.0.0.1 / localhost，
+     *  不含 127.0.0.2；设备配过 HTTP 代理或断网残留失效代理时，发往 127.0.0.2 的 /__proof 会被送去代理反复超时，
+     *  把启动页拖成几分钟「等待网关…」（known-issues #8） */
+    private static java.net.HttpURLConnection openLoopback(String url) throws java.io.IOException {
+        return (java.net.HttpURLConnection) new java.net.URL(url).openConnection(java.net.Proxy.NO_PROXY);
+    }
+
     /** 连本机网关：先核身份，再带上令牌头。网关没起来、没生成令牌、或端口上不是它时抛 IOException，调用方照"没就绪"处理即可 */
     static java.net.HttpURLConnection gateway(String path) throws java.io.IOException { return gateway("GET", path, null); }
 
@@ -57,7 +64,7 @@ final class Env {
     static java.net.HttpURLConnection gateway(String method, String path, byte[] body) throws java.io.IOException {
         if (!proveGateway()) throw new java.io.IOException(HOST + ":" + PORT + " 上不是 cccodroid 的网关（还没起来，或被别的应用占了）");
         String b = boot;
-        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL("http://" + HOST + ":" + PORT + path).openConnection();
+        java.net.HttpURLConnection c = openLoopback("http://" + HOST + ":" + PORT + path);
         c.setInstanceFollowRedirects(false);     // 自定义头会跟着重定向转发出去（审查 10-29 第六份 低5）
         c.setRequestMethod(method);
         // 不发令牌原文，按次签名（GHSA-hwmm 附录 B）：核身份到真正发请求之间网关要是换了人，对方拿到的签名只对这一个请求有效、只能用一次。
@@ -105,7 +112,7 @@ final class Env {
             byte[] nb = new byte[16];
             new java.security.SecureRandom().nextBytes(nb);
             String n = hex(nb);
-            java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL("http://" + HOST + ":" + PORT + "/__proof?n=" + n).openConnection();
+            java.net.HttpURLConnection c = openLoopback("http://" + HOST + ":" + PORT + "/__proof?n=" + n);
             c.setConnectTimeout(800); c.setReadTimeout(1500); c.setInstanceFollowRedirects(false); c.setUseCaches(false);
             try {
                 if (c.getResponseCode() != 200) return false;
@@ -140,7 +147,7 @@ final class Env {
             byte[] nb = new byte[16];
             new java.security.SecureRandom().nextBytes(nb);
             String n = hex(nb);
-            java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL("http://" + HOST + ":" + PORT + pq).openConnection();
+            java.net.HttpURLConnection c = openLoopback("http://" + HOST + ":" + PORT + pq);
             c.setConnectTimeout(2000); c.setReadTimeout(15000); c.setInstanceFollowRedirects(false); c.setUseCaches(false);
             c.setRequestProperty("X-CC-Nonce", n);
             c.setRequestProperty("Accept-Encoding", "identity");

@@ -21,23 +21,50 @@ import java.security.MessageDigest;
  * 系统会弹安装确认（targetSdk 28 无法免确认）；第一次还会要求在设置里允许"安装未知应用"。
  */
 final class Apk {
-    static final int SIG_FLAGS = Build.VERSION.SDK_INT >= 28 ? PackageManager.GET_SIGNING_CERTIFICATES : PackageManager.GET_SIGNATURES;
+    // 部分 Android 13–16 厂商 ROM 用 getPackageArchiveInfo 读仅带 v1+v2 签名的未安装 APK 时，
+    // 只传 GET_SIGNING_CERTIFICATES 会让 signingInfo 或 getSigningCertificateHistory() 为空；
+    // 同时带上 GET_SIGNATURES 并在下面逐级回退，避免误报「读不到签名」（known-issues #10）
+    @SuppressWarnings("deprecation")
+    static final int SIG_FLAGS = Build.VERSION.SDK_INT >= 28
+        ? (PackageManager.GET_SIGNING_CERTIFICATES | PackageManager.GET_SIGNATURES)
+        : PackageManager.GET_SIGNATURES;
 
     static PackageInfo archiveInfo(Context c, File apk) {
         return c.getPackageManager().getPackageArchiveInfo(apk.getPath(), SIG_FLAGS);
     }
 
+    /** 按优先级挑出当前生效的签名证书字节（纯逻辑，便于 JVM 回归）：
+     *  多签取 contents[0]；单签优先取 history 最后一张（签名轮换时当前证书在末尾），
+     *  history 为空时回退 contents[0]（无 v3 lineage 的 v1+v2 包在部分 ROM 上只填这里），
+     *  仍为空则回退旧接口 legacy[0]。 */
+    static byte[] pickSigner(boolean multi, byte[][] history, byte[][] contents, byte[][] legacy) {
+        if (multi) {
+            if (contents != null && contents.length > 0) return contents[0];
+        } else {
+            if (history != null && history.length > 0) return history[history.length - 1];
+            if (contents != null && contents.length > 0) return contents[0];
+        }
+        if (legacy != null && legacy.length > 0) return legacy[0];
+        return null;
+    }
+
+    private static byte[][] toBytes(Signature[] arr) {
+        if (arr == null || arr.length == 0) return null;
+        byte[][] out = new byte[arr.length][];
+        for (int i = 0; i < arr.length; i++) out[i] = arr[i] == null ? null : arr[i].toByteArray();
+        return out;
+    }
+
     /** 当前签名证书的 sha256（小写十六进制） */
     @SuppressWarnings("deprecation")
     static String signer(PackageInfo p) throws Exception {
-        Signature[] s = Build.VERSION.SDK_INT >= 28 && p.signingInfo != null
-            ? (p.signingInfo.hasMultipleSigners() ? p.signingInfo.getApkContentsSigners() : p.signingInfo.getSigningCertificateHistory())
-            : p.signatures;
-        if (s == null || s.length == 0) throw new IOException(Tr.t("读不到签名"));
+        boolean multi = Build.VERSION.SDK_INT >= 28 && p.signingInfo != null && p.signingInfo.hasMultipleSigners();
+        byte[][] history = Build.VERSION.SDK_INT >= 28 && p.signingInfo != null ? toBytes(p.signingInfo.getSigningCertificateHistory()) : null;
+        byte[][] contents = Build.VERSION.SDK_INT >= 28 && p.signingInfo != null ? toBytes(p.signingInfo.getApkContentsSigners()) : null;
+        byte[] cur = pickSigner(multi, history, contents, toBytes(p.signatures));
+        if (cur == null || cur.length == 0) throw new IOException(Tr.t("读不到签名"));
         StringBuilder hex = new StringBuilder();
-        // 签名轮换过的话 history 里有多张，最后一张是当前的；只比当前那张
-        Signature cur = Build.VERSION.SDK_INT >= 28 && p.signingInfo != null && !p.signingInfo.hasMultipleSigners() ? s[s.length - 1] : s[0];
-        byte[] d = MessageDigest.getInstance("SHA-256").digest(cur.toByteArray());
+        byte[] d = MessageDigest.getInstance("SHA-256").digest(cur);
         for (byte b : d) hex.append(String.format("%02x", b));
         return hex.toString();
     }

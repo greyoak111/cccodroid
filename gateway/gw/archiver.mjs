@@ -325,7 +325,13 @@ function mergeInto(stage, dest) {
 export function uniquePath(p) {
   if (!fs.existsSync(p)) return p;
   const dir = path.dirname(p), base = path.basename(p);
-  const m = /^(.*?)((?:\.tar)?\.[^.]{1,8})?$/.exec(base), stem = m[1] || base, ext = m[2] || "";
+  // 纯点文件（如 .gitignore）没有扩展名：直接按整名加序号，不要切成 ".gitignore (2).gitignore"
+  let stem = base, ext = "";
+  if (!(base.startsWith(".") && base.indexOf(".", 1) < 0)) {
+    const m = /^(.+?)((?:\.tar)?\.[^.]{1,8})?$/.exec(base);
+    stem = (m && m[1]) || base;
+    ext = (m && m[2]) || "";
+  }
   for (let i = 2; ; i++) { const q = path.join(dir, `${stem} (${i})${ext}`); if (!fs.existsSync(q)) return q; }
 }
 
@@ -410,8 +416,13 @@ export async function routeArc(req, res, u, p) {
     const d = safeWritePath(String(b.dest || ""));
     if (d.error) return sendJson(res, d.status || 400, { error: d.error });
     if (!d.fresh) return sendJson(res, 409, { error: "exists" });
-    // 压缩包不能放进正要压缩的文件夹里（会把自己也打进去）
-    if (items.some((it) => d.file === it || d.file.startsWith(it + path.sep))) return sendJson(res, 400, { error: "dest inside source" });
+    // 压缩包不能放进正要压缩的文件夹里（会把自己也打进去）：d.file 已 realpathSync，源路径也先规整，
+    // 否则安卓上 /sdcard/dir 与 /storage/emulated/0/dir/out.zip 别名不一致会绕过检查
+    const dLow = d.file.toLowerCase();
+    const realOf = (x) => { try { return fs.realpathSync(x); } catch { return x; } };
+    if (items.some((it) => { const rLow = realOf(it).toLowerCase(); return dLow === rLow || dLow.startsWith(rLow + path.sep); })) {
+      return sendJson(res, 400, { error: "dest inside source" });
+    }
     if (!sevenZ()) return sendJson(res, 501, { error: "7-Zip not available", code: "NO7Z" });
     return sendJson(res, 200, jobView(startCreate({ items, dest: d.file, format: b.format, level: b.level, password: b.password ? String(b.password) : "", encryptNames: !!b.encryptNames })));
   }

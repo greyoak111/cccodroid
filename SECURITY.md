@@ -28,7 +28,7 @@ Only the latest release is supported. Fixes are not backported.
 
 ## What counts
 
-cccodroid runs Claude Code on the phone and serves its UI from a local gateway on `127.0.0.1`. Other apps on the same phone can connect to that port, so the gateway requires a per-install token. Things we especially want to hear about:
+cccodroid runs Claude Code on the phone and serves its UI from a local gateway on `127.0.0.2` (with `127.0.0.1` kept for local tools). Other apps on the same phone can connect to that port, so the gateway requires a per-install token. Things we especially want to hear about:
 
 - getting past the token, Host or Origin checks, or reaching the gateway from a web page or another app;
 - code in an HTML preview, a downloaded file or a web page reaching the gateway or the app's native bridge;
@@ -123,7 +123,7 @@ Testing tip: use a spare install or a separate test gateway, never the data you 
 
 ## 哪些算安全问题
 
-cccodroid 在手机上跑 Claude Code，界面由一个监听 `127.0.0.1` 的本机网关提供。同一台手机上的其他应用也能连上这个端口，所以网关要求每次安装各自生成的令牌。特别想知道的是：
+cccodroid 在手机上跑 Claude Code，界面由一个监听 `127.0.0.2`（本机工具走 `127.0.0.1`）的本机网关提供。同一台手机上的其他应用也能连上这个端口，所以网关要求每次安装各自生成的令牌。特别想知道的是：
 
 - 绕过令牌、Host、Origin 校验，或者从网页、其他应用碰到网关；
 - HTML 预览、下载来的文件或网页里的代码，碰到网关或应用的原生桥；

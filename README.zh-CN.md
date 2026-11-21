@@ -137,7 +137,7 @@ cccodroid 让执行回到你自己的设备上：云端只负责模型推理，�
 
 **离线安装**：先把 `devkit-cc.codroid.tar.gz` 下到手机上，首次启动时选「选择本地文件…」挑它，不再下载。装之前会核对它是不是已发布的版本。
 
-**版本**：v0.3.0 是第一个稳定版。每个大版本走 21 个小版本（0.3.0–0.3.20，现在是 0.6.x）；每一版都能覆盖安装，数据和装好的东西都会保留。
+**版本**：v0.3.0 是第一个稳定版。每个大版本走 21 个小版本（0.3.0–0.3.20，现在是 0.7.x）；每一版都能覆盖安装，数据和装好的东西都会保留。
 
 ## 交流与参与
 
@@ -154,7 +154,7 @@ cccodroid 让执行回到你自己的设备上：云端只负责模型推理，�
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/cccodroid-architecture.zh-CN-dark.png">
-  <img alt="cccodroid 架构：用户在界面（WebView，前端分 27 段由网关拼接下发）上操作，界面经 HTTP 与 SSE 连 127.0.0.2 上的网关（server.mjs 加 gw/ 下的功能模块，令牌校验、按次签名与事件总线）；网关跑在 files/gw 里自己的运行库上（Node 与 glibc），按 APK 钉的哈希核对；网关由前台服务 GatewayService 拉起和崩溃重启，读写 home/ 下的会话、设置与令牌，经私有文件套接字通过 Priv 提权中转调用 Shizuku，并以 stream-json 驱动官方原版 Claude Code，Claude Code 按 Anthropic 签名清单核对；每轮起进程前，配置检查先对交给 Claude Code 的配置做破甲特征检查，查过才回填；Claude Code 经 HTTPS 调用模型 API（官方账户、DeepSeek、Kimi 等，每个对话各选），用 Bash 工具调用 devkit 工具链（基础加按需模块）；targetSdk 36 版里，APK 自带的加载器 libldlinux.so 与 exec 垫片负责改写程序启动方式；设备工具 MCP 是给 Claude 的 MCP 服务器，经本地套接字走 Priv；Updater / Installer 从 GitHub、cccodroid.net 镜像与官方渠道下载，管理 28/36 两套安装包、工具包模块与 Claude Code；组件管理从组件市场取 ed25519 签名的索引和组件包，装进 devkit，并把组件带的 skill 拷进 ~/.claude/skills，Claude Code 读到后就学会用新工具" src="docs/diagrams/cccodroid-architecture.zh-CN-light.png">
+  <img alt="cccodroid 架构：用户在界面（WebView，前端分 29 段由网关拼接下发）上操作，界面经 HTTP 与 SSE 连 127.0.0.2 上的网关（server.mjs 加 gw/ 下的功能模块，令牌校验、按次签名与事件总线）；网关跑在 files/gw 里自己的运行库上（Node 与 glibc），按 APK 钉的哈希核对；网关由前台服务 GatewayService 拉起和崩溃重启，读写 home/ 下的会话、设置与令牌，经私有文件套接字通过 Priv 提权中转调用 Shizuku，并以 stream-json 驱动官方原版 Claude Code，Claude Code 按 Anthropic 签名清单核对；每轮起进程前，配置检查先对交给 Claude Code 的配置做破甲特征检查，查过才回填；Claude Code 经 HTTPS 调用模型 API（官方账户、DeepSeek、Kimi 等，每个对话各选），用 Bash 工具调用 devkit 工具链（基础加按需模块）；targetSdk 36 版里，APK 自带的加载器 libldlinux.so 与 exec 垫片负责改写程序启动方式；设备工具 MCP 是给 Claude 的 MCP 服务器，经本地套接字走 Priv；Updater / Installer 从 GitHub、cccodroid.net 镜像与官方渠道下载，管理 28/36 两套安装包、工具包模块与 Claude Code；组件管理从组件市场取 ed25519 签名的索引和组件包，装进 devkit，并把组件带的 skill 拷进 ~/.claude/skills，Claude Code 读到后就学会用新工具" src="docs/diagrams/cccodroid-architecture.zh-CN-light.png">
 </picture>
 
 可交互版本（引导视图、深浅色、导出）：下载 [`docs/diagrams/cccodroid-architecture.zh-CN.html`](docs/diagrams/cccodroid-architecture.zh-CN.html) 用浏览器打开；

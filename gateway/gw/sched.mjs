@@ -395,10 +395,10 @@ async function fireNow(t, { reason, attempt, trial, occurrence }) {
     const c = t.cond || {};
     if (c.wifi || c.charging || c.battery) {
       const st = await deviceState();
-      // 判断不了（老版本 App、Priv 不通）也不跑：仅 Wi-Fi 是为了不走流量，宁可错过一次（#108 09-001）
+      // 判断不了（老版本 App、Priv 不通）也不跑：Wi-Fi、充电、电量保护条件一律宁可错过一次，不误触发（#108 09-001）
       if (c.wifi && st.wifi !== true) return skip(st.wifi === false ? tz("没连 Wi-Fi") : tz("判断不了是不是连着 Wi-Fi"));
-      if (c.charging && st.charging === false) return skip(tz("没在充电"));
-      if (c.battery && st.battery != null && st.battery < c.battery) return skip(tz("电量 {b}%，低于 {m}%", { b: st.battery, m: c.battery }));
+      if (c.charging && st.charging !== true) return skip(st.charging === false ? tz("没在充电") : tz("判断不了是不是在充电"));
+      if (c.battery && (st.battery == null || st.battery < c.battery)) return skip(st.battery == null ? tz("判断不了当前电量") : tz("电量 {b}%，低于 {m}%", { b: st.battery, m: c.battery }));
     }
   }
   // 并行槽和 queue.pump 用同一口径：idle 轮也占一个槽，以前这里按 !idle 判定，任务会在队里干等（197-5.6）

@@ -306,13 +306,32 @@ export async function rewindFiles(sid, userUuid, dryRun) {
   if (!sealed() && ucPending()) return { ok: false, error: tz("Claude Code 的用户级配置有改动还没确认。先发一条消息，在弹出的卡片里确认后再试。") };
   const blocked = await claudeBlocked();
   if (blocked) return { ok: false, error: blocked };
+  // --resume 只在会话原本所在的项目目录里找得到（同 run.mjs）：不能写死 CFG.workspace，否则项目会话回退必败
+  const sessCwd = sf ? peekSession(sf)?.cwd : "";
+  const cwd = sessCwd && fs.existsSync(sessCwd) ? sessCwd : (fs.existsSync(CFG.workspace) ? CFG.workspace : CFG.home);
   return new Promise((resolve) => {
     // 试算也会 --resume，和普通对话一样不能让默认或项目保留期清扫会话。
     const [cmd0, args0] = claudeCmd(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--resume", sid,
       "--settings", JSON.stringify({ cleanupPeriodDays: sessionRetention().days })]);
-    const child = spawn(cmd0, args0, { cwd: fs.existsSync(CFG.workspace) ? CFG.workspace : CFG.home, env: claudeEnv(), stdio: ["pipe", "pipe", "pipe"], detached: true });
-    let buf = "", done = false, err = "", exited = false;
-    const finish = (r) => { if (done) return; done = true; clearTimeout(t); try { child.stdin.end(); } catch {} setTimeout(() => { if (!exited) killTree(child); }, 3000); resolve(r); };
+    const child = spawn(cmd0, args0, { cwd, env: claudeEnv(), stdio: ["pipe", "pipe", "pipe"], detached: true });
+    let buf = "", done = false, err = "", exited = false, pendingRes = null, killTimer = null;
+    const settle = (r) => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      if (killTimer) clearTimeout(killTimer);
+      resolve(r);
+    };
+    // 收到 control_response 后先结束 stdin 等进程退出并 resealAfterEdit 再返回，避免紧随其后的续聊撞上旧封条；
+    // 最多等 3 秒强杀，防止子进程挂死拖住请求
+    const finish = (r) => {
+      if (done || pendingRes) return;
+      pendingRes = r;
+      clearTimeout(t);
+      try { child.stdin.end(); } catch {}
+      if (exited) { if (sf) resealAfterEdit(sid, sf, dirty); settle(r); return; }
+      killTimer = setTimeout(() => { if (!exited) killTree(child); }, 3000);
+    };
     const t = setTimeout(() => finish({ ok: false, error: tz("回退超时") }), 60000);
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
     child.stdout.on("data", (d) => {
@@ -328,9 +347,13 @@ export async function rewindFiles(sid, userUuid, dryRun) {
     });
     child.stderr.on("data", (d) => { err += d; });
     // spawn 失败（loader 缺失/EACCES/ENOMEM）只发 error：不接就是未捕获异常，整个网关退出
-    child.on("error", (e) => finish({ ok: false, error: e.code || e.message }));
+    child.on("error", (e) => { exited = true; settle({ ok: false, error: e.code || e.message }); });
     child.stdin.on("error", () => {});
-    child.on("close", () => { exited = true; if (sf) resealAfterEdit(sid, sf, dirty); finish({ ok: false, error: err.trim().slice(-300) || "claude exited" }); });
+    child.on("close", () => {
+      exited = true;
+      if (sf) resealAfterEdit(sid, sf, dirty);
+      settle(pendingRes || { ok: false, error: err.trim().slice(-300) || "claude exited" });
+    });
     child.stdin.write(JSON.stringify({ type: "control_request", request_id: "rw-" + Date.now(), request: { subtype: "rewind_files", user_message_id: userUuid, dry_run: !!dryRun } }) + "\n");
   });
 }
