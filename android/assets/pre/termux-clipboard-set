@@ -1,0 +1,3 @@
+#!/system/bin/sh
+# 写入系统剪贴板（支持位置参数或 stdin，兼容 gh 等调用 termux-clipboard-set 的 CLI）
+exec node "$(dirname "$0")/../bin/cli-bridge.mjs" clip-set "$@"

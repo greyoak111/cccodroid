@@ -1,0 +1,3 @@
+#!/system/bin/sh
+# 读取系统剪贴板（兼容 gh 等调用 termux-clipboard-get 的 CLI）
+exec node "$(dirname "$0")/../bin/cli-bridge.mjs" clip-get "$@"

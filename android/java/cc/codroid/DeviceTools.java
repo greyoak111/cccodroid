@@ -275,7 +275,7 @@ final class DeviceTools {
         return out.get();
     }
 
-    private static JSONObject clipRead(Context c) throws Exception {
+    static JSONObject clipRead(Context c) throws Exception {
         String s = onMain(() -> {
             ClipboardManager cm = c.getSystemService(ClipboardManager.class);
             ClipData d = cm.getPrimaryClip();
@@ -288,7 +288,7 @@ final class DeviceTools {
         return new JSONObject().put("ok", true).put("text", clip(s, 20000));
     }
 
-    private static JSONObject clipWrite(Context c, JSONObject a) throws Exception {
+    static JSONObject clipWrite(Context c, JSONObject a) throws Exception {
         String text = a.optString("text", "");
         // 剪贴板走 Binder，内容过大系统直接抛异常；也别让一段巨量文字把剪贴板占住（审查 10-30 第九份 安卓低12）
         if (text.length() > 200000) return fail(Tr.f("太长了（{0} 字），剪贴板一次最多放 20 万字", text.length()));
@@ -309,6 +309,31 @@ final class DeviceTools {
             out.put(new JSONObject().put("label", label).put("package", pkg));
         }
         return new JSONObject().put("ok", true).put("apps", out);
+    }
+
+    /** 严格校验 http/https 地址：禁空白与控制字符、要求非空有效主机、禁内嵌凭据（user:pass@host） */
+    static Uri safeHttpUri(String u) {
+        if (u == null || u.isEmpty()) return null;
+        for (int i = 0; i < u.length(); i++) {
+            char c = u.charAt(i);
+            if (c <= 0x20 || c == 0x7f || Character.isWhitespace(c)) return null;
+        }
+        Uri uri = Uri.parse(u);
+        String scheme = uri.getScheme();
+        if (scheme == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) return null;
+        if (uri.getUserInfo() != null) return null;
+        String auth = uri.getEncodedAuthority();
+        if (auth != null && auth.indexOf('@') >= 0) return null;
+        String host = uri.getHost();
+        if (host == null || host.isEmpty() || ".".equals(host)) return null;
+        return uri;
+    }
+
+    /** 终端 / CLI 桥接（xdg-open / termux-open-url）：严格校验 http / https，走与设备工具同一套前景/通知拉起逻辑 */
+    static JSONObject openUrl(Context c, String u) throws Exception {
+        Uri uri = safeHttpUri(u);
+        if (uri == null) return fail(Tr.t("url 只收 http / https"));
+        return launch(c, new Intent(Intent.ACTION_VIEW, uri), uri.getScheme() + "://" + uri.getHost());
     }
 
     /** 固定几类「打开并预填」：不收任意 action，免得模型拼出拨打、静默发送之类的东西 */

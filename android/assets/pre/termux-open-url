@@ -1,0 +1,3 @@
+#!/system/bin/sh
+# 同 xdg-open，兼容按 Termux 习惯调用 termux-open-url 的 CLI
+exec node "$(dirname "$0")/../bin/cli-bridge.mjs" open-url "$@"

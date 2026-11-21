@@ -539,6 +539,53 @@ final class Priv {
                     audit(t0, who, new JSONObject().put("argv", new JSONArray().put("[" + Tr.t("设备工具") + "] " + tool)), resp.optBoolean("ok", true) ? 0 : 1, System.currentTimeMillis() - t0);
                     break;
                 }
+                // 终端 / CLI 桥接（xdg-open / termux-open-url / termux-clipboard-get / termux-clipboard-set）：
+                // 不受「设备工具」开关限制（那是给 Claude MCP 用的），但同 uid 任意进程都能连套接字，
+                // 仍坚持「仅前台 + 原生确认框 + 不允许免问 + 留审计记录」，守住防钓鱼 / 防剪贴板劫持边界。
+                case "open_url": {
+                    long t0 = System.currentTimeMillis();
+                    int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
+                    String who = caller(pid), url = req.optString("url", "").trim();
+                    android.net.Uri uri = DeviceTools.safeHttpUri(url);
+                    if (uri == null) {
+                        resp = new JSONObject().put("ok", false).put("message", Tr.t("url 只收 http / https"));
+                    } else if (!ask(url, who, "cli:open_url", false)) {
+                        resp = new JSONObject().put("ok", false).put("message", Tr.t("用户没有允许打开（cccodroid 不在前台时也会直接拒绝）"));
+                    } else {
+                        resp = DeviceTools.openUrl(ctx, url);
+                    }
+                    // 审计只记 scheme://host，不落完整 URL（避免 OAuth 设备码 / query token 进日志）
+                    String auditTarget = uri == null ? "(invalid)" : uri.getScheme().toLowerCase(java.util.Locale.ROOT) + "://" + uri.getHost();
+                    audit(t0, who, new JSONObject().put("argv", new JSONArray().put("[open_url] " + auditTarget)), resp.optBoolean("ok", true) ? 0 : 1, System.currentTimeMillis() - t0);
+                    break;
+                }
+                case "clip_set": {
+                    long t0 = System.currentTimeMillis();
+                    int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
+                    String who = caller(pid), text = req.optString("text", "");
+                    if (text.length() > 200000) {
+                        resp = new JSONObject().put("ok", false).put("message", Tr.f("太长了（{0} 字），剪贴板一次最多放 20 万字", text.length()));
+                    } else if (!ask(clip(text), who, "cli:clip_set", false)) {
+                        resp = new JSONObject().put("ok", false).put("message", Tr.t("用户没有允许写剪贴板（cccodroid 不在前台时也会直接拒绝）"));
+                    } else {
+                        resp = DeviceTools.clipWrite(ctx, new JSONObject().put("text", text));
+                    }
+                    // 审计只记字符数，不把剪贴板正文落盘（里边可能是验证码、密钥）
+                    audit(t0, who, new JSONObject().put("argv", new JSONArray().put("[clip_set] (" + text.length() + " chars)")), resp.optBoolean("ok", true) ? 0 : 1, System.currentTimeMillis() - t0);
+                    break;
+                }
+                case "clip_get": {
+                    long t0 = System.currentTimeMillis();
+                    int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
+                    String who = caller(pid);
+                    if (!ask(Tr.t("设备工具：读取剪贴板"), who, "cli:clip_get", false)) {
+                        resp = new JSONObject().put("ok", false).put("message", Tr.t("用户没有允许读剪贴板（cccodroid 不在前台时也会直接拒绝）"));
+                    } else {
+                        resp = DeviceTools.clipRead(ctx);
+                    }
+                    audit(t0, who, new JSONObject().put("argv", new JSONArray().put("[clip_get]")), resp.optBoolean("ok", true) ? 0 : 1, System.currentTimeMillis() - t0);
+                    break;
+                }
                 case "dev_status": resp = DeviceTools.status(ctx); break;
                 // 定时任务的条件（充电 / 电量 / 仅 Wi-Fi）：平铺的几项，不受「设备工具」开关管（那是给 Claude 用的）。
                 // 以前网关问的这个操作根本不存在，Wi-Fi 一直是「不知道」，仅 Wi-Fi 的任务照跑（#108 09-001）
@@ -756,7 +803,12 @@ final class Priv {
                 .putExtra("cmd", show).putExtra("who", who).putExtra("trust", trustable).putExtra("sess", sess != null)
                 // 设置页的免责框：按来路认（exec 的 key 是 JSON 数组开头，撞不上），不看正文 —— 正文是命令原文，能伪造成免责说明的样子（审查 0601 高-2）
                 // 装 APK（apk_install）同理按来路认：标题和说明换成「安装应用」，别说成以 Shizuku 身份跑命令
-                .putExtra("kind", !trustable && "noask".equals(key) ? "noask" : !trustable && key.startsWith("apk:") ? "apk" : "")
+                .putExtra("kind", !trustable && "noask".equals(key) ? "noask"
+                    : !trustable && key.startsWith("apk:") ? "apk"
+                    : !trustable && ("cli:open_url".equals(key) || "dev:open".equals(key)) ? "url"
+                    : !trustable && ("cli:clip_set".equals(key) || "dev:clipboard_write".equals(key)) ? "clip_set"
+                    : !trustable && ("cli:clip_get".equals(key) || "dev:clipboard_read".equals(key)) ? "clip_get"
+                    : "")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             done.await(60, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception e) { Log.w(TAG, "问不了用户", e); }

@@ -1,0 +1,3 @@
+#!/system/bin/sh
+# 打开 http/https 链接（经 cccodroid 前台确认后交给系统浏览器；置于 app/pre 避免被 pkg install xdg-utils 覆盖）
+exec node "$(dirname "$0")/../bin/cli-bridge.mjs" open-url "$@"
