@@ -36,6 +36,8 @@
     "build": [
       "clang",
       "lld",
+      "binutils",
+      "nasm",
       "make",
       "cmake",
       "ninja",
@@ -134,6 +136,44 @@
     "python-tools": [
       "uv",
       "ruff"
+    ],
+    "jvm": [
+      "kotlin",
+      "scala",
+      "groovy",
+      "maven"
+    ],
+    "php": [
+      "php",
+      "composer"
+    ],
+    "beam": [
+      "erlang",
+      "elixir"
+    ],
+    "lisp": [
+      "sbcl",
+      "ecl",
+      "racket",
+      "chicken",
+      "guile",
+      "janet",
+      "picolisp"
+    ],
+    "native": [
+      "nim",
+      "crystal",
+      "ldc"
+    ],
+    "haskell": [
+      "ghc",
+      "cabal-install"
+    ],
+    "legacy": [
+      "tcl",
+      "gforth",
+      "gnucobol",
+      "swi-prolog"
     ]
   },
   "exclude": [
@@ -230,8 +270,8 @@
         "en": "C/C++ build"
       },
       "desc": {
-        "zh": "clang、lld、cmake、ninja、make、bison、flex、gperf、libtool、ccache、gdb、strace、patchelf：在手机上编译、调试原生程序。",
-        "en": "clang, lld, cmake, ninja, make, bison, flex, gperf, libtool, ccache, gdb, strace, patchelf: compile and debug native programs on the phone."
+        "zh": "clang、lld、binutils、nasm、cmake、ninja、make、bison、flex、gperf、libtool、ccache、gdb、strace、patchelf：在手机上编译、调试原生程序。",
+        "en": "clang, lld, binutils, nasm, cmake, ninja, make, bison, flex, gperf, libtool, ccache, gdb, strace, patchelf: compile and debug native programs on the phone."
       },
       "uses": [
         "native-build"
@@ -241,6 +281,8 @@
         "clang",
         "clang++",
         "lld",
+        "as",
+        "nasm",
         "make",
         "cmake",
         "ninja",
@@ -449,6 +491,160 @@
         "uv",
         "uvx",
         "ruff"
+      ]
+    },
+    "jvm": {
+      "groups": [
+        "jvm"
+      ],
+      "full": false,
+      "name": {
+        "zh": "JVM 语言",
+        "en": "JVM languages"
+      },
+      "desc": {
+        "zh": "Kotlin、Scala、Groovy、Maven（约 340 MB）：复用工具包自带的 JDK 21，在手机上写 JVM 语言。",
+        "en": "Kotlin, Scala, Groovy and Maven (~340 MB): write JVM languages on the phone, reusing the bundled JDK 21."
+      },
+      "uses": [],
+      "key": [
+        "kotlin",
+        "kotlinc",
+        "scala",
+        "scalac",
+        "groovy",
+        "groovyc",
+        "mvn"
+      ]
+    },
+    "php": {
+      "groups": [
+        "php"
+      ],
+      "full": false,
+      "name": {
+        "zh": "PHP",
+        "en": "PHP"
+      },
+      "desc": {
+        "zh": "PHP 8.5 与 Composer（约 82 MB）：命令行脚本、WordPress 等传统 Web 栈开发。",
+        "en": "PHP 8.5 and Composer (~82 MB): CLI scripting and classic web stacks like WordPress."
+      },
+      "uses": [],
+      "key": [
+        "php",
+        "composer"
+      ]
+    },
+    "beam": {
+      "groups": [
+        "beam"
+      ],
+      "full": false,
+      "name": {
+        "zh": "Erlang 与 Elixir",
+        "en": "Erlang & Elixir"
+      },
+      "desc": {
+        "zh": "Erlang/OTP 29 与 Elixir 1.20（约 135 MB）：高并发分布式系统、Phoenix Web 框架。",
+        "en": "Erlang/OTP 29 and Elixir 1.20 (~135 MB): concurrent distributed systems and the Phoenix web framework."
+      },
+      "uses": [],
+      "key": [
+        "erl",
+        "escript",
+        "elixir",
+        "iex",
+        "mix"
+      ]
+    },
+    "lisp": {
+      "groups": [
+        "lisp"
+      ],
+      "full": false,
+      "name": {
+        "zh": "Lisp 与 Scheme",
+        "en": "Lisp & Scheme"
+      },
+      "desc": {
+        "zh": "SBCL、ECL、Racket、Chicken、Guile、Janet、PicoLisp（约 170 MB）：Common Lisp、Scheme 与各 Lisp 方言，一次装齐。",
+        "en": "SBCL, ECL, Racket, Chicken, Guile, Janet and PicoLisp (~170 MB): Common Lisp, Scheme and other Lisp dialects in one install."
+      },
+      "uses": [],
+      "key": [
+        "sbcl",
+        "ecl",
+        "racket",
+        "raco",
+        "csi",
+        "guile",
+        "janet",
+        "pil"
+      ]
+    },
+    "native": {
+      "groups": [
+        "native"
+      ],
+      "full": false,
+      "name": {
+        "zh": "现代编译型语言",
+        "en": "Native-compiled languages"
+      },
+      "desc": {
+        "zh": "Nim、Crystal、D（ldc，约 193 MB）：三个现代编译型语言，都复用 C/C++ 构建的 clang/lld。",
+        "en": "Nim, Crystal and D (ldc, ~193 MB): three modern compiled languages, all reusing the clang/lld from C/C++ build."
+      },
+      "uses": [
+        "native-build"
+      ],
+      "key": [
+        "nim",
+        "crystal",
+        "ldc2"
+      ]
+    },
+    "haskell": {
+      "groups": [
+        "haskell"
+      ],
+      "full": false,
+      "name": {
+        "zh": "Haskell",
+        "en": "Haskell"
+      },
+      "desc": {
+        "zh": "GHC 9.12 与 cabal（装后约 2.8 GB）：按需安装，写函数式程序。",
+        "en": "GHC 9.12 and cabal (~2.8 GB installed): install on demand for functional programming."
+      },
+      "uses": [],
+      "key": [
+        "ghc",
+        "ghci",
+        "runghc",
+        "cabal"
+      ]
+    },
+    "legacy": {
+      "groups": [
+        "legacy"
+      ],
+      "full": false,
+      "name": {
+        "zh": "复古语言",
+        "en": "Retro languages"
+      },
+      "desc": {
+        "zh": "Tcl、Gforth（Forth）、GnuCOBOL、SWI-Prolog（约 37 MB）：老牌与复古语言。",
+        "en": "Tcl, Gforth (Forth), GnuCOBOL and SWI-Prolog (~37 MB): veteran and retro languages."
+      },
+      "uses": [],
+      "key": [
+        "tclsh",
+        "gforth",
+        "cobc",
+        "swipl"
       ]
     }
   },
