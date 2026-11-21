@@ -39,7 +39,7 @@ test("modules.json 里的 dir 必须是 $PREFIX 内的普通相对路径，坏�
   assert.deepEqual(modulesInfo().modules.map((m) => m.id), ["base", "modok"]);
 });
 
-test("modRemove 只删 FILES 里安全的相对路径，../ 与绝对路径不碰", () => {
+test("modRemove 只删 FILES 里安全的相对路径，../ 与绝对路径不碰", async () => {
   fs.writeFileSync(OK, JSON.stringify({ sha256: "dk0610" }));
   fs.mkdirSync(path.join(MODDIR), { recursive: true });
   fs.writeFileSync(path.join(MODDIR, "MANIFEST"), "h 1 bin/safe0610\n");
@@ -55,7 +55,7 @@ test("modRemove 只删 FILES 里安全的相对路径，../ 与绝对路径不�
     "a/../../b0610",
   ].join("\n") + "\n");
 
-  const r = _modForTest.modRemove("modok");
+  const r = await _modForTest.modRemove("modok");
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.ok(!fs.existsSync(path.join(PREFIX, "bin", "safe0610")), "安全路径照常删");
   assert.ok(!fs.existsSync(MODDIR), "模块目录照常删");

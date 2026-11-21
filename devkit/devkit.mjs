@@ -300,15 +300,31 @@ async function unxzToFile(data, outPath) {
     return new Promise((ok, bad) => {
       const out = fs.createWriteStream(outPath);
       const child = spawn(XZ, ["-dc"], { env: XZENV, stdio: ["pipe", "pipe", "inherit"] });
-      let done = false;
-      const fail = (e) => { if (!done) { done = true; bad(e); } };
+      let done = false, outDone = false, exited = false, exitCode = null, exitSig = null;
+      const fail = (e) => {
+        if (done) return;
+        done = true;
+        out.destroy();
+        try { child.kill(); } catch {}
+        bad(e);
+      };
+      const maybeOk = () => {
+        if (done || !outDone || !exited) return;
+        if (exitCode !== 0) return fail(new Error(`xz -dc 退出码 ${exitCode ?? exitSig}`));
+        done = true;
+        ok();
+      };
       child.on("error", fail);
-      child.stdin.on("error", fail);
+      child.stdin.on("error", (e) => { if (e.code !== "EPIPE") fail(e); });   // 坏输入下 xz 提前退出会触发 EPIPE，让 exit 报真正退出码
       child.stdout.on("error", fail);
       child.stdout.pipe(out);   // 不消费 stdout 的话 xz 会写满管道缓冲后卡死
       out.on("error", fail);
-      out.on("finish", () => { if (!done) { done = true; ok(); } });
-      child.on("exit", (code) => { if (code !== 0 && !done) fail(new Error(`xz -dc 退出码 ${code}`)); });
+      out.on("finish", () => { outDone = true; maybeOk(); });
+      child.on("exit", (code, sig) => {
+        exited = true; exitCode = code; exitSig = sig;
+        if (code !== 0) fail(new Error(`xz -dc 退出码 ${code ?? sig}`));
+        else maybeOk();
+      });
       child.stdin.end(data);
     });
   }
@@ -1148,16 +1164,19 @@ if (cmd === "modules") {
   const mj = {
     // format：modules.json 自身的格式版本；compat 同 devkit.lock.json（外壳接口版本）
     format: 1, compat: 1, target, snapshot: plan.snapshot, base: plan.base, built: new Date().toISOString(),
-    modules: locks.map((l) => ({
-      id: l.id, kind: l.kind, required: !!(def[l.id] || {}).required, deps: l.deps, users: l.users || [],
-      full: (def[l.id] || {}).full !== false,   // false：整包里没有它，整包用户升级时不当成已装
-      name: (def[l.id] || {}).name || { zh: "共享运行库", en: "Shared libraries" },
-      desc: (def[l.id] || {}).desc || { zh: `被 ${l.users.join("、")} 共用的大库，没有模块用到时自动卸载。`, en: `Large library shared by ${l.users.join(", ")}; removed automatically when no module needs it.` },
-      uses: (def[l.id] || {}).uses || [], dir: l.dir,
-      gz: l.gz, tar: { bytes: l.tar.bytes, sha256: l.tar.sha256 }, installed: l.installed, files: l.files,
-      commands: l.commands, key: ((def[l.id] || {}).key || []).filter((c) => l.commands.includes(c)), firstRun: l.firstRun,
-      packages: l.packages.map((p) => ({ name: p.name, version: p.version, source: p.source })),
-    })),
+    modules: locks.map((l) => {
+      const sharedTag = l.kind === "shared" && l.id.startsWith("lib-") && l.id.length > 4 ? l.id.slice(4) : "";
+      return {
+        id: l.id, kind: l.kind, required: !!(def[l.id] || {}).required, deps: l.deps, users: l.users || [],
+        full: (def[l.id] || {}).full !== false,   // false：整包里没有它，整包用户升级时不当成已装
+        name: (def[l.id] || {}).name || (sharedTag ? { zh: `共享运行库（${sharedTag}）`, en: `Shared libraries (${sharedTag})` } : { zh: "共享运行库", en: "Shared libraries" }),
+        desc: (def[l.id] || {}).desc || { zh: `被 ${l.users.join("、")} 共用的大库，没有模块用到时自动卸载。`, en: `Large library shared by ${l.users.join(", ")}; removed automatically when no module needs it.` },
+        uses: (def[l.id] || {}).uses || [], dir: l.dir,
+        gz: l.gz, tar: { bytes: l.tar.bytes, sha256: l.tar.sha256 }, installed: l.installed, files: l.files,
+        commands: l.commands, key: ((def[l.id] || {}).key || []).filter((c) => l.commands.includes(c)), firstRun: l.firstRun,
+        packages: l.packages.map((p) => ({ name: p.name, version: p.version, source: p.source })),
+      };
+    }),
   };
   fs.writeFileSync(path.join(OUT, "modules.json"), JSON.stringify(mj, null, 2));
   console.log(`\n✓ modules.json：${mj.modules.length} 块，下载合计 ${mb(mj.modules.reduce((s, m) => s + m.gz.bytes, 0))}，共 ${owner.size} 个文件路径，跨块无冲突`);
@@ -1238,16 +1257,23 @@ if (cmd === "build" || cmd === "component") {
         if (e.type === "1") { tw.add({ name: clean, type: "1", mode: e.mode, mtime: e.mtime, link: R.pathOf(e.link) || e.link }); continue; }
         if (e.type !== "0" && e.type !== "7") continue;
         // 带签名的 phar（文件尾有 GBMB 签名魔数，composer 就是）：动任何字节 PHP 都会以「签名不符」拒跑
-        // （首发 php 模块真机实测抓到）。原样保留、名字加 .phar，另放一个包装脚本在原路径上执行它（Debian 同款做法）；
-        // shebang 不再改写——经 `php xxx.phar` 执行时它只是 PHP 注释，签名完好。
+        // （首发 php 模块真机实测抓到）。可执行 CLI phar（带 shebang、非 .phar 扩展名）原样放成 .phar 并写绝对路径包装脚本；
+        // 库类 .phar（被 PHP require 加载的）原样保留、跳过前缀替换以免破坏签名。
         if (e.data.length > 32 && e.data.subarray(-4).toString("latin1") === "GBMB") {   // phar 布局：[签名][4 字节算法][GBMB]
-          tw.add({ name: clean + ".phar", type: "0", mode: 0o755, mtime: e.mtime, data: e.data });
-          listing.push("/" + R.to.replace(/^\//, "") + "files/" + clean + ".phar");
-          tw.add({
-            name: clean, type: "0", mode: 0o755, mtime: e.mtime,
-            data: Buffer.from("#!" + R.to + "files/usr/bin/sh\nexec php \"" + R.to + "files/usr/" + clean.replace(/^usr\//, "") + ".phar\" \"$@\"\n"),
-          });
-          files += 2;
+          const isCli = e.data[0] === 0x23 && e.data[1] === 0x21 &&
+            (/^usr\/bin\//.test(clean) || ((e.mode || 0) & 0o111) !== 0) && !clean.endsWith(".phar");
+          if (isCli) {
+            tw.add({ name: clean + ".phar", type: "0", mode: 0o755, mtime: e.mtime, data: e.data });
+            listing.push("/" + R.to.replace(/^\//, "") + "files/" + clean + ".phar");
+            tw.add({
+              name: clean, type: "0", mode: 0o755, mtime: e.mtime,
+              data: Buffer.from("#!" + R.to + "files/usr/bin/sh\nexec \"" + R.to + "files/usr/bin/php\" \"" + R.to + "files/usr/" + clean.replace(/^usr\//, "") + ".phar\" \"$@\"\n"),
+            });
+            files += 2;
+          } else {
+            tw.add({ name: clean, type: "0", mode: e.mode, mtime: e.mtime, data: e.data });
+            files++;
+          }
           continue;
         }
         // zip 类归档要下潜到压缩条目内部再改一遍，flat 替换在里面找不到模式

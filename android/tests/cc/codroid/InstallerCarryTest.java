@@ -64,6 +64,19 @@ public class InstallerCarryTest {
             Installer.carryOver(old2, neu2, files, false, "", QUIET);
             check("换版本：组件文件不搬（旧工具包上的）", !new File(neu2, "bin/comp-tool").exists());
             check("换版本：底座文件也不搬", !new File(neu2, "bin/base-tool").exists());
+
+            // 共享运行库名称消歧（v0.7.15 多共享层：lib-clang / lib-guile / lib-libllvm / lib-openjdk-21）
+            check("共享库中文消歧", "共享运行库（clang）".equals(Installer.formatModuleName("lib-clang", "shared", "共享运行库", true)));
+            check("共享库英文消歧", "Shared libraries (openjdk-21)".equals(Installer.formatModuleName("lib-openjdk-21", "shared", "Shared libraries", false)));
+            check("共享库已带后缀不重复拼接", "共享运行库（guile）".equals(Installer.formatModuleName("lib-guile", "shared", "共享运行库（guile）", true)));
+            check("普通模块原样返回", "C/C++ 构建".equals(Installer.formatModuleName("build", "module", "C/C++ 构建", true)));
+
+            // GwRuntime 基础包复用判断：工具包未升级到钉住版本时保留，已是同一版或失败时删除
+            check("GwRuntime 升级前保留基础包", GwRuntime.shouldKeepBaseForUpdater("sha-new", "sha-old", true));
+            check("GwRuntime 首装无已装版本时保留基础包", GwRuntime.shouldKeepBaseForUpdater("sha-new", "", true));
+            check("GwRuntime 已是同一版工具包时不保留", !GwRuntime.shouldKeepBaseForUpdater("sha-same", "sha-same", true));
+            check("GwRuntime 提取失败时不保留", !GwRuntime.shouldKeepBaseForUpdater("sha-new", "sha-old", false));
+            check("GwRuntime 缺钉子 sha 时不保留", !GwRuntime.shouldKeepBaseForUpdater("", "sha-old", true));
         } finally {
             try (java.util.stream.Stream<Path> s = Files.walk(tmp)) {
                 s.sorted(Comparator.reverseOrder()).forEach((p) -> { try { Files.delete(p); } catch (Exception ignored) {} });

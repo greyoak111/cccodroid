@@ -204,6 +204,7 @@ final class GwRuntime {
         File got = ins.download(Installer.DEVKIT_MIRROR + tag + "/" + file, base + file, new File(env.files, "gw-" + file), gz.optLong("bytes"), gz.optString("sha256"));
         File stage = new File(env.files, "gw-stage");
         Installer.deleteTree(stage);
+        boolean ok = false;
         try {
             stage.mkdirs();
             if (say != null) say.say(Tr.t("取回网关运行库：解包…"));
@@ -217,11 +218,27 @@ final class GwRuntime {
                 swap = new byte[][] { a, b };
             }
             for (String[] m : missing) put(new File(stage, m[1]), new File(m[0]), m[2], swap);
+            ok = true;
         } finally {
             Installer.deleteTree(stage);
-            got.delete();
             new File(got.getPath() + ".sha256").delete();
+            JSONObject pinGz = dp.optJSONObject("gz");
+            String pinSha = pinGz == null ? "" : pinGz.optString("sha256", "");
+            String instSha = env.devkitInfo().optString("sha256", "");
+            // 工具包还没升级到当前钉住的版本时，把刚下好并核过 sha256 的基础模块包留给 Updater / Installer 复用，省掉重下
+            File reuse = new File(env.files, file);
+            if (shouldKeepBaseForUpdater(pinSha, instSha, ok)) {
+                if (reuse.exists() && !reuse.delete()) got.delete();
+                else if (!got.renameTo(reuse)) got.delete();
+            } else {
+                got.delete();
+            }
         }
+    }
+
+    /** 工具包尚未装到钉住那版时保留基础模块压缩包给后续更新复用；已是同一版则立刻删掉免占空间 */
+    static boolean shouldKeepBaseForUpdater(String pinSha, String installedSha, boolean ok) {
+        return ok && pinSha != null && !pinSha.isEmpty() && !pinSha.equals(installedSha);
     }
 
     // ── 哈希缓存：同一个文件（inode、大小、修改时间、ctime 都没变）不重算。ctime 用户态改不了，换内容一定会变 ──

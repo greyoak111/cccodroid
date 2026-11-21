@@ -1,10 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { LAST_LANG, PREFIX, log, tr, tz } from "./config.mjs";
 import { killTree } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
-import { compBaseDeps, compJobsDeps, compNeeds, compRecords, compRun, devkitIdentity, sha256File, breathe } from "./components.mjs";
+import { termEnv } from "./terminal.mjs";
+import {
+  COMP_RUN_DIR, bootId, breathe, compBaseDeps, compJobsDeps, compNeeds, compRecords, compRun,
+  devkitIdentity, markChild, rmTreeBatched, sha256File, unmarkChild, uptimeMs,
+} from "./components.mjs";
 import { archiveProblem, parseTarListing } from "./archive-check.mjs";
 
 // ── 模块化工具包（0.3.9 起）──────────────────────────────────────────
@@ -89,10 +93,10 @@ function pkgRecords() {
 }
 /** 谁在用这一块：已装的模块（deps 含它）、已装的组件（依赖的底座包落在这块里、别的已装块又没有）、
  *  pkg 装的包（Depends 里有这块独有的包，#104 05-002）。组件判断不了依赖的（旧记录 + 没有索引）也算在用：宁可拦下，不能删坏 */
-function modDependents(mj, id) {
-  const mods = (mj.modules || []).filter((m) => m.id !== id && modInstalled(mj, m.id) && (m.deps || []).includes(id) && m.kind !== "shared").map((m) => m.id);
+function modDependents(mj, id, ignoreMods = null) {
+  const mods = (mj.modules || []).filter((m) => m.id !== id && !(ignoreMods && ignoreMods.has(m.id)) && modInstalled(mj, m.id) && (m.deps || []).includes(id) && m.kind !== "shared").map((m) => m.id);
   const mine = new Set((blockOf(mj, id).packages || []).map((p) => p.name));
-  for (const m of mj.modules || []) if (m.id !== id && modInstalled(mj, m.id)) for (const p of m.packages || []) mine.delete(p.name);
+  for (const m of mj.modules || []) if (m.id !== id && !(ignoreMods && ignoreMods.has(m.id)) && modInstalled(mj, m.id)) for (const p of m.packages || []) mine.delete(p.name);
   const comps = [];
   for (const [cid, rec] of compRecords()) {
     const deps = compBaseDeps(cid, rec.sha256, rec);
@@ -168,7 +172,7 @@ async function modStart(id, repair) {
   for (const c of chain) {
     const b = blockOf(mj, c);
     if (!b.gz || !Number.isFinite(b.gz.bytes) || typeof b.gz.sha256 !== "string" || !b.gz.sha256) return { ok: false, message: tz("这个模块的下载信息不完整，先更新一次工具包") };
-    try { fs.rmSync(path.join(STAGE, c), { recursive: true, force: true }); } catch {}
+    try { await rmTreeBatched(path.join(STAGE, c)); } catch {}
   }
   const need = modSpaceNeed(mj, chain);
   try { const st = fs.statfsSync(path.dirname(PREFIX)); const free = st.bavail * st.bsize; if (free < need) return { ok: false, message: tz("存储空间不够：需要约 {need} MB，只剩 {free} MB", { need: Math.ceil(need / 1048576), free: Math.floor(free / 1048576) }) }; } catch {}
@@ -182,7 +186,7 @@ async function modStart(id, repair) {
       job.error = e.message === "cancelled" ? "" : e.message;
       // 失败的解包树（可能几百 MB）以前一直留在 devkit-stage，只有下次重装才会被开头那句清掉；
       // 用户不再重试就没有入口删。这里当场清掉。压缩包按组件安装的做法留着，重试时大小对得上就不重下（196-供应链.2）
-      try { if (job.stageTree) fs.rmSync(job.stageTree, { recursive: true, force: true }); } catch {}
+      try { if (job.stageTree) await rmTreeBatched(job.stageTree); } catch {}
       log(`[mod] ${job.current} 安装失败：${e.message}`);
     } finally {
       job.finished = true; job.child = null;
@@ -191,6 +195,81 @@ async function modStart(id, repair) {
     }
   })();
   return { r: { ok: true, chain }, job };
+}
+
+/** 模块安装 / 卸载心跳：与 components.mjs 同目录同字段，看门狗（GatewayService.installingBeat）据此放宽探活时限，
+ *  避免大模块（如 haskell 9k+ 文件、build+共享层 16k+ 文件）在搬移或清理时被 SIGKILL */
+function modHeart(id) {
+  const mark = COMP_RUN_DIR ? path.join(COMP_RUN_DIR, `mod-${id}.installing`) : "";
+  if (mark) try { fs.mkdirSync(COMP_RUN_DIR, { recursive: true }); } catch {}
+  return {
+    beat(moved, phase = "move") {
+      if (!mark) return;
+      try { fs.writeFileSync(mark, JSON.stringify({ id: "mod-" + id, phase, moved, at: uptimeMs(), gw: process.pid, boot: bootId() })); } catch {}
+    },
+    clear() { if (mark) try { fs.rmSync(mark, { force: true }); } catch {} },
+  };
+}
+
+/** 列出 tar.gz 条目并挂到 job.child：扫描几百 MB 模块包时允许取消，崩溃后也可被 reapComponentRuns 清理 */
+function modTarList(job, gz) {
+  return new Promise((resolve, reject) => {
+    const cmd = path.join(PREFIX, "bin", "tar"), args = ["-tzv", "--quoting-style=c", "-f", gz];
+    const child = spawn(cmd, args, { env: termEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true });
+    job.child = child;
+    const mark = markChild(child, cmd, args);
+    const chunks = [];
+    let bytes = 0, err = "", overflow = false;
+    child.stdout.on("data", (d) => {
+      bytes += d.length;
+      if (bytes > (256 << 20)) { overflow = true; killTree(child); return; }
+      chunks.push(d);
+    });
+    child.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
+    child.on("error", (e) => { job.child = null; unmarkChild(mark); reject(e); });
+    child.on("exit", (code) => {
+      job.child = null; unmarkChild(mark);
+      if (job.cancelled) return reject(new Error("cancelled"));
+      if (overflow) return reject(new Error("tar listing too large"));
+      if (code !== 0) return reject(new Error(err.trim() || `tar exit ${code}`));
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+  });
+}
+
+/** Guile 编译缓存（.go）必须严格比源码（.scm）新，否则 gdb / guile 启动陷入重编译死循环（同 Installer.java:670） */
+async function touchGuileGo(beat = () => {}) {
+  const libGuile = path.join(PREFIX, "lib", "guile");
+  if (!fs.existsSync(libGuile)) return;
+  let maxScm = 0;
+  const scanScm = async (dir) => {
+    let ds; try { ds = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const d of ds) {
+      const p = path.join(dir, d.name);
+      if (d.isDirectory()) { await breathe(); await scanScm(p); }
+      else if (d.name.endsWith(".scm")) {
+        try { const mt = fs.statSync(p).mtimeMs; if (mt > maxScm) maxScm = mt; } catch {}
+      }
+    }
+  };
+  await scanScm(path.join(PREFIX, "share", "guile"));
+  await scanScm(libGuile);
+  const stamp = new Date(Math.max(Date.now(), maxScm + 1000));
+  let n = 0;
+  const touchWalk = async (dir) => {
+    let ds; try { ds = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const d of ds) {
+      const p = path.join(dir, d.name);
+      if (d.isDirectory()) { await breathe(); await touchWalk(p); }
+      else if (d.name.endsWith(".go")) {
+        try { fs.utimesSync(p, stamp, stamp); } catch {}
+        n++;
+        await breathe();
+        if ((n & 255) === 0) beat(n, "switch");
+      }
+    }
+  };
+  await touchWalk(libGuile);
 }
 
 /** 这条链还要多少空间（压缩包 + 解开后的大小，留 10%）：暂存区里大小对得上的压缩包不再重复要（0.6.9 审计 #186） */
@@ -257,12 +336,11 @@ async function modRunInstall(mj, m, base, job) {
   if (job.cancelled) throw new Error("cancelled");
   // 解包阶段没有可靠的字节进度：不画永远 0% 的条（0.6.9 审计 195-I.8），解完按清单给总量
   job.phase = "verifying"; job.done = 0; job.total = 0;
-  fs.rmSync(tree, { recursive: true, force: true });
+  await rmTreeBatched(tree);
   fs.mkdirSync(tree, { recursive: true });
   // 解之前按目录查（同组件包）：MANIFEST 解完才核，经包内软链或 .. 写到暂存区外面的条目那时已经落地了（11-03 审查 L-8）
   try {
-    const list = await new Promise((ok, no) => execFile(path.join(PREFIX, "bin", "tar"), ["-tzv", "--quoting-style=c", "-f", gz],
-      { maxBuffer: 256 << 20 }, (e, out) => e ? no(e) : ok(String(out))));
+    const list = await modTarList(job, gz);
     const bad = archiveProblem(parseTarListing(list));
     if (bad) throw new Error(tz("这个压缩包里有条目会写到包外面（{p}），为安全起见不解开", { p: String(bad.name).slice(0, 200) }));
     await compRun(job, path.join(PREFIX, "bin", "tar"), ["-xzf", gz, "-C", tree]);
@@ -280,26 +358,35 @@ async function modRunInstall(mj, m, base, job) {
   }
   // 搬进去：.ok 最后写，中途被打断就是「没装」，重装会覆盖、卸载按 FILES 删
   job.phase = "installing";
-  fs.rmSync(path.join(dirOf(m), ".ok"), { force: true });
-  const skipped = modMoveIn(path.join(tree, "usr"));
-  if (skipped.length) log(`[mod] ${m.id}：${skipped.length} 个路径和已有目录冲突，没放：${skipped.slice(0, 5).join(", ")}`);
-  const fr = path.join(dirOf(m), "first-run.sh");
-  if (fs.existsSync(fr)) {
-    try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); }
-    catch (e) {
-      if (job.cancelled) throw new Error("cancelled");
-      // first-run 失败不能写 .ok：以前照样写，模块显示已装但没有配置，也没有重试入口（0.6.9 审计 200-14-06）。
-      // 不写 .ok 就是「没装」，重装会再跑一遍
-      throw new Error(tz("模块「{name}」的首次配置没跑完（{err}），再装一次会重试", { name: (m.name && m.name.zh) || m.id, err: String(e.message).slice(0, 200) }));
+  const hasGuile = m.id === "lib-guile" || man.some((e) => e.rel.startsWith("lib/guile/") || e.rel.startsWith("share/guile/")) || fs.existsSync(path.join(tree, "usr", "lib", "guile"));
+  const heart = modHeart(m.id);
+  heart.beat(0, "switch");
+  try {
+    fs.rmSync(path.join(dirOf(m), ".ok"), { force: true });
+    const skipped = await modMoveIn(path.join(tree, "usr"), "", [], heart.beat);
+    if (skipped.length) log(`[mod] ${m.id}：${skipped.length} 个路径和已有目录冲突，没放：${skipped.slice(0, 5).join(", ")}`);
+    const fr = path.join(dirOf(m), "first-run.sh");
+    if (fs.existsSync(fr)) {
+      try { await compRun(job, path.join(PREFIX, "bin", "sh"), [fr]); }
+      catch (e) {
+        if (job.cancelled) throw new Error("cancelled");
+        // first-run 失败不能写 .ok：以前照样写，模块显示已装但没有配置，也没有重试入口（0.6.9 审计 200-14-06）。
+        // 不写 .ok 就是「没装」，重装会再跑一遍
+        throw new Error(tz("模块「{name}」的首次配置没跑完（{err}），再装一次会重试", { name: (m.name && m.name.zh) || m.id, err: String(e.message).slice(0, 200) }));
+      }
     }
+    if (hasGuile) await touchGuileGo(heart.beat);
+    fs.writeFileSync(path.join(dirOf(m), ".ok"), JSON.stringify({ sha256: m.gz.sha256, at: Date.now() }) + "\n");
+    await rmTreeBatched(tree, (n) => heart.beat(n, "switch"));
+    fs.rmSync(gz, { force: true });
+  } finally {
+    heart.clear();
   }
-  fs.writeFileSync(path.join(dirOf(m), ".ok"), JSON.stringify({ sha256: m.gz.sha256, at: Date.now() }) + "\n");
-  fs.rmSync(tree, { recursive: true, force: true });
-  fs.rmSync(gz, { force: true });
 }
 
-/** 暂存区的 usr/ 逐个搬进 $PREFIX。已有同名文件直接换掉：同一快照里共用的小包内容一样；pkg 先装过的以模块为准 */
-function modMoveIn(stageUsr, rel = "", skipped = []) {
+/** 暂存区的 usr/ 逐个搬进 $PREFIX。已有同名文件直接换掉：同一快照里共用的小包内容一样；pkg 先装过的以模块为准。
+ *  分批让出事件循环并写看门狗心跳，避免大模块搬移时事件循环阻塞被杀 */
+async function modMoveIn(stageUsr, rel = "", skipped = [], beat = () => {}, state = { n: 0 }) {
   for (const d of fs.readdirSync(path.join(stageUsr, rel), { withFileTypes: true })) {
     const r = rel ? rel + "/" + d.name : d.name;
     const src = path.join(stageUsr, r), dst = path.join(PREFIX, r);
@@ -307,11 +394,15 @@ function modMoveIn(stageUsr, rel = "", skipped = []) {
     if (d.isDirectory()) {
       if (st && !st.isDirectory()) { skipped.push(r); continue; }
       if (!st) fs.mkdirSync(dst, { recursive: true });
-      modMoveIn(stageUsr, r, skipped);
+      await breathe();
+      await modMoveIn(stageUsr, r, skipped, beat, state);
       continue;
     }
     if (st && st.isDirectory()) { skipped.push(r); continue; }
     fs.renameSync(src, dst);
+    state.n++;
+    await breathe();
+    if ((state.n & 255) === 0) { beat(state.n, "move"); await new Promise((r2) => setImmediate(r2)); }
   }
   return skipped;
 }
@@ -326,8 +417,8 @@ function modCancel(id) {
 }
 
 // ── 卸 ────────────────────────────────────────────────────────────────
-/** 卸 id；它依赖的共享层没有别的已装模块在用时一并卸掉 */
-function modRemove(id) {
+/** 卸 id；它依赖的共享层没有别的已装模块、组件或 pkg 在用时一并卸掉 */
+async function modRemove(id) {
   if (!PREFIX) return { ok: false, message: "only available in cccodroid" };
   const mj = modulesInfo();
   if (!mj) return { ok: false, message: tz("当前是整包工具包，没有模块可卸") };
@@ -340,36 +431,60 @@ function modRemove(id) {
   const dep = modDependents(mj, id);
   if (dep.modules.length || dep.components.length || dep.pkgs.length) return { ok: false, usedBy: dep, message: tz("{names} 要用它，先卸载那些", { names: [...dep.modules, ...dep.components, ...dep.pkgs.map((n) => "pkg " + n)].join("、") }) };
   const gone = [id];
+  const ignore = new Set([id]);
   for (const l of (m.deps || []).map((d) => blockOf(mj, d)).filter((b) => b && b.kind === "shared" && modInstalled(mj, b.id))) {
-    const still = (mj.modules || []).some((o) => o.id !== id && o.kind === "module" && (o.deps || []).includes(l.id) && modInstalled(mj, o.id));
-    if (!still) gone.push(l.id);
+    const stillMod = (mj.modules || []).some((o) => o.id !== id && o.kind === "module" && (o.deps || []).includes(l.id) && modInstalled(mj, o.id));
+    if (stillMod) continue;
+    // 共享层可能被已装组件或 pkg 单独依赖（如卸 android 时仍有组件/pkg 用 lib-openjdk-21）：有依赖就保留共享层
+    const ldep = modDependents(mj, l.id, ignore);
+    if (ldep.components.length || ldep.pkgs.length) {
+      log(`[mod] 保留共享运行库 ${l.id}（仍被 ${[...ldep.components, ...ldep.pkgs.map((x) => "pkg " + x)].join("、")} 使用）`);
+      continue;
+    }
+    gone.push(l.id);
   }
   // 还要留下的：其余已装块的路径 + 组件要用的 + pkg 装的
   const keep = new Set();
   for (const o of mj.modules || []) if (!gone.includes(o.id) && modInstalled(mj, o.id)) for (const r of filesOf(o)) keep.add(r);
   for (const [cid, rec] of compRecords()) for (const r of compNeeds(cid, rec)) keep.add(r);
   for (const p of Object.values(pkgRecords())) for (const r of (p && p.files) || []) keep.add(r);
+  const removal = { phase: "removing", finished: false };
+  MOD_JOBS.set(id, removal);
+  const heart = modHeart(id);
+  heart.beat(0, "switch");
   let n = 0;
-  for (const g of gone) {
-    const b = blockOf(mj, g), files = filesOf(b);
-    if (!files.length) { log(`[mod] ${g} 没有 FILES，跳过删除`); continue; }
-    fs.rmSync(path.join(dirOf(b), ".ok"), { force: true });         // 先摘 .ok：删到一半被打断就是「没装」
-    const dirs = new Set();
-    for (const r of files) {
-      if (keep.has(r)) continue;
-      try { fs.unlinkSync(path.join(PREFIX, r)); n++; } catch {}
-      for (let d = path.dirname(r); d && d !== "."; d = path.dirname(d)) dirs.add(d);
-      // Python 运行时生成的 .pyc 不在清单里，跟着 .py 删
-      if (r.endsWith(".py")) {
-        const pc = path.join(PREFIX, path.dirname(r), "__pycache__"), stem = path.basename(r, ".py") + ".";
-        try { for (const f of fs.readdirSync(pc)) if (f.startsWith(stem) && f.endsWith(".pyc")) fs.unlinkSync(path.join(pc, f)); } catch {}
-        dirs.add(path.join(path.dirname(r), "__pycache__"));
+  try {
+    for (const g of gone) {
+      const b = blockOf(mj, g), files = filesOf(b);
+      if (!files.length) { log(`[mod] ${g} 没有 FILES，跳过删除`); continue; }
+      fs.rmSync(path.join(dirOf(b), ".ok"), { force: true });         // 先摘 .ok：删到一半被打断就是「没装」
+      const dirs = new Set();
+      for (const r of files) {
+        if (keep.has(r)) continue;
+        try { fs.unlinkSync(path.join(PREFIX, r)); n++; } catch {}
+        for (let d = path.dirname(r); d && d !== "."; d = path.dirname(d)) dirs.add(d);
+        // Python 运行时生成的 .pyc 不在清单里，跟着 .py 删
+        if (r.endsWith(".py")) {
+          const pc = path.join(PREFIX, path.dirname(r), "__pycache__"), stem = path.basename(r, ".py") + ".";
+          try { for (const f of fs.readdirSync(pc)) if (f.startsWith(stem) && f.endsWith(".pyc")) fs.unlinkSync(path.join(pc, f)); } catch {}
+          dirs.add(path.join(path.dirname(r), "__pycache__"));
+        }
+        await breathe();
+        if ((n & 255) === 0) { heart.beat(n, "move"); await new Promise((r2) => setImmediate(r2)); }
+      }
+      await rmTreeBatched(dirOf(b), (k) => heart.beat(n + k, "switch"));
+      const sortedDirs = [...dirs].sort((a, c) => c.length - a.length);
+      for (let i = 0; i < sortedDirs.length; i++) {
+        try { fs.rmdirSync(path.join(PREFIX, sortedDirs[i])); } catch {}
+        if ((i & 255) === 0) { await breathe(); heart.beat(n, "switch"); }
       }
     }
-    fs.rmSync(dirOf(b), { recursive: true, force: true });
-    for (const d of [...dirs].sort((a, c) => c.length - a.length)) { try { fs.rmdirSync(path.join(PREFIX, d)); } catch {} }
+  } finally {
+    heart.clear();
+    removal.finished = true;
+    for (const g of gone) if (MOD_JOBS.get(g) === removal || MOD_JOBS.get(g)?.finished) MOD_JOBS.delete(g);
+    if (MOD_JOBS.get(id) === removal) MOD_JOBS.delete(id);
   }
-  for (const g of gone) MOD_JOBS.delete(g);
   log(`[mod] 已卸载 ${gone.join("、")}（删 ${n} 个路径）`);
   return { ok: true, removed: gone };
 }
@@ -384,9 +499,9 @@ export async function routeModules(req, res, u, p) {
   if (!/^[a-z0-9-]{1,40}$/.test(id)) return sendJson(res, 400, { ok: false, message: "bad id" });
   if (p === "/api/devkit/modules/install") return sendJson(res, 200, await modInstall(id));
   if (p === "/api/devkit/modules/cancel") return sendJson(res, 200, modCancel(id));
-  if (p === "/api/devkit/modules/remove") return sendJson(res, 200, modRemove(id));
+  if (p === "/api/devkit/modules/remove") return sendJson(res, 200, await modRemove(id));
   return sendJson(res, 404, { error: "not found" });
 }
 
 // 只给测试用（和 components.mjs 的 _compForTest 一个口径）
-export const _modForTest = { modInstall, modRemove, MOD_JOBS };
+export const _modForTest = { modInstall, modRemove, modCancel, MOD_JOBS };
