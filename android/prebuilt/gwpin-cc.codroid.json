@@ -1,18 +1,18 @@
 {
  "target": "cc.codroid",
- "key": "gwpin3:devkit-2026.10.28:5a0521833f73bd7b8e5fa423ce4f7d96180afbacff9fa9710313bd87fcc64fcd",
+ "key": "gwpin3:devkit-2026.11.21:ee4475e93f44a12867a300bc152ff837153456d1bfbd33d785d0db666fa8c7d7",
  "gw": {
   "node": {
    "src": "bin/node",
-   "sha256": "4f6994c4fadea6a927689b6bc951e255f9721cc39bae9064771028de029a29e5"
+   "sha256": "b512461c088810270d8501e84303f49886ff914d804626366b25d4dcae70c1cf"
   },
   "libtermux-exec-linker-ld-preload.so": {
    "src": "lib/libtermux-exec-linker-ld-preload.so",
    "sha256": "8a2cb26e883feb432f4898fa136a959c9f286b498b037eb012a2cf77ee12591d"
   },
   "libz.so.1": {
-   "src": "lib/libz.so.1.3.2",
-   "sha256": "d4906678656668bc6987ea4ee2805e845e2a1db2cb5ff23f4843e05686c0c69e"
+   "src": "lib/libz.so.1.4",
+   "sha256": "5b537e6531552c0a99f0c35d582df464a608ddcd823a6f35e1aec976f097aea6"
   },
   "libcares.so": {
    "src": "lib/libcares.so",
@@ -20,11 +20,11 @@
   },
   "libsqlite3.so": {
    "src": "lib/libsqlite3.so.3.54.1",
-   "sha256": "13a92874925cab4c05b64d51596731540102b8d194284dbb744a38de9fe7670a"
+   "sha256": "ebab3ed5ac97e8bd590d29b337cb47adda3f3c6402eca8264fdbc3ae6311299c"
   },
   "libffi.so": {
    "src": "lib/libffi.so",
-   "sha256": "de4e5e33eaba7908a04b987c484ced9a585e086875f56bd7afe1a718ce5f14ec"
+   "sha256": "f0a0a03abd0bbbd4ef5bad1136b705b85c57cf8a968d64d787f8a43793e31948"
   },
   "libcrypto.so.3": {
    "src": "lib/libcrypto.so.3",
@@ -34,25 +34,25 @@
    "src": "lib/libssl.so.3",
    "sha256": "da54ebbcac8f65712205b4f05a06b14c5b40165d145dc99bbec5f8f7dd91700a"
   },
-  "libicui18n.so.78": {
-   "src": "lib/libicui18n.so.78.3",
-   "sha256": "38ea82c8323318fdf4f7fa330de243e80948cfe31754459d5225a6ade372ccbe"
+  "libicui18n.so.79": {
+   "src": "lib/libicui18n.so.79.1",
+   "sha256": "45da45dc83a539a37911945b2311c268721260f1015b5a01d96256abd615cdb5"
   },
-  "libicuuc.so.78": {
-   "src": "lib/libicuuc.so.78.3",
-   "sha256": "9fe530d7453c7f0beee848e479c00424ff81ad9bd3e2e96930a92591d9eaf33a"
+  "libicuuc.so.79": {
+   "src": "lib/libicuuc.so.79.1",
+   "sha256": "ecc0b21f6de3f11d24c432b008e687979bbd433c61a569adf3bf874db52baccf"
   },
   "libc++_shared.so": {
    "src": "lib/libc++_shared.so",
    "sha256": "05bef9d3901910c3ff8ab450b03bc8b28383d363a2290f2f7b9aed7331ea6ff7"
   },
-  "libicudata.so.78": {
-   "src": "lib/libicudata.so.78.3",
-   "sha256": "bac9e83922f7a64236bc0efffd9743c2dded119290310b313148531dd8dc288b"
+  "libicudata.so.79": {
+   "src": "lib/libicudata.so.79.1",
+   "sha256": "d0b7b7a7787beaaac796bf565a906f4e8cffcaec15bc4790f8a2d5230335b5a1"
   },
   "libz.so": {
-   "src": "lib/libz.so.1.3.2",
-   "sha256": "d4906678656668bc6987ea4ee2805e845e2a1db2cb5ff23f4843e05686c0c69e"
+   "src": "lib/libz.so.1.4",
+   "sha256": "5b537e6531552c0a99f0c35d582df464a608ddcd823a6f35e1aec976f097aea6"
   }
  },
  "glibc": {
