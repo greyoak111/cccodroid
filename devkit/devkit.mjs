@@ -1237,6 +1237,19 @@ if (cmd === "build" || cmd === "component") {
         if (e.type === "2") { tw.add({ name: clean, type: "2", mode: 0o777, mtime: e.mtime, link: R.swap(Buffer.from(e.link))[0].toString() }); continue; }
         if (e.type === "1") { tw.add({ name: clean, type: "1", mode: e.mode, mtime: e.mtime, link: R.pathOf(e.link) || e.link }); continue; }
         if (e.type !== "0" && e.type !== "7") continue;
+        // 带签名的 phar（文件尾有 GBMB 签名魔数，composer 就是）：动任何字节 PHP 都会以「签名不符」拒跑
+        // （首发 php 模块真机实测抓到）。原样保留、名字加 .phar，另放一个包装脚本在原路径上执行它（Debian 同款做法）；
+        // shebang 不再改写——经 `php xxx.phar` 执行时它只是 PHP 注释，签名完好。
+        if (e.data.length > 32 && e.data.subarray(-4).toString("latin1") === "GBMB") {   // phar 布局：[签名][4 字节算法][GBMB]
+          tw.add({ name: clean + ".phar", type: "0", mode: 0o755, mtime: e.mtime, data: e.data });
+          listing.push("/" + R.to.replace(/^\//, "") + "files/" + clean + ".phar");
+          tw.add({
+            name: clean, type: "0", mode: 0o755, mtime: e.mtime,
+            data: Buffer.from("#!" + R.to + "files/usr/bin/sh\nexec php \"" + R.to + "files/usr/" + clean.replace(/^usr\//, "") + ".phar\" \"$@\"\n"),
+          });
+          files += 2;
+          continue;
+        }
         // zip 类归档要下潜到压缩条目内部再改一遍，flat 替换在里面找不到模式
         const [data, k] = looksLikeZip(clean) ? rewriteZip(e.data, R.swap) : R.swap(e.data);
         if (k) { hit += k; patchedFiles++; }
