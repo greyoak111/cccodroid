@@ -616,6 +616,8 @@ export async function startRun(item) {
   const textOf = (c) => (typeof c === "string" ? c : Array.isArray(c) ? c.filter((x) => x && x.type === "text").map((x) => x.text).join("\n") : "").trim();
   run.bgTasks = 0;             // claude 报的后台任务数（见 feed）
   run.bgList = [];             // 后台任务明细：{ id, type, desc }（shell / 子代理 / monitor / 工作流），界面列出来、可单独停
+  let bgIds = [];              // 完整后台任务 id 列表（不受 bgList 30 条上限影响），用于区分是不是全部由 stop_task 停掉
+  run.stopIds = new Set();     // 用户经 stop_task 主动请求停止的任务 id
   run.replays = 0;
   run.usageTools = new Set();   // 使用统计：本轮见过的工具调用（流式会重复报同一个）
   let subDir = null;
@@ -678,8 +680,28 @@ export async function startRun(item) {
   let ctlN = 0;
   run.setMode = (mode) => { run.permMode = mode; return run.inputOpen && writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "set_permission_mode", mode } }); };
   // 停掉一个后台任务（stop_task 控制请求；claude 停完会再报一次 background_tasks_changed）
-  run.stopTask = (taskId) => run.inputOpen && run.bgList.some((t) => t.id === taskId) &&
-    writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "stop_task", task_id: taskId } }) && (run.stopAsked = true);
+  run.stopTask = (taskId) => {
+    if (!run.inputOpen || !run.bgList.some((t) => t.id === taskId)) return false;
+    if (!writeCtl({ type: "control_request", request_id: "ccapp-" + (++ctlN), request: { subtype: "stop_task", task_id: taskId } })) return false;
+    run.stopIds.add(String(taskId));
+    run.stopAsked = true;
+    return true;
+  };
+  const closeInput = () => {
+    if (!run.inputOpen || run.perms.size) return;
+    run.inputOpen = false;
+    try { child.stdin.end(); } catch {}
+  };
+  const armIdleClose = () => {
+    clearTimeout(run.idleClose);
+    run.idleClose = null;
+    if (run.idle && !run.bgTasks && !run.perms.size && !run.ended && run.inputOpen) {
+      run.idleClose = setTimeout(() => {
+        if (run.idle && !run.bgTasks && !run.perms.size && !run.ended) closeInput();
+      }, run.stopAsked ? 6000 : IDLE_CLOSE_MS);
+      run.idleClose.unref?.();
+    }
+  };
   run.answerPerm = (id, a) => {
     const p = run.perms.get(id);
     if (!p || run.ended || run.aborted) return false;
@@ -701,6 +723,7 @@ export async function startRun(item) {
     }
     if (!writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: resp } })) return false;
     run.perms.delete(id);
+    armIdleClose();
     // 「拒绝并停止」也是停止：这一轮后面排着的别自动发（审查 #49 P2-3）
     if (resp.interrupt) holdLane(run);
     // 超时没答的和用户点了拒绝要分得开：界面上不能把「没人答」说成用户拒绝（FIND-043）
@@ -727,17 +750,28 @@ export async function startRun(item) {
       // 敏感操作再确认（guard/cc-guard.mjs 的 ask）：reason 形如 cccodroid-guard|类别|说明
       const gm = r.decision_reason_type === "hook" && /^cccodroid-guard\|([^|]+)\|(.*)$/s.exec(String(r.decision_reason || ""));
       if (gm) { p.guard = { cat: gm[1].slice(0, 80), what: gm[2].slice(0, 200) }; p.reason = null; }
+      if (!run.inputOpen || run.ended || run.aborted) {
+        log(`${runTag(run)} ⚠️ 收到 ${p.tool} 确认请求但 stdin 已关闭，无法应答（${id}）`);
+        return;
+      }
+      // 主会话在空闲状态直接发起工具确认：先切回忙碌，避免前端把卡片挂到上一轮已收尾的气泡上
+      if (run.idle && !p.agentId) {
+        run.idle = false; resultStale = true; run.stopAsked = false; run.stopIds.clear();
+        emit({ type: "run_busy", startedAt: Date.now() });
+      }
       if (run.unattended) {
         log(`✗ 无人值守，自动拒绝 ${p.tool} ${argLen(p.input)}`);
         (run.denied = run.denied || []).push(p.tool);
         writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: { behavior: "deny",
           message: "This is an unattended scheduled run: nobody can approve this action, so it is denied. Do not retry it; finish with what you can do and say what was blocked." } } });
+        armIdleClose();
         return;
       }
       // 同一轮里这一类敏感操作已经点过允许（比如一连串读屏点按）：别每步都问
       if (p.guard && run.guardOk?.has(guardKey(p))) {
         log(`✓ 敏感操作本轮已允许过，放行 ${p.tool} ${p.guard.cat || ""}`);
         writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: { behavior: "allow", updatedInput: p.input } } });
+        armIdleClose();
         return;
       }
       // 全部放行时 claude 不该再来问；来了（子代理没继承到模式之类）就直接放行，必须由人回答的（AskUserQuestion 等）照问。
@@ -745,6 +779,7 @@ export async function startRun(item) {
       if (run.permMode === "bypassPermissions" && !p.interactive && !HUMAN_TOOLS.has(p.tool) && !p.guard) {
         log(`✓ 全部放行，自动允许 ${p.tool}${p.agentId ? "（子代理）" : ""} ${argLen(p.input)}`);
         writeCtl({ type: "control_response", response: { subtype: "success", request_id: id, response: { behavior: "allow", updatedInput: p.input } } });
+        armIdleClose();
         return;
       }
       run.perms.set(id, p);
@@ -765,12 +800,7 @@ export async function startRun(item) {
       log(`${runTag(run)} ↩ 不支持的控制请求 ${String(r.subtype || "?")}（${id}），回了 error`);
       writeCtl({ type: "control_response", response: { subtype: "error", request_id: id, error: `unsupported: ${r.subtype}` } });
     }
-  };
-
-  const closeInput = () => {
-    if (!run.inputOpen || run.perms.size) return;
-    run.inputOpen = false;
-    try { child.stdin.end(); } catch {}
+    armIdleClose();
   };
 
   // lastResult 只证明「它那一轮」答完了：后台回报 / 插话会在同一进程里再起一轮，
@@ -896,7 +926,11 @@ export async function startRun(item) {
     let ev; try { ev = JSON.parse(line); } catch { return; }
     // 上一条事件之后文件可能已经建好：control_request 这类会提前 return 的分支也要先核一次
     noteSessionFile(ev.type);
-    if (ev.type === "control_request") return onControl(ev);
+    if (ev.type === "control_request") {
+      // 控制请求也是 claude 还在干活的信号：撤掉空闲收尾定时器，别在等待确认或刚答完时提前把 stdin 关掉
+      if (run.idleClose) { clearTimeout(run.idleClose); run.idleClose = null; }
+      return onControl(ev);
+    }
     run.meter.feed(ev);
     if (run.slashFlight.length && ((ev.type === "system" && (ev.subtype === "compact_boundary" || (ev.subtype === "status" && ev.status === "compacting"))) ||
         (ev.type === "assistant" && ev.message?.model === "<synthetic>"))) run.slashMark.seen = true;
@@ -917,6 +951,7 @@ export async function startRun(item) {
     }
     if (ev.type === "control_cancel_request") {           // claude 自己撤回了（比如被中断）
       if (run.perms.delete(ev.request_id)) { emit({ type: "perm_resolved", id: ev.request_id, behavior: "cancel" }); publishState(); }
+      armIdleClose();
       return;
     }
     // 后台任务（run_in_background 的命令、后台子代理）：result 之后它们跑完，claude 会在同一进程里接着再跑一轮。
@@ -925,16 +960,18 @@ export async function startRun(item) {
     if (run.idleClose && !(ev.type === "system" && ev.subtype === "background_tasks_changed")) { clearTimeout(run.idleClose); run.idleClose = null; }
     if (ev.type === "system" && ev.subtype === "background_tasks_changed" && Array.isArray(ev.tasks)) {
       if (run.slashFlight.length && ev.tasks.length !== run.bgTasks) run.slashMark.bg = true;
+      const prevBgIds = bgIds;
+      bgIds = ev.tasks.map((t) => String(t.task_id || ""));
       run.bgTasks = ev.tasks.length;
       run.bgList = ev.tasks.slice(0, 30).map((t) => ({ id: String(t.task_id || ""), type: String(t.task_type || ""), desc: String(t.description || "").slice(0, 200) }));
+      if (!run.bgTasks) run.stopAsked = prevBgIds.length > 0 && prevBgIds.every((id) => run.stopIds.has(id));
       if (run.idle && run.bgTasks) emit({ type: "run_idle", bg: run.bgTasks });
       publishState();                    // 明细跟着状态走（runInfo.bgList），断线重连也补得上
       // 空闲中后台任务全没了：任务自己跑完时 claude 会接着起一轮（之后的 result 会关 stdin）；
-      // 被 stop_task 停掉的只排进它的队列、不起新一轮，这一轮就永远挂着：我们发过 stop_task 的等 6 秒没动静就收尾。
-      // 自己跑完的不能这么快关：上下文大时 claude 起新一轮的第一个字常常超过 6 秒，stdin 先关了，那一轮里再起的后台任务
-      // （比如重开一条 SSH 隧道）就成了插话发不进、停止按不动的死局，消息永远排着（11-02 群友）。这种只留个兜底
-      clearTimeout(run.idleClose);
-      if (run.idle && !run.bgTasks) run.idleClose = setTimeout(() => { if (run.idle && !run.bgTasks && !run.ended) closeInput(); }, run.stopAsked ? 6000 : IDLE_CLOSE_MS);
+      // 被 stop_task 停掉的只排进它的队列、不起新一轮，这一轮就永远挂着：最后剩的任务全是我们发过 stop_task 停掉的，才等 6 秒收尾。
+      // 自己跑完的（含：早先停掉过别的任务、最后一个仍是自己跑完的）不能这么快关：上下文大时 claude 起新一轮的第一个字常常超过 6 秒，
+      // stdin 先关了，那一轮里的权限确认与后续后台任务都会报错或死局（11-02 群友）。这种只留个兜底
+      armIdleClose();
     }
     // 空闲中 claude 又动起来了（后台任务回报、或用户发来的新消息）：重新算「生成中」。
     // 只认主会话自己的事件：后台子代理的消息也从这条流出来（带 parent_tool_use_id），它们说话不等于主会话开了新一轮——
@@ -943,6 +980,7 @@ export async function startRun(item) {
     if (run.idle && mainEv && (ev.type === "assistant" || ev.type === "stream_event" || (ev.type === "system" && ev.subtype === "init"))) {
       run.idle = false; resultStale = true;
       run.stopAsked = false;   // 发过的 stop_task 只管那一次空闲；新一轮之后再空闲，照「自己跑完」的兜底算（DeepSeek 复核 中-1）
+      run.stopIds.clear();
       emit({ type: "run_busy", startedAt: Date.now() });
       publishState();
     }

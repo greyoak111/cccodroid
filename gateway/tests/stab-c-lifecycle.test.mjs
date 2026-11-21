@@ -230,7 +230,8 @@ test("FIND-042：收尾后的空壳不再收晚到的增量 / 插话 / 权限卡
   assert.ok(inject.includes("if (!rv || !rv.av) return;"));
   const idle = cut(src04, '      case "run_idle": {', '      case "run_busy": {');
   assert.ok(idle.includes("if (rv && rv.av && !rv.idle)"));
-  assert.ok(src04.includes('case "perm_request": if (runViews.get(ev.runId)?.av) onPermRequest(ev);'));
+  const perm = cut(src04, '      case "perm_request": {', '      case "perm_resolved":');
+  assert.ok(perm.includes("rv ? rv.av :"), "空壳（有 rv 但无 av）不得接收晚到的 perm_request");
 });
 
 test("FIND-007：这一轮在别的会话里跑完，权限卡记录也要收掉（哪怕本视图没有它的 run）", () => {
