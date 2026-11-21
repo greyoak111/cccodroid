@@ -1,0 +1,69 @@
+# 周期检查当前钉住的 devkit base 与 Termux 滚动仓库之间的 ABI 漂移（#206）。
+# 只有共享库 / 运行时出现 ABI-MAJOR 变化时才开/更新告警 issue；PATCH/MINOR/CLI-MAJOR 只归档报告，不阻断任何 PR。
+name: devkit-abi
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'   # 每周一 UTC 02:00（北京时间 10:00）
+  workflow_dispatch:
+    inputs:
+      fail_on_abi_major:
+        description: 出现 ABI-MAJOR 时让 job 标红（发版前自查用）
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020   # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: 检查 devkit base ABI 漂移
+        id: abi
+        run: |
+          node devkit/abi-check.mjs --json abi-report.json --markdown abi-report.md
+          cat abi-report.md >> "$GITHUB_STEP_SUMMARY"
+          MAJOR=$(node -p 'JSON.parse(require("fs").readFileSync("abi-report.json","utf8")).counts.abiMajor')
+          PKGS=$(node -p 'JSON.parse(require("fs").readFileSync("abi-report.json","utf8")).abiMajor.map(x=>x.name+" "+x.baseVersion+"→"+x.repoVersion).join(", ")')
+          echo "major=$MAJOR" >> "$GITHUB_OUTPUT"
+          echo "pkgs=$PKGS" >> "$GITHUB_OUTPUT"
+
+      - name: 归档漂移报告（供跨周对比）
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: devkit-abi-report
+          path: |
+            abi-report.json
+            abi-report.md
+          retention-days: 90
+
+      - name: 出现 ABI-MAJOR 时开或更新去重告警 issue
+        if: steps.abi.outputs.major != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ABI_PKGS: ${{ steps.abi.outputs.pkgs }}
+        run: |
+          # 只维护一条 open 状态的自动告警 issue，避免每周重复轰炸
+          EXISTING=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "[devkit] ABI 漂移告警 in:title" --json number,title --jq '.[0].number // empty')
+          TITLE="[devkit] ABI 漂移告警：${ABI_PKGS}"
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" -R "$GITHUB_REPOSITORY" --title "$TITLE" --body-file abi-report.md
+            echo "已更新现有告警 issue #$EXISTING"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --body-file abi-report.md
+          fi
+
+      - name: 发版前阻断开关
+        if: inputs.fail_on_abi_major && steps.abi.outputs.major != '0'
+        run: |
+          echo "检测到 ABI-MAJOR 漂移（${{ steps.abi.outputs.pkgs }}），请先规划重打 base。"
+          exit 1

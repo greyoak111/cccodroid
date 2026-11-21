@@ -767,6 +767,30 @@ function elfNeeded(b) {
   if (strtab < 0) return [];
   return need.map((x) => { const st = strtab + x; return b.toString("utf8", st, b.indexOf(0, st)); });
 }
+/** ELF64 小端的 DT_SONAME（tag = 14），供 devkit.lock.json 记录共享库 ABI 基线 */
+function elfSoname(b) {
+  if (b.length < 64 || b.readUInt32BE(0) !== 0x7f454c46 || b[4] !== 2 || b[5] !== 1) return null;
+  const phoff = Number(b.readBigUInt64LE(32)), phsz = b.readUInt16LE(54), phn = b.readUInt16LE(56);
+  const loads = []; let dyn = null;
+  for (let i = 0; i < phn; i++) {
+    const o = phoff + i * phsz, type = b.readUInt32LE(o);
+    const off = Number(b.readBigUInt64LE(o + 8)), va = Number(b.readBigUInt64LE(o + 16)), fsz = Number(b.readBigUInt64LE(o + 32));
+    if (type === 1) loads.push({ off, va, fsz });
+    if (type === 2) dyn = { off, fsz };
+  }
+  if (!dyn) return null;
+  const v2o = (va) => { const l = loads.find((x) => va >= x.va && va < x.va + x.fsz); return l ? va - l.va + l.off : -1; };
+  let strtab = -1, soname = -1;
+  for (let o = dyn.off; o + 16 <= dyn.off + dyn.fsz; o += 16) {
+    const tag = Number(b.readBigInt64LE(o)), val = Number(b.readBigUInt64LE(o + 8));
+    if (tag === 0) break;
+    if (tag === 5) strtab = v2o(val);
+    if (tag === 14) soname = val;
+  }
+  if (strtab < 0 || soname < 0 || strtab + soname >= b.length) return null;
+  const end = b.indexOf(0, strtab + soname);
+  return end > strtab + soname ? b.toString("utf8", strtab + soname, end) : null;
+}
 if (cmd === "gwpin") {
   const pinFile = opt("pin") || (() => { throw new Error("--pin <devkit-pin.json> 必填"); })();
   const pinRaw = fs.readFileSync(pinFile), pin = JSON.parse(pinRaw.toString("utf8"));
@@ -1080,6 +1104,7 @@ if (cmd === "build" || cmd === "component") {
     return twAdd(e);
   };
   const lock = [], seenDirs = new Set();
+  const abiSonames = {};           // 包名 → 该包放进 lib/ 或 glibc/lib/ 的共享库 DT_SONAME 列表（供 abi-check 与市场验证继承）
   const alts = new Map();          // 组名 → 优先级最高的那组链接
   const firstRun = [];             // 除 alternatives 外仍要在设备上跑的 postinst
   let patchedFiles = 0, patchedHits = 0, t0 = Date.now();
@@ -1102,6 +1127,7 @@ if (cmd === "build" || cmd === "component") {
       if (rest.length) firstRun.push({ pkg: n, script: R.swap(Buffer.from(sc.postinst))[0].toString() });
     }
     let files = 0, hit = 0;
+    const pkgSonames = new Set();
     const listing = [];          // dpkg 风格的文件清单，见下
     for (const e of readTar(tar)) {
       const name = R.pathOf(e.name);
@@ -1123,9 +1149,14 @@ if (cmd === "build" || cmd === "component") {
       const [data, k] = looksLikeZip(clean) ? rewriteZip(e.data, R.swap) : R.swap(e.data);
       if (k) { hit += k; patchedFiles++; }
       if (/\/ensurepip\/__init__\.py$/.test(clean)) ensurepipVer = (/^_PIP_VERSION = "([^"]+)"/m.exec(data.toString("utf8")) || [])[1] || null;
+      if (!COMP && !BLOCK && /^usr\/(?:glibc\/)?lib\/[^/]+\.so(?:\.[\d.]+)?$/.test(clean)) {
+        const sn = elfSoname(data);
+        if (sn) pkgSonames.add(sn);
+      }
       tw.add({ name: clean, type: "0", mode: e.mode, mtime: e.mtime, data });
       files++;
     }
+    if (pkgSonames.size) abiSonames[n] = [...pkgSonames].sort();
     patchedHits += hit;
     // var/lib/dpkg/info/<包>.list：我们不带 dpkg，但有的 postinst 拿它判断"某个包装没装"。
     // 实测：python 的 postinst 看不到 python-pip.list，就认定 pip 是旧版残留，把刚解出来的 pip 整个删掉。
@@ -1375,11 +1406,17 @@ if (cmd === "build" || cmd === "component") {
     console.log(`\n✓ ${BLOCK.id}：${tarFile}  ${mb(tarInfo.bytes)} → .gz ${mb(gzInfo.bytes)}  ${bins.size} 个命令  用时 ${((Date.now() - t0) / 1000) | 0}s`);
     process.exit(0);
   }
+  const abiRuntime = {};
+  for (const rn of ["python", "nodejs", "perl", "ruby", "openjdk-21", "glibc"]) {
+    const rec = lock.find((p) => p.name === rn);
+    if (rec) abiRuntime[rn] = rec.version;
+  }
   fs.writeFileSync(path.join(OUT, "devkit.lock.json"), JSON.stringify({
     // compat：工具包与 App 外壳的接口版本。改了外壳依赖的布局（路径、first-run 约定…）就加一，旧 App 会拒装新工具包
     target, compat: 1, prefix: R.to + "files/usr", repos: REPOS, snapshot: idx.date,
     tar: { file: path.basename(tarFile), ...tarInfo },
     gz: { file: path.basename(tarFile) + ".gz", ...gzInfo },
+    abi: { runtime: abiRuntime, sonames: abiSonames },
     packages: lock,
   }, null, 2));
   fs.writeFileSync(path.join(OUT, "SBOM.tsv"),
