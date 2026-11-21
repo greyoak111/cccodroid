@@ -1,6 +1,6 @@
 {
  "target": "cc.codroid",
- "key": "gwpin3:devkit-2026.11.21:ee4475e93f44a12867a300bc152ff837153456d1bfbd33d785d0db666fa8c7d7",
+ "key": "gwpin3:devkit-2026.11.21.1:ea0ffd51a62dc9ee854bd924032b2de9f9360431d3247293332ca55d24212b0a",
  "gw": {
   "node": {
    "src": "bin/node",
