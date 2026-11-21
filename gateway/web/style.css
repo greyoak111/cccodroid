@@ -36,7 +36,7 @@
   --strong:#fffdf8; --code-bg:#191817; --think-bg:#232220; --more-bg:#2b2a27; --more-line:#3e3d38;
   --user-bg:#2f2e2b; --user-line:#2f2e2b; --sys-bg:#29262e; --sys-line:#3b3644;
   --tool-bg:#232220; --tool-line:#34332f; --tool-sep:#2e2d2a; --cmd-bg:#25232a;
-  --err-bg:#311d1a; --err-line:#6b3229; --err-fg:#f3b1a6; --active-bg:#2c221d;
+  --err-bg:#311d1a; --err-line:#6b3229; --err-fg:#f3b1a6; --err-btn:#b93228; --on-err:#fff; --active-bg:#2c221d;
   --shadow:rgba(0,0,0,.5); --scrim:rgba(0,0,0,.5);
   --accent-btn:var(--accent);   /* 字压在强调色上的按钮 / 选中块用这个底；默认外观另给深一档（见下） */
   --on-accent:#fff;   /* 强调色底上的字（逐月深色的强调色是白，字得是黑） */
@@ -62,7 +62,7 @@ html[data-theme="light"]{
   --strong:#1a1813; --code-bg:#f3f1ea; --think-bg:#f6f4ee; --more-bg:#eeebe3; --more-line:#dcd7ca;
   --user-bg:#efece4; --user-line:#efece4; --sys-bg:#f5f1fa; --sys-line:#e1d7f0;
   --tool-bg:#f6f4ee; --tool-line:#e5e1d6; --tool-sep:#ebe7dc; --cmd-bg:#f8f5fb;
-  --err-bg:#fcefec; --err-line:#efc0b6; --err-fg:#9e2a1c; --active-bg:#f8ebe4;
+  --err-bg:#fcefec; --err-line:#efc0b6; --err-fg:#9e2a1c; --err-btn:var(--err); --on-err:#fff; --active-bg:#f8ebe4;
   --shadow:rgba(41,38,31,.14); --scrim:rgba(41,38,31,.3);
   color-scheme:light;
 }
@@ -137,8 +137,13 @@ html.tb-still #tb-tools,html.tb-still #tb-tools *,html.tb-still #btn-more path{t
 input,textarea,[contenteditable="true"],#composer input,#composer textarea,#composer [contenteditable="true"],
 #drawer input,#drawer textarea,#drawer [contenteditable="true"]{-webkit-user-select:text;user-select:text}
 #ctxfill{height:100%;width:0;background:linear-gradient(90deg,var(--accent-dim),var(--accent));transition:width .4s}
-/* 快满 / 满了：不换成纯黄纯红那种跳出来的色块，仍从本主题的强调色渐变过去，终点是按每套主题深浅调过的暖色 / 红色 */
-#ctxbar.warn #ctxfill{background:linear-gradient(90deg,var(--accent-dim),var(--ctx-warn))}
+/* 正常态（逐月除外，逐月保留下方灰阶渐变）：实心 --accent-btn 铺条，字按 --p 分两色；只对 #ctxctx 设透明，不扫 #ctxq，保留 #ctxq.warm / .hot 预警色 */
+html:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxfill{background:var(--accent-btn)}
+html:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxtxt{background:linear-gradient(90deg,var(--on-accent) var(--p,0%),var(--fg2) var(--p,0%));-webkit-background-clip:text;background-clip:text;color:transparent}
+html:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxtxt > #ctxctx{color:transparent}
+html[dir="rtl"]:not([data-skin="zhuyue"]) #ctxbar:not(.warn):not(.danger) #ctxtxt{background:linear-gradient(270deg,var(--on-accent) var(--p,0%),var(--fg2) var(--p,0%))}
+/* 快满 / 满了：不换成纯黄纯红那种跳出来的色块，改用按每套主题深浅调过的暖色 / 红色（不用深色 --accent-dim，免得压暗左半段导致 #111 读不清） */
+#ctxbar.warn #ctxfill{background:var(--ctx-warn)}
 #ctxbar.danger #ctxfill{background:linear-gradient(90deg,var(--ctx-warn),var(--ctx-err))}
 /* 这时字一半压在暖色 / 红色上、一半落在空白处：不再加描边衬底（观感差，10-28 用户定去掉），
    改成按进度分界线把同一行字分两色——压在条上的是近黑（各主题暖色 / 红色上对比度都 ≥5:1），空白处是正文色 */
@@ -638,7 +643,7 @@ html.has-right #pages{inset-inline-end:var(--rw)}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--fg2)}
 .btn.ghost.danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,var(--line))}
 .btn.sm{padding:7px 12px;font-size:12.5px;width:auto;margin-top:0}
-.btn.danger{border-color:var(--err-line);color:var(--err-fg)}
+.btn.danger{background:var(--err-bg);border:1px solid var(--err-line);color:var(--err-fg)}
 
 .row-actions{display:flex;gap:8px;margin-bottom:10px;align-items:center}
 #status-box{
@@ -1582,7 +1587,7 @@ mark.jump-hit{background:#f5c54266;color:inherit;border-radius:2px}
 html[data-skin="qiusuo"]{
   --bg:#151517; --bg2:#1b1b1c; --bg3:#232324; --bg4:#2c2c2e; --line:#2f3033;
   --fg:#f9fafb; --fg2:#cfd3d6; --fg3:#81858c;
-  --accent:#5686fe; --accent-dim:#4868b2;
+  --accent:#5686fe; --accent-btn:#3563d6; --accent-dim:#4868b2;
   --ok:#4ed17e; --err:#f25a5a; --warn:#f59e0b; --tool:#7aaaff; --purple:#b49ae0;
   --bar-bg:#151517; --bar-bg2:#151517; --veil:rgba(21,21,23,.86);
   --strong:#ffffff; --code-bg:#1b1b1c; --think-bg:#1b1b1c; --more-bg:#232324; --more-line:#353638;
@@ -2483,7 +2488,7 @@ textarea.pj-field{min-height:89px;resize:vertical;line-height:1.618}
 .pj-sfoot .btn,.pj-smain .btn{width:auto;margin:0}
 .pj-sfoot .btn.sm{padding:8px 16px;font-size:14px;border-radius:10px}
 .pj-sfoot .btn.ghost{color:var(--fg)}
-.btn.danger-fill{background:var(--err);color:#fff}   /* 对比度：固定（红底白字） */
+.btn.danger-fill{background:var(--err-btn);color:var(--on-err)}   /* 对比度：深色用深红或 M3 error/onError，浅色沿用 --err，保证 ≥4.5:1 */
 .pj-frow{margin:var(--g3) 0}
 .pj-frow > label{display:block;font-size:13px;font-weight:600;color:var(--fg2);margin-bottom:var(--g1)}
 .pj-hint{font-size:12px;color:var(--fg3);margin-top:var(--g1);line-height:1.5}
@@ -2765,7 +2770,7 @@ html.pg-on #ctxbar{visibility:hidden}   /* 整页盖着时不露会话的用量�
 html[data-skin="zhuyue"]{
   --bg:#111111; --bg2:#1a1a1a; --bg3:#1f1f1f; --bg4:#292929; --line:#2b2b2b;
   --fg:#f2f2f2; --fg2:#bdbdbd; --fg3:#7a7a7a;
-  --accent:#f2f2f2; --accent-dim:#5a5a5a; --on-accent:#111111; --zy-blue:#3a8ef6;
+  --accent:#f2f2f2; --accent-dim:#5a5a5a; --on-accent:#111111; --zy-blue:#3a8ef6; --zy-on-blue:#111111;
   --ok:#3ecf7a; --err:#f25a5a; --warn:#f0a020; --tool:#4a95f7; --purple:#a78bfa;
   --bar-bg:#111111; --bar-bg2:#111111; --veil:rgba(17,17,17,.86);
   --strong:#ffffff; --code-bg:#1a1a1a; --think-bg:#1a1a1a; --more-bg:#1f1f1f; --more-line:#333333;
@@ -2778,7 +2783,7 @@ html[data-skin="zhuyue"]{
 html[data-skin="zhuyue"][data-theme="light"]{
   --bg:#ffffff; --bg2:#f5f5f5; --bg3:#f0f0f0; --bg4:#e8e8e8; --line:#eeeeee;
   --fg:#141414; --fg2:#5c5c5c; --fg3:#888888;
-  --accent:#141414; --accent-dim:#cfcfcf; --on-accent:#ffffff; --zy-blue:#2b80f7;
+  --accent:#141414; --accent-dim:#cfcfcf; --on-accent:#ffffff; --zy-blue:#2b80f7; --zy-on-blue:#111111;
   --ok:#16a34a; --err:#dc2626; --warn:#b45309; --tool:#2b80f7; --purple:#7650c0;
   --bar-bg:#ffffff; --bar-bg2:#ffffff; --veil:rgba(255,255,255,.88);
   --strong:#000000; --code-bg:#f7f7f7; --think-bg:#f7f7f7; --more-bg:#f0f0f0; --more-line:#e5e5e5;
@@ -2861,9 +2866,10 @@ html[data-skin="goucheng"] :is(input[type=text],input[type=search],input[type=ur
 html[data-skin="goucheng"] :is(#pages,#set-ov) select{border-radius:0;border-color:var(--gc-ink)}
 /* 按钮：实心错位投影，按下往投影方向落 2px（只动 transform） */
 html[data-skin="goucheng"] .side-new{border:2px solid var(--gc-ink);box-shadow:3px 3px 0 var(--gc-hard)}
-html[data-skin="goucheng"] .btn{border-radius:0;border:2px solid var(--gc-ink);box-shadow:3px 3px 0 var(--gc-hard);transition:transform .08s,box-shadow .08s}
+html[data-skin="goucheng"] .btn,html[data-skin="goucheng"] :is(#pages,#set-ov) .btn{border-radius:0;border:2px solid var(--gc-ink);box-shadow:3px 3px 0 var(--gc-hard);transition:transform .08s,box-shadow .08s}
 html[data-skin="goucheng"] .btn:active{opacity:1;transform:translate(2px,2px);box-shadow:1px 1px 0 var(--gc-hard)}
-html[data-skin="goucheng"] .btn.ghost{border-color:var(--gc-ink);color:var(--fg)}
+html[data-skin="goucheng"] .btn.ghost:not(.danger),html[data-skin="goucheng"] :is(#pages,#set-ov) .btn.ghost:not(.danger){border-color:var(--gc-ink);color:var(--fg)}
+html[data-skin="goucheng"] .btn.ghost.danger,html[data-skin="goucheng"] :is(#pages,#set-ov) .btn.danger{border-color:var(--err);color:var(--err)}
 html[data-skin="goucheng"] :is(#pages,#set-ov) .btn.sm{border-radius:0}
 /* 分段：墨线槽，选中的一格是斜切红块 */
 html[data-skin="goucheng"] .seg{border-radius:0;background:transparent;border:1.5px solid var(--gc-ink);padding:1px}
@@ -2938,9 +2944,9 @@ html[data-skin="shise"] :is(.nav-item,.sr-item){border-radius:999px}
 html[data-skin="shise"] .nav-item.on{background:var(--ss-sc);color:var(--ss-on-sc)}
 html[data-skin="shise"] .sr-item.on{background:var(--ss-sc);color:var(--ss-on-sc)}
 /* 按钮：实心主色胶囊；ghost 当浅色按钮（次要色容器）；危险的保留红字 */
-html[data-skin="shise"] .btn{border-radius:999px}
-html[data-skin="shise"] .btn.ghost{background:var(--ss-sc);border-color:transparent;color:var(--ss-on-sc)}
-html[data-skin="shise"] .btn.ghost.danger{background:var(--err-bg);color:var(--err-fg)}
+html[data-skin="shise"] .btn,html[data-skin="shise"] :is(#pages,#set-ov) .btn{border-radius:999px}
+html[data-skin="shise"] .btn.ghost,html[data-skin="shise"] :is(#pages,#set-ov) .btn.ghost{background:var(--ss-sc);border-color:transparent;color:var(--ss-on-sc)}
+html[data-skin="shise"] .btn.ghost.danger,html[data-skin="shise"] :is(#pages,#set-ov) .btn.ghost.danger{background:var(--err-bg);border-color:transparent;color:var(--err-fg)}
 /* 分段：M3 segmented button —— 外框描一圈 outline，选中段铺次要色容器 */
 html[data-skin="shise"] .seg{background:transparent;border:1px solid var(--ss-outline);border-radius:999px;padding:0;overflow:hidden}
 html[data-skin="shise"] .seg button{border-radius:0;padding:5px 10px}
@@ -3084,7 +3090,7 @@ html[data-theme="light"] .lmap{--lm-track:#c4c4c4;--lm-grid:#f4f4f4}
 .lt-panel .lt-note{font-size:12px;color:var(--fg3);margin-top:4px}
 .lt-panel .lt-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
 .lt-panel .lt-btns button{border:1px solid var(--line);background:none;color:var(--fg2);border-radius:8px;padding:5px 12px;font-size:12.5px;cursor:pointer}
-.lt-panel .lt-btns button.pri{background:var(--zy-blue,var(--accent));border-color:transparent;color:#fff}
+.lt-panel .lt-btns button.pri{background:var(--zy-blue,var(--accent-btn));border-color:transparent;color:var(--zy-on-blue,var(--on-accent))}
 .lt-panel .lt-btns button:active{opacity:.8}
 /* 窄屏：项目条独占一行，「怎么看 / 补档 / 显示杂项」换到下一行，长语言也不出屏 */
 @media (max-width:599px){
@@ -3605,7 +3611,8 @@ html[data-skin="goucheng"] #bridge-config-panel .bc-card{box-shadow:4px 4px 0 va
 .sr-only{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 /* L.2 图片查看器恒为黑底：浅色主题下说明文字和按钮也要用浅色（原先是 --fg2 深灰压在黑底上） */
 #lightbox-cap{color:#e9e4d8}
-#lightbox .btn.ghost{color:#f2eee5;border-color:#7a7469}
+#lightbox .btn.ghost{background:rgba(255,255,255,.12);color:#f2eee5;border-color:#7a7469;box-shadow:none}
+#lightbox .btn.ghost:active{background:rgba(255,255,255,.22)}
 /* L.3 RTL 下返回箭头、设置分类箭头要镜像 */
 html[dir="rtl"] #set-back svg,html[dir="rtl"] .pj-back svg,html[dir="rtl"] .set-cats .chev{transform:scaleX(-1)}
 /* L.4 RTL 下权限菜单文字靠右（原规则写死 text-align:left） */
@@ -3637,7 +3644,7 @@ html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270
 .fs-crumbs .crumb .ui-i{width:14px;height:14px;vertical-align:-2px;margin-inline-end:3px}
 .fs-chkmark{flex:0 0 18px;height:18px;border:1.5px solid var(--fg3);border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;line-height:1}
 .fs-item.picked .fs-chkmark{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-#fs-multi.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+#fs-multi.on{background:var(--accent-btn);color:var(--on-accent);border-color:var(--accent-btn)}
 .fs-job{display:flex;align-items:center;gap:8px;flex:0 0 auto}
 .fs-job .tiny{margin:0;flex:0 0 auto}
 .arc-form{padding-bottom:calc(var(--safe-b, 0px) + 12px)}
