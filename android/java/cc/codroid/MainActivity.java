@@ -514,9 +514,10 @@ public class MainActivity extends Activity {
 
     /** 白名单以外的特权命令执行前问一句（见 Priv.ask / PrivRules）：关掉、按返回都算拒绝。
      *  按钮一秒后才能点，盖在上面的窗口挡着时不收触摸 —— 防止脚本抢在用户前面把「允许」点掉 */
-    private void confirmPriv(String id, String cmd, String who, boolean trustable, boolean sess, boolean noAskBox, boolean apk) {
+    private void confirmPriv(String id, String cmd, String who, boolean trustable, boolean sess, String kind, boolean noAskBox, boolean apk) {
         if (id == null) return;
-        boolean clip = Tr.t("设备工具：读取剪贴板").equals(cmd);
+        boolean clipGet = "clip_get".equals(kind) || Tr.t("设备工具：读取剪贴板").equals(cmd),
+            clipSet = "clip_set".equals(kind), openUrl = "url".equals(kind);
         // 发起方是按对方进程的环境变量认的，对方能伪造：只作参考
         String by = "claude".equals(who) ? "Claude" : "terminal".equals(who) ? Tr.t("终端") : "cc-mem".equals(who) ? "cc-mem" : "gateway".equals(who) ? Tr.t("cccodroid 网关接口（Claude 也能调用）") : Tr.t("不明程序");
         // 设置页打开「特权命令免确认」：整段是免责说明，标题和按钮换成对应的说法。按 Priv 给的来路认，不看正文（审查 0601 高-2）；
@@ -537,14 +538,20 @@ public class MainActivity extends Activity {
         }
         final boolean[] said = { false };
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this)
-            .setTitle(clip ? Tr.t("允许读取剪贴板？") : apk ? Tr.t("安装这个应用？") : Tr.t("允许执行这条特权命令？"))
-            .setMessage(Tr.t("发起方（自报，仅供参考）：") + by + "\n\n" + (clip ? Tr.t("剪贴板里可能有你从别的应用复制的密码、验证码。不是你让 Claude 读的就拒绝。")
+            .setTitle(clipGet ? Tr.t("允许读取剪贴板？")
+                : clipSet ? Tr.t("允许写入剪贴板？")
+                : openUrl ? Tr.t("用系统浏览器打开")
+                : apk ? Tr.t("安装这个应用？")
+                : Tr.t("允许执行这条特权命令？"))
+            .setMessage(Tr.t("发起方（自报，仅供参考）：") + by + "\n\n" + (clipGet ? Tr.t("剪贴板里可能有你从别的应用复制的密码、验证码。不是你发起的就拒绝。")
+                : clipSet ? cmd + "\n\n" + Tr.t("确认后这段内容会覆盖系统剪贴板。不是你发起的就拒绝。")
+                : openUrl ? cmd + "\n\n" + Tr.t("确认后会用系统浏览器打开这个地址。不认识就拒绝。")
                 // 装 APK：正文是 Priv 从安装包里读出的应用名、包名、版本和文件位置
                 : apk ? cmd + "\n\n" + Tr.t("点「允许」后还会弹出系统的安装确认。不是你自己点的「安装」、或者不认识这个安装包，就拒绝。")
                 : cmd + "\n\n" + Tr.t("它会以 Shizuku（shell）身份运行，能装卸应用、改权限或系统设置。不认识这条命令就拒绝。")))
             .setNegativeButton(Tr.t("拒绝"), (x, w) -> { said[0] = true; Priv.answer(id, 0); });
         // 这个会话后面的都允许（Claude 发来的才有）：勾上再点「允许」。只在内存里，应用重启就失效
-        final android.widget.CheckBox all = sess && !clip ? new android.widget.CheckBox(this) : null;
+        final android.widget.CheckBox all = sess && !clipGet && !clipSet && !openUrl ? new android.widget.CheckBox(this) : null;
         if (all != null) {
             all.setText(Tr.t("这个会话后面的特权命令都允许，不再逐条问（应用重启后失效）"));
             int pad = (int) (20 * getResources().getDisplayMetrics().density);
@@ -553,7 +560,7 @@ public class MainActivity extends Activity {
             box.addView(all);
             b.setView(box);
         }
-        b.setPositiveButton(Tr.t("允许"), (x, w) -> { said[0] = true; Priv.answer(id, all != null && all.isChecked() ? 3 : 1); });
+        b.setPositiveButton(openUrl ? Tr.t("打开") : Tr.t("允许"), (x, w) -> { said[0] = true; Priv.answer(id, all != null && all.isChecked() ? 3 : 1); });
         // 命令里引用了文件的，不给「不再问」：信任的是文字，文件内容随时能换（见 Priv.trustable）
         if (trustable) b.setNeutralButton(Tr.t("允许，这条命令 10 分钟内不再问"), (x, w) -> { said[0] = true; Priv.answer(id, 2); });
         android.app.AlertDialog d = b.create();
@@ -585,7 +592,7 @@ public class MainActivity extends Activity {
         else if (ACTION_FACTORY_RESET.equals(a)) askFactoryReset();
         else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false));
         else if (ACTION_CONSENT.equals(a)) Consent.runNext(this);
-        else if (ACTION_PRIV_OK.equals(a)) confirmPriv(i.getStringExtra("id"), i.getStringExtra("cmd"), i.getStringExtra("who"), i.getBooleanExtra("trust", false), i.getBooleanExtra("sess", false), "noask".equals(i.getStringExtra("kind")), "apk".equals(i.getStringExtra("kind")));
+        else if (ACTION_PRIV_OK.equals(a)) confirmPriv(i.getStringExtra("id"), i.getStringExtra("cmd"), i.getStringExtra("who"), i.getBooleanExtra("trust", false), i.getBooleanExtra("sess", false), i.getStringExtra("kind"), "noask".equals(i.getStringExtra("kind")), "apk".equals(i.getStringExtra("kind")));
         else if (Notify.ACTION_OPEN.equals(a)) openSession(i.getStringExtra("session"));
     }
 

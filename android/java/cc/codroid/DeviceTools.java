@@ -275,7 +275,7 @@ final class DeviceTools {
         return out.get();
     }
 
-    private static JSONObject clipRead(Context c) throws Exception {
+    static JSONObject clipRead(Context c) throws Exception {
         String s = onMain(() -> {
             ClipboardManager cm = c.getSystemService(ClipboardManager.class);
             ClipData d = cm.getPrimaryClip();
@@ -288,7 +288,7 @@ final class DeviceTools {
         return new JSONObject().put("ok", true).put("text", clip(s, 20000));
     }
 
-    private static JSONObject clipWrite(Context c, JSONObject a) throws Exception {
+    static JSONObject clipWrite(Context c, JSONObject a) throws Exception {
         String text = a.optString("text", "");
         // 剪贴板走 Binder，内容过大系统直接抛异常；也别让一段巨量文字把剪贴板占住（审查 10-30 第九份 安卓低12）
         if (text.length() > 200000) return fail(Tr.f("太长了（{0} 字），剪贴板一次最多放 20 万字", text.length()));
@@ -309,6 +309,12 @@ final class DeviceTools {
             out.put(new JSONObject().put("label", label).put("package", pkg));
         }
         return new JSONObject().put("ok", true).put("apps", out);
+    }
+
+    /** 终端 / CLI 桥接（xdg-open / termux-open-url）：只放行 http / https，走与设备工具同一套前景/通知拉起逻辑 */
+    static JSONObject openUrl(Context c, String u) throws Exception {
+        if (u == null || !u.matches("(?i)^https?://.+")) return fail(Tr.t("url 只收 http / https"));
+        return launch(c, new Intent(Intent.ACTION_VIEW, Uri.parse(u)), u);
     }
 
     /** 固定几类「打开并预填」：不收任意 action，免得模型拼出拨打、静默发送之类的东西 */

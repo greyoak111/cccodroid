@@ -500,7 +500,13 @@
     if (!a) return;
     const b = a.xt.buffer.active, lines = [];
     TERM.tvCut = b.length > 3000;   // 只导出最后 3000 行：复制提示不能说「已复制全部」（195-H.3）
-    for (let i = Math.max(0, b.length - 3000); i < b.length; i++) lines.push(b.getLine(i)?.translateToString(true) ?? "");
+    for (let i = Math.max(0, b.length - 3000); i < b.length; i++) {
+      const ln = b.getLine(i);
+      const s = ln?.translateToString(true) ?? "";
+      // 自动折行拼回同一行：长 OAuth 网址或命令在文本视图里不会被换行符劈成两截
+      if (ln?.isWrapped && lines.length) lines[lines.length - 1] += s;
+      else lines.push(s);
+    }
     while (lines.length && !lines[lines.length - 1]) lines.pop();
     $("term-text-pre").textContent = lines.join("\n");
     $("term-textview").classList.remove("hidden");
