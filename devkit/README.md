@@ -47,6 +47,25 @@ node devkit.mjs build --target <10字符包名> [--groups ...]     # 产出 out/
 `node scripts/publish-devkit.mjs devkit-YYYY.MM.DD[.n] --why "这版改了什么"`：打 tag → 等 CI → 验签并核对 Release（每个 gz 都在、大小对；`devkit.json` 点名的包都进了清单；和上一版比少了包就停）→ 改钉 App（`devkit-sources.txt`、`devkit-pin.json`、本文的包数）→ 市场 `bases.json` 加一行并等组件重打 → 重打预置浏览器、签索引、上传 → 等镜像同步并逐字节核对 → 打预览包 → main 合到 test → 全链对账。
 中途失败再跑同一条命令，从没做完的那步接着来；`--check` 只对账不改东西。`devkit.json` 的分组里要写实际的包名，不写虚包（`man` 要写成提供它的 `mandoc`），否则对账认不出。
 
+## ABI 漂移检查与重打触发条件
+
+base 是冻结快照，Termux 仓库持续滚动。运行以下命令（或查看每周一自动运行的 `devkit-abi` 工作流）核对漂移：
+
+```sh
+node devkit/abi-check.mjs                                  # 自动读取 devkit-pin.json 对应的 devkit.lock.json 并与 Termux 仓库对比
+node devkit/abi-check.mjs --lock path/to/devkit.lock.json  # 指定任意底座锁文件
+node devkit/abi-check.mjs --fail-on-abi-major              # 发版前检查：出现 ABI-MAJOR 时退出码 1
+```
+
+分级规则定义在 `devkit/abi-policy.json`：
+
+| 级别 | 含义 | 是否需要重打 base |
+|---|---|---|
+| `ABI-MAJOR` | 共享库 SOVERSION / SONAME 变化（如 `libicu 78.3 → 79.1`、`openssl` / `libllvm` / `ffmpeg` 主版本、`glibc` 次版本）或语言运行时 ABI 变化（`python` 次版本、`nodejs` 主版本）。若 `devkit.lock.json` 含 `abi.sonames`，会下载漂移 `.deb` 实测 ELF `DT_SONAME` 消除误报 | **需要重打**（否则依赖这些库的新组件会链接失败；建议把积压的小修正合并进同一次重打） |
+| `REMOVED` | base 里的包在 Termux 仓库索引中已下线/改名 | **需人工确认**（检查是否被替代或影响组件依赖） |
+| `CLI-MAJOR` | 纯命令行工具主版本升级（如 `npm 11 → 12`、`gh`、`rg`） | **不必单独重打**（留待下次 `ABI-MAJOR` 时一并带入） |
+| `MINOR` / `PATCH` | 共享库或普通包的向后兼容更新 | **不必重打**（仅记录报告，不阻断普通 PR） |
+
 ## 模块（`modules`，cccodroid 0.3.9 起）
 
 工具包按 `devkit.json` 的 `modules` 拆成基础模块 + 若干可选模块，App 里随装随卸：
