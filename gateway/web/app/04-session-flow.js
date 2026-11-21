@@ -84,7 +84,7 @@
       // 第三方接口不报窗口、也没设压缩线：没刻度就只报已用量，不画进度（以前整条藏掉，用量也看不到）
       // 新对话清零时收起，别残留上个会话的数
       if (!state.ctxUsed) {
-        $("ctxctx").textContent = ""; ctxFill.style.width = "0%";
+        $("ctxctx").textContent = ""; ctxFill.style.width = "0%"; ctxBar.style.setProperty("--p", "0%");
         if (!ctxBar.classList.contains("has-q")) ctxBar.classList.add("hidden");   // 额度速览还挂在这条上就留着
         saveUiState(); return;
       }

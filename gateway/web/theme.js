@@ -179,10 +179,10 @@
     const T = dark
       ? { bg: n(6), bg2: n(10), bg3: n(12), bg4: n(17), c5: n(22), fg: n(90), fg2: nv(80), fg3: nv(62), strong: n(98), line: nv(30), ov: nv(30), outline: nv(60),
           accent: p(80), onAccent: p(20), pc: pc(30), onPc: p(90), sc: s(30), onSc: s(90), dim: p(40),
-          ok: OK(80), warn: WARN(80), tool: TOOL(80), purple: PURP(80), err: ERR(80), errBg: ERR(25), errLine: ERR(35), errFg: ERR(90) }
+          ok: OK(80), warn: WARN(80), tool: TOOL(80), purple: PURP(80), err: ERR(80), errBg: ERR(25), errLine: ERR(35), errFg: ERR(90), errBtn: ERR(80), onErr: ERR(20), ctxWarn: WARN(80), ctxErr: ERR(80) }
       : { bg: n(98), bg2: n(96), bg3: n(94), bg4: n(92), c5: n(90), fg: n(10), fg2: nv(30), fg3: nv(50), strong: n(4), line: nv(88), ov: nv(80), outline: nv(50),
           accent: p(40), onAccent: "#ffffff", pc: pc(90), onPc: p(10), sc: s(90), onSc: s(10), dim: p(80),
-          ok: OK(40), warn: WARN(45), tool: TOOL(40), purple: PURP(40), err: ERR(40), errBg: ERR(92), errLine: ERR(80), errFg: ERR(25) };
+          ok: OK(40), warn: WARN(45), tool: TOOL(40), purple: PURP(40), err: ERR(40), errBg: ERR(92), errLine: ERR(80), errFg: ERR(25), errBtn: ERR(40), onErr: "#ffffff", ctxWarn: WARN(72), ctxErr: ERR(68) };
     T.tool2 = dark ? s(25) : s(95);   // 斜杠命令卡、系统消息：次要色的浅容器
     return T;
   }
@@ -192,12 +192,12 @@
       `--bg:${T.bg};--bg2:${T.bg2};--bg3:${T.bg3};--bg4:${T.bg4};--line:${T.line}`,
       `--fg:${T.fg};--fg2:${T.fg2};--fg3:${T.fg3};--strong:${T.strong}`,
       `--accent:${T.accent};--accent-btn:${T.accent};--accent-dim:${T.dim};--on-accent:${T.onAccent};--active-bg:${T.sc}`,
-      `--ok:${T.ok};--err:${T.err};--warn:${T.warn};--tool:${T.tool};--purple:${T.purple};--ctx-warn:${T.warn};--ctx-err:${T.err}`,
+      `--ok:${T.ok};--err:${T.err};--warn:${T.warn};--tool:${T.tool};--purple:${T.purple};--ctx-warn:${T.ctxWarn};--ctx-err:${T.ctxErr}`,
       `--bar-bg:${T.bg};--bar-bg2:${T.bg};--veil:${rgba(T.bg, 0.88)}`,
       `--code-bg:${T.bg3};--think-bg:${T.bg2};--more-bg:${T.bg3};--more-line:${T.ov}`,
       `--user-bg:${T.pc};--user-line:${T.pc};--sys-bg:${T.tool2};--sys-line:${T.tool2}`,
       `--tool-bg:${T.bg2};--tool-line:${T.bg2};--tool-sep:${T.bg4};--cmd-bg:${T.tool2}`,
-      `--err-bg:${T.errBg};--err-line:${T.errLine};--err-fg:${T.errFg}`,
+      `--err-bg:${T.errBg};--err-line:${T.errLine};--err-fg:${T.errFg};--err-btn:${T.errBtn};--on-err:${T.onErr}`,
       `--panel:${T.bg2};--input-bg:${T.bg4};--radius:16px`,
       // M3 角色原名，结构覆盖里直接用
       `--ss-pc:${T.pc};--ss-on-pc:${T.onPc};--ss-sc:${T.sc};--ss-on-sc:${T.onSc};--ss-c5:${T.c5};--ss-outline:${T.outline};--ss-ov:${T.ov}`,
