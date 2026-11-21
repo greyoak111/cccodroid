@@ -534,8 +534,20 @@ function unpack(p, deb) {
         const st = fs.statSync(f);
         if (st.nlink > 1) { const b = fs.readFileSync(f); fs.unlinkSync(f); fs.writeFileSync(f, b, { mode: st.mode }); }   // 硬链接拆开，各改各的
         const b = fs.readFileSync(f);
-        const [o, k] = ZIP_EXT.some((e) => r.toLowerCase().endsWith(e)) ? rewriteZip(b) : swap(b);
-        if (k) { fs.writeFileSync(f, o); fs.chmodSync(f, st.mode & 0o7777); patched++; }
+        if (b.length > 32 && b.subarray(-4).toString("latin1") === "GBMB") {
+          // 带签名的 phar（如 composer）：动任何字节 PHP 都会以签名不符拒跑；CLI phar 改名 .phar 并写绝对路径包装脚本，库 phar 原样保留
+          if (b[0] === 0x23 && b[1] === 0x21 && (r.startsWith("bin/") || (st.mode & 0o111) !== 0) && !r.endsWith(".phar")) {
+            const pharRel = r + ".phar", pharAbs = f + ".phar";
+            fs.renameSync(f, pharAbs);
+            fs.chmodSync(pharAbs, 0o755);
+            fs.writeFileSync(f, `#!${TARGET}files/usr/bin/sh\nexec "${TARGET}files/usr/bin/php" "${TARGET}files/usr/${pharRel}" "$@"\n`, { mode: 0o755 });
+            files.push(pharRel);
+            patched++;
+          }
+        } else {
+          const [o, k] = ZIP_EXT.some((e) => r.toLowerCase().endsWith(e)) ? rewriteZip(b) : swap(b);
+          if (k) { fs.writeFileSync(f, o); fs.chmodSync(f, st.mode & 0o7777); patched++; }
+        }
       } else continue;
       files.push(r);
     }

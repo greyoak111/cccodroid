@@ -59,7 +59,17 @@
     $("mod-field").classList.toggle("hidden", !on);
     if (!on) return;
     const items = r.items || [], byId = Object.fromEntries(items.map((m) => [m.id, m]));
-    const nameOf = (id) => esc(pickLang((byId[id] || {}).name) || id);
+    // 多个共享运行库（lib-clang / lib-guile / lib-libllvm / lib-openjdk-21）在 modules.json 里默认同名，按 id 后缀区分
+    const modLabel = (m) => {
+      if (!m) return "";
+      const base = pickLang(m.name) || m.id;
+      if (m.kind === "shared" && /^lib-/.test(m.id) && m.id.length > 4) {
+        const tag = m.id.slice(4);
+        if (!base.includes(tag)) return isZh() ? `${base}（${tag}）` : `${base} (${tag})`;
+      }
+      return base;
+    };
+    const nameOf = (id) => esc(modLabel(byId[id]) || id);
     const inst = items.filter((m) => m.state === "ok");
     $("mod-count").textContent = inst.length + "/" + items.length;
     ext.nMod = items.length; extSub();
@@ -107,7 +117,7 @@
         + btn("remove", m.id, t("卸载"), ' class="btn sm ghost"' + (used.length ? ' data-usedby="' + listOf(used) + '"' : ""));
       const tag = m.required ? `<span class="tag">${ei("lock")}${t("必装")}</span>` : m.kind === "shared" ? `<span class="tag">${t("共享运行库")}</span>`
         : m.state === "ok" && modOff.has(m.id) ? `<span class="tag">${t("已停用")}</span>` : "";
-      return rowItem(esc(pickLang(m.name) || m.id) + tag, '<span class="mono">' + (m.key || []).map(esc).join(" ") + "</span>",
+      return rowItem(esc(modLabel(m) || m.id) + tag, '<span class="mono">' + (m.key || []).map(esc).join(" ") + "</span>",
         '<span class="num">' + size + "</span>" + acts, { more: desc, extra: bar });
     }).join("");
     if (moving && pageOn("ext")) modTimer = setTimeout(() => { if (live()) loadModules(); }, 1500);

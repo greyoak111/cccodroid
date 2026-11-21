@@ -389,7 +389,7 @@ export async function breathe() {
 // 安装心跳的时间戳用开机以来的单调毫秒（/proc/uptime），和安卓侧 SystemClock.elapsedRealtime 同一基准：
 // 用户改系统时间（墙钟跳变）不再让全部心跳提前过期或集体新鲜（复核 P2-9）。字段名 at/phase/boot 与
 // GatewayService.parseBeatAt 的解析口径一致，改字段要两头一起改（复核 P2-14 契约）
-function uptimeMs() {
+export function uptimeMs() {
   try {
     const ms = Math.round(Number(fs.readFileSync("/proc/uptime", "utf8").split(/\s+/)[0]) * 1000);
     if (ms > 0) return ms;
@@ -399,14 +399,14 @@ function uptimeMs() {
 }
 let uptimeFallbackLogged = false;
 /** 开机代号：心跳里带上，重启后的旧心跳在 Java 侧直接判无效（复核 R2-P3-4） */
-function bootId() {
+export function bootId() {
   try { const b = fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(); if (b) return b; } catch {}
   return "";
 }
 
 // 组件安装 / 模块下载 / 自检这些 detached 子进程，网关被 SIGKILL 后会继续写 $PREFIX（0.6.9 审计 195-T.4）。
 // 起的时候落一份运行标记，正常退出删掉；新网关启动时按标记清掉上一任留下的。
-const COMP_RUN_DIR = PREFIX ? path.join(COMP_DIR, ".runs") : "";
+export const COMP_RUN_DIR = PREFIX ? path.join(COMP_DIR, ".runs") : "";
 /** 落一份运行标记；office 的转换子进程也走这里（0.6.9 审计 195-T.4），别另起一套 */
 export function markChild(child, cmd, args) {
   if (!COMP_RUN_DIR || !child.pid) return "";
@@ -991,7 +991,7 @@ if (PREFIX && LIVE) setTimeout(() => { compHealSkills(); compIndex(false).catch(
 
 // 分批递归删一棵树：大组件的暂存 / 备份有几百 MB 几千文件，同步 rm 会占死事件循环被看门狗杀（复核 R2-P2-4）。
 // 删不掉的就留着（下次再清），别为清垃圾卡死。
-async function rmTreeBatched(p, beat = () => {}) {
+export async function rmTreeBatched(p, beat = () => {}) {
   const ents = [];
   (function walk(rel) {
     let ds; try { ds = fs.readdirSync(path.join(p, rel), { withFileTypes: true }); } catch { return; }

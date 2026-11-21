@@ -632,10 +632,25 @@ final class Installer {
     }
 
     static String moduleName(JSONObject m) {
+        String id = m.optString("id");
         JSONObject n = m.optJSONObject("name");
-        if (n == null) return m.optString("id");
-        String s = n.optString(Tr.lang().startsWith("zh") ? "zh" : "en", "");
-        return s.isEmpty() ? n.optString("zh", m.optString("id")) : s;
+        boolean zh = Tr.lang().startsWith("zh");
+        String s = null;
+        if (n != null) {
+            s = n.optString(zh ? "zh" : "en", "");
+            if (s.isEmpty()) s = n.optString("zh", "");
+        }
+        return formatModuleName(id, m.optString("kind"), s, zh);
+    }
+
+    /** 多个共享运行库（lib-clang / lib-guile / lib-libllvm / lib-openjdk-21）默认同名，按 id 后缀区分 */
+    static String formatModuleName(String id, String kind, String base, boolean zh) {
+        String s = (base == null || base.isEmpty()) ? id : base;
+        if ("shared".equals(kind) && id != null && id.startsWith("lib-") && id.length() > 4) {
+            String tag = id.substring(4);
+            if (s != null && !s.contains(tag)) s = zh ? s + "（" + tag + "）" : s + " (" + tag + ")";
+        }
+        return s;
     }
 
     /** 两次换名把新版换上；第二次失败就把旧版换回来 */
