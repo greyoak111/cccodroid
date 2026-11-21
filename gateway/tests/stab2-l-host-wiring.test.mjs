@@ -20,11 +20,13 @@ test("BUG-A01 守护线程不再无界 proc.waitFor，改成有界等待 + 身�
 });
 
 test("BUG-A02 划掉后的空闲查询查完要复核前台与启动代次", () => {
-  assert.ok(gw.includes("synchronized (life) { startSeq++; }"), "onStartCommand 没记启动代次");
+  assert.ok(/synchronized \(life\) \{[^}]*startSeq\+\+;/.test(gw), "onStartCommand 没记启动代次");
   assert.ok(gw.includes("shutdownIfIdle(seen)"), "划掉后的空闲查询没走带复核的停机");
   const body = gw.slice(gw.indexOf("private boolean shutdownIfIdle"), gw.indexOf("public void onDestroy()"));
   assert.ok(body.includes("idleQueryStillValid(MainActivity.appForeground(), seenSeq, startSeq)"),
     "停机前没在一把锁里复核前台与代次");
+  assert.ok(body.includes("shouldFinishStop(stopping, mySeq, startSeq)") && body.includes("stopSelfResult(myStartId)"),
+    "杀网关后未按代次复核并用 stopSelfResult 落停");
   // 复核之后、退出锁才杀进程：别让等锁的主线程跟着等网关收尾
   const killAt = body.indexOf("killGateway();");
   const holdAt = body.indexOf("stopping = true;");
