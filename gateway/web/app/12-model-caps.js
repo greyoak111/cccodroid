@@ -150,8 +150,9 @@
     const paintEff = (levels, now) => {
       const opts = [["", t("默认")], ...levels.map((l) => [l, l])];
       effBox.innerHTML = levels.length
-        ? `<div class="seg mp-seg">${opts.map(([v, l]) => `<button type="button" class="${v === now ? "on" : ""}" data-eff="${esc(v)}">${esc(l)}</button>`).join("")}</div>`
+        ? `<div class="seg-scroll mp-scroll"><div class="seg mp-seg">${opts.map(([v, l]) => `<button type="button" class="${v === now ? "on" : ""}" data-eff="${esc(v)}">${esc(l)}</button>`).join("")}</div></div>`
         : `<span class="tiny">${t("这个模型没有可选的思考强度")}</span>`;
+      effBox.querySelector("button.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
     };
     let effLevels = info.effortLevels || [];
     paintEff(effLevels, info.effort || "");
@@ -200,8 +201,8 @@
       // 正在用的、全局默认的、正在看的那家总要列出来：不然藏了自己在用的那家，用户看不到现在是谁
       const ps = (state.provList || []).filter((p) => (p.usable && !p.hidden) || [curProv(), globalProv(), browse].includes(p.id));
       provWrap.classList.toggle("hidden", ps.length < 2);
-      provBox.innerHTML = `<div class="seg mp-seg mp-provseg">${ps.map((p) =>
-        `<button type="button" class="${p.id === browse ? "on" : ""}${p.id === curProv() ? " cur" : ""}${p.usable ? "" : " off"}" data-prov="${esc(p.id)}">${esc(provLabel(p.id))}</button>`).join("")}</div>` +
+      provBox.innerHTML = `<div class="seg-scroll mp-scroll"><div class="seg mp-seg mp-provseg">${ps.map((p) =>
+        `<button type="button" class="${p.id === browse ? "on" : ""}${p.id === curProv() ? " cur" : ""}${p.usable ? "" : " off"}" data-prov="${esc(p.id)}">${esc(provLabel(p.id))}</button>`).join("")}</div></div>` +
         // 总要列出的那几家可能用不了（没登录的官方账户、没下模型的端侧）：灰掉，看它时说一句
         (ps.some((p) => p.id === browse && !p.usable) ? `<div class="tiny mp-provhint">${esc(t("这一家还没就绪（没登录或没下模型），先到设置里配好"))}</div>` : "") +
         (browse !== curProv() ? `<div class="tiny mp-provhint">${esc(t("点一个模型，这个会话就换到「{name}」", { name: provLabel(browse) }))}</div>` : "");
