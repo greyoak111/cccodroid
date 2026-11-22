@@ -69,13 +69,17 @@ final class Apk {
         return hex.toString();
     }
 
+    private static final java.util.concurrent.atomic.AtomicInteger STAGE_SEQ = new java.util.concurrent.atomic.AtomicInteger();
+
     /** 查看器里点「安装」的那份：先拷进私有缓存再验、再装。验的和装的是同一份，原文件在确认框开着时被换掉也装不进别的 */
     static File stage(Context c, File src) throws IOException {
         File dir = new File(c.getCacheDir(), "apk-install");
+        long cutoff = System.currentTimeMillis() - 10 * 60_000L;
         File[] old = dir.listFiles();
-        if (old != null) for (File o : old) o.delete();     // 上次没走完（进程被杀）留下的
+        // 只清超过 10 分钟的遗留文件，避免并发装包请求删掉另一条正在等用户确认的暂存 APK
+        if (old != null) for (File o : old) if (o.lastModified() < cutoff) o.delete();
         if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException(Tr.t("建不了暂存目录"));
-        File dst = new File(dir, Long.toString(System.currentTimeMillis(), 36) + ".apk");
+        File dst = new File(dir, Long.toString(System.currentTimeMillis(), 36) + "-" + STAGE_SEQ.incrementAndGet() + ".apk");
         java.nio.file.Files.copy(src.toPath(), dst.toPath());
         return dst;
     }
@@ -97,6 +101,7 @@ final class Apk {
         PackageInstaller.SessionParams p = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
         p.setSize(apk.length());
         int id = pi.createSession(p);
+        boolean committed = false;
         try (PackageInstaller.Session s = pi.openSession(id)) {
             try (InputStream in = new FileInputStream(apk); OutputStream out = s.openWrite("base.apk", 0, apk.length())) {
                 byte[] buf = new byte[1 << 16];
@@ -106,6 +111,9 @@ final class Apk {
             Intent i = new Intent(c, Events.class).setAction(Events.ACTION_INSTALLED).putExtra("what", what);
             int fl = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
             s.commit(PendingIntent.getBroadcast(c, id, i, fl).getIntentSender());
+            committed = true;
+        } finally {
+            if (!committed) try { pi.abandonSession(id); } catch (Exception ignored) {}
         }
     }
 }

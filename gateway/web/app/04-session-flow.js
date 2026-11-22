@@ -420,7 +420,8 @@
       calmStatus(t("就绪"));
       if (anchor) return landOnChapter(page, gen, aObj);
       if (fwd) { stick = false; chatEl.scrollTop = 0; }   // 重连时接着原来那一段
-      else { scrollDown(true); if (!seenSessions.has(id)) MO.play(histEl, "mo-in-rise", 1400); }
+      // 长会话不对整棵 #hist 跑 transform+opacity 动画：超过安卓 WebView 合成层纹理上限易触发白屏瓦片（known-issues #9）
+      else { scrollDown(true); if (!seenSessions.has(id) && histEl.scrollHeight <= (window.innerHeight || 900) * 4) MO.play(histEl, "mo-in-rise", 1400); }
       seenSessions.add(id);
     } else {
       const h0 = chatEl.scrollHeight, t0 = chatEl.scrollTop;

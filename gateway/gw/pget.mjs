@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import { spawn } from "node:child_process";
-import { writeAll } from "./bigfile.mjs";
 
 // ── 分段并行下载 ─────────────────────────────────────────────────────
 // 单个连接常被限速（实测 dl.cccodroid.net 单线 2.7 MB/s，4 路并行 14 MB/s）：服务器认 Range、文件又够大时，
@@ -31,13 +30,20 @@ export async function pget({ curl, url, file, total, n = 4, curlArgs = [], onPro
     const segs = [];
     for (let i = 0; i < k; i++) segs.push([from + Math.floor(left * i / k), from + Math.floor(left * (i + 1) / k) - 1, 0]);
     st = { total, segs };
-    fs.writeFileSync(segFile, JSON.stringify(st));
+    await fs.promises.writeFile(segFile, JSON.stringify(st));
   }
-  const fd = fs.openSync(file, fs.existsSync(file) ? "r+" : "w+");
+  // 异步文件句柄写入（走 libuv 线程池，配合 stdout pause/resume 背压）：
+  // 并发下载多个组件时 8–12 路 curl 高速吐块，以前同步 fs.writeSync 会把事件循环堵死 >1.5s，触发宿主 /__proof 超时回 502
+  const fh = await fs.promises.open(file, fs.existsSync(file) ? "r+" : "w+");
+  let saveChain = Promise.resolve();
   try {
-    fs.ftruncateSync(fd, total);
+    await fh.truncate(total);
     const doneBytes = () => total - st.segs.reduce((a, [s, e, p]) => a + (e - s + 1 - p), 0);
-    const save = () => { try { fs.writeFileSync(segFile, JSON.stringify(st)); } catch {} };
+    const save = () => {
+      const snap = JSON.stringify(st);
+      saveChain = saveChain.then(() => fs.promises.writeFile(segFile, snap).catch(() => {}));
+      return saveChain;
+    };
     const kids = new Set();
     const tick = setInterval(() => { save(); onProgress(doneBytes()); if (cancelled()) for (const c of kids) c.kill("SIGKILL"); }, 1000);
     const runSeg = async (seg) => {
@@ -48,29 +54,47 @@ export async function pget({ curl, url, file, total, n = 4, curlArgs = [], onPro
           const c = spawn(curl, ["-fsSL", "--connect-timeout", "15", "--speed-limit", "20480", "--speed-time", "30", ...curlArgs,
             "-r", `${seg[0] + seg[2]}-${seg[1]}`, url], { stdio: ["ignore", "pipe", "pipe"] });
           kids.add(c);
-          let e = "";
+          let e = "", settled = false, queued = seg[2], pending = Promise.resolve();
+          const done = (msg) => { if (settled) return; settled = true; kids.delete(c); resolve(msg); };
           c.stdout.on("data", (b) => {
-            const room = seg[1] - seg[0] + 1 - seg[2];
+            if (fatal || settled) return;
+            const room = seg[1] - seg[0] + 1 - queued;
             const len = Math.min(b.length, room);
-            try {
-              if (len > 0) { writeAll(fd, b.subarray(0, len), seg[0] + seg[2]); seg[2] += len; }
-            } catch (er) {
-              // 写盘失败（ENOSPC/EIO）不能从 data 回调冒出去：网关只接 unhandledRejection，这里会把整个进程带走（#121-2）
-              fatal = true;
-              e = "写盘失败 " + (er.code || er.message);
-              c.kill("SIGKILL");
-              resolve(e);
-              return;
-            }
+            const pos = seg[0] + queued;
+            queued += len;
             if (b.length > room) c.kill("SIGKILL");                   // 服务器多给了（不该发生）：够了就停
+            if (len <= 0) return;
+            c.stdout.pause();
+            pending = pending.then(async () => {
+              if (fatal || settled) return;
+              try {
+                let off = 0;
+                while (off < len) {
+                  const { bytesWritten } = await fh.write(b, off, len - off, pos + off);
+                  if (!bytesWritten) throw new Error("short write");
+                  off += bytesWritten;
+                }
+                seg[2] += len;
+              } catch (er) {
+                // 写盘失败（ENOSPC/EIO）不能冒成未捕获异常把网关带走（#121-2）
+                fatal = true;
+                e = "写盘失败 " + (er.code || er.message);
+                c.kill("SIGKILL");
+                done(e);
+                return;
+              }
+              if (!c.stdout.destroyed) c.stdout.resume();
+            });
           });
           c.stderr.on("data", (d) => { e += d; });
           // curl 起不来（缺失/不可执行）只发 error：不接就是未处理的 error 事件，整个网关跟着退出（#102 04-006）
-          c.on("error", (er) => { kids.delete(c); fatal = true; resolve("curl " + (er.code || er.message)); });
+          c.on("error", (er) => { fatal = true; pending.finally(() => done("curl " + (er.code || er.message))); });
           c.on("close", (code) => {
-            kids.delete(c);
-            if (seg[2] >= seg[1] - seg[0] + 1) return resolve("");
-            resolve(code === 0 ? "连接提前结束" : (e.trim().split("\n").pop() || "curl " + code).replace(/^curl: \(\d+\) /, ""));
+            pending.finally(() => {
+              if (settled) return;
+              if (seg[2] >= seg[1] - seg[0] + 1) return done("");
+              done(code === 0 ? "连接提前结束" : (e.trim().split("\n").pop() || "curl " + code).replace(/^curl: \(\d+\) /, ""));
+            });
           });
         });
         if (!err) return "";
@@ -80,12 +104,15 @@ export async function pget({ curl, url, file, total, n = 4, curlArgs = [], onPro
       return "";
     };
     const errs = await Promise.all(st.segs.map(runSeg));
-    clearInterval(tick); save(); onProgress(doneBytes());
+    clearInterval(tick); await save(); onProgress(doneBytes());
     const bad = errs.find(Boolean);
     if (bad) return bad;
     fs.rmSync(segFile, { force: true });
     return "";
-  } finally { fs.closeSync(fd); }
+  } finally {
+    await saveChain.catch(() => {});
+    await fh.close().catch(() => {});
+  }
 }
 
 // 认不认 Range：要 1 个字节，回 206 才算。

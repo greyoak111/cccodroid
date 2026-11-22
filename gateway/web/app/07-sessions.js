@@ -392,7 +392,7 @@
       toast(!r.failed.length ? t("已移进回收站")
         : !nGone ? t("{n} 个已删除，{m} 个正在生成没删", { n: r.done.length, m: nBusy })
         : !nBusy ? t("{n} 个已删除，{m} 个已经不在了（别处删了或已在回收站）", { n: r.done.length, m: nGone })
-        : t("{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了", { n: r.done.length, m: nBusy, k: nGone }), true);
+        : t("{n} 个已删除，{m} 个正在生成没删，{k} 个已经不在了", { n: r.done.length, m: nBusy, k: nGone }), !!r.failed.length);
       sess.mode = "list"; sess.sel.clear(); loadSessions();
       return;
     }

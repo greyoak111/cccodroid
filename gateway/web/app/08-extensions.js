@@ -69,7 +69,8 @@
       }
       return base;
     };
-    const nameOf = (id) => esc(modLabel(byId[id]) || id);
+    const rawNameOf = (id) => modLabel(byId[id]) || id;
+    const nameOf = (id) => esc(rawNameOf(id));
     const inst = items.filter((m) => m.state === "ok");
     $("mod-count").textContent = inst.length + "/" + items.length;
     ext.nMod = items.length; extSub();
@@ -90,7 +91,8 @@
       if (deps.length) desc += '<div class="tiny">' + t("依赖：{list}", { list: listOf(deps.map(nameOf)) }) + "</div>";
       if (m.kind === "shared" && (m.users || []).length) desc += '<div class="tiny">' + t("给这些模块用：{list}", { list: listOf(m.users.map(nameOf)) }) + "</div>";
       const ub = m.usedBy || {};   // 缺 usedBy 时不能让整个模块列表渲染失败、轮询也停（196 前端注入域）
-      const used = [...(ub.modules || []).map(nameOf), ...(ub.components || []).map((c) => esc(c)), ...(ub.pkgs || []).map((n) => "pkg " + esc(n))];
+      const usedRaw = [...(ub.modules || []).map(rawNameOf), ...(ub.components || []), ...(ub.pkgs || []).map((n) => "pkg " + n)];
+      const used = usedRaw.map(esc);
       if (used.length) desc += '<div class="tiny">' + t("正在用它的：{list}", { list: listOf(used) }) + "</div>";
       if (m.error) desc += '<div class="tiny err">' + esc(m.error) + "</div>";
       // 命令与包：点开看全部
@@ -111,10 +113,10 @@
         // 连同还没装的依赖一起算下载量
         const chain = [...deps.filter((d) => byId[d].state !== "ok"), m.id];
         size = MB(chain.reduce((s, id) => s + byId[id].download, 0));
-        acts = (m.state === "error" ? sdot("err", st) : "") + btn("install", m.id, ei("download") + (m.state === "error" ? t("重试") : t("安装")), ' class="btn sm"' + (chain.length > 1 ? ` data-chain="${esc(listOf(chain.map(nameOf)))}"` : ""));
+        acts = (m.state === "error" ? sdot("err", st) : "") + btn("install", m.id, ei("download") + (m.state === "error" ? t("重试") : t("安装")), ' class="btn sm"' + (chain.length > 1 ? ` data-chain="${esc(listOf(chain.map(rawNameOf)))}"` : ""));
       } else if (m.state === "downloading" || m.state === "verifying" || m.state === "installing") acts = sdot("warn", st) + (m.state === "installing" ? "" : btn("cancel", m.id, t("取消"), ' class="btn sm ghost"'));
       else if (m.state === "ok") acts = btn("toggle", m.id, modOff.has(m.id) ? t("启用") : t("停用"), ` class="btn sm ghost" data-on="${modOff.has(m.id) ? 1 : 0}" title="${esc(OFF_TIP())}"`)
-        + btn("remove", m.id, t("卸载"), ' class="btn sm ghost"' + (used.length ? ' data-usedby="' + listOf(used) + '"' : ""));
+        + btn("remove", m.id, t("卸载"), ' class="btn sm ghost"' + (usedRaw.length ? ` data-usedby="${esc(listOf(usedRaw))}"` : ""));
       const tag = m.required ? `<span class="tag">${ei("lock")}${t("必装")}</span>` : m.kind === "shared" ? `<span class="tag">${t("共享运行库")}</span>`
         : m.state === "ok" && modOff.has(m.id) ? `<span class="tag">${t("已停用")}</span>` : "";
       return rowItem(esc(modLabel(m) || m.id) + tag, '<span class="mono">' + (m.key || []).map(esc).join(" ") + "</span>",
@@ -191,7 +193,7 @@
   }
 
   // ── 可选组件（浏览器组件 = 无头 Chromium）：下载 → 校验 → 换进工具包，进度靠轮询 ──
-  let compTimer = 0, compLoad = 0;
+  let compTimer = 0, compLoad = 0, compHasItems = false;
   const compRemoving = new Set();
   const compRemovalHint = () => '<span class="tiny muted" role="status">' + esc(t("正在卸载，这一步不能取消，请等待完成")) + "</span>";
   // 只有 zh / en 两份：中文界面（简繁都算）用 zh，其它语言一律用 en
@@ -234,13 +236,23 @@
     if (!pageOn("ext")) return "stale";
     const request = ++compLoad;
     clearTimeout(compTimer);
-    const r = await api("/api/components" + (refresh ? "?refresh=" + (refresh === true ? 1 : refresh) : "")).catch((e) => ({ supported: true, items: [], indexError: e.message }));
+    let netErr = null;
+    const raw = await api("/api/components" + (refresh ? "?refresh=" + (refresh === true ? 1 : refresh) : "")).catch((e) => { netErr = e; return null; });
+    if (request !== compLoad || !pageOn("ext")) return "stale";
+    // 并发下载时若瞬时撞上 502 / 抖动，且列表已在屏幕上：保留现有卡片和进度条，1.5s 后自动重试，别清屏并停掉轮询
+    if (netErr && compHasItems) {
+      if (refresh !== true) compTimer = setTimeout(() => { if (request === compLoad && pageOn("ext")) loadComponents(); }, 1500);
+      return { err: netErr.message };
+    }
+    const r = raw || { supported: true, items: [], indexError: netErr ? netErr.message : "" };
     const compOff = new Set((await extOffNow()).comp || []);
     // 完成后的刷新比卸载中的轮询新；旧响应不能把已恢复的卡片盖回去。
     if (request !== compLoad || !pageOn("ext")) return "stale";
     const outcome = { err: r.indexError || "" };
     $("comp-field").classList.toggle("hidden", !r.supported);
-    if (!r.supported) { syncCatalog(); return loadGhField(); }
+    if (!r.supported) { compHasItems = false; syncCatalog(); return loadGhField(); }
+    if ((r.items || []).length) compHasItems = true;
+    else if (!r.indexError) compHasItems = false;
     const box = $("comp-list");
     const btn = (c, id, label) => `<button data-c="${c}" data-id="${esc(id)}">${label}</button>`;
     const html = (r.items || []).map((c) => {
@@ -334,7 +346,7 @@
     const next = (r.allowUnsigned ? '<div class="tiny err">' + esc(t("组件签名检查已关闭（网关带了测试开关启动）")) + "</div>" : "") +
       (html || '<div class="tiny">' + (r.indexError ? t("组件清单取不到：{msg}", { msg: esc(r.indexError) }) : t("暂时没有可装的组件。")) + "</div>") +
       (html && r.indexError ? '<div class="tiny err">' + t("部分组件清单取不到：{msg}", { msg: esc(r.indexError) }) + "</div>" : "") +
-      (r.indexError ? '<div class="it-acts"><button class="btn ghost sm" data-c="reindex">' + t("重试") + "</button></div>" : "");
+      (r.indexError ? '<div class="it-acts"><button class="btn ghost sm" data-c="' + (netErr ? "retry" : "reindex") + '">' + t("重试") + "</button></div>" : "");
     const changed = box._html !== next;
     if (changed) {
       const opened = new Set([...box.querySelectorAll(".ccard.open")].map((c) => c.dataset.comp));
@@ -358,6 +370,9 @@
     // 有在跑的就一秒刷一次；抽屉关了 / 换了页签就停
     if ((compRemoving.size || (r.items || []).some((c) => c.progress || ["removing", "configuring", "fetching-models"].includes(c.state))) && pageOn("ext"))
       compTimer = setTimeout(() => { if (request === compLoad && pageOn("ext")) loadComponents(); }, 1000);
+    // 首开撞上瞬时 502 / 网关抖动：1.5 秒后自动拉一次缓存列表，不用干等手动刷新
+    else if (netErr && pageOn("ext"))
+      compTimer = setTimeout(() => { if (request === compLoad && pageOn("ext")) loadComponents(); }, 1500);
     // 先显示的是上回存下的列表、网关还在后台拉新索引：两秒后再要一次，拉完自然停
     else if (r.refreshing && pageOn("ext"))
       compTimer = setTimeout(() => { if (request === compLoad && pageOn("ext")) loadComponents(); }, 2000);
@@ -553,7 +568,7 @@
     const fams = [];
     for (const m of r.items || []) if (!m.custom && !fams.includes(m.fam)) fams.push(m.fam);
     const custom = (r.items || []).filter((m) => m.custom);
-    const html = '<div class="tiny dim">' + t("模型放在 /sdcard/cccodroid/models，下好后到 设置 → 模型服务 → 端侧小模型 使用。本机内存 {ram} GB。都是 Q4_K_M 量化；手机上 1–4B 比较实用，超过 6B 会很慢。", { ram: r.ram || "?" }) + "</div>" +
+    const html = '<div class="tiny dim">' + t("模型放在 /sdcard/cccodroid/models，下好后到 设置 → 接口与型号 → 端侧小模型 使用。本机内存 {ram} GB。都是 Q4_K_M 量化；手机上 1–4B 比较实用，超过 6B 会很慢。", { ram: r.ram || "?" }) + "</div>" +
       (r.err ? '<div class="tiny err">' + esc(r.err) + "</div>" : "") +
       fams.map((f) => {
         const list = r.items.filter((m) => !m.custom && m.fam === f);
@@ -1403,6 +1418,7 @@
     if (cb && cb.closest("#mod-list")) return;   // 模块按钮归上面的处理器
     if (cb && !cb.disabled) {
       const c = cb.dataset.c, id = cb.dataset.id;
+      if (c === "retry") { cb.disabled = true; $("comp-list")._html = null; return loadComponents(); }
       if (c === "reindex") { cb.disabled = true; $("comp-list")._html = null; return loadComponents(true); }
       if (c === "toggle") {
         cb.disabled = true; $("comp-list")._html = null;

@@ -597,7 +597,7 @@
     el.addEventListener("click", (e) => {
       const a = e.target.closest("[data-qc]");
       if (!a) return;
-      if (a.dataset.qc === "refresh") { a.disabled = true; qbLoad(true); return; }
+      if (a.dataset.qc === "refresh") { a.disabled = true; qbLoad(true).finally(() => { if (a.isConnected) a.disabled = false; }); return; }
       qcClose(); closeSettings(); openPage("usage");
     });
     qcRender();

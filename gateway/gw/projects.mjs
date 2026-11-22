@@ -5,6 +5,7 @@
 // 清单存在 home/ccapp-projects.json；目录本身不归我们管，删项目默认只删清单里这一条。
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { CFG, PATHS, log, tz } from "./config.mjs";
 import { dec, fileKind, NEXT, readBody, sendJson } from "./http.mjs";
@@ -37,8 +38,11 @@ const SAVE_FAIL = () => ({ ok: false, error: "save_failed", message: tz("项目�
 
 const real = (d) => { try { return fs.realpathSync(d); } catch { return path.resolve(String(d || "")); } };
 const isDir = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
-/** claude 给 cwd 起会话目录名的规则：非字母数字一律换成 - */
-export const projectSlug = (cwd) => String(cwd).replace(/[^A-Za-z0-9]/g, "-");
+/** claude 给 cwd 起会话目录名的规则：非字母数字一律换成 -，过长截断加 sha256（与 sessions.mjs / seal.mjs 一致） */
+export const projectSlug = (cwd) => {
+  const p = String(cwd), s = p.replace(/[^A-Za-z0-9]/g, "-");
+  return s.length <= 200 ? s : s.slice(0, 200) + "-" + crypto.createHash("sha256").update(p).digest("hex").slice(0, 8);
+};
 
 export const projectById = (id) => PROJECTS.find((p) => p.id === id) || null;
 /** 目录属于哪个项目：等于项目目录或在它下面（取最深的那个） */

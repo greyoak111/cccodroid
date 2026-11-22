@@ -28,7 +28,7 @@ const UPLOAD_MAX = 4 * 1024 ** 3;   // 单个附件上限（流式落盘）
 /** 绝不外发的路径：密钥所在的应用私有目录、运行时、以及几个具名的凭据文件。
  *  说明：这台网关本就只监听 127.0.0.1，且 /api/chat 等于本机任意命令执行 ——
  *  这一层是「别让取文件接口顺手把密钥递出去」的防呆，不是完整的鉴权边界。 */
-const SECRET_NAMES = new Set([
+export const SECRET_NAMES = new Set([
   "ccapp-providers.json", "ccapp-config.json", "ccapp-seed.json",
   "keystore.json", "debug.keystore", "id_ed25519", "id_rsa", "id_ecdsa",
 ]);
@@ -42,6 +42,8 @@ export function pathBlocked(real) {
   if (SEED_FILE) {
     let rr; try { rr = fs.realpathSync(SEED_FILE); } catch { rr = SEED_FILE; }
     if (real === rr) return true;
+    // /sdcard（FUSE）大小写不敏感，且可能有硬链/别名：按 dev+ino 比对同一文件
+    try { const a = fs.lstatSync(real), b = fs.lstatSync(rr); if (a.dev === b.dev && a.ino === b.ino) return true; } catch {}
   }
   // /proc 底下的进程目录：同 uid 的进程（claude 子进程、网关自己）的 environ、cmdline、内存映射都读得到（审查 v0513b 低-14）
   if (/^\/proc\/(self|thread-self|\d+)(\/|$)/.test(real)) return true;
@@ -362,18 +364,23 @@ export async function routeFiles(req, res, u, p) {
       // 也别把装着应用私有目录（或工作区）的上级挪走：按目录身份判，别名也认得
       if (st.isDirectory() && holdsPrivate(srcPath)) return sendJson(res, 403, { error: "forbidden" });
     }
-    const dst = safeWritePath(path.join(srcDir, name));
-    if (dst.error) return sendJson(res, dst.status || 400, { error: dst.error });
-    if (!dst.fresh) {
-      // /sdcard 不区分大小写：只改大小写时 lstat 看到的是原文件，不能当“同名已存在”拒掉（200-8-05）。
-      // 比 dev+ino 确认是同一个文件才放行
-      let a = null, b = null;
-      try { a = fs.lstatSync(srcPath); b = fs.lstatSync(dst.file); } catch {}
-      if (!(a && b && a.dev === b.dev && a.ino === b.ino)) return sendJson(res, 409, { error: "exists", message: tz("已经有同名的文件或文件夹") });
+    const dstRaw = path.join(srcDir, name);
+    if (zoneOf(srcDir) === "private" || SECRET_NAMES.has(name.toLowerCase()) || SECRET_RE.test(dstRaw)) return sendJson(res, 403, { error: "forbidden" });
+    let dstSt = null;
+    try { dstSt = fs.lstatSync(dstRaw); } catch (e) { if (e.code !== "ENOENT") return sendJson(res, 400, { error: e.message }); }
+    let dstFile = dstRaw;
+    if (dstSt) {
+      // /sdcard 不区分大小写：文件或目录仅改大小写时 lstat 看到的是原条目（200-8-05）。
+      // 目录先判 dev+ino，避免走 safeWritePath → safeFilePath 误吃 400 is a directory
+      if (!(st.dev === dstSt.dev && st.ino === dstSt.ino)) return sendJson(res, 409, { error: "exists", message: tz("已经有同名的文件或文件夹") });
+    } else {
+      const dst = safeWritePath(dstRaw);
+      if (dst.error) return sendJson(res, dst.status || 400, { error: dst.error });
+      dstFile = dst.file;
     }
-    try { fs.renameSync(srcPath, dst.file); } catch (e) { return sendJson(res, 500, { error: e.message }); }
-    log(`[file] 重命名 ${srcPath} → ${dst.file}`);
-    return sendJson(res, 200, { ok: true, path: dst.file, kind: fileKind(dst.file, st.isDirectory()) });
+    try { fs.renameSync(srcPath, dstFile); } catch (e) { return sendJson(res, 500, { error: e.message }); }
+    log(`[file] 重命名 ${srcPath} → ${dstFile}`);
+    return sendJson(res, 200, { ok: true, path: dstFile, kind: fileKind(dstFile, st.isDirectory()) });
   }
   // 删除：文件页长按「删除」、多选「删除选中」逐个调这里。永久删除（不进回收站），界面先弹确认。
   // 防呆照写文件那一套：父目录按真实路径判，不能在应用私有目录里；凭据名不碰；

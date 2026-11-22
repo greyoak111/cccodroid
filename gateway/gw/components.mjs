@@ -430,7 +430,7 @@ export function reapComponentRuns() {
       // 记录仍是 installing 的留给 compRecover 收，它需要心跳文件作「另一任网关还活着」的判断
       let j = null; try { j = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
       if (j && Number.isInteger(j.gw) && j.gw !== process.pid) { try { process.kill(j.gw, 0); continue; } catch {} }
-      const rec = compRecord(f.slice(0, -12));
+      const rec = compRecord(f.slice(0, -".installing".length));
       if (!rec || rec.state !== "installing") { try { fs.rmSync(p, { force: true }); } catch {} }
       continue;
     }
@@ -695,7 +695,9 @@ async function compStart(id) {
   if (cur && !cur.finished) return { ok: false, message: "busy" };
   const dk = devkitIdentity();
   if (!dk || !dk.sha256) return { ok: false, message: tz("工具包还没装好（或是本地文件装的，没有版本身份），装不了组件") };
-  const ix = await compIndex(true);
+  // 60 秒内已验过签的索引直接复用，避免并发点装多个组件时反复阻塞重拉远程索引抢带宽
+  const freshSigned = compIndexCache.data && Date.now() - compIndexCache.at < 60e3 && compIndexCache.data.components?.[id]?.signed;
+  const ix = freshSigned ? compIndexCache : await compIndex(true);
   // 拉索引期间可能已有配置、取清单或卸载占槽；不能覆盖它们的 job。
   const pending = COMP_JOBS.get(id);
   if (pending && !pending.finished) return { ok: false, message: "busy" };
@@ -723,9 +725,11 @@ async function compStart(id) {
   const needMods = modulesMissingFor(b.baseDeps);
   if (needMods.length) return { ok: false, needModules: needMods.map((m) => m.id), message: tz("要先装工具包模块：{names}（扩展页上方「工具包模块」）", { names: needMods.map((m) => m.name.zh || m.id).join("、") }) };
   // 空间：压缩包 + 解开后的大小，再留 10%。上次失败特意留下的压缩包（大小对得上）已经占着空间了，
-  // 不再重复索要；上次失败留下的解包树先清掉（0.6.9 审计 #186 / 195-I.2）
+  // 不再重复索要；上次失败留下的解包树分批清掉，别同步 rmSync 堵死事件循环（0.6.9 审计 #186 / 195-I.2）
   const stageRoot = path.join(COMP_DIR, ".staging"), stageTree = path.join(stageRoot, id), stageGz = path.join(stageRoot, `${id}-${b.sha256.slice(0, 12)}.tar.gz`);
-  try { fs.rmSync(stageTree, { recursive: true, force: true }); } catch {}
+  if (fs.existsSync(stageTree)) { try { await rmTreeBatched(stageTree); } catch {} }
+  const pending2 = COMP_JOBS.get(id);
+  if (pending2 && !pending2.finished) return { ok: false, message: "busy" };
   let reuse = 0; try { if (fs.statSync(stageGz).size === b.bytes) reuse = b.bytes; } catch {}
   try {
     const sf = fs.statfsSync(path.dirname(PREFIX));
@@ -738,10 +742,9 @@ async function compStart(id) {
   COMP_JOBS.set(id, job);
   job.done = compRunInstall(id, b, job).then(
     () => { job.finished = true; log(`[comp] ${id} ${b.version} 装好了`); },
-    (e) => {
-      // 取消、校验失败都走这里：解包树（chromium 约 1GB）只在成功路径里清，失败就留在私有目录、没有入口再删（审查 11-05）。
-      // compRunInstall 已经结束（tar 子进程已退出），这时删不会边解边删；压缩包留着，重试不用重下。下次安装开头本来也会先删这棵树
-      if (/^[a-z0-9][a-z0-9-]*$/.test(id)) try { fs.rmSync(path.join(COMP_DIR, ".staging", id), { recursive: true, force: true }); } catch {}
+    async (e) => {
+      // 取消、校验失败都走这里：解包树（chromium 约 1GB）分批清理避免卡死事件循环，压缩包留着重试不用重下
+      if (/^[a-z0-9][a-z0-9-]*$/.test(id)) try { await rmTreeBatched(path.join(COMP_DIR, ".staging", id)); } catch {}
       job.finished = true; job.error = job.cancelled ? "" : e.message; log(`[comp] ${id} 安装失败：${e.message}`);
     });
   return { r: { ok: true }, job };
@@ -1090,13 +1093,34 @@ async function compRunInstall(id, b, job) {
   // 2) 解到暂存区，按包内 MANIFEST 逐个核对
   // 解包阶段没有可靠的字节进度：别画一个永远 0% 的条（0.6.9 审计 195-I.8），解完按清单重新给总量
   job.phase = "verifying"; job.done = 0; job.total = 0;
-  fs.rmSync(tree, { recursive: true, force: true });
+  if (fs.existsSync(tree)) await rmTreeBatched(tree);
   fs.mkdirSync(tree, { recursive: true });
   // 解包失败就把压缩包也删了：下次重试从头下载，不再拿同一份去撞
   // 解之前按目录查：MANIFEST 在包里、解完才核，经包内软链写到暂存区外面的条目那时已经落地了（v0514 审查低-2）
   try {
-    const list = await new Promise((ok, no) => execFile(path.join(PREFIX, "bin", "tar"), ["-tzv", "--quoting-style=c", "-f", gz],
-      { maxBuffer: 256 << 20 }, (e, out) => e ? no(e) : ok(String(out))));
+    const list = await new Promise((resolve, reject) => {
+      const cmd = path.join(PREFIX, "bin", "tar"), args = ["-tzv", "--quoting-style=c", "-f", gz];
+      const child = spawn(cmd, args, { env: termEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true });
+      job.child = child;
+      const mark = markChild(child, cmd, args);
+      const chunks = [];
+      let bytes = 0, err = "", overflow = false;
+      child.stdout.on("data", (d) => {
+        bytes += d.length;
+        if (bytes > (256 << 20)) { overflow = true; killTree(child); return; }
+        chunks.push(d);
+      });
+      child.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
+      child.on("error", (e) => { job.child = null; unmarkChild(mark); reject(e); });
+      // 等 close 而不是 exit：exit 触发时 stdout 可能还有没读完的块，清单末尾被截掉就漏查后几条（逃逸检查必须看全）
+      child.on("close", (code) => {
+        job.child = null; unmarkChild(mark);
+        if (job.cancelled) return reject(new Error("cancelled"));
+        if (overflow) return reject(new Error("tar listing too large"));
+        if (code !== 0) return reject(new Error(err.trim() || `tar exit ${code}`));
+        resolve(Buffer.concat(chunks).toString("utf8"));
+      });
+    });
     const bad = archiveProblem(parseTarListing(list));
     if (bad) throw new Error(tz("这个压缩包里有条目会写到包外面（{p}），为安全起见不解开", { p: String(bad.name).slice(0, 200) }));
     await compRun(job, path.join(PREFIX, "bin", "tar"), ["-xzf", gz, "-C", tree]);

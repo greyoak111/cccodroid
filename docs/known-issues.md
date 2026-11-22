@@ -103,25 +103,28 @@ Some third-party API setups translate Anthropic requests to the OpenAI format an
 
 **Workaround:** from 0.5.8 the custom provider card has "Send images inside the message (compatibility)". With it on, each attached image is also put directly in the user message (a spot every setup handles); the `@path` route still works alongside it. Large images are shrunk to 1568 px on the long edge first; large images in mid-turn follow-ups are not shrunk and only go through Read. You don't need it with Anthropic or a provider's own API.
 
-## 8. Stuck on "Waiting for gateway…" after launch (investigating)
+## 8. Stuck on "Waiting for gateway…" after launch (fixed in 0.7.15+)
 
-One user hit this on a Samsung tablet (One UI, Android 16): the launch screen stayed on "Waiting for gateway…" for two to three minutes before the app opened. The diagnostics showed the gateway starting normally every time, with no errors. The phone happened to be offline at the time, and the root cause isn't known yet.
+One user hit this on a Samsung tablet (One UI, Android 16): the launch screen stayed on "Waiting for gateway…" for two to three minutes before the app opened. The diagnostics showed the gateway starting normally every time, with no errors. The causes have since been tracked down:
+
+- When a device has a stale or unreachable HTTP proxy, Java's default `nonProxyHosts` skips `127.0.0.2`, sending loopback `/__proof` probes through the proxy until they time out (fixed in 0.7.15 by using `Proxy.NO_PROXY` for loopback connections).
+- `Env.checkHost()` running synchronous `Socket.connect()` on the main thread during class initialization (`NetworkOnMainThreadException`), a supervisor exit race on rapid stop→restart, and a missing manual reload link on the waiting page after auto-retry throttling are also fixed.
 
 Another case has been tracked down: on some phones (where the app directory path goes through a system link, such as Honor MagicOS on Android 17), 0.6.8's gateway exited right after every start, and the notification kept saying "Gateway exited; restarting in 8s". Fixed in 0.6.9.
 
-**Workaround:** update to the latest version first. If it gets stuck there, give it a minute or two instead of swiping the app away and reopening it, since every restart begins the wait from scratch. Once it opens, send a diagnostics bundle from Settings → Troubleshooting.
+**Workaround:** update to the latest version first. If it still pauses on the waiting page, tap Reload; once it opens, send a diagnostics bundle from Settings → Troubleshooting.
 
 ## 9. The chat area occasionally goes blank and won't scroll (investigating)
 
-One user hit this on a Xiaomi phone (HyperOS, Android 16): after a cold start they opened a long chat, and while the top bar and input box were there, the message area stayed blank and didn't respond to a dozen or more swipes; the only way out was to swipe the app away and reopen it. The diagnostics showed the gateway running normally, no UI errors, and no automatic unfreeze (each swipe was short). The trigger isn't known yet; it may be the same kind of WebView problem as item 2.
+One user hit this on a Xiaomi phone (HyperOS, Android 16): after a cold start they opened a long chat, and while the top bar and input box were there, the message area stayed blank and didn't respond to a dozen or more swipes; the only way out was to swipe the app away and reopen it. The diagnostics showed the gateway running normally, no UI errors, and no automatic unfreeze (each swipe was short). Long chats now skip the whole-`#hist` entrance transform animation to avoid exceeding Android WebView's compositor texture limit; we are continuing to monitor whether this still reproduces.
 
 **Workaround:** first long-press the title in the top bar for about 0.6 s (unfreeze), or switch to another chat and back. If neither helps, reopen the app, send a diagnostics bundle from Settings → Troubleshooting, and tell us what you were doing right before (just launched the app, just opened that chat, or came back from the background).
 
-## 10. In-app update fails with "Error · Couldn't read the signature" (not fixed)
+## 10. In-app update fails with "Error · Couldn't read the signature" (fixed in 0.7.15)
 
-On one user's phone every in-app update stops here. Before installing, the app checks that the downloaded APK is signed with the same release key, reading the signature through a system API. On that phone the API returns nothing, so the install is refused. The APKs themselves are fine (each was checked; the signature matches every earlier release); the phone's system API just can't read it.
+On one user's phone every in-app update stopped here. Before installing, the app checks that the downloaded APK is signed with the same release key. On some Android 13–16 ROMs, `getPackageArchiveInfo` with only `GET_SIGNING_CERTIFICATES` leaves `signingCertificateHistory` empty for v1+v2 signed APKs. Fixed in 0.7.15 by also requesting `GET_SIGNATURES` and falling back through `history → contents → signatures`.
 
-**Workaround:** download the APK from the GitHub Release or the website and install it over the current one. Your data isn't affected.
+**Workaround:** update to 0.7.15 or later. If an older installed version hits this during upgrade, download the APK from the GitHub Release or the website and install it over the current one. Your data isn't affected.
 
 ## For developers: tests can create fake bugs
 
@@ -130,4 +133,3 @@ Item 1 is tied to automated testing (item 2 has been confirmed not to be). Befor
 - Events injected with `input swipe` / `input tap` get cancelled by some ROMs' gesture listeners, sometimes with an extra tap added.
 - Screenshots, simulated secondary displays, launching other windows and switching keyboards with `ime set` can all take input focus or the keyboard connection away from the app.
 - For drag, scroll and keyboard problems, trust results from a real finger and a real keyboard.
-- Under full load, the full test run (`node scripts/test.mjs`) occasionally fails once in `merge.test.mjs` ("记录与兜底"). It passes reliably when run alone; it's a timing issue that hasn't been fixed yet. If it's the only failure, rerun it on its own to confirm.

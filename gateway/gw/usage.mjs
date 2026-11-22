@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { CFG, LIVE, HERE, PATHS, PREFIX, log, tz } from "./config.mjs";
-import { claudeEnv, readLedger } from "./claude.mjs";
+import { claudeEnv, killTree, readLedger } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { devPrivStatus } from "./devside.mjs";
 import { isInjected } from "./integrity.mjs";
@@ -445,8 +445,18 @@ function energySystem() {
     // 两路输出并成一路：开发端的 priv（rish）在没有终端时会把一部分 stdout 吐到 stderr，分开收就是两半残缺的行
     // priv 用随包那份的绝对路径：PATH 里排在前面的目录（~/bin 之类）可能被放了同名程序（复核 11-03，L-9 余项）
     const priv = [path.join(HERE, "bin", "priv")].find((f) => fs.existsSync(f)) || "priv";
-    execFile("sh", ["-c", (priv.startsWith("/") ? "sh " : "") + "\"$0\" \"dumpsys batterystats --checkin\" 2>&1 </dev/null", priv], { env: { ...process.env, PATH: claudeEnv().PATH }, timeout: 60000, maxBuffer: 32 << 20 }, (err, out, errOut) => {
-      if (!out || !out.includes(",l,pwi,")) return resolve({ ok: false, message: (errOut || (err && err.message) || tz("没拿到数据")).trim().slice(0, 300) });
+    const child = spawn("sh", ["-c", (priv.startsWith("/") ? "sh " : "") + "\"$0\" \"dumpsys batterystats --checkin\" 2>&1 </dev/null", priv], {
+      env: { ...process.env, PATH: claudeEnv().PATH }, stdio: ["ignore", "pipe", "pipe"], detached: true,
+    });
+    const MAX = 32 << 20;
+    const outChunks = [];
+    let outLen = 0, errOut = "", settled = false, errMsg = "";
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const out = Buffer.concat(outChunks).toString("utf8");
+      if (!out || !out.includes(",l,pwi,")) return resolve({ ok: false, message: (errOut || errMsg || tz("没拿到数据")).trim().slice(0, 300) });
       const apps = {}, names = {};
       let cap = 0, used = 0, since = 0, me = null;
       for (const line of out.split("\n")) {
@@ -470,7 +480,16 @@ function energySystem() {
       };
       saveState(ENERGY_FILE, energy, { pretty: false });
       resolve({ ok: true, sys: energy.sys });
+    };
+    const timer = setTimeout(() => { errMsg = "timeout"; killTree(child); }, 60000);
+    child.stdout.on("data", (d) => {
+      outLen += d.length;
+      if (outLen > MAX) { errMsg = "stdout maxBuffer exceeded"; killTree(child); return; }
+      outChunks.push(d);
     });
+    child.stderr.on("data", (d) => { if (errOut.length < 4000) errOut += d; });
+    child.on("error", (e) => { errMsg = e.message; finish(); });
+    child.on("close", () => finish());
   });
 }
 

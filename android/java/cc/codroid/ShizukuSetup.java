@@ -538,8 +538,10 @@ final class ShizukuSetup {
             try {
                 if (boot) Thread.sleep(10_000);
                 for (int i = 0; i < 18 && !onWifi(); i++) Thread.sleep(10_000);
-                if (Priv.running() || busy) return;
-                busy = true;
+                synchronized (ShizukuSetup.this) {
+                    if (Priv.running() || busy) return;
+                    busy = true;
+                }
                 wifiOrig = wirelessOn();
                 try {
                     if (!onWifi()) { failNote(Tr.t("没连 Wi‑Fi，Shizuku 没能自动激活。连上 Wi‑Fi 后点此重试")); return; }
@@ -591,8 +593,8 @@ final class ShizukuSetup {
 
     /** 用户点"重新配对"：Shizuku 在跑也照样走配对 */
     void repair() {
-        wifiOrig = wirelessOn();
         synchronized (this) { if (busy) { activateQueued = false; return; } busy = true; }
+        wifiOrig = wirelessOn();
         new Thread(() -> {
             try {
                 if (Build.VERSION.SDK_INT < 30) { set("error", Tr.t("安卓 11 以下没有无线调试")); return; }

@@ -420,14 +420,21 @@ export function rewindFixup(sessionFile, sid, uuid, files) {
   } catch { return { fixed: 0, failed: 0 }; }
   const at = snaps.findIndex((x) => x.id === uuid);
   if (at < 0) return { fixed: 0, failed: 0 };
-  const absOf = (k, b) => b && b.realParentDir ? path.join(b.realParentDir, path.basename(k)) : path.resolve(CFG.workspace, k);
-  const hist = path.join(CFG.home, ".claude", "file-history", sid);
+  // 项目会话的相对快照路径相对该会话的 cwd，不能写死 CFG.workspace（同 rewindFiles）
+  const sessCwd = peekSession(sessionFile)?.cwd;
   const roots = sessionRoots(sessionFile);
+  const baseCwd = sessCwd && path.isAbsolute(sessCwd) ? sessCwd : (roots[0] || CFG.workspace);
+  const absOf = (k, b) => b && b.realParentDir ? path.join(b.realParentDir, path.basename(k)) : path.resolve(baseCwd, k);
+  const hist = path.join(CFG.home, ".claude", "file-history", sid);
   let fixed = 0, failed = 0;
   for (const want of files || []) {
+    const wantReal = realOf(want);
     let entry;
     for (let i = at; i < snaps.length && entry === undefined; i++) {
-      for (const [k, b] of Object.entries(snaps[i].backups)) if (absOf(k, b) === want) { entry = b; break; }
+      for (const [k, b] of Object.entries(snaps[i].backups)) {
+        const p = absOf(k, b);
+        if (p === want || realOf(p) === wantReal) { entry = b; break; }
+      }
     }
     if (entry === undefined) continue;                 // 快照里查不到：不碰
     if (!rewindTargetOk(want, roots)) { failed++; log(`回退补救跳过 ${want}：不在工作区或这条会话的项目目录里`); continue; }
@@ -983,10 +990,13 @@ export async function expireTrash() {
   } catch (e) { log("回收站清理失败: " + e.message); }
 }
 
-/** claude 给 cwd 起项目目录名的规则：非字母数字一律换成 -。
+/** claude 给 cwd 起项目目录名的规则：非字母数字一律换成 -，过长截断加 sha256（与 sessions.mjs / seal.mjs 一致）。
  *  它拿的是解析过符号链接的真实路径（/sdcard → /storage/emulated/0），这边也得先 realpath，否则对不上 */
 export function realWorkspace() { try { return fs.realpathSync(CFG.workspace); } catch { return CFG.workspace; } }
-function projectSlug(cwd) { return String(cwd).replace(/[^A-Za-z0-9]/g, "-"); }
+function projectSlug(cwd) {
+  const p = String(cwd), s = p.replace(/[^A-Za-z0-9]/g, "-");
+  return s.length <= 200 ? s : s.slice(0, 200) + "-" + crypto.createHash("sha256").update(p).digest("hex").slice(0, 8);
+}
 
 // 极简 zip（只 deflate / store，够会话包用）。不引第三方包：网关是单文件分发的
 export function zipBuild(entries) {

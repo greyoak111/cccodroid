@@ -515,7 +515,7 @@
     $("en-sys").innerHTML = `<div class="tiny">${esc(t("正在向系统查询…"))}</div>`;
     const r = await post("/api/energy/system", {}).catch((e) => ({ ok: false, message: e.message }));
     if (r.ok) enSys(r.sys);
-    else $("en-sys").innerHTML = `<div class="prov-state err">${esc(t("查不到：{msg}（要先在上面开好 Shizuku）", { msg: r.message || t("失败") }))}</div>`;
+    else $("en-sys").innerHTML = `<div class="prov-state err">${esc(t("查不到：{msg}（要先到 设置 → 设备与权限 开好 Shizuku）", { msg: r.message || t("失败") }))}</div>`;
   });
 
   // ── 自定义接口卡（任何讲 Anthropic Messages 协议的端点）──
