@@ -38,6 +38,11 @@ import java.util.zip.ZipOutputStream;
  */
 public final class Share extends ContentProvider {
     static final String AUTH = "cc.codroid.share";
+    private static final Object GRANT_LOCK = new Object();
+    private static final long GRANT_TTL_MS = 24L * 3600 * 1000;
+    private static final int GRANT_MAX = 64;
+    private static final java.security.SecureRandom RNG = new java.security.SecureRandom();
+    private static final Pattern TOKEN_RE = Pattern.compile("^[0-9a-f]{32}$");
 
     /** URI 第一段 → 允许的根目录 */
     private static File root(Context c, String name) {
@@ -49,6 +54,100 @@ public final class Share extends ContentProvider {
             case "camera": return Camera.dir(c);          // 拍照：系统相机往这里写（只有这个根可写）
             default: return null;
         }
+    }
+
+    private static File grantStore(Context c) { return new File(new Env(c).files, "cache/share-grants.tsv"); }
+
+    private static final class Grant {
+        final String path, name;
+        final long exp;
+        Grant(String path, String name, long exp) { this.path = path; this.name = name; this.exp = exp; }
+    }
+
+    private static java.util.LinkedHashMap<String, Grant> loadGrants(File store, long now) {
+        java.util.LinkedHashMap<String, Grant> out = new java.util.LinkedHashMap<>();
+        if (!store.isFile()) return out;
+        try {
+            java.util.Base64.Decoder dec = java.util.Base64.getUrlDecoder();
+            String raw = new String(java.nio.file.Files.readAllBytes(store.toPath()), StandardCharsets.UTF_8);
+            for (String line : raw.split("\n")) {
+                if (line.isEmpty()) continue;
+                String[] p = line.split("\t", 4);
+                if (p.length != 4 || !TOKEN_RE.matcher(p[0]).matches()) continue;
+                long exp;
+                try { exp = Long.parseLong(p[1]); } catch (NumberFormatException ignored) { continue; }
+                if (exp < now) continue;
+                String name = new String(dec.decode(p[2]), StandardCharsets.UTF_8);
+                String path = new String(dec.decode(p[3]), StandardCharsets.UTF_8);
+                if (!name.isEmpty() && !path.isEmpty()) out.put(p[0], new Grant(path, name, exp));
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    private static void saveGrants(File store, java.util.Map<String, Grant> grants) throws IOException {
+        File dir = store.getParentFile();
+        if (dir != null) dir.mkdirs();
+        java.util.Base64.Encoder enc = java.util.Base64.getUrlEncoder().withoutPadding();
+        StringBuilder sb = new StringBuilder();
+        for (java.util.Map.Entry<String, Grant> e : grants.entrySet()) {
+            Grant g = e.getValue();
+            sb.append(e.getKey()).append('\t').append(g.exp).append('\t')
+              .append(enc.encodeToString(g.name.getBytes(StandardCharsets.UTF_8))).append('\t')
+              .append(enc.encodeToString(g.path.getBytes(StandardCharsets.UTF_8))).append('\n');
+        }
+        File tmp = new File(store.getPath() + "." + Thread.currentThread().getId() + "." + System.nanoTime() + ".tmp");
+        try {
+            java.nio.file.Files.write(tmp.toPath(), sb.toString().getBytes(StandardCharsets.UTF_8));
+            if (!tmp.renameTo(store)) {
+                java.nio.file.Files.move(tmp.toPath(), store.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            if (tmp.exists()) tmp.delete();
+        }
+    }
+
+    /** 登记单个文件的只读分享句柄（零拷贝，支持 >512 MB 大文件），返回 32 位十六进制随机 token */
+    static String putGrant(File store, File canonicalFile, long now) throws IOException {
+        synchronized (GRANT_LOCK) {
+            java.util.LinkedHashMap<String, Grant> g = loadGrants(store, now);
+            // 超过上限时按最早过期驱逐，避免状态文件无限增长
+            while (g.size() >= GRANT_MAX) {
+                String oldest = null;
+                long minExp = Long.MAX_VALUE;
+                for (java.util.Map.Entry<String, Grant> e : g.entrySet()) {
+                    if (e.getValue().exp < minExp) { minExp = e.getValue().exp; oldest = e.getKey(); }
+                }
+                if (oldest == null) break;
+                g.remove(oldest);
+            }
+            byte[] rb = new byte[16];
+            String tok;
+            do {
+                RNG.nextBytes(rb);
+                StringBuilder sb = new StringBuilder(32);
+                for (byte b : rb) sb.append(String.format(Locale.ROOT, "%02x", b & 0xff));
+                tok = sb.toString();
+            } while (g.containsKey(tok));
+            g.put(tok, new Grant(canonicalFile.getPath(), canonicalFile.getName(), now + GRANT_TTL_MS));
+            saveGrants(store, g);
+            return tok;
+        }
+    }
+
+    /** 按 token + 展示文件名反查句柄对应的真实文件；若过期、名不符、原路径被换成软链或文件消失均拒绝 */
+    static File resolveGrant(File store, String tok, String name, long now) throws FileNotFoundException {
+        if (tok == null || name == null || !TOKEN_RE.matcher(tok).matches()) throw new FileNotFoundException();
+        Grant e;
+        synchronized (GRANT_LOCK) {
+            e = loadGrants(store, now).get(tok);
+        }
+        if (e == null || e.exp < now || !name.equals(e.name)) throw new FileNotFoundException();
+        try {
+            File f = new File(e.path).getCanonicalFile();
+            if (!f.getPath().equals(e.path) || !f.isFile()) throw new FileNotFoundException();
+            return f;
+        } catch (IOException ex) { throw new FileNotFoundException(); }
     }
 
     /** 绝对路径 → content:// 地址；不在允许的目录里就返回 null */
@@ -66,6 +165,10 @@ public final class Share extends ContentProvider {
     private File fileFor(Uri u) throws FileNotFoundException {
         java.util.List<String> seg = u.getPathSegments();
         if (seg.size() < 2) throw new FileNotFoundException();
+        if ("grant".equals(seg.get(0))) {
+            if (seg.size() != 3) throw new FileNotFoundException();
+            return resolveGrant(grantStore(getContext()), seg.get(1), seg.get(2), System.currentTimeMillis());
+        }
         File d = root(getContext(), seg.get(0));
         if (d == null) throw new FileNotFoundException();
         try {
@@ -114,29 +217,32 @@ public final class Share extends ContentProvider {
         }
     }
 
-    /** 不在允许目录里的文件（工作区、/sdcard 上的）：拷一份到 exports/shared 再分享，别的应用拿到的是这一份的只读授权 */
-    static File shareable(Context c, File f) throws Exception {
+    /** 取得分享用的 content:// 地址：在允许根目录里的直接用；工作区、/sdcard 上的走零拷贝单文件只读句柄（不再拷副本，支持 >512 MB 大文件） */
+    static Uri shareUri(Context c, File f) throws Exception {
         if (!f.isFile()) throw new FileNotFoundException(Tr.t("文件不存在：") + f);
         guard(c, f);
-        if (uriFor(c, f) != null) return f;
-        if (f.length() > 512L << 20) throw new IOException(Tr.t("文件超过 512 MB，不分享"));
-        File dir = new File(new Env(c).home, "exports/shared");
-        dir.mkdirs();
-        // 拷出来的副本放一天就清：以前分享过什么就永远留一份
-        File[] old = dir.listFiles();
-        long cut = System.currentTimeMillis() - 24L * 3600 * 1000;
-        if (old != null) for (File o : old) if (o.lastModified() < cut) {
-            File[] in = o.isDirectory() ? o.listFiles() : null;
-            if (in != null) for (File x : in) x.delete();
-            o.delete();
-        }
-        // 每次分享一个新的子目录：同名的两次分享以前共用一个副本，后一次会把前一次接收方还没读的内容换掉（审查 v0.5.20 09-004）
-        File sub;
-        do { sub = new File(dir, Long.toString(System.currentTimeMillis(), 36) + "-" + Integer.toHexString(new java.security.SecureRandom().nextInt())); } while (sub.exists());
-        if (!sub.mkdirs()) throw new IOException(Tr.t("建不了分享目录"));
-        File dst = new File(sub, f.getName());
-        java.nio.file.Files.copy(f.toPath(), dst.toPath());
-        return dst;
+        Uri direct = uriFor(c, f);
+        if (direct != null) return direct;
+        // 顺手清理旧版留下的 exports/shared 过期副本（24 小时前），释放升级前的残留占用
+        cleanupLegacyShared(c);
+        File cf = f.getCanonicalFile();
+        String tok = putGrant(grantStore(c), cf, System.currentTimeMillis());
+        return new Uri.Builder().scheme("content").authority(AUTH)
+            .appendPath("grant").appendPath(tok).appendPath(cf.getName()).build();
+    }
+
+    private static void cleanupLegacyShared(Context c) {
+        try {
+            File dir = new File(new Env(c).home, "exports/shared");
+            File[] old = dir.listFiles();
+            if (old == null) return;
+            long cut = System.currentTimeMillis() - GRANT_TTL_MS;
+            for (File o : old) if (o.lastModified() < cut) {
+                File[] in = o.isDirectory() ? o.listFiles() : null;
+                if (in != null) for (File x : in) x.delete();
+                o.delete();
+            }
+        } catch (Exception ignored) {}
     }
 
     /** 按扩展名猜类型；猜不出就当二进制 */
@@ -159,8 +265,11 @@ public final class Share extends ContentProvider {
 
     /** 弹系统分享面板 */
     static JSONObject send(Context c, File f, String mime) throws Exception {
-        Uri u = uriFor(c, f);
-        if (u == null || !f.isFile()) return new JSONObject().put("ok", false).put("message", Tr.t("这个文件不能分享：") + f);
+        return send(c, f, uriFor(c, f), mime);
+    }
+
+    static JSONObject send(Context c, File f, Uri u, String mime) throws Exception {
+        if (u == null || f == null || !f.isFile()) return new JSONObject().put("ok", false).put("message", Tr.t("这个文件不能分享：") + f);
         Intent send = new Intent(Intent.ACTION_SEND).setType(sendMime(mime))
             .putExtra(Intent.EXTRA_STREAM, u).putExtra(Intent.EXTRA_SUBJECT, f.getName())
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -420,7 +529,7 @@ public final class Share extends ContentProvider {
 
     @Override public Cursor query(Uri uri, String[] proj, String sel, String[] args, String sort) {
         File f;
-        try { f = fileFor(uri); } catch (FileNotFoundException e) { return null; }
+        try { f = fileFor(uri); guard(getContext(), f); } catch (IOException e) { return null; }
         String[] cols = proj != null ? proj : new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
         MatrixCursor c = new MatrixCursor(cols, 1);
         Object[] row = new Object[cols.length];

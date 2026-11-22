@@ -405,8 +405,8 @@ final class DeviceTools {
     private static JSONObject shareFile(Context c, JSONObject a) throws Exception {
         File f = new File(a.optString("path"));
         if (!f.isFile()) return fail(Tr.t("文件不存在：") + f);
-        try { f = Share.shareable(c, f); } catch (Exception e) { return fail(e.getMessage()); }
-        Uri u = Share.uriFor(c, f);
+        Uri u;
+        try { u = Share.shareUri(c, f); f = f.getCanonicalFile(); } catch (Exception e) { return fail(e.getMessage()); }
         if (u == null) return fail(Tr.t("这个文件不能分享：") + f);
         String mime = a.optString("mime", "");
         if (mime.isEmpty()) mime = Share.mimeOf(f);
