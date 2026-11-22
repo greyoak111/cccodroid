@@ -3739,3 +3739,8 @@ html[dir="rtl"] #ctxbar:is(.warn,.danger) #ctxtxt{background:linear-gradient(270
 /* RTL：命令参数 / 路径按 LTR 排；标题用 start */
 .ts-head,.bubble .hook-ctx{text-align:start}
 html[dir="rtl"] :is(.tool-arg,.perm-path,.missing-img){direction:ltr;text-align:left;unicode-bidi:isolate}
+
+/* 项目记忆纯只读弹窗 */
+.pj-mem-note{margin:2px 2px 10px}
+.pj-smain .panel > .row.pj-row{cursor:pointer}
+.pj-mem-md{padding:4px 2px 8px;overflow-wrap:anywhere}

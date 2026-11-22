@@ -87,14 +87,120 @@ function listProjects() {
       exists: isDir(p.path),
       sessions: mine.length,
       lastAt: Math.max(p.created || 0, ...mine.map((s) => s.mtime || 0)),
-      memory: memoryFiles(p).length,
+      memory: memoryEntries(p).length,
     };
   });
 }
-/** Claude 自己记在这个项目里的记忆：~/.claude/projects/<目录名>/memory/*.md */
-function memoryFiles(p) {
-  const dir = path.join(PATHS.projects, projectSlug(real(p.path)), "memory");
-  try { return fs.readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "MEMORY.md").map((f) => path.join(dir, f)); } catch { return []; }
+const MEM_MAX_FILES = 200;
+const MEM_MAX_BYTES = 1 << 20;   // 单条记忆查看上限 1 MB
+const MEM_NAME_RE = /^[^/\\\x00-\x1f\x7f]+\.md$/;
+
+/** 严格定位当前项目的私有记忆目录（~/.claude/projects/<slug>/memory）：
+ *  逐级 lstat 拒绝软链，且 realpath 必须精确落回 projects/<slug>/memory，防止软链跳出边界。 */
+function safeMemoryDir(p) {
+  let projRoot;
+  try {
+    if (!fs.lstatSync(PATHS.projects).isDirectory()) return null;
+    projRoot = fs.realpathSync(PATHS.projects);
+  } catch { return null; }
+  const slug = projectSlug(real(p.path));
+  if (!slug || slug === "." || slug === ".." || slug.includes("/") || slug.includes("\\")) return null;
+  const slugDir = path.join(projRoot, slug);
+  try { if (!fs.lstatSync(slugDir).isDirectory()) return null; } catch { return null; }
+  const memDir = path.join(slugDir, "memory");
+  try { if (!fs.lstatSync(memDir).isDirectory()) return null; } catch { return null; }
+  try {
+    const realMem = fs.realpathSync(memDir);
+    return realMem === memDir ? realMem : null;
+  } catch { return null; }
+}
+
+/** Claude 自己记在这个项目里的记忆：~/.claude/projects/<目录名>/memory/*.md（仅一层普通文件，不暴露私有绝对路径） */
+function memoryEntries(p) {
+  const dir = safeMemoryDir(p);
+  if (!dir) return [];
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const out = [];
+  for (const file of names) {
+    if (!MEM_NAME_RE.test(file) || file.length > 255 || file === ".md") continue;
+    let st;
+    try { st = fs.lstatSync(path.join(dir, file)); } catch { continue; }
+    if (!st.isFile()) continue;
+    out.push({ file, name: file.slice(0, -3), isIndex: file === "MEMORY.md", size: st.size, mtime: st.mtimeMs });
+  }
+  out.sort((a, b) => (b.isIndex - a.isIndex) || (b.mtime - a.mtime) || a.file.localeCompare(b.file));
+  return out.slice(0, MEM_MAX_FILES);
+}
+
+/** 纯只读读取单条记忆文件：单层 .md 文件名 + lstat + O_NOFOLLOW|O_NONBLOCK + fstat/fd 路径复核 + 限长读取 */
+function readMemoryFile(p, fileParam) {
+  const file = String(fileParam || "");
+  if (!file || file.length > 255 || file === ".md" || file === "." || file === ".." || path.basename(file) !== file || !MEM_NAME_RE.test(file)) {
+    return { status: 400, body: { error: "bad_name", message: tz("记忆文件名不合法") } };
+  }
+  const dir = safeMemoryDir(p);
+  if (!dir) return { status: 404, body: { error: "not_found", message: tz("记忆不存在") } };
+  const full = path.join(dir, file);
+  if (path.dirname(full) !== dir) return { status: 400, body: { error: "bad_name", message: tz("记忆文件名不合法") } };
+  let lst;
+  try { lst = fs.lstatSync(full); }
+  catch (e) {
+    if (e.code === "ENOENT") return { status: 404, body: { error: "not_found", message: tz("记忆不存在") } };
+    return { status: 500, body: { error: e.code || "io_error", message: e.code || e.message } };
+  }
+  if (lst.isSymbolicLink() || !lst.isFile()) {
+    return { status: 403, body: { error: "forbidden", message: tz("只允许查看普通记忆文件") } };
+  }
+  if (lst.size > MEM_MAX_BYTES) {
+    return { status: 413, body: { error: "too_large", message: tz("记忆文件太大了（超过 1 MB）") } };
+  }
+  const c = fs.constants;
+  let fd = null;
+  try {
+    fd = fs.openSync(full, c.O_RDONLY | (c.O_NOFOLLOW || 0) | (c.O_NONBLOCK || 0));
+    const fst = fs.fstatSync(fd);
+    if (!fst.isFile() || fst.dev !== lst.dev || fst.ino !== lst.ino) {
+      return { status: 403, body: { error: "forbidden", message: tz("只允许查看普通记忆文件") } };
+    }
+    if (fst.size > MEM_MAX_BYTES) {
+      return { status: 413, body: { error: "too_large", message: tz("记忆文件太大了（超过 1 MB）") } };
+    }
+    let openedReal = null;
+    try { openedReal = fs.readlinkSync("/proc/self/fd/" + fd); } catch {}
+    if (openedReal && openedReal !== full) {
+      return { status: 403, body: { error: "forbidden", message: tz("只允许查看普通记忆文件") } };
+    }
+    const chunks = [];
+    let total = 0;
+    const buf = Buffer.allocUnsafe(Math.min(Math.max(fst.size, 4096), 65536));
+    while (true) {
+      const n = fs.readSync(fd, buf, 0, buf.length, null);
+      if (n <= 0) break;
+      total += n;
+      if (total > MEM_MAX_BYTES) {
+        return { status: 413, body: { error: "too_large", message: tz("记忆文件太大了（超过 1 MB）") } };
+      }
+      chunks.push(Buffer.from(buf.subarray(0, n)));
+    }
+    return {
+      status: 200,
+      body: {
+        file,
+        name: file.slice(0, -3),
+        isIndex: file === "MEMORY.md",
+        size: total,
+        mtime: fst.mtimeMs,
+        text: Buffer.concat(chunks, total).toString("utf8"),
+      },
+    };
+  } catch (e) {
+    if (e.code === "ENOENT") return { status: 404, body: { error: "not_found", message: tz("记忆不存在") } };
+    if (e.code === "ELOOP") return { status: 403, body: { error: "forbidden", message: tz("只允许查看普通记忆文件") } };
+    return { status: 500, body: { error: e.code || "io_error", message: e.code || e.message } };
+  } finally {
+    if (fd != null) try { fs.closeSync(fd); } catch {}
+  }
 }
 /** 项目自带的 MCP 服务器（.mcp.json） */
 function projectMcp(p) {
@@ -261,7 +367,7 @@ export async function routeProjects(req, res, u, p) {
     const sessions = listSessions(5000).filter((s) => s.cwd && (real(s.cwd) === r || real(s.cwd).startsWith(r + "/")))
       .map((s) => ({ id: s.id, title: s.title, mtime: s.mtime, pinned: s.pinned }));
     return sendJson(res, 200, { project: one, sessions, files: topFiles(proj), mcp: projectMcp(proj),
-      memory: memoryFiles(proj).map((f) => ({ name: path.basename(f, ".md"), path: f })) });
+      memory: memoryEntries(proj) });
   }
   if (!sub && req.method === "PATCH") {
     const b = await body();
@@ -334,6 +440,17 @@ export async function routeProjects(req, res, u, p) {
       }
       return sendJson(res, 200, { ok: true });
     }
+  }
+  // 项目记忆：严格纯只读查看，不走通用文件浏览器、不放宽 pathBlocked 私有目录防线
+  if (sub === "/memory") {
+    if (req.method !== "GET") {
+      res.setHeader("Allow", "GET");
+      return sendJson(res, 405, { error: "method_not_allowed", message: tz("记忆只读，不能在这里修改") });
+    }
+    const fileParam = u.searchParams.get("file");
+    if (fileParam === null) return sendJson(res, 200, { files: memoryEntries(proj) });
+    const r = readMemoryFile(proj, fileParam);
+    return sendJson(res, r.status, r.body);
   }
   return NEXT;
 }

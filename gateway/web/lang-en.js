@@ -3304,4 +3304,10 @@ window.I18N_DICT.en = {
   "当前系统低于 Android 16，将以同卡进度通知显示，也可开启悬浮胶囊兜底。": "This device is below Android 16. Status will use a single progress notification, or you can enable the floating capsule fallback.",
   "已开始试播 10 秒，切到桌面或看顶部状态栏": "10s preview started — switch to home screen or check the top status bar",
   "试播失败": "Preview failed",
+  "索引": "Index",
+  "记忆文件名不合法": "Invalid memory file name",
+  "记忆不存在": "Memory not found",
+  "只允许查看普通记忆文件": "Only regular memory files can be viewed",
+  "记忆文件太大了（超过 1 MB）": "Memory file is too large (over 1 MB)",
+  "记忆只读，不能在这里修改": "Project memories are read-only here",
 };

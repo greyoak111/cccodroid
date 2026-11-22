@@ -3266,4 +3266,10 @@ window.I18N_DICT["id"] = {
   "当前系统低于 Android 16，将以同卡进度通知显示，也可开启悬浮胶囊兜底。": "Perangkat ini di bawah Android 16. Status memakai notifikasi progres, atau aktifkan kapsul mengambang.",
   "已开始试播 10 秒，切到桌面或看顶部状态栏": "Pratinjau 10 detik dimulai — buka layar utama atau lihat bilah status",
   "试播失败": "Pratinjau gagal",
+  "索引": "Indeks",
+  "记忆文件名不合法": "Nama file memori tidak valid",
+  "记忆不存在": "Memori tidak ditemukan",
+  "只允许查看普通记忆文件": "Hanya file memori biasa yang boleh dilihat",
+  "记忆文件太大了（超过 1 MB）": "File memori terlalu besar (lebih dari 1 MB)",
+  "记忆只读，不能在这里修改": "Memori hanya-baca dan tidak dapat diubah di sini",
 };
