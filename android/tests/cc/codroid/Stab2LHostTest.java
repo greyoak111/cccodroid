@@ -233,6 +233,18 @@ public class Stab2LHostTest {
             fail++;
         }
 
+        // ── Env.invokeOnBoot：onBoot 抛异常（如无 Looper 线程调 CookieManager）不打翻网关证明 ──
+        final String[] gotBoot = { null };
+        Env.invokeOnBoot(v -> gotBoot[0] = v, "cookie-ok");
+        eq("Env.invokeOnBoot 正常透传 cookieVal", "cookie-ok".equals(gotBoot[0]), true);
+        boolean survived = true;
+        try {
+            Env.invokeOnBoot(v -> { throw new IllegalStateException("SetCookie must be called on a thread with a running Looper."); }, "cookie-boom");
+        } catch (Throwable t) {
+            survived = false;
+        }
+        eq("Env.invokeOnBoot 吞住回调异常不打翻证明结果", survived, true);
+
         if (fail > 0) { System.out.println(fail + " 条失败"); System.exit(1); }
         System.out.println("全部通过");
     }

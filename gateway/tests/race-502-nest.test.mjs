@@ -167,6 +167,14 @@ test("A-P0-1..5 Android 宿主: ProofFlight 纪元/单飞、fetchStatic 限时�
   assert.ok(gwSrc.includes("static void pauseKick()"), "GatewayService 应提供不改变引用计数的 pauseKick");
   assert.ok(mainSrc.includes("GatewayService.pauseKick();"), "deployAssets 的 finally 应用 pauseKick 补刀");
   assert.ok(frSrc.includes("GatewayService.pauseKick();"), "FactoryReset 的 finally 应用 pauseKick 补刀");
+  // onBoot 异常隔离与主线程 Looper 投递：无 Looper 后台线程（ui-prove / WebView IO 线程）直接调 3 参 CookieManager.setCookie
+  // 会抛 IllegalStateException；必须投递到主线程 Looper 调用且在 Env.invokeOnBoot 独立捕获，避免打翻 proveBootOnce 触发 61ms 死循环
+  assert.ok(envSrc.includes("static void invokeOnBoot(") && /invokeOnBoot\([\s\S]{0,400}?catch \(Throwable /.test(envSrc),
+    "Env.java 应通过 invokeOnBoot 独立隔离 onBoot 回调异常");
+  assert.ok(envSrc.includes("fetchStatic 失败 ") && envSrc.includes("\" HTTP \" + code"),
+    "Env.fetchStatic 应记录非 200 与异常日志而非静默吞错");
+  assert.ok(/writeGatewayCookie\([\s\S]{0,1200}?main\.post\(\(\) -> \{[\s\S]{0,500}?cm\.setCookie\(mainUrl,\s*mainCookie,\s*ok -> latch\.countDown\(\)\)/.test(mainSrc),
+    "MainActivity.writeGatewayCookie 必须在主线程 Looper 上调用带回调的 CookieManager.setCookie");
 });
 
 test("W-P0-1/W-P0-3/W-P1-1 08-extensions.js: 模块/组件瞬时 502 不清屏且持续重试，loadComponents(true) 遇 502 仍续轮询", async () => {
