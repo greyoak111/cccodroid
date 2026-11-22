@@ -3,28 +3,68 @@
 import net from "node:net";
 
 const SOCKET = process.env.CCAPP_PRIV_SOCK || "/data/data/cc.codroid/files/.priv.sock";
+const SOCKET_TIMEOUT_MS = Number(process.env.CCAPP_CLI_BRIDGE_TIMEOUT_MS) > 0 ? Number(process.env.CCAPP_CLI_BRIDGE_TIMEOUT_MS) : 70000;
+const STDIN_TIMEOUT_MS = Number(process.env.CCAPP_CLI_BRIDGE_STDIN_TIMEOUT_MS) > 0 ? Number(process.env.CCAPP_CLI_BRIDGE_STDIN_TIMEOUT_MS) : 10000;
+const MAX_CLIP_CHARS = 200000;
 
 function send(req) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(val);
+    };
     const s = net.connect({ path: SOCKET }, () => s.write(JSON.stringify(req) + "\n"));
+    const timer = setTimeout(() => {
+      s.destroy();
+      finish(reject, new Error(`timed out waiting for cccodroid (${SOCKET_TIMEOUT_MS}ms)`));
+    }, SOCKET_TIMEOUT_MS);
     let buf = "";
     s.setEncoding("utf8");
-    s.on("data", (d) => (buf += d));
-    s.on("end", () => {
-      try { resolve(JSON.parse(buf)); }
-      catch { reject(new Error("invalid response from cccodroid: " + buf.slice(0, 200))); }
+    s.on("data", (d) => {
+      buf += d;
+      if (buf.length > 1024 * 1024) {
+        s.destroy();
+        finish(reject, new Error("response from cccodroid too large"));
+      }
     });
-    s.on("error", (e) => reject(new Error(`cannot connect to cccodroid (${e.code || e.message})`)));
+    s.on("end", () => {
+      try { finish(resolve, JSON.parse(buf)); }
+      catch { finish(reject, new Error("invalid response from cccodroid: " + buf.slice(0, 200))); }
+    });
+    s.on("error", (e) => finish(reject, new Error(`cannot connect to cccodroid (${e.code || e.message})`)));
   });
 }
 
 function readStdin() {
   return new Promise((resolve, reject) => {
     let data = "";
+    let settled = false;
+    const finish = (fn, val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      process.stdin.pause();
+      fn(val);
+    };
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => finish(reject, new Error(`timed out reading stdin (${STDIN_TIMEOUT_MS}ms)`)), STDIN_TIMEOUT_MS);
+    };
+    let timer = null;
+    resetTimer();
     process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (d) => (data += d));
-    process.stdin.on("end", () => resolve(data));
-    process.stdin.on("error", reject);
+    process.stdin.on("data", (d) => {
+      resetTimer();
+      data += d;
+      if (data.length > MAX_CLIP_CHARS) {
+        finish(reject, new Error(`input too large (exceeds ${MAX_CLIP_CHARS} chars)`));
+      }
+    });
+    process.stdin.on("end", () => finish(resolve, data));
+    process.stdin.on("error", (e) => finish(reject, e));
   });
 }
 
@@ -41,7 +81,8 @@ function isSafeHttpUrl(raw) {
 }
 
 async function main() {
-  const [cmd, ...args] = process.argv.slice(2);
+  const [cmd, ...rawArgs] = process.argv.slice(2);
+  const args = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
   if (cmd === "open-url") {
     const url = (args.find((a) => !a.startsWith("-")) || "").trim();
     if (!isSafeHttpUrl(url)) {
@@ -57,6 +98,10 @@ async function main() {
   }
   if (cmd === "clip-set") {
     const text = args.length ? args.join(" ") : await readStdin();
+    if (text.length > MAX_CLIP_CHARS) {
+      process.stderr.write(`termux-clipboard-set: input too large (exceeds ${MAX_CLIP_CHARS} chars)\n`);
+      process.exit(1);
+    }
     const r = await send({ op: "clip_set", text });
     if (!r.ok) {
       process.stderr.write(`termux-clipboard-set: ${r.message || "failed"}\n`);
