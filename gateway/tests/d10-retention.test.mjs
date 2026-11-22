@@ -46,6 +46,9 @@ test("读保留期：没写、写坏、不是正整数都按永久；合法的�
 
 test("启动补写：没有文件就新建；有别的键照留并留 .bak；用户写过的（含写坏的值）不动；整份坏了不碰", async () => {
   fs.rmSync(F, { force: true });
+  // 同一个池共用一个 home：前面的测试可能在这里留过 settings.json，fixture 已把它记成「已确认」。
+  // 删掉文件后要让 userconf 也忘掉那条记录，否则应用自己补写会被当成「写之前就有没确认的改动」而拒绝认领。
+  ucKeep([".claude/settings.json"]);
   let r = await ensureSessionRetention();
   assert.equal(r.changed, true);
   assert.deepEqual(read(), { cleanupPeriodDays: RETENTION_DAYS });

@@ -476,6 +476,7 @@ final class Env {
         e.put("CCAPP_TARGET_SDK", String.valueOf(targetSdk));
         e.put("CCAPP_EXEC", loader ? "loader" : "direct");
         e.put("CCAPP_NATIVE_LIB", nativeLib);
+        e.put("CCAPP_BUILTIN_ISLAND", "1");
         if (loader) applyLoader(e);
     }
 

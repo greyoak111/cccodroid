@@ -607,9 +607,28 @@
             <div class="sl"><b data-i18n>空闲压缩</b><p data-i18n>长会话闲置快一小时时先压缩</p><p class="clamp" data-i18n>只对 Claude 账户和 Anthropic API Key 生效。上下文超过 20 万 token 的会话闲置约 54 分钟、1 小时提示缓存快过期时，先压缩一次；回来接着聊就不用把整段历史按全价重新处理，订阅账户少占额度，API Key 少花钱。电脑上的 Claude Code 也是这么做的。</p></div>
             <div class="sc"><input type="checkbox" class="sw" id="set-idlecompact"></div>
           </div>
-          <div class="srow">
-            <div class="sl"><b data-i18n>工作岛（ColorOS 灵动岛）</b><p data-i18n>把 Claude 的工作状态显示在 ColorOS 16 的流体云 / 灵动岛上</p><p class="clamp" data-i18n>需要另外安装「工作岛」应用。开启后，正在干活、等待确认、任务完成会出现在岛上的胶囊里；完成后 8 秒自动收起。目前仅在 ColorOS 16 / Android 16 上测试过。</p><div class="tiny warn hidden" id="wi-state"><span id="wi-state-txt"></span> <button class="btn sm ghost" id="wi-retry" data-i18n>重试</button></div></div>
-            <div class="sc"><input type="checkbox" class="sw" id="set-workisland"></div>
+          <div class="sblock" id="wi-block">
+            <div class="srow head">
+              <div class="sl"><b data-i18n>工作岛（实时状态）</b><p data-i18n>把 Claude 的工作状态实时显示在系统灵动岛 / 实时通知，或用悬浮胶囊兜底</p><p class="clamp" data-i18n>开启后，正在干活、清单进度、等待确认、任务完成会实时显示在同一张状态卡片上，完成后 8 秒自动收起。Android 16+ 支持原生实时通知（荣耀灵动胶囊、ColorOS 流体云、小米超级岛等），低版本或未放行机型可开启悬浮胶囊兜底。</p><div class="tiny warn hidden" id="wi-state"><span id="wi-state-txt"></span> <button class="btn sm ghost" id="wi-retry" data-i18n>重试</button></div></div>
+              <div class="sc"><input type="checkbox" class="sw" id="set-workisland"></div>
+            </div>
+            <div id="wi-builtin" class="hidden">
+              <div class="srow sub" id="wi-sys-row">
+                <div class="sl"><p data-i18n>系统实时通知 / 灵动岛（Android 16+）</p></div>
+                <div class="sc"><input type="checkbox" class="sw" id="wi-sys"></div>
+              </div>
+              <div class="srow sub">
+                <div class="sl"><p data-i18n>悬浮胶囊兜底（触摸穿透，切后台时显示）</p></div>
+                <div class="sc"><input type="checkbox" class="sw" id="wi-ov"></div>
+              </div>
+              <div class="prov-state hidden" id="wi-host-st"></div>
+              <div class="row-actions" style="margin-top:6px">
+                <button class="btn sm ghost" id="wi-preview" data-i18n>试播 10 秒</button>
+                <button class="btn sm ghost hidden" id="wi-promo-btn" data-i18n>去允许实时通知</button>
+                <button class="btn sm ghost hidden" id="wi-ov-btn" data-i18n>去允许悬浮窗</button>
+                <button class="btn sm ghost hidden" id="wi-ntf-btn" data-i18n>去系统通知设置</button>
+              </div>
+            </div>
           </div>
           <div class="sblock" id="dir-field">
             <div class="srow head">

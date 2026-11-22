@@ -16,6 +16,10 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 内置工作岛：Android 16+ 标准实时通知（Live Updates / 灵动胶囊 / 流体云 / 超级岛），API < 36 自动忽略 -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!-- 内置工作岛兜底：可选悬浮胶囊（默认关闭，仅用户主动开启并授予悬浮窗权限时使用） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 锁屏验证（Consent.java）：安卓 11+ 用 BiometricPrompt 验过锁屏才把安全开关存到下次启动。
          平台从 28 起要求调用方声明 USE_BIOMETRIC（普通权限，装时自动授予，不弹框；更老的系统不认这条，无影响）。
          本应用不调 FingerprintManager，废弃的 USE_FINGERPRINT 不需要；缺这条时 authenticate() 会直接抛

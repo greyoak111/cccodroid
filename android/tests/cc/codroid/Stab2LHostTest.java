@@ -177,6 +177,17 @@ public class Stab2LHostTest {
             eq("Env.HOST 在 127.0.0.2 不可达时回退 127.0.0.1", "127.0.0.1".equals(Env.HOST), true);
         }
 
+        // ── WorkIsland：内置工作岛胶囊文案、状态色与资源回退 ──
+        eq("WorkIsland.shortChip 无清单保持原标题", "思考中".equals(WorkIsland.shortChip("思考中", 0, 0, false)), true);
+        eq("WorkIsland.shortChip 有清单拼接进度", "整理清单 2/5".equals(WorkIsland.shortChip("整理清单", 2, 5, false)), true);
+        eq("WorkIsland.shortChip 完成态不拼进度", "任务完成".equals(WorkIsland.shortChip("任务完成", 3, 3, true)), true);
+        eq("WorkIsland.shortChip 过长标题截断到 16 字符以内", WorkIsland.shortChip("12345678901234567890", 0, 0, false).length() <= 16, true);
+        eq("WorkIsland.statusColor waiting 为琥珀色", WorkIsland.statusColor("waiting") == WorkIsland.COLOR_WAITING, true);
+        eq("WorkIsland.statusColor done 为绿色", WorkIsland.statusColor("done") == WorkIsland.COLOR_DONE, true);
+        eq("WorkIsland.statusColor error 为红色", WorkIsland.statusColor("error") == WorkIsland.COLOR_ERROR, true);
+        eq("WorkIsland.statusColor working 为主题色", WorkIsland.statusColor("working") == WorkIsland.COLOR_WORKING, true);
+        eq("WorkIsland.iconRes 空上下文回退系统图标", WorkIsland.iconRes(null, "ic_work_island", 42) == 42, true);
+
         if (fail > 0) { System.out.println(fail + " 条失败"); System.exit(1); }
         System.out.println("全部通过");
     }

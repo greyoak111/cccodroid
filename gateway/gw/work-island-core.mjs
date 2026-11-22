@@ -153,19 +153,33 @@ export function createWorkIsland(opts = {}) {
   // 打开工作岛时可能已经有待确认的请求（run.perms）：不能一直显示「正在干活」（0.6.9 审计 195-P.5）
   const permCount = (run) => (run && run.perms && typeof run.perms.size === "number" ? run.perms.size : Array.isArray(run && run.perms) ? run.perms.length : 0);
 
-  let active = null;        // { id, startedAt, last }
+  let active = null;        // { id, sessionId, startedAt, last }
   let shown = false;        // 岛上还挂着东西（干活中，或「任务完成」还没收起）
+  let lastFrame = null;     // 最新一帧快照：给内置宿主重连 /api/events 时在 hello 里立即同步
   let doneTimer = null;
   let idleTimer = null;
   let lastSent = 0;
   let pending = null;       // 节流时保留的最后一条
   let pendingTimer = null;
 
-  const emit = (action, title, text, since, state, extra) => {
-    try { send(action, title, text, since, state, extra); } catch {}
+  const makeFrame = (action, title, text, since, state, extra, sessionId) => {
+    if (action === "IDLE") return null;
+    const f = { action, title: title || "", text: text || "", since: since || 0, state: state || "", sessionId: sessionId || "" };
+    if (extra && Number.isInteger(extra.todoTotal) && extra.todoTotal > 0) {
+      f.todoDone = extra.todoDone || 0;
+      f.todoTotal = extra.todoTotal;
+    }
+    return f;
   };
-  const emitSync = (action, title, text, since, state, extra) => {
-    try { sendSync(action, title, text, since, state, extra); } catch {}
+  const emit = (action, title, text, since, state, extra, meta) => {
+    const sid = (meta && meta.sessionId) || (active && active.sessionId) || "";
+    lastFrame = makeFrame(action, title, text, since, state, extra, sid);
+    try { send(action, title, text, since, state, extra, sid ? { sessionId: sid } : undefined); } catch {}
+  };
+  const emitSync = (action, title, text, since, state, extra, meta) => {
+    const sid = (meta && meta.sessionId) || (active && active.sessionId) || "";
+    lastFrame = makeFrame(action, title, text, since, state, extra, sid);
+    try { sendSync(action, title, text, since, state, extra, sid ? { sessionId: sid } : undefined); } catch {}
   };
 
   function clearPending() {
@@ -207,12 +221,16 @@ export function createWorkIsland(opts = {}) {
   }
 
   function start(run, text) {
+    const sid = (run && typeof run.sessionId === "string") ? run.sessionId : "";
     if (active) {
       // 并行会话：显示换到另一轮时，计时按那一轮自己的开始时间算（0.6.9 审计 195-P.5）
       if (run && run.id && run.id !== active.id) {
         active.id = run.id;
+        active.sessionId = sid;
         active.startedAt = Number(run.startedAt) || active.startedAt;
         active.last = "";
+      } else if (sid && !active.sessionId) {
+        active.sessionId = sid;
       }
       // 已经在显示了：state 快照每次都会走到这里，别把「等你确认」之类刷回「正在干活」（#97 02-010）。
       // 状态变化由各自的事件（perm_resolved、phase…）来改；但快照里已经有待确认的请求时要说出来
@@ -225,6 +243,7 @@ export function createWorkIsland(opts = {}) {
     if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
     active = {
       id: (run && run.id) || "",
+      sessionId: sid,
       startedAt: Number(run && run.startedAt) || clock(),
       last: "",
     };
@@ -235,6 +254,7 @@ export function createWorkIsland(opts = {}) {
   function finish(reason) {
     if (!active) return;
     const ms = Math.max(0, clock() - active.startedAt);
+    const doneSid = active.sessionId || "";
     active = null;
     clearPending();
     if (doneTimer) clearTimeout(doneTimer);
@@ -247,7 +267,7 @@ export function createWorkIsland(opts = {}) {
       const human = humanDuration(sec, L() === ZH);
       const text = L().took(human) + (reason ? ` · ${reason}` : "");
       shown = true;
-      emit("DONE", L().done, text, 0, "done");
+      emit("DONE", L().done, text, 0, "done", undefined, doneSid ? { sessionId: doneSid } : undefined);
       if (idleTimer) clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
         idleTimer = null;
@@ -294,6 +314,7 @@ export function createWorkIsland(opts = {}) {
         break;
       }
       case "perm_request":
+        if (active && typeof ev.sessionId === "string" && ev.sessionId) active.sessionId = ev.sessionId;
         update(L().perm(L().toolName(ev.tool || ev.name)), L().waiting, "waiting");
         break;
       case "perm_resolved":
@@ -339,6 +360,7 @@ export function createWorkIsland(opts = {}) {
     handleEvent,
     start,
     stop,
+    snapshot: () => (lastFrame ? { ...lastFrame } : null),
     get active() { return active; },
   };
 }
