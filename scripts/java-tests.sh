@@ -9,6 +9,8 @@ javac -nowarn -d "$OUT" "$ROOT/android/tests/stub/android/util/Base64.java" "$RO
 java -cp "$OUT" cc.codroid.Ed25519Vectors
 javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/PrivRules.java" "$ROOT/android/tests/cc/codroid/PrivRulesTest.java"
 java -cp "$OUT" cc.codroid.PrivRulesTest
+javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/NoAskDuration.java" "$ROOT/android/tests/cc/codroid/NoAskDurationTest.java"
+java -cp "$OUT" cc.codroid.NoAskDurationTest
 javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/KeyAttest.java" "$ROOT/android/tests/cc/codroid/KeyAttestTest.java"
 java -cp "$OUT" cc.codroid.KeyAttestTest
 # 更新说明挑版本：WhatsNew 引了安卓类，编译要 android.jar（平板 ~/.bldtools，或 ANDROID_JAR）；pick 本身不碰安卓接口

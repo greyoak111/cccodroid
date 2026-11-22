@@ -558,21 +558,87 @@ public class MainActivity extends Activity {
             .setNegativeButton(Tr.t("拒绝"), (x, w) -> { said[0] = true; Priv.answer(id, 0); });
         // 这个会话后面的都允许（Claude 发来的才有）：勾上再点「允许」。只在内存里，应用重启就失效
         final android.widget.CheckBox all = sess && !clipGet && !clipSet && !openUrl ? new android.widget.CheckBox(this) : null;
-        if (all != null) {
-            all.setText(Tr.t("这个会话后面的特权命令都允许，不再逐条问（应用重启后失效）"));
-            int pad = (int) (20 * getResources().getDisplayMetrics().density);
-            android.widget.FrameLayout box = new android.widget.FrameLayout(this);
-            box.setPadding(pad, pad / 2, pad, 0);
-            box.addView(all);
+        boolean canRenew = Priv.renewalDuration(id) > 0;
+        int[] durations = canRenew ? NoAskDuration.options() : new int[0];
+        android.widget.Spinner duration = canRenew ? new android.widget.Spinner(this) : null;
+        if (all != null || canRenew) {
+            android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+            box.setOrientation(android.widget.LinearLayout.VERTICAL);
+            box.setPadding(dp(24), dp(12), dp(24), canRenew ? dp(16) : 0);
+            if (all != null) {
+                all.setText(Tr.t("这个会话后面的特权命令都允许，不再逐条问（应用重启后失效）"));
+                box.addView(all);
+            }
+            if (canRenew) {
+                String label = Tr.t("放行所有特权指令（指定期限）");
+                android.widget.TextView heading = new android.widget.TextView(this);
+                heading.setText(label);
+                android.widget.LinearLayout.LayoutParams headingLayout = new android.widget.LinearLayout.LayoutParams(-1, -2);
+                if (all != null) headingLayout.topMargin = dp(12);
+                box.addView(heading, headingLayout);
+                String[] labels = new String[durations.length + 1];
+                labels[0] = Tr.t("关闭");
+                for (int i = 0; i < durations.length; i++) labels[i + 1] = Priv.noAskDurationLabel(durations[i]);
+                duration.setContentDescription(label);
+                duration.setMinimumHeight(dp(48));
+                android.widget.ArrayAdapter<String> options = new android.widget.ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
+                options.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                duration.setAdapter(options);
+                duration.setSelection(0);
+                android.widget.LinearLayout.LayoutParams pickerLayout = new android.widget.LinearLayout.LayoutParams(-1, -2);
+                pickerLayout.topMargin = dp(6);
+                box.addView(duration, pickerLayout);
+                android.widget.TextView note = new android.widget.TextView(this);
+                note.setText(Tr.t("选定时长后，点「允许」并验证。授权对所有会话和终端生效，后台也一样。涉及应用自身、Shizuku / Sui 的命令仍需确认。"));
+                android.widget.LinearLayout.LayoutParams noteLayout = new android.widget.LinearLayout.LayoutParams(-1, -2);
+                noteLayout.topMargin = dp(8);
+                box.addView(note, noteLayout);
+            }
             b.setView(box);
         }
-        b.setPositiveButton(openUrl ? Tr.t("打开") : Tr.t("允许"), (x, w) -> { said[0] = true; Priv.answer(id, all != null && all.isChecked() ? 3 : 1); });
+        Runnable allow = () -> { said[0] = true; Priv.answer(id, all != null && all.isChecked() ? 3 : 1); };
+        b.setPositiveButton(openUrl ? Tr.t("打开") : Tr.t("允许"), (x, w) -> allow.run());
+        if (canRenew) b.setNegativeButton(Tr.t("取消"), (x, w) -> { said[0] = true; Priv.answer(id, 0); });
         // 命令里引用了文件的，不给「不再问」：信任的是文字，文件内容随时能换（见 Priv.trustable）
         if (trustable) b.setNeutralButton(Tr.t("允许，这条命令 10 分钟内不再问"), (x, w) -> { said[0] = true; Priv.answer(id, 2); });
         android.app.AlertDialog d = b.create();
         d.setOnDismissListener((x) -> { PRIV_DLG.remove(id); if (!said[0]) Priv.answer(id, 0); });
         PRIV_DLG.put(id, d);
         if (!guard(d, android.content.DialogInterface.BUTTON_POSITIVE, android.content.DialogInterface.BUTTON_NEUTRAL)) { PRIV_DLG.remove(id); Priv.answer(id, 0); }
+        else if (canRenew) {
+            android.widget.Button action = d.getButton(android.content.DialogInterface.BUTTON_POSITIVE);
+            android.widget.Button limited = d.getButton(android.content.DialogInterface.BUTTON_NEUTRAL);
+            duration.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long rowId) {
+                    if (all != null) all.setEnabled(position == 0);
+                    if (limited != null) limited.setVisibility(position == 0 ? View.VISIBLE : View.GONE);
+                }
+                @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+            });
+            action.setOnClickListener(v -> {
+                int position = duration.getSelectedItemPosition();
+                if (position <= 0) {
+                    allow.run();
+                    d.dismiss();
+                    return;
+                }
+                if (position > durations.length) return;
+                action.setEnabled(false);
+                duration.setEnabled(false);
+                Priv.renewAndAllow(this, id, durations[position - 1], saved -> {
+                    if (PRIV_DLG.get(id) != d || !d.isShowing()) return;
+                    if (saved) {
+                        said[0] = true;
+                        d.dismiss();
+                    } else {
+                        duration.setSelection(0);
+                        duration.setEnabled(true);
+                        action.setEnabled(true);
+                        android.widget.Toast.makeText(this, Tr.t("没有续期，仍可单独确认这条命令"), android.widget.Toast.LENGTH_SHORT).show();
+                    }
+                });
+            });
+        }
     }
     private static final java.util.Map<String, android.app.Dialog> PRIV_DLG = new java.util.concurrent.ConcurrentHashMap<>();
     /** Priv.ask 等不到回答（超时）时收起对话框：别留一个点了也没用的「允许」在屏幕上 */
