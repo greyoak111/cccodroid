@@ -108,7 +108,15 @@ final class Notify {
         loop.start();
     }
 
-    synchronized void stop() { stopping = true; }
+    private volatile HttpURLConnection activeConn;
+
+    synchronized void stop() {
+        stopping = true;
+        HttpURLConnection c = activeConn;
+        if (c != null) try { c.disconnect(); } catch (Exception ignored) {}
+        Thread t = loop;
+        if (t != null) t.interrupt();
+    }
 
     /** 界面回到前台：确认通知都撤掉（卡片就在眼前） */
     void onForeground() { clearAsks(); }
@@ -133,6 +141,7 @@ final class Notify {
             HttpURLConnection c = null;
             try {
                 c = Env.gateway("/api/events");
+                activeConn = c;
                 c.setConnectTimeout(3000);
                 c.setReadTimeout(45_000);            // 网关每 15 秒一个心跳，45 秒没动静就当断了
                 if (lastId != null) c.setRequestProperty("Last-Event-ID", lastId);
@@ -152,9 +161,10 @@ final class Notify {
             } catch (Exception e) {
                 // 网关还没起来 / 正在重启：安静地等，别刷日志
             } finally {
+                if (activeConn == c) activeConn = null;
                 if (c != null) c.disconnect();
             }
-            sleep(2000);
+            if (!stopping) sleep(2000);
         }
         synchronized (this) { if (!stopping && loop == Thread.currentThread()) spawn(); }
     }
@@ -163,6 +173,8 @@ final class Notify {
         try {
             JSONObject ev = new JSONObject(json);
             String type = ev.optString("type");
+            boolean doSchedFromFile = false;
+            Long schedNextAt = null;
             synchronized (this) {
                 if ("hello".equals(type) || "state".equals(type)) {
                     if ("hello".equals(type)) {
@@ -170,15 +182,18 @@ final class Notify {
                         String boot = ev.optString("boot");
                         if (gatewayChanged(boot, lastBoot)) runText.clear();
                         lastBoot = boot;
+                        doSchedFromFile = true;
                     }
                     onState(ev);
                 }
                 else if ("run_start".equals(type)) runText.put(ev.optString("runId"), clip(ev.optString("text"), RUN_TEXT_CHARS));
                 else if ("run_end".equals(type)) onRunEnd(ev);
                 else if ("sched_note".equals(type)) onSchedNote(ev);
-                else if ("sched_next".equals(type)) SchedAlarm.set(ctx, ev.optLong("at"));
-                if ("hello".equals(type)) SchedAlarm.fromFile(ctx);   // 事件流（重）连上：按文件补定一次闹钟
+                else if ("sched_next".equals(type)) schedNextAt = ev.optLong("at");
             }
+            // 磁盘读取与 AlarmManager Binder IPC 放到 Notify 锁外，避免阻塞主线程 onResume/onPause
+            if (schedNextAt != null) SchedAlarm.set(ctx, schedNextAt);
+            if (doSchedFromFile) SchedAlarm.fromFile(ctx);
         } catch (Exception e) {
             Log.w(TAG, "通知：事件解析失败", e);
         }

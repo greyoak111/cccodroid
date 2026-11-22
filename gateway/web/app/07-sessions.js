@@ -294,11 +294,13 @@
 
   /** 成功返回 true，失败返回错误（同 loadSessions，「刷新列表」在回收站里刷的是回收站） */
   async function loadTrash() {
+    const ok = latest("trash");
     let ret = true;
     try {
       const r = await api("/api/trash");
+      if (!ok()) return ret;
       sess.trash = r.items || []; sess.keepDays = r.keepDays || 30; sess.trashErr = "";
-    } catch (e) { sess.trashErr = e.message || String(e); ret = e; }
+    } catch (e) { if (!ok()) return e; sess.trashErr = e.message || String(e); ret = e; }
     renderSessions();
     return ret;
   }

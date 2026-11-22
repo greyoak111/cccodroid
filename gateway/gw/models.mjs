@@ -283,8 +283,9 @@ function withCatalog(list, p) {
 // 清空 / 让它过期：别的模块改不了这几个变量（ES 模块的导入是只读的），走这两个函数
 // 代次：接口配置一改就加一。改之前发出去、改之后才回来的清单请求只交给当时的调用方，不再写回缓存（#77）
 let CACHE_GEN = 0, REQ_SEQ = 0;
-export function dropModelCache() { CACHE_GEN++; MODELS = null; MODELS_AT = 0; MODELS_FOR = null; CACHE.clear(); }
-export function expireModelCache() { CACHE_GEN++; MODELS_AT = 0; for (const c of CACHE.values()) c.at = 0; }   // 在途的旧结果别把过期的又续上（复核 L1）
+const MODELS_INFLIGHT = new Map();
+export function dropModelCache() { CACHE_GEN++; MODELS = null; MODELS_AT = 0; MODELS_FOR = null; CACHE.clear(); MODELS_INFLIGHT.clear(); }
+export function expireModelCache() { CACHE_GEN++; MODELS_AT = 0; for (const c of CACHE.values()) c.at = 0; MODELS_INFLIGHT.clear(); }   // 在途的旧结果别把过期的又续上（复核 L1）
 
 /** p：哪家（缺省 = 全局生效的）。按家各缓存 10 分钟；全局那家的结果同时放进 MODELS。
  *  guess：自定义端口没填清单地址时去猜 /models。只在用户打开清单（面板、/model）时猜：开跑前要等清单，
@@ -304,63 +305,67 @@ async function fetchModelsOf(p, force, guess) {
     return list;
   };
   if (!force && c && c.at && Date.now() - c.at < 600000) return c.list;
-
   if (p.local) return keep(localModels(), false);   // 端侧：模型目录里有什么就是什么（每次现扫，刚放进去的文件马上能选）
   if (isLoginMode(p)) return keep((p.fallbackModels && p.fallbackModels.length) ? p.fallbackModels : LOGIN_MODELS);
-
-  // 写在配置里的内嵌清单（data:application/json,…）：本地解析，不发请求、不带密钥，网络那边的同主机限制不用放宽（#57）
-  const inline = inlineModels(p.modelsUrl);
-  if (inline) {
-    const list = withCatalog(withConfigured(mergeKnown(inline, p.fallbackModels, true), p), p);
-    if (list.length) return keep(list);
-  }
-
-  const key = keyOf(p);
-  // 一次拉取：头按 modelsAuth 配；拉到像样的清单返回 list，否则 null（失败原因记日志）
-  const pull = async (url) => {
-    try {
-      const headers = {};
-      if (key) {
-        if (p.modelsAuth === "x-api-key") {
-          headers["x-api-key"] = key;
-          headers["anthropic-version"] = "2023-06-01";
-        } else if (p.modelsAuth !== "none") {
-          headers.Authorization = `Bearer ${key}`;
-        }
-      }
-      const r = await fetchKeyed(url, { headers, signal: AbortSignal.timeout(15000) });
-      if (r.ok) {
-        const list = withCatalog(withConfigured(mergeKnown(normalizeModels(await morePages(url, headers, await fetchJsonCapped(r))), p.fallbackModels), p), p);
-        if (list.length) {
-          log(`[${p.id}] 模型清单：${list.map((m) => m.id).join(", ")}`);
-          return list;
-        }
-      }
-      log(`[${p.id}] 拉模型清单失败 HTTP ${r.status}${url !== p.modelsUrl ? `（试 ${url}）` : ""}`);
-    } catch (e) {
-      log(`[${p.id}] 拉模型清单出错: ${e.message}${url !== p.modelsUrl ? `（试 ${url}）` : ""}`);
+  const fkey = `${p.id}|${sig}|${guess ? 1 : 0}|${gen}`;
+  if (!force && MODELS_INFLIGHT.has(fkey)) return MODELS_INFLIGHT.get(fkey);
+  const run = (async () => {
+    // 写在配置里的内嵌清单（data:application/json,…）：本地解析，不发请求、不带密钥，网络那边的同主机限制不用放宽（#57）
+    const inline = inlineModels(p.modelsUrl);
+    if (inline) {
+      const list = withCatalog(withConfigured(mergeKnown(inline, p.fallbackModels, true), p), p);
+      if (list.length) return keep(list);
     }
-    return null;
-  };
-  // 不带密钥（modelsAuth:"none"）也一样要过 modelsUrlOk：配置能分享导入，不能让它拿网关当跳板，每轮去敲内网地址（v0513b 中-2）
-  if (p.modelsUrl && (key || p.modelsAuth === "none") && modelsUrlOk(p)) {
-    const list = await pull(p.modelsUrl);
-    if (list) return keep(list);
-  } else if (!p.modelsUrl && p.custom && key && (guess || GUESSED.has(sig))) {
-    // 自定义端口没填清单地址：按接口地址猜几个同主机的 /models（第三方端口多半同时开着 OpenAI 形状的清单）。
-    // 只试和接口同主机同端口的地址（照样过 modelsUrlOk），密钥不会被带去别处；猜中的记在这份配置名下，下次直接用
-    const hit = GUESSED.get(sig);
-    for (const url of hit ? [hit] : guessModelsUrls(p.baseUrl)) {
-      if (!modelsUrlOk({ baseUrl: p.baseUrl, modelsUrl: url })) continue;
-      const list = await pull(url);
-      if (list) { GUESSED.set(sig, url); return keep(list); }
+
+    const key = keyOf(p);
+    // 一次拉取：头按 modelsAuth 配；拉到像样的清单返回 list，否则 null（失败原因记日志）
+    const pull = async (url) => {
+      try {
+        const headers = {};
+        if (key) {
+          if (p.modelsAuth === "x-api-key") {
+            headers["x-api-key"] = key;
+            headers["anthropic-version"] = "2023-06-01";
+          } else if (p.modelsAuth !== "none") {
+            headers.Authorization = `Bearer ${key}`;
+          }
+        }
+        const r = await fetchKeyed(url, { headers, signal: AbortSignal.timeout(15000) });
+        if (r.ok) {
+          const list = withCatalog(withConfigured(mergeKnown(normalizeModels(await morePages(url, headers, await fetchJsonCapped(r))), p.fallbackModels), p), p);
+          if (list.length) {
+            log(`[${p.id}] 模型清单：${list.map((m) => m.id).join(", ")}`);
+            return list;
+          }
+        }
+        log(`[${p.id}] 拉模型清单失败 HTTP ${r.status}${url !== p.modelsUrl ? `（试 ${url}）` : ""}`);
+      } catch (e) {
+        log(`[${p.id}] 拉模型清单出错: ${e.message}${url !== p.modelsUrl ? `（试 ${url}）` : ""}`);
+      }
+      return null;
+    };
+    // 不带密钥（modelsAuth:"none"）也一样要过 modelsUrlOk：配置能分享导入，不能让它拿网关当跳板，每轮去敲内网地址（v0513b 中-2）
+    if (p.modelsUrl && (key || p.modelsAuth === "none") && modelsUrlOk(p)) {
+      const list = await pull(p.modelsUrl);
+      if (list) return keep(list);
+    } else if (!p.modelsUrl && p.custom && key && (guess || GUESSED.has(sig))) {
+      // 自定义端口没填清单地址：按接口地址猜几个同主机的 /models（第三方端口多半同时开着 OpenAI 形状的清单）。
+      // 只试和接口同主机同端口的地址（照样过 modelsUrlOk），密钥不会被带去别处；猜中的记在这份配置名下，下次直接用
+      const hit = GUESSED.get(sig);
+      for (const url of hit ? [hit] : guessModelsUrls(p.baseUrl)) {
+        if (!modelsUrlOk({ baseUrl: p.baseUrl, modelsUrl: url })) continue;
+        const list = await pull(url);
+        if (list) { GUESSED.set(sig, url); return keep(list); }
+      }
+      if (hit) GUESSED.delete(sig);
     }
-    if (hit) GUESSED.delete(sig);
-  }
-  // 该猜而这次没猜（开跑前那次）：先用兜底清单，但不记 10 分钟，用户打开清单时照样去猜
-  const skipped = !p.modelsUrl && p.custom && key && !guess && !GUESSED.has(sig);
-  return keep(c && c.list ? c.list
-    : withConfigured((p.fallbackModels || []).map((m) => ({ context_window: 0, max_output_tokens: 0, input_modalities: ["text"], effort: null, ...m })), p), !skipped);
+    // 该猜而这次没猜（开跑前那次）：先用兜底清单，但不记 10 分钟，用户打开清单时照样去猜
+    const skipped = !p.modelsUrl && p.custom && key && !guess && !GUESSED.has(sig);
+    return keep(c && c.list ? c.list
+      : withConfigured((p.fallbackModels || []).map((m) => ({ context_window: 0, max_output_tokens: 0, input_modalities: ["text"], effort: null, ...m })), p), !skipped);
+  })().finally(() => { if (MODELS_INFLIGHT.get(fkey) === run) MODELS_INFLIGHT.delete(fkey); });
+  if (!force) MODELS_INFLIGHT.set(fkey, run);
+  return run;
 }
 // 自定义端口猜中的清单地址（按配置指纹记；改了配置指纹就变，重新猜）
 const GUESSED = new Map();

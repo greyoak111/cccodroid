@@ -100,6 +100,65 @@ function hashOf(file, mark = -1) {
   } catch { return null; } finally { try { fs.closeSync(fd); } catch {} }
 }
 
+async function hashOfAsync(file, mark = -1) {
+  let fh; try { fh = await fs.promises.open(file, "r"); } catch { return null; }
+  try {
+    const size = (await fh.stat()).size, h = crypto.createHash("sha256"), buf = Buffer.allocUnsafe(1 << 20);
+    const feed = async (from, to) => {
+      for (let p = from; p < to;) {
+        const { bytesRead } = await fh.read(buf, 0, Math.min(buf.length, to - p), p);
+        if (bytesRead <= 0) break;
+        h.update(buf.subarray(0, bytesRead));
+        p += bytesRead;
+      }
+    };
+    if (mark >= 0 && mark <= size) {
+      await feed(0, mark);
+      const prefix = h.copy().digest("hex");
+      await feed(mark, size);
+      return { hash: h.digest("hex"), prefix };
+    }
+    await feed(0, size);
+    return mark >= 0 ? { hash: h.digest("hex"), prefix: null } : h.digest("hex");
+  } catch { return null; } finally { await fh.close().catch(() => {}); }
+}
+
+/** 起进程紧前给会话文件拍的底（异步不阻塞事件循环） */
+export async function sessionAnchorAsync(file) {
+  if (!file) return null;
+  let size; try { size = (await fs.promises.stat(file)).size; } catch { return null; }
+  const hash = await hashOfAsync(file);
+  return hash ? { size, hash } : null;
+}
+
+export async function sealSessionAsync(sid, file, { flag, clear = false, base = null } = {}) {
+  if (!sid || !file) return;
+  let size; try { size = (await fs.promises.stat(file)).size; } catch { return; }
+  const r = await hashOfAsync(file, base ? base.size : -1);
+  if (!r) return;
+  const hash = base ? r.hash : r;
+  if (base && r.prefix !== base.hash) {
+    flag = "edited"; clear = false;
+    log(`[封签] 会话 ${String(sid).slice(0, 8)} 的记录在这一轮运行期间被改了前面的内容，下一轮提醒模型`);
+  }
+  const keep = flag || (clear ? null : seals()[sid]?.flag);
+  seals()[sid] = { size, hash, at: Date.now(), ...(keep ? { flag: keep } : {}) };
+  saveSeals();
+}
+
+export async function checkSessionAsync(sid, file) {
+  if (!sid) return null;
+  const rec = seals()[sid];
+  if (!rec) return null;
+  if (rec.flag) return rec.flag;
+  if (!file) return null;
+  let size; try { size = (await fs.promises.stat(file)).size; } catch { return null; }
+  if (size === rec.size && (await hashOfAsync(file)) === rec.hash) return null;
+  rec.flag = "edited"; saveSeals();
+  log(`[封签] 会话 ${String(sid).slice(0, 8)} 的记录在应用外被改过，下一轮提醒模型`);
+  return "edited";
+}
+
 /** 起进程紧前给会话文件拍的底（大小 + 哈希）：收尾时核这一轮只是往后追加（见 sealSession 的 base） */
 export function sessionAnchor(file) {
   if (!file) return null;

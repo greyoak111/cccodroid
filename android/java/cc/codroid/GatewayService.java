@@ -29,17 +29,30 @@ public class GatewayService extends Service {
     /** 系统闹钟叫醒（SchedAlarm）：跑完到点的任务就自己退，不常驻（0.6.9 审计 13-01） */
     static final String ACTION_ALARM = "cc.codroid.ALARM";
 
-    /** 替换工具包期间停住网关（它跑的 node 就在要被换掉的目录里） */
+    /** 替换工具包期间停住网关（引用计数：多个并发暂停方都放开才恢复，且 pause(true) 递增 lifeGen 阻断在途 spawnGateway） */
+    private static final Object PAUSE_LOCK = new Object();
+    private static int pauseCount;
     private static volatile boolean paused;
     private static volatile GatewayService self;
     /** 停住期间通知栏上写什么；null 按更新工具包说 */
     private static volatile String pauseWhy;
     static void pause(boolean on) { pause(on, null); }
     static void pause(boolean on, String why) {
-        pauseWhy = on ? why : null;
-        paused = on;
         GatewayService s = self;
-        if (on && s != null) s.killGateway();
+        synchronized (PAUSE_LOCK) {
+            if (on) {
+                pauseCount++;
+                pauseWhy = why;
+                paused = true;
+            } else {
+                if (pauseCount > 0) pauseCount--;
+                if (pauseCount == 0) { paused = false; pauseWhy = null; }
+            }
+        }
+        if (on && s != null) {
+            synchronized (s.life) { s.lifeGen++; }
+            s.killGateway();
+        }
     }
 
     private Env env;
@@ -152,11 +165,15 @@ public class GatewayService extends Service {
                             if (idleGrace > 0) { idleGrace--; idle = 0; }
                             else idle = closeWhenIdle && !busy() ? idle + 1 : 0;
                             if (idle >= 3) {
+                                final long seen;
+                                synchronized (life) { seen = startSeq; }
                                 // 标记文件可能没写上（存储满）或没来得及更新：真要停之前直接问一次网关。
                                 // 问不到（网关没起来）才算空闲；网关起着说还有轮次 / 排队，就接着保活（0.6.9 审计 13-03）
                                 if (Updater.gatewayBusy()) { idle = 0; continue; }
-                                // 问的这几秒里用户可能又把界面打开了：那就不算「划掉」
-                                if (closeWhenIdle && !MainActivity.appForeground()) { Log.i(TAG, "划掉时在跑的任务跑完了，停止服务"); shutdown(); break; }
+                                // 问的这几秒里用户可能又把界面打开了或新闹钟/启动请求到达：带 seen 复核（BUG-A02）
+                                if (closeWhenIdle && !MainActivity.appForeground()) {
+                                    if (shutdownIfIdle(seen)) { Log.i(TAG, "划掉时在跑的任务跑完了，停止服务"); break; }
+                                }
                                 idle = 0;
                             }
                             long gap = android.os.SystemClock.uptimeMillis() - t0 - 2000;
@@ -191,11 +208,11 @@ public class GatewayService extends Service {
         // 只认自己通知里那个「停止」：服务是导出的，有跨用户权限的进程（shell、别的拿了 Shizuku 的应用）也能发；对不上就当普通启动（审查 v0.5.9 B5）
         String ik = i == null ? null : i.getStringExtra(MainActivity.IK);
         boolean mine = ik != null && java.security.MessageDigest.isEqual(ik.getBytes(), MainActivity.intentKey(this).getBytes());
-        if (i != null && ACTION_STOP.equals(i.getAction()) && mine) { shutdown(); return START_NOT_STICKY; }
+        if (i != null && ACTION_STOP.equals(i.getAction()) && mine) { shutdownAsync(); return START_NOT_STICKY; }
         // 系统把被杀的服务带空 intent 重建：没任务在跑就不起了。用户在最近任务里划掉、ROM 只杀进程不强停时，
         // 粘性重建出来的服务紧接着又被冻住，通知卡在「正在启动…」（红魔，11-03 用户反馈）。
         // 定时任务不靠这个：到点由系统闹钟（SchedAlarm）拉起；下次打开界面也会拉起
-        if (i == null && !busy()) { Log.i(TAG, "粘性重建时没有任务在跑，不再拉起"); shutdown(); return START_NOT_STICKY; }
+        if (i == null && !busy()) { Log.i(TAG, "粘性重建时没有任务在跑，不再拉起"); shutdownAsync(); return START_NOT_STICKY; }
         // 有人明确要服务（打开界面、闹钟、开机）：划掉时记的「跑完就停」作罢。口令对不上的 STOP 不算（服务是导出的，审查 0601b）
         if (i != null && !ACTION_STOP.equals(i.getAction())) closeWhenIdle = false;
         // 系统闹钟叫醒的、系统粘性重建的，都不是用户在盯着界面：跑到点该跑的任务就自己退，不常驻、不占着 WakeLock。
@@ -251,6 +268,21 @@ public class GatewayService extends Service {
 
     private void shutdown() { shutdownIfIdle(null); }
 
+    /** 主线程停机入口（ACTION_STOP / 粘性重建无任务）：立即异步杀网关并收尾，避免主线程 waitFor(5s) 触发 ANR */
+    private void shutdownAsync() {
+        final int myStartId;
+        synchronized (life) {
+            myStartId = lastStartId;
+            lifeGen++;
+            stopping = true;
+        }
+        killGatewayAsync();
+        ShizukuSetup.get(this).onExit();
+        stopForeground(true);
+        if (myStartId > 0) stopSelfResult(myStartId);
+        else stopSelf();
+    }
+
     /** 停机；给了 seenSeq（划掉后的空闲查询）就先在锁里复核用户没回来、服务没被重新拉起，不能停就返回 false。
      *  代次和 stopping 在锁里定，退出锁才去杀进程 / 停前台：别让等这把锁的主线程跟着等网关收尾的 5 秒 */
     private boolean shutdownIfIdle(Long seenSeq) {
@@ -280,7 +312,7 @@ public class GatewayService extends Service {
         synchronized (life) { lifeGen++; stopping = true; }
         Updater.get(this).stopLoop();
         Notify.get(this).stop();
-        killGateway();
+        killGatewayAsync();
         if (wake != null && wake.isHeld()) wake.release();
         super.onDestroy();
     }
@@ -329,6 +361,7 @@ public class GatewayService extends Service {
                         int rc = waitGatewayExit();
                         if (stopping) break;
                         Env.resetBoot();             // 网关没了：上一次核身份的缓存作废，别在 3 秒内把签名请求交给接手端口的人
+                        if (paused) { backoff = 1000; continue; }    // 主动暂停（更新工具包/部署资源）：不算崩溃，不走退避
                         why = exitWhy(rc);
                         Log.w(TAG, "网关退出 rc=" + rc + (why != null ? "：" + why : ""));
                     } catch (Cancelled e) {
@@ -496,8 +529,21 @@ public class GatewayService extends Service {
 
     private void killGateway() {
         Process p;
-        synchronized (life) { p = proc; }
+        synchronized (life) { p = proc; proc = null; }
         if (p != null) terminate(p);
+    }
+
+    /** 原子取出 proc 并在后台等待收尾：主线程只发 SIGTERM，绝不 waitFor(5s) 卡死主线程触发 ANR */
+    private void killGatewayAsync() {
+        final Process p;
+        synchronized (life) { p = proc; proc = null; }
+        if (p == null) return;
+        p.destroy();
+        Thread t = new Thread(() -> {
+            try { if (!p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly(); } catch (InterruptedException ignored) {}
+        }, "gateway-reap");
+        t.setDaemon(true);
+        t.start();
     }
 
     /** SIGTERM 让网关自己收尾（它会连带杀掉正在跑的 claude 进程树），5 秒不退再强杀 */

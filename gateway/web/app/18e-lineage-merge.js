@@ -36,13 +36,16 @@
   }
   $("lin-pick-x").addEventListener("click", linPickEnd);
   $("lin-pick-ok").addEventListener("click", async () => {
-    const P = MG.pick; if (!P || !P.ids.length) return;
+    const ok = $("lin-pick-ok"), P = MG.pick;
+    if (!P || !P.ids.length || ok.disabled) return;
     if (P.mode === "merge") return mergeWizard(P.ids.slice());
+    ok.disabled = true;
     try {
       const r = await post("/api/lineage/extra", { child: P.child, add: P.ids });
       toast(t("已补记 {n} 个来源", { n: r.n || P.ids.length }));
       linPickEnd(); lineageDirty();
     } catch (e) { toast(e.message === "too_many" ? t("这个会话补记的来源已经满了（最多 {n} 个）", { n: 32 }) : e.message, true); }
+    finally { if (MG.pick) ok.disabled = !MG.pick.ids.length; }
   });
 
   // 卡片「更多…」：从这里分叉、补记来源、撤掉补错的来源
@@ -65,11 +68,14 @@
     return items;
   }
   async function linFork(id) {
+    if (linFork._busy) return;
+    linFork._busy = true;
     try {
       const r = await post("/api/session/" + encodeURIComponent(id) + "/fork", { latest: true });
       toast(t("已分叉：保留了前 {n} 轮，接着聊就行", { n: r.kept }));
       loadSessions(); openSession(r.id);
     } catch (e) { toast(e.message, true); }
+    finally { linFork._busy = false; }
   }
 
   // ── 向导 ──

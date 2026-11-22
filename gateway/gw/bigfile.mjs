@@ -109,7 +109,18 @@ const dosDate = (d) => (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) <<
 export async function zipToFile(file, entries, fd0) {
   const fd = fd0 ?? fs.openSync(file, "w");
   let off = 0;
-  const put = (b) => { writeAll(fd, b); off += b.length; };
+  const writeChunkAsync = (b) => new Promise((resolve, reject) => {
+    const step = (pos) => {
+      if (pos >= b.length) return resolve();
+      fs.write(fd, b, pos, b.length - pos, null, (err, n) => {
+        if (err) return reject(err);
+        if (!n) return reject(new Error("short write"));
+        step(pos + n);
+      });
+    };
+    step(0);
+  });
+  const put = async (b) => { await writeChunkAsync(b); off += b.length; };
   const now = new Date(), central = [];
   try {
     for (const e of entries) {
@@ -117,17 +128,17 @@ export async function zipToFile(file, entries, fd0) {
       const h = Buffer.alloc(30);
       h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4); h.writeUInt16LE(0x0808, 6); h.writeUInt16LE(8, 8);
       h.writeUInt16LE(dosTime(now), 10); h.writeUInt16LE(dosDate(now), 12); h.writeUInt16LE(name.length, 26);
-      put(h); put(name);
+      await put(h); await put(name);
       let crc = 0, usize = 0, csize = 0;
       const src = e.file ? fs.createReadStream(e.file, { highWaterMark: CHUNK }) : [Buffer.from(e.data)];
       await pipeline(src,
         new Transform({ transform(c, _e, cb) { crc = zlib.crc32(c, crc); usize += c.length; cb(null, c); } }),
         zlib.createDeflateRaw({ level: 6 }),
-        new Writable({ write(c, _e, cb) { put(c); csize += c.length; cb(); } }));
+        new Writable({ write(c, _e, cb) { put(c).then(() => { csize += c.length; cb(); }, cb); } }));
       if (usize > ZIP32 || off > ZIP32) throw new Error(tz("会话包超过 4 GB，分几次导出"));
       const dd = Buffer.alloc(16);
       dd.writeUInt32LE(0x08074b50, 0); dd.writeUInt32LE(crc >>> 0, 4); dd.writeUInt32LE(csize, 8); dd.writeUInt32LE(usize, 12);
-      put(dd);
+      await put(dd);
       const c = Buffer.alloc(46);
       c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(0x0808, 8); c.writeUInt16LE(8, 10);
       c.writeUInt16LE(dosTime(now), 12); c.writeUInt16LE(dosDate(now), 14);
@@ -137,11 +148,11 @@ export async function zipToFile(file, entries, fd0) {
     }
     const cd = Buffer.concat(central), cdAt = off;
     if (cdAt + cd.length > ZIP32 || entries.length > 0xffff) throw new Error(tz("会话包超过 4 GB，分几次导出"));
-    put(cd);
+    await put(cd);
     const end = Buffer.alloc(22);
     end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
     end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(cdAt, 16);
-    put(end);
+    await put(end);
     return off;
   } catch (err) { try { fs.closeSync(fd); } catch {} fs.rmSync(file, { force: true }); throw err; }
   finally { try { fs.closeSync(fd); } catch {} }

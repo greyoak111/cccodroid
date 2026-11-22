@@ -84,7 +84,7 @@ function scanGoal(file, size) {
     return { ...base, active: true, setAt, checks, reason: last.sentinel ? "" : String(last.reason || "").slice(0, 600) };
   }
 }
-// 跑着的时候每 4 秒看一眼（只看有会话号的轮），变了才推；每轮结束再补看一次（见 endRun），最后那次达成不会漏
+// 跑着的时候每 4 秒异步分块看一眼（防重叠 + 不堵事件循环），变了才推；每轮结束再补看一次（见 endRun），最后那次达成不会漏
 const GOAL_SEEN = new Map();   // 会话号 → 上次推出去的 JSON
 export function goalCheck(sid) {
   const f = sid && findSessionFile(sid);
@@ -95,7 +95,74 @@ export function goalCheck(sid) {
   if (GOAL_SEEN.size > 200) GOAL_SEEN.delete(GOAL_SEEN.keys().next().value);
   publish({ type: "goal", sessionId: sid, goal: g });
 }
-if (LIVE) setInterval(() => { for (const r of RUNS.values()) { goalCheck(r.sessionId); tasksCheck(r.sessionId); } }, 4000).unref?.();
+async function scanGoalAsync(file, size) {
+  let last = null, lastAt = 0, setAt = null, checks = 0, done = false, cleared = false;
+  const step = (l) => {
+    if (!l.includes("goal")) return false;
+    let e; try { e = JSON.parse(l); } catch { return false; }
+    if (!last && e.type === "user" && typeof e.message?.content === "string") {
+      const m = e.message.content.match(/<command-name>\/goal<\/command-name>[\s\S]*?<command-args>([\s\S]*?)<\/command-args>/);
+      if (m && GOAL_CLEAR.has(m[1].trim().toLowerCase())) { cleared = true; return true; }
+    }
+    const a = e.type === "attachment" && e.attachment?.type === "goal_status" ? e.attachment : null;
+    if (!a) return false;
+    if (!last) { last = a; lastAt = Date.parse(e.timestamp) || 0; if (a.met || a.failed) return true; }
+    if (a.condition !== last.condition) return true;
+    if (a.sentinel) { setAt = Date.parse(e.timestamp) || null; return true; }
+    if (!a.met) checks++;
+    return false;
+  };
+  let fh; try { fh = await fs.promises.open(file, "r"); } catch { return null; }
+  try {
+    const chunkMax = Math.min(GOAL_CHUNK, 2 << 20);
+    let pos = size, carry = Buffer.alloc(0), read = 0;
+    while (pos > 0 && !done) {
+      if (read >= GOAL_SCAN_MAX) break;
+      const n = Math.min(chunkMax, pos); pos -= n; read += n;
+      const b = Buffer.alloc(n);
+      const { bytesRead } = await fh.read(b, 0, n, pos);
+      const slice = bytesRead === n ? b : b.subarray(0, bytesRead);
+      const buf = carry.length ? Buffer.concat([slice, carry]) : slice;
+      let end = buf.length;
+      for (let k = buf.length - 1; k >= 0 && !done; k--) {
+        if (buf[k] !== 10) continue;
+        if (step(buf.toString("utf8", k + 1, end))) done = true;
+        end = k;
+      }
+      carry = buf.subarray(0, end);
+      await new Promise((ok) => setImmediate(ok));
+    }
+    if (!done && pos === 0 && carry.length && step(carry.toString("utf8"))) done = true;
+    if (!done && pos > 0) return last ? result() : undefined;
+  } catch { return null; } finally { await fh.close().catch(() => {}); }
+  return cleared || !last ? null : result();
+  function result() {
+    const base = { condition: String(last.condition || "").slice(0, 600), at: lastAt };
+    if (last.met || last.failed) return { ...base, done: true, met: !!last.met, failed: !!last.failed, reason: String(last.reason || "").slice(0, 600),
+      iterations: last.iterations ?? null, durationMs: last.durationMs ?? null, tokens: last.tokens ?? null };
+    return { ...base, active: true, setAt, checks, reason: last.sentinel ? "" : String(last.reason || "").slice(0, 600) };
+  }
+}
+async function goalCheckAsync(sid) {
+  const f = sid && findSessionFile(sid);
+  if (!f) return;
+  let st; try { st = await fs.promises.stat(f.file); } catch { return; }
+  const g = st.size <= GOAL_CHUNK ? goalStateOf(f.file) : await scanGoalAsync(f.file, st.size);
+  if (g === undefined) return;
+  const j = JSON.stringify(g);
+  if (GOAL_SEEN.get(sid) === j) return;
+  GOAL_SEEN.set(sid, j);
+  if (GOAL_SEEN.size > 200) GOAL_SEEN.delete(GOAL_SEEN.keys().next().value);
+  publish({ type: "goal", sessionId: sid, goal: g });
+}
+let goalTicking = false;
+if (LIVE) setInterval(() => {
+  if (goalTicking) return;
+  goalTicking = true;
+  (async () => {
+    for (const r of [...RUNS.values()]) { await goalCheckAsync(r.sessionId); tasksCheck(r.sessionId); }
+  })().catch(() => {}).finally(() => { goalTicking = false; });
+}, 4000).unref?.();
 
 // 任务清单（TaskCreate / TaskUpdate）：claude 存在 ~/.claude/tasks/<会话号>/<编号>.json，--resume 沿用同一会话号，所以每轮换进程也接得上
 const TASKS_DIR = path.join(CFG.home, ".claude", "tasks");

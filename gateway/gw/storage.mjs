@@ -58,6 +58,25 @@ export function rmChecked(p, roots) {
     try { chmodTree(r); fs.rmSync(r, { recursive: true, force: true }); return { ok: true }; } catch { return { ok: false, why: e.code || e.message }; }
   }
 }
+async function chmodTreeAsync(d) {
+  let st; try { st = await fs.promises.lstat(d); } catch { return; }
+  if (!st.isDirectory()) return;
+  try { await fs.promises.chmod(d, 0o700); } catch {}
+  let ds; try { ds = await fs.promises.readdir(d); } catch { return; }
+  for (const n of ds) await chmodTreeAsync(path.join(d, n));
+}
+export async function rmCheckedAsync(p, roots) {
+  const r = realOf(p);
+  if (!r) return { ok: false, why: "gone" };
+  const rs = roots.map(realDir).filter(Boolean);
+  if (!rs.some((root) => r !== root && under(r, root))) return { ok: false, why: "outside" };
+  const nv = NEVER().map((x) => realOf(x) || x);
+  if (nv.some((x) => under(r, x) || under(x, r)) || NEVER_NAME.test(path.basename(r))) return { ok: false, why: "protected" };
+  try { await fs.promises.rm(r, { recursive: true, force: true }); return { ok: true }; }
+  catch (e) {
+    try { await chmodTreeAsync(r); await fs.promises.rm(r, { recursive: true, force: true }); return { ok: true }; } catch { return { ok: false, why: e.code || e.message }; }
+  }
+}
 function chmodTree(d) {
   let st; try { st = fs.lstatSync(d); } catch { return; }
   if (!st.isDirectory()) return;
@@ -322,17 +341,18 @@ export async function cleanStorage(cats, { picks = null, auto = false, at = Date
   const now = Date.now(), open = openPaths(), live = await liveSessions();
   let freed = 0, n = 0, skipped = 0;
   const done = {};
-  const rm = (p, bytes, roots, cat) => {
-    const r = rmChecked(p, roots);
+  const rm = async (p, bytes, roots, cat) => {
+    const r = await rmCheckedAsync(p, roots);
     if (r.ok) { freed += bytes; n++; done[cat] = (done[cat] || 0) + bytes; }
     else if (r.why !== "gone") { skipped++; log(`[存储] 没删 ${tilde(p)}：${r.why}`); }
+    if (((n + skipped) & 63) === 0) await new Promise((ok) => setImmediate(ok));
   };
   if (cats.includes("cache")) {
     const dirs = cacheDirs();
     for (const it of await cacheCandidates(open, now)) {
       const c = dirs.find((x) => x.id === it.id);
       const roots = c.dir ? [c.dir] : [path.dirname(c.file)];
-      for (const f of it.files) { let s = 0; try { s = fs.lstatSync(f).size; } catch {} rm(f, s, roots, "cache"); }
+      for (const f of it.files) { let s = 0; try { s = (await fs.promises.lstat(f)).size; } catch {} await rm(f, s, roots, "cache"); }
     }
   }
   if (cats.includes("tmp") && TMP()) {
@@ -340,10 +360,10 @@ export async function cleanStorage(cats, { picks = null, auto = false, at = Date
     for (const u of await tmpUnits(open, live, now)) {
       // 勾的也要过：有进程开着、会话还在跑的照样不删；没数完的不删
       const ok = want ? want.has(u.rel) && !u.inUse && !u.active && u.full : u.auto;
-      if (ok) rm(u.path, u.bytes, [TMP()], "tmp");
+      if (ok) await rm(u.path, u.bytes, [TMP()], "tmp");
     }
   }
-  if (cats.includes("junk")) for (const u of await junkUnits(open, live, now)) if (u.auto) rm(u.path, u.bytes, JUNK_ROOTS(), "junk");
+  if (cats.includes("junk")) for (const u of await junkUnits(open, live, now)) if (u.auto) await rm(u.path, u.bytes, JUNK_ROOTS(), "junk");
   const rec = { at, auto, freed, n, skipped, cats: done };
   st().history.push(rec); st().history = st().history.slice(-30);
   if (auto) st().lastAuto = at;

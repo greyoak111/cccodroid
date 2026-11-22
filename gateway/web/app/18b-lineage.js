@@ -68,6 +68,13 @@
       try { [g] = await Promise.all([sameGet("/api/lineage"), ensureLinMap()]); }
       catch (e) {
         if (!live()) return;
+        if (LIN.building && (LIN.fails || 0) < 6) {
+          LIN.fails = (LIN.fails || 0) + 1;
+          LIN.poll = setTimeout(() => { if (live()) loadLineage(); }, 2000);
+          return;
+        }
+        LIN.building = false;
+        if (LIN.map) { toast(t("读不到脉络：{e}", { e: e.message }), true); return; }
         linState(t("读不到脉络：{e}", { e: e.message }));
         const b = document.createElement("button"); b.type = "button"; b.className = "btn ghost sm"; b.textContent = t("重试");
         b.onclick = () => { linState(t("加载中…")); loadLineage(); };
@@ -75,11 +82,14 @@
         return;
       }
       if (!live()) return;
+      LIN.fails = 0;
       if (g.building) {
+        LIN.building = true;
         linState(t("正在整理会话记录… {d}/{n}", { d: g.done || 0, n: g.total || "?" }));
         LIN.poll = setTimeout(() => { if (live()) loadLineage(); }, 800);
         return;
       }
+      LIN.building = false;
       // 头一回画图才归位到「现在」；后台重取保持用户拖着的位置（195-K.8）
       const first = !LIN.map;
       LIN.g = g; LIN.stale = false;
@@ -90,14 +100,19 @@
   }
 
   // ── 补档（gw/backfill.mjs）：没题名的旧章，用全局默认模型按压缩摘要补起题名；先报预估，用户点头才跑 ──
-  const FILL = { st: null, poll: 0, was: false, revision: 0 };
+  const FILL = { st: null, poll: 0, was: false, revision: 0, fails: 0 };
   function linFill(changed = false) {
     if (changed) FILL.revision++;
     const visit = pageVisit, rev = FILL.revision, live = () => pageVisible("lineage", visit) && FILL.revision === rev;
     return viewRead("lineage-backfill", visit + ":" + rev, live, async () => {
       clearTimeout(FILL.poll);
       const r = await api("/api/lineage/backfill").catch(() => null);
-      if (live() && r?.job && r.estimate) paintFill(r, live);
+      if (!live()) return;
+      if (r?.job && r.estimate) { FILL.fails = 0; paintFill(r, live); }
+      else if (FILL.was && FILL.fails < 6) {
+        FILL.fails++;
+        FILL.poll = setTimeout(() => { if (live()) linFill(); }, 2000);
+      }
     });
   }
   function paintFill(r, live) {
@@ -122,18 +137,26 @@
     el.classList.toggle("hidden", !n);
   }
   $("lin-fill").addEventListener("click", async () => {
-    const r = FILL.st; if (!r) return;
-    if (r.job.running) { await post("/api/lineage/backfill", { action: "stop" }).catch(() => {}); return linFill(true); }
+    const el = $("lin-fill"), r = FILL.st;
+    if (!r || el.disabled) return;
+    if (r.job.running) {
+      el.disabled = true;
+      try { await post("/api/lineage/backfill", { action: "stop" }).catch(() => {}); }
+      finally { el.disabled = false; }
+      return linFill(true);
+    }
     const e = r.estimate, num = (x) => x.toLocaleString(I18N.lang);
     const msg = t("用全局默认的 {m}（{p}）给 {s} 个会话的 {c} 章补起题名。", { m: r.modelName || r.model || "?", p: r.provider, s: e.sessions, c: e.chapters })
       + "\n\n" + t("素材是每章结束时的压缩摘要，不重读全文。预计 {k} 次调用，输入约 {i} token、输出约 {o} token（按上限估，实际通常更少）。", { k: e.calls, i: num(e.tokensIn), o: num(e.tokensOut) })
       + "\n\n" + t("补出来的题名随时能改，之后 AI 建档也会盖过它。开始吗？");
     if (!confirm(msg)) return;
+    el.disabled = true;
     try {
       const s = await post("/api/lineage/backfill", { action: "start" });
       if (!s.ok && s.message === "nothing") toast(t("没有要补的章了"));
       else if (!s.ok && s.message === "bridge") toast(t("本地 DNS 桥启动失败，无法连接 API。"), true);
     } catch (err) { toast(err.message, true); }
+    finally { el.disabled = false; }
     linFill(true);
   });
   const mdOf = (ms) => { const d = new Date(ms), p = (n) => String(n).padStart(2, "0"); return p(d.getMonth() + 1) + "-" + p(d.getDate()); };

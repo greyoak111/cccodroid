@@ -17,8 +17,10 @@
   });
 
   async function loadProviders() {
+    const ok = latest("providers");
     try {
       const r = await api("/api/providers");
+      if (!ok()) return;
       state.providers = r.providers || [];
       state.providerActive = r.active;
       if (!state.provView || (state.provView !== "__new__" && !state.providers.some((p) => p.id === state.provView))) {
@@ -42,6 +44,7 @@
       $("provider-info").title = cur.baseUrl || "";
       if (setVisible("provider")) renderProvCard();
     } catch (e) {
+      if (!ok()) return;
       $("provider-info").textContent = t("读取接口清单失败：{msg}", { msg: e.message });
     }
   }
@@ -323,7 +326,7 @@
       </div>`;
     $("btn-login-term").onclick = async () => {
       await post("/api/login/cancel").catch(() => {});
-      clearInterval(state.loginTimer);
+      stopLoginWatch();
       closeSettings();       // 终端窗格在设置模态下面，不关设置就点不着（审查 P2-6）
       openLoginTerm(method === "console" ? "console" : "claudeai");
     };
@@ -344,11 +347,21 @@
     if (live()) paintLoginFlow(r.url || "", method);
     watchLogin(p, method);
   }
+  let loginWatchGen = 0;
+  function stopLoginWatch() {
+    loginWatchGen++;
+    clearTimeout(state.loginTimer);
+    state.loginTimer = null;
+  }
   function watchLogin(p, method) {
-    clearInterval(state.loginTimer);
-    state.loginTimer = setInterval(async () => {
+    stopLoginWatch();
+    const gen = loginWatchGen;
+    const step = async () => {
+      if (gen !== loginWatchGen || !setOpen || setCatOpen !== "provider") { if (gen === loginWatchGen) stopLoginWatch(); return; }
+      if (document.hidden) { state.loginTimer = setTimeout(step, 2000); return; }
       let st;
-      try { st = await api("/api/login/status"); } catch { return; }
+      try { st = await api("/api/login/status"); } catch { if (gen === loginWatchGen) state.loginTimer = setTimeout(step, 2000); return; }
+      if (gen !== loginWatchGen) return;
       if (st.pending) {
         // 20 秒后才拿到的授权地址：轮询里补开，只开一次（0.6.9 审计 195-G.4）
         if (st.url && st.url !== loginUrlOpened) {
@@ -357,22 +370,28 @@
           if (state.provView === p.id) paintLoginFlow(st.url, method);
         }
         if (state.provView === p.id) paintLoginState(st, p);
+        state.loginTimer = setTimeout(step, 2000);
         return;
       }
-      clearInterval(state.loginTimer);
+      stopLoginWatch();
       if (st.loggedIn) toast((st.email ? t("✓ 已登录：{email}", { email: st.email }) : t("✓ 已登录")) + (p.active ? "" : t("，点「使用这个接口」切过去")));
       else if (st.last && !st.last.ok) toast(t("登录没有完成"), true);
       if (state.provView === p.id) renderProvCard();
       refreshStatus();
-    }, 2000);
+    };
+    state.loginTimer = setTimeout(step, 2000);
   }
   async function logout(p) {
+    if (logout._busy) return;
     if (!confirm(t("退出这台设备上的 Claude 账户登录？"))) return;
-    const r = await post("/api/login/logout").catch((e) => ({ ok: false, output: e.message }));
-    toast(r.ok ? t("已退出登录") : t("退出失败：{msg}", { msg: r.output || r.message || "" }), !r.ok);
-    renderProvCard();
-    // 退出成功后顶栏 / 用量页的额度要跟着撤掉，不能留着上一个账户的数（195-O.9）
-    if (r.ok) { refreshStatus(); qbLoad(); loadQuota().catch(() => {}); }
+    logout._busy = true;
+    try {
+      const r = await post("/api/login/logout").catch((e) => ({ ok: false, output: e.message }));
+      toast(r.ok ? t("已退出登录") : t("退出失败：{msg}", { msg: r.output || r.message || "" }), !r.ok);
+      renderProvCard();
+      // 退出成功后顶栏 / 用量页的额度要跟着撤掉，不能留着上一个账户的数（195-O.9）
+      if (r.ok) { refreshStatus(); qbLoad(); loadQuota().catch(() => {}); }
+    } finally { logout._busy = false; }
   }
 
   // ── 密钥卡（Claude API Key 与第三方厂商）──
@@ -721,9 +740,16 @@
       ${p.hasKey ? `<div id="pc-bill" class="bill"></div>` : ""}`;
     if (p.hasKey) loadBill(p);
     box.onclick = async (e) => {
-      const act = e.target.dataset && e.target.dataset.act;
-      if (!act) return;
-      if (act === "use") return useProvider(p);
+      const btn = e.target.closest && e.target.closest("button[data-act]");
+      const act = btn ? btn.dataset.act : (e.target.dataset && e.target.dataset.act);
+      if (!act || box._busy || (btn && btn.disabled)) return;
+      const runLocked = async (fn) => {
+        box._busy = true;
+        if (btn) btn.disabled = true;
+        try { return await fn(); }
+        finally { box._busy = false; if (btn && btn.isConnected) btn.disabled = false; }
+      };
+      if (act === "use") return runLocked(() => useProvider(p));
       // 这张卡的身份与编辑代次：await 回来的旧回执只许动仍在原卡、且输入没被再改过的输入框。
       // 以前 A 卡保存还没回来就切到 B：A 的旧闭包按全局 id 找 #pc-key，把 B 刚粘进去的 Key 清掉，
       // 随后的刷新还会把 B 重画（BUG-UIFS-004）。
@@ -731,34 +757,41 @@
       const live = () => state.provView === p.id && box.contains(keyEl) && $("pc-key") === keyEl;
       if (act === "clear") {
         if (!confirm(t("清除 {name} 的 Key？", { name: p.label }))) return;
-        // 没清掉就别说「已清除」（审查 D-04）
-        try { await post("/api/providers/save", { id: p.id, clearKey: true }); } catch (e2) { return toast(e2.message, true); }
-        if (!live()) return toast(t("已清除"));
-        return reloadProv(t("已清除"));
+        return runLocked(async () => {
+          // 没清掉就别说「已清除」（审查 D-04）
+          try { await post("/api/providers/save", { id: p.id, clearKey: true }); } catch (e2) { return toast(e2.message, true); }
+          if (!live()) return toast(t("已清除"));
+          return reloadProv(t("已清除"));
+        });
       }
       const body = { id: p.id, apiKey: keyEl.value.trim() };
       if ($("pc-endpoint")) body.endpoint = $("pc-endpoint").value;
       else if (p.endpointLost) body.endpoint = p.endpoint;   // 只剩一条线路时没有下拉框，也得把新线路记下来，提示才会消失（196-凭据.1）
       // 还没 Key、输入框也空着：点保存不能说「已保存」，其实什么都没配上（审查 P3-3）
       if (act === "save" && !body.apiKey && !p.hasKey && !(body.endpoint && body.endpoint !== p.endpoint)) return toast(t("先把 API Key 粘进来再保存"), true);
-      if (act === "save" || body.apiKey || body.endpoint !== p.endpoint) {
-        let r;
-        try { r = await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
-        // 线路失效后只重选、没填新 Key：网关把旧 Key 清掉了（196-凭据.1）
-        const msg = r && r.keyCleared ? t("换了线路，旧 Key 已清掉，请重新填") : t("已保存");
-        if (!live()) return toast(msg);                          // 卡已切走：只报结果，不动当前卡
-        if (keyEl.value.trim() !== body.apiKey) return toast(msg); // 同卡提交后又敲了新内容：留着
-        keyEl.value = "";
-        if (r && r.keyCleared) return reloadProv(msg);
-        if (act === "save") return reloadProv(msg, true);
-      }
-      await testAndShow(p.id);
+      return runLocked(async () => {
+        if (act === "save" || body.apiKey || body.endpoint !== p.endpoint) {
+          let r;
+          try { r = await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
+          // 线路失效后只重选、没填新 Key：网关把旧 Key 清掉了（196-凭据.1）
+          const msg = r && r.keyCleared ? t("换了线路，旧 Key 已清掉，请重新填") : t("已保存");
+          if (!live()) return toast(msg);                          // 卡已切走：只报结果，不动当前卡
+          if (keyEl.value.trim() !== body.apiKey) return toast(msg); // 同卡提交后又敲了新内容：留着
+          keyEl.value = "";
+          if (r && r.keyCleared) return reloadProv(msg);
+          if (act === "save") return reloadProv(msg, true);
+        }
+        await testAndShow(p.id);
+      });
     };
   }
+  let testProvSeq = 0;
   async function testAndShow(id) {
     const el = $("pc-result"); if (!el) return;
+    const my = ++testProvSeq;
     el.className = "prov-state"; el.textContent = t("测试中…");
     const r = await post("/api/providers/test", { id }).catch((e) => ({ ok: false, message: e.message }));
+    if (my !== testProvSeq || !el.isConnected) return;
     el.className = "prov-state " + (r.ok ? "ok" : "err");
     el.textContent = (r.ok ? "✓ " : "✗ ") + r.message;
   }

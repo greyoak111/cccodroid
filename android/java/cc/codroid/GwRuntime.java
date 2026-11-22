@@ -225,11 +225,12 @@ final class GwRuntime {
             JSONObject pinGz = dp.optJSONObject("gz");
             String pinSha = pinGz == null ? "" : pinGz.optString("sha256", "");
             String instSha = env.devkitInfo().optString("sha256", "");
-            // 工具包还没升级到当前钉住的版本时，把刚下好并核过 sha256 的基础模块包留给 Updater / Installer 复用，省掉重下
+            // 工具包还没升级到当前钉住的版本时，把刚下好并核过 sha256 的基础模块包留给 Updater / Installer 复用；
+            // 若目标文件或 .part 已存在（Updater 正在下/已下好），不动它避免并发覆盖竞态
             File reuse = new File(env.files, file);
-            if (shouldKeepBaseForUpdater(pinSha, instSha, ok)) {
-                if (reuse.exists() && !reuse.delete()) got.delete();
-                else if (!got.renameTo(reuse)) got.delete();
+            File reusePart = new File(env.files, file + ".part");
+            if (shouldKeepBaseForUpdater(pinSha, instSha, ok) && !reuse.exists() && !reusePart.exists()) {
+                if (!got.renameTo(reuse)) got.delete();
             } else {
                 got.delete();
             }

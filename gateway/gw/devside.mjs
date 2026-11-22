@@ -147,11 +147,15 @@ if (!PREFIX) {
 if (PREFIX && process.env.CCAPP_BIN) {
   const dest = path.join(CFG.home, ".local", "share", "cccodroid", "claude");
   const script = path.join(process.env.CCAPP_BIN, "..", "scripts", "install-claude.mjs");
+  let rechecking = false;
   const recheck = () => {
+    if (rechecking) return;
     let pending = false;
     try { pending = fs.readdirSync(dest).some((d) => /^\d/.test(d) && fs.existsSync(path.join(dest, d, "claude")) && (fs.existsSync(path.join(dest, d, ".npm-only")) || fs.existsSync(path.join(dest, d, ".mismatch")) || !fs.existsSync(path.join(dest, d, "manifest.json.sig")))); } catch {}
     if (!pending || !fs.existsSync(script)) return;
+    rechecking = true;
     execFile(path.join(PREFIX, "bin", "node"), [script, "--recheck"], { env: termEnv(), timeout: 600000 }, (e, out) => {
+      rechecking = false;
       const msg = String(out || "").trim();
       if (msg) log("[claude 补核] " + msg.replace(/\n/g, "；"));
       if (e && e.code === 3) ledger("verify", false, "Claude Code 与官方清单不符（npm 来源）", msg);
@@ -217,28 +221,34 @@ async function devApp(op, b) {
 // 官方和两个镜像都取不到时留空，不拿 npm 的 dist-tags 顶（两边是否始终同步没核实过）。
 // 装哪一版都由 install-claude.mjs 按官方清单 / PGP / npm 签名把关
 let ccVersions = { at: 0, data: null };
+let ccVersionsInFlight = null;
 async function claudeVersions(force) {
   if (!force && ccVersions.data && Date.now() - ccVersions.at < 600e3) return ccVersions.data;
-  const get = async (u, ms = 12000) => { const r = await fetch(u, { signal: AbortSignal.timeout(ms), headers: { Accept: "application/vnd.npm.install-v1+json" } }); if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); };
-  const channel = async (ch) => {
-    for (const b of ["https://downloads.claude.ai/claude-code-releases", "https://cccodroid.net/claude-code", "https://dl.cccodroid.net/claude-code"]) {
-      try { const v = (await get(`${b}/${ch}`, 8000)).trim(); if (/^\d+\.\d+\.\d+/.test(v)) return v; } catch {}
+  if (ccVersionsInFlight) return ccVersionsInFlight;
+  const run = (async () => {
+    const get = async (u, ms = 12000) => { const r = await fetch(u, { signal: AbortSignal.timeout(ms), headers: { Accept: "application/vnd.npm.install-v1+json" } }); if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); };
+    const channel = async (ch) => {
+      for (const b of ["https://downloads.claude.ai/claude-code-releases", "https://cccodroid.net/claude-code", "https://dl.cccodroid.net/claude-code"]) {
+        try { const v = (await get(`${b}/${ch}`, 8000)).trim(); if (/^\d+\.\d+\.\d+/.test(v)) return v; } catch {}
+      }
+      return "";
+    };
+    let versions = [], err = "";
+    for (const reg of ["https://registry.npmmirror.com", "https://registry.npmjs.org"]) {
+      try {
+        const j = JSON.parse(await get(`${reg}/@anthropic-ai%2fclaude-code-linux-arm64`, 20000));
+        versions = Object.keys(j.versions || {}).filter((v) => /^\d+\.\d+\.\d+$/.test(v));
+        if (versions.length) break;
+      } catch (e) { err = e.message; }
     }
-    return "";
-  };
-  let versions = [], err = "";
-  for (const reg of ["https://registry.npmmirror.com", "https://registry.npmjs.org"]) {
-    try {
-      const j = JSON.parse(await get(`${reg}/@anthropic-ai%2fclaude-code-linux-arm64`, 20000));
-      versions = Object.keys(j.versions || {}).filter((v) => /^\d+\.\d+\.\d+$/.test(v));
-      if (versions.length) break;
-    } catch (e) { err = e.message; }
-  }
-  versions.sort((a, b) => cmpVer(b, a));
-  const [stable, latest] = await Promise.all([channel("stable"), channel("latest")]);
-  const data = { ok: versions.length > 0 || !!stable, versions, stable, latest, message: versions.length ? "" : tz("取不到版本列表：{err}", { err }) };
-  if (data.ok) ccVersions = { at: Date.now(), data };
-  return data;
+    versions.sort((a, b) => cmpVer(b, a));
+    const [stable, latest] = await Promise.all([channel("stable"), channel("latest")]);
+    const data = { ok: versions.length > 0 || !!stable, versions, stable, latest, message: versions.length ? "" : tz("取不到版本列表：{err}", { err }) };
+    if (data.ok) ccVersions = { at: Date.now(), data };
+    return data;
+  })().finally(() => { if (ccVersionsInFlight === run) ccVersionsInFlight = null; });
+  ccVersionsInFlight = run;
+  return run;
 }
 
 // /api/app/* 各操作收哪些字段（对照 Priv.java、Updater.set、Notify.set、DeviceTools.set）

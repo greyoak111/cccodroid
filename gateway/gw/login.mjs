@@ -122,30 +122,36 @@ function statusJson(text) {
   }
   return cands.find((x) => typeof x.loggedIn === "boolean") || cands[0] || null;
 }
+let authInFlight = null;
 export async function authStatus(force) {
   if (!force && AUTH_CACHE && Date.now() - AUTH_CACHE.at < 30000) return AUTH_CACHE.v;
-  const r = await runAuth(["status"]);
-  // 状态 JSON 走 stdout；stderr 只用于没解析出 loggedIn 时的「未登录」判断和错误提示
-  let j = statusJson(r.stdout) || statusJson(r.out) || {};
-  // 只转出界面要显示的几项；令牌之类的东西它本来也不报
-  // 问不出结果（claude 起不来、超时、输出解析不了）：不能当成「未登录」—— 有上次问出的就沿用并标明是旧的，
-  // 没有就标「不知道」，把原因带给界面（#102 04-010）
-  // 退出码是 0 也一样：解析不出 loggedIn 就不算知道（DeepSeek 复核 #2）；只有输出明说没登录才给确定的 false
-  if (typeof j.loggedIn !== "boolean" && !/not logged in|not authenticated/i.test(r.out || "")) {
-    const error = String(r.out || "").trim().split("\n").pop().slice(0, 300) || "exit " + r.code;
-    const v = AUTH_GOOD ? { ...AUTH_GOOD, stale: true, error } : { loggedIn: false, authMethod: "none", email: null, org: null, plan: null, unknown: true, error };
-    AUTH_CACHE = { at: Date.now(), v };
+  if (authInFlight) return authInFlight;
+  const run = (async () => {
+    const r = await runAuth(["status"]);
+    // 状态 JSON 走 stdout；stderr 只用于没解析出 loggedIn 时的「未登录」判断和错误提示
+    let j = statusJson(r.stdout) || statusJson(r.out) || {};
+    // 只转出界面要显示的几项；令牌之类的东西它本来也不报
+    // 问不出结果（claude 起不来、超时、输出解析不了）：不能当成「未登录」—— 有上次问出的就沿用并标明是旧的，
+    // 没有就标「不知道」，把原因带给界面（#102 04-010）
+    // 退出码是 0 也一样：解析不出 loggedIn 就不算知道（DeepSeek 复核 #2）；只有输出明说没登录才给确定的 false
+    if (typeof j.loggedIn !== "boolean" && !/not logged in|not authenticated/i.test(r.out || "")) {
+      const error = String(r.out || "").trim().split("\n").pop().slice(0, 300) || "exit " + r.code;
+      const v = AUTH_GOOD ? { ...AUTH_GOOD, stale: true, error } : { loggedIn: false, authMethod: "none", email: null, org: null, plan: null, unknown: true, error };
+      AUTH_CACHE = { at: Date.now(), v };
+      return v;
+    }
+    const v = {
+      loggedIn: !!j.loggedIn, authMethod: j.authMethod || "none",
+      email: j.email || j.account?.email || null,
+      org: j.orgName || j.organization?.name || null,
+      plan: j.subscriptionType || j.plan || null,
+    };
+    AUTH_CACHE = { at: Date.now(), v }; AUTH_GOOD = v;
+    noteLoggedIn(v.loggedIn);
     return v;
-  }
-  const v = {
-    loggedIn: !!j.loggedIn, authMethod: j.authMethod || "none",
-    email: j.email || j.account?.email || null,
-    org: j.orgName || j.organization?.name || null,
-    plan: j.subscriptionType || j.plan || null,
-  };
-  AUTH_CACHE = { at: Date.now(), v }; AUTH_GOOD = v;
-  noteLoggedIn(v.loggedIn);
-  return v;
+  })().finally(() => { if (authInFlight === run) authInFlight = null; });
+  authInFlight = run;
+  return run;
 }
 
 // ── 路由：/api/login/start /api/login/status /api/login/cancel /api/login/logout ──

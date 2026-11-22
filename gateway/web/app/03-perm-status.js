@@ -202,12 +202,14 @@
 
   async function permAnswer(id, body) {
     const it = PERMS.get(id);
-    if (!it || it.done) return;
+    if (!it || it.done || it.busy) return;
+    it.busy = true;
     it.el?.classList.add("busy");
     try {
       await api("/api/perm/answer", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId: it.runId, id, ...body }) });
       permDone(id, body.behavior, { always: body.always, interrupt: body.interrupt });
     } catch (e) {
+      it.busy = false;
       it.el?.classList.remove("busy");
       if (e.status === 409) permDone(id, "gone");
       else toast(e.message, true);

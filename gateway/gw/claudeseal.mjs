@@ -36,12 +36,23 @@ const fpFor = (bin) => { const d = path.dirname(bin); return fpOf(bin, path.join
 function fpOf(...files) {
   return files.map((f) => { try { const s = fs.statSync(f); return `${f}:${s.size}:${s.mtimeMs}:${s.ctimeMs}:${s.ino}`; } catch { return f + ":-"; } }).join("|");
 }
-function sha256(f) {
-  const h = crypto.createHash("sha256"), fd = fs.openSync(f, "r"), b = Buffer.alloc(4 << 20);
-  try { let n; while ((n = fs.readSync(fd, b, 0, b.length)) > 0) h.update(b.subarray(0, n)); } finally { fs.closeSync(fd); }
+async function sha256Async(f) {
+  const h = crypto.createHash("sha256");
+  const fh = await fs.promises.open(f, "r");
+  const b = Buffer.alloc(2 << 20);
+  try {
+    let pos = 0;
+    while (true) {
+      const { bytesRead } = await fh.read(b, 0, b.length, pos);
+      if (!bytesRead) break;
+      h.update(b.subarray(0, bytesRead));
+      pos += bytesRead;
+    }
+  } finally { await fh.close().catch(() => {}); }
   return h.digest("hex");
 }
 
+const SEAL_INFLIGHT = new Map();
 /**
  * { ok: true } 核过 / { ok: false, why } 对不上（别起）/ { ok: null, why } 核不了（开发版照常起）。
  * 发行版没有签名清单时是 { ok: false, why, pending: true }：不算篡改，补核取到清单后自动放行
@@ -57,37 +68,43 @@ export async function claudeSeal(bin0 = PATHS.claude, { force = false, home = CF
   let fresh = false;
   try { fresh = Date.now() - fs.statSync(bin).ctimeMs <= 2000; } catch {}
   if (cache.fp === fp && cache.res && !fresh) return cache.res;
-  let res;
-  const ROOT = path.join(home, ".local", "share", "cccodroid", "claude");
-  let m = null, sig = null, root = ROOT;
-  try { root = fs.realpathSync(ROOT); } catch {}
-  try { m = fs.readFileSync(mf); sig = fs.readFileSync(sf, "utf8"); } catch {}
-  if ((path.dirname(dir) !== root || !isVer(path.basename(dir)) || path.basename(bin) !== "claude"))
-    res = { ok: false, why: "not an installed version under " + ROOT };
-  else if (fs.existsSync(path.join(dir, ".mismatch"))) res = { ok: false, why: "recheck found it doesn't match the official manifest" };
-  else if (!m || !sig) res = sealed.has(dir) ? { ok: false, why: "signed manifest removed after it was verified" }
-    : editionSealed() ? { ok: false, why: "no signed manifest", pending: true } : { ok: null, why: "no signed manifest" };
-  else {
-    try {
-      const { verifyDetached, ANTHROPIC_KEYS } = await loadPgp();
-      verifyDetached(m, sig, ANTHROPIC_KEYS);
-      const j = JSON.parse(m.toString("utf8")), p = j && j.platforms && j.platforms[PLATFORM];
-      if (!p || !/^[a-f0-9]{64}$/.test(p.checksum || "")) res = { ok: false, why: "signed manifest has no " + PLATFORM + " entry" };
-      else if (j.version !== path.basename(dir)) res = { ok: false, why: `manifest is for ${j.version}, directory is ${path.basename(dir)}` };
-      else if (sha256(bin) !== p.checksum) res = { ok: false, why: "binary does not match the signed manifest" };
-      else { res = { ok: true, version: j.version }; sealed.add(dir); }
-    } catch (e) {
-      // 验签模块缺了（files/app 有核对还原，正常不会）：发行版照样不起
-      res = /pgp\.mjs not found/.test(e.message) && !editionSealed() ? { ok: null, why: e.message } : { ok: false, why: "manifest signature: " + e.message };
+  const flightKey = `${bin}|${home}|${fp}|${force ? 1 : 0}`;
+  if (SEAL_INFLIGHT.has(flightKey)) return SEAL_INFLIGHT.get(flightKey);
+  const run = (async () => {
+    let res;
+    const ROOT = path.join(home, ".local", "share", "cccodroid", "claude");
+    let m = null, sig = null, root = ROOT;
+    try { root = fs.realpathSync(ROOT); } catch {}
+    try { m = await fs.promises.readFile(mf); sig = await fs.promises.readFile(sf, "utf8"); } catch {}
+    if ((path.dirname(dir) !== root || !isVer(path.basename(dir)) || path.basename(bin) !== "claude"))
+      res = { ok: false, why: "not an installed version under " + ROOT };
+    else if (fs.existsSync(path.join(dir, ".mismatch"))) res = { ok: false, why: "recheck found it doesn't match the official manifest" };
+    else if (!m || !sig) res = sealed.has(dir) ? { ok: false, why: "signed manifest removed after it was verified" }
+      : editionSealed() ? { ok: false, why: "no signed manifest", pending: true } : { ok: null, why: "no signed manifest" };
+    else {
+      try {
+        const { verifyDetached, ANTHROPIC_KEYS } = await loadPgp();
+        verifyDetached(m, sig, ANTHROPIC_KEYS);
+        const j = JSON.parse(m.toString("utf8")), p = j && j.platforms && j.platforms[PLATFORM];
+        if (!p || !/^[a-f0-9]{64}$/.test(p.checksum || "")) res = { ok: false, why: "signed manifest has no " + PLATFORM + " entry" };
+        else if (j.version !== path.basename(dir)) res = { ok: false, why: `manifest is for ${j.version}, directory is ${path.basename(dir)}` };
+        else if ((await sha256Async(bin)) !== p.checksum) res = { ok: false, why: "binary does not match the signed manifest" };
+        else { res = { ok: true, version: j.version }; sealed.add(dir); }
+      } catch (e) {
+        // 验签模块缺了（files/app 有核对还原，正常不会）：发行版照样不起
+        res = /pgp\.mjs not found/.test(e.message) && !editionSealed() ? { ok: null, why: e.message } : { ok: false, why: "manifest signature: " + e.message };
+      }
     }
-  }
-  const again = cache.res && cache.res.ok === res.ok && cache.res.why === res.why;
-  if (res.pending) { if (!again) log(`[Claude Code 核验] ${path.basename(dir)} 还没有签名清单，补核拿到之前不起`); }
-  else if (res.ok === false && !(cache.res && cache.res.ok === false && cache.fp === fp)) {
-    log(`⚠️ [Claude Code 核验] ${bin}：${res.why}`);
-    tamperRecord("claude", [`${path.basename(dir)}/claude: ${res.why}`]);
-  } else if (res.ok === null && cache.res?.ok !== null) log(`[Claude Code 核验] 核不了（${res.why}），照常起；连得上官方时会补存签名清单`);
-  if (res.why === "no signed manifest") try { askRecheck?.(); } catch {}
-  cache = { fp, res };
-  return res;
+    const again = cache.res && cache.res.ok === res.ok && cache.res.why === res.why;
+    if (res.pending) { if (!again) log(`[Claude Code 核验] ${path.basename(dir)} 还没有签名清单，补核拿到之前不起`); }
+    else if (res.ok === false && !(cache.res && cache.res.ok === false && cache.fp === fp)) {
+      log(`⚠️ [Claude Code 核验] ${bin}：${res.why}`);
+      tamperRecord("claude", [`${path.basename(dir)}/claude: ${res.why}`]);
+    } else if (res.ok === null && cache.res?.ok !== null) log(`[Claude Code 核验] 核不了（${res.why}），照常起；连得上官方时会补存签名清单`);
+    if (res.why === "no signed manifest") try { askRecheck?.(); } catch {}
+    cache = { fp, res };
+    return res;
+  })().finally(() => { if (SEAL_INFLIGHT.get(flightKey) === run) SEAL_INFLIGHT.delete(flightKey); });
+  SEAL_INFLIGHT.set(flightKey, run);
+  return run;
 }

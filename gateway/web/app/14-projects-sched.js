@@ -160,11 +160,21 @@
     }
     if (a === "instr-undo") { box.querySelector(".pj-instr").value = PJ.detail.instr || ""; box.querySelector(".pj-save").classList.add("hidden"); return; }
     if (a === "instr-save") {
+      const btn = e.target.closest("[data-a]");
       const ta = box.querySelector(".pj-instr");
-      if (!ta || ta.dataset.pid !== p.id || PJ.detail.instrErr) return;    // 眼前的编辑框必须是这个项目的
+      if (!ta || ta.dataset.pid !== p.id || PJ.detail.instrErr || (btn && btn.disabled)) return;    // 眼前的编辑框必须是这个项目的
       const text = ta.value;
-      try { await jsend(`/api/projects/${encodeURIComponent(p.id)}/instr`, { text }, "PUT"); PJ.detail.instr = text; box.querySelector(".pj-save").classList.add("hidden"); toast(t("已保存")); }
+      if (btn) btn.disabled = true;
+      try {
+        await jsend(`/api/projects/${encodeURIComponent(p.id)}/instr`, { text }, "PUT");
+        if (PJ.detail?.project?.id === p.id) {
+          PJ.detail.instr = text;
+          if (ta.isConnected && ta.value === text) box.querySelector(".pj-save")?.classList.add("hidden");
+        }
+        toast(t("已保存"));
+      }
       catch (err) { toast(err.message, true); }
+      finally { if (btn && btn.isConnected) btn.disabled = false; }
     }
   });
   // 长按项目卡片（安卓长按 = contextmenu）：重命名、换颜色、打开目录、删除，和详情页的 ⋯ 是同一份菜单
@@ -285,13 +295,16 @@
       ["keep", t("只删项目，目录和对话都留着"), esc(t("对话回到「不在项目里」，目录还在 {p}", { p: p.path }))],
       ["dir", t("连目录一起删"), esc(t("对话进回收站（可恢复），目录直接删掉，不可恢复"))],
     ], "keep"), `<button class="btn sm ghost" data-close>${esc(t("取消"))}</button><button class="btn sm danger-fill" id="dp-ok">${esc(t("删除"))}</button>`);
-    o.querySelector("#dp-ok").addEventListener("click", async () => {
+    o.querySelector("#dp-ok").addEventListener("click", async (e) => {
+      const b = e.currentTarget;
+      if (b.disabled) return;
       const withDir = picked(o, "how") === "dir";
       if (withDir && !confirm(t("目录 {p} 会被直接删掉，不能恢复。确定？", { p: p.path }))) return;
+      b.disabled = true;
       // 删之前记下：聊天区开着的是不是这个项目的对话 / 新对话是不是挂在这个项目上（删完映射就没了）
       const mine = curProject()?.id === p.id;
       try { await api(`/api/projects/${encodeURIComponent(p.id)}${withDir ? "?withDir=1" : ""}`, { method: "DELETE" }); }
-      catch (err) { return toast(err.message, true); }
+      catch (err) { b.disabled = false; return toast(err.message, true); }
       OV.close(o); PJ.cur = null; PJ.detail = null;
       // 连目录删时对话进了回收站：聊天区别再停在这个已删的对话上，换成新对话（群反馈 11-06）；新对话挂着这个项目的也摘掉
       if (mine && (withDir || !view.sessionId)) newConversation();
@@ -387,7 +400,10 @@
         let data;
         try { data = await api(url); }
         catch (e) {
-          if (live()) { SC.cur = null; toast(t("任务详情读取失败：{msg}", { msg: e.message }), true); renderSched(); }
+          if (live()) {
+            toast(t("任务详情读取失败：{msg}", { msg: e.message }), true);
+            if (box._taskId !== id || e.status === 404) { SC.cur = null; renderSched(); }
+          }
           return;
         }
         if (live()) { SC.detail = data; renderTask(box); }
@@ -455,7 +471,16 @@
       return;
     }
     const ms = e.target.closest("[data-missed]");
-    if (ms) { try { await jsend("/api/sched/missed", { taskId: ms.dataset.id, at: +ms.dataset.at, act: ms.dataset.missed }); toast(ms.dataset.missed === "run" ? t("已开始补跑") : t("这次就算了")); } catch (err) { toast(err.message, true); } return loadSched(true); }
+    if (ms) {
+      if (ms.disabled) return;
+      ms.disabled = true;
+      try {
+        await jsend("/api/sched/missed", { taskId: ms.dataset.id, at: +ms.dataset.at, act: ms.dataset.missed });
+        toast(ms.dataset.missed === "run" ? t("已开始补跑") : t("这次就算了"));
+      } catch (err) { toast(err.message, true); }
+      finally { if (ms.isConnected) ms.disabled = false; }
+      return loadSched(true);
+    }
     const sid = e.target.closest("[data-sid]"); if (sid) return goSession(sid.dataset.sid);
     // 没存成对话的那几次：结果只在运行记录里，点开看全文（#173-2）
     const fr = e.target.closest("[data-full]");

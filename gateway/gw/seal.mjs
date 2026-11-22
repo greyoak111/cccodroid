@@ -545,19 +545,23 @@ export function sealRecheck(prep) {
 }
 
 /** 清旧东西：一天前的单轮文件（终端起的 claude 没有「结束」可挂）、七天没用过的插件副本 */
-let lastPrune = 0;
+let lastPrune = 0, pruning = false;
 function prune() {
   const now = Date.now();
-  if (now - lastPrune < 3600e3) return;
+  if (pruning || now - lastPrune < 3600e3) return;
   lastPrune = now;
-  let ents = []; try { ents = fs.readdirSync(ROOT()); } catch { return; }
-  for (const n of ents) {
-    const p = path.join(ROOT(), n);
-    let st; try { st = fs.statSync(p); } catch { continue; }
-    const age = now - st.mtimeMs;
-    if (/^(?:ctx|mcp)-/.test(n) && age > 864e5) fs.rmSync(p, { force: true });
-    else if (/^plug-/.test(n) && age > 7 * 864e5) fs.rmSync(p, { recursive: true, force: true });
-  }
+  pruning = true;
+  (async () => {
+    const root = ROOT();
+    let ents = []; try { ents = await fs.promises.readdir(root); } catch { return; }
+    for (const n of ents) {
+      const p = path.join(root, n);
+      let st; try { st = await fs.promises.stat(p); } catch { continue; }
+      const age = now - st.mtimeMs;
+      if (/^(?:ctx|mcp)-/.test(n) && age > 864e5) await fs.promises.rm(p, { force: true }).catch(() => {});
+      else if (/^plug-/.test(n) && age > 7 * 864e5) await fs.promises.rm(p, { recursive: true, force: true }).catch(() => {});
+    }
+  })().catch(() => {}).finally(() => { pruning = false; });
 }
 /** 复用的插件副本：摸一下，别被当成七天没用 */
 function touch(dir) { try { const t = new Date(); fs.utimesSync(dir, t, t); } catch {} }

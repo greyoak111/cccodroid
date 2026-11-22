@@ -9,7 +9,7 @@ import { termEnv } from "./terminal.mjs";
 import { SKILLS_DIR, addMcp, removeMcp, skillMeta } from "./extensions.mjs";
 import { modulesMissingFor } from "./modules.mjs";
 import { ghProxy, pget } from "./pget.mjs";
-import { retireManagedBridge } from "./managed-bridge.mjs";
+import { clearComponentRemovedRecoveryLock, hasManagedBridgeRegistration, retireManagedBridge, warmManagedBridge } from "./managed-bridge.mjs";
 import { clearBridgeConfigMapping, handleBridgeConfig, handleBridgeModels, handleBridgeRepair } from "./bridge-config.mjs";
 import { archiveProblem, parseTarListing } from "./archive-check.mjs";
 import { baseOwnedPaths } from "./orphans.mjs";
@@ -76,26 +76,39 @@ const compRecFile = (id) => path.join(COMP_DIR, id + ".json");
  *  这里没有用 statefile 的 loadState：它读坏了会把原文件改名成 .bad-*，
  *  列表按 <id>.json 就再也找不到这个组件，正好落回 Z.11 的老毛病。
  *  rec 只做「是个普通对象」这层形状检查，逐字段校验仍由各调用方按自己的用途做（compRemovalRecord 等）。 */
+const COMP_REC_CACHE = new Map();
 export function compRecordInfo(id) {
   const f = compRecFile(id);
   let st;
-  try { st = fs.lstatSync(f); }
-  catch (e) { return { rec: null, missing: e.code === "ENOENT", bad: e.code !== "ENOENT" }; }
-  if (!st.isFile()) return { rec: null, missing: false, bad: true };       // 软链 / 目录 / 设备文件
+  try { st = fs.lstatSync(f, { bigint: true }); }
+  catch (e) { COMP_REC_CACHE.delete(id); return { rec: null, missing: e.code === "ENOENT", bad: e.code !== "ENOENT" }; }
+  if (!st.isFile()) { COMP_REC_CACHE.delete(id); return { rec: null, missing: false, bad: true }; }       // 软链 / 目录 / 设备文件
+  // 仅对大记录（> 4 KB，通常为含上千文件清单的真实组件记录）做 stat 签名缓存，避免短时间同 tick 原地覆写小记录误命中
+  const cacheable = st.size > 4096n;
+  const sig = cacheable ? `${st.dev}:${st.ino}:${st.mtimeNs}:${st.ctimeNs}:${st.size}` : "";
+  if (cacheable) {
+    const hit = COMP_REC_CACHE.get(id);
+    if (hit && hit.sig === sig) return hit.info;
+  } else {
+    COMP_REC_CACHE.delete(id);
+  }
   // 记录上限放 8 MB：共享清单大的组件（melt 的 x11 闭包 19k 条共享文件）记录会过 1 MB，
   // 默认上限会把自家刚写好的记录判成坏记录，界面永远「已损坏」（2026-11-16 真机验证发现）
   const t = readSmall(f, 8 << 20);
-  if (t == null) return { rec: null, missing: false, bad: true };          // 超过 1 MB / 读不了
+  if (t == null) { const info = { rec: null, missing: false, bad: true }; if (cacheable) COMP_REC_CACHE.set(id, { sig, info }); return info; }
   try {
     const j = JSON.parse(t);
-    if (!j || typeof j !== "object" || Array.isArray(j)) return { rec: null, missing: false, bad: true };
-    return { rec: j, missing: false, bad: false };
-  } catch { return { rec: null, missing: false, bad: true }; }
+    if (!j || typeof j !== "object" || Array.isArray(j)) { const info = { rec: null, missing: false, bad: true }; if (cacheable) COMP_REC_CACHE.set(id, { sig, info }); return info; }
+    const info = { rec: j, missing: false, bad: false };
+    if (cacheable) COMP_REC_CACHE.set(id, { sig, info });
+    return info;
+  } catch { const info = { rec: null, missing: false, bad: true }; if (cacheable) COMP_REC_CACHE.set(id, { sig, info }); return info; }
 }
 export function compRecord(id) { return compRecordInfo(id).rec; }
 /** 写组件记录：临时文件 + fsync + 换名（statefile.mjs 的 writeAtomic），失败返回 false，
  *  由调用方如实回给界面——以前是直接覆盖写，掉电 / 写满就留下半截 JSON，整条记录报废（195-Z.10） */
 function compWriteRecord(id, rec) {
+  COMP_REC_CACHE.delete(id);
   return writeAtomic(compRecFile(id), JSON.stringify(rec, null, 1));
 }
 export const _compForTest = { compWriteRecord, compRecordInfo, compRecFile, compDropDanglingDocs, compSweepDanglingDocs,
@@ -308,8 +321,14 @@ function compOnDevkit(rec, dk = devkitIdentity()) {
 }
 /** 已装的组件里，requires 了 id 的那些（卸载 id 会把它们弄坏）。
  *  装在旧工具包上的记录不算：它的文件已经不在，卸 id 不会再弄坏一个本来就要重装的组件 */
-function compUsers(id) {
-  const out = [], dk = devkitIdentity();
+function compUsers(id, dk = devkitIdentity(), recMap = null) {
+  const out = [];
+  if (recMap) {
+    for (const [oid, r] of recMap) {
+      if (oid !== id && compOnDevkit(r, dk) && (r.requires || []).includes(id)) out.push(oid);
+    }
+    return out;
+  }
   try {
     for (const f of fs.readdirSync(COMP_DIR)) {
       if (!f.endsWith(".json") || f === id + ".json") continue;
@@ -323,13 +342,21 @@ function compUsers(id) {
 async function compList(force) {
   if (!PREFIX) return { supported: false };
   const dk = devkitIdentity();
-  compHealSkills();
   const ix = await compIndex(force);
   const comps = (ix.data && ix.data.components) || {};
   const ids = new Set([...Object.keys(comps)]);
-  try { for (const f of fs.readdirSync(COMP_DIR)) if (f.endsWith(".json")) ids.add(f.slice(0, -5)); } catch {}
+  const recMap = new Map();
+  try {
+    for (const f of fs.readdirSync(COMP_DIR)) {
+      if (!f.endsWith(".json")) continue;
+      const cid = f.slice(0, -5);
+      ids.add(cid);
+      const r = compRecord(cid);
+      if (r) recMap.set(cid, r);
+    }
+  } catch {}
   const items = [...ids].map((id) => {
-    const e = comps[id] || null, b = e && compBuildFor(e, dk), rec = compRecord(id), job = COMP_JOBS.get(id);
+    const e = comps[id] || null, b = e && compBuildFor(e, dk), rec = recMap.get(id) || null, job = COMP_JOBS.get(id);
     return {
       id, name: e ? e.name : { zh: id, en: id }, desc: e ? e.desc : null,
       version: b ? b.version : null, bytes: b ? b.bytes : 0, installed: b ? b.installed : 0,
@@ -350,7 +377,7 @@ async function compList(force) {
         // 模块化工具包：还没装的模块也算没满足的依赖（界面同样置灰安装按钮、写明先装哪个）
         ...(b ? modulesMissingFor(b.baseDeps).map((m) => ({ id: "module:" + m.id, name: m.name, ok: false })) : []),
       ],
-      usedBy: rec ? compUsers(id).map((rid) => ({ id: rid, name: compName(rid, comps) })) : [],
+      usedBy: rec ? compUsers(id, dk, recMap).map((rid) => ({ id: rid, name: compName(rid, comps) })) : [],
       unsupported: compUnsupported(e),
     };
   });
@@ -725,23 +752,35 @@ async function compStart(id) {
   const needMods = modulesMissingFor(b.baseDeps);
   if (needMods.length) return { ok: false, needModules: needMods.map((m) => m.id), message: tz("要先装工具包模块：{names}（扩展页上方「工具包模块」）", { names: needMods.map((m) => m.name.zh || m.id).join("、") }) };
   // 空间：压缩包 + 解开后的大小，再留 10%。上次失败特意留下的压缩包（大小对得上）已经占着空间了，
-  // 不再重复索要；上次失败留下的解包树分批清掉，别同步 rmSync 堵死事件循环（0.6.9 审计 #186 / 195-I.2）
-  const stageRoot = path.join(COMP_DIR, ".staging"), stageTree = path.join(stageRoot, id), stageGz = path.join(stageRoot, `${id}-${b.sha256.slice(0, 12)}.tar.gz`);
-  if (fs.existsSync(stageTree)) { try { await rmTreeBatched(stageTree); } catch {} }
-  const pending2 = COMP_JOBS.get(id);
-  if (pending2 && !pending2.finished) return { ok: false, message: "busy" };
-  let reuse = 0; try { if (fs.statSync(stageGz).size === b.bytes) reuse = b.bytes; } catch {}
-  try {
-    const sf = fs.statfsSync(path.dirname(PREFIX));
-    const need = (b.bytes - reuse + b.installed) * 1.1;
-    if (sf.bavail * sf.bsize < need) return { ok: false, message: tz("存储空间不够：需要约 {n} MB", { n: Math.ceil(need / 1048576) }) };
-  } catch {}
-  // baseDeps 记在 job 上：下载、校验那几分钟里卸工具包模块，要知道这个在装的组件也在用（#134，见 modules.mjs modDependents）
+  // 不再重复索要；先占 COMP_JOBS 槽再分批清解包树，防并发重试互相把对方刚解包进 stageTree 的文件删掉
   const job = { phase: "downloading", done: 0, total: b.bytes, error: "", child: null, cancelled: false, finished: false,
     baseDeps: (Array.isArray(b.baseDeps) ? b.baseDeps : []).map((d) => (typeof d === "string" ? d : d && d.name)).filter(Boolean) };
   COMP_JOBS.set(id, job);
+  const stageRoot = path.join(COMP_DIR, ".staging"), stageTree = path.join(stageRoot, id), stageGz = path.join(stageRoot, `${id}-${b.sha256.slice(0, 12)}.tar.gz`);
+  try {
+    if (fs.existsSync(stageTree)) { try { await rmTreeBatched(stageTree); } catch {} }
+    let reuse = 0; try { if (fs.statSync(stageGz).size === b.bytes) reuse = b.bytes; } catch {}
+    try {
+      const sf = fs.statfsSync(path.dirname(PREFIX));
+      const need = (b.bytes - reuse + b.installed) * 1.1;
+      if (sf.bavail * sf.bsize < need) {
+        if (COMP_JOBS.get(id) === job) COMP_JOBS.delete(id);
+        return { ok: false, message: tz("存储空间不够：需要约 {n} MB", { n: Math.ceil(need / 1048576) }) };
+      }
+    } catch {}
+  } catch (e) {
+    if (COMP_JOBS.get(id) === job) COMP_JOBS.delete(id);
+    throw e;
+  }
   job.done = compRunInstall(id, b, job).then(
-    () => { job.finished = true; log(`[comp] ${id} ${b.version} 装好了`); },
+    () => {
+      job.finished = true;
+      log(`[comp] ${id} ${b.version} 装好了`);
+      if (id === "openai-bridge") {
+        if (clearComponentRemovedRecoveryLock()) log("[comp] openai-bridge 已清除工具包切换遗留的停用故障锁");
+        warmManagedBridge().catch(() => {});
+      }
+    },
     async (e) => {
       // 取消、校验失败都走这里：解包树（chromium 约 1GB）分批清理避免卡死事件循环，压缩包留着重试不用重下
       if (/^[a-z0-9][a-z0-9-]*$/.test(id)) try { await rmTreeBatched(path.join(COMP_DIR, ".staging", id)); } catch {}
@@ -1350,7 +1389,9 @@ export async function compRemove(id) {
     // 所以记录等退役完、进锁之后再读，不拿退役前的旧快照删文件（196-供应链.1）
     const retired = await retireManagedBridge(id);
     stage = "clear-app-mapping";
-    const unmapped = clearBridgeConfigMapping(id);
+    // 若因工具包切换组件文件已不在而保留了注册与运行目录，同时保留 App 侧映射，重装后自动复接
+    const unmapped = (id === "openai-bridge" && !retired && hasManagedBridgeRegistration())
+      ? false : clearBridgeConfigMapping(id);
     let mcpName = "";
     const out = await compFsExclusive(async () => {
       stage = "read-record";

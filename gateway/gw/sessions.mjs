@@ -61,6 +61,8 @@ export function savePins() {
 // ── 会话（claude 的 transcript 文件）─────────────────────────────────
 /** 项目目录名 → 真实 cwd（从 jsonl 里读，目录名本身不可逆） */
 export const PEEK_CACHE = new Map();   // 标题/cwd 取自文件开头，写进去就不变了，没必要每次列表都重读
+const REWIND_BUSY = new Set();         // 跨最长 120s 异步 rewind 期间锁住该会话，防止并发 chat/delmsg/trash/rewind 踩踏
+export const isSessionRewinding = (id) => !!(id && REWIND_BUSY.has(id));
 // Claude Code 自己的 /resume 只滤 sessionKind=daemon / daemon-worker（后台守护进程开的会话，不是用户
 // 开的那条对话）；bg 是用户自己甩到后台的会话，在 /resume 里带「bg」标记照常显示，这里不能一起藏掉。
 // 同样不按 isSidechain / 标题猜：用户从工具调用里接出来的会话、被复用成任务的会话都不能因此消失。
@@ -612,7 +614,7 @@ export async function routeSessions(req, res, u, p) {
 
     if (req.method === "DELETE" && !action) {
       if (!found) return sendJson(res, 404, { error: "not found" });
-      if (!(await idleRetired(id))) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中。") });
+      if (isSessionRewinding(id) || !(await idleRetired(id))) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中。") });
       // 删除先进回收站（30 天内可恢复），彻底删除走 /api/trash/purge
       let r;
       try { r = trashSession(id); } catch (e) { return sendJson(res, 500, { error: e.message }); }
@@ -634,41 +636,44 @@ export async function routeSessions(req, res, u, p) {
     // 回退到某条用户消息之前：文件（claude 检查点）+ 可选连对话一起（截到这条之前另起一个会话，原会话不动）
     if (req.method === "POST" && action === "rewind") {
       const b = JSON.parse((await readBody(req)) || "{}");
-      if (!(await idleRetired(id))) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中，等它答完再回退。") });
-      const loc = locateUserTurn(id, String(b.userText || ""), b.after, String(b.uuid || "").slice(0, 64));
-      if (!loc.ok) return sendJson(res, loc.status || 400, { error: "locate", message: loc.message });
-      const uuid = loc.users[loc.best].uuid;
-      // 真回退也先试算一次：要拿到会动哪些文件，回退后逐个核对（见 rewindFixup）
-      const dry = uuid ? await rewindFiles(id, uuid, true) : { ok: false, error: "no uuid" };
-      let files = dry;
-      if (!b.dryRun && dry.ok && dry.canRewind !== false && (dry.filesChanged || []).length) {
-        files = await rewindFiles(id, uuid, false);
-        const fx2 = rewindFixup(loc.found.file, id, uuid, dry.filesChanged);
-        if (fx2.fixed || fx2.failed) log(`回退补救：补写 ${fx2.fixed} 个，失败 ${fx2.failed} 个`);
-        if (fx2.failed) files = { ok: false, error: tz("有 {n} 个文件没能还原", { n: fx2.failed }) };
-        else files = { ...files, ok: true, canRewind: true, filesChanged: dry.filesChanged, insertions: dry.insertions, deletions: dry.deletions };
-      }
-      // 早于检查点的消息（或这一轮之后根本没改文件）claude 会说不能回退：代码这块就当「没有可撤销的」
-      const fx = files.ok && files.canRewind !== false
-        ? { canRewind: true, files: files.filesChanged || null, insertions: files.insertions || 0, deletions: files.deletions || 0 }
-        : { canRewind: false, reason: String(files.error || "").slice(0, 300) };
-      if (b.dryRun) return sendJson(res, 200, { ok: true, ...fx });
-      if (!fx.canRewind && !b.conversation) return sendJson(res, 409, { error: "cannot", message: tz("这条消息之后的文件改动没有留底，没法撤销。") + (fx.reason ? "（" + fx.reason + "）" : "") });
-      log(`回退 ${id.slice(0, 8)}：文件${fx.canRewind ? "已撤销" : "未动"}${b.conversation ? "，对话截到这条之前" : ""}`);
-      let fork = null;
-      if (b.conversation && loc.best === 0) fork = { ok: true, fresh: true };   // 退到第一条之前 = 空会话，前端直接开新会话
-      else if (b.conversation) {
-        fork = forkSession(id, String(b.userText || ""), b.after, { before: true, uuid: String(b.uuid || "").slice(0, 64) });
-        if (!fork.ok) return sendJson(res, fork.status || 400, { error: "fork", message: fork.message, files: fx });
-      }
-      return sendJson(res, 200, { ok: true, files: fx, fork });
+      if (REWIND_BUSY.has(id) || !(await idleRetired(id))) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中，等它答完再回退。") });
+      REWIND_BUSY.add(id);
+      try {
+        const loc = locateUserTurn(id, String(b.userText || ""), b.after, String(b.uuid || "").slice(0, 64));
+        if (!loc.ok) return sendJson(res, loc.status || 400, { error: "locate", message: loc.message });
+        const uuid = loc.users[loc.best].uuid;
+        // 真回退也先试算一次：要拿到会动哪些文件，回退后逐个核对（见 rewindFixup）
+        const dry = uuid ? await rewindFiles(id, uuid, true) : { ok: false, error: "no uuid" };
+        let files = dry;
+        if (!b.dryRun && dry.ok && dry.canRewind !== false && (dry.filesChanged || []).length) {
+          files = await rewindFiles(id, uuid, false);
+          const fx2 = rewindFixup(loc.found.file, id, uuid, dry.filesChanged);
+          if (fx2.fixed || fx2.failed) log(`回退补救：补写 ${fx2.fixed} 个，失败 ${fx2.failed} 个`);
+          if (fx2.failed) files = { ok: false, error: tz("有 {n} 个文件没能还原", { n: fx2.failed }) };
+          else files = { ...files, ok: true, canRewind: true, filesChanged: dry.filesChanged, insertions: dry.insertions, deletions: dry.deletions };
+        }
+        // 早于检查点的消息（或这一轮之后根本没改文件）claude 会说不能回退：代码这块就当「没有可撤销的」
+        const fx = files.ok && files.canRewind !== false
+          ? { canRewind: true, files: files.filesChanged || null, insertions: files.insertions || 0, deletions: files.deletions || 0 }
+          : { canRewind: false, reason: String(files.error || "").slice(0, 300) };
+        if (b.dryRun) return sendJson(res, 200, { ok: true, ...fx });
+        if (!fx.canRewind && !b.conversation) return sendJson(res, 409, { error: "cannot", message: tz("这条消息之后的文件改动没有留底，没法撤销。") + (fx.reason ? "（" + fx.reason + "）" : "") });
+        log(`回退 ${id.slice(0, 8)}：文件${fx.canRewind ? "已撤销" : "未动"}${b.conversation ? "，对话截到这条之前" : ""}`);
+        let fork = null;
+        if (b.conversation && loc.best === 0) fork = { ok: true, fresh: true };   // 退到第一条之前 = 空会话，前端直接开新会话
+        else if (b.conversation) {
+          fork = forkSession(id, String(b.userText || ""), b.after, { before: true, uuid: String(b.uuid || "").slice(0, 64) });
+          if (!fork.ok) return sendJson(res, fork.status || 400, { error: "fork", message: fork.message, files: fx });
+        }
+        return sendJson(res, 200, { ok: true, files: fx, fork });
+      } finally { REWIND_BUSY.delete(id); }
     }
 
     // 删一条消息（which: user = 这一轮的提问；bot = 这一轮 Claude 的整条回复），可撤销最近一次
     if (req.method === "POST" && (action === "delmsg" || action === "undodel")) {
       const b = JSON.parse((await readBody(req)) || "{}");
       // 只剩后台任务的 idle 轮：先结束它（否则永远 409），真正在生成的仍拒绝（195-A.3）
-      if (action === "delmsg" && !(await idleRetired(id))) return sendJson(res, 409, { ok: false, error: "delmsg", message: tz("这个会话正在生成中，等它答完再删。") });
+      if (action === "delmsg" && (isSessionRewinding(id) || !(await idleRetired(id)))) return sendJson(res, 409, { ok: false, error: "delmsg", message: tz("这个会话正在生成中，等它答完再删。") });
       let r;
       try { r = action === "delmsg" ? deleteMessage(id, String(b.userText || ""), Number(b.after) || 0, b.which === "user" ? "user" : "bot", String(b.uuid || "").slice(0, 64), String(b.replyUuid || "").slice(0, 64), Array.isArray(b.offs) ? b.offs.slice(0, 64).map(Number) : []) : undoDelete(id, String(b.undo || "")); }
       catch (e) { r = { ok: false, status: 500, message: e.message }; }

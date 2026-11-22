@@ -561,35 +561,45 @@ Context window: 200k (optional; only if the provider doesn't report one)</pre>
         <div class="tiny">${t("第三方端口由你自己选择，应用不审核、不背书。对方能看到你的 Key、代码和对话，请只用你信任的服务；不要使用共享或转售的账户。")}</div>
       </details>`;
     box.onclick = async (e) => {
-      const act = e.target.dataset && e.target.dataset.act;
-      if (!act) return;
-      if (act === "use") return useProvider(p);
-      if (act === "test") return testAndShow(p.id);
+      const btn = e.target.closest && e.target.closest("button[data-act]");
+      const act = btn ? btn.dataset.act : (e.target.dataset && e.target.dataset.act);
+      if (!act || box._busy || (btn && btn.disabled)) return;
+      const runLocked = async (fn) => {
+        box._busy = true;
+        if (btn) btn.disabled = true;
+        try { return await fn(); }
+        finally { box._busy = false; if (btn && btn.isConnected) btn.disabled = false; }
+      };
+      if (act === "use") return runLocked(() => useProvider(p));
+      if (act === "test") return runLocked(() => testAndShow(p.id));
       // 这张卡属于哪一家、还是不是刚才那一份 DOM：await 回来的旧回执只许动仍在原卡上的视图（BUG-UIFS-004）
       const cardId = p ? p.id : "__new__";
       const keyEl = $("pc-key"), labelEl = $("cc-label");
       const live = () => state.provView === cardId && $("cc-label") === labelEl && $("pc-key") === keyEl;
       if (act === "clear") {
         if (!confirm(t("清除 {name} 的 Key？", { name: p.label }))) return;
-        // 留空保存会继续用旧 Key，以前只能把整个接口删掉（195-E.9）；后端支持 clearKey
-        let r;
-        try { r = await post("/api/providers/save", { id: p.id, clearKey: true }); } catch (e2) { return toast(e2.message, true); }
-        if (r && r.ok === false) return toast(t("清除失败：{msg}", { msg: r.message || "?" }), true);
-        if (!live()) return toast(t("已清除"));
-        return reloadProv(t("已清除"));
+        return runLocked(async () => {
+          // 留空保存会继续用旧 Key，以前只能把整个接口删掉（195-E.9）；后端支持 clearKey
+          let r;
+          try { r = await post("/api/providers/save", { id: p.id, clearKey: true }); } catch (e2) { return toast(e2.message, true); }
+          if (r && r.ok === false) return toast(t("清除失败：{msg}", { msg: r.message || "?" }), true);
+          if (!live()) return toast(t("已清除"));
+          return reloadProv(t("已清除"));
+        });
       }
       if (act === "del") {
         if (!confirm(t("删除接口「{name}」？", { name: p.label }))) return;
-        let r;
-        try { r = await post("/api/providers/delete", { id: p.id }); } catch (e2) { return toast(e2.message, true); }
-        if (r && r.ok === false) return toast(t("删除失败：{msg}", { msg: r.message || "?" }), true);
-        const wasActive = state.providerActive === p.id;
-        state.provView = wasActive ? null : state.providerActive;
-        await reloadProv(t("已删除"));
-        // 删的就是正在用的接口：reloadProv 里 provView 已经清空，型号 / 思考强度下拉会停在已删清单上；
-        // 这里强制按新接口重拉一次，免得再保存时把旧型号写成新接口的型号（195-E.3）
-        if (wasActive) await loadModels(true);
-        return;   // 删除动作到此结束：以前缺这一句，会落进下面的公共保存分支，用已删的 id 再把当前卡保存一遍（BUG-UIFS-005）
+        return runLocked(async () => {
+          let r;
+          try { r = await post("/api/providers/delete", { id: p.id }); } catch (e2) { return toast(e2.message, true); }
+          if (r && r.ok === false) return toast(t("删除失败：{msg}", { msg: r.message || "?" }), true);
+          const wasActive = state.providerActive === p.id;
+          state.provView = wasActive ? null : state.providerActive;
+          await reloadProv(t("已删除"));
+          // 删的就是正在用的接口：reloadProv 里 provView 已经清空，型号 / 思考强度下拉会停在已删清单上；
+          // 这里强制按新接口重拉一次，免得再保存时把旧型号写成新接口的型号（195-E.3）
+          if (wasActive) await loadModels(true);
+        });
       }
       const body = {
         id: p ? p.id : "", label: $("cc-label").value.trim(), baseUrl: $("cc-base").value.trim(),
@@ -613,17 +623,19 @@ Context window: 200k (optional; only if the provider doesn't report one)</pre>
         if (lm[2] && !(w >= 1024 && w <= 16777216)) return toast(t("上下文窗口填 1024 到 16777216 之间的整数，也可以写 256k、1m"), true);
         if (!body.extraModels.some((m) => m.id === lm[1])) body.extraModels.push({ id: lm[1], contextWindow: w });
       }
-      let r;
-      try { r = await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
-      // 换了主机又没给新 Key：网关把旧 Key 清掉了，得说清楚、让用户重新填（0.6.9 审计 P1-2）
-      const done = p ? t("已保存") : t("已添加");
-      // 远程明文 http：只警告不拦，保存回执带 warning 就跟在「已保存」后面说（199-9-02）
-      const msg = r.keyCleared ? t("换了主机，旧 Key 已清掉，请重新填") : r.warning ? done + " · " + r.warning : done;
-      // 卡已切走：迟到的回执只报保存结果，别把视图切回来重画当前卡（BUG-UIFS-004）
-      if (!live()) return toast(msg);
-      if (keyEl.value.trim() !== body.apiKey) return toast(msg);   // 同卡提交后又敲了新 Key：留着，别重画掉
-      state.provView = r.id;
-      await reloadProv(msg, true);
+      return runLocked(async () => {
+        let r;
+        try { r = await post("/api/providers/save", body); } catch (e2) { return toast(e2.message, true); }
+        // 换了主机又没给新 Key：网关把旧 Key 清掉了，得说清楚、让用户重新填（0.6.9 审计 P1-2）
+        const done = p ? t("已保存") : t("已添加");
+        // 远程明文 http：只警告不拦，保存回执带 warning 就跟在「已保存」后面说（199-9-02）
+        const msg = r.keyCleared ? t("换了主机，旧 Key 已清掉，请重新填") : r.warning ? done + " · " + r.warning : done;
+        // 卡已切走：迟到的回执只报保存结果，别把视图切回来重画当前卡（BUG-UIFS-004）
+        if (!live()) return toast(msg);
+        if (keyEl.value.trim() !== body.apiKey) return toast(msg);   // 同卡提交后又敲了新 Key：留着，别重画掉
+        state.provView = r.id;
+        await reloadProv(msg, true);
+      });
     };
   }
 

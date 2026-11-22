@@ -142,6 +142,8 @@
     setVisit++;
     clearTimeout(ST.poll); clearTimeout(privPoll); clearTimeout(updPoll);
     clearTimeout(devPoll); clearTimeout(fixTimer); clearTimeout(envFactsTimer);
+    clearWiTimers();
+    if (!setOpen || setCatOpen !== "provider") stopLoginWatch();
   }
   // 设备和更新没有静态设置项。发现前也能进；不支持时显示说明，而不是把正在看的分类拿掉。
   const setDiscover = new Set(["device", "update"]);

@@ -88,10 +88,13 @@
 
   /** 手动登录：开一个新终端，网关替你敲好 claude auth login；授权码贴给 claude 自己的提示 */
   async function openLoginTerm(method) {
+    const gen = ++TERM.gen;
     MO.cancel(termEl); termEl.classList.remove("hidden"); raisePane("term");
     try { await loadXterm(); } catch (e) { toast(t("终端组件加载失败：{msg}", { msg: e.message }), true); return; }
-    try { const r = await api("/api/term/list"); TERM.list = (r.terms || []).filter((x) => x.alive || TERM.inst.has(x.id)); } catch {}
-    await newTerm({ login: method === "console" ? "console" : true });
+    if (gen !== TERM.gen) return;
+    try { const r = await api("/api/term/list"); if (gen !== TERM.gen) return; TERM.list = (r.terms || []).filter((x) => x.alive || TERM.inst.has(x.id)); } catch {}
+    if (gen !== TERM.gen) return;
+    await newTerm({ gen, login: method === "console" ? "console" : true });
   }
 
   async function newTerm(opts = {}) {
@@ -251,6 +254,7 @@
   });
 
   function termDetach(a) {
+    if (a.reconnTimer) { clearTimeout(a.reconnTimer); a.reconnTimer = 0; }
     const es = a.es;
     a.es = null;
     if (es) try { es.close(); } catch {}
@@ -259,6 +263,7 @@
   }
   function termAttach(a) {
     if (a.es || a.exited) return;
+    if (a.reconnTimer) { clearTimeout(a.reconnTimer); a.reconnTimer = 0; }
     const { id, xt } = a;
     const es = new EventSource(`/api/term/${encodeURIComponent(id)}/stream`);
     a.es = es;
@@ -296,17 +301,41 @@
       const x = TERM.list.find((y) => y.id === id);
       if (x) { x.alive = false; x.code = code; renderTermTabs(); }
     });
-    // 网关重启后这个终端就没了：重连拿到 404，EventSource 自己停下，这时说一声并标成已退出（195-H.4）。
-    // 网关整个没了的时候它一直停在「连接中」，以前什么都不显示（复审 中12）：第一次断就先提示在重连
+    // EventSource 收到 HTTP 502/503 会直接进入 CLOSED：先探 /api/term/list 确认终端真不在才判死，否则退避重连
     let lost = false;
-    es.onopen = () => { lost = false; };
+    es.onopen = () => { lost = false; a.closedRetries = 0; };
     es.onerror = () => {
       if (a.es !== es) return;   // 已关闭或换过连接，不补提示
       if (es.readyState === EventSource.CLOSED) {
-        a.es = null; es.close(); a.exited = true;
-        const x = TERM.list.find((y) => y.id === id);
-        if (x) { x.alive = false; renderTermTabs(); }
-        termOutput(a, "\r\n\x1b[2m" + t("[与网关的连接已断开]") + "\x1b[0m\r\n");
+        a.es = null; es.close();
+        if (!lost) { lost = true; termOutput(a, "\r\n\x1b[2m" + t("[与网关的连接断了，正在重连…]") + "\x1b[0m\r\n"); }
+        const gen = TERM.gen;
+        const wait = Math.min(5000, 1000 * (++a.closedRetries || (a.closedRetries = 1)));
+        a.reconnTimer = setTimeout(async () => {
+          a.reconnTimer = 0;
+          if (gen !== TERM.gen || a.es || a.exited || !TERM.inst.has(id)) return;
+          try {
+            const r = await api("/api/term/list");
+            if (gen !== TERM.gen || a.es || a.exited || !TERM.inst.has(id)) return;
+            const found = (r.terms || []).find((y) => y.id === id);
+            if (!found || found.alive === false) {
+              a.exited = true;
+              const x = TERM.list.find((y) => y.id === id);
+              if (x) { x.alive = false; renderTermTabs(); }
+              termOutput(a, "\r\n\x1b[2m" + t("[与网关的连接已断开]") + "\x1b[0m\r\n");
+              return;
+            }
+          } catch {
+            // 探活本身撞 502：还没确认死亡，继续下轮退避重连（超过上限放弃）
+            if (a.closedRetries >= 8) {
+              const x = TERM.list.find((y) => y.id === id);
+              if (x) { x.alive = false; renderTermTabs(); }
+              termOutput(a, "\r\n\x1b[2m" + t("[与网关的连接已断开]") + "\x1b[0m\r\n");
+              return;
+            }
+          }
+          if (termCurrent(a) && !a.exited) termAttach(a);
+        }, wait);
         return;
       }
       if (!lost) { lost = true; termOutput(a, "\r\n\x1b[2m" + t("[与网关的连接断了，正在重连…]") + "\x1b[0m\r\n"); }
