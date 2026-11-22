@@ -225,13 +225,21 @@ final class Env {
                     }
                     provedAt = System.currentTimeMillis();
                 }
-                if (cookieVal != null) {
-                    java.util.function.Consumer<String> cb = onBoot;
-                    if (cb != null) cb.accept(cookieVal);
-                }
+                if (cookieVal != null) invokeOnBoot(onBoot, cookieVal);
                 return p[0];
             } finally { c.disconnect(); }
         } catch (Exception e) { return null; }
+    }
+
+    /** 独立隔离 onBoot 回调异常：写 WebView Cookie 失败绝不能打翻已通过的网关身份证明，
+     *  否则 proveBootOnce 返回 null 会让 loadUi 误判 UI_WAIT、命中刚写下的 3 秒 provedAt 缓存并在几十毫秒内耗尽重载额度。 */
+    static void invokeOnBoot(java.util.function.Consumer<String> cb, String cookieVal) {
+        if (cb == null || cookieVal == null) return;
+        try { cb.accept(cookieVal); }
+        catch (Throwable ce) {
+            try { android.util.Log.e("cccodroid", "onBoot 写 Cookie 异常（不阻塞证明）", ce); }
+            catch (Throwable ignored) {}
+        }
     }
 
     /** 代 WebView 取界面的页面与静态资源（审查 10-29 第六份 中3）。端口全机共享，网关崩溃到重拉的空档里别的应用能占住它；
@@ -257,7 +265,10 @@ final class Env {
                     String reason = code == 404 ? "Not Found" : code == 403 ? "Forbidden" : code == 304 ? "Not Modified" : "No Content";
                     return new android.webkit.WebResourceResponse("text/plain", "utf-8", code, reason, h, new java.io.ByteArrayInputStream(new byte[0]));
                 }
-                if (code != 200) return null;
+                if (code != 200) {
+                    try { android.util.Log.w("cccodroid", "fetchStatic " + pq.replaceAll("[?#].*", "") + " HTTP " + code); } catch (Throwable ignored) {}
+                    return null;
+                }
                 java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
                 try (java.io.InputStream in = c.getInputStream()) {
                     byte[] buf = new byte[1 << 16];
@@ -283,7 +294,10 @@ final class Env {
                 }
                 return new android.webkit.WebResourceResponse(mime, enc, 200, "OK", h, new java.io.ByteArrayInputStream(body));
             } finally { c.disconnect(); }
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            try { android.util.Log.w("cccodroid", "fetchStatic 失败 " + pq.replaceAll("[?#].*", "") + ": " + e); } catch (Throwable ignored) {}
+            return null;
+        }
     }
 
     /** 端口上有没有人在听（不发任何东西）。网关两个回环地址都听（server.mjs：主服务 127.0.0.1、界面 HOST=127.0.0.2），

@@ -113,6 +113,7 @@ public class MainActivity extends Activity {
     private volatile boolean booted;
     private Intent pending;
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private final Handler cookieUi = new Handler(Looper.getMainLooper());
     private FrameLayout root;
     private TextView log;
     private ScrollView logScroll;
@@ -2043,24 +2044,10 @@ public class MainActivity extends Activity {
                 jsDialog(fromPage(url, msg), true, def == null ? "" : def, r, r); return true;
             }
         });
-        // 网关换了一个（重启、崩溃重拉）：它只认按新启动号派生的 Cookie，这里当场同步入库，避免放行首个 /api/* 时还带着旧 Cookie 吃 401（审查 S1）
+        // 网关换了一个（重启、崩溃重拉）：它只认按新启动号派生的 Cookie，这里当场同步入内存 CookieStore（SQLite 刷盘延后异步），
+        // 避免放行首个 /api/* 时还带着旧 Cookie 吃 401（审查 S1）
         Env.onBoot = myOnBoot = (v) -> {
-            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
-            String mainUrl = "http://" + Env.HOST + ":" + Env.PORT;
-            String oldUrl = "http://" + ("127.0.0.1".equals(Env.HOST) ? "127.0.0.2" : "127.0.0.1") + ":" + Env.PORT;
-            String mainCookie = "cc_t_" + Env.PORT + "=" + v + "; Path=/; HttpOnly; SameSite=Strict";
-            String oldCookie = "cc_t_" + Env.PORT + "=; Path=/; Max-Age=0";
-            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                cm.setCookie(mainUrl, mainCookie);
-                cm.setCookie(oldUrl, oldCookie);
-                cm.flush();
-            } else {
-                java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
-                cm.setCookie(oldUrl, oldCookie, null);
-                cm.setCookie(mainUrl, mainCookie, ok -> latch.countDown());
-                try { latch.await(300, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                ui.post(cm::flush);
-            }
+            writeGatewayCookie(cookieUi, v);
             ui.post(() -> {
                 if (uiLoading) { bootSeenWhileLoading = true; return; }
                 if (squatShown || waitingShown) { squatShown = false; waitingShown = false; loadUi(); }
@@ -2212,6 +2199,47 @@ public class MainActivity extends Activity {
     private void bounceBack() {
         bounceStage = 2;
         loadUi();
+    }
+
+    /** 把新启动号对应的会话 Cookie 同步写进 Chromium 内存 CookieStore（SQLite 刷盘延后异步）。
+     *  CookieManager.setCookie 带非空 callback 时 Chromium 会在调用线程创建 Handler，
+     *  无 Looper 的后台线程（ui-prove / WebView IO 线程）直接调用必抛 IllegalStateException；
+     *  即便调用线程恰好有 Looper，同线程立刻 latch.await 也会堵死回调派发。
+     *  因此非主线程统一投递到主线程 Looper 调用 setCookie(..., callback) 并等待内存写入完成。 */
+    private static void writeGatewayCookie(Handler main, String v) {
+        final String mainUrl = "http://" + Env.HOST + ":" + Env.PORT;
+        final String oldUrl = "http://" + ("127.0.0.1".equals(Env.HOST) ? "127.0.0.2" : "127.0.0.1") + ":" + Env.PORT;
+        final String mainCookie = "cc_t_" + Env.PORT + "=" + v + "; Path=/; HttpOnly; SameSite=Strict";
+        final String oldCookie = "cc_t_" + Env.PORT + "=; Path=/; Max-Age=0";
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            try {
+                android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+                cm.setAcceptCookie(true);
+                cm.setCookie(oldUrl, oldCookie, null);
+                cm.setCookie(mainUrl, mainCookie, null);
+                main.postDelayed(() -> { try { cm.flush(); } catch (Throwable ignored) {} }, 250);
+            } catch (Throwable ce) {
+                android.util.Log.e("cccodroid", "onBoot 主线程写 Cookie 异常", ce);
+            }
+            return;
+        }
+        final CountDownLatch latch = new CountDownLatch(1);
+        boolean posted = main.post(() -> {
+            try {
+                android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+                cm.setAcceptCookie(true);
+                cm.setCookie(oldUrl, oldCookie, null);
+                cm.setCookie(mainUrl, mainCookie, ok -> latch.countDown());
+                main.postDelayed(() -> { try { cm.flush(); } catch (Throwable ignored) {} }, 250);
+            } catch (Throwable ce) {
+                android.util.Log.e("cccodroid", "onBoot 写 Cookie 异常", ce);
+                latch.countDown();
+            }
+        });
+        if (posted) {
+            try { latch.await(300, java.util.concurrent.TimeUnit.MILLISECONDS); }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+        }
     }
 
     private final java.util.concurrent.atomic.AtomicInteger uiLoadGen = new java.util.concurrent.atomic.AtomicInteger();
