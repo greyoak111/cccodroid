@@ -3266,4 +3266,10 @@ window.I18N_DICT["fr"] = {
   "当前系统低于 Android 16，将以同卡进度通知显示，也可开启悬浮胶囊兜底。": "Cet appareil est sous Android < 16. Le statut utilisera une notification de progression, ou vous pouvez activer la capsule flottante.",
   "已开始试播 10 秒，切到桌面或看顶部状态栏": "Aperçu de 10 s lancé — passez à l'écran d'accueil ou regardez la barre d'état",
   "试播失败": "Échec de l'aperçu",
+  "索引": "Index",
+  "记忆文件名不合法": "Nom de fichier mémoire invalide",
+  "记忆不存在": "Mémoire introuvable",
+  "只允许查看普通记忆文件": "Seuls les fichiers mémoire ordinaires peuvent être consultés",
+  "记忆文件太大了（超过 1 MB）": "Le fichier mémoire est trop volumineux (plus de 1 Mo)",
+  "记忆只读，不能在这里修改": "Les mémoires sont en lecture seule ici",
 };
