@@ -1,5 +1,6 @@
   // ── 扩展：插件 / 技能 / MCP ──────────────────────────────────────────
   const ext = { q: "", offset: 0, busy: false };
+  const extLatest = (k) => (typeof latest === "function" ? latest(k) : () => true);
   // 设计稿的行：左名称 + 一行等宽小字，右边大小 / 状态 / 按钮；说明、依赖这些点一下行才展开（.it-more），进度条一直在
   const EI = {
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
@@ -37,7 +38,7 @@
       ${acts ? `<div class="it-acts">${acts}</div>` : ""}</div>`;
 
   // ── 工具包模块（0.3.9 起）：基础 + 随装随卸的模块；用途、命令、包、大小、依赖、谁在用都摆出来 ──
-  let modTimer = 0;
+  let modTimer = 0, modLoad = 0, modHasItems = false, modMoving = false, compMoving = false;
   // 模块装完 / 卸完后组件卡要跟着刷新：组件装的正是刚补上的模块，不刷新的话安装按钮一直是灰的（0.6.10 审计 195-I.4）
   let modTouched = false;
   const MOD_USES = () => ({
@@ -50,14 +51,20 @@
   const OFF_TIP = () => t("停用后 Claude 看不到它，命令文件还在，随时可以启用。");
   async function loadModules() {
     clearTimeout(modTimer);
-    const visit = pageVisit, live = () => pageVisible("ext", visit);
+    const visit = pageVisit, req = ++modLoad, live = () => pageVisible("ext", visit) && req === modLoad;
     if (!live()) return;
-    const [r, xoff] = await Promise.all([sameGet("/api/devkit/modules").catch(() => null), extOffNow()]);
+    let netErr = null;
+    const [r, xoff] = await Promise.all([sameGet("/api/devkit/modules").catch((e) => { netErr = e; return null; }), extOffNow()]);
     if (!live()) return;
+    if (netErr && modHasItems) {
+      if (modMoving && pageOn("ext")) modTimer = setTimeout(() => { if (live()) loadModules(); }, 1500);
+      return;
+    }
     const modOff = new Set(xoff.mod || []);
     const on = !!(r && r.supported && r.modular);
     $("mod-field").classList.toggle("hidden", !on);
-    if (!on) return;
+    if (!on) { if (!netErr) { modHasItems = false; modMoving = false; } return; }
+    modHasItems = true;
     const items = r.items || [], byId = Object.fromEntries(items.map((m) => [m.id, m]));
     // 多个共享运行库（lib-clang / lib-guile / lib-libllvm / lib-openjdk-21）在 modules.json 里默认同名，按 id 后缀区分
     const modLabel = (m) => {
@@ -122,6 +129,7 @@
       return rowItem(esc(modLabel(m) || m.id) + tag, '<span class="mono">' + (m.key || []).map(esc).join(" ") + "</span>",
         '<span class="num">' + size + "</span>" + acts, { more: desc, extra: bar });
     }).join("");
+    modMoving = moving;
     if (moving && pageOn("ext")) modTimer = setTimeout(() => { if (live()) loadModules(); }, 1500);
     // 装 / 卸完成后（列表里不再有进行中的那块）再刷组件卡；模块 POST 一返回任务才刚起，不能当场刷
     if (!moving && modTouched && pageOn("ext")) { modTouched = false; loadComponents(); }
@@ -147,7 +155,8 @@
     const r = await post("/api/devkit/modules/" + c, { id }).catch((e2) => ({ ok: false, message: e2.message }));
     if (!r.ok) toast(r.message || t("失败"), true);
     else modTouched = true;   // 任务结束后刷组件卡（见 loadModules 末尾）
-    setTimeout(loadModules, 300);
+    clearTimeout(modTimer);
+    modTimer = setTimeout(loadModules, 300);
   });
 
   function loadExt() { loadModules(); loadComponents(60); loadCustom(); loadExtPlugins(); loadExtCmds(); loadExtSkills(); loadExtMcp(); loadExtMarkets(); loadExtHooks(); }
@@ -229,7 +238,7 @@
   });
   function pauseExtReads() {
     clearTimeout(compTimer); clearTimeout(modTimer); clearTimeout(ghAuth.timer);
-    compLoad++;
+    compLoad++; modLoad++; ghAuth.seq = (ghAuth.seq || 0) + 1;
     pauseCatalog();
   }
   async function loadComponents(refresh) {
@@ -239,9 +248,9 @@
     let netErr = null;
     const raw = await api("/api/components" + (refresh ? "?refresh=" + (refresh === true ? 1 : refresh) : "")).catch((e) => { netErr = e; return null; });
     if (request !== compLoad || !pageOn("ext")) return "stale";
-    // 并发下载时若瞬时撞上 502 / 抖动，且列表已在屏幕上：保留现有卡片和进度条，1.5s 后自动重试，别清屏并停掉轮询
+    // 并发下载时若瞬时撞上 502 / 抖动，且列表已在屏幕上：保留现有卡片和进度条，1.5s 后自动重试（下载中点强刷也要续约下载轮询）
     if (netErr && compHasItems) {
-      if (refresh !== true) compTimer = setTimeout(() => { if (request === compLoad && pageOn("ext")) loadComponents(); }, 1500);
+      if (refresh !== true || compMoving) compTimer = setTimeout(() => { if (request === compLoad && pageOn("ext")) loadComponents(); }, 1500);
       return { err: netErr.message };
     }
     const r = raw || { supported: true, items: [], indexError: netErr ? netErr.message : "" };
@@ -365,10 +374,11 @@
     ext.nComp = (r.items || []).length; extSub();
     ext.compBytes = (r.items || []).filter((c) => c.installedVersion || c.state === "ok").reduce((s, c) => s + (c.installed || 0), 0); paintStorage();
     renderIdx("comp", [["inst", t("已装")], ["upd", t("要更新")], ...Object.entries(CAT()).map(([k, v]) => ["cat:" + k, v])]);
-    if ($("gh-auth")) loadGhAuth(refresh);
+    if ($("gh-auth")) loadGhAuth(refresh === true);
     syncCatalog();
     // 有在跑的就一秒刷一次；抽屉关了 / 换了页签就停
-    if ((compRemoving.size || (r.items || []).some((c) => c.progress || ["removing", "configuring", "fetching-models"].includes(c.state))) && pageOn("ext"))
+    compMoving = !!(compRemoving.size || (r.items || []).some((c) => c.progress || ["removing", "configuring", "fetching-models"].includes(c.state)));
+    if (compMoving && pageOn("ext"))
       compTimer = setTimeout(() => { if (request === compLoad && pageOn("ext")) loadComponents(); }, 1000);
     // 首开撞上瞬时 502 / 网关抖动：1.5 秒后自动拉一次缓存列表，不用干等手动刷新
     else if (netErr && pageOn("ext"))
@@ -397,11 +407,14 @@
   const KIND = () => ({ glibc: t("Linux 程序（glibc）"), bionic: t("安卓原生程序"), static: t("静态程序"), script: t("脚本"),
     musl: "musl", unsupported: t("跑不了") });
   async function loadCustom() {
+    const ok = extLatest("ext-custom");
     // 读失败不能当成「这个版本没有自定义组件」把整节藏掉（195-N.4 / X.2）
     const r = await api("/api/custom").catch((e) => ({ supported: true, error: e.message, items: [] }));
+    if (!ok()) return;
     if (r.ok === false && !r.error) r.error = r.message || "?";
     $("custom-field").classList.remove("hidden");
     if (r.error) {
+      if ($("custom-list").querySelector(".item")) return toast(t("自定义组件列表读取失败：{msg}", { msg: r.error }), true);
       $("custom-count").textContent = "—";
       $("custom-list").innerHTML = '<div class="tiny err">' + esc(t("自定义组件列表读取失败：{msg}", { msg: r.error })) + '</div><div class="it-acts"><button class="btn ghost sm" id="custom-retry">' + t("重试") + "</button></div>";
       $("custom-retry").onclick = () => loadCustom();
@@ -535,8 +548,14 @@
     const visit = llmDl.visit, live = () => catalogOpen() && visit === llmDl.visit;
     return viewRead("llm-catalog", visit, live, async () => {
       clearTimeout(llmDl.timer);
-      const r = await api("/api/local/catalog").catch((e) => ({ items: [], err: e.message }));
-      if (live()) paintCatalog(r, live);
+      let netErr = null;
+      const r = await api("/api/local/catalog").catch((e) => { netErr = e; return { items: [], err: e.message }; });
+      if (!live()) return;
+      if (netErr && llmDl.items && llmDl.items.size > 0) {
+        if (llmDl.wasBusy) llmDl.timer = setTimeout(() => { if (live()) loadLlmDl(); }, 1500);
+        return;
+      }
+      paintCatalog(r, live);
     });
   }
   function paintCatalog(r, live) {
@@ -597,6 +616,7 @@
       const inp = $("llm-url"); if (inp) inp.oninput = () => { llmDl.url = inp.value; };
     }
     const busy = (r.items || []).some((m) => m.job && m.job.phase !== "error");
+    llmDl.wasBusy = busy;
     if (busy) llmDl.timer = setTimeout(() => { if (live()) loadLlmDl(); }, 1000);
   }
   $("tab-ext").addEventListener("click", async (e) => {
@@ -619,7 +639,7 @@
   });
 
   // ── gh 登录卡：设备码流程。令牌只在 gh 自己那儿，网关只回账号名与状态 ──
-  const ghAuth = { html: "", at: 0, timer: 0, polling: false };
+  const ghAuth = { html: "", at: 0, timer: 0, polling: false, seq: 0 };
   // 没有组件系统的地方（开发端）：gh 在 PATH 里就单独给一张 GitHub 卡片，登录卡同一套
   async function loadGhField() {
     const visit = pageVisit;
@@ -636,10 +656,17 @@
     clearTimeout(ghAuth.timer);
     // 组件列表下载时一秒刷一次，gh auth status 要联网验令牌，别跟着每秒跑
     if (!force && !ghAuth.polling && Date.now() - ghAuth.at < 30000) return;
+    const my = ++ghAuth.seq;
     ghAuth.at = Date.now();
-    const r = data || await api("/api/gh/auth").catch((e) => ({ installed: true, accounts: [], error: e.message }));
-    if (!live()) return;
-    const j = r.job, wasPolling = ghAuth.polling;
+    let netErr = null;
+    const r = data || await api("/api/gh/auth").catch((e) => { netErr = e; return { installed: true, accounts: [], error: e.message }; });
+    if (!live() || my !== ghAuth.seq) return;
+    const wasPolling = ghAuth.polling;
+    if (netErr && (wasPolling || ghAuth.html)) {
+      if (wasPolling && $("gh-auth")) ghAuth.timer = setTimeout(() => { if (live() && my === ghAuth.seq) loadGhAuth(); }, 2000);
+      return;
+    }
+    const j = r.job;
     ghAuth.polling = !!j && ["starting", "waiting"].includes(j.state);
     if (wasPolling && j && j.state === "done") toast(j.git ? t("GitHub 已登录，git 推送已配好") : t("GitHub 已登录，但 git 凭据没配上，可在终端运行 gh auth setup-git"), !j.git);
     let h = "";
@@ -668,10 +695,12 @@
   }
 
   async function loadExtPlugins() {
+    const ok = extLatest("ext-plugins");
     const box = $("ext-plugins");
     let r;
-    try { r = await api("/api/ext/plugins"); } catch (e) { box.innerHTML = `<div class="tiny">${esc(e.message)}</div>`; return; }
-    if (r.ok === false) { box.innerHTML = `<div class="tiny">${esc(r.message)}</div>`; return; }
+    try { r = await api("/api/ext/plugins"); } catch (e) { if (!ok()) return; if (box.querySelector(".item")) return toast(e.message, true); box.innerHTML = `<div class="tiny">${esc(e.message)}</div>`; return; }
+    if (!ok()) return;
+    if (r.ok === false) { if (box.querySelector(".item")) return toast(r.message || "?", true); box.innerHTML = `<div class="tiny">${esc(r.message)}</div>`; return; }
     $("ext-p-count").textContent = r.installed.length;
     box.innerHTML = r.installed.length ? r.installed.map((p) => extItem(
       esc(p.id.split("@")[0]) + (p.enabled ? "" : ` <span class="badge">${t("已停用")}</span>`),
@@ -729,10 +758,13 @@
   }
 
   async function loadExtMarkets() {
+    const ok = extLatest("ext-markets");
     // 读失败要报错，不能画成「只有内置的官方目录」（195-N.4 / X.2）
     const r = await api("/api/ext/marketplaces").catch((e) => ({ items: [], err: e.message }));
+    if (!ok()) return;
     if (r.ok === false) r.err = r.err || r.message || "?";
     if (r.err) {
+      if ($("ext-markets").querySelector(".item")) return toast(t("插件市场读取失败：{msg}", { msg: r.err }), true);
       $("ext-markets").innerHTML = `<div class="tiny err">${esc(t("插件市场读取失败：{msg}", { msg: r.err }))}</div><div class="it-acts"><button class="btn ghost sm" data-x="market-retry">${t("重试")}</button></div>`;
       return;
     }
@@ -742,10 +774,13 @@
   }
 
   async function loadExtSkills() {
+    const ok = extLatest("ext-skills");
     // 读失败不能显示成「还没有技能」、计数 0（审查 F-007）
     const r = await api("/api/ext/skills").catch((e) => ({ items: [], err: e.message || "?" }));
+    if (!ok()) return;
     if (r.ok === false) r.err = r.message || "?";   // 200 + {ok:false}（195-X.2）
     if (r.err) {
+      if ($("ext-skills").querySelector(".item")) return toast(t("技能列表读取失败：{msg}", { msg: r.err }), true);
       $("ext-s-count").textContent = "—";
       $("ext-skills").innerHTML = `<div class="tiny err">${esc(t("技能列表读取失败：{msg}", { msg: r.err }))}</div><div class="it-acts"><button class="btn ghost sm" id="ext-s-retry">${esc(t("重试"))}</button></div>`;
       $("ext-s-retry").onclick = () => loadExtSkills();
@@ -858,9 +893,11 @@
   };
 
   async function loadExtHooks() {
+    const ok = extLatest("ext-hooks");
     let d;
-    try { d = await api("/api/ext/hooks"); } catch (e) { $("ext-hooks").innerHTML = `<div class="tiny">${esc(e.message)}</div>`; return; }
-    if (d && d.ok === false) { $("ext-hooks").innerHTML = `<div class="tiny err">${esc(d.message || "?")}</div>`; return; }
+    try { d = await api("/api/ext/hooks"); } catch (e) { if (!ok()) return; if (HK.data) return toast(e.message, true); $("ext-hooks").innerHTML = `<div class="tiny">${esc(e.message)}</div>`; return; }
+    if (!ok()) return;
+    if (d && d.ok === false) { if (HK.data) return toast(d.message || "?", true); $("ext-hooks").innerHTML = `<div class="tiny err">${esc(d.message || "?")}</div>`; return; }
     HK.data = d;
     if (!d.scopes.some((s) => s.scope === HK.scope)) HK.scope = "user";
     renderHooks();
@@ -1067,36 +1104,40 @@
     if (a === "f-cancel") return hkCloseForm();
     if (a === "f-test") { const v = hkFormVal(); return hkRunTest($("hook-form").querySelector(".hk-out"), v.event, v.command, v.matcher, v.timeout); }
     if (a === "f-save") {
+      if (HK.saving || b.disabled) return;
       const v = hkFormVal();
       if (!v.command) return toast(t("命令是空的"), true);
-      // 内置脚本装不上就别保存规则：以前吞掉错误，界面提示“已保存”，实际这条规则永远跑不起来（197-2.9）
-      if (/\$HOME\/\.claude\/hooks\/cc-/.test(v.command)) {
-        let inst;
-        try { inst = await api("/api/ext/hooks/scripts", { method: "POST", body: "{}" }); }
-        catch (e) { return toast(t("内置脚本没装上：{msg}，规则没有保存", { msg: e.message }), true); }
-        if (inst.ok === false) return toast(t("内置脚本没装上：{msg}，规则没有保存", { msg: inst.message || "?" }), true);
-      }
-      const h = hkClone();
-      const entry = { type: "command", command: v.command };
-      if (v.timeout) entry.timeout = v.timeout;
-      if (HK.edit) {
-        // 编辑期间列表可能变了（删了前面一条、别处改了文件）：按下标找到的得还是原来那条，不是就在同一事件里按内容重新找；
-        // 都找不到就不存，不能把修改稿写到另一条规则上（#152-1）
-        const same = (g, x) => g && x && JSON.stringify({ m: g.matcher || "", h: x }) === HK.edit.orig;
-        let gi = HK.edit.gi, hi = HK.edit.hi;
-        if (HK.edit.scope !== HK.scope || !same(h[HK.edit.ev]?.[gi], h[HK.edit.ev]?.[gi]?.hooks?.[hi])) {
-          gi = hi = -1;
-          (h[HK.edit.ev] || []).some((g, a) => (g.hooks || []).some((x, b) => same(g, x) && ((gi = a), (hi = b), true)));
+      HK.saving = true; b.disabled = true;
+      try {
+        // 内置脚本装不上就别保存规则：以前吞掉错误，界面提示“已保存”，实际这条规则永远跑不起来（197-2.9）
+        if (/\$HOME\/\.claude\/hooks\/cc-/.test(v.command)) {
+          let inst;
+          try { inst = await api("/api/ext/hooks/scripts", { method: "POST", body: "{}" }); }
+          catch (e) { return toast(t("内置脚本没装上：{msg}，规则没有保存", { msg: e.message }), true); }
+          if (inst.ok === false) return toast(t("内置脚本没装上：{msg}，规则没有保存", { msg: inst.message || "?" }), true);
         }
-        if (gi < 0 || HK.edit.scope !== HK.scope) { toast(t("这条规则在你编辑期间被改动或删掉了，重新打开它再改"), true); return hkCloseForm(); }
-        HK.edit.gi = gi; HK.edit.hi = hi;
-        const old = h[HK.edit.ev][HK.edit.gi];
-        const keep = old.hooks[HK.edit.hi];
-        // 事件、匹配都没变就原地换；变了就从原组里摘掉，按新的事件 / 匹配放
-        if (HK.edit.ev === v.event && (old.matcher || "") === v.matcher) { const nh = { ...keep, ...entry }; if (!v.timeout) delete nh.timeout; old.hooks[HK.edit.hi] = nh; }
-        else { old.hooks.splice(HK.edit.hi, 1); hkPut(h, v, entry); }
-      } else hkPut(h, v, entry);
-      if (await hkSave(h)) hkCloseForm();
+        const h = hkClone();
+        const entry = { type: "command", command: v.command };
+        if (v.timeout) entry.timeout = v.timeout;
+        if (HK.edit) {
+          // 编辑期间列表可能变了（删了前面一条、别处改了文件）：按下标找到的得还是原来那条，不是就在同一事件里按内容重新找；
+          // 都找不到就不存，不能把修改稿写到另一条规则上（#152-1）
+          const same = (g, x) => g && x && JSON.stringify({ m: g.matcher || "", h: x }) === HK.edit.orig;
+          let gi = HK.edit.gi, hi = HK.edit.hi;
+          if (HK.edit.scope !== HK.scope || !same(h[HK.edit.ev]?.[gi], h[HK.edit.ev]?.[gi]?.hooks?.[hi])) {
+            gi = hi = -1;
+            (h[HK.edit.ev] || []).some((g, a) => (g.hooks || []).some((x, b) => same(g, x) && ((gi = a), (hi = b), true)));
+          }
+          if (gi < 0 || HK.edit.scope !== HK.scope) { toast(t("这条规则在你编辑期间被改动或删掉了，重新打开它再改"), true); return hkCloseForm(); }
+          HK.edit.gi = gi; HK.edit.hi = hi;
+          const old = h[HK.edit.ev][HK.edit.gi];
+          const keep = old.hooks[HK.edit.hi];
+          // 事件、匹配都没变就原地换；变了就从原组里摘掉，按新的事件 / 匹配放
+          if (HK.edit.ev === v.event && (old.matcher || "") === v.matcher) { const nh = { ...keep, ...entry }; if (!v.timeout) delete nh.timeout; old.hooks[HK.edit.hi] = nh; }
+          else { old.hooks.splice(HK.edit.hi, 1); hkPut(h, v, entry); }
+        } else hkPut(h, v, entry);
+        if (await hkSave(h)) hkCloseForm();
+      } finally { HK.saving = false; b.disabled = false; }
     }
   });
   $("ext-hook-sec").addEventListener("change", async (e) => {
@@ -1117,9 +1158,12 @@
   }
 
   async function loadExtMcp() {
+    const ok = extLatest("ext-mcp");
     const box = $("ext-mcp");
     const r = await api("/api/ext/mcp").catch((e) => ({ items: [], err: e.message }));
+    if (!ok()) return;
     if (r.ok === false) r.err = r.message || "?";   // 200 + {ok:false} 也是失败，不能画成空列表（195-X.2）
+    if (r.err && box.querySelector(".item")) return toast(r.err, true);
     $("ext-m-count").textContent = r.err ? "—" : (r.items || []).length;
     box.innerHTML = (r.items || []).map((m) => extItem(
       esc(m.name) + (m.cloud ? ` <span class="badge">${t("账户连接器")}</span>` : ""),
@@ -1137,10 +1181,16 @@
   // ── 官方技能目录（anthropics/skills）：展开时才拉；装好后上面「技能」列表跟着刷新 ──
   const KB = (n) => (n < 1048576 ? Math.max(1, Math.ceil((n || 0) / 1024)) + " KB" : MB(n));
   async function loadSkillCat(force) {
+    const ok = extLatest("skillcat");
     const box = $("ext-s-cat");
     if (!box.children.length || force) box.innerHTML = `<div class="tiny">${t("正在拉取官方技能目录…")}</div>`;
     const r = await api("/api/ext/catalog/skills" + (force ? "?refresh=1" : "")).catch((e) => ({ ok: false, message: e.message }));
-    if (!r.ok) { box.innerHTML = `<div class="tiny err">${esc(r.message || "")}</div><div class="it-acts"><button data-x="skillcat-retry">${t("重试")}</button></div>`; return; }
+    if (!ok()) return;
+    if (!r.ok) {
+      if (box.querySelector(".item")) return toast(r.message || "?", true);
+      box.innerHTML = `<div class="tiny err">${esc(r.message || "")}</div><div class="it-acts"><button data-x="skillcat-retry">${t("重试")}</button></div>`;
+      return;
+    }
     box.innerHTML = r.items.map((x) => extItem(esc(x.name),
       `<span>${KB(x.bytes)}</span>${x.installed ? `<span>${t("已安装")}</span>` : ""}`,
       x.installed ? "" : `<button data-x="skillcat-install" data-id="${esc(x.dir)}">${t("安装")}</button>`,
@@ -1198,7 +1248,7 @@
     const b = e.target.closest("button"); if (!b) return;
     if (b.classList.contains("mcpcat-more")) return searchMcpCat(true);
     const x = b.dataset.x;
-    if (x === "skillcat-retry") return loadSkillCat(true);
+    if (x === "skillcat-retry") return loadSkillCat(false);
     if (x === "market-retry") return loadExtMarkets();
     if (x === "skillcat-install") {
       b.disabled = true; b.textContent = t("安装中…");
@@ -1255,13 +1305,18 @@
     loadExtSkills();
   });
   $("ext-m-add").addEventListener("click", async () => {
+    const btn = $("ext-m-add");
+    if (btn.disabled) return;
     const source = $("ext-m-src").value.trim();
     if (!source) return;
-    toast(t("正在添加市场…"));
-    const r = await post("/api/ext/marketplaces/add", { source }).catch((e) => ({ ok: false, message: e.message }));
-    toast(r.ok ? t("已添加") : t("添加失败：{msg}", { msg: r.message || "" }), !r.ok);
-    if (r.ok) $("ext-m-src").value = "";
-    loadExtMarkets();
+    btn.disabled = true;
+    try {
+      toast(t("正在添加市场…"));
+      const r = await post("/api/ext/marketplaces/add", { source }).catch((e) => ({ ok: false, message: e.message }));
+      toast(r.ok ? t("已添加") : t("添加失败：{msg}", { msg: r.message || "" }), !r.ok);
+      if (r.ok) $("ext-m-src").value = "";
+      loadExtMarkets();
+    } finally { btn.disabled = false; }
   });
   // 选 http / sse 时把输入框提示换成请求头的写法：远程服务器常要 Bearer 令牌，
   // 写成 KEY=值 会被当成环境变量（远程没有子进程，-e 无处注入），令牌根本没发出去。
@@ -1382,6 +1437,8 @@
     if (r.ok) { endMcpEdit(); loadExtMcp(); }
   });
   $("ext-mcp-add").addEventListener("click", async () => {
+    const btn = $("ext-mcp-add");
+    if (btn.disabled) return;
     const transport = $("ext-mcp-tr").value;
     const raw = $("ext-mcp-env").value;
     const extra = (raw.includes("\n") ? raw.split("\n") : raw.split(",")).map((x) => x.trim()).filter(Boolean);
@@ -1395,9 +1452,12 @@
       env: envLike,
       headers: hdrLike,
     };
-    const r = await post("/api/ext/mcp/add", body).catch((e) => ({ ok: false, message: e.message }));
-    toast(r.ok ? t("已添加 {name}", { name: body.name }) : t("添加失败：{msg}", { msg: r.message || "" }), !r.ok);
-    if (r.ok) { ["ext-mcp-name", "ext-mcp-target", "ext-mcp-env"].forEach((id) => ($(id).value = "")); loadExtMcp(); }
+    btn.disabled = true;
+    try {
+      const r = await post("/api/ext/mcp/add", body).catch((e) => ({ ok: false, message: e.message }));
+      toast(r.ok ? t("已添加 {name}", { name: body.name }) : t("添加失败：{msg}", { msg: r.message || "" }), !r.ok);
+      if (r.ok) { ["ext-mcp-name", "ext-mcp-target", "ext-mcp-env"].forEach((id) => ($(id).value = "")); loadExtMcp(); }
+    } finally { btn.disabled = false; }
   });
 
   $("tab-ext").addEventListener("click", async (e) => {
@@ -1584,12 +1644,18 @@
       </div>`).join("") + (j.steps.some((s) => s.state === "handed") ? `<div class="tiny">${esc(t("交给应用的那几步在「设置 → 更新」里看进度，做完后再点「核对记录」。"))}</div>` : "");
     box.classList.remove("hidden");
   }
+  let fixFails = 0;
   async function followFix(visit = setVisit, j) {
     const live = () => setVisible("trouble", visit);
     if (!live()) return;
     clearTimeout(fixTimer);
     j ||= await sameGet("/api/reconcile/fix").catch(() => null);
-    if (!live() || !j?.ok) return;
+    if (!live()) return;
+    if (!j?.ok) {
+      if (++fixFails <= 6) fixTimer = setTimeout(() => followFix(visit), 2000);
+      return;
+    }
+    fixFails = 0;
     paintFix(j);
     if (j.running) { fixTimer = setTimeout(() => followFix(visit), 1500); return; }
     const failed = j.steps.filter((s) => s.state === "fail").length;
@@ -1623,19 +1689,26 @@
     return r;
   }
   $("btn-reconcile").addEventListener("click", async () => {
+    const btn = $("btn-reconcile");
+    if (btn.disabled) return;
     // 按钮是「核对」：已有结果时点它也要重新核，不能第一次只把面板收起来（195-M.6）
     const visit = setVisit;
-    toast(t("正在核对…"));
-    const r = await loadReconcile(true);
-    if (!setVisible("trouble", visit)) return;
-    if (!r) toast(t("核对失败"), true);
-    else if (!r.supported) toast(t("这里没有工具包，不用核对"));
+    btn.disabled = true;
+    try {
+      toast(t("正在核对…"));
+      const r = await loadReconcile(true);
+      if (!setVisible("trouble", visit)) return;
+      if (!r) toast(t("核对失败"), true);
+      else if (!r.supported) toast(t("这里没有工具包，不用核对"));
+    } finally { btn.disabled = false; }
   });
   // 本机自检（195-M.1）：看上次结果，点「重新自检」不等过期立刻重跑；跑着的时候每 5 秒刷新一次
-  let envFactsTimer = 0;
+  let envFactsTimer = 0, envFactsRunning = false, envFactsFails = 0;
   function paintEnvFacts(r, visit) {
     $("envfacts-row").classList.toggle("hidden", !r.supported);
     const el = $("envfacts-state"), b = $("btn-envfacts");
+    envFactsRunning = !!r.running;
+    envFactsFails = 0;
     b.disabled = !!r.running;
     const why = { timeout: t("超时了"), empty: t("没有输出") };
     const lines = [];
@@ -1652,12 +1725,21 @@
     const visit = setVisit;
     if (!setVisible("trouble", visit)) return;
     const r = await sameGet("/api/env-facts").catch(() => null);
-    if (r && setVisible("trouble", visit)) paintEnvFacts(r, visit);
+    if (!setVisible("trouble", visit)) return;
+    if (r) return paintEnvFacts(r, visit);
+    if (envFactsRunning) {
+      if (++envFactsFails <= 6) envFactsTimer = setTimeout(() => { if (setVisible("trouble", visit)) loadEnvFacts(); }, 5000);
+      else { envFactsRunning = false; $("btn-envfacts").disabled = false; }
+    }
   }
   $("btn-envfacts").addEventListener("click", async () => {
+    const btn = $("btn-envfacts");
+    if (btn.disabled) return;
     const visit = setVisit;
+    btn.disabled = true;
     const r = await post("/api/env-facts/rerun").catch((e) => (toast(e.message, true), null));
     if (r && setVisible("trouble", visit)) paintEnvFacts(r, visit);
+    else btn.disabled = false;
   });
   const LEDGER_KIND = () => ({ verify: t("校验"), repair: t("修复"), install: t("安装"), uninstall: t("卸载"), recover: t("恢复"), "safe-mode": t("安全模式"), logs: t("日志") });
   $("btn-ledger").addEventListener("click", async () => {
@@ -1680,7 +1762,17 @@
   const UC = { data: null, scope: localStorage.getItem("cc.cmdScope") || "user", edit: null };
   const ucScope = () => UC.data && UC.data.scopes.find((s) => s.scope === UC.scope);
   async function loadExtCmds() {
-    try { UC.data = await api("/api/commands"); } catch (e) { $("ext-cmds").innerHTML = `<div class="tiny">${esc(e.message)}</div>`; return; }
+    const ok = extLatest("ext-cmds");
+    try {
+      const d = await api("/api/commands");
+      if (!ok()) return;
+      UC.data = d;
+    } catch (e) {
+      if (!ok()) return;
+      if (UC.data) return toast(e.message, true);
+      $("ext-cmds").innerHTML = `<div class="tiny">${esc(e.message)}</div>`;
+      return;
+    }
     renderCmds();
   }
   function renderCmds() {
@@ -1734,23 +1826,31 @@
     if (act === "use" && c) { closePage(); insertAtCursor((UC.data.sealed ? "/user:" : "/") + c.name); inputEl.focus(); return; }
     if (act === "edit" && c) return ucForm(c);
     if (act === "del" && c) {
+      if (b.disabled) return;
       if (!confirm(t("删除指令 /{name}？", { name: c.name }))) return;
-      const r = await post("/api/commands/del", { scope: UC.scope, dir: UC.data.workspace, name: c.name }).catch((err) => ({ ok: false, message: err.message }));
-      if (!r.ok) return toast(r.message, true);
-      if (MO.on() && it.animate) await it.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: `translateX(${MO.rtl() ? 24 : -24}px)` }], { duration: 155, easing: "cubic-bezier(.4,0,1,1)", fill: "forwards" }).finished.catch(() => {});
-      await loadExtCmds(); loadCaps();
+      b.disabled = true;
+      try {
+        const r = await post("/api/commands/del", { scope: UC.scope, dir: UC.data.workspace, name: c.name }).catch((err) => ({ ok: false, message: err.message }));
+        if (!r.ok) return toast(r.message, true);
+        if (MO.on() && it.animate) await it.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: `translateX(${MO.rtl() ? 24 : -24}px)` }], { duration: 155, easing: "cubic-bezier(.4,0,1,1)", fill: "forwards" }).finished.catch(() => {});
+        await loadExtCmds(); loadCaps();
+      } finally { b.disabled = false; }
       return;
     }
     if (act === "f-cancel") return ucClose();
     if (act === "f-save") {
+      if (b.disabled) return;
       const f = $("cmd-form"), q = (k) => f.querySelector(`[data-f="${k}"]`).value;
       const body = { scope: UC.scope, dir: UC.data.workspace, name: q("name").trim().replace(/^\//, ""), description: q("description"), hint: q("hint"), body: q("body") };
       if (UC.edit) { if (UC.edit !== body.name) body.oldName = UC.edit; } else body.fresh = true;
-      const r = await post("/api/commands/save", body).catch((err) => ({ ok: false, message: err.message }));
-      if (!r.ok) return toast(t("保存失败：{msg}", { msg: t(r.message || "") }), true);
-      toast(t("已保存 /{name}，输入框里打 / 就能用", { name: r.name }));
-      ucClose(); await loadExtCmds(); loadCaps();
-      const row = [...document.querySelectorAll("#ext-cmds .uc-item .mono")].find((x) => x.textContent === "/" + r.name);
-      if (row) MO.play(row.closest(".uc-item"), "mo-in-rise", 1400);
+      b.disabled = true;
+      try {
+        const r = await post("/api/commands/save", body).catch((err) => ({ ok: false, message: err.message }));
+        if (!r.ok) return toast(t("保存失败：{msg}", { msg: t(r.message || "") }), true);
+        toast(t("已保存 /{name}，输入框里打 / 就能用", { name: r.name }));
+        ucClose(); await loadExtCmds(); loadCaps();
+        const row = [...document.querySelectorAll("#ext-cmds .uc-item .mono")].find((x) => x.textContent === "/" + r.name);
+        if (row) MO.play(row.closest(".uc-item"), "mo-in-rise", 1400);
+      } finally { b.disabled = false; }
     }
   });

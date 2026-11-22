@@ -1081,12 +1081,15 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
 
   // 回复 / 查看器里的本机路径：点了直接在应用内打开
   async function openPath(p) {
+    const ok = typeof latest === "function" ? latest("openPath") : () => true;
     let r;
     try { r = await api("/api/file/stat?path=" + encodeURIComponent(p)); }
     catch (e) {
+      if (!ok()) return;
       return toast(e.status === 403 ? t("这个位置受保护，不能在界面里打开：{p}", { p }) :
         e.status === 404 ? t("文件不存在：{p}", { p }) : t("打不开：{msg}", { msg: e.message }));
     }
+    if (!ok()) return;
     if (r.dir) {
       // 查看器盖着文件页（窄屏两页都铺满、查看器 z 更高）：先关查看器，不然文件页开在它底下（0.6.9 审计 195-C.17）
       const vw = $("viewer");

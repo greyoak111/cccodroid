@@ -185,9 +185,11 @@ export function moveSession(sid, projectId) {
 }
 
 // ── 路由：/api/projects ──
+const CLONING_DIRS = new Set();
+const DELETING_PROJS = new Set();
 function freeDir(name) {
   let base = path.join(CFG.workspace, slugName(name)), n = 2;
-  while (fs.existsSync(base)) base = path.join(CFG.workspace, slugName(name) + "-" + n++);
+  while (fs.existsSync(base) || CLONING_DIRS.has(base)) base = path.join(CFG.workspace, slugName(name) + "-" + n++);
   return base;
 }
 
@@ -227,7 +229,9 @@ export async function routeProjects(req, res, u, p) {
       if (b.mode === "git") {
         const url = String(b.url || "").trim();
         if (!/^(https?:\/\/|git@|ssh:\/\/)/.test(url)) return sendJson(res, 400, { error: tz("仓库地址要以 https:// 或 git@ 开头") });
+        CLONING_DIRS.add(dir);
         try { await gitClone(url, dir); } catch (e) { return sendJson(res, 400, { error: tz("克隆失败：{msg}", { msg: e.message }) }); }
+        finally { CLONING_DIRS.delete(dir); }
       } else fs.mkdirSync(dir, { recursive: true });
     }
     if (PROJECTS.some((x) => real(x.path) === real(dir))) return sendJson(res, 409, { error: tz("这个目录已经是一个项目了") });
@@ -268,35 +272,39 @@ export async function routeProjects(req, res, u, p) {
     return sendJson(res, 200, { ok: true, project: proj });
   }
   if (!sub && req.method === "DELETE") {
-    const withDir = u.searchParams.get("withDir") === "1";
-    if (withDir) {
-      const r = real(proj.path);
-      // 先判断能不能删，再动会话（原来先把会话收进回收站、后面才拦）。拦这些（审查 10-29 低6）：
-      // 工作区 / home 本身及其上级、App 私有目录里工作区以外的地方（令牌、工具包、网关本体）、存储根和它下面一级（Download、DCIM…）、太浅的路径
-      // 私有目录按目录身份判（gw/pathguard.mjs）：以前按字符串拼保护表，还拼错了（拼成 /data/data/files），
-      // 应用数据根和它的别名都没进表，能递归删掉 shared_prefs 甚至整个 home（0.6.9 审计 P0-2）
-      if (r.split("/").length < 4 || holdsPrivate(r) || isPrivate(r)
-        || /^\/storage\/(emulated\/\d+|[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}|self\/primary)(\/[^/]+)?$/.test(r) || /^\/sdcard(\/[^/]+)?$/.test(r))
-        return sendJson(res, 400, { error: tz("这个目录不能删") });
-      const inDir = (s) => s.cwd && (real(s.cwd) === r || real(s.cwd).startsWith(r + "/"));
-      // 有会话正在这个目录里跑：先别删（目录删了它还在往里写，对话也收不进回收站）
-      if (listSessions(5000).some((s) => inDir(s) && runOfSession(s.id))) return sendJson(res, 409, { error: "busy", message: tz("这个项目里有会话正在生成，等它结束再删。") });
-      // 删目录前先把对话收进回收站（可恢复）。有一条没收进去就不删目录：以前吞掉错误照删（0.6.9 审计 195 第二批 R2/R5）。
-      // 会话不只看最近 5000 条（更早的也在这个目录里）
-      const failed = [];
-      for (const s of listSessions(1e6)) if (inDir(s)) {
-        try {
-          const r = trashSession(s.id);
-          if (!r.ok) failed.push(`${s.id.slice(0, 8)}: ${r.message || r.error}`);
-        } catch (e) { failed.push(`${s.id.slice(0, 8)}: ${e.message}`); }
+    if (DELETING_PROJS.has(proj.id)) return sendJson(res, 409, { error: "busy" });
+    DELETING_PROJS.add(proj.id);
+    try {
+      const withDir = u.searchParams.get("withDir") === "1";
+      if (withDir) {
+        const r = real(proj.path);
+        // 先判断能不能删，再动会话（原来先把会话收进回收站、后面才拦）。拦这些（审查 10-29 低6）：
+        // 工作区 / home 本身及其上级、App 私有目录里工作区以外的地方（令牌、工具包、网关本体）、存储根和它下面一级（Download、DCIM…）、太浅的路径
+        // 私有目录按目录身份判（gw/pathguard.mjs）：以前按字符串拼保护表，还拼错了（拼成 /data/data/files），
+        // 应用数据根和它的别名都没进表，能递归删掉 shared_prefs 甚至整个 home（0.6.9 审计 P0-2）
+        if (r.split("/").length < 4 || holdsPrivate(r) || isPrivate(r)
+          || /^\/storage\/(emulated\/\d+|[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}|self\/primary)(\/[^/]+)?$/.test(r) || /^\/sdcard(\/[^/]+)?$/.test(r))
+          return sendJson(res, 400, { error: tz("这个目录不能删") });
+        const inDir = (s) => s.cwd && (real(s.cwd) === r || real(s.cwd).startsWith(r + "/"));
+        // 有会话正在这个目录里跑：先别删（目录删了它还在往里写，对话也收不进回收站）
+        if (listSessions(5000).some((s) => inDir(s) && runOfSession(s.id))) return sendJson(res, 409, { error: "busy", message: tz("这个项目里有会话正在生成，等它结束再删。") });
+        // 删目录前先把对话收进回收站（可恢复）。有一条没收进去就不删目录：以前吞掉错误照删（0.6.9 审计 195 第二批 R2/R5）。
+        // 会话不只看最近 5000 条（更早的也在这个目录里）
+        const failed = [];
+        for (const s of listSessions(1e6)) if (inDir(s)) {
+          try {
+            const tr = trashSession(s.id);
+            if (!tr.ok) failed.push(`${s.id.slice(0, 8)}: ${tr.message || tr.error}`);
+          } catch (e) { failed.push(`${s.id.slice(0, 8)}: ${e.message}`); }
+        }
+        if (failed.length) return sendJson(res, 500, { error: "trash_failed", message: tz("有 {n} 个对话没能移进回收站，目录没删：{why}", { n: failed.length, why: failed.slice(0, 3).join("；") }) });
+        try { await fs.promises.rm(r, { recursive: true, force: true }); } catch (e) { return sendJson(res, 500, { error: e.message }); }
       }
-      if (failed.length) return sendJson(res, 500, { error: "trash_failed", message: tz("有 {n} 个对话没能移进回收站，目录没删：{why}", { n: failed.length, why: failed.slice(0, 3).join("；") }) });
-      try { fs.rmSync(r, { recursive: true, force: true }); } catch (e) { return sendJson(res, 500, { error: e.message }); }
-    }
-    PROJECTS = PROJECTS.filter((x) => x.id !== proj.id);
-    if (!save()) return sendJson(res, 500, SAVE_FAIL());
-    log(`📁 删除项目「${proj.name}」${withDir ? "（连目录）" : ""}`);
-    return sendJson(res, 200, { ok: true });
+      PROJECTS = PROJECTS.filter((x) => x.id !== proj.id);
+      if (!save()) return sendJson(res, 500, SAVE_FAIL());
+      log(`📁 删除项目「${proj.name}」${withDir ? "（连目录）" : ""}`);
+      return sendJson(res, 200, { ok: true });
+    } finally { DELETING_PROJS.delete(proj.id); }
   }
   // 指令 = 项目目录里的 CLAUDE.md。读写都不跟软链：克隆来的仓库可以把它做成指向密钥文件 / 设置文件的软链，
   // 读出来就进了界面，保存就把那个文件盖掉（审查 v0513b 低-13）

@@ -72,8 +72,9 @@ final class FactoryReset {
             try { AppFiles.deploy(c, env.app); AppFiles.markSeen(c); }
             catch (Exception e) { Log.w(TAG, "重铺应用文件失败", e); failed.add("files/app"); }
         } finally {
-            // 停住之前正在起的那个网关（比如正在取运行库）可能在挪的时候起来了，内存里还是旧设置：再停一次再放行
-            GatewayService.pause(true, Tr.t("正在恢复初始设置…"));
+            // 停住之前正在起的那个网关（比如正在取运行库）可能在挪的时候起来了，内存里还是旧设置：再停一次再放行。
+            // 用 pauseKick 而不是再 pause(true)：后者是引用计数，会多记一次暂停，放行后网关再也起不来
+            GatewayService.pauseKick();
             GatewayService.pause(false, null);
         }
         JSONObject d = new JSONObject();

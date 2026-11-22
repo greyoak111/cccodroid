@@ -68,7 +68,7 @@ function amFailed(e, err) {
     started = false;
     amQ = [];
     if (unsub) { try { unsub(); } catch {} unsub = null; }
-    if (core) { try { core.stop(true, false); } catch {} core = null; }
+    if (core) { try { core.stop(false, false); } catch {} core = null; }
   }
 }
 function amSendSync(...args) {
@@ -198,7 +198,7 @@ export function startWorkIsland() {
     });
     const live = runList().filter((r) => r && !r.ended);
     if (live.length) core.start(live[0]);        // 开设置时已经有轮次在跑
-    else core.stop(true, true);                  // 没有轮次：先发一次 IDLE，收掉上一任网关被 SIGKILL 后留下的胶囊（195-P.1）
+    else core.stop(false, true);                 // 没有轮次：先异步发一次 IDLE，收掉上一任网关被 SIGKILL 后留下的胶囊（不阻塞主线程）
     lastErr = null;
     log("[work-island] 已订阅网关事件");
   });

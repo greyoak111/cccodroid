@@ -77,19 +77,36 @@ final class Consent {
         return x[0];
     }
 
+    private static final java.util.Map<String, String> BAD_SIG = new java.util.concurrent.ConcurrentHashMap<>();
+
     /** 当前值；没同意过（或签名验不过）返回 null */
     static String get(Context c, String name) {
         String v = MEM.get(name);
         if (v != null) return v;
+        SharedPreferences p = sp(c);
+        String val = p.getString("v." + name, null), sig = p.getString("s." + name, null);
+        if (val == null || sig == null) return null;
+        String token = val + "\0" + sig;
+        if (token.equals(BAD_SIG.get(name))) return null;
+        // 认证链与 KeyStore 验签放在锁外，避免后台状态轮询持 LOCK 阻塞主线程 showWeb()/onResume()
+        Boolean verified = verify(c, name, val, sig);
+        if (verified != Boolean.TRUE) {
+            // 只有确定签名不对才缓存：KeyStore 一时出错（null）下次还得再试，
+            // 否则一次抖动就把用户已同意的设置永久当成没同意，直到进程重启
+            if (verified == Boolean.FALSE) BAD_SIG.put(name, token);
+            Log.w(TAG, name + (verified == Boolean.FALSE ? " 的签名验不过，当作没同意" : " 的签名这次核不了，当作没同意"));
+            return null;
+        }
         synchronized (LOCK) {
-            v = MEM.get(name);
-            if (v != null) return v;
-            SharedPreferences p = sp(c);
-            String val = p.getString("v." + name, null), sig = p.getString("s." + name, null);
-            if (val == null || sig == null) return null;
-            if (!verify(c, name, val, sig)) { Log.w(TAG, name + " 的签名验不过，当作没同意"); return null; }
-            MEM.put(name, val);
-            return val;
+            String cur = MEM.get(name);
+            if (cur != null) return cur;
+            // 复核验签期间未被 revoke/修改
+            SharedPreferences p2 = sp(c);
+            if (val.equals(p2.getString("v." + name, null)) && sig.equals(p2.getString("s." + name, null))) {
+                MEM.put(name, val);
+                return val;
+            }
+            return null;
         }
     }
     static boolean on(Context c, String name) { return get(c, name) != null; }
@@ -128,7 +145,10 @@ final class Consent {
     }
 
     private static void dropSaved(Context c, String name) {
-        sp(c).edit().remove("v." + name).remove("s." + name).commit();
+        BAD_SIG.remove(name);
+        SharedPreferences p = sp(c);
+        if (!p.contains("v." + name) && !p.contains("s." + name)) return;   // 本就没存档：主线程 showWeb() 不白做 commit + KeyStore IPC
+        p.edit().remove("v." + name).remove("s." + name).commit();
         try { KeyStore ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null); ks.deleteEntry(ALIAS + name); }
         catch (Exception e) { Log.w(TAG, "删钥匙失败 " + name, e); }
     }
@@ -176,58 +196,70 @@ final class Consent {
             running = true;
         }
         final String name = job[0], value = job[1];
-        Signature s;
-        try {
-            KeyPairGenerator g = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore");
-            g.initialize(new KeyGenParameterSpec.Builder(ALIAS + name, KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
-                .setDigests(KeyProperties.DIGEST_SHA256)
-                .setUserAuthenticationRequired(true)
-                .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL)
-                .setInvalidatedByBiometricEnrollment(false)
-                .setAttestationChallenge(challenge(a, name, value))
-                .build());
-            PrivateKey k = g.generateKeyPair().getPrivate();
-            // 先验一遍认证链：这台设备做不了（没有 Google 根等）的话，存了下次也认不了，别让用户白验
-            KeyStore ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null);
-            if (attested(a, ks, name, value) == null) {
-                try { ks.deleteEntry(ALIAS + name); } catch (Exception ignored) {}
-                done(a, Tr.f("这台设备做不了硬件密钥认证，「{0}」只在这次运行有效", label(name, value)));
+        // 硬件密钥生成与认证链核对放到后台线程，完成后回主线程弹 BiometricPrompt，避免 StrongBox 机型主线程卡顿 0.5–3s
+        new Thread(() -> {
+            final Signature s;
+            try {
+                KeyPairGenerator g = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore");
+                g.initialize(new KeyGenParameterSpec.Builder(ALIAS + name, KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
+                    .setDigests(KeyProperties.DIGEST_SHA256)
+                    .setUserAuthenticationRequired(true)
+                    .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL)
+                    .setInvalidatedByBiometricEnrollment(false)
+                    .setAttestationChallenge(challenge(a, name, value))
+                    .build());
+                PrivateKey k = g.generateKeyPair().getPrivate();
+                KeyStore ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null);
+                if (attested(a, ks, name, value) == null) {
+                    try { ks.deleteEntry(ALIAS + name); } catch (Exception ignored) {}
+                    a.runOnUiThread(() -> done(a, Tr.f("这台设备做不了硬件密钥认证，「{0}」只在这次运行有效", label(name, value))));
+                    return;
+                }
+                s = Signature.getInstance("SHA256withECDSA");
+                s.initSign(k);
+            } catch (Exception e) {
+                Log.w(TAG, "生成签名钥匙失败", e);
+                a.runOnUiThread(() -> done(a, Tr.f("没能保存「{0}」，只在这次运行有效：", label(name, value)) + e.getMessage()));
                 return;
             }
-            s = Signature.getInstance("SHA256withECDSA");
-            s.initSign(k);
-        } catch (Exception e) {
-            Log.w(TAG, "生成签名钥匙失败", e);
-            done(a, Tr.f("没能保存「{0}」，只在这次运行有效：", label(name, value)) + e.getMessage());
-            return;
-        }
-        BiometricPrompt bp = new BiometricPrompt.Builder(a)
-            .setTitle(Tr.t("用锁屏验证保存这项设置"))
-            .setSubtitle(label(name, value))
-            .setDescription(Tr.t("验证后，重启 cccodroid 也会保持打开。不验证的话只在这次运行有效。这样别的程序就改不了这项设置。"))
-            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.DEVICE_CREDENTIAL)
-            .build();
-        try {
-            bp.authenticate(new BiometricPrompt.CryptoObject(s), new CancellationSignal(), a.getMainExecutor(), new BiometricPrompt.AuthenticationCallback() {
-                @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult r) {
-                    try {
-                        Signature sg = r.getCryptoObject().getSignature();
-                        sg.update(msg(a, name, value));
-                        String sig = Base64.encodeToString(sg.sign(), Base64.NO_WRAP);
-                        synchronized (LOCK) {
-                            // 验证期间用户又把它关了：别存
-                            if (value.equals(MEM.get(name))) sp(a).edit().putString("v." + name, value).putString("s." + name, sig).commit();
+            a.runOnUiThread(() -> {
+                if (a.isDestroyed() || a.isFinishing()) { synchronized (LOCK) { running = false; } return; }
+                BiometricPrompt bp = new BiometricPrompt.Builder(a)
+                    .setTitle(Tr.t("用锁屏验证保存这项设置"))
+                    .setSubtitle(label(name, value))
+                    .setDescription(Tr.t("验证后，重启 cccodroid 也会保持打开。不验证的话只在这次运行有效。这样别的程序就改不了这项设置。"))
+                    .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                    .build();
+                try {
+                    bp.authenticate(new BiometricPrompt.CryptoObject(s), new CancellationSignal(), a.getMainExecutor(), new BiometricPrompt.AuthenticationCallback() {
+                        @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult r) {
+                            try {
+                                Signature sg = r.getCryptoObject().getSignature();
+                                sg.update(msg(a, name, value));
+                                String sig = Base64.encodeToString(sg.sign(), Base64.NO_WRAP);
+                                synchronized (LOCK) {
+                                    if (value.equals(MEM.get(name))) {
+                                        BAD_SIG.remove(name);
+                                        sp(a).edit().putString("v." + name, value).putString("s." + name, sig).commit();
+                                    }
+                                }
+                                done(a, Tr.f("已保存「{0}」", label(name, value)));
+                            } catch (Exception e) {
+                                Log.w(TAG, "签名失败", e);
+                                done(a, Tr.f("签名失败，「{0}」只在这次运行有效", label(name, value)));
+                            }
                         }
-                        Log.i(TAG, "已保存 " + name);
-                        done(a, Tr.f("已保存：{0}", label(name, value)));
-                    } catch (Exception e) { done(a, Tr.t("保存失败，只在这次运行有效：") + e.getMessage()); }
-                }
-                @Override public void onAuthenticationError(int code, CharSequence m) {
-                    done(a, Tr.f("没有验证，「{0}」只在这次运行有效", label(name, value)));
+                        @Override public void onAuthenticationError(int code, CharSequence err) {
+                            Log.i(TAG, "锁屏验证取消/出错 " + code + ": " + err);
+                            done(a, Tr.f("没有保存，「{0}」只在这次运行有效", label(name, value)));
+                        }
+                    });
+                } catch (Exception e) {
+                    Log.w(TAG, "弹锁屏验证失败", e);
+                    done(a, Tr.f("没能弹出锁屏验证，「{0}」只在这次运行有效", label(name, value)));
                 }
             });
-        } catch (java.lang.SecurityException e) { done(a, Tr.t("弹不出锁屏验证（缺少生物识别权限），只在这次运行有效：") + e.getMessage()); }
-        catch (Exception e) { done(a, Tr.t("弹不出锁屏验证，只在这次运行有效：") + e.getMessage()); }
+        }, "consent-keygen").start();
     }
     private static void done(Activity a, String toast) {
         synchronized (LOCK) { running = false; }
@@ -239,7 +271,8 @@ final class Consent {
     }
 
     // ── 验签 ──
-    private static boolean verify(Context c, String name, String value, String sig) {
+    /** true 验过 / false 确定不对 / null 这次核不了（异常；调用方不要把它缓存成篡改） */
+    private static Boolean verify(Context c, String name, String value, String sig) {
         try {
             KeyStore ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null);
             KeyStore.Entry e = ks.getEntry(ALIAS + name, null);
@@ -254,7 +287,7 @@ final class Consent {
             s.initVerify(leaf.getPublicKey());
             s.update(msg(c, name, value));
             return s.verify(Base64.decode(sig, Base64.NO_WRAP));
-        } catch (Exception ex) { Log.w(TAG, "验签出错 " + name, ex); return false; }
+        } catch (Exception ex) { Log.w(TAG, "验签出错 " + name, ex); return null; }
     }
     /** 规则在 PrivRules（好在宿主上测） */
     static boolean keyOk(int origin, boolean authRequired, int validitySec) {

@@ -75,6 +75,10 @@ function registrationExists() {
   catch (error) { if (error.code === "ENOENT") return false; throw fail("retire-lock"); }
 }
 
+export function hasManagedBridgeRegistration() {
+  try { return registrationExists(); } catch { return false; }
+}
+
 const readRegistration = () => withRegistryFile((file) => jsonSnapshot(file));
 
 function inspectRegistration(file) {
@@ -188,13 +192,17 @@ function endpointOf(value) {
   return m && Number(m[1]) >= 1024 && Number(m[1]) <= 65535 ? "http://127.0.0.1:" + m[1] : "";
 }
 
+function validRegistrationShape(r) {
+  const endpoint = endpointOf(r?.endpoint);
+  return object(r) && r.schema === 1 && r.id === ID && !!endpoint && r.endpoint === endpoint &&
+    typeof r.runtimeDir === "string" && path.isAbsolute(r.runtimeDir) && !r.runtimeDir.includes("\0") &&
+    path.resolve(r.runtimeDir) === r.runtimeDir && typeof r.instanceId === "string" && /^[0-9a-f]{32}$/.test(r.instanceId) &&
+    Object.keys(r).length === 5 && !Object.keys(r).some((k) => !["schema", "id", "endpoint", "runtimeDir", "instanceId"].includes(k));
+}
+
 function installedBinding(stored) {
   const r = stored.value;
-  const endpoint = endpointOf(r?.endpoint);
-  if (!object(r) || r.schema !== 1 || r.id !== ID || !endpoint || r.endpoint !== endpoint ||
-      typeof r.runtimeDir !== "string" || !path.isAbsolute(r.runtimeDir) || r.runtimeDir.includes("\0") ||
-      path.resolve(r.runtimeDir) !== r.runtimeDir || typeof r.instanceId !== "string" || !/^[0-9a-f]{32}$/.test(r.instanceId) ||
-      Object.keys(r).length !== 5 || Object.keys(r).some((k) => !["schema", "id", "endpoint", "runtimeDir", "instanceId"].includes(k))) throw fail();
+  if (!validRegistrationShape(r)) throw fail();
   const component = path.join(PREFIX, ENTRY);
   try {
     const record = jsonSnapshot(path.join(path.dirname(PREFIX), "components", ID + ".json"), 4 << 20);
@@ -470,6 +478,52 @@ export async function warmManagedBridge() {
 }
 
 /**
+ * 新工具包切换时会替换 $PREFIX，导致运行中的看护（watchdog.sh）因临时找不到 component.cjs 而写下
+ * recovery.failed="component removed or disabled\n"，重装组件后若不清掉，界面会永久误报「本地桥已停用」。
+ * 仅在组件已重新安装且通过 installedBinding 校验、无 disabled 停用标记、且 recovery.failed 精确为该内容时
+ * 改名留证并清掉预算；其它崩溃故障锁和用户主动停用一律不动。
+ */
+export function clearComponentRemovedRecoveryLock() {
+  if (!PREFIX || retiring || configuring.size) return false;
+  let stored, r;
+  try {
+    stored = readRegistration();
+    const endpoint = endpointOf(stored.value?.endpoint);
+    if (!endpoint) return false;
+    r = binding(endpoint);
+    if (!r) return false;
+    try { if (fs.lstatSync(path.join(r.runtimeDir, "disabled"))) return false; }
+    catch (error) { if (error.code !== "ENOENT") return false; }
+  } catch { return false; }
+  let fd;
+  try {
+    fd = fs.openSync(r.runtimeDir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    for (const name of ["runtime-home", ".claude-code-router"]) {
+      const next = fs.openSync(`/proc/self/fd/${fd}/${name}`,
+        fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+      fs.closeSync(fd);
+      fd = next;
+      if (fs.fstatSync(fd).uid !== process.getuid()) return false;
+    }
+    const state = `/proc/self/fd/${fd}`, lock = state + "/recovery.failed", attempts = state + "/recovery.attempts";
+    const s = snapshot(lock, 128);
+    const st = fs.lstatSync(lock);
+    if (!st.isFile() || st.isSymbolicLink() || st.uid !== process.getuid()) return false;
+    if (s.data.toString("utf8") !== "component removed or disabled\n") return false;
+    const suffix = ".prev-" + Date.now() + "-" + crypto.randomBytes(4).toString("hex");
+    try {
+      const ast = fs.lstatSync(attempts);
+      if (ast.isFile() && !ast.isSymbolicLink() && ast.uid === process.getuid()) fs.renameSync(attempts, attempts + suffix);
+    } catch (error) { if (error.code !== "ENOENT") return false; }
+    fs.renameSync(lock, lock + suffix);
+    ready = null;
+    failures.clear();
+    return true;
+  } catch { return false; }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
+}
+
+/**
  * false = 非本组件/无可安全清除的注册；true = 已停用，或只清理固定残留注册并跳过脚本。
  * 固定 uninstall 或注册锁失败会拒绝（静态 code/stage），让组件管理器保包。
  */
@@ -491,6 +545,14 @@ export function retireManagedBridge(id) {
         const expected = inspectRegistration(file);
         try { return { r: installedBinding(expected.stored), original: expected }; }
         catch {
+          // 升级新工具包换掉 $PREFIX 后，component.cjs 已经不在，但用户私有运行目录与合法注册文件仍完好配对：
+          // 若此刻卸载降级把注册文件删掉、运行目录却留着，重装后组件会因「目录在而注册缺」永久报 RUNTIME_CONFLICT。
+          // 仅对这类合法注册 + 运行目录仍在 + 入口缺失的场景保留注册，重装即可无缝复接（坏注册/缺失目录仍按旧规则清理）。
+          const storedVal = expected.stored?.value;
+          if (validRegistrationShape(storedVal) && !fs.existsSync(path.join(PREFIX, ENTRY)) && fs.existsSync(storedVal.runtimeDir)) {
+            log("[comp] openai-bridge 组件文件已不在，保留运行实例与服务注册待重装后复接");
+            return { cleared: false };
+          }
           log("[comp] openai-bridge 卸载降级（stage=retire-binding）");
           return { cleared: clearRegistration(file, expected) };
         }

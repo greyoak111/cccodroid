@@ -101,7 +101,8 @@ public class SchedAlarm extends BroadcastReceiver {
     /** 网关写的 home/ccapp-sched-next（服务启动、事件流重连时补一次，免得漏掉事件） */
     static void fromFile(Context c) {
         try {
-            File f = new File(new Env(c).home, "ccapp-sched-next");
+            // 直接定位 home/ccapp-sched-next，不再构造 new Env(c) 避免触发多 MB ld.so 读盘
+            File f = new File(new File(c.getFilesDir(), "home"), "ccapp-sched-next");
             if (!f.exists()) return;
             // 只认正常大小的普通文件：旧版是直接覆盖写，断电 / 崩溃留下半截时，半个数字也会 parse 成
             // 一个过去的时刻，立刻叫醒一次；FIFO / 目录更会卡住读取（0.6.9 审计 13-11）
@@ -123,26 +124,30 @@ public class SchedAlarm extends BroadcastReceiver {
         // 闹钟叫醒的服务跑完就退，不常驻（0.6.9 审计 13-01）
         boolean started = false;
         try { started = GatewayService.startAlarm(c); } catch (Exception e) { Log.w(TAG, "定时任务闹钟：拉起服务失败", e); }
-        // targetSdk 31+ 没给精确闹钟时响的是非精确闹钟，从后台不许起前台服务：网关起不来，任务就没人执行。
-        // 发通知请用户点开应用（界面在前台就能起服务；下面这段 tick 最多试 50 秒，用户快点开还能赶上）
+        // targetSdk 31+ 没给精确闹钟时响的是非精确闹钟，从后台不许起前台服务：发通知请用户点开应用
         if (!started) wakeUser(c, at);
-        // 挂住广播（后台广播最多约 60 秒）：等网关能接请求了让它立刻查一遍；网关刚启动的话它 5 秒后也会自己查
+        // 严格限制 goAsync() 总墙钟时间（≤8 秒，最多 3 轮；服务未拉起且网关不在时只探 1 次），防止广播 ANR
+        final boolean tryMore = started || GatewayService.serviceUp();
         final byte[] payload = ("{\"at\":" + at + "}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        PendingResult pr = goAsync();
+        final PendingResult pr = goAsync();
         new Thread(() -> {
+            long deadline = android.os.SystemClock.elapsedRealtime() + 8000L;
             try {
-                for (int n = 0; n < 20; n++) {
+                int maxTries = tryMore ? 3 : 1;
+                for (int n = 0; n < maxTries; n++) {
                     try {
                         HttpURLConnection h = Env.gateway("POST", "/api/sched/tick", payload);
                         try {
-                            h.setConnectTimeout(2000); h.setReadTimeout(5000);
+                            h.setConnectTimeout(1500); h.setReadTimeout(2500);
                             h.setDoOutput(true);
                             try (java.io.OutputStream o = h.getOutputStream()) { o.write(payload); }
                             int code = h.getResponseCode();
                             if (code == 200) { Log.i(TAG, "定时任务闹钟：网关已查过"); return; }
                         } finally { h.disconnect(); }
                     } catch (Exception ignored) {}
-                    try { Thread.sleep(2500); } catch (InterruptedException e) { return; }
+                    long rem = deadline - android.os.SystemClock.elapsedRealtime();
+                    if (n + 1 >= maxTries || rem <= 0) return;
+                    try { Thread.sleep(Math.min(2000L, rem)); } catch (InterruptedException e) { return; }
                 }
             } finally { pr.finish(); }
         }, "sched-alarm").start();

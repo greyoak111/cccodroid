@@ -396,7 +396,13 @@ public class BrowserPane extends LinearLayout {
     public void restoreState(Bundle b) { web.restoreState(b); }
     public void pause() { web.onPause(); CookieManager.getInstance().flush(); }
     public void resume() { web.onResume(); }
-    public void destroy() { web.stopLoading(); web.setWebChromeClient(null); web.destroy(); }
+    public void destroy() {
+        pickStop();
+        if (fileCb != null) { fileCb.onReceiveValue(null); fileCb = null; }
+        web.stopLoading();
+        web.setWebChromeClient(null);
+        web.destroy();
+    }
 
     private TextView btn(String label, int fg, String desc) {
         TextView t = new TextView(act);

@@ -22,6 +22,7 @@ import { archiveProblem, parseTarListing } from "./archive-check.mjs";
 const DK = PREFIX ? path.join(PREFIX, "libexec/devkit") : "";
 const STAGE = PREFIX ? path.join(path.dirname(PREFIX), "devkit-stage") : "";
 const MOD_JOBS = new Map();          // id → { phase, done, total, via, error, child, cancelled, finished, queue }
+let modStarting = false;             // 覆盖 await rmTreeBatched 窗口，防止并发 modStart/modRemove 绕过 MOD_JOBS 忙检查
 const DEVKIT_MIRROR = "https://dl.cccodroid.net/devkit/";
 
 /** modules.json 同 uid 可改：dir 只认 $PREFIX 内的普通相对路径 —— 卸载时会对 dirOf(m) 整个 rmSync（196-供应链.3） */
@@ -159,6 +160,7 @@ async function modStart(id, repair) {
   if (!mj) return { ok: false, message: tz("当前是整包工具包，没有模块可装") };
   const m = blockOf(mj, id);
   if (!m) return { ok: false, message: tz("没有这个模块：{id}", { id }) };
+  if (modStarting) return { ok: false, message: tz("另一个模块正在装，等它结束再试") };
   for (const j of MOD_JOBS.values()) if (!j.finished) return { ok: false, message: tz("另一个模块正在装，等它结束再试") };
   let chain;
   try { chain = missingChain(mj, id); } catch (e) { return { ok: false, message: e.message }; }
@@ -166,23 +168,28 @@ async function modStart(id, repair) {
   if (!chain.length) return { ok: true, already: true };
   const dk = devkitIdentity() || {};
   if (!dk.base) return { ok: false, message: tz("工具包是从本地文件装的，不知道该去哪个 Release 下载模块。请先在设置里更新一次工具包") };
-  // 空间：压缩包 + 解开后的大小（暂存区与目标在同一分区，搬进去是换名不占双份），再留 10%。
-  // 上次失败留下的、大小对得上的压缩包已经占着空间，不再重复要；上次失败留下的解包树先清掉，
-  // 不然重试先被自己留下的残留挡住（0.6.9 审计 #186 / 195-I.2）
+  // 先校验所有块的下载信息，再加占位锁清理暂存树，避免 await 间隙并发 modStart 双装踩踏 $PREFIX
   for (const c of chain) {
     const b = blockOf(mj, c);
     if (!b.gz || !Number.isFinite(b.gz.bytes) || typeof b.gz.sha256 !== "string" || !b.gz.sha256) return { ok: false, message: tz("这个模块的下载信息不完整，先更新一次工具包") };
-    try { await rmTreeBatched(path.join(STAGE, c)); } catch {}
   }
-  const need = modSpaceNeed(mj, chain);
-  try { const st = fs.statfsSync(path.dirname(PREFIX)); const free = st.bavail * st.bsize; if (free < need) return { ok: false, message: tz("存储空间不够：需要约 {need} MB，只剩 {free} MB", { need: Math.ceil(need / 1048576), free: Math.floor(free / 1048576) }) }; } catch {}
-  const job = { phase: "downloading", done: 0, total: 0, queue: chain, current: chain[0], finished: false };
-  for (const c of chain) MOD_JOBS.set(c, job);
-  job.done = (async () => {
-    try {
-      for (const c of chain) { job.current = c; await modRunInstall(mj, blockOf(mj, c), dk.base, job); }
-      log(`[mod] 已装：${chain.join(" → ")}`);
-    } catch (e) {
+  modStarting = true;
+  try {
+    // 空间：压缩包 + 解开后的大小（暂存区与目标在同一分区，搬进去是换名不占双份），再留 10%。
+    // 上次失败留下的、大小对得上的压缩包已经占着空间，不再重复要；上次失败留下的解包树先清掉，
+    // 不然重试先被自己留下的残留挡住（0.6.9 审计 #186 / 195-I.2）
+    for (const c of chain) {
+      try { await rmTreeBatched(path.join(STAGE, c)); } catch {}
+    }
+    const need = modSpaceNeed(mj, chain);
+    try { const st = fs.statfsSync(path.dirname(PREFIX)); const free = st.bavail * st.bsize; if (free < need) return { ok: false, message: tz("存储空间不够：需要约 {need} MB，只剩 {free} MB", { need: Math.ceil(need / 1048576), free: Math.floor(free / 1048576) }) }; } catch {}
+    const job = { phase: "downloading", done: 0, total: 0, queue: chain, current: chain[0], finished: false };
+    for (const c of chain) MOD_JOBS.set(c, job);
+    job.done = (async () => {
+      try {
+        for (const c of chain) { job.current = c; await modRunInstall(mj, blockOf(mj, c), dk.base, job); }
+        log(`[mod] 已装：${chain.join(" → ")}`);
+      } catch (e) {
       job.error = e.message === "cancelled" ? "" : e.message;
       // 失败的解包树（可能几百 MB）以前一直留在 devkit-stage，只有下次重装才会被开头那句清掉；
       // 用户不再重试就没有入口删。这里当场清掉。压缩包按组件安装的做法留着，重试时大小对得上就不重下（196-供应链.2）
@@ -193,8 +200,11 @@ async function modStart(id, repair) {
       // 成功的块不留 job（状态看 .ok）；失败的那块留着 error 给面板看
       for (const c of chain) if (!job.error || c !== job.current) MOD_JOBS.delete(c);
     }
-  })();
-  return { r: { ok: true, chain }, job };
+    })();
+    return { r: { ok: true, chain }, job };
+  } finally {
+    modStarting = false;
+  }
 }
 
 /** 模块安装 / 卸载心跳：与 components.mjs 同目录同字段，看门狗（GatewayService.installingBeat）据此放宽探活时限，
@@ -426,6 +436,7 @@ async function modRemove(id) {
   if (!m) return { ok: false, message: tz("没有这个模块：{id}", { id }) };
   if (m.required) return { ok: false, message: tz("基础模块不能卸载") };
   if (m.kind === "shared") return { ok: false, message: tz("共享运行库跟着用它的模块走，不能单独卸载") };
+  if (modStarting) return { ok: false, message: tz("有模块正在安装，等它结束再试") };
   for (const j of MOD_JOBS.values()) if (!j.finished) return { ok: false, message: tz("有模块正在安装，等它结束再试") };
   if (!modInstalled(mj, id)) return { ok: false, message: "not installed" };
   const dep = modDependents(mj, id);

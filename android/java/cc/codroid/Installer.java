@@ -320,18 +320,34 @@ final class Installer {
         try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(part, "rw")) { raf.setLength(size); }
         final long[][] S = segs;
         final IOException[] err = new IOException[1];
-        Thread[] ts = new Thread[S.length];
+        final java.util.concurrent.atomic.AtomicBoolean aborted = new java.util.concurrent.atomic.AtomicBoolean();
+        final HttpURLConnection[] conns = new HttpURLConnection[S.length];
+        final Thread[] ts = new Thread[S.length];
+        Runnable cancelAll = () -> {
+            aborted.set(true);
+            for (int j = 0; j < conns.length; j++) {
+                HttpURLConnection cj;
+                synchronized (conns) { cj = conns[j]; }
+                if (cj != null) try { cj.disconnect(); } catch (Exception ignored) {}
+            }
+            for (Thread tj : ts) if (tj != null) tj.interrupt();
+        };
         for (int i = 0; i < S.length; i++) {
+            final int idx = i;
             final long[] sg = S[i];
             ts[i] = new Thread(() -> {
-                for (int a = 0; !Thread.currentThread().isInterrupted(); a++) {
+                for (int a = 0; !aborted.get() && !Thread.currentThread().isInterrupted(); a++) {
                     long done, total;
                     synchronized (S) { done = sg[2]; total = sg[1] - sg[0] + 1; }
                     if (done >= total) break;
-                    try { fetchPiece(url, part, sg, S); }
+                    try { fetchPiece(url, part, sg, S, conns, idx, aborted); }
                     catch (IOException e) {
-                        if (Thread.currentThread().isInterrupted()) return;
-                        if (a >= 2) { synchronized (err) { if (err[0] == null) err[0] = e; } return; }
+                        if (aborted.get() || Thread.currentThread().isInterrupted()) return;
+                        if (a >= 2) {
+                            synchronized (err) { if (err[0] == null) err[0] = e; }
+                            cancelAll.run();
+                            return;
+                        }
                         try { Thread.sleep(2000L * (a + 1)); } catch (InterruptedException ie) { return; }
                     }
                 }
@@ -341,14 +357,14 @@ final class Installer {
         try {
             for (boolean alive = true; alive; ) {
                 alive = false;
-                for (Thread t : ts) { t.join(1000); alive |= t.isAlive(); }
+                for (Thread t : ts) { t.join(300); alive |= t.isAlive(); }
                 saveSegs(segF, S);
                 long left = 0;
                 synchronized (S) { for (long[] sg : S) left += sg[1] - sg[0] + 1 - sg[2]; }
                 ui.bytes(size - left, size);
             }
         } catch (InterruptedException e) {
-            for (Thread t : ts) t.interrupt();
+            cancelAll.run();
             for (Thread t : ts) { try { t.join(500); } catch (InterruptedException ignored) {} }
             Thread.currentThread().interrupt();
             throw new IOException(e);
@@ -364,11 +380,13 @@ final class Installer {
     }
 
     /** 下一段：从 sg 已下的位置接着要到段尾，按偏移写进 part */
-    private static void fetchPiece(String url, File part, long[] sg, Object lock) throws IOException {
+    private static void fetchPiece(String url, File part, long[] sg, Object lock, HttpURLConnection[] conns, int idx, java.util.concurrent.atomic.AtomicBoolean aborted) throws IOException {
         long start, end, done;
         synchronized (lock) { start = sg[0]; end = sg[1]; done = sg[2]; }
         long total = end - start + 1;
         HttpURLConnection c = open(url);
+        synchronized (conns) { conns[idx] = c; }
+        if (aborted.get()) { c.disconnect(); throw new IOException("aborted"); }
         c.setRequestProperty("Range", "bytes=" + (start + done) + "-" + end);
         try {
             if (code(c, url) != 206) throw new IOException("HTTP " + c.getResponseCode());
@@ -377,7 +395,7 @@ final class Installer {
                 byte[] buf = new byte[1 << 16];
                 Slow slow = new Slow();
                 for (int r; (r = in.read(buf)) > 0; ) {
-                    if (Thread.currentThread().isInterrupted()) throw new IOException("interrupted");
+                    if (aborted.get() || Thread.currentThread().isInterrupted()) throw new IOException("interrupted");
                     slow.add(r);
                     long room = total - done;
                     int n = (int) Math.min(r, room);
@@ -389,7 +407,10 @@ final class Installer {
                 }
             }
             if (done < total) throw new IOException(Tr.t("连接提前结束"));
-        } finally { c.disconnect(); }
+        } finally {
+            synchronized (conns) { if (conns[idx] == c) conns[idx] = null; }
+            c.disconnect();
+        }
     }
 
     /** 从 part 现有长度续传到结束；服务器不认 Range（回 200）就从头写 */
@@ -1120,17 +1141,24 @@ final class Installer {
         pb.directory(env.home);
         pb.redirectErrorStream(true);
         Process p = pb.start();
-        BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8));
-        for (String l; (l = r.readLine()) != null; ) {
-            // 脚本用 "@progress 已下 总量" 报进度：画进度条，不进日志
-            if (l.startsWith("@progress ")) {
-                String[] p2 = l.split(" ");
-                try { ui.bytes(Long.parseLong(p2[1]), Long.parseLong(p2[2])); } catch (Exception ignored) {}
-                continue;
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+            for (String l; (l = r.readLine()) != null; ) {
+                // 脚本用 "@progress 已下 总量" 报进度：画进度条，不进日志
+                if (l.startsWith("@progress ")) {
+                    String[] p2 = l.split(" ");
+                    try { ui.bytes(Long.parseLong(p2[1]), Long.parseLong(p2[2])); } catch (Exception ignored) {}
+                    continue;
+                }
+                ui.step(l);
             }
-            ui.step(l);
+            return p.waitFor();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException(e);
+        } finally {
+            try { p.getOutputStream().close(); } catch (IOException ignored) {}
+            if (p.isAlive()) p.destroyForcibly();
         }
-        try { return p.waitFor(); } catch (InterruptedException e) { throw new IOException(e); }
     }
 
     // ── tar（ustar + GNU 长名 + pax）────────────────────────────────────

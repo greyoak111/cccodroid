@@ -186,10 +186,24 @@
       }
       if (op) { GIT.file = s.files[+op.dataset.open].path; GIT.view = { kind: "diff" }; return gitRender(); }
       if (un != null) {
+        const btn = e.target.closest && e.target.closest("[data-undo]");
+        const dir = GIT.dir;
+        if (GIT_BUSY.has(dir) || (btn && btn.disabled)) return;
         const f = s.files[+un];
         const q = (f.kind === "new" || f.kind === "added") ? t("{f} 是新文件，撤销就是删掉它。确定？", { f: f.path }) : t("把 {f} 改回上次提交时的样子？这个文件没提交的改动会丢掉。", { f: f.path });
         if (!confirm(q)) return;
-        try { const r = await gpost("discard", { file: f.path }); toast(r.message || t("已撤销")); gitLoad(); } catch (e2) { toast(e2.message, true); }
+        GIT_BUSY.set(dir, "discard"); gitSyncBar();
+        if (btn) btn.disabled = true;
+        try {
+          const r = await gpost("discard", { file: f.path });
+          toast(r.message || t("已撤销"));
+          if (GIT.dir === dir) gitLoad();
+        } catch (e2) { toast(e2.message, true); }
+        finally {
+          GIT_BUSY.delete(dir);
+          if (GIT.dir === dir) gitSyncBar();
+          if (btn && btn.isConnected) btn.disabled = false;
+        }
       }
     };
     $("git-do").onclick = () => gitCommit();
@@ -222,32 +236,50 @@
       <div class="git-sec">${t("本地分支")}</div>${[...r.local].sort((x, y) => (y.current ? 1 : 0) - (x.current ? 1 : 0)).map((b) => row(b, false)).join("") || `<div class="tiny">${t("还没有提交，所以也还没有分支。")}</div>`}
       ${r.remote.length ? `<div class="git-sec">${t("只在远端的分支")}</div>${r.remote.map((b) => row(b, true)).join("")}` : ""}
       ${r.remotes.length ? "" : `<div class="tiny">${t("这个仓库还没有设置远端（remote），推送和拉取用不了。")}</div>`}`;
-    const sw = async (name, create) => {
-      try { const x = await gpost("switch", { branch: name, create }); toast(x.message || t("已切换")); }
-      catch (e) { return toast(e.message, true); }
-      GIT.known = null; GIT.sel = new Set();
-      await gitLoad();
+    const sw = async (name, create, btn) => {
+      const dir = GIT.dir;
+      if (GIT_BUSY.has(dir) || (btn && btn.disabled)) return;
+      GIT_BUSY.set(dir, "switch"); gitSyncBar();
+      if (btn) btn.disabled = true;
+      try {
+        const x = await gpost("switch", { branch: name, create });
+        toast(x.message || t("已切换"));
+        if (GIT.dir !== dir) return;
+        GIT.known = null; GIT.sel = new Set();
+        await gitLoad();
+      }
+      catch (e) { toast(e.message, true); }
+      finally {
+        GIT_BUSY.delete(dir);
+        if (GIT.dir === dir) gitSyncBar();
+        if (btn && btn.isConnected) btn.disabled = false;
+      }
     };
     box.onclick = (e) => {
       const b = e.target.closest("[data-sw]"); if (!b) return;
       const rowEl = b.closest(".gbr");
-      sw(rowEl.dataset.b, false);
+      sw(rowEl.dataset.b, false, b);
     };
-    $("git-newbr-ok").onclick = () => {
+    $("git-newbr-ok").onclick = (e) => {
       const n = $("git-newbr").value.trim();
       if (!n) { toast(t("填一个分支名"), true); return $("git-newbr").focus(); }
-      sw(n, true);
+      sw(n, true, e.currentTarget);
     };
     $("git-newbr").onkeydown = (e) => { if (e.key === "Enter") $("git-newbr-ok").click(); };
   }
 
   async function gitCommit(again) {
+    const dir = GIT.dir;
+    if (GIT_BUSY.has(dir)) return;
     const msg = ($("git-msg")?.value || "").trim();
     if (!msg) { toast(t("写一句提交说明"), true); $("git-msg")?.focus(); return; }
     // 一律按勾选清单传：以前「全选」发 files:null，网关 add -A 把状态快照之后新冒出来的文件、子模块指针也一起提交了
     // （0.6.10 审计 195-S.1）。列表截断时也是清单的子集，没显示的本来就不该跟着提交（#106 07-002）
     // 提交在途时面板可能已换到别的仓库：回执只收拾发起它的那个仓库，别清掉另一个仓库正在写的说明（#154-1）
-    const dir = GIT.dir;
+    const doBtn = $("git-do");
+    GIT_BUSY.set(dir, "commit"); gitSyncBar();
+    if (doBtn) doBtn.disabled = true;
+    let askId = false;
     try {
       const r = await gpost("commit", { message: msg, files: [...GIT.sel] });
       toast(r.message || t("已提交"));
@@ -260,9 +292,14 @@
     } catch (e) {
       if (GIT.dir !== dir) return toast(e.message, true);
       // 只有「还没设置署名」才弹身份表单；冲突、合并中不能只提交一部分之类也是 409，要直接说清楚（195-S.2）
-      if (e.status === 409 && e.body && e.body.error === "no_identity" && !again) return gitAskIdentity();
-      toast(e.message, true);
+      if (e.status === 409 && e.body && e.body.error === "no_identity" && !again) askId = true;
+      else toast(e.message, true);
+    } finally {
+      GIT_BUSY.delete(dir);
+      if (GIT.dir === dir) gitSyncBar();
+      if (doBtn && doBtn.isConnected) doBtn.disabled = !GIT.sel.size;
     }
+    if (askId) gitAskIdentity();
   }
   /** 第一次提交：git 要知道署名。填一次，存进全局配置 */
   function gitAskIdentity() {
@@ -270,9 +307,12 @@
     box.innerHTML = `<div class="tiny">${t("第一次提交要先告诉 git 你的名字和邮箱（写进提交记录，存在本机）。")}</div>
       <input id="git-id-name" placeholder="${esc(t("名字"))}" autocomplete="off"><input id="git-id-mail" placeholder="${esc(t("邮箱"))}" autocomplete="off" inputmode="email">
       <button class="btn sm" id="git-id-ok">${t("保存并提交")}</button>`;
-    $("git-id-ok").onclick = async () => {
+    $("git-id-ok").onclick = async (e) => {
+      const b = e.currentTarget;
+      if (b.disabled) return;
+      b.disabled = true;
       try { await gpost("identity", { name: $("git-id-name").value, email: $("git-id-mail").value }); }
-      catch (e) { return toast(e.message, true); }
+      catch (err) { b.disabled = false; return toast(err.message, true); }
       box.classList.add("hidden");
       gitCommit(true);
     };
@@ -325,9 +365,23 @@
       if (a === "wrap") { GIT.wrap = !GIT.wrap; box.querySelectorAll(".gdiff").forEach((d) => d.classList.toggle("nowrap", !GIT.wrap)); return; }
       if (a === "hist") { GIT.tab = "history"; GIT.view = null; return gitRender(); }
       if (a === "undo") {
+        const btn = e.target.closest && e.target.closest("[data-a]");
+        const dir = GIT.dir;
+        if (GIT_BUSY.has(dir) || (btn && btn.disabled)) return;
         const f = GIT.status.files.find((x) => x.path === file);
         if (!confirm(f && (f.kind === "new" || f.kind === "added") ? t("{f} 是新文件，撤销就是删掉它。确定？", { f: file }) : t("把 {f} 改回上次提交时的样子？这个文件没提交的改动会丢掉。", { f: file }))) return;
-        try { await gpost("discard", { file }); toast(t("已撤销")); GIT.view = null; GIT.file = ""; gitLoad(); } catch (e2) { toast(e2.message, true); }
+        GIT_BUSY.set(dir, "discard"); gitSyncBar();
+        if (btn) btn.disabled = true;
+        try {
+          await gpost("discard", { file });
+          toast(t("已撤销"));
+          if (GIT.dir === dir) { GIT.view = null; GIT.file = ""; gitLoad(); }
+        } catch (e2) { toast(e2.message, true); }
+        finally {
+          GIT_BUSY.delete(dir);
+          if (GIT.dir === dir) gitSyncBar();
+          if (btn && btn.isConnected) btn.disabled = false;
+        }
       }
     };
     const ok = latest("gitbody");

@@ -21,8 +21,19 @@ import { RETENTION_DAYS } from "./retention.mjs";
 // 格式随 claude 版本变，自己写迟早写坏。技能目录（~/.claude/skills）例外：它就是一堆文件夹，没有命令。
 // 同一时刻只跑一个改配置的命令，免得两个安装同时写 settings.json。
 let EXT_LOCK = Promise.resolve();
-function extRun(args, timeoutMs = 180000) {
-  const job = EXT_LOCK.then(() => claudeBlocked()).then((blocked) => blocked ? { code: -1, out: "", err: blocked } : new Promise((resolve) => {
+function withExtLock(fn) {
+  const job = EXT_LOCK.then(fn);
+  EXT_LOCK = job.catch(() => {});
+  return job;
+}
+function extExecRaw(args, timeoutMs = 180000) {
+  const writes = ["plugin", "mcp"].includes(args[0]) && !args.includes("list") && !args.includes("get");
+  const appWrote = (ucb) => {
+    if (!writes) return;
+    if (args[0] === "mcp") ucAppWrote([".claude.json"], ucb);
+    else ucAppWrote([".claude/settings.json", ".claude/plugins/"], ucb, { ".claude/settings.json": ["enabledPlugins", "extraKnownMarketplaces"] });
+  };
+  return Promise.resolve().then(() => claudeBlocked()).then((blocked) => blocked ? { code: -1, out: "", err: blocked } : new Promise((resolve) => {
     const [cmd0, args0] = claudeCmd(args);
     const ucb = writes ? ucAppBegin() : null;
     const child = spawn(cmd0, args0, {
@@ -36,16 +47,9 @@ function extRun(args, timeoutMs = 180000) {
     child.on("close", (code) => { clearTimeout(t); appWrote(code === 0 ? ucb : null); resolve({ code, out, err }); });
     child.on("error", (e) => { clearTimeout(t); resolve({ code: -1, out, err: err + e.message }); });
   }));
-  // 装卸插件、加删 MCP 是应用替用户做的：这次命令改到的当场认下，别下一轮反过来问他（见 userconf.mjs）。命令失败的不认，下一轮照问。
-  // 只认对应的地方：插件只动 plugins/ 和设置里的 enabledPlugins / extraKnownMarketplaces，MCP 只动 .claude.json
-  const writes = ["plugin", "mcp"].includes(args[0]) && !args.includes("list") && !args.includes("get");
-  const appWrote = (ucb) => {
-    if (!writes) return;
-    if (args[0] === "mcp") ucAppWrote([".claude.json"], ucb);
-    else ucAppWrote([".claude/settings.json", ".claude/plugins/"], ucb, { ".claude/settings.json": ["enabledPlugins", "extraKnownMarketplaces"] });
-  };
-  EXT_LOCK = job.catch(() => {});
-  return job;
+}
+function extRun(args, timeoutMs = 180000) {
+  return withExtLock(() => extExecRaw(args, timeoutMs));
 }
 const lastJson = (s) => {
   const lines = String(s).trim().split("\n").reverse();
@@ -57,14 +61,20 @@ const lastJson = (s) => {
 const cliMsg = (r) => (r.err || r.out || "").replace(/\x1b\[[0-9;]*m/g, "").trim().slice(-600);
 
 let PLUGIN_CATALOG = null;   // 可安装清单有三千多条，缓存 10 分钟，搜索在网关这边做
+let PLUGIN_STATE_FLIGHT = null;
 async function pluginState(withAvailable) {
-  const fresh = PLUGIN_CATALOG && Date.now() - PLUGIN_CATALOG.at < 600000;
-  const r = await extRun(["plugin", "list", "--json", ...(withAvailable && !fresh ? ["--available"] : [])], 120000);
-  const j = lastJson(r.out);
-  if (!j) throw new Error(cliMsg(r) || "claude plugin list 没有输出");
-  const installed = Array.isArray(j) ? j : j.installed || [];
-  if (!Array.isArray(j) && j.available) PLUGIN_CATALOG = { at: Date.now(), list: j.available };
-  return installed;
+  if (PLUGIN_STATE_FLIGHT && (!withAvailable || PLUGIN_STATE_FLIGHT.withAvailable)) return PLUGIN_STATE_FLIGHT.p;
+  const p = withExtLock(async () => {
+    const fresh = PLUGIN_CATALOG && Date.now() - PLUGIN_CATALOG.at < 600000;
+    const r = await extExecRaw(["plugin", "list", "--json", ...(withAvailable && !fresh ? ["--available"] : [])], 120000);
+    const j = lastJson(r.out);
+    if (!j) throw new Error(cliMsg(r) || "claude plugin list 没有输出");
+    const installed = Array.isArray(j) ? j : j.installed || [];
+    if (!Array.isArray(j) && j.available) PLUGIN_CATALOG = { at: Date.now(), list: j.available };
+    return installed;
+  }).finally(() => { if (PLUGIN_STATE_FLIGHT && PLUGIN_STATE_FLIGHT.p === p) PLUGIN_STATE_FLIGHT = null; });
+  PLUGIN_STATE_FLIGHT = { withAvailable: !!withAvailable, p };
+  return p;
 }
 
 async function listPlugins(q, offset, withAvailable) {
@@ -574,28 +584,32 @@ const mcpTarget = (d) => {
   return (String(d.url || [d.command, ...(Array.isArray(d.args) ? d.args : [])].filter((x) => x != null).join(" ")).slice(0, 300)
     + (env ? ` [env: ${env}]` : "") + (hdr ? ` [headers: ${hdr}]` : "")).slice(0, 500);
 };
-/** 停用 = 先把定义存进停用名单，再用 claude mcp remove 拿掉；remove 失败就把名单退回去 */
-async function disableMcp(name) {
-  if (!extIdOk(name) || badArg(name)) return { ok: false, message: tz("名字格式不对") };
-  const def = userMcpDef(name);
-  if (!def) return { ok: false, message: tz("只能停用你自己加的（用户级）MCP 服务器") };
-  const off = extOff();
-  off.mcp[name] = def;
-  if (!saveExtOff(off)) return { ok: false, message: tz("停用名单写不进去") };
-  const r = await extRun(["mcp", "remove", "-s", "user", name], 60000);
-  if (r.code !== 0) { const o2 = extOff(); delete o2.mcp[name]; saveExtOff(o2); return { ok: false, message: cliMsg(r) }; }
-  log(`MCP ${name} 已停用`);
-  return { ok: true };
+/** 停用 = 先把定义存进停用名单，再用 claude mcp remove 拿掉；remove 失败就把名单退回去（整段在单把锁内原子化） */
+function disableMcp(name) {
+  if (!extIdOk(name) || badArg(name)) return Promise.resolve({ ok: false, message: tz("名字格式不对") });
+  return withExtLock(async () => {
+    const def = userMcpDef(name);
+    if (!def) return { ok: false, message: tz("只能停用你自己加的（用户级）MCP 服务器") };
+    const off = extOff();
+    off.mcp[name] = def;
+    if (!saveExtOff(off)) return { ok: false, message: tz("停用名单写不进去") };
+    const r = await extExecRaw(["mcp", "remove", "-s", "user", name], 60000);
+    if (r.code !== 0) { const o2 = extOff(); delete o2.mcp[name]; saveExtOff(o2); return { ok: false, message: cliMsg(r) }; }
+    log(`MCP ${name} 已停用`);
+    return { ok: true };
+  });
 }
-/** 启用 = claude mcp add-json 把存着的定义加回去，成功了才从名单里删 */
-async function enableMcp(name) {
-  const off = extOff(), def = extIdOk(name) ? off.mcp[name] : null;
-  if (!def) return { ok: false, message: tz("停用名单里没有它") };
-  const r = await extRun(["mcp", "add-json", "-s", "user", name, JSON.stringify(def)], 60000);
-  if (r.code !== 0) return { ok: false, message: cliMsg(r) };
-  const o2 = extOff(); delete o2.mcp[name]; saveExtOff(o2);
-  log(`MCP ${name} 已启用`);
-  return { ok: true };
+/** 启用 = claude mcp add-json 把存着的定义加回去，成功了才从名单里删（整段在单把锁内原子化） */
+function enableMcp(name) {
+  return withExtLock(async () => {
+    const off = extOff(), def = extIdOk(name) ? off.mcp[name] : null;
+    if (!def) return { ok: false, message: tz("停用名单里没有它") };
+    const r = await extExecRaw(["mcp", "add-json", "-s", "user", name, JSON.stringify(def)], 60000);
+    if (r.code !== 0) return { ok: false, message: cliMsg(r) };
+    const o2 = extOff(); delete o2.mcp[name]; saveExtOff(o2);
+    log(`MCP ${name} 已启用`);
+    return { ok: true };
+  });
 }
 /** 停用着的 MCP 直接删掉（不再加回） */
 function forgetMcp(name) {
@@ -643,6 +657,8 @@ function deleteSkill(dir) {
 // 只读公开目录；装卸都落在用户自己的 ~/.claude：技能拷进 skills/，MCP 走 claude mcp add（见 addMcp）。
 const SKILL_REPO = "anthropics/skills";
 let skillCat = null;                 // { at, sha, items }：一小时内复用，GitHub 未登录的 API 一小时只给 60 次
+let skillCatFlight = null;
+const SKILL_INSTALLING = new Set();
 const ghGet = async (url, json) => {
   const r = await fetch(url, { headers: { "User-Agent": "cccodroid", ...(json ? { Accept: "application/vnd.github+json" } : {}) }, signal: AbortSignal.timeout(20000) });
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -650,19 +666,31 @@ const ghGet = async (url, json) => {
 };
 async function skillCatalog(force) {
   if (!force && skillCat && Date.now() - skillCat.at < 3600e3) return skillCat;
-  const tree = await ghGet(`https://api.github.com/repos/${SKILL_REPO}/git/trees/HEAD?recursive=1`, true);
-  const blobs = (tree.tree || []).filter((e) => e.type === "blob");
-  const names = [...new Set(blobs.map((e) => /^skills\/([^/]+)\/SKILL\.md$/.exec(e.path)?.[1]).filter((n) => n && SID_RE.test(n)))].sort();
-  const items = await Promise.all(names.map(async (n) => {
-    const files = blobs.filter((e) => e.path.startsWith(`skills/${n}/`)).map((e) => ({ path: e.path.slice(`skills/${n}/`.length), size: e.size || 0 }));
-    let meta = { name: n, description: "" };
-    try {
-      const md = String(await ghGet(`https://raw.githubusercontent.com/${SKILL_REPO}/${tree.sha}/skills/${n}/SKILL.md`)).slice(0, 4000);
-      meta = { name: fmField(md, "name") || n, description: fmField(md, "description").slice(0, 300) };
-    } catch {}
-    return { dir: n, ...meta, files, bytes: files.reduce((a, x) => a + x.size, 0), license: files.some((x) => /^LICENSE/i.test(x.path)) };
-  }));
-  return (skillCat = { at: Date.now(), sha: tree.sha, items });
+  if (skillCatFlight) return skillCatFlight;
+  const run = (async () => {
+    const tree = await ghGet(`https://api.github.com/repos/${SKILL_REPO}/git/trees/HEAD?recursive=1`, true);
+    const blobs = (tree.tree || []).filter((e) => e.type === "blob");
+    const names = [...new Set(blobs.map((e) => /^skills\/([^/]+)\/SKILL\.md$/.exec(e.path)?.[1]).filter((n) => n && SID_RE.test(n)))].sort();
+    // 限制并发数（5 路），避免未认证 GitHub API 突发并发撞限流或拖慢事件循环
+    const items = new Array(names.length);
+    let idx = 0;
+    const worker = async () => {
+      while (idx < names.length) {
+        const i = idx++, n = names[i];
+        const files = blobs.filter((e) => e.path.startsWith(`skills/${n}/`)).map((e) => ({ path: e.path.slice(`skills/${n}/`.length), size: e.size || 0 }));
+        let meta = { name: n, description: "" };
+        try {
+          const md = String(await ghGet(`https://raw.githubusercontent.com/${SKILL_REPO}/${tree.sha}/skills/${n}/SKILL.md`)).slice(0, 4000);
+          meta = { name: fmField(md, "name") || n, description: fmField(md, "description").slice(0, 300) };
+        } catch {}
+        items[i] = { dir: n, ...meta, files, bytes: files.reduce((a, x) => a + x.size, 0), license: files.some((x) => /^LICENSE/i.test(x.path)) };
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(5, names.length || 1) }, worker));
+    return (skillCat = { at: Date.now(), sha: tree.sha, items });
+  })().finally(() => { if (skillCatFlight === run) skillCatFlight = null; });
+  skillCatFlight = run;
+  return run;
 }
 const skillSource = (dir) => { try { const raw = readSmallFile(path.join(SKILLS_DIR, dir, ".cc-source.json"), 64 << 10); return raw == null ? null : JSON.parse(raw); } catch { return null; } };
 async function listSkillCatalog(force) {
@@ -672,30 +700,34 @@ async function listSkillCatalog(force) {
       installed: fs.existsSync(path.join(SKILLS_DIR, x.dir, "SKILL.md")), official: (skillSource(x.dir) || {}).repo === SKILL_REPO })) };
   } catch (e) { return { ok: false, message: tz("取不到官方技能目录：{err}", { err: e.message }) }; }
 }
-/** 装一个官方技能：按目录树逐个下载到临时目录，齐了再改名就位（不会留下半截）；超过 50 MB 不装 */
+/** 装一个官方技能：按目录树逐个下载到随机临时目录，齐了再改名就位（不会留下半截）；超过 50 MB 不装 */
 async function installCatalogSkill(dir) {
   if (!SID_RE.test(dir)) return { ok: false, message: "bad name" };
-  const c = await skillCatalog().catch((e) => null);
-  const it = c && c.items.find((x) => x.dir === dir);
-  if (!it) return { ok: false, message: tz("官方目录里没有这个技能") };
-  const dest = path.join(SKILLS_DIR, dir);
-  if (fs.existsSync(dest)) return { ok: false, message: tz("已经有同名技能，先删掉再装") };
-  if (it.bytes > 50 << 20) return { ok: false, message: tz("太大了（超过 50 MB）") };
-  const tmp = path.join(SKILLS_DIR, `.tmp-${dir}-${process.pid}`);
-  const ucb = ucAppBegin();
-  fs.rmSync(tmp, { recursive: true, force: true });
+  if (SKILL_INSTALLING.has(dir)) return { ok: false, message: "busy" };
+  SKILL_INSTALLING.add(dir);
   try {
-    for (const f of it.files) {
-      const out = path.resolve(tmp, f.path);
-      if (!out.startsWith(tmp + path.sep)) throw new Error("bad path " + f.path);
-      fs.mkdirSync(path.dirname(out), { recursive: true });
-      fs.writeFileSync(out, await ghGet(`https://raw.githubusercontent.com/${SKILL_REPO}/${c.sha}/skills/${dir}/${f.path.split("/").map(encodeURIComponent).join("/")}`));
-    }
-    fs.writeFileSync(path.join(tmp, ".cc-source.json"), JSON.stringify({ repo: SKILL_REPO, sha: c.sha, path: "skills/" + dir, at: new Date().toISOString() }) + "\n");
-    fs.renameSync(tmp, dest);
-    ucAppWrote([dest, tmp], ucb);
-    return { ok: true };
-  } catch (e) { fs.rmSync(tmp, { recursive: true, force: true }); return { ok: false, message: e.message }; }
+    const c = await skillCatalog().catch(() => null);
+    const it = c && c.items.find((x) => x.dir === dir);
+    if (!it) return { ok: false, message: tz("官方目录里没有这个技能") };
+    const dest = path.join(SKILLS_DIR, dir);
+    if (fs.existsSync(dest)) return { ok: false, message: tz("已经有同名技能，先删掉再装") };
+    if (it.bytes > 50 << 20) return { ok: false, message: tz("太大了（超过 50 MB）") };
+    const tmp = path.join(SKILLS_DIR, `.tmp-${dir}-${process.pid}-${crypto.randomBytes(4).toString("hex")}`);
+    const ucb = ucAppBegin();
+    await fs.promises.rm(tmp, { recursive: true, force: true }).catch(() => {});
+    try {
+      for (const f of it.files) {
+        const out = path.resolve(tmp, f.path);
+        if (!out.startsWith(tmp + path.sep)) throw new Error("bad path " + f.path);
+        fs.mkdirSync(path.dirname(out), { recursive: true });
+        await fs.promises.writeFile(out, await ghGet(`https://raw.githubusercontent.com/${SKILL_REPO}/${c.sha}/skills/${dir}/${f.path.split("/").map(encodeURIComponent).join("/")}`));
+      }
+      await fs.promises.writeFile(path.join(tmp, ".cc-source.json"), JSON.stringify({ repo: SKILL_REPO, sha: c.sha, path: "skills/" + dir, at: new Date().toISOString() }) + "\n");
+      fs.renameSync(tmp, dest);
+      ucAppWrote([dest, tmp], ucb);
+      return { ok: true };
+    } catch (e) { await fs.promises.rm(tmp, { recursive: true, force: true }).catch(() => {}); return { ok: false, message: e.message }; }
+  } finally { SKILL_INSTALLING.delete(dir); }
 }
 
 // MCP 注册表：任何人都能发布，没人审 —— 界面写明，装 npm 包前把命令亮给人看。

@@ -364,26 +364,35 @@
     } catch (err) { fsErr(err); }
   }
   // 删除（永久，不进回收站）：先确认，写明几项、文件夹连里面一起删；逐个调接口，删不掉的报出来，删掉的照算
+  let fsDeleting = false;
   async function fsDelete(names) {
     const here = fsHere, dir = state.fs.path, multi = state.fs.multi;
-    if (!here() || !names.length || state.fs.arc) return;
+    if (fsDeleting || !here() || !names.length || state.fs.arc) return;
     const ents = names.map((name) => ({ name, path: fullPathOf({ name }), dir: state.fs.entries.find(e => e.name === name)?.dir }));
     const dirs = ents.filter((x) => x.dir).length;
     const what = names.length === 1 ? `「${names[0]}${dirs ? "/" : ""}」` : t("选中的 {n} 项", { n: names.length });
     if (!confirm(t("永久删除{what}？删除后不能恢复。", { what }) + (dirs ? "\n" + t("文件夹会连同里面的内容一起删除。") : ""))) return;
-    const deleted = new Set(); let fail = null;
-    for (const { name, path } of ents) {
-      try { await api(`/api/file/delete?path=${encodeURIComponent(path)}`, { method: "POST" }); deleted.add(name); }
-      catch (err) { fail = fail || err; }
+    fsDeleting = true;
+    const delBtn = $("fs-del");
+    if (delBtn) delBtn.disabled = true;
+    try {
+      const deleted = new Set(); let fail = null;
+      for (const { name, path } of ents) {
+        try { await api(`/api/file/delete?path=${encodeURIComponent(path)}`, { method: "POST" }); deleted.add(name); }
+        catch (err) { fail = fail || err; }
+      }
+      if (here() && deleted.size) {
+        if (state.fs.multi === multi) for (const name of deleted) multi?.delete(name);
+        if (deleted.has(state.fs.sel)) state.fs.sel = null;
+        fsDotsAt = 0;
+        await fsLoad(dir, { keepSel: true, keepQ: true, keepMulti: true });
+      }
+      if (fail) fsErr(fail);
+      else toast(t("已删除 {n} 项", { n: deleted.size }));
+    } finally {
+      fsDeleting = false;
+      if (delBtn) delBtn.disabled = false;
     }
-    if (here() && deleted.size) {
-      if (state.fs.multi === multi) for (const name of deleted) multi?.delete(name);
-      if (deleted.has(state.fs.sel)) state.fs.sel = null;
-      fsDotsAt = 0;
-      await fsLoad(dir, { keepSel: true, keepQ: true, keepMulti: true });
-    }
-    if (fail) fsErr(fail);
-    else toast(t("已删除 {n} 项", { n: deleted.size }));
   }
   $("fs-del").addEventListener("click", () => { if (state.fs.multi) fsDelete([...state.fs.multi]); });
   $("fs-newfile").addEventListener("click", () => fsCreate(false));
@@ -657,10 +666,17 @@
       }
       line.textContent = `${label} ${j.pct || 0}%`;
     };
+    let pollFails = 0;
     while (j.state === "running") {
       paint();
-      await new Promise((r) => setTimeout(r, 600));
-      try { j = await api("/api/arc/job?id=" + encodeURIComponent(j.id)); } catch { break; }
+      await new Promise((r) => setTimeout(r, pollFails ? 1200 : 600));
+      try {
+        j = await api("/api/arc/job?id=" + encodeURIComponent(j.id));
+        pollFails = 0;
+      } catch (e) {
+        if (e && e.status === 404) { j = { ...j, state: "error", error: e.message }; break; }
+        if (++pollFails > 6) { j = { ...j, state: "error", error: e?.message || "?" }; break; }
+      }
     }
     clear();
     if (j.state === "done") {

@@ -6,7 +6,7 @@
 // 闹钟也没叫醒（被强行停止、厂商拦截）而错过的，下次启动按每个任务的「错过了」处理，不偷偷补跑。存储：home/ccapp-sched.json（任务 + 设置）、home/ccapp-sched-runs.json（运行记录，留最近 500 条）。
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { CFG, LIVE, log, tz } from "./config.mjs";
 import { isObj, loadState, saveState, writeAtomic } from "./statefile.mjs";
 import { guarded } from "./crashguard.mjs";
@@ -26,7 +26,7 @@ import { providerById, usdCny } from "./providers.mjs";
 // node 在安卓上可能没拿到时区（TZ 没设就是 UTC）：「每天 09:00」必须按本地时间算
 // 按系统设置取的就要跟着系统变：出差、手动改时区后，每天 09:00 要按新时区的 09:00（#107 06-012）。tick 里隔几分钟再问一次
 const sysTz = () => { try { return execFileSync("getprop", ["persist.sys.timezone"], { encoding: "utf8", timeout: 2000 }).trim(); } catch { return ""; } };
-let TZ_FROM_PROP = false, TZ_CHECKED = 0;
+let TZ_FROM_PROP = false, TZ_CHECKED = 0, TZ_CHECKING = false;
 // 以前只在「node 解析成 UTC」时才记下系统时区并开启跟随：本机解析对了 Asia/Shanghai，followSysTz 就永远不执行，
 // 出差 / 手动改时区后「每天 09:00」还按旧时区跑（197-5.2）。拿到 getprop 的值就跟随，启动时 TZ 没设的顺手设上
 {
@@ -34,13 +34,18 @@ let TZ_FROM_PROP = false, TZ_CHECKED = 0;
   if (z) { if (!process.env.TZ) process.env.TZ = z; TZ_FROM_PROP = true; }
 }
 function followSysTz(now) {
-  if (!TZ_FROM_PROP || now - TZ_CHECKED < 5 * 60000) return;
+  if (!TZ_FROM_PROP || TZ_CHECKING || now - TZ_CHECKED < 5 * 60000) return;
   TZ_CHECKED = now;
-  const z = sysTz();
-  if (!z || z === process.env.TZ) return;
-  log(`⏰ 系统时区 ${process.env.TZ} → ${z}，重排定时任务`);
-  process.env.TZ = z;                    // node 见到 TZ 被改会重读时区
-  for (const t of DB.tasks) if (t.on && t.nextAt != null && t.nextAt > now) refreshNext(t, now);   // 已到点的照常跑，跑完自然按新时区排
+  TZ_CHECKING = true;
+  execFile("getprop", ["persist.sys.timezone"], { encoding: "utf8", timeout: 2000 }, (err, out) => {
+    TZ_CHECKING = false;
+    const z = !err ? String(out || "").trim() : "";
+    if (!z || z === process.env.TZ) return;
+    log(`⏰ 系统时区 ${process.env.TZ} → ${z}，重排定时任务`);
+    process.env.TZ = z;                    // node 见到 TZ 被改会重读时区
+    const tNow = Date.now();
+    for (const t of DB.tasks) if (t.on && t.nextAt != null && t.nextAt > tNow) refreshNext(t, tNow);   // 已到点的照常跑，跑完自然按新时区排
+  });
 }
 
 const FILE = path.join(CFG.home, "ccapp-sched.json");

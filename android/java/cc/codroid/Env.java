@@ -105,8 +105,15 @@ final class Env {
     // ── 核身份（审查 S1）：端口全机共享，交出令牌之前先确认对面是真网关。协议见 gateway/gw/access.mjs 的 proof ──
     private static final Object BOOT_LOCK = new Object();
     private static final Object PROOF_FLIGHT_LOCK = new Object();
-    private static boolean proofInFlight;
-    private static String proofFlightResult;
+    private static final class ProofFlight {
+        final long epoch;
+        final String keySnap;
+        boolean done;
+        String result;
+        ProofFlight(long epoch, String keySnap) { this.epoch = epoch; this.keySnap = keySnap; }
+    }
+    private static ProofFlight proofFlight;
+    private static long bootEpoch;
     private static volatile long provedAt;
     private static volatile String boot = "";
     /** 网关换了一个（启动号变了）时回调，参数是这次的 Cookie 值；MainActivity 拿去种进 WebView */
@@ -114,7 +121,8 @@ final class Env {
 
     /** 忘掉上次核到的启动号：下一次核身份一定回调 onBoot（界面刚接上 onBoot 时用，不然后台服务先核过了，Cookie 就种不上） */
     static void resetBoot() {
-        synchronized (BOOT_LOCK) { boot = ""; provedAt = 0; }
+        synchronized (BOOT_LOCK) { boot = ""; provedAt = 0; bootEpoch++; }
+        synchronized (PROOF_FLIGHT_LOCK) { proofFlight = null; }
     }
 
     /** 网关作证应答的签名（gateway/gw/access.mjs witnessMac）：按启动随机数派生的钥匙、核到的启动号、监听地址 */
@@ -133,48 +141,62 @@ final class Env {
     /** force：不吃 3 秒缓存。界面的 /api 请求前要用这一版（0.6.10 审计 199-1-04）：
      *  页面加载完以后网关被杀、端口被别的应用占住的空档里，3 秒缓存正好能放过冒牌的一两个请求 ——
      *  里面可能就是用户刚敲的话。多跑一趟本机请求（几毫秒），换来每个 /api 都当场核一次。
-     *  并发 /api/* 同毫秒撞进来时复用正在进行的同一趟实时 /__proof（单飞，不缓存过期结果），避免并发下载时把探活踩成 502。 */
+     *  并发 /api/* 同毫秒撞进来时复用同一代次的在途实时 /__proof（独立 Flight 对象 + 单调钟总截止时间），
+     *  避免跨 flight 串结果、resetBoot() 漏种 Cookie 或旧钥匙回写污染新网关。 */
     static boolean proveGateway(boolean force) {
         return proveBoot(force) != null;
     }
 
     /** 核身份并返回本次核到的启动号（原子快照，防 resetBoot 与并发写 provedAt/boot 撕裂导致签名带空 boot 吃 403） */
     private static String proveBoot(boolean force) {
-        if (!force) {
-            synchronized (BOOT_LOCK) {
-                if (!boot.isEmpty() && System.currentTimeMillis() - provedAt < 3000) return boot;    // 刚核过：别每个请求都多跑一趟
+        long curEpoch;
+        synchronized (BOOT_LOCK) {
+            curEpoch = bootEpoch;
+            if (!force && !boot.isEmpty() && System.currentTimeMillis() - provedAt < 3000) return boot;    // 刚核过：别每个请求都多跑一趟
+        }
+        String keySnap = key();
+        if (keySnap.isEmpty()) return null;
+        final ProofFlight flight;
+        final boolean leader;
+        synchronized (PROOF_FLIGHT_LOCK) {
+            if (proofFlight != null && proofFlight.epoch == curEpoch && keySnap.equals(proofFlight.keySnap)) {
+                flight = proofFlight;
+                leader = false;
+            } else {
+                flight = new ProofFlight(curEpoch, keySnap);
+                proofFlight = flight;
+                leader = true;
             }
         }
-        boolean leader = false;
-        synchronized (PROOF_FLIGHT_LOCK) {
-            if (proofInFlight) {
-                while (proofInFlight) {
-                    try { PROOF_FLIGHT_LOCK.wait(4500); }
+        if (!leader) {
+            long deadline = System.nanoTime() + 4500_000_000L;
+            synchronized (flight) {
+                while (!flight.done) {
+                    long remMs = (deadline - System.nanoTime()) / 1_000_000L;
+                    if (remMs <= 0) return null;
+                    try { flight.wait(remMs); }
                     catch (InterruptedException ie) { Thread.currentThread().interrupt(); return null; }
                 }
-                return proofFlightResult;
+                return flight.result;
             }
-            proofInFlight = true;
-            proofFlightResult = null;
-            leader = true;
         }
         String res = null;
         try {
-            res = proveBootOnce();
+            res = proveBootOnce(flight.epoch, flight.keySnap);
             return res;
         } finally {
-            if (leader) {
-                synchronized (PROOF_FLIGHT_LOCK) {
-                    proofFlightResult = res;
-                    proofInFlight = false;
-                    PROOF_FLIGHT_LOCK.notifyAll();
-                }
+            synchronized (PROOF_FLIGHT_LOCK) {
+                if (proofFlight == flight) proofFlight = null;
+            }
+            synchronized (flight) {
+                flight.result = res;
+                flight.done = true;
+                flight.notifyAll();
             }
         }
     }
 
-    private static String proveBootOnce() {
-        String t = key();
+    private static String proveBootOnce(long epoch, String t) {
         if (t.isEmpty()) return null;
         try {
             byte[] nb = new byte[16];
@@ -196,6 +218,7 @@ final class Env {
                 if (!java.security.MessageDigest.isEqual(want.getBytes(), p[1].getBytes())) return null;
                 String cookieVal = null;
                 synchronized (BOOT_LOCK) {
+                    if (epoch != bootEpoch || !t.equals(key())) return null;
                     if (!p[0].equals(boot)) {
                         boot = p[0];
                         cookieVal = hmac(t, "cookie:" + boot);
@@ -223,16 +246,22 @@ final class Env {
             new java.security.SecureRandom().nextBytes(nb);
             String n = hex(nb);
             java.net.HttpURLConnection c = openLoopback("http://" + HOST + ":" + PORT + pq);
-            c.setConnectTimeout(2000); c.setReadTimeout(15000); c.setInstanceFollowRedirects(false); c.setUseCaches(false);
+            c.setConnectTimeout(1000); c.setReadTimeout(5000); c.setInstanceFollowRedirects(false); c.setUseCaches(false);
             c.setRequestProperty("X-CC-Nonce", n);
             c.setRequestProperty("Accept-Encoding", "identity");
             try {
                 int code = c.getResponseCode();
+                if (code == 404 || code == 403 || code == 304 || code == 204) {
+                    java.util.Map<String, String> h = new java.util.HashMap<>();
+                    h.put("Cache-Control", "no-store");
+                    String reason = code == 404 ? "Not Found" : code == 403 ? "Forbidden" : code == 304 ? "Not Modified" : "No Content";
+                    return new android.webkit.WebResourceResponse("text/plain", "utf-8", code, reason, h, new java.io.ByteArrayInputStream(new byte[0]));
+                }
                 if (code != 200) return null;
                 java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
                 try (java.io.InputStream in = c.getInputStream()) {
                     byte[] buf = new byte[1 << 16];
-                    for (int k; (k = in.read(buf)) > 0; ) { bo.write(buf, 0, k); if (bo.size() > (64 << 20)) return null; }
+                    for (int k; (k = in.read(buf)) > 0; ) { bo.write(buf, 0, k); if (bo.size() > (16 << 20)) return null; }
                 }
                 byte[] body = bo.toByteArray();
                 String got = c.getHeaderField("X-CC-Mac");

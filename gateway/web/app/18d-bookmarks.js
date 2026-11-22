@@ -64,49 +64,54 @@
 
   // 点了书签键：那颗键弹一下（加上、取消都弹，颜色本身说明是哪个）
   const bmTick = (msg) => { const b = msg.querySelector(':scope > .msg-acts button[data-a="mark"]'); if (b) MO.play(b, "mo-tick", 900); };
+  const bmBusy = new WeakSet();
   async function toggleMark(msg) {
+    if (bmBusy.has(msg)) return;
     const sid = view.sessionId;
     if (!sid) return toast(t("这个会话还没存下来，答完一轮再加书签"), true);
-    const uu = msgUuids(msg), mine = BMK.items.filter((b) => uu.includes(b.uuid));
-    if (mine.length) {   // 已经有：再点一下取消
-      try { await post("/api/bookmarks/del", { ids: mine.map((b) => b.id) }); } catch (e) { return toast(e.message, true); }
-      BMK.items = BMK.items.filter((b) => !mine.includes(b));
-      paintMarks(msg); bmTick(msg);
-      return toast(t("已取消书签"));
-    }
-    const tg = topIn(msg);
-    if (!tg) return;
-    const user = isUserMsg(msg), uuid = boxUuid(msg, tg.box);
-    const src = user ? userTextOf.get(msg) || "" : tg.box._src ? tg.box._src() : "";
-    // 没有 uuid 时网关从尾部按开头认领：同样的话后面又出现过几次，就跳过几次，免得认成后一条（审查 #50 S2-02）
-    const head = src.trim().slice(0, 200);
-    let nth = 0, unsure = false;
-    if (!uuid && head) for (const m of chatEl.querySelectorAll(user ? ".msg.user" : ".msg.bot")) {
-      if (m === msg || !(msg.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
-      for (const b of markBoxes(m)) {
-        const t2 = user ? userTextOf.get(m) || "" : b._src ? b._src() : "";
-        if (!t2.trim().startsWith(head)) continue;
-        // 后面那条同样的话还在跑、或者那一轮失败 / 被停了：说不准它进没进会话记录，数错了就认到别的消息上。
-        // 宁可这次不加（审查 #52 S2-02）
-        if (m.dataset.run && m.dataset.done !== "ok") unsure = true;
-        nth++;
-      }
-    }
-    if (unsure) return toast(t("后面有一条同样的话还没确认存下，等那一轮答完（或重新打开这个会话）再加书签"), true);
+    bmBusy.add(msg);
     try {
-      const r = await post("/api/bookmarks", {
-        session: sid, uuid, hint: Number(msg.closest(".page")?.dataset.from) || 0, para: paraIndex(msg, tg.box, tg.para),
-        role: user ? "user" : "assistant", head, nth,
-        excerpt: ((tg.el && tg.el.innerText) || src).trim().slice(0, 120),
-      });
-      // 刚答完的回复界面上没有 uuid：网关认领到了就补上，之后按钮状态、再点取消都靠它
-      if (!uuid && r.item) (user ? msg : tg.box).dataset.uuid = r.item.uuid;
-      if (sid === view.sessionId && r.item) { BMK.items.push(r.item); paintMarks(msg); bmTick(msg); }
-      toast(t("已加书签"));
-    } catch (e) {
-      toast(e.status === 409 ? t("这个会话的书签已满 {n} 个，先删掉一些", { n: (e.body && e.body.limit) || 50 })
-        : e.status === 404 ? t("没在会话记录里找到这条消息，稍后再试") : e.message, true);
-    }
+      const uu = msgUuids(msg), mine = BMK.items.filter((b) => uu.includes(b.uuid));
+      if (mine.length) {   // 已经有：再点一下取消
+        try { await post("/api/bookmarks/del", { ids: mine.map((b) => b.id) }); } catch (e) { return toast(e.message, true); }
+        BMK.items = BMK.items.filter((b) => !mine.includes(b));
+        paintMarks(msg); bmTick(msg);
+        return toast(t("已取消书签"));
+      }
+      const tg = topIn(msg);
+      if (!tg) return;
+      const user = isUserMsg(msg), uuid = boxUuid(msg, tg.box);
+      const src = user ? userTextOf.get(msg) || "" : tg.box._src ? tg.box._src() : "";
+      // 没有 uuid 时网关从尾部按开头认领：同样的话后面又出现过几次，就跳过几次，免得认成后一条（审查 #50 S2-02）
+      const head = src.trim().slice(0, 200);
+      let nth = 0, unsure = false;
+      if (!uuid && head) for (const m of chatEl.querySelectorAll(user ? ".msg.user" : ".msg.bot")) {
+        if (m === msg || !(msg.compareDocumentPosition(m) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+        for (const b of markBoxes(m)) {
+          const t2 = user ? userTextOf.get(m) || "" : b._src ? b._src() : "";
+          if (!t2.trim().startsWith(head)) continue;
+          // 后面那条同样的话还在跑、或者那一轮失败 / 被停了：说不准它进没进会话记录，数错了就认到别的消息上。
+          // 宁可这次不加（审查 #52 S2-02）
+          if (m.dataset.run && m.dataset.done !== "ok") unsure = true;
+          nth++;
+        }
+      }
+      if (unsure) return toast(t("后面有一条同样的话还没确认存下，等那一轮答完（或重新打开这个会话）再加书签"), true);
+      try {
+        const r = await post("/api/bookmarks", {
+          session: sid, uuid, hint: Number(msg.closest(".page")?.dataset.from) || 0, para: paraIndex(msg, tg.box, tg.para),
+          role: user ? "user" : "assistant", head, nth,
+          excerpt: ((tg.el && tg.el.innerText) || src).trim().slice(0, 120),
+        });
+        // 刚答完的回复界面上没有 uuid：网关认领到了就补上，之后按钮状态、再点取消都靠它
+        if (!uuid && r.item) (user ? msg : tg.box).dataset.uuid = r.item.uuid;
+        if (sid === view.sessionId && r.item) { BMK.items.push(r.item); paintMarks(msg); bmTick(msg); }
+        toast(t("已加书签"));
+      } catch (e) {
+        toast(e.status === 409 ? t("这个会话的书签已满 {n} 个，先删掉一些", { n: (e.body && e.body.limit) || 50 })
+          : e.status === 404 ? t("没在会话记录里找到这条消息，稍后再试") : e.message, true);
+      }
+    } finally { bmBusy.delete(msg); }
   }
 
   /** 落到书签：把那一段放到视口上三分之一（「上次读到」放在顶上、不闪） */
@@ -149,12 +154,19 @@
   // ── 侧栏「书签」页 ──
   const BM_DEL = '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>';
   async function loadBookmarks() {
-    const box = $("tab-bookmarks");
+    const box = $("tab-bookmarks"), ok = latest("bookmarks");
     let r;
-    try { r = await api("/api/bookmarks"); } catch (e) { box.innerHTML = `<div class="panel">${emptyRow(e.message)}</div>`; return; }
+    try { r = await api("/api/bookmarks"); }
+    catch (e) {
+      if (!ok()) return;
+      if (box._items) toast(e.message, true);
+      else box.innerHTML = `<div class="panel">${emptyRow(e.message)}</div>`;
+      return;
+    }
+    if (!ok()) return;
     const items = (r.items || []).sort((a, b) => b.at - a.at);
     setPageSub("bookmarks", t("{n} 个", { n: items.length }));
-    if (!items.length) { box.innerHTML = `<div class="panel">${emptyRow(t("还没有书签。在提问或回复底下点书签键，就在那一处留了个记号。"))}</div>`; return; }
+    if (!items.length) { box.innerHTML = `<div class="panel">${emptyRow(t("还没有书签。在提问或回复底下点书签键，就在那一处留了个记号。"))}</div>`; box._items = []; return; }
     // 按会话分组，组的先后看组里最新的那个
     const groups = new Map();
     for (const b of items) { if (!groups.has(b.sid)) groups.set(b.sid, []); groups.get(b.sid).push(b); }
@@ -183,7 +195,9 @@
     const box = $("tab-bookmarks"), items = box._items || [];
     const d = e.target.closest("[data-del]");
     if (d) {
-      try { await post("/api/bookmarks/del", { id: d.dataset.del }); } catch (err) { return toast(err.message, true); }
+      if (d.disabled) return;
+      d.disabled = true;
+      try { await post("/api/bookmarks/del", { id: d.dataset.del }); } catch (err) { d.disabled = false; return toast(err.message, true); }
       BMK.items = BMK.items.filter((b) => b.id !== d.dataset.del); paintMarks();
       return bmDropRow(d.closest("[data-bm]"));
     }

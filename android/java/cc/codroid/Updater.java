@@ -440,8 +440,10 @@ final class Updater {
     // ── 检查 ───────────────────────────────────────────────────────────
     /** 后台线程里跑。manual=true：用户点的"检查更新"——只查不自动装大件；auto 模式下顺带按规则自动下载/安装 */
     void checkAsync(boolean manual) {
-        if (checking) return;
-        checking = true;
+        synchronized (this) {
+            if (checking) return;
+            checking = true;
+        }
         new Thread(() -> {
             try { check(manual); } finally { checking = false; }
         }, "upd-check").start();
@@ -591,11 +593,13 @@ final class Updater {
                 return;
             }
         }
-        devkit.latest = best;
-        // 正在下、正在装、正在校验，或者已下好一份等着装：别动它的文件与哈希（文件名各版本相同，换了哈希就和落盘的那份对不上）
-        String st0 = devkit.state;
-        if ("verifying".equals(st0)) { recheckDevkit = true; return; }   // 校验完再补查（见 verifyAsync）
-        if ("downloading".equals(st0) || "installing".equals(st0) || "ready".equals(st0)) return;
+        synchronized (this) {
+            devkit.latest = best;
+            // 正在下、正在装、正在校验，或者已下好一份等着装：别动它的文件与哈希（文件名各版本相同，换了哈希就和落盘的那份对不上）
+            String st0 = devkit.state;
+            if ("verifying".equals(st0)) { recheckDevkit = true; return; }   // 校验完再补查（见 verifyAsync）
+            if ("downloading".equals(st0) || "installing".equals(st0) || "ready".equals(st0)) return;
+        }
         String base = "https://github.com/" + REPO + "/releases/download/" + best + "/";
         // 最新的就是 APK 钉的那版（常态：新工具包跟着新 APK 走）：校验值用 APK 自带的，不联网 ——
         // 国内连不上 github.com 时，以前这里取 devkit.lock.json 失败，整行报错（群友 10-22）
@@ -609,34 +613,52 @@ final class Updater {
             lock = new JSONObject(new String(lockBytes, StandardCharsets.UTF_8));
         }
         if (!ctx.getPackageName().equals(lock.optString("target")) || lock.optInt("compat", 1) != DEVKIT_COMPAT) {
-            devkit.set("uptodate", Tr.f("{0} 需要更新版本的 cccodroid", best)); return;
+            synchronized (this) {
+                if (!devkitMoving() && !"verifying".equals(devkit.state) && !"ready".equals(devkit.state))
+                    devkit.set("uptodate", Tr.f("{0} 需要更新版本的 cccodroid", best));
+            }
+            return;
         }
         JSONObject gz = lock.getJSONObject("gz");
         String sha = gz.getString("sha256");
         String have = installedDevkitSha();
         if (!have.isEmpty() && have.equals(sha)) {
-            devkit.current = best;
-            if (!"damaged".equals(devkit.state)) devkit.set("uptodate", "");     // 自检查出坏了：同一版本，等用户点修复
+            synchronized (this) {
+                devkit.current = best;
+                if (!"damaged".equals(devkit.state) && !devkitMoving() && !"verifying".equals(devkit.state) && !"ready".equals(devkit.state))
+                    devkit.set("uptodate", "");     // 自检查出坏了：同一版本，等用户点修复
+            }
             return;
         }
         JSONObject tar = lock.optJSONObject("tar");
-        devkit.base = base; devkit.sha = sha; devkit.size = gz.getLong("bytes");
-        devkit.tarSha = tar != null ? tar.optString("sha256", null) : null;
-        devkit.need = tar != null ? tar.optLong("bytes") : devkit.size * 4;
-        devkit.url = base + gz.getString("file");
-        devkit.alt = devkitMirror(base, gz.getString("file"));
-        devkit.file = new File(env.files, gz.getString("file"));
-        devkit.modules = null; devkit.modSha = null; devkit.moduleIds = null;
-        planModules(base);
-        // 整包清单只靠 TLS 不够（装了根证书的代理、仓库被攻破都能换掉整个工具包 —— 审查 H3）：
-        // 不是 APK 钉的那份、又没有验得过的 .sig，就只许按块装（modules.json 验过签）；按块的没核实成就报错，不再静默退回整包
-        if (devkit.modules == null && lock != pin && !lockSigned(base, lockBytes)) {
-            // 上面已经把这份没核实的清单填进了 devkit：清掉，不然出错后点「重试」会照着它下载安装（审查 A5）
-            dropDevkitPlan();
+        long nextSize = gz.getLong("bytes");
+        String nextTarSha = tar != null ? tar.optString("sha256", null) : null;
+        long nextNeed = tar != null ? tar.optLong("bytes") : nextSize * 4;
+        String nextUrl = base + gz.getString("file");
+        String nextAlt = devkitMirror(base, gz.getString("file"));
+        File nextFile = new File(env.files, gz.getString("file"));
+        // 先在局部变量完成全部网络拉取与验签，再持锁原子提交，避免并发 apply 读到半截未验签计划或覆写在途任务
+        ModPlan mp = computeModulesPlan(base);
+        if (mp != null) {
+            nextSize = mp.size; nextNeed = mp.need; nextFile = mp.file;
+        } else if (lock != pin && !lockSigned(base, lockBytes)) {
             throw new IOException(Tr.f("{0} 的工具包清单没核实成（签名对不上或没取到）；过会儿再检查更新", best));
         }
-        String mb = String.format(java.util.Locale.ROOT, "%.0f MB", devkit.size / 1048576.0);
-        devkit.set("available", have.isEmpty() && env.devkitReady() ? mb + Tr.t(" · 无法确认已装的是哪一版，建议更新一次") : mb);
+        String mb = String.format(java.util.Locale.ROOT, "%.0f MB", nextSize / 1048576.0);
+        String msg = have.isEmpty() && env.devkitReady() ? mb + Tr.t(" · 无法确认已装的是哪一版，建议更新一次") : mb;
+        synchronized (this) {
+            String stNow = devkit.state;
+            if ("verifying".equals(stNow)) { recheckDevkit = true; return; }
+            if ("downloading".equals(stNow) || "installing".equals(stNow) || "ready".equals(stNow)) return;
+            devkit.latest = best;
+            devkit.base = base; devkit.sha = sha; devkit.size = nextSize;
+            devkit.tarSha = nextTarSha; devkit.need = nextNeed;
+            devkit.url = nextUrl; devkit.alt = nextAlt; devkit.file = nextFile;
+            devkit.modules = mp != null ? mp.modules : null;
+            devkit.modSha = mp != null ? mp.modSha : null;
+            devkit.moduleIds = mp != null ? mp.moduleIds : null;
+            devkit.set("available", msg);
+        }
     }
 
     /** 清掉待下载的工具包（地址、哈希、文件）：清单没核实成时用 */
@@ -684,32 +706,44 @@ final class Updater {
      * modules.json 要带签名（modules.json.sig，和组件索引同一把 ed25519 钥匙）：里面有每块的 sha256，签名对不上就不信它，退回整包。
      * 首装不走这里 —— 那时 modules.json 按 APK 钉的 sha256 核
      */
-    private void planModules(String base) {
+    private static final class ModPlan {
+        final byte[] modules; final String modSha; final java.util.List<String> moduleIds; final long size, need; final File file;
+        ModPlan(byte[] m, String s, java.util.List<String> ids, long sz, long nd, File f) {
+            modules = m; modSha = s; moduleIds = ids; size = sz; need = nd; file = f;
+        }
+    }
+
+    private ModPlan computeModulesPlan(String base) {
         try {
             byte[][] got = new byte[1][];
             fetchDevkitFile(base, "modules.json", got);
             byte[] b = got[0];
             fetchDevkitFile(base, "modules.json.sig", got);
             String sig = new String(got[0], StandardCharsets.UTF_8);
-            if (!Ed25519.verifyIndex(b, sig)) { Log.w(TAG, "planModules: modules.json 签名对不上，按整包装"); return; }
+            if (!Ed25519.verifyIndex(b, sig)) { Log.w(TAG, "planModules: modules.json 签名对不上，按整包装"); return null; }
             JSONObject mj = new JSONObject(new String(b, StandardCharsets.UTF_8));
-            if (!ctx.getPackageName().equals(mj.optString("target")) || mj.optInt("compat", 1) != DEVKIT_COMPAT) return;
-            // 签名只说明是我们发的，不说明是哪一版：旧版清单连签名搬到新 tag 下能冒充新版（审查 10-29 第六份 中1）。
-            // 新清单带 release 字段，要和下载地址的 tag 一致；没带的老清单只认 APK 钉的那份
+            if (!ctx.getPackageName().equals(mj.optString("target")) || mj.optInt("compat", 1) != DEVKIT_COMPAT) return null;
             String sha = Installer.hex(java.security.MessageDigest.getInstance("SHA-256").digest(b));
             if (mj.has("release")) {
-                if (!mj.optString("release").equals(tagOf(base))) { Log.w(TAG, "planModules: modules.json 属于 " + mj.optString("release") + "，不是 " + tagOf(base)); return; }
+                if (!mj.optString("release").equals(tagOf(base))) { Log.w(TAG, "planModules: modules.json 属于 " + mj.optString("release") + "，不是 " + tagOf(base)); return null; }
             } else {
                 JSONObject pin = devkitPin(ctx), pm = pin == null ? null : pin.optJSONObject("modules");
-                if (pm == null || !sha.equals(pm.optString("sha256"))) { Log.w(TAG, "planModules: modules.json 没写 release、也不是钉的那份"); return; }
+                if (pm == null || !sha.equals(pm.optString("sha256"))) { Log.w(TAG, "planModules: modules.json 没写 release、也不是钉的那份"); return null; }
             }
             java.util.List<String> ids = installedModuleIds(mj);
             long dl = 0, need = 0;
             for (JSONObject m : Installer.moduleOrder(mj, ids)) { dl += m.getJSONObject("gz").optLong("bytes"); need += m.getJSONObject("tar").optLong("bytes"); }
-            devkit.modules = b; devkit.modSha = sha;
-            devkit.moduleIds = ids; devkit.size = dl; devkit.need = need;
-            devkit.file = new File(env.files, "modules-" + tagOf(base) + ".json");
-        } catch (Exception e) { Log.i(TAG, "planModules: 按整包装（" + e + "）"); }
+            return new ModPlan(b, sha, ids, dl, need, new File(env.files, "modules-" + tagOf(base) + ".json"));
+        } catch (Exception e) { Log.i(TAG, "planModules: 按整包装（" + e + "）"); return null; }
+    }
+
+    private void planModules(String base) {
+        ModPlan mp = computeModulesPlan(base);
+        if (mp != null) {
+            devkit.modules = mp.modules; devkit.modSha = mp.modSha;
+            devkit.moduleIds = mp.moduleIds; devkit.size = mp.size; devkit.need = mp.need;
+            devkit.file = mp.file;
+        }
     }
 
     /** 现在装着哪些模块：模块化工具包按各块的 .ok；整包工具包 = 新清单里整包本来就有的模块（full，升级后一样不少，不用的再到扩展页卸） */
@@ -950,7 +984,10 @@ final class Updater {
                 if (it.modules != null) st.put("modSha", it.modSha).put("moduleIds", new JSONArray(it.moduleIds));
                 prefs().edit().putString("devkitStaged", st.toString()).apply();
             }
-            it.set("ready", via != null ? Tr.f("从 {0} 下载", via) : "");
+            synchronized (this) {
+                it.set("ready", via != null ? Tr.f("从 {0} 下载", via) : "");
+                if (it == app && user) app.set("installing", "");
+            }
             if (it == app) { if (user) installApp(); else maybeSilentInstallApp(); }
             else if (user) startDevkitApply();
             else { notifyReady(it); releaseApp(); }
@@ -959,8 +996,11 @@ final class Updater {
                 if (it.file != null) it.file.delete();
                 prefs().edit().remove("appStaged").apply();
             }
-            it.set("error", e.getMessage());
-            if (it == devkit) { repairing = false; releaseApp(); }
+            synchronized (this) {
+                it.set("error", e.getMessage());
+                if (it == devkit) repairing = false;
+            }
+            if (it == devkit) releaseApp();
         }
     }
 
@@ -1012,8 +1052,8 @@ final class Updater {
     /** 工具包正在下载 / 替换：这时装 APK 会把它拦腰截断 */
     boolean devkitMoving() { return "downloading".equals(devkit.state) || "installing".equals(devkit.state); }
 
-    /** 推迟 APK，等工具包这一步走完 */
-    private boolean deferApp(boolean user) {
+    /** 推迟 APK，等工具包这一步走完（synchronized 防与 releaseApp 丢唤醒） */
+    private synchronized boolean deferApp(boolean user) {
         if (!devkitMoving()) return false;
         appWaiting = true; appWaitingUser |= user;
         app.set("ready", ("installing".equals(devkit.state) ? Tr.t("等开发工具包装完再装，免得把它打断") : Tr.t("等开发工具包下完再装，免得把它打断")));
@@ -1021,11 +1061,14 @@ final class Updater {
     }
     /** 工具包这一步走完（下完 / 装完 / 出错）：放行等着的 APK */
     private void releaseApp() {
-        if (!appWaiting || devkitMoving()) return;
-        boolean user = appWaitingUser;
-        appWaiting = false; appWaitingUser = false;
-        if (!"ready".equals(app.state)) return;
-        app.set("ready", "");
+        boolean user;
+        synchronized (this) {
+            if (!appWaiting || devkitMoving()) return;
+            user = appWaitingUser;
+            appWaiting = false; appWaitingUser = false;
+            if (!"ready".equals(app.state)) return;
+            app.set(user ? "installing" : "ready", "");
+        }
         if (user) installApp(); else maybeSilentInstallApp();
     }
 
@@ -1207,10 +1250,13 @@ final class Updater {
         JSONObject r = new JSONObject();
         try {
             if (!env.devkitReady()) return r.put("ok", false).put("message", Tr.t("开发工具包还没装好"));
-            if (devkitMoving() || "verifying".equals(devkit.state)) return r.put("ok", true).put("message", Tr.t("进行中"));
-            String prev = devkit.state, prevMsg = devkit.message;
-            devkit.set("verifying", full ? Tr.t("逐个文件核对哈希") : "");
-            devkit.done = 0; devkit.total = 0;
+            final String prev, prevMsg;
+            synchronized (this) {
+                if (devkitMoving() || "verifying".equals(devkit.state)) return r.put("ok", true).put("message", Tr.t("进行中"));
+                prev = devkit.state; prevMsg = devkit.message;
+                devkit.set("verifying", full ? Tr.t("逐个文件核对哈希") : "");
+                devkit.done = 0; devkit.total = 0;
+            }
             new Thread(() -> {
                 try {
                     JSONObject v = installer(devkit).verifyDevkit(full);
