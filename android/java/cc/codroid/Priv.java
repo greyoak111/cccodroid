@@ -120,18 +120,66 @@ final class Priv {
      */
     private static volatile long verifiedAt;
     private static volatile boolean verifiedOk;
+    private static final Object VERIFY_LOCK = new Object();
+    private static boolean verifyInFlight;
     static boolean verified() {
         if (!granted()) return false;
         if (System.currentTimeMillis() - verifiedAt < 10_000) return verifiedOk;
-        boolean ok;
+        synchronized (VERIFY_LOCK) {
+            if (System.currentTimeMillis() - verifiedAt < 10_000) return verifiedOk;
+            if (verifyInFlight) {
+                long deadline = System.nanoTime() + 3500_000_000L;
+                while (verifyInFlight) {
+                    long rem = (deadline - System.nanoTime()) / 1_000_000L;
+                    if (rem <= 0) return false;
+                    try { VERIFY_LOCK.wait(rem); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return false; }
+                }
+                return verifiedOk;
+            }
+            verifyInFlight = true;
+        }
+        boolean ok = false;
         try {
-            java.lang.Process p = newProcess(new String[]{"id", "-u"}, null, "/");
-            p.getOutputStream().close();
-            String out = new String(readAll(p.getInputStream()), StandardCharsets.UTF_8).trim();
-            ok = p.waitFor() == 0 && (out.equals("2000") || out.equals("0"));
+            String[] r = runProcessWithTimeout(new String[]{"id", "-u"}, 3000);
+            ok = "0".equals(r[0]) && (r[1].equals("2000") || r[1].equals("0"));
         } catch (Throwable t) { ok = false; }
-        verifiedOk = ok; verifiedAt = System.currentTimeMillis();
+        finally {
+            verifiedOk = ok; verifiedAt = System.currentTimeMillis();
+            synchronized (VERIFY_LOCK) { verifyInFlight = false; VERIFY_LOCK.notifyAll(); }
+        }
         return ok;
+    }
+
+    /** 带超时的短命令执行并确保流关闭与僵死进程回收，防止 Shizuku 僵死时线程/FD 泄漏 */
+    private static String[] runProcessWithTimeout(String[] argv, long timeoutMs) {
+        java.lang.Process p = null;
+        try {
+            p = newProcess(argv, null, "/");
+            try { p.getOutputStream().close(); } catch (IOException ignored) {}
+            final java.lang.Process fp = p;
+            final String[] out = { "" };
+            Thread rd = new Thread(() -> {
+                try (InputStream in = fp.getInputStream()) {
+                    out[0] = new String(readAll(in), StandardCharsets.UTF_8).trim();
+                } catch (Throwable ignored) {}
+            }, "priv-read");
+            rd.setDaemon(true);
+            rd.start();
+            boolean finished = p.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (!finished) {
+                p.destroyForcibly();
+                try { p.getInputStream().close(); } catch (IOException ignored) {}
+                try { p.getErrorStream().close(); } catch (IOException ignored) {}
+                rd.join(500);
+                return new String[]{"-", "timeout"};
+            }
+            rd.join(1000);
+            try { p.getErrorStream().close(); } catch (IOException ignored) {}
+            return new String[]{String.valueOf(p.exitValue()), out[0]};
+        } catch (Throwable t) {
+            if (p != null) { try { p.destroyForcibly(); } catch (Throwable ignored) {} }
+            return new String[]{"-", String.valueOf(t)};
+        }
     }
 
     private static int safeUid() { try { return Shizuku.getUid(); } catch (Throwable t) { return -1; } }
@@ -199,16 +247,9 @@ final class Priv {
         String[] r = runRc(cmd);
         return r[0].equals("0") ? r[1] : r[0].equals("-") ? Tr.t("[失败] ") + r[1] : "[rc=" + r[0] + "] " + r[1];
     }
-    /** 同上，退出码单独给：{退出码（起不来是 "-"）, 输出} */
+    /** 同上，退出码单独给：{退出码（起不来或超时是 "-"）, 输出} */
     static String[] runRc(String cmd) {
-        try {
-            java.lang.Process p = newProcess(new String[]{"/system/bin/sh", "-c", cmd + " 2>&1"}, null, "/");
-            p.getOutputStream().close();
-            String out = new String(readAll(p.getInputStream()), StandardCharsets.UTF_8).trim();
-            return new String[]{String.valueOf(p.waitFor()), out};
-        } catch (Throwable t) {
-            return new String[]{"-", String.valueOf(t)};
-        }
+        return runProcessWithTimeout(new String[]{"/system/bin/sh", "-c", cmd + " 2>&1"}, 15_000);
     }
 
     static final String STAGE_LOG = "/data/local/tmp/cccodroid-update.log";
@@ -905,7 +946,10 @@ final class Priv {
         inT.setDaemon(true);
         inT.start();
         int rc = p.waitFor();
-        o1.join(); o2.join();
+        // 子进程已退出但孙进程继承管道时不无限阻塞 frameExit（最多等 2 秒收尾）
+        o1.join(2000); o2.join(2000);
+        try { p.getInputStream().close(); } catch (IOException ignored) {}
+        try { p.getErrorStream().close(); } catch (IOException ignored) {}
         audit(t0, who, req, rc, System.currentTimeMillis() - t0);
         frameExit(out, rc);
         return inT;
@@ -972,11 +1016,15 @@ final class Priv {
         Thread t = new Thread(() -> {
             byte[] buf = new byte[16384];
             int n;
-            while (true) {
-                try { if ((n = src.read(buf)) <= 0) return; } catch (IOException e) { return; }
-                // 输出送不回去 = 客户端已经走了：同上，停掉还在跑的命令
-                try { synchronized (out) { out.writeByte(type); out.writeInt(n); out.write(buf, 0, n); out.flush(); } }
-                catch (IOException e) { stopIfAlive(p, "输出送不回客户端"); return; }
+            try {
+                while (true) {
+                    try { if ((n = src.read(buf)) <= 0) return; } catch (IOException e) { return; }
+                    // 输出送不回去 = 客户端已经走了：同上，停掉还在跑的命令
+                    try { synchronized (out) { out.writeByte(type); out.writeInt(n); out.write(buf, 0, n); out.flush(); } }
+                    catch (IOException e) { stopIfAlive(p, "输出送不回客户端"); return; }
+                }
+            } finally {
+                try { src.close(); } catch (IOException ignored) {}
             }
         }, "priv-out" + type);
         t.start();

@@ -20,7 +20,7 @@ import { TASKS_HINT, contextWindowOf, toolsHint, translate, hookBlocked } from "
 import { archiveHint } from "./archive.mjs";
 import { autoTitle } from "./autotitle.mjs";
 import { SUBAGENT_HINT, agentBook, takeAgentNote, putAgentNote, onShared, privateAgentsBase } from "./agents.mjs";
-import { findSessionFile, peekSession } from "./sessions.mjs";
+import { findSessionFile, isSessionRewinding, peekSession } from "./sessions.mjs";
 import { projectById, projectDefaults, projectOfDir } from "./projects.mjs";
 import { sessLostProvider, sessModel, sessProvider, setSessModel } from "./sessmodel.mjs";
 import { noteManaged } from "./sessmanaged.mjs";
@@ -29,7 +29,7 @@ import { pathWatch, previewHint, putPathNote, settlePathNote, takePathNote } fro
 import { claudeSeal, sealStillValid } from "./claudeseal.mjs";
 import { gwRuntimeBlocked } from "./gwpin.mjs";
 import { tamperNote, tamperRecord, tamperRetell } from "./tamper.mjs";
-import { SPOOF_NOTE, checkSession, integrityHint, integrityNote, neutralizeMarkers, sealSession, sessionAnchor } from "./integrity.mjs";
+import { SPOOF_NOTE, checkSessionAsync, integrityHint, integrityNote, neutralizeMarkers, sealSessionAsync, sessionAnchorAsync } from "./integrity.mjs";
 import { ruleblockHint } from "./ruleblock.mjs";
 import { recordExtra } from "./lineage-store.mjs";
 import { refNote, refNoteSync } from "./merge.mjs";
@@ -440,7 +440,12 @@ export async function startRun(item) {
   // 会话封签（见 integrity.mjs）：上一轮之后记录在应用外被改过、或是导入的，这一轮告诉模型别把那段历史当成自己说过的。
   // 起进程前核对：claude --resume 一起来就可能往文件里写
   const sfile = () => run.sessionId ? findSessionFile(String(run.sessionId), run.cwd)?.file : null;   // 按这一轮的目录找（F8）
-  let integ = checkSession(run.sessionId, sfile());
+  if (isSessionRewinding(run.sessionId)) {
+    const msg = tr(LAST_LANG, tz("这个会话正在生成中。"));
+    emit({ type: "error", message: msg });
+    return endRun(run, { failed: true, finalText: msg });
+  }
+  let integ = await checkSessionAsync(run.sessionId, sfile());
   let integNote = isCmd || P.local ? "" : integrityNote(integ);
   // 消息里提到档号（0ab2·61）：附上那一章的压缩摘要（见 merge.mjs refNote）。读不出来就算了，不挡这一轮
   const refN = isCmd || P.local ? "" : await refNote(message, run.sessionId).catch((e) => { log("档号引用失败: " + e.message); return ""; });
@@ -541,8 +546,8 @@ export async function startRun(item) {
   }
   // 会话封签起进程紧前再核一次：上面等卡片、核程序可能等很久，这期间记录被改了，这一轮就该带提醒（199-S-04）。
   // 同时拍底，收尾时核这一轮只是往后追加
-  if (!integ) { integ = checkSession(run.sessionId, sfile()); if (integ) integNote = isCmd || P.local ? "" : integrityNote(integ); }
-  run.sealBase = run.sessionId ? { sid: run.sessionId, ...sessionAnchor(sfile()) } : null;
+  if (!integ) { integ = await checkSessionAsync(run.sessionId, sfile()); if (integ) integNote = isCmd || P.local ? "" : integrityNote(integ); }
+  run.sealBase = run.sessionId ? { sid: run.sessionId, ...(await sessionAnchorAsync(sfile())) } : null;
   if (run.sealBase) saveRunMark();     // 底要进运行标记：这一轮被系统结束时，下次启动凭它重新封签（195-A.8）
   if (run.aborted || run.ended) { log("⏹ 起进程前已停止"); return endRun(run, { durationMs: 0 }); }
   try { promptFiles(argv, run.id, appendPrompt, subPrompt); }
@@ -1045,7 +1050,7 @@ export async function startRun(item) {
   };
   run.requeuePending = requeuePending;
 
-  const finish = (code, signal) => {
+  const finish = async (code, signal) => {
     if (buf.trim()) feed(buf.trim());
     buf = "";
     noteSessionFile("finish");           // 记录只在退出前才落盘的情况：收尾前再核一次
@@ -1053,7 +1058,7 @@ export async function startRun(item) {
     try { run.agents?.close(); } catch (e) { log(`${runTag(run)} 子代理收尾出错: ${e.message}`); }
     // claude 已经退出，这时的记录就是下一轮的基准；提醒这一轮已经交出去（正常答完）才清掉标记
     if (!lastResult || lastResult.is_error) run.giveNotesBack?.();
-    try { sealSession(run.sessionId, sfile(), { clear: !!integNote && !run.aborted && !!lastResult && !lastResult.is_error, base: run.sealBase?.sid === run.sessionId && run.sealBase.hash ? run.sealBase : null }); } catch (e) { log(`${runTag(run)} [封签] ${e.message}`); }
+    try { await sealSessionAsync(run.sessionId, sfile(), { clear: !!integNote && !run.aborted && !!lastResult && !lastResult.is_error, base: run.sealBase?.sid === run.sessionId && run.sealBase.hash ? run.sealBase : null }); } catch (e) { log(`${runTag(run)} [封签] ${e.message}`); }
     run.inputOpen = false;
     run.perms.clear();                // 卡片随 run_end 一起作废（前端按 run_end 收起）
     requeuePending();
@@ -1121,8 +1126,8 @@ export async function startRun(item) {
   const finishSafe = (code, signal) => {
     if (closed) return;
     closed = true;
-    try { finish(code, signal); }
-    catch (e) { log(`${runTag(run)} ⚠️ 收尾出错: ${(e && e.stack) || e}`); try { endRun(run, { failed: true }); } catch {} }
+    Promise.resolve().then(() => finish(code, signal))
+      .catch((e) => { log(`${runTag(run)} ⚠️ 收尾出错: ${(e && e.stack) || e}`); try { endRun(run, { failed: true }); } catch {} });
   };
   // 管道关不掉的兜底（queue.abortRun 5+2 秒后调）：走和正常退出同一条 finish —— 封签、账本、权限卡、未送达消息都要收，
   // 以前直接 endRun 把这些全跳过了（FIND-002）。进程树由调用方负责杀，这里只把管道拆掉

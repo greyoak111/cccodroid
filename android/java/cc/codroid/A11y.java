@@ -142,27 +142,34 @@ public class A11y extends AccessibilityService {
         for (AccessibilityWindowInfo w : s.getWindows())
             if (w.isActive() && w.getTitle() != null) { r.put("window", w.getTitle().toString()); break; }
         StringBuilder out = new StringBuilder();
-        synchronized (LOCK) {
-            nodes.clear(); sigs.clear();
-            walk(root, 0, all, out);
-        }
+        List<AccessibilityNodeInfo> localNodes = new ArrayList<>();
+        List<String> localSigs = new ArrayList<>();
+        walk(root, 0, all, out, localNodes, localSigs);
         // 网页（WebView / 浏览器）在无障碍刚打开时还没生成内容树，只露出一个空壳：等一下再读一次
-        if (nodes.size() <= 2 && out.indexOf("WebView") >= 0) {
+        if (localNodes.size() <= 2 && out.indexOf("WebView") >= 0) {
             Thread.sleep(800);
             root.refresh();
             out.setLength(0);
-            synchronized (LOCK) { nodes.clear(); sigs.clear(); walk(root, 0, all, out); }
+            localNodes.clear(); localSigs.clear();
+            walk(root, 0, all, out, localNodes, localSigs);
+        }
+        int count;
+        synchronized (LOCK) {
+            nodes.clear(); nodes.addAll(localNodes);
+            sigs.clear(); sigs.addAll(localSigs);
+            count = nodes.size();
         }
         Rect sc = new Rect(); root.getBoundsInScreen(sc);
         r.put("screen", sc.width() + "x" + sc.height());
-        r.put("count", nodes.size());
+        r.put("count", count);
         String txt = out.toString();
         if (txt.length() > 60000) txt = txt.substring(0, 60000) + "\n…(" + Tr.t("太长，截断了") + ")";
         return r.put("tree", txt);
     }
 
-    private static void walk(AccessibilityNodeInfo n, int depth, boolean all, StringBuilder out) {
-        if (n == null || nodes.size() >= 800) return;
+    private static void walk(AccessibilityNodeInfo n, int depth, boolean all, StringBuilder out,
+                             List<AccessibilityNodeInfo> localNodes, List<String> localSigs) {
+        if (n == null || localNodes.size() >= 800) return;
         if (!n.isVisibleToUser()) return;
         CharSequence text = n.getText(), desc = n.getContentDescription();
         // 密码框的内容不交给模型：有的应用 getText 给的是明文，不是圆点，也有把明文放进描述的，两样都不读
@@ -174,9 +181,9 @@ public class A11y extends AccessibilityService {
             || (text != null && text.length() > 0) || (desc != null && desc.length() > 0);
         int nextDepth = depth;
         if (useful) {
-            int id = nodes.size();
-            nodes.add(n);
-            sigs.add(sig(n));
+            int id = localNodes.size();
+            localNodes.add(n);
+            localSigs.add(sig(n));
             Rect b = new Rect(); n.getBoundsInScreen(b);
             for (int i = Math.min(depth, 12); i > 0; i--) out.append("  ");
             out.append('[').append(id).append("] ");
@@ -198,7 +205,7 @@ public class A11y extends AccessibilityService {
             out.append('\n');
             nextDepth = depth + 1;
         }
-        for (int i = 0; i < n.getChildCount(); i++) walk(n.getChild(i), nextDepth, all, out);
+        for (int i = 0; i < n.getChildCount(); i++) walk(n.getChild(i), nextDepth, all, out, localNodes, localSigs);
     }
 
     /** 编号的指纹：模型从屏幕树里认这个元素靠的那几样。输入框的文字会随输入变，不算；密码框的内容本来就不读 */
@@ -214,17 +221,14 @@ public class A11y extends AccessibilityService {
         return s.length() > 160 ? s.substring(0, 160) + "…" : s;
     }
 
-    /** 上一次 node() 为什么没给出节点：编号已经不在 / 元素换了内容 */
-    private static String miss = "";
-
-    private static AccessibilityNodeInfo node(int id) {
+    private static AccessibilityNodeInfo node(int id, String[] missOut) {
         synchronized (LOCK) {
-            miss = Tr.t("找不到这个编号的元素：界面变了，先重新 screen_read");
+            if (missOut != null && missOut.length > 0) missOut[0] = Tr.t("找不到这个编号的元素：界面变了，先重新 screen_read");
             if (id < 0 || id >= nodes.size()) return null;
             AccessibilityNodeInfo n = nodes.get(id);
             if (!n.refresh()) return null;
             if (!sig(n).equals(sigs.get(id))) {
-                miss = Tr.t("这个编号上的元素已经换了内容（列表滚动或刷新过），没有动手：按新屏幕重新选");
+                if (missOut != null && missOut.length > 0) missOut[0] = Tr.t("这个编号上的元素已经换了内容（列表滚动或刷新过），没有动手：按新屏幕重新选");
                 return null;
             }
             return n;
@@ -236,23 +240,28 @@ public class A11y extends AccessibilityService {
     // notificationTimeout 平时是 1000（系统攒一秒才推一次），等的时候临时压到 50，不然首个事件就要晚一秒
     static final int EVT_SETTLE = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED | AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
         | AccessibilityEvent.TYPE_WINDOWS_CHANGED | AccessibilityEvent.TYPE_VIEW_SCROLLED;
+    private static final java.util.concurrent.atomic.AtomicInteger armCount = new java.util.concurrent.atomic.AtomicInteger();
 
-    /** 动作前调用：临时多订事件。返回动作前的事件计数，交给 settle */
+    /** 动作前调用：临时多订事件（引用计数，并发动作不提前撤订）。返回动作前的事件计数，交给 settle */
     static int arm() {
-        A11y s = self;
-        if (s != null) try {
-            AccessibilityServiceInfo i = s.getServiceInfo();
-            if (i != null) { i.eventTypes = EVT_SETTLE; i.notificationTimeout = 50; s.setServiceInfo(i); }
-        } catch (Throwable t) { Log.w(TAG, "settle arm", t); }
+        if (armCount.incrementAndGet() == 1) {
+            A11y s = self;
+            if (s != null) try {
+                AccessibilityServiceInfo i = s.getServiceInfo();
+                if (i != null) { i.eventTypes = EVT_SETTLE; i.notificationTimeout = 50; s.setServiceInfo(i); }
+            } catch (Throwable t) { Log.w(TAG, "settle arm", t); }
+        }
         return evts;
     }
 
     static void disarm() {
-        A11y s = self;
-        if (s != null) try {
-            AccessibilityServiceInfo i = s.getServiceInfo();
-            if (i != null) { i.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED; i.notificationTimeout = 1000; s.setServiceInfo(i); }
-        } catch (Throwable t) { Log.w(TAG, "settle disarm", t); }
+        if (armCount.updateAndGet(v -> v > 0 ? v - 1 : 0) == 0) {
+            A11y s = self;
+            if (s != null) try {
+                AccessibilityServiceInfo i = s.getServiceInfo();
+                if (i != null) { i.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED; i.notificationTimeout = 1000; s.setServiceInfo(i); }
+            } catch (Throwable t) { Log.w(TAG, "settle disarm", t); }
+        }
     }
 
     /** 等界面静下来；返回等了多少毫秒 */
@@ -283,8 +292,9 @@ public class A11y extends AccessibilityService {
         touch();
         boolean lng = a.optBoolean("long", false);
         if (a.has("node")) {
-            AccessibilityNodeInfo n = node(a.getInt("node"));
-            if (n == null) return fail(miss);
+            String[] miss = new String[1];
+            AccessibilityNodeInfo n = node(a.getInt("node"), miss);
+            if (n == null) return fail(miss[0]);
             int act = lng ? AccessibilityNodeInfo.ACTION_LONG_CLICK : AccessibilityNodeInfo.ACTION_CLICK;
             // 文字本身不可点时，往上找第一个可点的父节点（列表项常见）
             for (AccessibilityNodeInfo p = n; p != null; p = p.getParent())
@@ -300,8 +310,9 @@ public class A11y extends AccessibilityService {
     static JSONObject swipe(JSONObject a) throws Exception {
         touch();
         if (a.has("node")) {
-            AccessibilityNodeInfo n = node(a.getInt("node"));
-            if (n == null) return fail(miss);
+            String[] miss = new String[1];
+            AccessibilityNodeInfo n = node(a.getInt("node"), miss);
+            if (n == null) return fail(miss[0]);
             boolean back = "backward".equals(a.optString("direction", "forward"));
             int act = back ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD;
             for (AccessibilityNodeInfo p = n; p != null; p = p.getParent())
@@ -315,7 +326,7 @@ public class A11y extends AccessibilityService {
     static JSONObject type(JSONObject a) throws Exception {
         touch();
         AccessibilityNodeInfo n = null;
-        if (a.has("node")) { n = node(a.getInt("node")); if (n == null) return fail(miss); }
+        if (a.has("node")) { String[] miss = new String[1]; n = node(a.getInt("node"), miss); if (n == null) return fail(miss[0]); }
         else {
             A11y s = self;
             if (s == null) return fail(Tr.t("无障碍没开。到 设置 → 设备工具 里打开（要先激活 Shizuku），或自己去系统的无障碍设置里打开 cccodroid"));

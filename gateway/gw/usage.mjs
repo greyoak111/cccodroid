@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { CFG, LIVE, HERE, PATHS, PREFIX, log, tz } from "./config.mjs";
 import { claudeEnv, killTree, readLedger } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
@@ -134,6 +134,20 @@ export function usageMeter(ctx) {
     if (seen.size > 5000) seen.delete(seen.keys().next().value);
     if (d.i || d.o || d.c) add(d, ctx.sid(), p.m || ctx.model());
   };
+  const SUB_CHUNK = 2 << 20;
+  function parseSubText(n, from, text) {
+    const end = text.lastIndexOf("\n");
+    if (end < 0) return false;                         // 半行：等写完
+    subPos.set(n, from + Buffer.byteLength(text.slice(0, end + 1)));
+    for (const line of text.slice(0, end).split("\n")) {
+      if (!line.includes('"usage"') || !line.includes('"assistant"')) continue;
+      let e; try { e = JSON.parse(line); } catch { continue; }
+      // 消息按时间归轮：本轮开始之后写的才算（以前放宽 5 秒，上一轮收尾慢的子代理会被下一轮再算一遍）
+      if (e.type !== "assistant" || !e.message?.id || !(Date.parse(e.timestamp) >= t0)) continue;
+      bump(e.message.id, e.message.usage, e.message.model, false);
+    }
+    return true;
+  }
   function scanSubs() {
     const dir = ctx.subDir && ctx.subDir();
     if (!dir) return;
@@ -145,24 +159,67 @@ export function usageMeter(ctx) {
       if (st.mtimeMs < t0 - 5000) continue;        // 以前几轮的子代理
       const from = subPos.get(n) || 0;
       if (st.size <= from) continue;
-      let text = "";
       let fd = null;
-      try { fd = fs.openSync(file, "r"); const b = Buffer.alloc(st.size - from); fs.readSync(fd, b, 0, b.length, from); text = b.toString("utf8"); }
-      catch { continue; }
-      finally { if (fd != null) try { fs.closeSync(fd); } catch {} }   // 读一半抛错也要关 fd（200-6-02）
-      const end = text.lastIndexOf("\n");
-      if (end < 0) continue;                         // 半行：等写完
-      subPos.set(n, from + Buffer.byteLength(text.slice(0, end + 1)));
-      for (const line of text.slice(0, end).split("\n")) {
-        if (!line.includes('"usage"') || !line.includes('"assistant"')) continue;
-        let e; try { e = JSON.parse(line); } catch { continue; }
-        // 消息按时间归轮：本轮开始之后写的才算（以前放宽 5 秒，上一轮收尾慢的子代理会被下一轮再算一遍）
-        if (e.type !== "assistant" || !e.message?.id || !(Date.parse(e.timestamp) >= t0)) continue;
-        bump(e.message.id, e.message.usage, e.message.model, false);
-      }
+      try {
+        fd = fs.openSync(file, "r");
+        let pos = from;
+        while (pos < st.size) {
+          const len = Math.min(SUB_CHUNK, st.size - pos);
+          const b = Buffer.alloc(len);
+          const got = fs.readSync(fd, b, 0, len, pos);
+          if (!got) break;
+          const text = b.subarray(0, got).toString("utf8");
+          if (!parseSubText(n, pos, text)) {
+            if (len < SUB_CHUNK) break;
+            // 单行超过 2 MB：跳到下一行起点继续，避免无限卡在半行
+            const nl = text.indexOf("\n");
+            if (nl < 0) { pos += got; subPos.set(n, pos); continue; }
+            pos += Buffer.byteLength(text.slice(0, nl + 1)); subPos.set(n, pos); continue;
+          }
+          pos = subPos.get(n) || (pos + got);
+        }
+      } catch { continue; }
+      finally { if (fd != null) try { fs.closeSync(fd); } catch {} }
     }
   }
-  const timer = setInterval(scanSubs, 30000);
+  let subScanning = false;
+  async function scanSubsAsync() {
+    if (subScanning) return;
+    subScanning = true;
+    try {
+      const dir = ctx.subDir && ctx.subDir();
+      if (!dir) return;
+      let names = [];
+      try { names = (await fs.promises.readdir(dir)).filter((n) => n.endsWith(".jsonl")); } catch { return; }
+      for (const n of names) {
+        const file = path.join(dir, n);
+        let st; try { st = await fs.promises.stat(file); } catch { continue; }
+        if (st.mtimeMs < t0 - 5000) continue;
+        let pos = subPos.get(n) || 0;
+        if (st.size <= pos) continue;
+        let fh = null;
+        try {
+          fh = await fs.promises.open(file, "r");
+          while (pos < st.size) {
+            const len = Math.min(SUB_CHUNK, st.size - pos);
+            const b = Buffer.alloc(len);
+            const { bytesRead } = await fh.read(b, 0, len, pos);
+            if (!bytesRead) break;
+            const text = b.subarray(0, bytesRead).toString("utf8");
+            if (!parseSubText(n, pos, text)) {
+              if (len < SUB_CHUNK) break;
+              pos += bytesRead; subPos.set(n, pos);
+            } else {
+              pos = subPos.get(n) || (pos + bytesRead);
+            }
+            await new Promise((ok) => setImmediate(ok));
+          }
+        } catch {}
+        finally { if (fh) await fh.close().catch(() => {}); }
+      }
+    } finally { subScanning = false; }
+  }
+  const timer = setInterval(() => { scanSubsAsync().catch(() => {}); }, 30000);
   timer.unref?.();
   return {
     feed(ev) {

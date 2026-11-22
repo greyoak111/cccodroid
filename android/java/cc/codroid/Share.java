@@ -217,7 +217,8 @@ public final class Share extends ContentProvider {
         File dir = new File(env.files, "cache/share");
         dir.mkdirs();
         File[] old = dir.listFiles();
-        if (old != null) for (File o : old) if (o.getName().startsWith("cccodroid-logs-")) o.delete();
+        long cutoff = System.currentTimeMillis() - 10 * 60_000L;
+        if (old != null) for (File o : old) if (o.getName().startsWith("cccodroid-logs-") && o.lastModified() < cutoff) o.delete();
         String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.ROOT).format(new Date());
         File out = new File(dir, "cccodroid-logs-" + stamp + ".zip");
         JSONObject parts = new JSONObject();
@@ -333,8 +334,23 @@ public final class Share extends ContentProvider {
             pb.directory(env.home);
             pb.redirectErrorStream(true);
             p = pb.start();
-            String out = readAll(p.getInputStream()).trim().replace('\n', ' ');
-            if (!p.waitFor(12, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS); return r.append("  curl 卡住").toString(); }
+            final Process fp = p;
+            final String[] outBuf = { "" };
+            Thread rd = new Thread(() -> {
+                try (InputStream in = fp.getInputStream()) { outBuf[0] = readAll(in).trim().replace('\n', ' '); }
+                catch (Exception ignored) {}
+            }, "probe-read");
+            rd.setDaemon(true);
+            rd.start();
+            if (!p.waitFor(12, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                try { p.getInputStream().close(); } catch (IOException ignored) {}
+                p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+                rd.join(500);
+                return r.append("  curl 卡住").toString();
+            }
+            rd.join(1000);
+            String out = outBuf[0];
             r.append("  curl rc=").append(p.exitValue()).append(' ').append(out.length() > 200 ? out.substring(0, 200) : out);
         } catch (Exception e) {
             r.append("  curl 起不来：").append(e.getMessage());
@@ -345,12 +361,29 @@ public final class Share extends ContentProvider {
 
     /** 本进程能读到的只有自己的日志（安卓 4.1 起），正好 */
     private static String logcat() {
+        Process p = null;
         try {
-            Process p = new ProcessBuilder("logcat", "-d", "-v", "time", "-t", "8000").redirectErrorStream(true).start();
-            String s = readAll(p.getInputStream());
-            p.waitFor();
-            return s;
-        } catch (Exception e) { return "（读不到 logcat：" + e + "）"; }
+            p = new ProcessBuilder("logcat", "-d", "-v", "time", "-t", "8000").redirectErrorStream(true).start();
+            final Process fp = p;
+            final String[] out = { "" };
+            Thread rd = new Thread(() -> {
+                try (InputStream in = fp.getInputStream()) { out[0] = readAll(in); }
+                catch (Exception ignored) {}
+            }, "logcat-read");
+            rd.setDaemon(true);
+            rd.start();
+            if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                try { p.getInputStream().close(); } catch (IOException ignored) {}
+                rd.join(500);
+                return out[0].isEmpty() ? "（读 logcat 超时）" : out[0];
+            }
+            rd.join(1000);
+            return out[0];
+        } catch (Exception e) {
+            if (p != null) p.destroyForcibly();
+            return "（读不到 logcat：" + e + "）";
+        }
     }
 
     private static String tail(File f, int max) throws IOException {

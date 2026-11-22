@@ -53,7 +53,7 @@ final class DeviceTools {
     static final String CH = "agent";
     static final String[] BASIC = {"device_status", "notify", "clipboard_read", "clipboard_write", "open", "share_file", "app_list"};
     static final String[] SCREEN = {"screen_read", "screen_tap", "screen_swipe", "screen_type", "screen_key", "screenshot"};
-    private static int noteId = 600;
+    private static final java.util.concurrent.atomic.AtomicInteger noteId = new java.util.concurrent.atomic.AtomicInteger(600);
 
     /** 用户在原生对话框里确认过开读屏（MainActivity.confirmA11y）。总开关和读屏模式存在 Consent 里（锁屏签名），
      *  不再是同 uid 脚本改一下 prefs 就能伪造的明文（11-03 审查 H-2） */
@@ -239,7 +239,7 @@ final class DeviceTools {
         NotificationManager nm = c.getSystemService(NotificationManager.class);
         PendingIntent pi = PendingIntent.getActivity(c, 60, new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        int id = noteId++;
+        int id = noteId.getAndIncrement();
         nm.notify(id, new Notification.Builder(c, CH)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle(title.isEmpty() ? "Claude" : clip(title, 200))
@@ -430,8 +430,8 @@ final class DeviceTools {
         // 通知被系统 / 用户关掉时 notify 不抛异常、只是不显示：以前照样回「已发通知」，用户什么也看不到（BUG-A04）
         JSONObject blocked = notifyBlocked(c);
         if (blocked != null) return fail(Tr.t("cccodroid 在后台，安卓不让直接弹出界面；系统里通知又被关掉了，打开请求送不到你面前。请先打开应用再试，或在系统设置里允许通知"));
-        PendingIntent pi = PendingIntent.getActivity(c, 700 + (noteId % 50), i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        int id = noteId++;
+        int id = noteId.getAndIncrement();
+        PendingIntent pi = PendingIntent.getActivity(c, 700 + Math.floorMod(id, 50), i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         c.getSystemService(NotificationManager.class).notify(id, new Notification.Builder(c, CH)
             .setSmallIcon(android.R.drawable.ic_menu_send)
             .setContentTitle(Tr.t("Claude 想打开："))

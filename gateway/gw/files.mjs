@@ -396,7 +396,7 @@ export async function routeFiles(req, res, u, p) {
     if (path.dirname(target) === target || zoneOf(dir) === "private" || SECRET_NAMES.has(name.toLowerCase()) || SECRET_RE.test(target) ||
         (!st.isSymbolicLink() && pathBlocked(target))) return sendJson(res, 403, { error: "forbidden" });
     if (st.isDirectory() && holdsPrivate(target)) return sendJson(res, 403, { error: "forbidden", message: tz("这个文件夹装着应用自己的目录或工作区，不能删") });
-    try { fs.rmSync(target, { recursive: st.isDirectory(), force: false }); }
+    try { await fs.promises.rm(target, { recursive: st.isDirectory(), force: false }); }
     catch (e) { return sendJson(res, e.code === "EACCES" || e.code === "EPERM" ? 403 : 500, { error: e.code || e.message, message: e.message }); }
     log(`[file] 删除${st.isDirectory() ? "目录" : ""} ${target}`);
     return sendJson(res, 200, { ok: true });

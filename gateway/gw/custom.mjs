@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
+import { promisify } from "node:util";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { CFG, GLIBC_PRELOAD, PATHS, PREFIX, glibcEnv, loadPgp, log, tz } from "./config.mjs";
@@ -114,6 +117,18 @@ function openDirs(p) {
   let ds = []; try { ds = fs.readdirSync(p); } catch {}
   for (const d of ds) openDirs(path.join(p, d));
 }
+const gunzipAsync = promisify(zlib.gunzip);
+async function openDirsAsync(p) {
+  let st; try { st = await fs.promises.lstat(p); } catch { return; }
+  if (!st.isDirectory()) return;
+  if ((st.mode & 0o700) !== 0o700) try { await fs.promises.chmod(p, (st.mode & 0o7777) | 0o700); } catch {}
+  let ds = []; try { ds = await fs.promises.readdir(p); } catch {}
+  for (const d of ds) await openDirsAsync(path.join(p, d));
+}
+async function rmTreeAsync(p) {
+  try { await fs.promises.rm(p, { recursive: true, force: true }); return; } catch {}
+  try { await openDirsAsync(p); await fs.promises.rm(p, { recursive: true, force: true }); } catch (e) { log(`[custom] 删不掉 ${p}：${e.code || e.message}`); }
+}
 /** 删目录：删不动（只读目录）就先放开权限再删；还删不掉只记日志，不抛（11-04 报告 六-9） */
 function rmTree(p) {
   try { fs.rmSync(p, { recursive: true, force: true }); return; } catch {}
@@ -187,42 +202,48 @@ const GZ_MAX = 256 << 20, DEB_MAX = 512 << 20;
 // Termux glibc 仓库的 Contents（文件 → 包）与 Packages（包 → 下载地址、sha256），缓存一天。
 // 先用 Termux 自动构建钥验 Release 的签名，再按 Release 里的 SHA256 核 Contents 和 Packages：
 // 以前只信 TLS，镜像或中间人给一份自洽的 Packages 就能塞进任意 .so（11-03 审查 M-5，同 devkit.mjs 的 loadRepo）
+let glibcRepoInFlight = null;
 async function glibcRepoIndex(fresh = false) {
-  const cache = path.join(CUSTOM_DIR, ".cache"); fs.mkdirSync(cache, { recursive: true });
-  const get = async (name, url) => {
-    const f = path.join(cache, name), part = f + "." + crypto.randomBytes(3).toString("hex") + ".part";
-    try { if (!fresh && Date.now() - fs.statSync(f).mtimeMs < 86400000) return fs.readFileSync(f); } catch {}
-    const r = await runP(path.join(PREFIX, "bin", "curl"), ["-fsSL", "--max-time", "120", "--retry", "2", "-o", part, url]);
-    if (r.code) { fs.rmSync(part, { force: true }); if (fs.existsSync(f)) return fs.readFileSync(f); throw new Error(tz("取不到 glibc 仓库索引：{msg}", { msg: r.err.trim().split("\n").pop() })); }
-    fs.renameSync(part, f); return fs.readFileSync(f);
-  };
-  const { TERMUX_KEYS, verifyDetached } = await loadPgp();
-  const rel = await get("Release-glibc", GLIBC_REPO + "dists/glibc/Release");
-  verifyDetached(rel, (await get("Release-glibc.gpg", GLIBC_REPO + "dists/glibc/Release.gpg")).toString(), TERMUX_KEYS);
-  const sums = new Map();
-  for (const l of (rel.toString().split("SHA256:")[1] || "").split("\n")) { const m = /^ ([0-9a-f]{64})\s+\d+\s+(\S+)$/.exec(l); if (m) sums.set(m[2], m[1]); else if (l && !l.startsWith(" ")) break; }
-  const checked = async (name, rp) => {
-    const b = await get(name, GLIBC_REPO + "dists/glibc/" + rp);
-    if (sums.get(rp) === crypto.createHash("sha256").update(b).digest("hex")) return b;
-    if (!fresh) throw Object.assign(new Error("stale"), { stale: true });   // 缓存和新的 Release 对不上：整套重取一次
-    throw new Error(tz("glibc 仓库的 {f} 和签过名的 Release 对不上", { f: rp }));
-  };
-  let contentsGz, pkgsBuf;
-  try { contentsGz = await checked("Contents-glibc.gz", "Contents-aarch64.gz"); pkgsBuf = await checked("Packages-glibc", "stable/binary-aarch64/Packages"); }
-  catch (e) { if (e.stale) return glibcRepoIndex(true); throw e; }
-  const contents = zlib.gunzipSync(contentsGz, { maxOutputLength: GZ_MAX }).toString();
-  const lib = new Map();
-  for (const l of contents.split("\n")) {
-    if (!l.startsWith(GLIBC_REPO_LIB)) continue;
-    const sp = l.lastIndexOf(" "), p = l.slice(GLIBC_REPO_LIB.length, sp).trim();
-    if (!p.includes("/")) lib.set(p, l.slice(sp + 1).split(",")[0].replace(/^.*\//, ""));
-  }
-  const pk = new Map();
-  for (const blk of pkgsBuf.toString().split("\n\n")) {
-    const f = Object.fromEntries(blk.split("\n").map((x) => [x.slice(0, x.indexOf(":")), x.slice(x.indexOf(":") + 1).trim()]));
-    if (f.Package) pk.set(f.Package, { version: f.Version, file: f.Filename, sha256: f.SHA256, size: +f.Size || 0 });
-  }
-  return { lib, pk };
+  if (!fresh && glibcRepoInFlight) return glibcRepoInFlight;
+  const run = (async () => {
+    const cache = path.join(CUSTOM_DIR, ".cache"); fs.mkdirSync(cache, { recursive: true });
+    const get = async (name, url) => {
+      const f = path.join(cache, name), part = f + "." + crypto.randomBytes(3).toString("hex") + ".part";
+      try { if (!fresh && Date.now() - (await fs.promises.stat(f)).mtimeMs < 86400000) return await fs.promises.readFile(f); } catch {}
+      const r = await runP(path.join(PREFIX, "bin", "curl"), ["-fsSL", "--max-time", "120", "--retry", "2", "-o", part, url]);
+      if (r.code) { fs.rmSync(part, { force: true }); if (fs.existsSync(f)) return await fs.promises.readFile(f); throw new Error(tz("取不到 glibc 仓库索引：{msg}", { msg: r.err.trim().split("\n").pop() })); }
+      fs.renameSync(part, f); return await fs.promises.readFile(f);
+    };
+    const { TERMUX_KEYS, verifyDetached } = await loadPgp();
+    const rel = await get("Release-glibc", GLIBC_REPO + "dists/glibc/Release");
+    verifyDetached(rel, (await get("Release-glibc.gpg", GLIBC_REPO + "dists/glibc/Release.gpg")).toString(), TERMUX_KEYS);
+    const sums = new Map();
+    for (const l of (rel.toString().split("SHA256:")[1] || "").split("\n")) { const m = /^ ([0-9a-f]{64})\s+\d+\s+(\S+)$/.exec(l); if (m) sums.set(m[2], m[1]); else if (l && !l.startsWith(" ")) break; }
+    const checked = async (name, rp) => {
+      const b = await get(name, GLIBC_REPO + "dists/glibc/" + rp);
+      if (sums.get(rp) === crypto.createHash("sha256").update(b).digest("hex")) return b;
+      if (!fresh) throw Object.assign(new Error("stale"), { stale: true });   // 缓存和新的 Release 对不上：整套重取一次
+      throw new Error(tz("glibc 仓库的 {f} 和签过名的 Release 对不上", { f: rp }));
+    };
+    let contentsGz, pkgsBuf;
+    try { contentsGz = await checked("Contents-glibc.gz", "Contents-aarch64.gz"); pkgsBuf = await checked("Packages-glibc", "stable/binary-aarch64/Packages"); }
+    catch (e) { if (e.stale) return glibcRepoIndex(true); throw e; }
+    const contents = (await gunzipAsync(contentsGz, { maxOutputLength: GZ_MAX })).toString();
+    const lib = new Map();
+    for (const l of contents.split("\n")) {
+      if (!l.startsWith(GLIBC_REPO_LIB)) continue;
+      const sp = l.lastIndexOf(" "), p = l.slice(GLIBC_REPO_LIB.length, sp).trim();
+      if (!p.includes("/")) lib.set(p, l.slice(sp + 1).split(",")[0].replace(/^.*\//, ""));
+    }
+    const pk = new Map();
+    for (const blk of pkgsBuf.toString().split("\n\n")) {
+      const f = Object.fromEntries(blk.split("\n").map((x) => [x.slice(0, x.indexOf(":")), x.slice(x.indexOf(":") + 1).trim()]));
+      if (f.Package) pk.set(f.Package, { version: f.Version, file: f.Filename, sha256: f.SHA256, size: +f.Size || 0 });
+    }
+    return { lib, pk };
+  })().finally(() => { if (glibcRepoInFlight === run) glibcRepoInFlight = null; });
+  if (!fresh) glibcRepoInFlight = run;
+  return run;
 }
 
 /** 一个目录里所有 ELF 的「能提供的库名」（文件名 + SONAME） */
@@ -255,7 +276,7 @@ async function customAnalyze(src, displayName) {
   const ownStaging = (p) => p === CUSTOM_DIR || p.startsWith(CUSTOM_DIR + path.sep);
   if (!ownStaging(sp) && pathBlocked(sp)) return { ok: false, message: tz("这个位置不能读") };
   if (!st.isFile()) return { ok: false, message: tz("要选一个文件（程序本身或压缩包）") };
-  for (const [k, v] of CUSTOM_STAGES) if (Date.now() - v.at > 3600000) { rmTree(v.dir); CUSTOM_STAGES.delete(k); }
+  for (const [k, v] of CUSTOM_STAGES) if (Date.now() - v.at > 3600000) { await rmTreeAsync(v.dir); CUSTOM_STAGES.delete(k); }
   // 盘上的也扫：暂存表只在内存里，网关重启后表空了，没装也没丢弃的 .stage-* 就永远留着（0.6.9 审计 196-供应链.2）。
   // 不能见一个删一个：一小时内的还能读回来接着装（195-J.4），正在分析的目录也是新的。按 report.json 的时刻、没有就按目录时间算
   try {
@@ -265,7 +286,7 @@ async function customAnalyze(src, displayName) {
       let at = 0;
       try { at = Number(JSON.parse(fs.readFileSync(path.join(d, "report.json"), "utf8")).at) || 0; } catch {}
       if (!at) try { at = fs.lstatSync(d).mtimeMs; } catch { continue; }
-      if (Date.now() - at > 3600000) rmTree(d);
+      if (Date.now() - at > 3600000) await rmTreeAsync(d);
     }
   } catch {}
   const stage = crypto.randomBytes(6).toString("hex");
@@ -274,13 +295,13 @@ async function customAnalyze(src, displayName) {
   // 上传落盘用的是 ASCII 化的临时名（带随机前缀）：显示名、默认 ID 要用用户原来的文件名，
   // 不能把「工具-1.2.zip」变成「a1b2c3d4-______.zip」（195-J.3）
   const base = path.basename(String(displayName || "").trim()) || path.basename(sp), warnings = [];
-  const fail = (m) => { rmTree(dir); return { ok: false, message: m }; };
+  const fail = async (m) => { await rmTreeAsync(dir); return { ok: false, message: m }; };
   const isTar = /\.(tar\.(gz|xz|bz2|zst)|tgz|txz|tbz2?|tar)$/i.test(base), isZip = /\.zip$/i.test(base);
   if (isTar || isZip) {
     // 先拷进私有暂存区再查、再解：查和解是两次打开，源文件在共享存储上，中间能被换成另一个包（11-03 审查 L-5）
     // 暂存文件名用随机串：显示名可能很长或是中文，直接拼进文件名会超 255 字节
     const own = path.join(dir, "src-" + crypto.randomBytes(4).toString("hex") + path.extname(sp).slice(0, 16).replace(/[^\w.]/g, ""));
-    try { fs.copyFileSync(sp, own); } catch (e) { return fail(tz("拷不进暂存区：{msg}", { msg: e.code || e.message })); }
+    try { await fs.promises.copyFile(sp, own); } catch (e) { return fail(tz("拷不进暂存区：{msg}", { msg: e.code || e.message })); }
     sp = own;
     const n = await unpackedSize(sp, isZip);
     if (n == null) return fail(tz("读不出压缩包的目录，可能已损坏"));
@@ -406,58 +427,63 @@ async function customAnalyze(src, displayName) {
 async function customFetchLibs(want, deps, have, log2) {
   const ix = await glibcRepoIndex();
   const cache = path.join(CUSTOM_DIR, ".cache"), got = [];
+  // 每次补库独立工作目录，避免并发 customInstall 结束时互删 .cache/*.deb
+  const runDir = path.join(cache, "run-" + crypto.randomBytes(4).toString("hex"));
   // 仓库里找不到、或包里没有这个文件的：一路记着，最后报「还缺」。以前每轮把 want 清空，补进来的库自己缺的二级依赖找不到就悄悄丢了（#104 05-011）
   const miss = new Set();
   fs.mkdirSync(deps, { recursive: true });
-  for (let round = 0; want.size && round < 6; round++) {
-    const byPkg = new Map();
-    for (const n of want) { if (have.has(n)) continue; const p = ix.lib.get(n); if (p && ix.pk.has(p)) (byPkg.get(p) || byPkg.set(p, []).get(p)).push(n); else miss.add(n); }
-    want = new Set();
-    for (const [pkg, names] of byPkg) {
-      const m = ix.pk.get(pkg), deb = path.join(cache, path.basename(m.file));
-      if (!(m.size > 0 && m.size <= DEB_MAX) || !/^[0-9a-f]{64}$/.test(m.sha256 || "")) throw new Error(tz("{pkg} 的索引条目不对", { pkg }));
-      let ok = false; try { ok = (await sha256File(deb)) === m.sha256; } catch {}
-      if (!ok) {
-        const part = deb + "." + crypto.randomBytes(3).toString("hex") + ".part";
-        log2(tz("下载 {pkg}（{mb} MB）", { pkg, mb: Math.max(1, Math.round(m.size / 1048576)) }));
-        const r = await runP(path.join(PREFIX, "bin", "curl"), ["-fsSL", "--max-time", "900", "--retry", "2", "-o", part, GLIBC_REPO + m.file]);
-        if (r.code) { fs.rmSync(part, { force: true }); throw new Error(tz("下载 {pkg} 失败：{msg}", { pkg, msg: r.err.trim().split("\n").pop() })); }
-        if ((await sha256File(part)) !== m.sha256) { fs.rmSync(part, { force: true }); throw new Error(tz("{pkg} 校验不对", { pkg })); }
-        fs.renameSync(part, deb);
+  fs.mkdirSync(runDir, { recursive: true });
+  try {
+    for (let round = 0; want.size && round < 6; round++) {
+      const byPkg = new Map();
+      for (const n of want) { if (have.has(n)) continue; const p = ix.lib.get(n); if (p && ix.pk.has(p)) (byPkg.get(p) || byPkg.set(p, []).get(p)).push(n); else miss.add(n); }
+      want = new Set();
+      for (const [pkg, names] of byPkg) {
+        const m = ix.pk.get(pkg), deb = path.join(runDir, path.basename(m.file));
+        if (!(m.size > 0 && m.size <= DEB_MAX) || !/^[0-9a-f]{64}$/.test(m.sha256 || "")) throw new Error(tz("{pkg} 的索引条目不对", { pkg }));
+        let ok = false; try { ok = (await sha256File(deb)) === m.sha256; } catch {}
+        if (!ok) {
+          const part = deb + "." + crypto.randomBytes(3).toString("hex") + ".part";
+          log2(tz("下载 {pkg}（{mb} MB）", { pkg, mb: Math.max(1, Math.round(m.size / 1048576)) }));
+          const r = await runP(path.join(PREFIX, "bin", "curl"), ["-fsSL", "--max-time", "900", "--retry", "2", "-o", part, GLIBC_REPO + m.file]);
+          if (r.code) { fs.rmSync(part, { force: true }); throw new Error(tz("下载 {pkg} 失败：{msg}", { pkg, msg: r.err.trim().split("\n").pop() })); }
+          if ((await sha256File(part)) !== m.sha256) { fs.rmSync(part, { force: true }); throw new Error(tz("{pkg} 校验不对", { pkg })); }
+          fs.renameSync(part, deb);
+        }
+        // .deb 是 ar 包：找 data.tar.*，用工具包的 tar 解到临时目录
+        const buf = await fs.promises.readFile(deb); let off = 8, member = null;
+        while (off + 60 <= buf.length) {
+          const nm = buf.toString("latin1", off, off + 16).trim().replace(/\/$/, ""), size = parseInt(buf.toString("latin1", off + 48, off + 58), 10);
+          if (nm.startsWith("data.tar")) { member = { nm, data: buf.subarray(off + 60, off + 60 + size) }; break; }
+          off += 60 + size + (size & 1);
+        }
+        if (!member) throw new Error(tz("{pkg} 的包结构不对", { pkg }));
+        const tmp = path.join(runDir, "x-" + pkg + "-" + crypto.randomBytes(3).toString("hex")); await rmTreeAsync(tmp); fs.mkdirSync(tmp, { recursive: true });
+        const tf = path.join(tmp, member.nm); await fs.promises.writeFile(tf, member.data);
+        // 解之前看目录：条目跳出包外、或经过包里的软链的，整包不解（同导入程序时的检查）
+        const ls = await runP(path.join(PREFIX, "bin", "tar"), ["-tv", "--quoting-style=c", "-f", tf], { maxBuffer: 64 << 20 });
+        let bad = ls.code ? { name: "?" } : null;
+        try { if (!bad) bad = archiveProblem(parseTarListing(ls.out)); } catch { bad = { name: "?" }; }
+        if (bad) { await rmTreeAsync(tmp); throw new Error(tz("{pkg} 里有条目会写到包外面，不解开", { pkg })); }
+        const r = await runP(path.join(PREFIX, "bin", "tar"), ["-xf", tf, "-C", tmp, "--no-same-owner", "./" + GLIBC_REPO_LIB]);
+        if (r.code) { await rmTreeAsync(tmp); throw new Error(tz("解开 {pkg} 失败：{msg}", { pkg, msg: r.err.trim().split("\n").pop() })); }
+        const libd = path.join(tmp, GLIBC_REPO_LIB);
+        for (const n of names) {
+          if (have.has(n)) continue;
+          let real; try { real = fs.realpathSync(path.join(libd, n)); } catch { miss.add(n); continue; }
+          if (!real.startsWith(tmp + path.sep)) { miss.add(n); continue; }
+          await fs.promises.copyFile(real, path.join(deps, n)); await fs.promises.chmod(path.join(deps, n), 0o755);
+          have.add(n); got.push({ soname: n, pkg, version: m.version });
+          const e = elfInfo(path.join(deps, n));
+          for (const d of (e && e.needed) || []) if (!have.has(d)) want.add(d);
+        }
+        await rmTreeAsync(tmp);
       }
-      // .deb 是 ar 包：找 data.tar.*，用工具包的 tar 解到临时目录
-      const buf = fs.readFileSync(deb); let off = 8, member = null;
-      while (off + 60 <= buf.length) {
-        const nm = buf.toString("latin1", off, off + 16).trim().replace(/\/$/, ""), size = parseInt(buf.toString("latin1", off + 48, off + 58), 10);
-        if (nm.startsWith("data.tar")) { member = { nm, data: buf.subarray(off + 60, off + 60 + size) }; break; }
-        off += 60 + size + (size & 1);
-      }
-      if (!member) throw new Error(tz("{pkg} 的包结构不对", { pkg }));
-      const tmp = path.join(cache, "x-" + pkg + "-" + crypto.randomBytes(3).toString("hex")); fs.rmSync(tmp, { recursive: true, force: true }); fs.mkdirSync(tmp, { recursive: true });
-      const tf = path.join(tmp, member.nm); fs.writeFileSync(tf, member.data);
-      // 解之前看目录：条目跳出包外、或经过包里的软链的，整包不解（同导入程序时的检查）
-      const ls = await runP(path.join(PREFIX, "bin", "tar"), ["-tv", "--quoting-style=c", "-f", tf], { maxBuffer: 64 << 20 });
-      let bad = ls.code ? { name: "?" } : null;
-      try { if (!bad) bad = archiveProblem(parseTarListing(ls.out)); } catch { bad = { name: "?" }; }
-      if (bad) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(tz("{pkg} 里有条目会写到包外面，不解开", { pkg })); }
-      const r = await runP(path.join(PREFIX, "bin", "tar"), ["-xf", tf, "-C", tmp, "--no-same-owner", "./" + GLIBC_REPO_LIB]);
-      if (r.code) { fs.rmSync(tmp, { recursive: true, force: true }); throw new Error(tz("解开 {pkg} 失败：{msg}", { pkg, msg: r.err.trim().split("\n").pop() })); }
-      const libd = path.join(tmp, GLIBC_REPO_LIB);
-      for (const n of names) {
-        if (have.has(n)) continue;
-        let real; try { real = fs.realpathSync(path.join(libd, n)); } catch { miss.add(n); continue; }
-        if (!real.startsWith(tmp + path.sep)) { miss.add(n); continue; }
-        fs.copyFileSync(real, path.join(deps, n)); fs.chmodSync(path.join(deps, n), 0o755);
-        have.add(n); got.push({ soname: n, pkg, version: m.version });
-        const e = elfInfo(path.join(deps, n));
-        for (const d of (e && e.needed) || []) if (!have.has(d)) want.add(d);
-      }
-      fs.rmSync(tmp, { recursive: true, force: true });
     }
+    return { got, still: [...new Set([...miss, ...want])].filter((n) => !have.has(n)) };   // 6 轮还没补完的也算缺
+  } finally {
+    await rmTreeAsync(runDir);
   }
-  // 下载的 .deb 只是中转（gcc-libs 就 20 多 MB），用完删掉；索引留着
-  for (const f of fs.readdirSync(cache)) if (f.endsWith(".deb")) fs.rmSync(path.join(cache, f), { force: true });
-  return { got, still: [...new Set([...miss, ...want])].filter((n) => !have.has(n)) };   // 6 轮还没补完的也算缺
 }
 
 // patchelf 写进程序的解释器：一律用工具包里的 ld.so —— 路径固定。PATHS.loader 在「经加载器」时是 APK 里那份，
@@ -729,11 +755,19 @@ async function handleCustom(req, res, p, u) {
     const MAX = 2 * 1024 ** 3;
     if (+req.headers["content-length"] > MAX) return sendJson(res, 413, { ok: false, message: "file too large (max 2 GB)" });
     try {
-      await new Promise((resolve, reject) => {
-        const w = fs.createWriteStream(out); let n = 0;
-        req.on("data", (c) => { n += c.length; if (n > MAX) { req.unpipe(w); w.destroy(); req.destroy(); reject(Object.assign(new Error("file too large (max 2 GB)"), { big: true })); } });
-        req.pipe(w); w.on("finish", resolve); w.on("error", reject); req.on("error", reject);
-      });
+      let n = 0;
+      await pipeline(
+        req,
+        new Transform({
+          transform(c, _e, cb) {
+            n += c.length;
+            if (n > MAX) return cb(Object.assign(new Error("file too large (max 2 GB)"), { big: true }));
+            cb(null, c);
+          },
+        }),
+        fs.createWriteStream(out),
+      );
+      if (req.aborted || !req.complete) throw new Error("upload aborted");
     } catch (e) { fs.rmSync(out, { force: true }); return sendJson(res, e.big ? 413 : 500, { ok: false, message: e.message }); }
     const r = await customAnalyze(out, shown);
     fs.rmSync(out, { force: true });

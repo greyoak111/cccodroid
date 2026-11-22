@@ -130,14 +130,18 @@
       p.style.maxHeight = Math.min(Math.round(w * 1.618), ar.top - 8 - 16) + "px";
     }
     // browse：模型清单正在看哪家（点上面的接口切换，只是看；点了模型才真换）
-    let info, browse = curProv(), ML = [];
+    let info, browse = curProv(), ML = [], loadSeq = 0;
     const list = m.querySelector(".mp-list"), q = m.querySelector(".mp-q");
     async function load() {
-      const want = browse;
+      const want = browse, my = ++loadSeq;
       let r;
       try { r = await api("/api/models" + sidQ(browse && browse !== curProv() ? "browse=" + encodeURIComponent(browse) : "")); }
-      catch (e) { list.textContent = t("拉取模型清单失败：{msg}", { msg: e.message }); return false; }
-      if (!m.isConnected || want !== browse) return false;
+      catch (e) {
+        if (!m.isConnected || my !== loadSeq || want !== browse) return false;
+        list.textContent = t("拉取模型清单失败：{msg}", { msg: e.message });
+        return false;
+      }
+      if (!m.isConnected || my !== loadSeq || want !== browse) return false;
       info = r; ML = r.models || [];
       if (r.providers) state.provList = r.providers;
       if (!browse) browse = r.provider;
@@ -582,11 +586,16 @@
   extSync(); document.addEventListener("cc:ui", (e) => { if (e.detail.key === "extImg" || e.detail.key == null) extSync(); });
   $("set-extimg").addEventListener("change", (e) => uiSet("extImg", e.target.checked ? null : "auto"));
   // 工作岛起没起来（195-P.4）：检测要几秒（pm 再加 am 探一次），开关 / 重试之后隔几秒再看
+  let wiTimers = [];
+  function clearWiTimers() {
+    for (const id of wiTimers) clearTimeout(id);
+    wiTimers = [];
+  }
   async function loadWorkIsland() {
-    const visit = setVisit;
+    const visit = setVisit, ok = latest("work-island");
     if (!setVisible("claude", visit)) return;
     const r = await api("/api/work-island").catch(() => null), box = $("wi-state");
-    if (!setVisible("claude", visit)) return;
+    if (!ok() || !setVisible("claude", visit)) return;
     const show = !!(r && r.supported && r.wanted && !r.started && !r.detecting && r.error);
     box.classList.toggle("hidden", !show);
     if (!show) return;
@@ -595,8 +604,9 @@
       : t("没检测到「工作岛」应用：装好后点重试。");
   }
   const wiLater = () => {
+    clearWiTimers();
     const visit = setVisit;
-    if (setVisible("claude", visit)) for (const ms of [2000, 6000, 10000]) setTimeout(() => { if (setVisible("claude", visit)) loadWorkIsland(); }, ms);
+    if (setVisible("claude", visit)) for (const ms of [2000, 6000, 10000]) wiTimers.push(setTimeout(() => { if (setVisible("claude", visit)) loadWorkIsland(); }, ms));
   };
   $("wi-retry").addEventListener("click", async () => {
     await post("/api/work-island/retry").catch((e) => toast(e.message, true));
@@ -709,10 +719,14 @@
   }
 
   async function loadCaps() {
+    const ok = latest("caps");
     try {
-      state.caps = await api("/api/capabilities"); state.capsErr = "";
+      const r = await api("/api/capabilities");
+      if (!ok()) return;
+      state.caps = r; state.capsErr = "";
       renderCaps();
     } catch (e) {
+      if (!ok()) return;
       // 一次都没拿到过：说清楚读取失败、给重试，别只剩空标题（审查 F-008）
       state.capsErr = e.message || "?";
       renderCaps();

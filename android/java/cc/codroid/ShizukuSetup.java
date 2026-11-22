@@ -142,8 +142,8 @@ final class ShizukuSetup {
 
     private static final String EXTRA_PROGRESS = "cc.codroid.progress";
 
-    /** 用户退出应用：收起配对 / 激活通知，不然常驻通知会一直挂着 */
-    void onExit() { cancelNote(); }
+    /** 用户退出应用：收起配对 / 激活通知并注销 NSD 配对监听，避免后台泄漏 */
+    void onExit() { stopPairDiscovery(); cancelNote(); }
 
     SharedPreferences prefs() { return ctx.getSharedPreferences("shz", Context.MODE_PRIVATE); }
     boolean hasWss() { return ctx.checkSelfPermission(WSS) == PackageManager.PERMISSION_GRANTED; }
@@ -187,6 +187,8 @@ final class ShizukuSetup {
         startInstall(thenActivate);
     }
     /** 调用方已经占着 busy：下载安装线程接手，跑完由它放掉 */
+    private volatile File stagedShizukuApk;
+
     private void startInstall(boolean thenActivate) {
         activateAfterInstall = thenActivate;
         new Thread(() -> {
@@ -197,7 +199,7 @@ final class ShizukuSetup {
                 JSONObject a = null;
                 for (int i = 0; i < as.length(); i++) if (as.getJSONObject(i).optString("name").endsWith(".apk")) { a = as.getJSONObject(i); break; }
                 if (a == null) throw new Exception(Tr.f("Shizuku {0} 里没有 APK", rel.optString("tag_name")));
-                File f = new File(env.files, "updates/shizuku.apk");
+                File f = new File(env.files, "updates/shizuku-" + System.currentTimeMillis() + ".apk");
                 done = 0; total = a.optLong("size");
                 set("downloading", Tr.f("下载 Shizuku {0}…", rel.optString("tag_name")));
                 new Installer(env, new Installer.Progress() {
@@ -207,6 +209,7 @@ final class ShizukuSetup {
                 PackageInfo p = Apk.archiveInfo(ctx, f);
                 if (p == null || !Priv.MANAGER.equals(p.packageName)) { f.delete(); throw new Exception(Tr.t("下载的不是 Shizuku 安装包")); }
                 if (!PIN.equals(Apk.signer(p))) { f.delete(); throw new Exception(Tr.t("Shizuku 安装包的签名不是官方的，拒绝安装")); }
+                stagedShizukuApk = f;
                 set("installing", Tr.t("在系统弹窗里点「安装」（第一次需要先允许 cccodroid 安装应用）"));
                 Apk.install(ctx, f, "shizuku");
             } catch (Exception e) {
@@ -220,6 +223,9 @@ final class ShizukuSetup {
     }
 
     void onInstalled(boolean ok, String msg) {
+        File staged = stagedShizukuApk;
+        stagedShizukuApk = null;
+        if (staged != null) staged.delete();
         new File(env.files, "updates/shizuku.apk").delete();
         if (!ok) { set("error", Tr.t("没装上：") + msg); return; }
         set("idle", Tr.t("✓ Shizuku 已安装"));
@@ -715,22 +721,26 @@ final class ShizukuSetup {
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(64);
         List<Integer> hits = Collections.synchronizedList(new ArrayList<>());
         java.util.concurrent.atomic.AtomicInteger next = new java.util.concurrent.atomic.AtomicInteger(1024);
-        for (int t = 0; t < 64; t++) pool.execute(() -> {
-            for (int p; (p = next.getAndIncrement()) <= 65535; ) {
-                if (p == Env.PORT || p == 5037) continue;
-                try (java.net.Socket so = new java.net.Socket()) {
-                    so.connect(new java.net.InetSocketAddress("127.0.0.1", p), 200);
-                    so.setSoTimeout(800);
-                    so.getOutputStream().write(cnxn());
-                    byte[] h = new byte[4];
-                    int n = so.getInputStream().read(h);
-                    if (n == 4 && (h[0] == 'S' && h[1] == 'T' && h[2] == 'L' && h[3] == 'S')) hits.add(p);
-                } catch (Exception ignored) {}
-            }
-        });
-        pool.shutdown();
-        pool.awaitTermination(60, TimeUnit.SECONDS);
-        return new ArrayList<>(hits);
+        try {
+            for (int t = 0; t < 64; t++) pool.execute(() -> {
+                for (int p; !Thread.currentThread().isInterrupted() && (p = next.getAndIncrement()) <= 65535; ) {
+                    if (p == Env.PORT || p == 5037) continue;
+                    try (java.net.Socket so = new java.net.Socket(java.net.Proxy.NO_PROXY)) {
+                        so.connect(new java.net.InetSocketAddress("127.0.0.1", p), 200);
+                        so.setSoTimeout(800);
+                        so.getOutputStream().write(cnxn());
+                        byte[] h = new byte[4];
+                        int n = so.getInputStream().read(h);
+                        if (n == 4 && (h[0] == 'S' && h[1] == 'T' && h[2] == 'L' && h[3] == 'S')) hits.add(p);
+                    } catch (Exception ignored) {}
+                }
+            });
+            pool.shutdown();
+            pool.awaitTermination(60, TimeUnit.SECONDS);
+            return new ArrayList<>(hits);
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     /** ADB 协议的 CNXN 消息：24 字节头（小端）+ "host::\0" */
