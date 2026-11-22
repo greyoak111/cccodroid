@@ -148,6 +148,7 @@ public class GatewayService extends Service {
         self = this;
         Updater.get(this).loop();
         // Shizuku 掉了（重启、被杀）而用户开着自动激活：自己重新拉起来
+        ShizukuSetup.get(this).startKeepaliveWatch();
         ShizukuSetup.get(this).reactivateAsync(false);
         watchFreeze();
         // 后台时的完成 / 等确认通知：订阅网关事件流（界面关了也照发）
@@ -331,6 +332,7 @@ public class GatewayService extends Service {
     @Override public void onDestroy() {
         if (self == this) self = null;
         synchronized (life) { lifeGen++; stopping = true; }
+        ShizukuSetup.get(this).stopKeepaliveWatch();
         Updater.get(this).stopLoop();
         Notify.get(this).stop();
         killGatewayAsync();

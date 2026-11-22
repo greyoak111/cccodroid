@@ -3310,4 +3310,13 @@ window.I18N_DICT.en = {
   "只允许查看普通记忆文件": "Only regular memory files can be viewed",
   "记忆文件太大了（超过 1 MB）": "Memory file is too large (over 1 MB)",
   "记忆只读，不能在这里修改": "Project memories are read-only here",
+  "无线 ADB 保活": "Wireless ADB keep-alive",
+  "通过私有UnixSocket维持无线ADB，以便在没有WIFI的情况下也能恢复意外停止的Shizuku进程。重启手机后依然需要连接一次WiFi才能激活。如果你没遇到过特权指令执行失败的问题，请保持关闭。": "Keeps wireless ADB available through a private Unix socket so Shizuku can recover without Wi-Fi if it stops unexpectedly. After restarting your phone, connect to Wi-Fi once to activate Shizuku. Leave this off if you have not experienced failures when running privileged commands.",
+  "本机 ADB 通道已就绪": "Local ADB connection ready",
+  "正在建立本机 ADB 通道…": "Preparing the local ADB connection…",
+  "系统正在使用另一个 ADB 端口。": "Android is using a different ADB port.",
+  "等待本机 ADB 通道。手机重启后请先连 Wi-Fi 激活 Shizuku。": "Waiting for the local ADB connection. After a phone reboot, activate Shizuku over Wi-Fi first.",
+  "ADB 通道已连接，等待 Shizuku 授权或系统投递凭据。": "ADB connected. Waiting for Shizuku authorization or the system to deliver its credentials.",
+  "本机 ADB 尚未获系统授权。请检查系统调试授权，需要时重新配对。": "Android has not authorized local ADB. Check your debugging authorizations and re-pair if needed.",
+  "本机 ADB 通道暂不可用，将自动重试。如果调试授权已撤销，可重新配对。": "Local ADB is temporarily unavailable. Retrying automatically. If debugging authorization was revoked, you can re-pair.",
 };

@@ -23,6 +23,8 @@ import java.io.File;
 import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,6 +32,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -64,6 +68,10 @@ final class ShizukuSetup {
     volatile long done, total;
     private volatile boolean busy, activateAfterInstall, activateQueued;
     private volatile int pairPort = -1;
+    private static final int TCP_PORT = 5555;
+    private static final String TCP_SERIAL = "127.0.0.1:" + TCP_PORT;
+    private volatile ScheduledExecutorService keepaliveWorker;
+    private volatile String keepaliveState = "waiting";
     /** 这次配对期间看到的配对服务（名字 → 端口）。这类广播谁都能注册：不止一个时不替用户挑，要他照配对框填端口 */
     private final java.util.Map<String, Integer> pairSeen = new java.util.concurrent.ConcurrentHashMap<>();
     private NsdManager.DiscoveryListener pairDisc;
@@ -107,7 +115,8 @@ final class ShizukuSetup {
         // 应用刚起来时 Shizuku 的 binder 可能还没到：等一会儿（最多 30 秒）再判断
         for (int i = 0; i < 30 && !Priv.running(); i++) { try { Thread.sleep(1000); } catch (InterruptedException e) { break; } }
         try {
-            if (Build.VERSION.SDK_INT >= 30 && prefs().getBoolean("paired", false) && hasWss() && Priv.running() && !Priv.sui() && wirelessOn() != 0) {
+            if (Build.VERSION.SDK_INT >= 30 && !adbKeepalive() && prefs().getBoolean("paired", false)
+                    && hasWss() && Priv.running() && !Priv.sui() && wirelessOn() != 0) {
                 Settings.Global.putInt(ctx.getContentResolver(), "adb_wifi_enabled", 0);
                 wifiOff = true;
             }
@@ -153,8 +162,12 @@ final class ShizukuSetup {
         synchronized (ring) { lg = new JSONArray(ring); }
         o.put("setup", new JSONObject().put("phase", phase).put("message", message).put("done", done).put("total", total).put("log", lg));
         o.put("autostart", autostart());
+        o.put("adbKeepalive", adbKeepalive());
+        o.put("adbKeepaliveState", keepaliveState);
+        o.put("adbKeepaliveSupported", Build.VERSION.SDK_INT >= 30 && !Priv.sui());
         o.put("paired", prefs().getBoolean("paired", false));
         o.put("pairOk", pairOk);
+        o.put("pairedBefore", prefs().contains("pairedAt"));
         if (Priv.running()) verifyPairAsync();
         o.put("wss", hasWss());
         // 这次开机有没有收到 BOOT_COMPLETED（国产 ROM 的"自启动管理"会拦）。配对之后重启过才有意义
@@ -280,16 +293,20 @@ final class ShizukuSetup {
         startPairing();
     }
 
-    /** 已配对过的情况：开无线调试（有 WRITE_SECURE_SETTINGS 时自己开）→ 连 → 起服务。成功返回 true */
-    private boolean connectAndStart(boolean bounce) throws Exception {
+    private boolean openWireless() throws Exception {
         if (wirelessOn() == 0 && hasWss()) {
             if (wifiOrig < 0) wifiOrig = 0;
-            set("connecting", Tr.t("打开无线调试…"));
             Settings.Global.putInt(ctx.getContentResolver(), "adb_wifi_enabled", 1);
             for (int i = 0; i < 20 && wirelessOn() == 0; i++) Thread.sleep(250);
             Thread.sleep(1500);   // adbd 要一点时间开始监听、广播服务
         }
-        if (wirelessOn() == 0) { log("无线调试没开，也没有 WRITE_SECURE_SETTINGS 去开它"); return false; }
+        return wirelessOn() != 0;
+    }
+
+    /** 已配对过的情况：开无线调试 → 连 → 起服务。成功返回 true */
+    private boolean connectAndStart(boolean bounce) throws Exception {
+        if (wirelessOn() == 0 && hasWss()) set("connecting", Tr.t("打开无线调试…"));
+        if (!openWireless()) { log("无线调试没开，也没有 WRITE_SECURE_SETTINGS 去开它"); return false; }
         set("connecting", Tr.t("寻找本机的无线调试端口…"));
         boolean[] untrusted = new boolean[1];
         String serial = trustedSerial(untrusted);
@@ -598,8 +615,11 @@ final class ShizukuSetup {
     }
 
     /** 用户点"重新配对"：Shizuku 在跑也照样走配对 */
-    void repair() {
-        synchronized (this) { if (busy) { activateQueued = false; return; } busy = true; }
+    boolean repair() {
+        synchronized (this) {
+            if (busy) return false;
+            busy = true;
+        }
         wifiOrig = wirelessOn();
         new Thread(() -> {
             try {
@@ -608,6 +628,7 @@ final class ShizukuSetup {
                 startPairing();
             } finally { idle(); }
         }, "shz-repair").start();
+        return true;
     }
 
     /** 开机 / Shizuku 被杀后自动重开无线调试：用户点过头的同意（Consent 签名存档），不再是谁都能改的 prefs。
@@ -617,6 +638,159 @@ final class ShizukuSetup {
     void setAutostart(boolean on) {
         if (on) Consent.grant(ctx, Consent.SHZ_AUTO, "1"); else Consent.revoke(ctx, Consent.SHZ_AUTO);
         prefs().edit().remove("autostart").apply();
+    }
+
+    // KEEPALIVE 管的是应用后台限制，这条同意单独授权 ADB 通道。
+    boolean adbKeepalive() { return Consent.on(ctx, Consent.SHZ_TCP); }
+
+    void setAdbKeepalive(boolean on) {
+        if (on) {
+            Consent.grant(ctx, Consent.SHZ_TCP, "1");
+            keepaliveState = "waiting";
+        } else {
+            Consent.revoke(ctx, Consent.SHZ_TCP);
+            keepaliveState = "waiting";
+            // 设备端通道可能正在被其他已授权的应用或工具使用。只停本包的恢复。
+        }
+    }
+
+    synchronized void startKeepaliveWatch() {
+        if (keepaliveWorker != null) return;
+        ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "shz-adb-keepalive"));
+        keepaliveState = "waiting";
+        keepaliveWorker = worker;
+        worker.scheduleWithFixedDelay(() -> keepaliveTick(worker), 0, 15, TimeUnit.SECONDS);
+    }
+
+    synchronized void stopKeepaliveWatch() {
+        if (keepaliveWorker != null) keepaliveWorker.shutdown();
+        keepaliveWorker = null;
+    }
+
+    private boolean keepaliveAllowed(ScheduledExecutorService worker) {
+        return keepaliveWorker == worker && Build.VERSION.SDK_INT >= 30 && !Priv.sui() && adbKeepalive()
+            && Priv.installed() && hasWss() && prefs().getBoolean("paired", false);
+    }
+
+    private void keepaliveTick(ScheduledExecutorService worker) {
+        if (!keepaliveAllowed(worker)) return;
+        synchronized (this) {
+            if (busy || "pairing".equals(phase)) return;
+            busy = true;
+        }
+        boolean triedWireless = false;
+        try {
+            boolean running = Priv.running();
+            boolean listening = systemTcpListening();
+            if (!running || !Priv.granted() || !"ready".equals(keepaliveState) || !listening) {
+                keepaliveState = "waiting";
+                if (!listening) {
+                    int configuredPort = systemTcpPort();
+                    if (configuredPort > 0) {
+                        keepaliveState = configuredPort == TCP_PORT ? "unavailable" : "conflict";
+                        return;
+                    }
+                    if (!running || !Priv.verified() || !onWifi()) return;
+                    keepaliveState = "preparing";
+                    triedWireless = true;
+                    if (!prepareKeepalive(worker)) return;
+                }
+                if (!keepaliveAllowed(worker)) return;
+                String result = adb(8, "connect", TCP_SERIAL);
+                String transport = adb(5, "-s", TCP_SERIAL, "get-state").trim();
+                if (!"device".equals(transport)) {
+                    keepaliveState = (result + transport).matches("(?is).*(unauthorized|failed to authenticate).*")
+                        ? "unauthorized" : "unavailable";
+                    return;
+                }
+                if (!Priv.running()) {
+                    if (!keepaliveAllowed(worker)) return;
+                    // Binder 还没投递时，尤其是双包共存，先确认服务是否已运行。
+                    String pid = adb(5, "-s", TCP_SERIAL, "shell", "pidof shizuku_server").trim();
+                    if (pid.matches("[0-9]+(\\s+[0-9]+)*")) {
+                        try { ctx.startService(new Intent(ctx, ShzNudge.class)); } catch (RuntimeException ignored) {}
+                        keepaliveState = "binder";
+                        return;
+                    }
+                    if (!keepaliveAllowed(worker) || Priv.running()) return;
+                    startServer(TCP_SERIAL, false);
+                }
+                if (keepaliveAllowed(worker)) keepaliveState = Priv.verified() ? "ready" : "binder";
+            }
+        } catch (Exception e) {
+            keepaliveState = "unavailable";
+            log("无线 ADB 保活：" + e.getMessage());
+            if ("starting".equals(phase)) set("error", Tr.t("Shizuku 未能自动恢复，稍后再试"));
+        } finally {
+            if (triedWireless) restoreWifi();
+            idle();
+        }
+    }
+
+    private boolean prepareKeepalive(ScheduledExecutorService worker) throws Exception {
+        wifiOrig = wirelessOn();
+        if (!openWireless()) { keepaliveState = "unavailable"; return false; }
+        if (!keepaliveAllowed(worker)) return false;
+        String serial = findKeepaliveTransport(worker, discover("_adb-tls-connect._tcp", 4_000, 3));
+        if (serial == null && keepaliveAllowed(worker)) serial = findKeepaliveTransport(worker, probeLocalAdb(8));
+        if (serial == null || !keepaliveAllowed(worker)) { keepaliveState = "unavailable"; return false; }
+        // 另一份应用可能刚完成切换，先让设备端监听稳定。
+        int configuredPort = systemTcpPort();
+        if (configuredPort == TCP_PORT) return systemTcpListening();
+        if (configuredPort > 0) { keepaliveState = "conflict"; return false; }
+        // 已确认 TLS 配对身份才切换设备端通道。切换时 adbd 会短暂重启。
+        boolean usbWasEnabled = Settings.Global.getInt(ctx.getContentResolver(), Settings.Global.ADB_ENABLED, 0) != 0;
+        if (!usbWasEnabled && !Settings.Global.putInt(ctx.getContentResolver(), Settings.Global.ADB_ENABLED, 1)) return false;
+        boolean ready = false;
+        try {
+            if (!keepaliveAllowed(worker)) return false;
+            adb(8, "-s", serial, "tcpip", String.valueOf(TCP_PORT));
+            for (int i = 0; i < 20; i++) {
+                if (systemTcpListening()) { ready = true; break; }
+                Thread.sleep(250);
+            }
+            if (!ready) keepaliveState = "unavailable";
+            return ready;
+        } finally {
+            if (!usbWasEnabled && !ready && systemTcpPort() <= 0) {
+                Settings.Global.putInt(ctx.getContentResolver(), Settings.Global.ADB_ENABLED, 0);
+            }
+        }
+    }
+
+    private String findKeepaliveTransport(ScheduledExecutorService worker, List<Integer> ports) throws Exception {
+        for (int port : ports.subList(0, Math.min(ports.size(), 3))) {
+            if (!keepaliveAllowed(worker)) break;
+            String candidate = "127.0.0.1:" + port;
+            if (adb(5, "connect", candidate).contains("connected to")
+                    && "device".equals(adb(3, "-s", candidate, "get-state").trim())) return candidate;
+        }
+        return null;
+    }
+
+    private boolean systemTcpListening() throws Exception {
+        // 端口开放本身不足以证明它属于 adbd。
+        if (systemTcpPort() != TCP_PORT) return false;
+        try (Socket socket = new Socket(java.net.Proxy.NO_PROXY)) {
+            socket.connect(new InetSocketAddress("127.0.0.1", TCP_PORT), 300);
+            return true;
+        } catch (java.io.IOException e) {
+            return false;
+        }
+    }
+
+    private int systemTcpPort() throws Exception {
+        Process p = new ProcessBuilder("/system/bin/getprop", "service.adb.tcp.port").start();
+        try (InputStream in = p.getInputStream()) {
+            if (!p.waitFor(1, TimeUnit.SECONDS) || p.exitValue() != 0) {
+                throw new java.io.IOException("Unable to read the system ADB port");
+            }
+            byte[] value = new byte[32];
+            int read = in.read(value);
+            if (read <= 0) return 0;
+            String property = new String(value, 0, read, StandardCharsets.UTF_8).trim();
+            return property.isEmpty() ? 0 : Integer.parseInt(property);
+        } finally { if (p.isAlive()) p.destroyForcibly(); }
     }
 
     // ── 工具 ───────────────────────────────────────────────────────────
@@ -688,6 +862,10 @@ final class ShizukuSetup {
 
     /** 找本机广播的 mDNS 服务端口。局域网里别的设备也可能在广播：优先地址是本机的那些 */
     private List<Integer> discover(String type, long ms) throws Exception {
+        return discover(type, ms, Integer.MAX_VALUE);
+    }
+
+    private List<Integer> discover(String type, long ms, int maxResolutions) throws Exception {
         NsdManager nm = ctx.getSystemService(NsdManager.class);
         List<NsdServiceInfo> found = Collections.synchronizedList(new ArrayList<>());
         NsdManager.DiscoveryListener l = new Disc(found, null);
@@ -702,7 +880,9 @@ final class ShizukuSetup {
         try { nm.stopServiceDiscovery(l); } catch (Exception ignored) {}
         Set<String> mine = localAddrs();
         List<Integer> local = new ArrayList<>(), other = new ArrayList<>();
-        for (NsdServiceInfo s : new ArrayList<>(found)) {
+        List<NsdServiceInfo> candidates;
+        synchronized (found) { candidates = new ArrayList<>(found.subList(0, Math.min(found.size(), maxResolutions))); }
+        for (NsdServiceInfo s : candidates) {
             NsdServiceInfo r = resolve(nm, s);
             if (r == null || r.getPort() <= 0) continue;
             InetAddress h = r.getHost();
@@ -718,6 +898,10 @@ final class ShizukuSetup {
      * 回环口上被拒绝的连接立即返回，64 个线程扫完 1024–65535 只要几秒。
      */
     private List<Integer> probeLocalAdb() throws Exception {
+        return probeLocalAdb(60);
+    }
+
+    private List<Integer> probeLocalAdb(int timeoutSeconds) throws Exception {
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(64);
         List<Integer> hits = Collections.synchronizedList(new ArrayList<>());
         java.util.concurrent.atomic.AtomicInteger next = new java.util.concurrent.atomic.AtomicInteger(1024);
@@ -736,8 +920,8 @@ final class ShizukuSetup {
                 }
             });
             pool.shutdown();
-            pool.awaitTermination(60, TimeUnit.SECONDS);
-            return new ArrayList<>(hits);
+            pool.awaitTermination(timeoutSeconds, TimeUnit.SECONDS);
+            synchronized (hits) { return new ArrayList<>(hits); }
         } finally {
             pool.shutdownNow();
         }

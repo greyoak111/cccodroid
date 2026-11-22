@@ -457,7 +457,38 @@ final class Priv {
                     ShizukuSetup.get(ctx).activate(); resp = status(); break;
                 }
                 case "shz_pair": ShizukuSetup.get(ctx).onCode(req.optString("code")); resp = status(); break;
-                case "shz_repair": ShizukuSetup.get(ctx).repair(); resp = status(); break;
+                case "shz_repair": {
+                    boolean started = ShizukuSetup.get(ctx).repair();
+                    resp = status().put("ok", started);
+                    if (!started) resp.put("message", Tr.t("Shizuku 正在检查连接，请稍后再试"));
+                    break;
+                }
+                case "shz_adb_keepalive": {
+                    Object enable = req.opt("enable");
+                    if (!(enable instanceof Boolean)) {
+                        resp = status().put("ok", false).put("message", Tr.t("请求参数不对"));
+                        break;
+                    }
+                    boolean on = (Boolean) enable;
+                    ShizukuSetup shz = ShizukuSetup.get(ctx);
+                    if (on && !shz.adbKeepalive()) {
+                        if (Build.VERSION.SDK_INT < 30 || sui || !shz.hasWss() || !shz.prefs().getBoolean("paired", false)) {
+                            resp = status().put("ok", false).put("message", Tr.t("先通过无线调试配对并授权 Shizuku"));
+                            break;
+                        }
+                        int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
+                        if (!confirm(Tr.t("无线 ADB 保活会保持 USB 调试。断开 Wi-Fi 后仍可恢复 Shizuku，系统 ADB 端口可能在局域网可达。"),
+                                caller(pid), "shz_adb_keepalive")) {
+                            resp = status().put("ok", false).put("message", Tr.t("没有允许，无线 ADB 保活没有打开"));
+                            break;
+                        }
+                        shz.setAdbKeepalive(true);
+                    } else if (!on) {
+                        shz.setAdbKeepalive(false);
+                    }
+                    resp = status().put("ok", true);
+                    break;
+                }
                 case "shz_autostart": {
                     // 打开 = 以后开机时不问就打开无线调试：和保活一样，要原生确认并签名存档；关掉随时可以
                     boolean on = req.optBoolean("enable", true);

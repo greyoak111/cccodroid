@@ -3272,4 +3272,13 @@ window.I18N_DICT["fr"] = {
   "只允许查看普通记忆文件": "Seuls les fichiers mémoire ordinaires peuvent être consultés",
   "记忆文件太大了（超过 1 MB）": "Le fichier mémoire est trop volumineux (plus de 1 Mo)",
   "记忆只读，不能在这里修改": "Les mémoires sont en lecture seule ici",
+  "无线 ADB 保活": "Maintenir ADB sans fil actif",
+  "通过私有UnixSocket维持无线ADB，以便在没有WIFI的情况下也能恢复意外停止的Shizuku进程。重启手机后依然需要连接一次WiFi才能激活。如果你没遇到过特权指令执行失败的问题，请保持关闭。": "Maintient ADB sans fil disponible via un socket Unix privé pour relancer Shizuku sans Wi-Fi après un arrêt inattendu. Après le redémarrage du téléphone, connectez-vous une fois au Wi-Fi pour activer Shizuku. Laissez cette option désactivée si vos commandes privilégiées s’exécutent sans échec.",
+  "本机 ADB 通道已就绪": "Connexion ADB locale prête",
+  "正在建立本机 ADB 通道…": "Préparation de la connexion ADB locale…",
+  "系统正在使用另一个 ADB 端口。": "Android utilise un autre port ADB.",
+  "等待本机 ADB 通道。手机重启后请先连 Wi-Fi 激活 Shizuku。": "En attente de la connexion ADB locale. Après un redémarrage, activez d’abord Shizuku via le Wi-Fi.",
+  "ADB 通道已连接，等待 Shizuku 授权或系统投递凭据。": "ADB connecté. En attente de l’autorisation de Shizuku ou des données d’authentification du système.",
+  "本机 ADB 尚未获系统授权。请检查系统调试授权，需要时重新配对。": "Android n’a pas autorisé ADB local. Vérifiez les autorisations de débogage et associez de nouveau l’appareil si besoin.",
+  "本机 ADB 通道暂不可用，将自动重试。如果调试授权已撤销，可重新配对。": "ADB local est temporairement indisponible. Nouvel essai automatique. Si l’autorisation de débogage a été révoquée, vous pouvez refaire l’association.",
 };

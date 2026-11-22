@@ -3269,3 +3269,12 @@
 3269	Solo se permiten archivos de memoria normales
 3270	El archivo de memoria es demasiado grande (más de 1 MB)
 3271	Las memorias son de solo lectura aquí
+3272	Mantener activo ADB inalámbrico
+3273	Mantiene disponible ADB inalámbrico mediante un socket Unix privado para recuperar Shizuku sin Wi-Fi si se detiene inesperadamente. Tras reiniciar el teléfono, conéctate una vez a Wi-Fi para activar Shizuku. Déjalo desactivado si no has tenido fallos al ejecutar comandos con privilegios.
+3274	Conexión ADB local lista
+3275	Preparando la conexión ADB local…
+3276	Android está usando otro puerto ADB.
+3277	Esperando la conexión ADB local. Tras reiniciar el teléfono, activa Shizuku primero por Wi-Fi.
+3278	ADB conectado. Esperando la autorización de Shizuku o que el sistema entregue sus credenciales.
+3279	Android no ha autorizado ADB local. Comprueba las autorizaciones de depuración y vuelve a emparejar si es necesario.
+3280	ADB local no está disponible temporalmente. Se reintentará automáticamente. Si se revocó la autorización de depuración, puedes volver a emparejar.
