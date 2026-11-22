@@ -69,7 +69,8 @@
       }
       return base;
     };
-    const nameOf = (id) => esc(modLabel(byId[id]) || id);
+    const rawNameOf = (id) => modLabel(byId[id]) || id;
+    const nameOf = (id) => esc(rawNameOf(id));
     const inst = items.filter((m) => m.state === "ok");
     $("mod-count").textContent = inst.length + "/" + items.length;
     ext.nMod = items.length; extSub();
@@ -90,7 +91,8 @@
       if (deps.length) desc += '<div class="tiny">' + t("依赖：{list}", { list: listOf(deps.map(nameOf)) }) + "</div>";
       if (m.kind === "shared" && (m.users || []).length) desc += '<div class="tiny">' + t("给这些模块用：{list}", { list: listOf(m.users.map(nameOf)) }) + "</div>";
       const ub = m.usedBy || {};   // 缺 usedBy 时不能让整个模块列表渲染失败、轮询也停（196 前端注入域）
-      const used = [...(ub.modules || []).map(nameOf), ...(ub.components || []).map((c) => esc(c)), ...(ub.pkgs || []).map((n) => "pkg " + esc(n))];
+      const usedRaw = [...(ub.modules || []).map(rawNameOf), ...(ub.components || []), ...(ub.pkgs || []).map((n) => "pkg " + n)];
+      const used = usedRaw.map(esc);
       if (used.length) desc += '<div class="tiny">' + t("正在用它的：{list}", { list: listOf(used) }) + "</div>";
       if (m.error) desc += '<div class="tiny err">' + esc(m.error) + "</div>";
       // 命令与包：点开看全部
@@ -111,10 +113,10 @@
         // 连同还没装的依赖一起算下载量
         const chain = [...deps.filter((d) => byId[d].state !== "ok"), m.id];
         size = MB(chain.reduce((s, id) => s + byId[id].download, 0));
-        acts = (m.state === "error" ? sdot("err", st) : "") + btn("install", m.id, ei("download") + (m.state === "error" ? t("重试") : t("安装")), ' class="btn sm"' + (chain.length > 1 ? ` data-chain="${esc(listOf(chain.map(nameOf)))}"` : ""));
+        acts = (m.state === "error" ? sdot("err", st) : "") + btn("install", m.id, ei("download") + (m.state === "error" ? t("重试") : t("安装")), ' class="btn sm"' + (chain.length > 1 ? ` data-chain="${esc(listOf(chain.map(rawNameOf)))}"` : ""));
       } else if (m.state === "downloading" || m.state === "verifying" || m.state === "installing") acts = sdot("warn", st) + (m.state === "installing" ? "" : btn("cancel", m.id, t("取消"), ' class="btn sm ghost"'));
       else if (m.state === "ok") acts = btn("toggle", m.id, modOff.has(m.id) ? t("启用") : t("停用"), ` class="btn sm ghost" data-on="${modOff.has(m.id) ? 1 : 0}" title="${esc(OFF_TIP())}"`)
-        + btn("remove", m.id, t("卸载"), ' class="btn sm ghost"' + (used.length ? ' data-usedby="' + listOf(used) + '"' : ""));
+        + btn("remove", m.id, t("卸载"), ' class="btn sm ghost"' + (usedRaw.length ? ` data-usedby="${esc(listOf(usedRaw))}"` : ""));
       const tag = m.required ? `<span class="tag">${ei("lock")}${t("必装")}</span>` : m.kind === "shared" ? `<span class="tag">${t("共享运行库")}</span>`
         : m.state === "ok" && modOff.has(m.id) ? `<span class="tag">${t("已停用")}</span>` : "";
       return rowItem(esc(modLabel(m) || m.id) + tag, '<span class="mono">' + (m.key || []).map(esc).join(" ") + "</span>",
@@ -553,7 +555,7 @@
     const fams = [];
     for (const m of r.items || []) if (!m.custom && !fams.includes(m.fam)) fams.push(m.fam);
     const custom = (r.items || []).filter((m) => m.custom);
-    const html = '<div class="tiny dim">' + t("模型放在 /sdcard/cccodroid/models，下好后到 设置 → 模型服务 → 端侧小模型 使用。本机内存 {ram} GB。都是 Q4_K_M 量化；手机上 1–4B 比较实用，超过 6B 会很慢。", { ram: r.ram || "?" }) + "</div>" +
+    const html = '<div class="tiny dim">' + t("模型放在 /sdcard/cccodroid/models，下好后到 设置 → 接口与型号 → 端侧小模型 使用。本机内存 {ram} GB。都是 Q4_K_M 量化；手机上 1–4B 比较实用，超过 6B 会很慢。", { ram: r.ram || "?" }) + "</div>" +
       (r.err ? '<div class="tiny err">' + esc(r.err) + "</div>" : "") +
       fams.map((f) => {
         const list = r.items.filter((m) => !m.custom && m.fam === f);

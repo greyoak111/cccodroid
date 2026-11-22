@@ -397,12 +397,12 @@ function modelFetch(e, urls) {
   if (cur && cur.phase !== "error") return;
   const dir = modelDir(), dst = path.join(dir, e.id + ".gguf"), part = dst + ".part";
   if (fs.existsSync(dst)) throw new Error(tz("已经有同名模型了"));
-  const job = { phase: "downloading", done: 0, total: e.bytes || 0, err: "", cancelled: false, child: null, url: e.url || "",
-    part, meta };   // 失败后「移除」要能把半截文件和来源标记一起删掉（0.6.9 审计 195-F.3）
-  MDL.set(e.id, job);
   // 半截文件只按文件名对上不够：同名换了链接（内容不同）还续传，就成了前半 A、后半 B 的拼接，GGUF 头照样过（审查 B25）。
   // 旁边记一笔来源（目录里的按 sha256，没有就按链接），对不上先删掉半截从头下
   const meta = part + ".src", src = e.sha256 ? "sha256:" + e.sha256 : "url:" + (e.url || urls[0] || "");
+  const job = { phase: "downloading", done: 0, total: e.bytes || 0, err: "", cancelled: false, child: null, url: e.url || "",
+    part, meta };   // 失败后「移除」要能把半截文件和来源标记一起删掉（0.6.9 审计 195-F.3）
+  MDL.set(e.id, job);
   let had = ""; try { had = fs.readFileSync(meta, "utf8"); } catch {}
   if (had !== src) { try { fs.rmSync(part, { force: true }); } catch {} }
   try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(meta, src); } catch {}

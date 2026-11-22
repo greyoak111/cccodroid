@@ -1488,8 +1488,8 @@ public class MainActivity extends Activity {
     private void pushInsets() {
         if (web == null) return;
         float d = getResources().getDisplayMetrics().density;
-        web.evaluateJavascript("document.documentElement.style.setProperty('--safe-t','" + insetTop / d + "px');"
-            + "document.documentElement.style.setProperty('--safe-b','" + insetBot / d + "px')", null);
+        web.evaluateJavascript(guarded("pushInsets", "var r=document.documentElement;if(r){r.style.setProperty('--safe-t','" + insetTop / d + "px');"
+            + "r.style.setProperty('--safe-b','" + insetBot / d + "px')}"), null);
         pushFold();
     }
     /** 折痕交给页面：html[data-fold=none|flat|half]、data-fold-dir=v（竖折痕，左右分）|h（横折痕，上下分），
@@ -1772,7 +1772,8 @@ public class MainActivity extends Activity {
                 return shouldOverrideUrlLoading(v, req.getUrl().toString());
             }
             @Override public boolean shouldOverrideUrlLoading(WebView v, String url) {
-                // 网关起不来时的等待页 / 拦截页上的两个自救链接（页面不许跑脚本，只能靠跳转）。都只是弹原生对话框，谁点的都一样要用户确认
+                // 网关起不来时的等待页 / 拦截页上的自救链接（页面不许跑脚本，只能靠跳转）。重置 / 诊断弹原生对话框确认；重试清限流再连
+                if (RESCUE_RETRY.equals(url)) { java.util.Arrays.fill(recoverAt, 0); recovering = false; recoverGateway(true); return true; }
                 if (RESCUE_RESET.equals(url)) { askFactoryReset(); return true; }
                 if (RESCUE_LOGS.equals(url)) { stuck.performClick(); return true; }
                 if (isOwnGateway(url)) return false;
@@ -1977,9 +1978,10 @@ public class MainActivity extends Activity {
                 boolean ok = false;
                 try {
                     java.net.HttpURLConnection c = Env.gateway("/api/file?path=" + Uri.encode(p));
-                    c.setConnectTimeout(3000); c.setReadTimeout(3000);
-                    ok = c.getResponseCode() == 200;
-                    c.disconnect();
+                    try {
+                        c.setConnectTimeout(3000); c.setReadTimeout(3000);
+                        ok = c.getResponseCode() == 200;
+                    } finally { c.disconnect(); }
                 } catch (Exception ignored) {}
                 final boolean pass = ok;
                 ui.post(() -> { if (pass) startSaveAs(p, new File(p).getName(), mime); else savedJs(false, "forbidden"); });
@@ -2029,7 +2031,8 @@ public class MainActivity extends Activity {
             // 回退设备上界面就在 127.0.0.1（Env.checkHost），清的是旧版留在 127.0.0.2 上的死值（复核报告发现 #2）
             cm.setCookie("http://" + ("127.0.0.1".equals(Env.HOST) ? "127.0.0.2" : "127.0.0.1") + ":" + Env.PORT, "cc_t_" + Env.PORT + "=; Path=/; Max-Age=0");
             cm.flush();
-            if (squatShown || waitingShown) { squatShown = false; waitingShown = false; loadUi(); }
+            // loadUi() 自己跑 proveGateway() 也会触发 onBoot：在途时由 loadUi() 收口，避免在 waitingShown 清零前自递归双加载
+            if ((squatShown || waitingShown) && !uiLoading) { squatShown = false; waitingShown = false; loadUi(); }
         });
         // 守护线程核过 /proc、确认端口被别的应用占着：正开着的界面（或等待页）换成说明页；网关起来后（onBoot）再接回界面
         GatewayService.onSquat = mySquat = () -> ui.post(() -> { if (web != null && !squatShown && (waitingShown || isOwnGateway(web.getUrl()))) showSquatted(); });
@@ -2151,8 +2154,11 @@ public class MainActivity extends Activity {
     }
     private String waitingHtml() {
         boolean night = systemNight();
+        String link = night ? "#8fb4ff" : "#2a5db0";
         return "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><body style=\"margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font:15px sans-serif;"
-            + (night ? "background:#1b1b1b;color:#bbb" : "background:#fafafa;color:#555") + "\"><div style=\"text-align:center\">" + android.text.TextUtils.htmlEncode(Tr.t("等待网关…")) + rescueLinks(night ? "#8fb4ff" : "#2a5db0") + "</div></body>";
+            + (night ? "background:#1b1b1b;color:#bbb" : "background:#fafafa;color:#555") + "\"><div style=\"text-align:center\">" + android.text.TextUtils.htmlEncode(Tr.t("等待网关…"))
+            + "<p style=\"font-size:14px;margin-top:20px\"><a style=\"color:" + link + "\" href=\"" + RESCUE_RETRY + "\">" + android.text.TextUtils.htmlEncode(Tr.t("重新载入")) + "</a></p>"
+            + rescueLinks(link) + "</div></body>";
     }
     private android.webkit.WebResourceResponse waitingPage() {
         java.util.Map<String, String> h = new java.util.HashMap<>();
@@ -2176,16 +2182,23 @@ public class MainActivity extends Activity {
         loadUi();
     }
 
+    private final java.util.concurrent.atomic.AtomicInteger uiLoadGen = new java.util.concurrent.atomic.AtomicInteger();
+    private volatile boolean uiLoading;
+
     /** 打开界面。地址里带着令牌和桥口令，先在后台核网关身份，过了才交出去（审查 S1）；
      *  端口上没人在听就照旧打开（只会显示连不上，什么也漏不出去）；有人在听却证明不了自己，换成一页说明 */
     private void loadUi() {
+        final int gen = uiLoadGen.incrementAndGet();
+        uiLoading = true;
         new Thread(() -> {
             Env.resetBoot();       // 这一次核身份一定回调 onBoot，种好 Cookie 再加载（onBoot 的 post 排在下面 loadUrl 前面）
             boolean proved = Env.proveGateway();
             int decision = uiPageDecision(proved, !proved && Env.portBusy(), GatewayService.gwBlocked != null);
             ui.post(() -> {
+                if (gen != uiLoadGen.get()) return;
+                uiLoading = false;
                 if (web == null) return;
-                if (decision == UI_LOAD) { waitingShown = false; web.loadUrl(Env.uiUrl()); return; }
+                if (decision == UI_LOAD) { squatShown = false; waitingShown = false; web.loadUrl(Env.uiUrl()); return; }
                 // 运行库对不上：原因已经确定，直接给说明页
                 if (decision == UI_SQUAT) { showSquatted(); return; }
                 // 端口上有人答话、但这次启动证明不了它：先停在「等待网关」。
@@ -2228,7 +2241,7 @@ public class MainActivity extends Activity {
     private boolean squatShown;
 
     // ── 恢复初始设置（FactoryReset）：入口在设置页排障栏、启动页「我卡住了」、网关起不来时的等待页 ──
-    private static final String RESCUE_RESET = "cccodroid-rescue:reset", RESCUE_LOGS = "cccodroid-rescue:logs";
+    private static final String RESCUE_RETRY = "cccodroid-rescue:retry", RESCUE_RESET = "cccodroid-rescue:reset", RESCUE_LOGS = "cccodroid-rescue:logs";
     private static String rescueLinks(String color) {
         String a = "style=\"color:" + color + ";display:inline-block;margin:10px 12px 0\"";
         return "<p style=\"font-size:14px;margin-top:28px\"><a " + a + " href=\"" + RESCUE_LOGS + "\">" + android.text.TextUtils.htmlEncode(Tr.t("我卡住了：分享诊断")) + "</a>"
@@ -2416,7 +2429,7 @@ public class MainActivity extends Activity {
             pane = new BrowserPane(this, new BrowserPane.Host() {
                 @Override public void onPaneClose() { closePane(true); }
                 // json 已经是 evaluateJavascript 编好的 JS 字符串字面量，原样当参数传，界面那边再 JSON.parse、只取文字
-                @Override public void onPicked(String json) { if (web != null) web.evaluateJavascript("window.__ccPickIn&&__ccPickIn(" + json + ")", null); }
+                @Override public void onPicked(String json) { if (web != null) web.evaluateJavascript(guarded("__ccPickIn", "window.__ccPickIn&&__ccPickIn(" + json + ")"), null); }
             }, 9);
             pane.setVisibility(View.GONE);               // 等页面报来位置再显示，免得先闪一下全屏
             root.addView(pane, new FrameLayout.LayoutParams(0, 0));

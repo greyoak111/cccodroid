@@ -430,7 +430,7 @@ export function reapComponentRuns() {
       // 记录仍是 installing 的留给 compRecover 收，它需要心跳文件作「另一任网关还活着」的判断
       let j = null; try { j = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
       if (j && Number.isInteger(j.gw) && j.gw !== process.pid) { try { process.kill(j.gw, 0); continue; } catch {} }
-      const rec = compRecord(f.slice(0, -12));
+      const rec = compRecord(f.slice(0, -".installing".length));
       if (!rec || rec.state !== "installing") { try { fs.rmSync(p, { force: true }); } catch {} }
       continue;
     }
@@ -1095,8 +1095,28 @@ async function compRunInstall(id, b, job) {
   // 解包失败就把压缩包也删了：下次重试从头下载，不再拿同一份去撞
   // 解之前按目录查：MANIFEST 在包里、解完才核，经包内软链写到暂存区外面的条目那时已经落地了（v0514 审查低-2）
   try {
-    const list = await new Promise((ok, no) => execFile(path.join(PREFIX, "bin", "tar"), ["-tzv", "--quoting-style=c", "-f", gz],
-      { maxBuffer: 256 << 20 }, (e, out) => e ? no(e) : ok(String(out))));
+    const list = await new Promise((resolve, reject) => {
+      const cmd = path.join(PREFIX, "bin", "tar"), args = ["-tzv", "--quoting-style=c", "-f", gz];
+      const child = spawn(cmd, args, { env: termEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true });
+      job.child = child;
+      const mark = markChild(child, cmd, args);
+      const chunks = [];
+      let bytes = 0, err = "", overflow = false;
+      child.stdout.on("data", (d) => {
+        bytes += d.length;
+        if (bytes > (256 << 20)) { overflow = true; killTree(child); return; }
+        chunks.push(d);
+      });
+      child.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
+      child.on("error", (e) => { job.child = null; unmarkChild(mark); reject(e); });
+      child.on("exit", (code) => {
+        job.child = null; unmarkChild(mark);
+        if (job.cancelled) return reject(new Error("cancelled"));
+        if (overflow) return reject(new Error("tar listing too large"));
+        if (code !== 0) return reject(new Error(err.trim() || `tar exit ${code}`));
+        resolve(Buffer.concat(chunks).toString("utf8"));
+      });
+    });
     const bad = archiveProblem(parseTarListing(list));
     if (bad) throw new Error(tz("这个压缩包里有条目会写到包外面（{p}），为安全起见不解开", { p: String(bad.name).slice(0, 200) }));
     await compRun(job, path.join(PREFIX, "bin", "tar"), ["-xzf", gz, "-C", tree]);

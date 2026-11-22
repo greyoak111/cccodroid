@@ -135,39 +135,54 @@ public class GatewayService extends Service {
      * 顺带看「划掉时在跑、跑完再停」（onTaskRemoved）。
      */
     private void watchFreeze() {
-        Thread t = new Thread(() -> {
-            android.content.SharedPreferences sp = getSharedPreferences("bg", MODE_PRIVATE);
-            int idle = 0;
-            while (!stopping) {
-                long t0 = android.os.SystemClock.uptimeMillis();
-                sleep(2000);
-                // 界面开着就是用户在用它：把「跑完就停」作罢。闹钟 / 粘性重建拉起时界面恰好开着、之后按 Home
-                // 退到后台（没划掉）也不会被当成空闲退出（0.6.9 审计 13-01）
-                if (MainActivity.appForeground()) closeWhenIdle = false;
-                // 划掉时在跑的任务跑完了：连着三次（约 6 秒）都空闲才停，免得撞上队列里下一条、/goal 下一轮开跑前的空档
-                if (idleGrace > 0) { idleGrace--; idle = 0; }
-                else idle = closeWhenIdle && !busy() ? idle + 1 : 0;
-                if (idle >= 3) {
-                    // 标记文件可能没写上（存储满）或没来得及更新：真要停之前直接问一次网关。
-                    // 问不到（网关没起来）才算空闲；网关起着说还有轮次 / 排队，就接着保活（0.6.9 审计 13-03）
-                    if (Updater.gatewayBusy()) { idle = 0; continue; }
-                    // 问的这几秒里用户可能又把界面打开了：那就不算「划掉」
-                    if (closeWhenIdle && !MainActivity.appForeground()) { Log.i(TAG, "划掉时在跑的任务跑完了，停止服务"); shutdown(); break; }
-                    idle = 0;
+        synchronized (life) {
+            if (freezeWatcher != null && freezeWatcher.isAlive()) return;
+            Thread t = new Thread(() -> {
+                android.content.SharedPreferences sp = getSharedPreferences("bg", MODE_PRIVATE);
+                int idle = 0;
+                try {
+                    for (;;) {
+                        while (!stopping) {
+                            long t0 = android.os.SystemClock.uptimeMillis();
+                            sleep(2000);
+                            // 界面开着就是用户在用它：把「跑完就停」作罢。闹钟 / 粘性重建拉起时界面恰好开着、之后按 Home
+                            // 退到后台（没划掉）也不会被当成空闲退出（0.6.9 审计 13-01）
+                            if (MainActivity.appForeground()) closeWhenIdle = false;
+                            // 划掉时在跑的任务跑完了：连着三次（约 6 秒）都空闲才停，免得撞上队列里下一条、/goal 下一轮开跑前的空档
+                            if (idleGrace > 0) { idleGrace--; idle = 0; }
+                            else idle = closeWhenIdle && !busy() ? idle + 1 : 0;
+                            if (idle >= 3) {
+                                // 标记文件可能没写上（存储满）或没来得及更新：真要停之前直接问一次网关。
+                                // 问不到（网关没起来）才算空闲；网关起着说还有轮次 / 排队，就接着保活（0.6.9 审计 13-03）
+                                if (Updater.gatewayBusy()) { idle = 0; continue; }
+                                // 问的这几秒里用户可能又把界面打开了：那就不算「划掉」
+                                if (closeWhenIdle && !MainActivity.appForeground()) { Log.i(TAG, "划掉时在跑的任务跑完了，停止服务"); shutdown(); break; }
+                                idle = 0;
+                            }
+                            long gap = android.os.SystemClock.uptimeMillis() - t0 - 2000;
+                            if (gap > 15_000) {
+                                Log.w(TAG, "被冻结了约 " + gap / 1000 + " 秒");
+                                // 空闲时被冻无害，只记跑任务时的那种（标记文件由网关在任务开始/结束时增删）
+                                if (!new File(env.home, ".run-active").exists()) continue;
+                                sp.edit().putLong("frozenAt", System.currentTimeMillis()).putLong("frozenMs", gap)
+                                    .putInt("frozenCount", sp.getInt("frozenCount", 0) + 1).apply();
+                            }
+                        }
+                        // 退出前在锁内复核：停机后秒重拉会把 stopping 复位，避免旧线程未退完导致 onStartCommand 漏起新线程
+                        synchronized (life) {
+                            if (!stopping && freezeWatcher == Thread.currentThread()) continue;
+                            if (freezeWatcher == Thread.currentThread()) freezeWatcher = null;
+                            return;
+                        }
+                    }
+                } finally {
+                    synchronized (life) { if (freezeWatcher == Thread.currentThread()) freezeWatcher = null; }
                 }
-                long gap = android.os.SystemClock.uptimeMillis() - t0 - 2000;
-                if (gap > 15_000) {
-                    Log.w(TAG, "被冻结了约 " + gap / 1000 + " 秒");
-                    // 空闲时被冻无害，只记跑任务时的那种（标记文件由网关在任务开始/结束时增删）
-                    if (!new File(env.home, ".run-active").exists()) continue;
-                    sp.edit().putLong("frozenAt", System.currentTimeMillis()).putLong("frozenMs", gap)
-                        .putInt("frozenCount", sp.getInt("frozenCount", 0) + 1).apply();
-                }
-            }
-        }, "freeze-watch");
-        t.setDaemon(true);
-        freezeWatcher = t;
-        t.start();
+            }, "freeze-watch");
+            t.setDaemon(true);
+            freezeWatcher = t;
+            t.start();
+        }
     }
 
     @Override public int onStartCommand(Intent i, int flags, int id) {
@@ -181,27 +196,27 @@ public class GatewayService extends Service {
         // 粘性重建出来的服务紧接着又被冻住，通知卡在「正在启动…」（红魔，11-03 用户反馈）。
         // 定时任务不靠这个：到点由系统闹钟（SchedAlarm）拉起；下次打开界面也会拉起
         if (i == null && !busy()) { Log.i(TAG, "粘性重建时没有任务在跑，不再拉起"); shutdown(); return START_NOT_STICKY; }
-        // 上一次 shutdownIfIdle 可能还在锁外等 killGateway（最多 5 秒）或尚未 onDestroy：
-        // 系统复用同一个 Service 实例回调 onStartCommand，必须复位 stopping，否则新起的 supervise 会立即退出、
-        // shutdownIfIdle 收尾也会把刚拉起的服务停掉
-        synchronized (life) {
-            if (stopping) {
-                stopping = false;
-                lifeGen++;
-            }
-        }
-        // 开机重新激活 Shizuku 也只认自己的开机广播带来的口令（11-01 独立审查低-6）
         // 有人明确要服务（打开界面、闹钟、开机）：划掉时记的「跑完就停」作罢。口令对不上的 STOP 不算（服务是导出的，审查 0601b）
         if (i != null && !ACTION_STOP.equals(i.getAction())) closeWhenIdle = false;
         // 系统闹钟叫醒的、系统粘性重建的，都不是用户在盯着界面：跑到点该跑的任务就自己退，不常驻、不占着 WakeLock。
         // 给约 60 秒宽限，等网关起来、任务进队列（.run-active 落盘）再开始数空闲（0.6.9 审计 13-01）
         if (i == null || ACTION_ALARM.equals(i.getAction())) { closeWhenIdle = true; idleGrace = 30; }
-        if (i != null && ACTION_BOOT.equals(i.getAction()) && mine) ShizukuSetup.get(this).reactivateAsync(true);
-        if (freezeWatcher == null || !freezeWatcher.isAlive()) watchFreeze();
-        if (supervisor == null || !supervisor.isAlive()) {
-            supervisor = new Thread(this::supervise, "gateway-supervisor");
-            supervisor.start();
+        // 上一次 shutdownIfIdle 可能还在锁外等 killGateway（最多 5 秒）或尚未 onDestroy：
+        // 系统复用同一个 Service 实例回调 onStartCommand，必须在同一把 life 锁里复位 stopping 并确保看护线程在线，
+        // 避免旧线程刚跳出 while (!stopping) 但尚未完全结束（isAlive() 仍为 true）导致漏起新线程、服务永久卡死在「等待网关…」
+        synchronized (life) {
+            if (stopping) {
+                stopping = false;
+                lifeGen++;
+            }
+            if (freezeWatcher == null || !freezeWatcher.isAlive()) watchFreeze();
+            if (supervisor == null || !supervisor.isAlive()) {
+                supervisor = new Thread(this::supervise, "gateway-supervisor");
+                supervisor.start();
+            }
         }
+        // 开机重新激活 Shizuku 也只认自己的开机广播带来的口令（11-01 独立审查低-6）
+        if (i != null && ACTION_BOOT.equals(i.getAction()) && mine) ShizukuSetup.get(this).reactivateAsync(true);
         // 被系统回收后自动重建（Android 会带空 intent 重启服务）
         return START_STICKY;
     }
@@ -288,54 +303,66 @@ public class GatewayService extends Service {
     private void supervise() {
         long backoff = 1000;
         String why = null;
-        while (!stopping) {
-            if (paused) { String w = pauseWhy; update(w != null ? w : Tr.t("正在更新开发工具包…")); sleep(1000); continue; }
-            if (!env.devkitReady()) { update(Tr.t("工具链未安装")); sleep(3000); continue; }
-            // 走到这里的是接手的网关（不是本服务拉起的，拉起的在下面 waitFor 里，一退出就作废核身份缓存）：
-            // 2 秒看一次，缩短它挂掉到发现端口换了人之间的空档（审查 10-30 第九份 中5）
-            if (alive()) { update(Tr.t("运行中 · 127.0.0.1:") + Env.PORT); sleep(2000); continue; }
-            int sq = squatted();
-            if (sq == SQUAT_ADOPTED || sq == SQUAT_WAIT) { sleep(500); continue; }   // 真网关起来了 / 残留网关在安装：回循环顶部让 alive() 再判断，别抢端口、别杀它
-            if (sq == SQUAT_HIJACKED) {
-                update(Tr.f("端口 {0} 被别的应用占着，网关起不来。重启手机，或卸载最近装的可疑应用", Env.PORT));
-                Env.resetBoot();
-                Runnable cb = onSquat;
-                if (cb != null) cb.run();
-                sleep(10000); continue;      // 照旧每 10 秒再看一次，占用的走了就起网关
+        try {
+            for (;;) {
+                while (!stopping) {
+                    if (paused) { String w = pauseWhy; update(w != null ? w : Tr.t("正在更新开发工具包…")); sleep(1000); continue; }
+                    if (!env.devkitReady()) { update(Tr.t("工具链未安装")); sleep(3000); continue; }
+                    // 走到这里的是接手的网关（不是本服务拉起的，拉起的在下面 waitFor 里，一退出就作废核身份缓存）：
+                    // 2 秒看一次，缩短它挂掉到发现端口换了人之间的空档（审查 10-30 第九份 中5）
+                    if (alive()) { update(Tr.t("运行中 · 127.0.0.1:") + Env.PORT); sleep(2000); continue; }
+                    int sq = squatted();
+                    if (sq == SQUAT_ADOPTED || sq == SQUAT_WAIT) { sleep(500); continue; }   // 真网关起来了 / 残留网关在安装：回循环顶部让 alive() 再判断，别抢端口、别杀它
+                    if (sq == SQUAT_HIJACKED) {
+                        update(Tr.f("端口 {0} 被别的应用占着，网关起不来。重启手机，或卸载最近装的可疑应用", Env.PORT));
+                        Env.resetBoot();
+                        Runnable cb = onSquat;
+                        if (cb != null) cb.run();
+                        sleep(10000); continue;      // 照旧每 10 秒再看一次，占用的走了就起网关
+                    }
+                    long t0 = System.currentTimeMillis();
+                    try {
+                        spawnGateway();
+                        update(Tr.t("运行中 · 127.0.0.1:") + Env.PORT);
+                        // 有界等待 + 身份检查交替：以前这里是无界 waitFor()，自己拉起的网关活着但卡死 / 失联时
+                        // 永远走不到循环顶部的 alive()，只能等它自己退出（BUG-A01）
+                        int rc = waitGatewayExit();
+                        if (stopping) break;
+                        Env.resetBoot();             // 网关没了：上一次核身份的缓存作废，别在 3 秒内把签名请求交给接手端口的人
+                        why = exitWhy(rc);
+                        Log.w(TAG, "网关退出 rc=" + rc + (why != null ? "：" + why : ""));
+                    } catch (Cancelled e) {
+                        // 准备期间服务被停掉 / 停住（更新工具包）：这次不启动，回循环顶部按最新状态再判断（BUG-A03）
+                        continue;
+                    } catch (GwUnavailable e) {
+                        Log.e(TAG, "网关运行库对不上，不起网关：" + e.getMessage());
+                        gwBlocked = Tr.f("网关自己的运行库和安装包对不上，为了安全没有启动网关：{0}\n\n联网后会自动再试；一直不行请重装 cccodroid", e.getMessage());
+                        Runnable cb = onSquat;
+                        if (cb != null) cb.run();
+                        if (stopping) break;
+                        backoff = Math.min(Math.max(backoff, 15000) * 2, 300000);
+                        update(Tr.t("网关运行库对不上，网关没有启动"));
+                        sleep(backoff);
+                        continue;
+                    } catch (Exception e) {
+                        Log.e(TAG, "网关启动失败", e);
+                    }
+                    if (stopping) break;
+                    backoff = System.currentTimeMillis() - t0 > 60000 ? 1000 : Math.min(backoff * 2, 60000);
+                    // 反复退出时用户多半拿不到日志（界面停在「等待网关」页）：把这次退出的原因带进通知，截个图就能定位（11-07 升级后网关起不来）
+                    update(why != null ? Tr.f("网关已退出：{0}，{1} 秒后重启", why, backoff / 1000) : Tr.f("网关已退出，{0} 秒后重启", backoff / 1000));
+                    why = null;
+                    sleep(backoff);
+                }
+                // 退出前在锁内复核：停机后秒重拉会把 stopping 复位，避免旧线程未退完导致 onStartCommand 漏起新看护线程
+                synchronized (life) {
+                    if (!stopping && supervisor == Thread.currentThread()) continue;
+                    if (supervisor == Thread.currentThread()) supervisor = null;
+                    return;
+                }
             }
-            long t0 = System.currentTimeMillis();
-            try {
-                spawnGateway();
-                update(Tr.t("运行中 · 127.0.0.1:") + Env.PORT);
-                // 有界等待 + 身份检查交替：以前这里是无界 waitFor()，自己拉起的网关活着但卡死 / 失联时
-                // 永远走不到循环顶部的 alive()，只能等它自己退出（BUG-A01）
-                int rc = waitGatewayExit();
-                if (stopping) break;
-                Env.resetBoot();             // 网关没了：上一次核身份的缓存作废，别在 3 秒内把签名请求交给接手端口的人
-                why = exitWhy(rc);
-                Log.w(TAG, "网关退出 rc=" + rc + (why != null ? "：" + why : ""));
-            } catch (Cancelled e) {
-                // 准备期间服务被停掉 / 停住（更新工具包）：这次不启动，回循环顶部按最新状态再判断（BUG-A03）
-                continue;
-            } catch (GwUnavailable e) {
-                Log.e(TAG, "网关运行库对不上，不起网关：" + e.getMessage());
-                gwBlocked = Tr.f("网关自己的运行库和安装包对不上，为了安全没有启动网关：{0}\n\n联网后会自动再试；一直不行请重装 cccodroid", e.getMessage());
-                Runnable cb = onSquat;
-                if (cb != null) cb.run();
-                if (stopping) break;
-                backoff = Math.min(Math.max(backoff, 15000) * 2, 300000);
-                update(Tr.t("网关运行库对不上，网关没有启动"));
-                sleep(backoff);
-                continue;
-            } catch (Exception e) {
-                Log.e(TAG, "网关启动失败", e);
-            }
-            if (stopping) break;
-            backoff = System.currentTimeMillis() - t0 > 60000 ? 1000 : Math.min(backoff * 2, 60000);
-            // 反复退出时用户多半拿不到日志（界面停在「等待网关」页）：把这次退出的原因带进通知，截个图就能定位（11-07 升级后网关起不来）
-            update(why != null ? Tr.f("网关已退出：{0}，{1} 秒后重启", why, backoff / 1000) : Tr.f("网关已退出，{0} 秒后重启", backoff / 1000));
-            why = null;
-            sleep(backoff);
+        } finally {
+            synchronized (life) { if (supervisor == Thread.currentThread()) supervisor = null; }
         }
     }
 

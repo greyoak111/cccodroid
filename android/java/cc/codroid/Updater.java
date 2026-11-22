@@ -960,7 +960,7 @@ final class Updater {
                 prefs().edit().remove("appStaged").apply();
             }
             it.set("error", e.getMessage());
-            if (it == devkit) releaseApp();
+            if (it == devkit) { repairing = false; releaseApp(); }
         }
     }
 
@@ -1257,8 +1257,15 @@ final class Updater {
     /** 修复：把已装的那一版（不知道是哪版就用本 APK 内置的那版）重新下载、重装。用户自装的 pip / npm 包照常保留 */
     JSONObject repair() {
         JSONObject r = new JSONObject();
+        synchronized (this) {
+            if (devkitMoving()) {
+                try { return r.put("ok", true).put("message", Tr.t("进行中")); } catch (Exception ignored) { return r; }
+            }
+            devkit.set("downloading", "");
+            repairing = true;
+        }
+        boolean started = false;
         try {
-            if (devkitMoving()) return r.put("ok", true).put("message", Tr.t("进行中"));
             String base = installedDevkitBase();
             if (base.isEmpty()) base = pinnedDevkitBase();
             boolean modular = new Installer(env, null).readModules() != null;
@@ -1266,7 +1273,9 @@ final class Updater {
             byte[] lockBytes = null;
             if (pin != null && base.equals(pin.optString("base")) && pin.optJSONObject("gz") != null) lock = pin;
             else {
-                lockBytes = Installer.httpGetSmall(base + "devkit.lock.json");
+                byte[][] got = new byte[1][];
+                fetchDevkitFile(base, "devkit.lock.json", got);
+                lockBytes = got[0];
                 lock = new JSONObject(new String(lockBytes, StandardCharsets.UTF_8));
                 // 整包重装同样要清单可信（审查 H3）：没签名的整包旧版，改装本 APK 钉的那版
                 if (!modular && !lockSigned(base, lockBytes) && pin != null && pin.optJSONObject("gz") != null) {
@@ -1289,15 +1298,22 @@ final class Updater {
                 dropDevkitPlan();   // 同 checkDevkit：没核实的地址别留着给后面的「更新」「重试」用（审查 A5）
                 return r.put("ok", false).put("message", Tr.f("{0} 的工具包清单没核实成（签名对不上或没取到）；过会儿再试", tagOf(base)));
             }
-            devkit.set("available", Tr.t("修复：重装 ") + devkit.latest);
-            repairing = true;
+            devkit.set("downloading", Tr.t("修复：重装 ") + devkit.latest);
             Ledger.add(env, "repair", true, Tr.t("开始修复：重新下载 ") + devkit.latest, null);
             new Thread(() -> download(devkit, true), "upd-dl-devkit").start();
+            started = true;
             return r.put("ok", true).put("message", Tr.f("开始下载 {0} 用于修复", devkit.latest));
         } catch (Exception e) {
             Ledger.add(env, "repair", false, Tr.t("修复没开始：") + e.getMessage(), null);
             try { r.put("ok", false).put("message", Tr.t("修复没开始：") + e.getMessage()); } catch (Exception ignored) {}
             return r;
+        } finally {
+            if (!started) {
+                synchronized (this) {
+                    repairing = false;
+                    if ("downloading".equals(devkit.state)) devkit.set("error", r.optString("message", ""));
+                }
+            }
         }
     }
 

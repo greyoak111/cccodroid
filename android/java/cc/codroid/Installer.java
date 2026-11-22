@@ -324,9 +324,13 @@ final class Installer {
         for (int i = 0; i < S.length; i++) {
             final long[] sg = S[i];
             ts[i] = new Thread(() -> {
-                for (int a = 0; sg[2] < sg[1] - sg[0] + 1; a++) {
-                    try { fetchPiece(url, part, sg); }
+                for (int a = 0; !Thread.currentThread().isInterrupted(); a++) {
+                    long done, total;
+                    synchronized (S) { done = sg[2]; total = sg[1] - sg[0] + 1; }
+                    if (done >= total) break;
+                    try { fetchPiece(url, part, sg, S); }
                     catch (IOException e) {
+                        if (Thread.currentThread().isInterrupted()) return;
                         if (a >= 2) { synchronized (err) { if (err[0] == null) err[0] = e; } return; }
                         try { Thread.sleep(2000L * (a + 1)); } catch (InterruptedException ie) { return; }
                     }
@@ -334,14 +338,22 @@ final class Installer {
             }, "seg-" + i);
             ts[i].start();
         }
-        for (boolean alive = true; alive; ) {
-            alive = false;
-            for (Thread t : ts) { try { t.join(1000); } catch (InterruptedException e) { throw new IOException(e); } alive |= t.isAlive(); }
-            saveSegs(segF, S);
-            long left = 0; for (long[] sg : S) left += sg[1] - sg[0] + 1 - sg[2];
-            ui.bytes(size - left, size);
+        try {
+            for (boolean alive = true; alive; ) {
+                alive = false;
+                for (Thread t : ts) { t.join(1000); alive |= t.isAlive(); }
+                saveSegs(segF, S);
+                long left = 0;
+                synchronized (S) { for (long[] sg : S) left += sg[1] - sg[0] + 1 - sg[2]; }
+                ui.bytes(size - left, size);
+            }
+        } catch (InterruptedException e) {
+            for (Thread t : ts) t.interrupt();
+            for (Thread t : ts) { try { t.join(500); } catch (InterruptedException ignored) {} }
+            Thread.currentThread().interrupt();
+            throw new IOException(e);
         }
-        if (err[0] != null) throw err[0];
+        synchronized (err) { if (err[0] != null) throw err[0]; }
         segF.delete();
     }
 
@@ -352,9 +364,12 @@ final class Installer {
     }
 
     /** 下一段：从 sg 已下的位置接着要到段尾，按偏移写进 part */
-    private static void fetchPiece(String url, File part, long[] sg) throws IOException {
+    private static void fetchPiece(String url, File part, long[] sg, Object lock) throws IOException {
+        long start, end, done;
+        synchronized (lock) { start = sg[0]; end = sg[1]; done = sg[2]; }
+        long total = end - start + 1;
         HttpURLConnection c = open(url);
-        c.setRequestProperty("Range", "bytes=" + (sg[0] + sg[2]) + "-" + sg[1]);
+        c.setRequestProperty("Range", "bytes=" + (start + done) + "-" + end);
         try {
             if (code(c, url) != 206) throw new IOException("HTTP " + c.getResponseCode());
             try (InputStream in = new BufferedInputStream(c.getInputStream(), 1 << 16);
@@ -362,16 +377,18 @@ final class Installer {
                 byte[] buf = new byte[1 << 16];
                 Slow slow = new Slow();
                 for (int r; (r = in.read(buf)) > 0; ) {
+                    if (Thread.currentThread().isInterrupted()) throw new IOException("interrupted");
                     slow.add(r);
-                    long room = sg[1] - sg[0] + 1 - sg[2];
+                    long room = total - done;
                     int n = (int) Math.min(r, room);
-                    raf.seek(sg[0] + sg[2]);
+                    raf.seek(start + done);
                     raf.write(buf, 0, n);
-                    sg[2] += n;
-                    if (sg[2] >= sg[1] - sg[0] + 1) break;
+                    done += n;
+                    synchronized (lock) { sg[2] = done; }
+                    if (done >= total) break;
                 }
             }
-            if (sg[2] < sg[1] - sg[0] + 1) throw new IOException(Tr.t("连接提前结束"));
+            if (done < total) throw new IOException(Tr.t("连接提前结束"));
         } finally { c.disconnect(); }
     }
 
@@ -476,16 +493,17 @@ final class Installer {
     void installDevkit(String source, String base, String sha, String tarSha) throws IOException {
         // 本地文件没给 sha：自己算一个。已装记录里有了内容身份，更新检查才不会把它误认成别的版本
         if (sha == null && !source.startsWith("http")) { ui.step(Tr.t("计算工具包校验和…")); sha = sha256(new File(source)); }
-        InputStream raw; long total;
         if (source.startsWith("http")) {
-            HttpURLConnection c = (HttpURLConnection) new URL(source).openConnection();
-            c.setInstanceFollowRedirects(true);
-            raw = c.getInputStream(); total = c.getContentLengthLong();
+            HttpURLConnection c = open(source);
+            try {
+                int rc = code(c, source);
+                if (rc != 200) throw new IOException("HTTP " + rc);
+                installDevkit(c.getInputStream(), c.getContentLengthLong(), source.endsWith(".gz"), base, sha, tarSha);
+            } finally { c.disconnect(); }
         } else {
             File f = new File(source);
-            raw = new FileInputStream(f); total = f.length();
+            installDevkit(new FileInputStream(f), f.length(), source.endsWith(".gz"), base, sha, tarSha);
         }
-        installDevkit(raw, total, source.endsWith(".gz"), base, sha, tarSha);
     }
 
     /** 本地文件（系统文件选择器给的 content://）的来源：要读两遍（先认身份、再解包），所以给个能重开的入口 */
@@ -530,16 +548,24 @@ final class Installer {
     String extractInto(File dir, InputStream raw, long total, boolean gzip, String tarSha) throws IOException {
         Counting in = new Counting(new BufferedInputStream(raw, 1 << 20), total);
         MessageDigest md;
-        try { md = MessageDigest.getInstance("SHA-256"); } catch (java.security.NoSuchAlgorithmException e) { throw new IOException(e); }
-        java.security.DigestInputStream s = new java.security.DigestInputStream(gzip ? new GZIPInputStream(in, 1 << 16) : in, md);
+        try { md = MessageDigest.getInstance("SHA-256"); } catch (java.security.NoSuchAlgorithmException e) {
+            try { in.close(); } catch (IOException ignored) {}
+            throw new IOException(e);
+        }
+        java.security.DigestInputStream s = null;
         try {
+            // GZIPInputStream 放进 try 内：坏包在读 gzip 头时就会抛错，必须在 catch 清掉 dir 并在 finally 关掉底层流
+            s = new java.security.DigestInputStream(gzip ? new GZIPInputStream(in, 1 << 16) : in, md);
             untar(s, dir, "usr/");
             byte[] sink = new byte[1 << 16];
             while (s.read(sink) > 0) { }            // tar 末尾的填充块也算进校验和
         } catch (IOException | RuntimeException e) {     // 畸形包抛的运行时异常也要清掉半成品（审查 v0.5.7 L9）
             deleteTree(dir);
             throw new IOException(Tr.t("解包失败，旧工具包未改动：") + e.getMessage(), e);
-        } finally { s.close(); }
+        } finally {
+            if (s != null) s.close();
+            else in.close();
+        }
         String got = hex(md.digest());
         if (tarSha != null && !tarSha.isEmpty() && !tarSha.equals(got)) {
             deleteTree(dir);

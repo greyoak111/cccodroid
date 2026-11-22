@@ -510,6 +510,14 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   if (mem.skipped.length) notes.push(`记忆文件太大没扫，已改名 .ccapp-skip（去掉后缀可恢复）：${mem.skipped.slice(0, 4).join(", ")}`);
   settings.autoMemoryDirectory = memDir;
 
+  // MCP 配置也过破甲扫描：instructions / description / command 都在这份 JSON 里。
+  // 项目 .mcp.json 是不回填，这里回填的必须同口径（红队报告 VULN-01），必须在判 block 之前扫描，否则命中后不会拦轮次且已写出 ctx-*.md
+  const mcp = mcpConfig(cwd);
+  if (mcp) {
+    const r = scanText(JSON.stringify(mcp));
+    if (r.blocked) found.push({ name: "~/.claude.json 的 mcpServers（已不加载）", hits: r.hits });
+  }
+
   if (found.length) return { args: [], settings: null, block: { found }, memDir, memFp: mem.fp, notes };
 
   const rid = String(runId).replace(/[^\w.-]/g, "_") + "-" + crypto.randomBytes(4).toString("hex");
@@ -520,17 +528,10 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
   }
   if (userPlug) args.push("--plugin-dir", userPlug);
   for (const d of plugDirs) args.push("--plugin-dir", d);
-  const mcp = mcpConfig(cwd);
   if (mcp) {
-    // MCP 配置也过破甲扫描：instructions / description / command 都在这份 JSON 里。
-    // 项目 .mcp.json 是不回填，这里回填的必须同口径（红队报告 VULN-01：这是唯一没扫的通道）
-    const r = scanText(JSON.stringify(mcp));
-    if (r.blocked) found.push({ name: "~/.claude.json 的 mcpServers（已不加载）", hits: r.hits });
-    else {
-      const f = path.join(ROOT(), `mcp-${rid}.json`);
-      fs.writeFileSync(f, JSON.stringify(mcp), { mode: 0o600 });
-      args.push("--mcp-config", f);
-    }
+    const f = path.join(ROOT(), `mcp-${rid}.json`);
+    fs.writeFileSync(f, JSON.stringify(mcp), { mode: 0o600 });
+    args.push("--mcp-config", f);
   }
   return { args, settings, block: null, memDir, memFp: mem.fp, notes };
 }

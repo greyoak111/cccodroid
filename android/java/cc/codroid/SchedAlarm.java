@@ -134,12 +134,13 @@ public class SchedAlarm extends BroadcastReceiver {
                 for (int n = 0; n < 20; n++) {
                     try {
                         HttpURLConnection h = Env.gateway("POST", "/api/sched/tick", payload);
-                        h.setConnectTimeout(2000); h.setReadTimeout(5000);
-                        h.setDoOutput(true);
-                        try (java.io.OutputStream o = h.getOutputStream()) { o.write(payload); }
-                        int code = h.getResponseCode();
-                        h.disconnect();
-                        if (code == 200) { Log.i(TAG, "定时任务闹钟：网关已查过"); return; }
+                        try {
+                            h.setConnectTimeout(2000); h.setReadTimeout(5000);
+                            h.setDoOutput(true);
+                            try (java.io.OutputStream o = h.getOutputStream()) { o.write(payload); }
+                            int code = h.getResponseCode();
+                            if (code == 200) { Log.i(TAG, "定时任务闹钟：网关已查过"); return; }
+                        } finally { h.disconnect(); }
                     } catch (Exception ignored) {}
                     try { Thread.sleep(2500); } catch (InterruptedException e) { return; }
                 }

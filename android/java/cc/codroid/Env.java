@@ -12,22 +12,44 @@ final class Env {
      *  个别设备上 127.0.0.2 根本连不通（11-14 一加 PGP110 / Android 17：发往它的 SYN 被静默丢掉，只剩 127.0.0.1 能通）：
      *  核不了身份 → 每 40 秒杀一次网关 → 界面永远「等待网关」。类加载时自连探测一次（checkHost），不通就回退 127.0.0.1；
      *  代价是回退设备上会话 Cookie 落在 127.0.0.1，内置浏览器访问本机 127.0.0.1 别的端口时会带上它（11-14 交接 2.6 明示的安全代价） */
-    static volatile String HOST = "127.0.0.2";
-    static { checkHost(); }
+    static volatile String HOST = HostProbe.detect();
 
-    /** 这台设备上 127.0.0.2 通不通：先绑一个端口、再连它自己。绑不上、或 SYN 等不到应答（该设备上被静默丢掉）就回退 127.0.0.1。
-     *  整个进程只跑这一次，正常设备行为完全不变 */
-    private static void checkHost() {
-        try (java.net.ServerSocket ss = new java.net.ServerSocket()) {
-            ss.setReuseAddress(false);
-            ss.bind(new java.net.InetSocketAddress("127.0.0.2", 0));
-            try (java.net.Socket s = new java.net.Socket()) {
-                s.connect(new java.net.InetSocketAddress("127.0.0.2", ss.getLocalPort()), 300);
+    /** 独立嵌套类探测 127.0.0.2：
+     *  1) 放后台线程执行，避免 Env 在主线程 <clinit> 时同步 Socket.connect 触发 NetworkOnMainThreadException 静默降级为 127.0.0.1；
+     *  2) 放在独立类里且不引用 Env，避免后台线程在 Env.<clinit> 持有类初始化锁期间回调 Env 静态方法/lambda 造成类加载死锁。 */
+    static final class HostProbe {
+        static boolean probe(String host, int timeoutMs) throws java.io.IOException {
+            try (java.net.ServerSocket ss = new java.net.ServerSocket()) {
+                ss.setReuseAddress(false);
+                ss.bind(new java.net.InetSocketAddress(host, 0));
+                try (java.net.Socket s = new java.net.Socket(java.net.Proxy.NO_PROXY)) {
+                    s.connect(new java.net.InetSocketAddress(host, ss.getLocalPort()), timeoutMs);
+                    return true;
+                }
             }
-        } catch (Exception e) {
-            HOST = "127.0.0.1";
-            android.util.Log.w("cccodroid", "127.0.0.2 在本机连不通，界面地址回退 127.0.0.1：" + e);
         }
+
+        static String detect() {
+            final boolean[] ok = { false };
+            final Exception[] err = { null };
+            Thread t = new Thread(() -> {
+                try { ok[0] = probe("127.0.0.2", 300); }
+                catch (Exception e) { err[0] = e; }
+            }, "env-host-check");
+            t.setDaemon(true);
+            t.start();
+            try { t.join(450); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            if (ok[0]) return "127.0.0.2";
+            try {
+                android.util.Log.w("cccodroid", "127.0.0.2 在本机连不通，界面地址回退 127.0.0.1："
+                    + (err[0] != null ? err[0] : "probe timeout"));
+            } catch (RuntimeException ignored) {}
+            return "127.0.0.1";
+        }
+    }
+
+    static boolean probeLoopback(String host, int timeoutMs) throws java.io.IOException {
+        return HostProbe.probe(host, timeoutMs);
     }
 
     /** 网关访问令牌（server.mjs 首次启动时生成，0600，存在应用私有目录）。见 server.mjs「访问控制」 */
@@ -62,8 +84,8 @@ final class Env {
 
     /** 同上，指定方法；body 是之后要写出去的请求体（没有给 null），签名里带它的 sha256，调用方照旧自己 setDoOutput 再写 */
     static java.net.HttpURLConnection gateway(String method, String path, byte[] body) throws java.io.IOException {
-        if (!proveGateway()) throw new java.io.IOException(HOST + ":" + PORT + " 上不是 cccodroid 的网关（还没起来，或被别的应用占了）");
-        String b = boot;
+        String b = proveBoot(false);
+        if (b == null || b.isEmpty()) throw new java.io.IOException(HOST + ":" + PORT + " 上不是 cccodroid 的网关（还没起来，或被别的应用占了）");
         java.net.HttpURLConnection c = openLoopback("http://" + HOST + ":" + PORT + path);
         c.setInstanceFollowRedirects(false);     // 自定义头会跟着重定向转发出去（审查 10-29 第六份 低5）
         c.setRequestMethod(method);
@@ -81,20 +103,24 @@ final class Env {
     }
 
     // ── 核身份（审查 S1）：端口全机共享，交出令牌之前先确认对面是真网关。协议见 gateway/gw/access.mjs 的 proof ──
+    private static final Object BOOT_LOCK = new Object();
     private static volatile long provedAt;
     private static volatile String boot = "";
     /** 网关换了一个（启动号变了）时回调，参数是这次的 Cookie 值；MainActivity 拿去种进 WebView */
     static volatile java.util.function.Consumer<String> onBoot;
 
     /** 忘掉上次核到的启动号：下一次核身份一定回调 onBoot（界面刚接上 onBoot 时用，不然后台服务先核过了，Cookie 就种不上） */
-    static void resetBoot() { boot = ""; provedAt = 0; }
+    static void resetBoot() {
+        synchronized (BOOT_LOCK) { boot = ""; provedAt = 0; }
+    }
 
     /** 网关作证应答的签名（gateway/gw/access.mjs witnessMac）：按启动随机数派生的钥匙、核到的启动号、监听地址 */
     static boolean witnessOk(String n, int anc, int top, String tok, String mac) {
-        String k = key();
-        if (k.isEmpty() || mac == null) return false;
+        String k = key(), b;
+        synchronized (BOOT_LOCK) { b = boot; }
+        if (k.isEmpty() || b.isEmpty() || mac == null) return false;
         try {
-            String want = hmac(k, "witness:" + n + ":" + boot + ":" + HOST + ":" + anc + ":" + top + ":" + tok);
+            String want = hmac(k, "witness:" + n + ":" + b + ":" + HOST + ":" + anc + ":" + top + ":" + tok);
             return java.security.MessageDigest.isEqual(want.getBytes(), mac.getBytes());
         } catch (Exception e) { return false; }
     }
@@ -105,9 +131,18 @@ final class Env {
      *  页面加载完以后网关被杀、端口被别的应用占住的空档里，3 秒缓存正好能放过冒牌的一两个请求 ——
      *  里面可能就是用户刚敲的话。多跑一趟本机请求（几毫秒），换来每个 /api 都当场核一次。 */
     static boolean proveGateway(boolean force) {
-        if (!force && System.currentTimeMillis() - provedAt < 3000) return true;    // 刚核过：别每个请求都多跑一趟
+        return proveBoot(force) != null;
+    }
+
+    /** 核身份并返回本次核到的启动号（原子快照，防 resetBoot 与并发写 provedAt/boot 撕裂导致签名带空 boot 吃 403） */
+    private static String proveBoot(boolean force) {
+        if (!force) {
+            synchronized (BOOT_LOCK) {
+                if (!boot.isEmpty() && System.currentTimeMillis() - provedAt < 3000) return boot;    // 刚核过：别每个请求都多跑一趟
+            }
+        }
         String t = key();
-        if (t.isEmpty()) return false;
+        if (t.isEmpty()) return null;
         try {
             byte[] nb = new byte[16];
             new java.security.SecureRandom().nextBytes(nb);
@@ -115,25 +150,31 @@ final class Env {
             java.net.HttpURLConnection c = openLoopback("http://" + HOST + ":" + PORT + "/__proof?n=" + n);
             c.setConnectTimeout(800); c.setReadTimeout(1500); c.setInstanceFollowRedirects(false); c.setUseCaches(false);
             try {
-                if (c.getResponseCode() != 200) return false;
+                if (c.getResponseCode() != 200) return null;
                 byte[] buf = new byte[256];
                 int len = 0;
                 try (java.io.InputStream in = c.getInputStream()) {
                     for (int k; len < buf.length && (k = in.read(buf, len, buf.length - len)) > 0; ) len += k;
                 }
                 String[] p = new String(buf, 0, len, java.nio.charset.StandardCharsets.UTF_8).trim().split(" ");
-                if (p.length != 2 || !p[0].matches("[0-9a-f]{32}")) return false;
+                if (p.length != 2 || !p[0].matches("[0-9a-f]{32}")) return null;
                 String want = hmac(t, "proof:" + n + ":" + p[0] + ":" + HOST);   // 绑监听地址：冒牌的转发到 127.0.0.1 上的真网关，算出来的对不上
-                if (!java.security.MessageDigest.isEqual(want.getBytes(), p[1].getBytes())) return false;
-                provedAt = System.currentTimeMillis();
-                if (!p[0].equals(boot)) {
-                    boot = p[0];
-                    java.util.function.Consumer<String> cb = onBoot;
-                    if (cb != null) cb.accept(hmac(t, "cookie:" + boot));
+                if (!java.security.MessageDigest.isEqual(want.getBytes(), p[1].getBytes())) return null;
+                String cookieVal = null;
+                synchronized (BOOT_LOCK) {
+                    if (!p[0].equals(boot)) {
+                        boot = p[0];
+                        cookieVal = hmac(t, "cookie:" + boot);
+                    }
+                    provedAt = System.currentTimeMillis();
                 }
-                return true;
+                if (cookieVal != null) {
+                    java.util.function.Consumer<String> cb = onBoot;
+                    if (cb != null) cb.accept(cookieVal);
+                }
+                return p[0];
             } finally { c.disconnect(); }
-        } catch (Exception e) { return false; }
+        } catch (Exception e) { return null; }
     }
 
     /** 代 WebView 取界面的页面与静态资源（审查 10-29 第六份 中3）。端口全机共享，网关崩溃到重拉的空档里别的应用能占住它；
@@ -190,7 +231,7 @@ final class Env {
     }
 
     private static boolean listening(String host) {
-        try (java.net.Socket s = new java.net.Socket()) {
+        try (java.net.Socket s = new java.net.Socket(java.net.Proxy.NO_PROXY)) {
             s.connect(new java.net.InetSocketAddress(host, PORT), 500);
             return true;
         } catch (java.io.IOException e) { return false; }

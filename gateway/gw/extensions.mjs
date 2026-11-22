@@ -151,8 +151,8 @@ const mcpAddArgs = (transport, name, target, env, headers, parts) => {
   for (const kv of [].concat(env || [])) if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(kv)) args.push("-e", kv);
   for (const h of [].concat(headers || [])) if (String(h).includes(":")) args.push("--header", String(h));
   if (transport === "stdio") {
-    // 命令行按空白切开；带空格的参数用引号括起来
-    args.push("--", ...(parts || target.match(/"[^"]*"|'[^']*'|\S+/g).map((x) => x.replace(/^(["'])(.*)\1$/, "$2"))));
+    // 命令行按 shell 引号规则切开（与 editMcp 共用 parseStdioTarget，支持双引号内转义 \" / \\ 与单引号）
+    args.push("--", ...(parts || parseStdioTarget(target)));
   }
   return args;
 };

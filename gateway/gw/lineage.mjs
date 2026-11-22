@@ -239,13 +239,22 @@ export async function lineageGraph() {
     edges.push({ child, parent: x.id, at: x.at || null, ts: tsAt(RECS.get(x.id), x.at), kind: "merge", source: "explicit", how: x.how || "", missing: !RECS.has(x.id) });
     linked.add(child + ">" + x.id);
   }
-  // 汇合记录丢了（导到别的设备、手动删过 ccapp-lineage.json）：按第一条消息末尾的落款重建
+  // 汇合记录丢了（导到别的设备、手动删过 ccapp-lineage.json）：按第一条消息末尾的落款重建。
+  // 4 位短前缀在 65536 空间里有碰撞概率：先存全部候选，再按「非自身、且来源早于子会话（若时间有效）」消歧；仍多于一条才放弃
   const byShort = new Map();
-  for (const id of RECS.keys()) { const k = id.slice(0, 4); byShort.set(k, byShort.has(k) ? null : id); }
+  for (const id of RECS.keys()) { const k = id.slice(0, 4); const list = byShort.get(k); if (list) list.push(id); else byShort.set(k, [id]); }
   for (const r of RECS.values()) {
     if (!r.sig || (db.edges[r.id] && (db.edges[r.id].extra || []).length)) continue;
     for (const x of r.sig) {
-      const pid = byShort.get(x.short);
+      const cands = (byShort.get(x.short) || []).filter((id) => id !== r.id);
+      let pid = cands.length === 1 ? cands[0] : null;
+      if (!pid && cands.length > 1) {
+        const before = cands.filter((id) => {
+          const rec = RECS.get(id);
+          return rec && (!r.firstTs || !rec.firstTs || rec.firstTs <= r.firstTs) && rec.compacts.length + 1 >= x.n;
+        });
+        if (before.length === 1) pid = before[0];
+      }
       if (!pid || pid === r.id || linked.has(r.id + ">" + pid) || (db.edges[r.id]?.nosig || []).includes(pid)) continue;
       const at = RECS.get(pid).compacts[x.n - 1]?.uuid || null;   // 第 n 章的摘要 = 第 n 次压缩；进行中的章没有，画到来源末端
       edges.push({ child: r.id, parent: pid, at, ts: tsAt(RECS.get(pid), at), kind: "merge", source: "sig", how: "", missing: false });

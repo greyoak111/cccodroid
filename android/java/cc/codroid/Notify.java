@@ -337,13 +337,15 @@ final class Notify {
             byte[] body = new JSONObject().put("id", id).put("behavior", "deny")
                 .put("message", "用户在通知里拒绝了这次操作。").toString().getBytes(StandardCharsets.UTF_8);
             HttpURLConnection h = Env.gateway("POST", "/api/perm/answer", body);
-            h.setDoOutput(true);
-            h.setConnectTimeout(3000); h.setReadTimeout(5000);
-            h.setRequestProperty("Content-Type", "application/json");
-            h.getOutputStream().write(body);
-            int code = h.getResponseCode();
-            Log.i(TAG, "通知里拒绝 " + id + " → HTTP " + code);
-            h.disconnect();
+            int code;
+            try {
+                h.setDoOutput(true);
+                h.setConnectTimeout(3000); h.setReadTimeout(5000);
+                h.setRequestProperty("Content-Type", "application/json");
+                try (java.io.OutputStream o = h.getOutputStream()) { o.write(body); }
+                code = h.getResponseCode();
+                Log.i(TAG, "通知里拒绝 " + id + " → HTTP " + code);
+            } finally { h.disconnect(); }
             // 拒绝送到了，或者这项已经答过 / 不在了（409 / 404）：通知撤掉
             if (code == 200 || code == 409 || code == 404) { c.getSystemService(NotificationManager.class).cancel(TAG_ASK, id.hashCode()); return; }
         } catch (Exception e) {

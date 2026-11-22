@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { CFG, log } from "./config.mjs";
 import { NEXT, fileKind, readBody, sendJson } from "./http.mjs";
-import { safeFilePath, safeWritePath } from "./files.mjs";
+import { SECRET_NAMES, safeFilePath, safeWritePath } from "./files.mjs";
 import { holdsPrivate } from "./pathguard.mjs";
 import { ZIP_ENCODINGS, zipExtract, zipList, zipNative } from "./zipread.mjs";
 
@@ -189,20 +189,23 @@ async function extractOne(file, list, e, out, password) {
   const lst = out + ".list";
   fs.writeFileSync(lst, e.path + "\n");
   const ws = fs.createWriteStream(out, { flags: "wx", mode: 0o644 });
-  let n = 0, over = false;
+  let n = 0, over = false, outer = null;
   try {
     let r;
     const onStdout = (d) => { n += d.length; if (n > e.size + 1024 && e.size > 0) over = true; if (!over) ws.write(d); };
     if (list.kind === "tar2") {
-      const outer = spawnOuter(file);
+      outer = spawnOuter(file);
       r = await run7z(["e", "-so", "-si", "-ttar", "-spd", "-scsUTF-8", "-i@" + lst], { stdin: outer.stdout, onStdout });
-      outer.kill();
     } else r = await run7z(["e", "-so", "-y", "-spd", "-scsUTF-8", "-i@" + lst, file], { password: password ?? (e.enc ? "" : null), onStdout });
     await new Promise((res) => ws.end(res));
     if (over) throw new Error("entry larger than declared");
     if (wrongPw(r)) throw Object.assign(new Error("wrong password"), { status: 401, wrongPassword: true });
     if (r.code !== 0) throw new Error((r.err.trim().split("\n").pop() || `7-Zip exit ${r.code}`).slice(0, 200));
-  } finally { ws.destroy(); fs.rmSync(lst, { force: true }); }
+  } finally {
+    if (outer) try { outer.kill(); } catch {}
+    ws.destroy();
+    fs.rmSync(lst, { force: true });
+  }
 }
 
 function prunePreview() {
@@ -288,16 +291,19 @@ async function extract7z(file, list, items, sel, stage, password, j) {
     args.push("-i@" + lst);
   }
   const onStdout = (d) => { const m = /(\d+)%[^%]*$/.exec(d.toString()); if (m) j.pct = Math.min(99, +m[1]); };
+  let outer = null;
   try {
     let r;
     if (list.kind === "tar2") {
-      const outer = spawnOuter(file);
+      outer = spawnOuter(file);
       r = await run7z([...args, "-si", "-ttar"], { stdin: outer.stdout, onStdout, signal: j.ac.signal });
-      outer.kill();
     } else r = await run7z([...args, file], { password: password ?? (list.encrypted ? "" : null), onStdout, signal: j.ac.signal });
     if (wrongPw(r)) throw Object.assign(new Error("wrong password"), { wrongPassword: true });
     if (r.code !== 0) throw new Error((r.err.trim().split("\n").filter(Boolean).pop() || `7-Zip exit ${r.code}`).slice(0, 300));
-  } finally { if (lst) fs.rmSync(lst, { force: true }); }
+  } finally {
+    if (outer) try { outer.kill(); } catch {}
+    if (lst) fs.rmSync(lst, { force: true });
+  }
 }
 
 /** 解出来的东西里：指向临时目录外面的软链删掉，特殊文件（FIFO、设备）删掉 */
@@ -337,8 +343,31 @@ export function uniquePath(p) {
 
 // ── 压缩 ────────────────────────────────────────────────────────────────
 export const CREATE_FORMATS = { zip: "zip", "7z": "7z", tar: "tar", "tar.gz": "gzip", "tar.xz": "xz", "tar.bz2": "bzip2" };
-/** 不打进压缩包的：凭据目录（同 files.mjs 的 SECRET_RE） */
-const EXCLUDE = [".ssh", ".gnupg", ".aws"];
+/** 不打进压缩包的：凭据目录与凭据文件名（同 files.mjs 的 SECRET_RE / SECRET_NAMES） */
+const EXCLUDE_DIRS = [".ssh", ".gnupg", ".aws", ".config/gcloud"];
+const SECRET_DIR_RE = /(^|\/)(\.ssh|\.gnupg|\.aws|\.config\/gcloud)$/i;
+
+/** 扫描待压缩条目里的大小写变体凭据路径（/sdcard 不区分大小写，7zz 默认 -xr! 区分大小写；
+ *  不传全局 -ssc-，否则 ext4 同目录有 foo.txt 与 Foo.txt 时 7zz 会报 Duplicate filename） */
+function collectSecretExcludes(items) {
+  const out = [];
+  let seen = 0;
+  const walk = (abs, rel) => {
+    if (seen > 200000) return;
+    let st; try { st = fs.lstatSync(abs); } catch { return; }
+    if (st.isSymbolicLink()) return;
+    const base = path.basename(abs).toLowerCase();
+    if (SECRET_NAMES.has(base) || SECRET_DIR_RE.test(rel)) { out.push(rel); return; }
+    if (!st.isDirectory()) return;
+    let ds; try { ds = fs.readdirSync(abs); } catch { return; }
+    for (const n of ds) {
+      if (++seen > 200000) return;
+      walk(path.join(abs, n), rel + "/" + n);
+    }
+  };
+  for (const f of items) walk(f, path.basename(f));
+  return out;
+}
 
 export function startCreate({ items, dest, format, level, password, encryptNames }) {
   const j = newJob("create", { dest });
@@ -347,8 +376,16 @@ export function startCreate({ items, dest, format, level, password, encryptNames
     const tmp = path.join(path.dirname(dest), `.cc-pack-${j.id}-` + path.basename(dest));
     const lv = Math.max(0, Math.min(9, Number.isFinite(+level) ? +level : 5));
     const names = items.map((f) => "./" + path.basename(f));
-    const common = ["-y", "-bsp1", "-bso0", "-spd", "-scsUTF-8", ...EXCLUDE.map((x) => "-xr!" + x)];
+    const common = ["-y", "-bsp1", "-bso0", "-spd", "-scsUTF-8", ...EXCLUDE_DIRS.map((x) => "-xr!" + x), ...[...SECRET_NAMES].map((x) => "-xr!" + x)];
+    const extraEx = collectSecretExcludes(items);
+    let exFile = null;
+    if (extraEx.length) {
+      exFile = tmp + ".ex";
+      fs.writeFileSync(exFile, extraEx.join("\n") + "\n");
+      common.push("-x@" + exFile);
+    }
     const onStdout = (d) => { const m = /(\d+)%[^%]*$/.exec(d.toString()); if (m) j.pct = Math.min(99, +m[1]); };
+    let inner = null;
     try {
       let r;
       if (format === "zip" || format === "7z" || format === "tar") {
@@ -361,7 +398,7 @@ export function startCreate({ items, dest, format, level, password, encryptNames
         r = await run7z([...a, tmp, "--", ...names], { cwd: parent, password: password && format !== "tar" ? password + "\n" + password : null, onStdout, signal: j.ac.signal });
       } else {
         // tar.gz / tar.xz / tar.bz2：内层 tar 写标准输出，外层从标准输入压
-        const inner = spawn(sevenZ(), ["a", "-ttar", "-so", "-an", ...common.filter((x) => x !== "-bsp1" && x !== "-bso0"), "--", ...names], { cwd: parent, stdio: ["ignore", "pipe", "ignore"], signal: j.ac.signal });
+        inner = spawn(sevenZ(), ["a", "-ttar", "-so", "-an", ...common.filter((x) => x !== "-bsp1" && x !== "-bso0"), "--", ...names], { cwd: parent, stdio: ["ignore", "pipe", "ignore"], signal: j.ac.signal });
         const innerDone = new Promise((res) => { inner.on("close", res); inner.on("error", () => res(-1)); });
         r = await run7z(["a", "-t" + CREATE_FORMATS[format], "-mx=" + lv, "-y", "-bsp1", "-bso0", "-si" + path.basename(dest).replace(/\.(gz|xz|bz2)$/i, ""), tmp], { stdin: inner.stdout, onStdout, signal: j.ac.signal });
         const ic = await innerDone;
@@ -370,7 +407,11 @@ export function startCreate({ items, dest, format, level, password, encryptNames
       if (r.code !== 0 && r.code !== 1) throw new Error((r.err.trim().split("\n").filter(Boolean).pop() || `7-Zip exit ${r.code}`).slice(0, 300));
       if (fs.existsSync(dest)) throw Object.assign(new Error("exists"), { status: 409 });
       fs.renameSync(tmp, dest);
-    } finally { fs.rmSync(tmp, { force: true }); }
+    } finally {
+      if (inner) try { inner.kill(); } catch {}
+      if (exFile) fs.rmSync(exFile, { force: true });
+      fs.rmSync(tmp, { force: true });
+    }
     j.size = fs.statSync(dest).size;
     log(`[压缩包] 压缩 ${items.length} 项 → ${dest}（${format}）`);
   })().then(() => finish(j), (e) => finish(j, e));

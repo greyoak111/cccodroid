@@ -133,6 +133,7 @@ public class A11y extends AccessibilityService {
     // ── 读屏 ─────────────────────────────────────────────────────────────
     static JSONObject read(boolean all) throws Exception {
         A11y s = self;
+        if (s == null) return fail(Tr.t("无障碍没开。到 设置 → 设备工具 里打开（要先激活 Shizuku），或自己去系统的无障碍设置里打开 cccodroid"));
         touch();
         AccessibilityNodeInfo root = s.getRootInActiveWindow();
         JSONObject r = new JSONObject().put("ok", true);
@@ -316,7 +317,9 @@ public class A11y extends AccessibilityService {
         AccessibilityNodeInfo n = null;
         if (a.has("node")) { n = node(a.getInt("node")); if (n == null) return fail(miss); }
         else {
-            AccessibilityNodeInfo root = self.getRootInActiveWindow();
+            A11y s = self;
+            if (s == null) return fail(Tr.t("无障碍没开。到 设置 → 设备工具 里打开（要先激活 Shizuku），或自己去系统的无障碍设置里打开 cccodroid"));
+            AccessibilityNodeInfo root = s.getRootInActiveWindow();
             if (root != null) n = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
         }
         if (n == null || !n.isEditable()) return fail(Tr.t("没找到输入框：给 node（screen_read 里带 edit 的编号），或先点一下输入框"));
@@ -346,7 +349,9 @@ public class A11y extends AccessibilityService {
             case "lock_screen": g = GLOBAL_ACTION_LOCK_SCREEN; break;
             default: return fail(Tr.t("不认识的按键：") + k);
         }
-        return self.performGlobalAction(g) ? ok(k) : fail(Tr.t("系统没执行"));
+        A11y s = self;
+        if (s == null) return fail(Tr.t("无障碍没开。到 设置 → 设备工具 里打开（要先激活 Shizuku），或自己去系统的无障碍设置里打开 cccodroid"));
+        return s.performGlobalAction(g) ? ok(k) : fail(Tr.t("系统没执行"));
     }
 
     /** 截屏 → JPEG（长边缩到 1280，省 token）。返回 base64 和存下来的路径 */
@@ -354,16 +359,22 @@ public class A11y extends AccessibilityService {
         touch();
         if (android.os.Build.VERSION.SDK_INT < 30) return fail(Tr.t("截屏要安卓 11 以上"));
         A11y s = self;
+        if (s == null) return fail(Tr.t("无障碍没开。到 设置 → 设备工具 里打开（要先激活 Shizuku），或自己去系统的无障碍设置里打开 cccodroid"));
         CountDownLatch done = new CountDownLatch(1);
         AtomicReference<Bitmap> bmp = new AtomicReference<>();
         AtomicReference<String> err = new AtomicReference<>();
         s.takeScreenshot(Display.DEFAULT_DISPLAY, c.getMainExecutor(), new TakeScreenshotCallback() {
             @Override public void onSuccess(ScreenshotResult r) {
+                android.hardware.HardwareBuffer hb = r.getHardwareBuffer();
+                Bitmap hw = null;
                 try {
-                    Bitmap hw = Bitmap.wrapHardwareBuffer(r.getHardwareBuffer(), r.getColorSpace());
+                    hw = Bitmap.wrapHardwareBuffer(hb, r.getColorSpace());
                     bmp.set(hw == null ? null : hw.copy(Bitmap.Config.ARGB_8888, false));
-                    r.getHardwareBuffer().close();
                 } catch (Throwable t) { err.set(t.toString()); }
+                finally {
+                    if (hw != null) hw.recycle();
+                    if (hb != null) hb.close();
+                }
                 done.countDown();
             }
             @Override public void onFailure(int code) {
@@ -372,13 +383,27 @@ public class A11y extends AccessibilityService {
             }
         });
         if (!done.await(5, TimeUnit.SECONDS)) return fail(Tr.t("截屏超时"));
-        if (bmp.get() == null) return fail(err.get() != null ? err.get() : Tr.t("截屏失败"));
-        Bitmap b = bmp.get();
-        int w = b.getWidth(), hh = b.getHeight(), max = Math.max(w, hh);
-        if (max > 1280) { float k = 1280f / max; b = Bitmap.createScaledBitmap(b, Math.round(w * k), Math.round(hh * k), true); }
-        ByteArrayOutputStream bo = new ByteArrayOutputStream();
-        b.compress(Bitmap.CompressFormat.JPEG, 80, bo);
-        byte[] jpg = bo.toByteArray();
+        Bitmap orig = bmp.get();
+        if (orig == null) return fail(err.get() != null ? err.get() : Tr.t("截屏失败"));
+        Bitmap scaled = null;
+        int w = orig.getWidth(), hh = orig.getHeight(), max = Math.max(w, hh);
+        int sw = w, sh = hh;
+        byte[] jpg;
+        try {
+            Bitmap b = orig;
+            if (max > 1280) {
+                float k = 1280f / max;
+                scaled = Bitmap.createScaledBitmap(orig, Math.round(w * k), Math.round(hh * k), true);
+                b = scaled;
+            }
+            sw = b.getWidth(); sh = b.getHeight();
+            ByteArrayOutputStream bo = new ByteArrayOutputStream();
+            b.compress(Bitmap.CompressFormat.JPEG, 80, bo);
+            jpg = bo.toByteArray();
+        } finally {
+            if (scaled != null && scaled != orig) scaled.recycle();
+            orig.recycle();
+        }
         java.io.File dir = new java.io.File(new Env(c).home, ".cache/screens");
         dir.mkdirs();
         java.io.File[] old = dir.listFiles();
@@ -389,7 +414,7 @@ public class A11y extends AccessibilityService {
         java.io.File f = new java.io.File(dir, "screen-" + System.currentTimeMillis() + ".jpg");
         try (java.io.FileOutputStream fo = new java.io.FileOutputStream(f)) { fo.write(jpg); }
         return ok("screenshot").put("path", f.getPath()).put("size", w + "x" + hh)
-            .put("scaled", b.getWidth() + "x" + b.getHeight())
+            .put("scaled", sw + "x" + sh)
             .put("jpeg", android.util.Base64.encodeToString(jpg, android.util.Base64.NO_WRAP));
     }
 

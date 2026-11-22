@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { CFG, GLIBC_PRELOAD, PATHS, PREFIX, glibcEnv, loadPgp, log, tz } from "./config.mjs";
 import { SETTINGS } from "./settings-store.mjs";
-import { enosysRun } from "./claude.mjs";
+import { enosysRun, killTree } from "./claude.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { termEnv } from "./terminal.mjs";
 import { sha256File } from "./components.mjs";
@@ -87,8 +87,25 @@ function glibcVersion() {
   try { const m = /release version (\d+\.\d+)/.exec(fs.readFileSync(path.join(PATHS.glibcLib, "libc.so.6")).toString("latin1")); if (m) GLIBC_VER = m[1]; } catch {}
   return GLIBC_VER;
 }
-const runP = (cmd, args, opts = {}) => new Promise((resolve) => execFile(cmd, args, { env: termEnv(), timeout: 600000, maxBuffer: 16 << 20, ...opts },
-  (err, out, errOut) => resolve({ code: err ? (err.code || 1) : 0, out: String(out || ""), err: String(errOut || err?.message || "") })));
+function runP(cmd, args, opts = {}) {
+  const { timeout = 600000, maxBuffer = 16 << 20, ...rest } = opts;
+  return new Promise((resolve) => {
+    const ch = spawn(cmd, args, { env: termEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true, ...rest });
+    const out = [], err = [];
+    let outN = 0, errN = 0, done = false, killed = "";
+    const finish = (code, msg) => {
+      if (done) return;
+      done = true;
+      clearTimeout(tm);
+      resolve({ code, out: Buffer.concat(out).toString("utf8"), err: Buffer.concat(err).toString("utf8") || msg || "" });
+    };
+    const tm = timeout > 0 ? setTimeout(() => { killed = "timeout"; killTree(ch); }, timeout) : null;
+    ch.stdout.on("data", (d) => { outN += d.length; if (outN > maxBuffer) { killed = "maxBuffer"; killTree(ch); return; } out.push(d); });
+    ch.stderr.on("data", (d) => { errN += d.length; if (errN <= maxBuffer) err.push(d); });
+    ch.on("error", (e) => finish(e.code || 1, e.message));
+    ch.on("close", (code) => finish(killed ? 1 : (code ?? 1), killed));
+  });
+}
 /** 包里的目录可能是只读的（0555，tar / unzip 都照原样还原）：之后遍历、删除都会 EACCES。解开后把真目录都放开成本人可读写（不跟软链） */
 function openDirs(p) {
   let st; try { st = fs.lstatSync(p); } catch { return; }
@@ -110,16 +127,28 @@ const UNPACK_MAX_FILES = 200000, UNPACK_RESERVE = 512 * 1024 * 1024;
 function runCapped(cmd, args, dir, max) {
   return new Promise((resolve) => {
     let f0; try { f0 = fs.statfsSync(dir); } catch {}
-    let over = 0;
-    const ch = execFile(cmd, args, { env: termEnv(), timeout: 600000, maxBuffer: 16 << 20 }, (err, out, errOut) => {
+    let over = 0, done = false, killed = "";
+    const out = [], err = [];
+    let outN = 0, errN = 0;
+    const ch = spawn(cmd, args, { env: termEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true });
+    const finish = (code, msg) => {
+      if (done) return;
+      done = true;
       clearInterval(t);
-      resolve(over ? { code: "TOOBIG", used: over, out: "", err: "" } : { code: err ? (err.code || 1) : 0, out: String(out || ""), err: String(errOut || err?.message || "") });
-    });
+      clearTimeout(tm);
+      resolve(over ? { code: "TOOBIG", used: over, out: "", err: "" }
+        : { code, out: Buffer.concat(out).toString("utf8"), err: Buffer.concat(err).toString("utf8") || msg || "" });
+    };
+    const tm = setTimeout(() => { killed = "timeout"; killTree(ch); }, 600000);
+    ch.stdout.on("data", (d) => { outN += d.length; if (outN <= (16 << 20)) out.push(d); });
+    ch.stderr.on("data", (d) => { errN += d.length; if (errN <= (16 << 20)) err.push(d); });
+    ch.on("error", (e) => finish(e.code || 1, e.message));
+    ch.on("close", (code) => finish(killed ? 1 : (code ?? 1), killed));
     const t = setInterval(() => {
       if (over || !f0) return;
       let f; try { f = fs.statfsSync(dir); } catch { return; }
       const used = (f0.bavail - f.bavail) * f.bsize, files = f0.ffree - f.ffree;
-      if (used > max || files > UNPACK_MAX_FILES || f.bavail * f.bsize < UNPACK_RESERVE) { over = Math.max(used, 1); try { ch.kill("SIGKILL"); } catch {} }
+      if (used > max || files > UNPACK_MAX_FILES || f.bavail * f.bsize < UNPACK_RESERVE) { over = Math.max(used, 1); killTree(ch); }
     }, 200);
   });
 }

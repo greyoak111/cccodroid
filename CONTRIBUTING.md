@@ -24,7 +24,7 @@ Privately, please: see [SECURITY.md](SECURITY.md). Don’t post it in a public i
 
 ### Fix translations
 
-The UI ships in seven other languages, mostly translated by the author with AI help, so some strings will read awkwardly or be wrong. See [i18n/README.md](i18n/README.md); it's a single text file per language.
+The UI ships in nine other languages, mostly translated by the author with AI help, so some strings will read awkwardly or be wrong. See [i18n/README.md](i18n/README.md); it's a single text file per language.
 
 ### Docs and guides
 
