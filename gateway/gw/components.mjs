@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import crypto from "node:crypto";
@@ -413,15 +414,21 @@ export async function breathe() {
   lastBreath = Date.now();
 }
 
-// 安装心跳的时间戳用开机以来的单调毫秒（/proc/uptime），和安卓侧 SystemClock.elapsedRealtime 同一基准：
-// 用户改系统时间（墙钟跳变）不再让全部心跳提前过期或集体新鲜（复核 P2-9）。字段名 at/phase/boot 与
-// GatewayService.parseBeatAt 的解析口径一致，改字段要两头一起改（复核 P2-14 契约）
+// 安装心跳的时间戳用开机以来的单调毫秒（/proc/uptime，安卓 SELinux 禁读时回落 os.uptime() → CLOCK_BOOTTIME），
+// 和安卓侧 SystemClock.elapsedRealtime 同一基准：用户改系统时间（墙钟跳变）不再让全部心跳提前过期或集体新鲜（复核 P2-9）。
+// 字段名 at/phase/boot 与 GatewayService.parseBeatAt 的解析口径一致，改字段要两头一起改（复核 P2-14 契约）
 export function uptimeMs() {
   try {
     const ms = Math.round(Number(fs.readFileSync("/proc/uptime", "utf8").split(/\s+/)[0]) * 1000);
     if (ms > 0) return ms;
   } catch {}
-  if (!uptimeFallbackLogged) { uptimeFallbackLogged = true; log("[comp] /proc/uptime 读不到，心跳退回墙钟（看门狗会当成未来时间不放行）"); }
+  try {
+    // 安卓上 untrusted_app 读 /proc/uptime 恒定 EACCES；os.uptime() 走 libuv clock_gettime(CLOCK_BOOTTIME)，
+    // 与 Java SystemClock.elapsedRealtime() 同基准，向下取整为整秒毫秒严格 <= now，不会被 parseBeatAt 当成未来时间拒掉
+    const sec = Math.floor(os.uptime());
+    if (sec > 0) return sec * 1000;
+  } catch {}
+  if (!uptimeFallbackLogged) { uptimeFallbackLogged = true; log("[comp] /proc/uptime 与 os.uptime() 均读不到，心跳退回墙钟（看门狗会当成未来时间不放行）"); }
   return Date.now();   // 读不到：退墙钟——Java 侧按单调时间读会当成未来时间不放行，安全方向（复核 R2-P3-4）
 }
 let uptimeFallbackLogged = false;

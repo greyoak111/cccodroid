@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { CFG, LIVE, HERE, PATHS, PREFIX, log, tz } from "./config.mjs";
@@ -430,9 +431,14 @@ async function energySample() {
     let from = prev.ts;
     if (now - prev.ts > 2 * ENERGY_STEP) {
       try {
-        const up = parseFloat(fs.readFileSync("/proc/uptime", "utf8")) * 1000, boot = now - up;
-        const oldest = Math.min(...Object.values(cur.pids).map((x) => x[0])) * (1000 / CLK_TCK) + boot;
-        if (oldest > from) from = Math.min(oldest, now - 1000);
+        let up = 0;
+        try { up = parseFloat(fs.readFileSync("/proc/uptime", "utf8")) * 1000; } catch {}
+        if (!(up > 0)) { try { up = Math.floor(os.uptime()) * 1000; } catch {} }
+        if (up > 0) {
+          const boot = now - up;
+          const oldest = Math.min(...Object.values(cur.pids).map((x) => x[0])) * (1000 / CLK_TCK) + boot;
+          if (oldest > from) from = Math.min(oldest, now - 1000);
+        }
       } catch {}
     }
     const add = { c: Math.max(0, d) / CLK_TCK };

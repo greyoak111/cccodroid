@@ -31,6 +31,30 @@ function authEnv() {
   return env;
 }
 
+/** 登录子进程环境：剥离 PATH 中的 app/pre（含 xdg-open / termux-open-url / termux-clipboard-set），
+ *  并在最前挂载仅写入 urlFile 的 xdg-open / termux-open-url 垫片——避免登录 CLI 无视或回落
+ *  xdg-open 命中 app/pre/xdg-open 弹出原生「允许打开网址？」确认框阻塞登录流程。 */
+export function loginBrowserEnv(base, loginDir, browserScript) {
+  const env = { ...base, BROWSER: browserScript };
+  const skip = new Set();
+  if (env.CCAPP_BIN) skip.add(path.resolve(env.CCAPP_BIN, "..", "pre"));
+  if (env.CCAPP_RUNTIME) skip.add(path.resolve(env.CCAPP_RUNTIME, "app", "pre"));
+  const parts = String(env.PATH || "").split(":").filter((d) => d && !skip.has(path.resolve(d)));
+  if (loginDir && browserScript) {
+    const shimDir = path.join(loginDir, "bin");
+    try {
+      fs.mkdirSync(shimDir, { recursive: true });
+      const shim = `#!/system/bin/sh\nexec "${browserScript}" "$@"\n`;
+      for (const name of ["xdg-open", "termux-open-url"]) {
+        fs.writeFileSync(path.join(shimDir, name), shim, { mode: 0o700 });
+      }
+      parts.unshift(shimDir);
+    } catch {}
+  }
+  env.PATH = parts.join(":");
+  return env;
+}
+
 async function loginStart(flag) {
   const blocked = await claudeBlocked();
   if (blocked) return { ok: false, message: blocked };
@@ -40,7 +64,7 @@ async function loginStart(flag) {
   const browser = path.join(LOGIN_DIR, "browser.sh");
   try { fs.unlinkSync(urlFile); } catch {}
   fs.writeFileSync(browser, '#!/system/bin/sh\nprintf "%s\\n" "$1" > "' + urlFile + '"\n', { mode: 0o700 });
-  const env = { ...authEnv(), BROWSER: browser };
+  const env = loginBrowserEnv(authEnv(), LOGIN_DIR, browser);
   const child = spawn(PATHS.claudeLoader, claudeArgv(["auth", "login", flag]), { cwd: CFG.home, env, stdio: ["ignore", "pipe", "pipe"] });
   const L = LOGIN = { child, out: "", startedAt: Date.now(), done: false, ok: false, flag, urlFile };
   // 登录不完成不能永久挂：设备码流程最多 15 分钟，到点收掉子进程并把状态结掉（0.6.9 审计 195-R.9）
