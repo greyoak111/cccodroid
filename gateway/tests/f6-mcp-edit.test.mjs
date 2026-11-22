@@ -76,7 +76,7 @@ test("editMcp：改 URL 留空 = 保留原请求头值，点掉的键删掉", as
   const r = await editMcp({ name: "e1", transport: "http", target: "http://new/mcp", env: [], headers: [], dropHeaders: ["X-A"] });
   assert.ok(r.ok, r.message);
   const cs = calls();
-  assert.deepEqual(cs[0], ["mcp", "remove", "e1"], "先 remove 旧的");
+  assert.deepEqual(cs[0], ["mcp", "remove", "-s", "user", "e1"], "先 remove 旧的（显式指定用户级作用域，别误删同名项目级条目）");
   assert.deepEqual(cs[1].slice(0, 5), ["mcp", "add-json", "-s", "user", "e1"]);
   assert.deepEqual(lastJson(), { type: "http", url: "http://new/mcp", headers: { Authorization: "Bearer tok" } }, "留空的请求头带着原值，点掉的键不在");
 });
@@ -87,7 +87,7 @@ test("editMcp：同名键覆盖、改名、删环境变量；空 env 不写进�
   const r = await editMcp({ name: "e2", newName: "e2x", transport: "stdio", target: "npx -y y", env: ["A=9"], headers: [], dropEnv: ["B"] });
   assert.ok(r.ok, r.message);
   const cs = calls();
-  assert.deepEqual(cs[0], ["mcp", "remove", "e2"]);
+  assert.deepEqual(cs[0], ["mcp", "remove", "-s", "user", "e2"]);
   assert.deepEqual(cs[1].slice(0, 5), ["mcp", "add-json", "-s", "user", "e2x"]);
   const j = lastJson();
   assert.deepEqual(j, { type: "stdio", command: "npx", args: ["-y", "y"], env: { A: "9" } }, "同名覆盖、点掉的删掉、旧值不残留");
