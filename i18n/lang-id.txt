@@ -3240,3 +3240,32 @@
 3240	Instal komponen kotak alat PDF, lalu buka kembali.
 3241	Masukkan folder hasil baru di lokasi yang dapat ditulis.
 3242	Hasil melebihi 512 MB. Kurangi halaman atau resolusi.
+3243	Tugas PDF sedang berjalan. Coba lagi nanti.
+3244	Instal komponen kotak alat PDF, lalu buka kembali.
+3245	Masukkan folder hasil baru di lokasi yang dapat ditulis.
+3246	Hasil melebihi 512 MB. Kurangi halaman atau resolusi.
+3247	berkas
+3248	Cadangan dari pemasangan sebelumnya belum dipulihkan. Coba lagi, atau hapus lalu pasang ulang.
+3249	Gulir tampak macet — tekan lama judul bilah atas (~0,6 detik) untuk memulihkan
+3250	Pulau Kerja (Status Langsung)
+3251	Tampilkan status langsung Claude di Live Updates / pulau sistem, atau kapsul mengambang sebagai cadangan
+3252	Saat aktif, progres kerja, daftar tugas, permintaan konfirmasi, dan penyelesaian tampil langsung di satu kartu lalu menutup otomatis setelah 8 detik. Android 16+ mendukung Live Updates bawaan; perangkat lain dapat mengaktifkan kapsul mengambang.
+3253	Live Updates / Pulau Sistem (Android 16+)
+3254	Kapsul mengambang cadangan (tembus sentuhan, tampil di latar belakang)
+3255	Pratinjau 10 dtk
+3256	Izinkan Live Updates
+3257	Izinkan hamparan
+3258	Notifikasi aplikasi atau saluran Pulau Kerja dimatikan di pengaturan sistem.
+3259	Live Updates belum diizinkan untuk aplikasi ini; akan ditampilkan sebagai notifikasi progres biasa.
+3260	Kapsul mengambang aktif, tetapi izin tampil di atas aplikasi lain belum diberikan.
+3261	✓ Live Updates sistem siap
+3262	✓ Kapsul mengambang siap
+3263	Perangkat ini di bawah Android 16. Status memakai notifikasi progres, atau aktifkan kapsul mengambang.
+3264	Pratinjau 10 detik dimulai — buka layar utama atau lihat bilah status
+3265	Pratinjau gagal
+3266	Indeks
+3267	Nama file memori tidak valid
+3268	Memori tidak ditemukan
+3269	Hanya file memori biasa yang boleh dilihat
+3270	File memori terlalu besar (lebih dari 1 MB)
+3271	Memori hanya-baca dan tidak dapat diubah di sini

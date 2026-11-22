@@ -190,6 +190,7 @@ export function createWorkIsland(opts = {}) {
   function sendUpdate(title, text, since, state, extra) {
     const t = clock();
     if (t - lastSent >= throttleMs) {
+      clearPending();
       lastSent = t;
       shown = true;
       emit("UPDATE", title, text, since, state, extra);
@@ -221,28 +222,35 @@ export function createWorkIsland(opts = {}) {
   }
 
   function start(run, text) {
+    const rid = (run && (run.id || run.runId)) || "";
     const sid = (run && typeof run.sessionId === "string") ? run.sessionId : "";
     if (active) {
+      let switched = false;
       // 并行会话：显示换到另一轮时，计时按那一轮自己的开始时间算（0.6.9 审计 195-P.5）
-      if (run && run.id && run.id !== active.id) {
-        active.id = run.id;
+      if (rid && rid !== active.id) {
+        active.id = rid;
         active.sessionId = sid;
         active.startedAt = Number(run.startedAt) || active.startedAt;
         active.last = "";
+        switched = true;
       } else if (sid && !active.sessionId) {
         active.sessionId = sid;
+        if (lastFrame && lastFrame.action === "UPDATE" && !lastFrame.sessionId) {
+          lastFrame = { ...lastFrame, sessionId: sid };
+        }
       }
       // 已经在显示了：state 快照每次都会走到这里，别把「等你确认」之类刷回「正在干活」（#97 02-010）。
-      // 状态变化由各自的事件（perm_resolved、phase…）来改；但快照里已经有待确认的请求时要说出来
+      // 状态变化由各自的事件（perm_resolved、phase…）来改；但快照里已经有待确认的请求、或刚切到另一轮时要立刻刷新
       if (permCount(run)) update(L().perm(""), L().waiting, "waiting");
       else if (text) update(text);
+      else if (switched) update(L().start, L().working, "working");
       return;
     }
     clearPending();
     if (doneTimer) { clearTimeout(doneTimer); doneTimer = null; }
     if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
     active = {
-      id: (run && run.id) || "",
+      id: rid,
       sessionId: sid,
       startedAt: Number(run && run.startedAt) || clock(),
       last: "",
@@ -278,6 +286,7 @@ export function createWorkIsland(opts = {}) {
 
   function handleEvent(ev) {
     if (!ev || !ev.type) return;
+    const otherRun = !!(ev.runId && active && active.id && ev.runId !== active.id);
     switch (ev.type) {
       case "run_start":
         start(ev);
@@ -287,9 +296,11 @@ export function createWorkIsland(opts = {}) {
         else if (active && !liveRuns().length) finish("");
         break;
       case "run_busy":
+        if (otherRun) break;
         update(L().resume, L().working, "working");
         break;
       case "phase":
+        if (otherRun) break;
         if (ev.phase === "wait") update(L().wait, L().titleWait, "thinking");
         else if (ev.phase === "think") update(L().think, L().titleThink, "thinking");
         else if (ev.phase === "text") update(L().text, L().titleText, "writing");
@@ -297,6 +308,7 @@ export function createWorkIsland(opts = {}) {
         else if (ev.phase === "retry") update(L().wait, L().titleRetry, "thinking");
         break;
       case "tool_use": {
+        if (otherRun) break;
         const todo = todoProgress(ev, L());
         if (todo) update(todo.text, todo.title, todo.state, todo.extra);
         else update(L().tool(L().toolName(ev.name)), L().toolTitle(ev.name), toolState(ev.name));
@@ -305,6 +317,7 @@ export function createWorkIsland(opts = {}) {
       case "tasks": {
         // TaskCreate / TaskUpdate 的清单（goal.mjs 的 tasksCheck）：只数数字，不转发 subject / active 原文。
         // tasks 为 null 表示清单被清空，这时什么也不做，等下一个事件刷新。
+        if (ev.sessionId && active && active.sessionId && ev.sessionId !== active.sessionId) break;
         const list = Array.isArray(ev.tasks) ? ev.tasks : null;
         if (!list || !list.length) break;
         const total = list.length;
@@ -318,18 +331,23 @@ export function createWorkIsland(opts = {}) {
         update(L().perm(L().toolName(ev.tool || ev.name)), L().waiting, "waiting");
         break;
       case "perm_resolved":
+        if (otherRun) break;
         update(L().resume, L().working, "working");
         break;
       case "compacting":
+        if (otherRun) break;
         update(L().compact, L().titleCompact, "thinking");
         break;
       case "sub_progress":
+        if (otherRun) break;
         update(L().sub, L().titleSub, "subtask");   // 不转发子任务描述：是模型写的原文，可能带路径、用户内容
         break;
       case "run_idle":
+        if (otherRun) break;
         if (ev.bg > 0) update(L().bg, L().titleBg, "working");
         break;
       case "error":
+        if (otherRun) break;
         // 不转发 message：可能带路径/命令输出。正文给一句固定话，
         // 别发空串（应用缺 text 时会把上一句清掉，看起来像没更新）。
         update(L().errorText, L().titleError, "error");

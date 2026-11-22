@@ -178,11 +178,12 @@ public final class Share extends ContentProvider {
         } catch (IOException e) { throw new FileNotFoundException(); }
     }
 
-    /** 不往外分享的：本应用的令牌与厂商密钥配置（审查 10-29 第六份 低7），Claude 登录凭据、SSH/GPG 目录、私钥与证书库（v0.5.7 独立审查 L7） */
+    /** 不往外分享的：本应用的令牌与厂商密钥配置（审查 10-29 第六份 低7），Claude 登录凭据、SSH/GPG 目录、私钥与证书库（v0.5.7 独立审查 L7）。
+     *  名称与路径统一转小写后匹配：/sdcard（FUSE）大小写不敏感，.SSH/ID_RSA 等大小写变体同样拦截。 */
     static boolean secret(File f) {
-        String nm = f.getName(), p = f.getPath();
+        String nm = f.getName().toLowerCase(Locale.ROOT), p = f.getPath().toLowerCase(Locale.ROOT);
         return nm.equals(".gateway-token") || nm.matches("ccapp-(providers|config|seed).*\\.json") || nm.equals("ccapp-key") || nm.equals("llama-api-key")
-            || nm.equals(".credentials.json") || nm.matches("id_(rsa|dsa|ecdsa|ed25519)(_sk)?") || nm.matches("(?i).*\\.(pem|key|p12|pfx|jks|keystore)")
+            || nm.equals(".credentials.json") || nm.matches("id_(rsa|dsa|ecdsa|ed25519)(_sk)?") || nm.matches(".*\\.(pem|key|p12|pfx|jks|keystore)")
             || nm.equals(".netrc") || nm.equals(".git-credentials")
             // Claude 的登录与设置（.claude.json 里有 OAuth 刷新令牌，settings.json 常放 ANTHROPIC_AUTH_TOKEN）、npm / pip 的令牌（审查 v0513b 低-19）
             || nm.equals(".claude.json") || nm.matches("\\.claude\\.json\\.backup.*") || p.matches(".*/\\.claude/settings(\\.local)?\\.json")
@@ -194,22 +195,44 @@ public final class Share extends ContentProvider {
             || p.matches(".*/\\.(ssh|gnupg|aws|docker|kube|azure)/.*") || p.matches(".*/\\.config/gcloud/.*");
     }
 
+    /** 路径是否在 root 目录内：同时比规范路径前缀与 (st_dev, st_ino) 目录身份，识别 /data/data/<pkg> ↔ /data/user/0/<pkg> 绑定挂载别名 */
+    private static boolean underDir(File cf, File root) {
+        if (root == null) return false;
+        try {
+            String p = cf.getPath(), rp = root.getCanonicalPath();
+            if (p.equals(rp) || p.startsWith(rp + "/")) return true;
+        } catch (IOException ignored) {}
+        try {
+            android.system.StructStat rst = android.system.Os.stat(root.getPath());
+            for (File cur = cf; cur != null; cur = cur.getParentFile()) {
+                try {
+                    android.system.StructStat cst = android.system.Os.stat(cur.getPath());
+                    if (cst.st_dev == rst.st_dev && cst.st_ino == rst.st_ino) return true;
+                } catch (android.system.ErrnoException ignored) {}
+            }
+        } catch (android.system.ErrnoException ignored) {}
+        return false;
+    }
+
     /** 能不能交出本应用（分享、「保存到」）：凭据按真实路径拦（软链指过去的也算）；
      *  私有目录里只交工作区和导出目录的，别的（配置、登录态、日志、会话记录）和网关 /api/file 一样不往外给（审查 v0513b 低-19）。
-     *  「私有目录」是整个应用数据目录（shared_prefs、databases、files 下 home 以外的都算），不只 home（审查 v0.5.20 09-015）；
+     *  「私有目录」是整个应用数据目录（shared_prefs、databases、files 下 home 以外的都算，含 /data/data/<pkg> 别名），不只 home（审查 v0.5.20 09-015）；
      *  诊断包和拍照那两个分享根照常能交 */
     static void guard(Context c, File f) throws IOException {
         File cf = f.getCanonicalFile();
         if (secret(cf)) throw new IOException(Tr.t("这是凭据或私钥文件，不分享"));
         String p = cf.getPath();
-        boolean priv = false;
-        for (File d : new File[]{c.getDataDir(), c.createDeviceProtectedStorageContext().getDataDir()})
-            if (d != null && p.startsWith(d.getCanonicalPath() + "/")) priv = true;
+        String pkg = c.getPackageName();
+        boolean priv = p.equals("/data/data/" + pkg) || p.startsWith("/data/data/" + pkg + "/");
+        if (!priv) {
+            for (File d : new File[]{c.getDataDir(), c.createDeviceProtectedStorageContext().getDataDir()})
+                if (underDir(cf, d)) { priv = true; break; }
+        }
         if (priv) {
             Env env = new Env(c);
             boolean ok = false;
             for (File d : new File[]{new File(env.home, "workspace"), new File(env.home, "exports"), root(c, "logs"), Camera.dir(c)})
-                if (p.startsWith(d.getCanonicalPath() + "/")) ok = true;
+                if (underDir(cf, d)) { ok = true; break; }
             if (!ok) throw new IOException(Tr.t("应用私有目录里的这个文件不分享"));
             // 硬链接不改真实路径：工作区里一个硬链接就能指到凭据文件上（10-31 复核）。私有目录里正常的文件只有一个名字
             try { if (android.system.Os.stat(cf.getPath()).st_nlink > 1) throw new IOException(Tr.t("这个文件有多个硬链接，不分享")); }

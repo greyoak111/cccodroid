@@ -147,7 +147,7 @@ async function modInstall(id) { return (await modInstallJob(id)).r; }
  *  done 在任务结束时给出错误信息（成功是 ""），只给网关内部等，不出 HTTP */
 export async function modRepair(id) {
   const { r, job } = await modInstallJob(id, { repair: true });
-  return { ...r, done: job ? job.done.then(() => job.error || (job.cancelled ? tz("已取消") : "")) : Promise.resolve("") };
+  return { ...r, done: job ? job.promise.then(() => job.error || (job.cancelled ? tz("已取消") : "")) : Promise.resolve("") };
 }
 /** 返回 { r: 给界面的结果, job: 真起了安装任务才有 } */
 async function modInstallJob(id, { repair = false } = {}) {
@@ -185,7 +185,7 @@ async function modStart(id, repair) {
     try { const st = fs.statfsSync(path.dirname(PREFIX)); const free = st.bavail * st.bsize; if (free < need) return { ok: false, message: tz("存储空间不够：需要约 {need} MB，只剩 {free} MB", { need: Math.ceil(need / 1048576), free: Math.floor(free / 1048576) }) }; } catch {}
     const job = { phase: "downloading", done: 0, total: 0, queue: chain, current: chain[0], finished: false };
     for (const c of chain) MOD_JOBS.set(c, job);
-    job.done = (async () => {
+    job.promise = (async () => {
       try {
         for (const c of chain) { job.current = c; await modRunInstall(mj, blockOf(mj, c), dk.base, job); }
         log(`[mod] 已装：${chain.join(" → ")}`);
@@ -236,8 +236,14 @@ function modTarList(job, gz) {
       chunks.push(d);
     });
     child.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
-    child.on("error", (e) => { job.child = null; unmarkChild(mark); reject(e); });
-    child.on("exit", (code) => {
+    let settled = false;
+    child.on("error", (e) => {
+      if (settled) return; settled = true;
+      job.child = null; unmarkChild(mark); reject(e);
+    });
+    // 监听 close 而非 exit：exit 触发时 stdout 管道末尾分片可能尚未排空，会导致尾部路径逃逸校验漏检
+    child.on("close", (code) => {
+      if (settled) return; settled = true;
       job.child = null; unmarkChild(mark);
       if (job.cancelled) return reject(new Error("cancelled"));
       if (overflow) return reject(new Error("tar listing too large"));
@@ -420,7 +426,7 @@ async function modMoveIn(stageUsr, rel = "", skipped = [], beat = () => {}, stat
 function modCancel(id) {
   const job = MOD_JOBS.get(id);
   if (!job || job.finished) return { ok: false, message: "not running" };
-  if (job.phase === "installing") return { ok: false, message: tz("正在放进工具包，这一步不能中断") };
+  if (job.phase === "installing" || job.phase === "removing") return { ok: false, message: tz("正在放进工具包，这一步不能中断") };
   job.cancelled = true;
   if (job.child) killTree(job.child);
   return { ok: true };
@@ -459,7 +465,7 @@ async function modRemove(id) {
   for (const o of mj.modules || []) if (!gone.includes(o.id) && modInstalled(mj, o.id)) for (const r of filesOf(o)) keep.add(r);
   for (const [cid, rec] of compRecords()) for (const r of compNeeds(cid, rec)) keep.add(r);
   for (const p of Object.values(pkgRecords())) for (const r of (p && p.files) || []) keep.add(r);
-  const removal = { phase: "removing", finished: false };
+  const removal = { phase: "removing", current: id, finished: false };
   MOD_JOBS.set(id, removal);
   const heart = modHeart(id);
   heart.beat(0, "switch");

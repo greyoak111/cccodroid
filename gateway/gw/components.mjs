@@ -713,7 +713,7 @@ async function compInstall(id) { const x = await compStart(id); return x.job ? x
 /** 核对记录的「修补」（reconcile.mjs）：同版本原地重装；done 在任务结束时给出错误信息（成功是 ""），只给网关内部等 */
 export async function compRepair(id) {
   const x = await compStart(id);
-  return x.job ? { ...x.r, done: x.job.done.then(() => x.job.error || (x.job.cancelled ? tz("已取消") : "")) } : { ...x, done: Promise.resolve("") };
+  return x.job ? { ...x.r, done: x.job.promise.then(() => x.job.error || (x.job.cancelled ? tz("已取消") : "")) } : { ...x, done: Promise.resolve("") };
 }
 /** 起安装任务：起了返回 { r, job }，没起返回给界面的结果 */
 async function compStart(id) {
@@ -772,7 +772,7 @@ async function compStart(id) {
     if (COMP_JOBS.get(id) === job) COMP_JOBS.delete(id);
     throw e;
   }
-  job.done = compRunInstall(id, b, job).then(
+  job.promise = compRunInstall(id, b, job).then(
     () => {
       job.finished = true;
       log(`[comp] ${id} ${b.version} 装好了`);
@@ -1323,7 +1323,12 @@ async function compSwitch(id, b, tree, job) {
       if (restored) {
         await rmTreeBatched(bak, (n) => beat(n, "switch"));   // 备份只剩空目录，删起来便宜；分批让出（复核 R2-P2-4）
         try { fs.rmSync(prevFile, { force: true }); } catch {}
-        if (old && !compWriteRecord(id, old)) log(`[comp] ${id}：回滚后旧记录没写回去，界面会显示装到一半`);
+        if (old) {
+          if (!compWriteRecord(id, old)) log(`[comp] ${id}：回滚后旧记录没写回去，界面会显示装到一半`);
+        } else {
+          // 首次安装回滚干净后清掉 installing 记录，避免界面把未装上的组件报成 damaged
+          try { fs.rmSync(compRecFile(id), { force: true }); } catch {}
+        }
       } else {
         // 回滚失败：别再写回 ok 假装旧版完好——留 installing + 备份 + .prev，让启动恢复（compRecover）或
         // 下次安装接手（复核 §3：界面按 damaged 显示，可重装可卸载，比「显示 ok 其实缺文件」诚实）
