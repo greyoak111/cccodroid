@@ -1112,7 +1112,8 @@ async function compRunInstall(id, b, job) {
       });
       child.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
       child.on("error", (e) => { job.child = null; unmarkChild(mark); reject(e); });
-      child.on("exit", (code) => {
+      // 等 close 而不是 exit：exit 触发时 stdout 可能还有没读完的块，清单末尾被截掉就漏查后几条（逃逸检查必须看全）
+      child.on("close", (code) => {
         job.child = null; unmarkChild(mark);
         if (job.cancelled) return reject(new Error("cancelled"));
         if (overflow) return reject(new Error("tar listing too large"));
