@@ -526,11 +526,13 @@ final class Priv {
                     break;
                 }
                 case "share_file": {
-                    // 查看器、用量月报都走这里：工作区和 /sdcard 上的文件先拷到导出目录再分享
+                    // 查看器、用量月报都走这里：不在固定分享根里的文件走零拷贝单文件只读句柄（支持 >512 MB 大文件）
                     try {
-                        java.io.File f = Share.shareable(ctx, new java.io.File(req.optString("path")));
+                        java.io.File f = new java.io.File(req.optString("path"));
+                        android.net.Uri u = Share.shareUri(ctx, f);
+                        java.io.File cf = f.getCanonicalFile();
                         String mime = req.optString("mime", "");
-                        resp = Share.send(ctx, f, mime.isEmpty() ? Share.mimeOf(f) : mime);
+                        resp = Share.send(ctx, cf, u, mime.isEmpty() ? Share.mimeOf(cf) : mime);
                     } catch (Exception e) { resp = new JSONObject().put("ok", false).put("message", e.getMessage()); }
                     break;
                 }

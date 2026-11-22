@@ -188,6 +188,48 @@ public class Stab2LHostTest {
         eq("WorkIsland.statusColor working 为主题色", WorkIsland.statusColor("working") == WorkIsland.COLOR_WORKING, true);
         eq("WorkIsland.iconRes 空上下文回退系统图标", WorkIsland.iconRes(null, "ic_work_island", 42) == 42, true);
 
+        // ── Share：零拷贝单文件只读句柄（解除 512 MB 拷贝上限、过期/改名/软链切换/驱逐均生效）──
+        try {
+            java.io.File sdir = java.nio.file.Files.createTempDirectory("share-grant-test").toFile();
+            java.io.File store = new java.io.File(sdir, "share-grants.json");
+            java.io.File big = new java.io.File(sdir, "archive-1gb.bin");
+            java.nio.file.Files.write(big.toPath(), "hello".getBytes("UTF-8"));
+            java.io.File canon = big.getCanonicalFile();
+            long gt0 = 1_700_000_000_000L;
+            String tok = Share.putGrant(store, canon, gt0);
+            eq("Share.putGrant 返回 32 位十六进制随机 token", tok.matches("[0-9a-f]{32}"), true);
+            eq("Share.resolveGrant 有效期内解析回原文件（零拷贝）",
+                canon.equals(Share.resolveGrant(store, tok, "archive-1gb.bin", gt0 + 1000)), true);
+            boolean badName = false;
+            try { Share.resolveGrant(store, tok, "spoof.txt", gt0 + 1000); } catch (java.io.FileNotFoundException e) { badName = true; }
+            eq("Share.resolveGrant 拒绝文件名不匹配", badName, true);
+            boolean expired = false;
+            try { Share.resolveGrant(store, tok, "archive-1gb.bin", gt0 + 25L * 3600 * 1000); } catch (java.io.FileNotFoundException e) { expired = true; }
+            eq("Share.resolveGrant 拒绝 24 小时后过期的句柄", expired, true);
+            boolean badTok = false;
+            try { Share.resolveGrant(store, "../etc/passwd", "archive-1gb.bin", gt0 + 1000); } catch (java.io.FileNotFoundException e) { badTok = true; }
+            eq("Share.resolveGrant 拒绝非法 token", badTok, true);
+            // 超过 64 条上限时驱逐最早过期的句柄
+            String first = Share.putGrant(store, canon, gt0 + 1);
+            for (int i = 0; i < 65; i++) Share.putGrant(store, canon, gt0 + 100 + i);
+            boolean evicted = false;
+            try { Share.resolveGrant(store, first, "archive-1gb.bin", gt0 + 200); } catch (java.io.FileNotFoundException e) { evicted = true; }
+            eq("Share.putGrant 超出 64 条上限后驱逐最早条", evicted, true);
+            // 授权后原路径被替换成指向别处的软链：canonicalPath 对不上，拒绝
+            java.io.File secret = new java.io.File(sdir, "secret.txt");
+            java.nio.file.Files.write(secret.toPath(), "s".getBytes("UTF-8"));
+            String tok2 = Share.putGrant(store, canon, gt0 + 500);
+            big.delete();
+            java.nio.file.Files.createSymbolicLink(big.toPath(), secret.toPath());
+            boolean symBlocked = false;
+            try { Share.resolveGrant(store, tok2, "archive-1gb.bin", gt0 + 600); } catch (java.io.FileNotFoundException e) { symBlocked = true; }
+            eq("Share.resolveGrant 拒绝授权后被替换成软链的路径", symBlocked, true);
+            big.delete(); secret.delete(); store.delete(); sdir.delete();
+        } catch (Exception e) {
+            System.out.println("FAIL Share 句柄单测异常: " + e);
+            fail++;
+        }
+
         if (fail > 0) { System.out.println(fail + " 条失败"); System.exit(1); }
         System.out.println("全部通过");
     }
