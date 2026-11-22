@@ -301,7 +301,8 @@ export async function routeDevside(req, res, u, p) {
   // 更新（APK / 工具包 / Claude Code）与 Shizuku 一键安装激活：都在应用进程里做，这里只转话
   if (p.startsWith("/api/app/")) {
     const op = p.slice(9);
-    const OPS = ["upd_status", "upd_check", "upd_apply", "upd_set", "upd_verify", "upd_repair", "share_logs", "factory_reset", "share_file", "apk_install", "shz_install", "shz_activate", "shz_pair", "shz_autostart", "shz_repair", "open_app_settings", "freeze_ack", "notify_status", "notify_set", "notify_settings", "island_status", "island_set", "island_preview", "island_promo_settings", "island_overlay_settings", "dev_status", "dev_set", "a11y_settings"];
+    const OPS = ["upd_status", "upd_check", "upd_apply", "upd_set", "upd_verify", "upd_repair", "share_logs", "factory_reset", "share_file", "apk_install", "shz_install", "shz_activate", "shz_pair", "shz_autostart", "shz_repair", "shz_split_settings", "open_app_settings", "freeze_ack", "notify_status", "notify_set", "notify_settings", "island_status", "island_set", "island_preview", "island_promo_settings", "island_overlay_settings", "dev_status", "dev_set", "a11y_settings"];
+    if (op === "shz_split_settings" && req.method !== "POST") return sendJson(res, 405, { ok: false });
     if (!OPS.includes(op)) return sendJson(res, 404, { ok: false, message: tz("未知操作") });
     const raw = req.method === "POST" ? JSON.parse((await readBody(req)) || "{}") : {};
     // 只转各操作认的字段、认的类型：应用那头也逐项校验，这里再挡一道（11-01 独立审查低-3）

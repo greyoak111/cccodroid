@@ -11,6 +11,8 @@ javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/PrivRules.java" "$ROOT/an
 java -cp "$OUT" cc.codroid.PrivRulesTest
 javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/KeyAttest.java" "$ROOT/android/tests/cc/codroid/KeyAttestTest.java"
 java -cp "$OUT" cc.codroid.KeyAttestTest
+javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/SplitPairing.java" "$ROOT/android/tests/cc/codroid/SplitPairingTest.java"
+java -cp "$OUT" cc.codroid.SplitPairingTest
 # 更新说明挑版本：WhatsNew 引了安卓类，编译要 android.jar（平板 ~/.bldtools，或 ANDROID_JAR）；pick 本身不碰安卓接口
 AJAR=${ANDROID_JAR:-$HOME/.bldtools/android.jar}
 if [ -f "$AJAR" ]; then

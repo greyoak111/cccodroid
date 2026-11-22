@@ -730,6 +730,10 @@
               <input id="priv-port" inputmode="numeric" maxlength="5" placeholder="端口（配对框里）" data-i18n-attr="placeholder">
               <button class="btn sm" data-act="pair" data-i18n>配对</button>
             </div>
+            <div class="hidden" id="priv-split">
+              <div class="row-actions"><button type="button" class="btn sm ghost" id="priv-split-settings" data-i18n>分屏打开设置</button></div>
+              <p class="hint" id="priv-split-state" role="status" aria-live="polite"></p>
+            </div>
             <div class="row-actions" id="priv-actions"></div>
             <div class="priv-audit hidden" id="priv-audit"></div>
             <div class="srow sub hidden" id="priv-auto-row">
