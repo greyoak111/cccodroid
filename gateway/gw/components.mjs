@@ -1522,21 +1522,43 @@ async function ghStatus() {
   const j = GH.job;
   return { installed: true, accounts, job: j ? { state: j.state, code: j.code, url: j.url, error: j.error, git: j.git } : null };
 }
+export function parseGhDeviceOutput(raw) {
+  const clean = String(raw || "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+  // 兼容 gh 两种输出格式：
+  // 1) 无剪贴板或复制失败：First copy your one-time code: ABCD-1234
+  // 2) 剪贴板复制成功（如 app/pre/termux-clipboard-set 或桌面 pbcopy/xclip/wl-copy）：
+  //    ✓ One-time code (ABCD-1234) copied to clipboard
+  const m = clean.match(/one-time code(?::\s*|\s*\()([A-Z0-9]{4}-[A-Z0-9]{4})\)?/i);
+  const u = clean.match(/https:\/\/github\.com\/login\/device\b/);
+  return { code: m ? m[1].toUpperCase() : "", url: u ? u[0] : "" };
+}
+export function ghLoginEnv(base = termEnv()) {
+  const env = { ...base, NO_COLOR: "1" };
+  // 扩展页 gh 登录卡自带一次性码展示与「复制并打开浏览器」按钮；
+  // 剥离 PATH 中的 app/pre（含 termux-clipboard-set / xdg-open），避免 gh auth login --web
+  // 暗中调用 termux-clipboard-set 弹出「允许写入剪贴板？」确认框阻塞申请流程。
+  const skip = new Set();
+  if (env.CCAPP_BIN) skip.add(path.resolve(env.CCAPP_BIN, "..", "pre"));
+  if (env.CCAPP_RUNTIME) skip.add(path.resolve(env.CCAPP_RUNTIME, "app", "pre"));
+  if (skip.size && env.PATH) {
+    env.PATH = env.PATH.split(":").filter((d) => d && !skip.has(path.resolve(d))).join(":");
+  }
+  return env;
+}
 function ghLogin() {
   const bin = ghBin();
   if (!bin || !fs.existsSync(bin)) return { ok: false, message: tz("gh 没装") };
   if (GH.job && ["starting", "waiting"].includes(GH.job.state)) return { ok: true };
   // 没有终端时 gh 不等回车、不开浏览器，只把一次性码和网址打到 stderr；-s workflow 让推 .github/workflows 也行
   const child = spawn(bin, ["auth", "login", "--web", "-h", "github.com", "-p", "https", "-s", "workflow"],
-    { env: termEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true });
+    { env: ghLoginEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true });
   const job = (GH.job = { state: "starting", code: "", url: "", error: "", git: null, child });
   let buf = "";
   const onData = (d) => {
     buf = (buf + d).slice(-4000);
-    const m = buf.match(/one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})/);
-    if (m && !job.code) { job.code = m[1]; job.state = "waiting"; }
-    const u = buf.match(/https:\/\/github\.com\/login\/device\b/);
-    if (u) job.url = u[0];
+    const parsed = parseGhDeviceOutput(buf);
+    if (parsed.code && !job.code) { job.code = parsed.code; job.state = "waiting"; }
+    if (parsed.url) job.url = parsed.url;
   };
   child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");   // 按流解码：多字节字符跨块不会被拆坏
   child.stdout.on("data", onData);
