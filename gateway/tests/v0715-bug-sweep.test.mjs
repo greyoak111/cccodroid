@@ -200,3 +200,55 @@ test("components.mjs: reapComponentRuns 正确剥离 11 字符 .installing 后�
   assert.ok(src.includes('f.slice(0, -".installing".length)'), "应精确剥离 .installing");
 });
 
+test("pget.mjs: 分段并行下载改用异步 fh.write，不阻塞网关事件循环", () => {
+  const src = fs.readFileSync(path.join(process.cwd(), "gateway", "gw", "pget.mjs"), "utf8");
+  assert.ok(!src.includes("writeAll("), "不应在 curl stdout 回调里同步 writeAll/writeSync");
+  assert.ok(src.includes("fs.promises.open") && src.includes("fh.write("), "应使用异步文件句柄写入配合背压");
+});
+
+test("08-extensions.js: 组件市场列表已渲染时遇瞬时 502 不清屏且自动排程重试", async () => {
+  const vm = await import("node:vm");
+  const src = fs.readFileSync(path.join(process.cwd(), "gateway", "web", "app", "08-extensions.js"), "utf8");
+  const nodes = new Map(), timers = [];
+  const node = (id) => {
+    if (["gh-auth", "llm-dl", "ext-storage"].includes(id)) return null;
+    if (!nodes.has(id)) nodes.set(id, {
+      innerHTML: "", textContent: "", dataset: {}, listeners: {},
+      classList: { toggle() {}, contains() { return false; }, add() {}, remove() {} },
+      querySelectorAll() { return []; },
+      addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+    });
+    return nodes.get(id);
+  };
+  let failNext = false;
+  const box = {
+    window: { I18N: { lang: "zh" } }, I18N: { lang: "zh" },
+    $: node, t: (s) => s, tk: (s) => s, esc: (s) => String(s ?? ""), isZh: () => true,
+    document: { querySelectorAll: () => [] }, localStorage: { getItem: () => null },
+    pageOn: () => true, setPageSub() {}, webUrl: () => false,
+    extOffNow: async () => ({ comp: [] }),
+    api: async () => {
+      if (failNext) throw new Error("HTTP 502");
+      return {
+        supported: true,
+        items: [{ id: "blender", name: { zh: "Blender" }, desc: "", state: "downloading", available: true, verified: true, bytes: 10 << 20, installed: 20 << 20, bin: [], progress: { phase: "downloading", done: 1 << 20, total: 10 << 20 } }],
+      };
+    },
+    setTimeout: (fn, delay) => { timers.push({ fn, delay }); return timers.length; },
+    clearTimeout() {},
+  };
+  vm.runInNewContext(src + "\nglobalThis.__loadComponents = loadComponents;", box, { filename: "08-extensions.js" });
+  await box.__loadComponents();
+  const rendered = node("comp-list").innerHTML;
+  assert.match(rendered, /Blender/, "首次加载应渲染组件卡片");
+  timers.length = 0;
+  failNext = true;
+  const st = await box.__loadComponents();
+  assert.equal(st.err, "HTTP 502");
+  assert.equal(node("comp-list").innerHTML, rendered, "瞬时 502 不应清空已有组件列表");
+  assert.equal(timers.length, 1, "瞬时 502 后应自动排程 1.5s 重试轮询");
+  assert.equal(timers[0].delay, 1500);
+});
+
+
+

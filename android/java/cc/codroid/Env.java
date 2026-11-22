@@ -104,6 +104,9 @@ final class Env {
 
     // ── 核身份（审查 S1）：端口全机共享，交出令牌之前先确认对面是真网关。协议见 gateway/gw/access.mjs 的 proof ──
     private static final Object BOOT_LOCK = new Object();
+    private static final Object PROOF_FLIGHT_LOCK = new Object();
+    private static boolean proofInFlight;
+    private static String proofFlightResult;
     private static volatile long provedAt;
     private static volatile String boot = "";
     /** 网关换了一个（启动号变了）时回调，参数是这次的 Cookie 值；MainActivity 拿去种进 WebView */
@@ -129,7 +132,8 @@ final class Env {
 
     /** force：不吃 3 秒缓存。界面的 /api 请求前要用这一版（0.6.10 审计 199-1-04）：
      *  页面加载完以后网关被杀、端口被别的应用占住的空档里，3 秒缓存正好能放过冒牌的一两个请求 ——
-     *  里面可能就是用户刚敲的话。多跑一趟本机请求（几毫秒），换来每个 /api 都当场核一次。 */
+     *  里面可能就是用户刚敲的话。多跑一趟本机请求（几毫秒），换来每个 /api 都当场核一次。
+     *  并发 /api/* 同毫秒撞进来时复用正在进行的同一趟实时 /__proof（单飞，不缓存过期结果），避免并发下载时把探活踩成 502。 */
     static boolean proveGateway(boolean force) {
         return proveBoot(force) != null;
     }
@@ -141,6 +145,35 @@ final class Env {
                 if (!boot.isEmpty() && System.currentTimeMillis() - provedAt < 3000) return boot;    // 刚核过：别每个请求都多跑一趟
             }
         }
+        boolean leader = false;
+        synchronized (PROOF_FLIGHT_LOCK) {
+            if (proofInFlight) {
+                while (proofInFlight) {
+                    try { PROOF_FLIGHT_LOCK.wait(4500); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); return null; }
+                }
+                return proofFlightResult;
+            }
+            proofInFlight = true;
+            proofFlightResult = null;
+            leader = true;
+        }
+        String res = null;
+        try {
+            res = proveBootOnce();
+            return res;
+        } finally {
+            if (leader) {
+                synchronized (PROOF_FLIGHT_LOCK) {
+                    proofFlightResult = res;
+                    proofInFlight = false;
+                    PROOF_FLIGHT_LOCK.notifyAll();
+                }
+            }
+        }
+    }
+
+    private static String proveBootOnce() {
         String t = key();
         if (t.isEmpty()) return null;
         try {
@@ -148,7 +181,8 @@ final class Env {
             new java.security.SecureRandom().nextBytes(nb);
             String n = hex(nb);
             java.net.HttpURLConnection c = openLoopback("http://" + HOST + ":" + PORT + "/__proof?n=" + n);
-            c.setConnectTimeout(800); c.setReadTimeout(1500); c.setInstanceFollowRedirects(false); c.setUseCaches(false);
+            // 读超时放宽到 3500ms：并发下载/解包组件时安卓闪存瞬时 IO 抖动可超 1.5s，避免界面误吃 502
+            c.setConnectTimeout(1000); c.setReadTimeout(3500); c.setInstanceFollowRedirects(false); c.setUseCaches(false);
             try {
                 if (c.getResponseCode() != 200) return null;
                 byte[] buf = new byte[256];

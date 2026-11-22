@@ -121,10 +121,15 @@ test("curl 起不来：返回错误，不留未处理的 error 把网关带走�
 test("写盘失败：返回错误，别把网关带走（#121-2）", async (t) => {
   reset("range");
   const f = fresh("diskerr.part");
-  const orig = fs.writeSync;
-  const m = t.mock.method(fs, "writeSync", function (fd, b, off, len, pos) {
-    if (typeof pos === "number") throw Object.assign(new Error("ENOSPC"), { code: "ENOSPC" });
-    return orig.call(fs, fd, b, off, len, pos);
+  const origOpen = fs.promises.open;
+  const m = t.mock.method(fs.promises, "open", async function (...args) {
+    const fh = await origOpen.apply(fs.promises, args);
+    const origWrite = fh.write.bind(fh);
+    fh.write = async function (b, off, len, pos) {
+      if (typeof pos === "number") throw Object.assign(new Error("ENOSPC"), { code: "ENOSPC" });
+      return origWrite(b, off, len, pos);
+    };
+    return fh;
   });
   try {
     const err = await pget({ curl: CURL, url: URL_, file: f, total: DATA.length });
