@@ -581,12 +581,48 @@
   const extSync = () => { $("set-extimg").checked = uiGet("extImg") !== "auto"; };
   extSync(); document.addEventListener("cc:ui", (e) => { if (e.detail.key === "extImg" || e.detail.key == null) extSync(); });
   $("set-extimg").addEventListener("change", (e) => uiSet("extImg", e.target.checked ? null : "auto"));
-  // 工作岛起没起来（195-P.4）：检测要几秒（pm 再加 am 探一次），开关 / 重试之后隔几秒再看
+  // 工作岛：内置（cccodroid 本体实时通知 + 悬浮胶囊兜底）与旧伴侣应用兼容
+  let wiTimers = [];
+  function clearWiTimers() {
+    for (const id of wiTimers) clearTimeout(id);
+    wiTimers = [];
+  }
   async function loadWorkIsland() {
-    const visit = setVisit;
+    const visit = setVisit, ok = typeof latest === "function" ? latest("work-island") : () => true;
     if (!setVisible("claude", visit)) return;
-    const r = await api("/api/work-island").catch(() => null), box = $("wi-state");
-    if (!setVisible("claude", visit)) return;
+    const r = await api("/api/work-island").catch(() => null), box = $("wi-state"), built = $("wi-builtin");
+    if (!ok() || !setVisible("claude", visit)) return;
+    if (r && r.builtin && built) {
+      box.classList.add("hidden");
+      const showBuilt = !!r.wanted;
+      built.classList.toggle("hidden", !showBuilt);
+      if (!showBuilt) return;
+      const st = await api("/api/app/island_status").catch(() => null);
+      if (!ok() || !setVisible("claude", visit)) return;
+      if (!st || !st.ok) { built.classList.add("hidden"); return; }
+      $("wi-sys-row").classList.toggle("hidden", !st.systemSupported);
+      $("wi-sys").checked = !!st.systemIsland;
+      $("wi-ov").checked = !!st.overlay;
+      const hs = $("wi-host-st");
+      const needNtf = !st.notifEnabled || !st.chEnabled;
+      const needPromo = st.systemSupported && st.systemIsland && !needNtf && !st.canPostPromoted;
+      const needOv = st.overlay && !st.canDrawOverlays;
+      $("wi-ntf-btn").classList.toggle("hidden", !needNtf);
+      $("wi-promo-btn").classList.toggle("hidden", !needPromo);
+      $("wi-ov-btn").classList.toggle("hidden", !needOv);
+      let cls = "ok", txt = "";
+      if (needNtf) { cls = "warn"; txt = t("系统设置里关掉了本应用通知或工作岛渠道。"); }
+      else if (needPromo) { cls = "warn"; txt = t("系统尚未允许本应用显示实时通知，未开启前将以普通进度通知显示。"); }
+      else if (needOv) { cls = "warn"; txt = t("已开启悬浮胶囊兜底，但尚未授予悬浮窗权限。"); }
+      else if (st.systemSupported && st.systemIsland) { txt = t("✓ 系统实时通知已就绪"); }
+      else if (st.overlay) { txt = t("✓ 悬浮胶囊兜底已就绪"); }
+      else { cls = ""; txt = t("当前系统低于 Android 16，将以同卡进度通知显示，也可开启悬浮胶囊兜底。"); }
+      hs.className = "prov-state" + (cls ? " " + cls : "");
+      hs.textContent = txt;
+      hs.classList.toggle("hidden", !txt);
+      return;
+    }
+    if (built) built.classList.add("hidden");
     const show = !!(r && r.supported && r.wanted && !r.started && !r.detecting && r.error);
     box.classList.toggle("hidden", !show);
     if (!show) return;
@@ -595,14 +631,34 @@
       : t("没检测到「工作岛」应用：装好后点重试。");
   }
   const wiLater = () => {
+    clearWiTimers();
     const visit = setVisit;
-    if (setVisible("claude", visit)) for (const ms of [2000, 6000, 10000]) setTimeout(() => { if (setVisible("claude", visit)) loadWorkIsland(); }, ms);
+    if (setVisible("claude", visit)) for (const ms of [400, 2000, 6000]) wiTimers.push(setTimeout(() => { if (setVisible("claude", visit)) loadWorkIsland(); }, ms));
   };
   $("wi-retry").addEventListener("click", async () => {
     await post("/api/work-island/retry").catch((e) => toast(e.message, true));
     $("wi-state").classList.add("hidden");
     wiLater();
   });
+  $("wi-sys")?.addEventListener("change", (e) => post("/api/app/island_set", { systemIsland: e.target.checked })
+    .then(() => loadWorkIsland(), (err) => { toast(err.message, true); loadWorkIsland(); }));
+  $("wi-ov")?.addEventListener("change", (e) => post("/api/app/island_set", { overlay: e.target.checked })
+    .then(() => loadWorkIsland(), (err) => { toast(err.message, true); loadWorkIsland(); }));
+  $("wi-preview")?.addEventListener("click", async (e) => {
+    const b = e.currentTarget;
+    if (b.disabled) return;
+    b.disabled = true;
+    try {
+      const r = await post("/api/app/island_preview", {});
+      toast(r && r.ok ? t("已开始试播 10 秒，切到桌面或看顶部状态栏") : t("试播失败"));
+      loadWorkIsland();
+    } catch (err) { toast(err.message, true); }
+    finally { setTimeout(() => { if (b.isConnected) b.disabled = false; }, 1200); }
+  });
+  $("wi-promo-btn")?.addEventListener("click", () => appPost("/api/app/island_promo_settings"));
+  $("wi-ov-btn")?.addEventListener("click", () => appPost("/api/app/island_overlay_settings"));
+  $("wi-ntf-btn")?.addEventListener("click", () => appPost("/api/app/notify_settings"));
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && setVisible("claude")) loadWorkIsland(); });
   $("set-workisland").addEventListener("change", (e) => saveSettings({ workIsland: e.target.checked }).then(wiLater));
   $("set-parallel").addEventListener("change", (e) => {
     const v = Math.round(Number(e.target.value));

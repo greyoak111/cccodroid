@@ -11,7 +11,7 @@ import fs from "node:fs";
 import { execFile, execFileSync } from "node:child_process";
 import { SETTINGS } from "./settings-store.mjs";
 import { runList } from "./runs.mjs";
-import { onPublish } from "./bus.mjs";
+import { onPublish, publishNotify, registerNotifyHello } from "./bus.mjs";
 import { LAST_LANG, log } from "./config.mjs";
 import { createWorkIsland } from "./work-island-core.mjs";
 
@@ -114,10 +114,37 @@ function detectApp(cb) {
   });
 }
 
-// 测试替身：检测和「是不是安卓」可以换掉，好在 CI（不是安卓）里按自己定的先后回调，复现开关交错（#124-1）
+function isBuiltin() {
+  return process.env.CCAPP_BUILTIN_ISLAND === "1";
+}
+
+function builtinSend(action, title, text, since, state, extra, meta) {
+  const frame = {
+    action,
+    title: title || "",
+    text: text || "",
+    since: since || 0,
+    state: state || "",
+    sessionId: (meta && meta.sessionId) || "",
+  };
+  if (extra && Number.isInteger(extra.todoTotal) && extra.todoTotal > 0) {
+    frame.todoDone = extra.todoDone || 0;
+    frame.todoTotal = extra.todoTotal;
+  }
+  publishNotify({ type: "work_island", frame });
+}
+
+registerNotifyHello(() => {
+  if (!started || !core || !seam.builtin()) return null;
+  const frame = core.snapshot ? core.snapshot() : null;
+  return frame ? { workIsland: frame } : null;
+});
+
+// 测试替身：检测、内置模式和「是不是安卓」可以换掉，好在 CI（不是安卓）里按自己定的先后回调，复现开关交错（#124-1）
 const seam = {
   detect: (cb) => detectApp(cb),
   android: () => isAndroid(),
+  builtin: () => isBuiltin(),
   exec: (args, timeout, cb) => execFile("/system/bin/am", args, { timeout }, cb),
   execSync: (args, timeout) => execFileSync("/system/bin/am", args, { timeout, stdio: "ignore" }),
 };
@@ -127,6 +154,25 @@ export function startWorkIsland() {
   if (started || detecting) return;
   if (!SETTINGS.workIsland) return;              // 默认关，用户开了才动
   if (process.env.CCAPP_WORK_ISLAND === "0") return;
+  if (seam.builtin()) {
+    started = true;
+    detecting = false;
+    lastErr = null;
+    core = createWorkIsland({
+      send: builtinSend,
+      sendSync: builtinSend,
+      runs: runList,
+      lang: () => LAST_LANG,
+    });
+    unsub = onPublish((ev) => {
+      try { core.handleEvent(ev); } catch {}
+    });
+    const live = runList().filter((r) => r && !r.ended);
+    if (live.length) core.start(live[0]);
+    else core.stop(false, true);
+    log("[work-island] 内置工作岛已订阅网关事件");
+    return;
+  }
   if (!seam.android()) return;
   started = true;
   detecting = true;
@@ -176,7 +222,8 @@ export function stopWorkIslandSync() {
 
 /** 设置页显示用：开着没有、跑起来没有、没起来是为什么（195-P.4） */
 export function workIslandStatus() {
-  return { supported: seam.android(), wanted: SETTINGS.workIsland === true, started: started && !detecting, detecting, error: started ? null : lastErr };
+  const builtin = seam.builtin();
+  return { supported: builtin || seam.android(), builtin, wanted: SETTINGS.workIsland === true, started: started && !detecting, detecting, error: started ? null : lastErr };
 }
 /** 「重试」：关了再开，重新检测（装好应用、或系统放开之后） */
 export function retryWorkIsland() {

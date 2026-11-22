@@ -47,6 +47,7 @@ final class Notify {
     private final Context ctx;
     private final NotificationManager nm;
     private final SharedPreferences sp;
+    private final WorkIsland island;
     private Thread loop;
     private volatile boolean stopping;
 
@@ -74,7 +75,14 @@ final class Notify {
         ask.setDescription(Tr.t("应用在后台时，Claude 等你批准命令、计划或回答问题"));
         nm.createNotificationChannel(done);
         nm.createNotificationChannel(ask);
+        island = new WorkIsland(c, nm, sp);
     }
+
+    JSONObject islandStatus() throws Exception { return island.status(); }
+    void islandSet(JSONObject req) { island.set(req); }
+    JSONObject islandPreview() throws Exception { return island.preview(openIntent("", 81)); }
+    void openIslandPromoSettings() { island.openPromoSettings(); }
+    void openIslandOverlaySettings() { island.openOverlaySettings(); }
 
     boolean doneOn() { return sp.getBoolean("done", true); }
     boolean askOn() { return sp.getBoolean("ask", true); }
@@ -108,13 +116,22 @@ final class Notify {
         loop.start();
     }
 
-    synchronized void stop() { stopping = true; }
+    synchronized void stop() {
+        stopping = true;
+        island.cancel();
+    }
 
     /** 界面回到前台：确认通知都撤掉（卡片就在眼前） */
-    void onForeground() { clearAsks(); }
+    void onForeground() {
+        clearAsks();
+        island.setForeground(true);
+    }
 
     /** 界面刚退到后台：还有没答的确认，现在补发 */
-    void onBackground() { synchronized (this) { syncAsks(); } }
+    void onBackground() {
+        island.setForeground(false);
+        synchronized (this) { syncAsks(); }
+    }
 
     private void clearAsks() {
         synchronized (this) {
@@ -132,7 +149,7 @@ final class Notify {
         while (!stopping) {
             HttpURLConnection c = null;
             try {
-                c = Env.gateway("/api/events");
+                c = Env.gateway("/api/events?notify=1");
                 c.setConnectTimeout(3000);
                 c.setReadTimeout(45_000);            // 网关每 15 秒一个心跳，45 秒没动静就当断了
                 if (lastId != null) c.setRequestProperty("Last-Event-ID", lastId);
@@ -153,6 +170,7 @@ final class Notify {
                 // 网关还没起来 / 正在重启：安静地等，别刷日志
             } finally {
                 if (c != null) c.disconnect();
+                island.cancel();
             }
             sleep(2000);
         }
@@ -170,8 +188,15 @@ final class Notify {
                         String boot = ev.optString("boot");
                         if (gatewayChanged(boot, lastBoot)) runText.clear();
                         lastBoot = boot;
+                        JSONObject wi = ev.optJSONObject("workIsland");
+                        if (wi != null) island.render(wi, openIntent(sidOf(wi), 81));
+                        else island.cancel();
                     }
                     onState(ev);
+                }
+                else if ("work_island".equals(type)) {
+                    JSONObject wi = ev.optJSONObject("frame");
+                    island.render(wi, openIntent(wi == null ? "" : sidOf(wi), 81));
                 }
                 else if ("run_start".equals(type)) runText.put(ev.optString("runId"), clip(ev.optString("text"), RUN_TEXT_CHARS));
                 else if ("run_end".equals(type)) onRunEnd(ev);

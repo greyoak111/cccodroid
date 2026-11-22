@@ -470,6 +470,11 @@ final class Priv {
                     resp = new JSONObject().put("ok", true);
                     break;
                 }
+                case "island_status": resp = Notify.get(ctx).islandStatus(); break;
+                case "island_set": Notify.get(ctx).islandSet(req); resp = Notify.get(ctx).islandStatus(); break;
+                case "island_preview": resp = Notify.get(ctx).islandPreview(); break;
+                case "island_promo_settings": Notify.get(ctx).openIslandPromoSettings(); resp = new JSONObject().put("ok", true); break;
+                case "island_overlay_settings": Notify.get(ctx).openIslandOverlaySettings(); resp = new JSONObject().put("ok", true); break;
                 case "share_logs": resp = Share.send(ctx, Share.bundleLogs(ctx), "application/zip"); break;
                 case "factory_reset": {
                     // 设置页「恢复初始设置」：这里只请界面弹原生确认框（MainActivity.askFactoryReset），执行要用户在框里点；

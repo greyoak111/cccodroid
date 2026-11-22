@@ -24,11 +24,26 @@ const RING_MAX = 4000;
 const RING_BYTES = 32 * 1024 * 1024;
 // 进程内订阅者：可选集成（如工作岛）不用再开一条 HTTP SSE，也不占令牌。
 const SUBSCRIBERS = new Set();
+// 仅给宿主通知流（/api/events?notify=1）附加的 hello 扩展字段（如当前内置工作岛快照）
+const HELLO_NOTIFY_PROVIDERS = new Set();
 
 /** 订阅每个事件；返回取消订阅的函数。订阅者出错不影响主流程。 */
 export function onPublish(fn) {
   SUBSCRIBERS.add(fn);
   return () => SUBSCRIBERS.delete(fn);
+}
+
+/** 为 /api/events?notify=1 的 hello 快照注册附加字段提供者，不污染浏览器前端。 */
+export function registerNotifyHello(fn) {
+  HELLO_NOTIFY_PROVIDERS.add(fn);
+  return () => HELLO_NOTIFY_PROVIDERS.delete(fn);
+}
+
+/** 仅向宿主通知流（?notify=1）推送事件，不入环形缓冲也不占用 WebView 前端带宽。 */
+export function publishNotify(ev) {
+  if (!BUS.clients.size) return;
+  const line = Buffer.from(`data: ${JSON.stringify(ev)}\n\n`);
+  for (const c of BUS.clients) if (c.__notify) busWrite(c, line);
 }
 
 export function publish(ev) {
@@ -78,7 +93,14 @@ export async function routeBus(req, res, u, p) {
     const resume = since >= 0 && since <= BUS.seq && (since === BUS.seq || (first && first.seq <= since + 1));
     // 要补发的先按条取成快照（这一刻的样子；之后的增量走下面的队列），再按对端的接收速度逐条写：
     // 以前拼成一整个字符串一次写出，整轮重放几十 MB 时就是双份内存，对端不收还全堆在缓冲里（审查 v0513b 低-4）
-    const head = "retry: 1500\n\n" + `data: ${JSON.stringify({ type: "hello", boot: BOOT, resume, uiTag: uiTag(), ...snapshot() })}\n\n`;
+    const notifyClient = u.searchParams.get("notify") === "1";
+    const helloExtra = {};
+    if (notifyClient) {
+      for (const fn of HELLO_NOTIFY_PROVIDERS) {
+        try { Object.assign(helloExtra, fn() || {}); } catch {}
+      }
+    }
+    const head = "retry: 1500\n\n" + `data: ${JSON.stringify({ type: "hello", boot: BOOT, resume, uiTag: uiTag(), ...snapshot(), ...helloExtra })}\n\n`;
     const tail = `id: ${BOOT}.${BUS.seq}\ndata: {"type":"sync"}\n\n`;
     let lines;
     if (resume) {
@@ -108,6 +130,7 @@ export async function routeBus(req, res, u, p) {
     }
     // 同时连着的事件流有上限：一直开新连接不关的，最早那条让位
     if (BUS.clients.size >= CLIENTS_MAX) { const old = BUS.clients.values().next().value; BUS.clients.delete(old); try { old.destroy(); } catch {} }
+    res.__notify = notifyClient;
     res.__q = [];                     // 补发期间新来的事件先排在这里，补完接着发，顺序不乱
     BUS.clients.add(res);
     (async () => {
