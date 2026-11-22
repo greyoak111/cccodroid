@@ -177,9 +177,11 @@ export async function routeFonts(req, res, u, p) {
     await fs.promises.writeFile(target, buf);
     // 清单在异步解析和写盘之后再取：避免交错覆盖（审查 B21）
     const list = load();
-    if (list.length >= FONT_COUNT) { try { fs.unlinkSync(target); } catch {} return sendJson(res, 400, { error: "too many", message: "最多导入 10 个字体，先删掉一个再导入" }); }
+    // 先认重：字体文件按 sha 命名，重传已有字体会写回同一个 target；若先查数量上限，
+    // 满 10 个时重传已有字体就会把它自己的文件删掉，记录还留着却打不开了。
     const dup = list.find((f) => f.sha === sha);
     if (dup) return sendJson(res, 200, { ok: true, font: pub(dup), dup: true });
+    if (list.length >= FONT_COUNT) { try { fs.unlinkSync(target); } catch {} return sendJson(res, 400, { error: "too many", message: "最多导入 10 个字体，先删掉一个再导入" }); }
     const f = { id, name: parsedName, file: raw || `${stem}.${fmt}`, fmt, size: buf.length, sha, at: Date.now() };
     list.push(f); save(list);
     log(`[fonts] 导入 ${f.file}（${f.name}，${fmt}，${buf.length}B）→ ${f.id}`);

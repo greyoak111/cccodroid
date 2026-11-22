@@ -89,9 +89,12 @@ final class Consent {
         String token = val + "\0" + sig;
         if (token.equals(BAD_SIG.get(name))) return null;
         // 认证链与 KeyStore 验签放在锁外，避免后台状态轮询持 LOCK 阻塞主线程 showWeb()/onResume()
-        if (!verify(c, name, val, sig)) {
-            BAD_SIG.put(name, token);
-            Log.w(TAG, name + " 的签名验不过，当作没同意");
+        Boolean verified = verify(c, name, val, sig);
+        if (verified != Boolean.TRUE) {
+            // 只有确定签名不对才缓存：KeyStore 一时出错（null）下次还得再试，
+            // 否则一次抖动就把用户已同意的设置永久当成没同意，直到进程重启
+            if (verified == Boolean.FALSE) BAD_SIG.put(name, token);
+            Log.w(TAG, name + (verified == Boolean.FALSE ? " 的签名验不过，当作没同意" : " 的签名这次核不了，当作没同意"));
             return null;
         }
         synchronized (LOCK) {
@@ -268,7 +271,8 @@ final class Consent {
     }
 
     // ── 验签 ──
-    private static boolean verify(Context c, String name, String value, String sig) {
+    /** true 验过 / false 确定不对 / null 这次核不了（异常；调用方不要把它缓存成篡改） */
+    private static Boolean verify(Context c, String name, String value, String sig) {
         try {
             KeyStore ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null);
             KeyStore.Entry e = ks.getEntry(ALIAS + name, null);
@@ -283,7 +287,7 @@ final class Consent {
             s.initVerify(leaf.getPublicKey());
             s.update(msg(c, name, value));
             return s.verify(Base64.decode(sig, Base64.NO_WRAP));
-        } catch (Exception ex) { Log.w(TAG, "验签出错 " + name, ex); return false; }
+        } catch (Exception ex) { Log.w(TAG, "验签出错 " + name, ex); return null; }
     }
     /** 规则在 PrivRules（好在宿主上测） */
     static boolean keyOk(int origin, boolean authRequired, int validitySec) {

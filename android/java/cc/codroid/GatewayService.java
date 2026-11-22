@@ -55,6 +55,19 @@ public class GatewayService extends Service {
         }
     }
 
+    /** 暂停期间再踢一次网关，不改变引用计数：换工具包 / 恢复设置的 finally 里补刀用。
+     *  必须在本方还持着 pause(true) 时调用（否则可能杀掉已经放行后新起的网关）。 */
+    static void pauseKick() {
+        final GatewayService s;
+        synchronized (PAUSE_LOCK) {
+            if (pauseCount <= 0) return;
+            s = self;
+        }
+        if (s == null) return;
+        synchronized (s.life) { s.lifeGen++; }
+        s.killGateway();
+    }
+
     private Env env;
     // 守护线程里赋值、界面线程（划掉 / 停止 / 更新工具包）里读：不 volatile 时那边可能拿到 null，
     // 该杀的网关没杀，留下一个占着端口的孤儿（0.6.9 审计 13-06）
@@ -268,19 +281,27 @@ public class GatewayService extends Service {
 
     private void shutdown() { shutdownIfIdle(null); }
 
-    /** 主线程停机入口（ACTION_STOP / 粘性重建无任务）：立即异步杀网关并收尾，避免主线程 waitFor(5s) 触发 ANR */
+    /** 主线程停机入口（ACTION_STOP / 粘性重建无任务）：异步杀网关，收尾照旧在杀完之后复核。
+     *  以前在 onStartCommand 里同步 killGateway（最多等 5 秒）再复核 startSeq；改成异步后不能把复核也省掉，
+     *  否则用户点「停止」后立刻回到界面（新 onStartCommand 已把 stopping 复位）仍会被这次 stopSelf 杀回去。 */
     private void shutdownAsync() {
+        final long mySeq;
         final int myStartId;
         synchronized (life) {
+            mySeq = startSeq;
             myStartId = lastStartId;
             lifeGen++;
             stopping = true;
         }
-        killGatewayAsync();
-        ShizukuSetup.get(this).onExit();
-        stopForeground(true);
-        if (myStartId > 0) stopSelfResult(myStartId);
-        else stopSelf();
+        killGatewayAsync(() -> {
+            synchronized (life) {
+                if (!shouldFinishStop(stopping, mySeq, startSeq)) return;
+            }
+            ShizukuSetup.get(this).onExit();
+            stopForeground(true);
+            if (myStartId > 0) stopSelfResult(myStartId);
+            else stopSelf();
+        });
     }
 
     /** 停机；给了 seenSeq（划掉后的空闲查询）就先在锁里复核用户没回来、服务没被重新拉起，不能停就返回 false。
@@ -533,14 +554,17 @@ public class GatewayService extends Service {
         if (p != null) terminate(p);
     }
 
-    /** 原子取出 proc 并在后台等待收尾：主线程只发 SIGTERM，绝不 waitFor(5s) 卡死主线程触发 ANR */
-    private void killGatewayAsync() {
+    /** 原子取出 proc 并在后台等待收尾：主线程只发 SIGTERM，绝不 waitFor(5s) 卡死主线程触发 ANR。
+     *  after 在进程真正退出（或 5 秒后强杀）之后执行，用来把「等网关收尾再决定要不要停机」的逻辑搬到后台。 */
+    private void killGatewayAsync() { killGatewayAsync(null); }
+    private void killGatewayAsync(Runnable after) {
         final Process p;
         synchronized (life) { p = proc; proc = null; }
-        if (p == null) return;
+        if (p == null) { if (after != null) after.run(); return; }
         p.destroy();
         Thread t = new Thread(() -> {
             try { if (!p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly(); } catch (InterruptedException ignored) {}
+            if (after != null) try { after.run(); } catch (Throwable ignored) {}
         }, "gateway-reap");
         t.setDaemon(true);
         t.start();

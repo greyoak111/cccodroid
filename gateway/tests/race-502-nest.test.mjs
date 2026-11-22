@@ -80,6 +80,12 @@ test("G-P1-7 sessions.mjs & run.mjs: 导出 isSessionRewinding 且 run.mjs 启�
   assert.equal(sess.isSessionRewinding("nonexistent-session"), false);
   const runSrc = fs.readFileSync(path.join(root, "gateway", "gw", "run.mjs"), "utf8");
   assert.ok(runSrc.includes("isSessionRewinding("), "run.mjs 应阻止对正在回退的会话发起新运行");
+  // 多个回退请求同时到达时，不能都在 await idleRetired 期间通过「没人在回退」的检查
+  const sessSrc = fs.readFileSync(path.join(root, "gateway", "gw", "sessions.mjs"), "utf8");
+  const rewindAt = sessSrc.indexOf('action === "rewind"');
+  const addAt = sessSrc.indexOf("REWIND_BUSY.add(id);", rewindAt);
+  const idleAt = sessSrc.indexOf("await idleRetired(id)", rewindAt);
+  assert.ok(rewindAt > 0 && addAt > rewindAt && idleAt > rewindAt && addAt < idleAt, "rewind 必须先同步占 REWIND_BUSY 再 await idleRetired");
 });
 
 test("openai-bridge 新工具包生命周期：卸载时入口缺失不误删合法注册；重装后自动清除 component removed 故障锁", async () => {
@@ -136,6 +142,14 @@ test("openai-bridge 新工具包生命周期：卸载时入口缺失不误删合
   }
 });
 
+test("fonts.mjs: 满额时先认重再判断数量，避免并发导入把已有字体的文件删掉", () => {
+  const src = fs.readFileSync(path.join(root, "gateway", "gw", "fonts.mjs"), "utf8");
+  const dupAt = src.indexOf("const dup = list.find((f) => f.sha === sha);");
+  const limitAt = src.indexOf("if (list.length >= FONT_COUNT) { try { fs.unlinkSync(target);");
+  assert.ok(dupAt > 0 && limitAt > 0, "找到字体去重与满额清理分支");
+  assert.ok(dupAt < limitAt, "重复字体必须先返回 dup，不能落进满额时 unlink(target) 的分支");
+});
+
 test("A-P0-1..5 Android 宿主: ProofFlight 纪元/单飞、fetchStatic 限时限流、PAUSE_LOCK 引用计数与异步停网关", () => {
   const envSrc = fs.readFileSync(path.join(root, "android", "java", "cc", "codroid", "Env.java"), "utf8");
   const gwSrc = fs.readFileSync(path.join(root, "android", "java", "cc", "codroid", "GatewayService.java"), "utf8");
@@ -144,7 +158,15 @@ test("A-P0-1..5 Android 宿主: ProofFlight 纪元/单飞、fetchStatic 限时�
   assert.ok(envSrc.includes("setConnectTimeout(1000)") && envSrc.includes("setReadTimeout(5000)"), "fetchStatic 应设短超时避免拖死 WebView 线程");
   assert.ok(gwSrc.includes("PAUSE_LOCK") && gwSrc.includes("pauseCount") && gwSrc.includes("killGatewayAsync"), "GatewayService 应采用 PAUSE_LOCK 引用计数与异步停网关");
   assert.ok(gwSrc.includes("shutdownIfIdle("), "watchFreeze 应快照 startSeq 并调用 shutdownIfIdle");
+  assert.ok(/killGatewayAsync\(\(\) -> \{[\s\S]{0,400}?shouldFinishStop\(stopping, mySeq, startSeq\)/.test(gwSrc),
+    "异步停机的收尾必须在杀完网关后复核 startSeq，用户重开界面时不能继续停");
   assert.ok(mainSrc.includes("DEVKIT_APPLYING") && mainSrc.includes("IK_LOCK"), "MainActivity 应具备 DEVKIT_APPLYING CAS 与 IK_LOCK");
+  // pause 已改成引用计数：暂停窗口内想再踢一次网关，必须用不计数 pauseKick，
+  // 否则「pause(true) 两次 + pause(false) 一次」会漏掉一次计数，放行后网关永远起不来
+  const frSrc = fs.readFileSync(path.join(root, "android", "java", "cc", "codroid", "FactoryReset.java"), "utf8");
+  assert.ok(gwSrc.includes("static void pauseKick()"), "GatewayService 应提供不改变引用计数的 pauseKick");
+  assert.ok(mainSrc.includes("GatewayService.pauseKick();"), "deployAssets 的 finally 应用 pauseKick 补刀");
+  assert.ok(frSrc.includes("GatewayService.pauseKick();"), "FactoryReset 的 finally 应用 pauseKick 补刀");
 });
 
 test("W-P0-1/W-P0-3/W-P1-1 08-extensions.js: 模块/组件瞬时 502 不清屏且持续重试，loadComponents(true) 遇 502 仍续轮询", async () => {

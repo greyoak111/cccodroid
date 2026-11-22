@@ -636,9 +636,11 @@ export async function routeSessions(req, res, u, p) {
     // 回退到某条用户消息之前：文件（claude 检查点）+ 可选连对话一起（截到这条之前另起一个会话，原会话不动）
     if (req.method === "POST" && action === "rewind") {
       const b = JSON.parse((await readBody(req)) || "{}");
-      if (REWIND_BUSY.has(id) || !(await idleRetired(id))) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中，等它答完再回退。") });
+      // 先同步占锁再 await：两个同时到达的回退请求以前都能在 idleRetired 等待期间通过检查
+      if (REWIND_BUSY.has(id)) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中，等它答完再回退。") });
       REWIND_BUSY.add(id);
       try {
+        if (!(await idleRetired(id))) return sendJson(res, 409, { error: "busy", message: tz("这个会话正在生成中，等它答完再回退。") });
         const loc = locateUserTurn(id, String(b.userText || ""), b.after, String(b.uuid || "").slice(0, 64));
         if (!loc.ok) return sendJson(res, loc.status || 400, { error: "locate", message: loc.message });
         const uuid = loc.users[loc.best].uuid;

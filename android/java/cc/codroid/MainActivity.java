@@ -1368,8 +1368,9 @@ public class MainActivity extends Activity {
         try {
             AppFiles.deploy(this, env.app);
         } finally {
-            // 守护线程若恰好在 pause 前一刻已经在拉 node，这里再杀一次，保证起来的一定是新文件
-            GatewayService.pause(true);
+            // 守护线程若恰好在 pause 前一刻已经在拉 node，这里再杀一次，保证起来的一定是新文件。
+            // 必须用 pauseKick：pause(true) 是引用计数，再调一次却没有配对的 pause(false) 会让网关永远停在暂停里
+            GatewayService.pauseKick();
             GatewayService.pause(false);
         }
     }
