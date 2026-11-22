@@ -258,11 +258,13 @@ const APP_FIELDS = {
   upd_verify: { full: "boolean" }, upd_repair: { full: "boolean" },
   share_file: { path: "string", mime: "string" },
   apk_install: { path: "string" },
-  shz_pair: { code: "string" }, shz_autostart: { enable: "boolean" },
+  shz_pair: { code: "string" }, shz_autostart: { enable: "boolean", pageTicket: "string" },
   notify_set: { done: "boolean", ask: "boolean" },
   island_set: { systemIsland: "boolean", overlay: "boolean", overlayY: "number", overlayOpacity: "number" },
-  dev_set: { on: "boolean", tool: "string", enabled: "boolean", a11y: "string", idle: "number" },
+  dev_set: { on: "boolean", tool: "string", enabled: "boolean", a11y: "string", idle: "number", pageTicket: "string" },
 };
+
+const consentTicket = (value) => typeof value === "string" && /^[a-f0-9-]{36}$/.test(value) ? value : undefined;
 
 // ── 路由：/api/mem/status /api/mem/clear /api/priv/status /api/priv/request /api/priv/open /api/priv/audit /api/priv/keepalive /api/app/ ──
 export async function routeDevside(req, res, u, p) {
@@ -292,11 +294,11 @@ export async function routeDevside(req, res, u, p) {
     let b; try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
     // 时长只认固定几档（应用侧同样只认这几档，别的按 24 小时），最长一周（11-08 用户定）
     const hours = [1, 4, 24, 72, 168].includes(+b.hours) ? +b.hours : 24;
-    return sendJson(res, 200, await privCall({ op: "noask", enable: b.enable === true, hours }, 90000));
+    return sendJson(res, 200, await privCall({ op: "noask", enable: b.enable === true, hours, pageTicket: consentTicket(b.pageTicket) }, 90000));
   }
   if (req.method === "POST" && p === "/api/priv/keepalive") {
     const b = JSON.parse((await readBody(req)) || "{}");
-    return sendJson(res, 200, await privCall({ op: "keepalive", enable: b.enable !== false }, 60000));
+    return sendJson(res, 200, await privCall({ op: "keepalive", enable: b.enable !== false, pageTicket: consentTicket(b.pageTicket) }, 60000));
   }
   // 更新（APK / 工具包 / Claude Code）与 Shizuku 一键安装激活：都在应用进程里做，这里只转话
   if (p.startsWith("/api/app/")) {

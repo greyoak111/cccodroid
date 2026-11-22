@@ -406,12 +406,13 @@ final class Priv {
                 case "keepalive": {
                     // 打开要用户点头：会改全局的幽灵进程上限、把本应用加进电池白名单（10-31 复核：以前谁发一条都直接改）
                     boolean on = req.optBoolean("enable", true);
+                    String pageVisit = on ? PageConsent.consume(ctx, req.optString("pageTicket"), "keepalive", "1") : null;
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                     if (on && !Consent.on(ctx, Consent.KEEPALIVE) && !ask(Tr.t("打开后台保活增强：") + "\n" + String.join("\n", keepAliveOn()), caller(pid), "keepalive")) {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("没有允许，保活增强没有打开"));
                         break;
                     }
-                    if (on && !Consent.on(ctx, Consent.KEEPALIVE)) Consent.grant(ctx, Consent.KEEPALIVE, "1");
+                    if (on && !Consent.on(ctx, Consent.KEEPALIVE)) Consent.grant(ctx, Consent.KEEPALIVE, "1", pageVisit);
                     resp = keepAlive(on);
                     break;
                 }
@@ -421,6 +422,7 @@ final class Priv {
                     // 时长可选，最长一周（11-08 用户定）；只认固定几档，别的一律按 24 小时。选的时长写进原生说明里，由用户在这里确认
                     long ttl = noAskTtl(req.optInt("hours", 24));
                     long hrs = ttl / 3600000L;
+                    String pageVisit = on ? PageConsent.consume(ctx, req.optString("pageTicket"), "noask", String.valueOf(hrs)) : null;
                     String until = hrs % 24 == 0 ? Tr.f("{0} 天后自动关闭，恢复逐条确认。", hrs / 24) : Tr.f("{0} 小时后自动关闭，恢复逐条确认。", hrs);
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                     if (on && !noAsk() && !confirm(Tr.t("特权命令不再逐条确认（风险自负）") + "\n\n"
@@ -431,7 +433,7 @@ final class Priv {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("没有确认，仍然逐条询问"));
                         break;
                     }
-                    if (on) { if (!noAsk()) Consent.grant(ctx, Consent.NOASK, String.valueOf(System.currentTimeMillis() + ttl)); } else Consent.revoke(ctx, Consent.NOASK);
+                    if (on) { if (!noAsk()) Consent.grant(ctx, Consent.NOASK, String.valueOf(System.currentTimeMillis() + ttl), pageVisit); } else Consent.revoke(ctx, Consent.NOASK);
                     Log.w(TAG, "特权命令免确认 " + (on ? "打开" : "关闭"));
                     resp = new JSONObject().put("ok", true).put("noask", on);
                     break;
@@ -461,12 +463,13 @@ final class Priv {
                 case "shz_autostart": {
                     // 打开 = 以后开机时不问就打开无线调试：和保活一样，要原生确认并签名存档；关掉随时可以
                     boolean on = req.optBoolean("enable", true);
+                    String pageVisit = on ? PageConsent.consume(ctx, req.optString("pageTicket"), "shz_autostart", "1") : null;
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                     if (on && !ShizukuSetup.get(ctx).autostart() && !confirm(Tr.t("开机后自动激活 Shizuku：每次开机会临时打开无线调试，用配对过的钥匙启动 Shizuku。"), caller(pid), "shz_autostart")) {
                         resp = status().put("ok", false).put("message", Tr.t("没有允许，自动激活没有打开"));
                         break;
                     }
-                    ShizukuSetup.get(ctx).setAutostart(on); resp = status(); break;
+                    ShizukuSetup.get(ctx).setAutostart(on, pageVisit); resp = status(); break;
                 }
                 // 更新（Updater）
                 case "upd_status": resp = Updater.get(ctx).status(); break;
