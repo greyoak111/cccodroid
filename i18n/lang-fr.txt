@@ -3240,3 +3240,32 @@
 3240	Installez le composant PDF, puis rouvrez la boîte à outils.
 3241	Indiquez un nouveau dossier de sortie dans un emplacement accessible en écriture.
 3242	La sortie dépasse 512 Mo. Réduisez les pages ou la résolution.
+3243	Une tâche PDF est déjà en cours. Réessayez plus tard.
+3244	Installez le composant PDF, puis rouvrez la boîte à outils.
+3245	Indiquez un nouveau dossier de sortie dans un emplacement accessible en écriture.
+3246	La sortie dépasse 512 Mo. Réduisez les pages ou la résolution.
+3247	fichier(s)
+3248	La sauvegarde de la dernière installation n'a pas encore été restaurée. Réessayez, sinon désinstallez puis réinstallez.
+3249	Le défilement semble bloqué : appuyez longuement (~0,6 s) sur le titre de la barre supérieure pour débloquer
+3250	Îlot de travail (statut en direct)
+3251	Afficher l'état de Claude en direct dans les mises à jour en direct du système ou via une capsule flottante
+3252	Une fois activé, la progression, la liste de tâches, les confirmations et la fin s'affichent sur une même carte et se replient 8 s après la fin. Android 16+ utilise les mises à jour en direct natives ; les appareils plus anciens ou restreints peuvent activer la capsule flottante.
+3253	Mises à jour en direct / Îlot système (Android 16+)
+3254	Capsule flottante de secours (tactile traversant, affichée en arrière-plan)
+3255	Aperçu (10 s)
+3256	Autoriser les mises à jour en direct
+3257	Autoriser la superposition
+3258	Les notifications de l'application ou le canal de l'îlot de travail sont désactivés dans les paramètres système.
+3259	Les mises à jour en direct ne sont pas encore autorisées pour cette application ; une notification de progression standard sera utilisée.
+3260	La capsule flottante est activée, mais l'autorisation de superposition n'est pas encore accordée.
+3261	✓ Mises à jour en direct prêtes
+3262	✓ Capsule flottante prête
+3263	Cet appareil est sous Android < 16. Le statut utilisera une notification de progression, ou vous pouvez activer la capsule flottante.
+3264	Aperçu de 10 s lancé — passez à l'écran d'accueil ou regardez la barre d'état
+3265	Échec de l'aperçu
+3266	Index
+3267	Nom de fichier mémoire invalide
+3268	Mémoire introuvable
+3269	Seuls les fichiers mémoire ordinaires peuvent être consultés
+3270	Le fichier mémoire est trop volumineux (plus de 1 Mo)
+3271	Les mémoires sont en lecture seule ici

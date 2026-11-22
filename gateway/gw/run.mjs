@@ -618,7 +618,7 @@ export async function startRun(item) {
   writeUser(initContent);
   run.inputOpen = true;
   run.initReplayed = false;    // 本轮首条用户消息是否已收到 claude 的 isReplay 回显
-  let orphanTaskNotif = false; // 首条消息回显前见到孤儿 <task-notification>（--resume 遗留未完结后台任务）
+  let orphanTaskNotif = 0;     // 首条消息回显前见到的孤儿 <task-notification> 计数（--resume 遗留未完结后台任务）
   let turnSawMainOutput = false; // 本轮主会话是否已见过正文/流式输出（区分 0 轮孤儿通知 result）
   let bgDroppedMidTurn = false;  // 本轮进行中曾有后台任务自然清零：紧接着的 result 后留宽限等 <task-notification> 跟进轮次
   run.pendingInject = [];      // 已写进 stdin、还没被 claude 吃进去的插话
@@ -673,9 +673,17 @@ export async function startRun(item) {
     try { writeUser(content); } catch { return false; }
     WROTE.set(item, textOf(content));
     run.pendingInject.push(item);
-    // 空闲轮次的收尾定时器（6 秒 / IDLE_CLOSE_MS）要撤掉：claude 吃进这条、吐出第一个事件之前它到点了，
-    // 就会把 stdin 关掉，这一轮被打断、之后的工具确认也写不进去（0.6.9 审计 195-W.3）。这一轮的 result 之后照常判断收尾
+    // 空闲轮次的收尾定时器（6 秒 / IDLE_CLOSE_MS）要撤掉，并立刻切回忙态、标记上次 result 已过期：
+    // 否则在 claude 吐出下一轮首个事件前，armIdleClose 或意外退出仍会把它当成空闲已完结轮次提前关 stdin / 拿旧 result 顶替
     if (run.idleClose) { clearTimeout(run.idleClose); run.idleClose = null; }
+    if (run.idle) {
+      run.idle = false;
+      resultStale = true;
+      run.stopAsked = false;
+      run.stopIds.clear();
+      emit({ type: "run_busy", startedAt: Date.now() });
+      publishState();
+    }
     saveRunMark();     // 马上落盘：送达前 App 被强停，下次启动它还能回到队列里，不会凭空消失
     log(`↪ 插话 ${promptLogLine(item.message, false)}`);
     return true;
@@ -706,9 +714,9 @@ export async function startRun(item) {
   const armIdleClose = () => {
     clearTimeout(run.idleClose);
     run.idleClose = null;
-    if (run.idle && !run.bgTasks && !run.perms.size && !run.ended && run.inputOpen) {
+    if (run.idle && !run.bgTasks && !run.perms.size && !run.pendingInject.length && !run.slashFlight.length && !run.ended && run.inputOpen) {
       run.idleClose = setTimeout(() => {
-        if (run.idle && !run.bgTasks && !run.perms.size && !run.ended) closeInput();
+        if (run.idle && !run.bgTasks && !run.perms.size && !run.pendingInject.length && !run.slashFlight.length && !run.ended) closeInput();
       }, run.stopAsked ? 6000 : IDLE_CLOSE_MS);
       run.idleClose.unref?.();
     }
@@ -887,10 +895,10 @@ export async function startRun(item) {
     // 在首条用户消息尚未回显前就吐出 0 轮空 result；此时绝不能 closeInput()，否则紧接着执行的
     // 真正用户轮次全程在已关闭的 stdin 下运行，一触发 cc-guard 确认就报 AbortError: Stream closed。
     const orphanEmpty = !isCmd && !run.initReplayed && !r.is_error && !turnSawMainOutput && (
-      orphanTaskNotif || (Number(r.num_turns) === 0 && !String(r.result || "").trim())
+      orphanTaskNotif > 0 || (Number(r.num_turns) === 0 && !String(r.result || "").trim())
     );
     if (orphanEmpty) {
-      orphanTaskNotif = false;
+      if (orphanTaskNotif > 0) orphanTaskNotif--;
       bgDroppedMidTurn = false;
       resultStale = true;
       log(`${runTag(run)} ↺ 跳过首条用户消息送达前的孤儿通知 result，保持 stdin 打开`);
@@ -926,8 +934,8 @@ export async function startRun(item) {
       }
     }
     // 孤儿 <task-notification> 自己跑了一轮并出了 result，但首条用户消息还在队列里没回显：留着 stdin 等真正的首条消息
-    if (!isCmd && !run.initReplayed && orphanTaskNotif) {
-      orphanTaskNotif = false;
+    if (!isCmd && !run.initReplayed && orphanTaskNotif > 0) {
+      orphanTaskNotif--;
       bgDroppedMidTurn = false;
       resultStale = true;
       return;
@@ -963,7 +971,7 @@ export async function startRun(item) {
       const matchesInit = run.replays === 0 && initText.startsWith("<task-notification>");
       const matchesInject = !!(head && WROTE.get(head) === txt);
       if (!matchesInit && !matchesInject) {
-        if (!run.initReplayed) orphanTaskNotif = true;
+        if (!run.initReplayed) orphanTaskNotif++;
         return;
       }
     }
@@ -975,9 +983,17 @@ export async function startRun(item) {
     }
     const said = run.replays === 0 ? message : run.pendingInject[0] && run.pendingInject[0].message;
     if (said && usageIsPrompt(said)) usageAdd({ m: 1 }, run.sessionId);
-    if (run.replays++ === 0) { run.initReplayed = true; return; }
+    if (run.replays++ === 0) { run.initReplayed = true; orphanTaskNotif = 0; return; }
     const it = run.pendingInject.shift();
-    if (it) { emit({ type: "inject", text: it.message, cid: it.cid, itemId: it.id }); saveRunMark(); }
+    if (it) {
+      if (run.idle) {
+        run.idle = false; resultStale = true; run.stopAsked = false; run.stopIds.clear();
+        emit({ type: "run_busy", startedAt: Date.now() });
+        publishState();
+      }
+      emit({ type: "inject", text: it.message, cid: it.cid, itemId: it.id });
+      saveRunMark();
+    }
   };
   const feed = (line) => {
     let ev; try { ev = JSON.parse(line); } catch { return; }
@@ -993,10 +1009,10 @@ export async function startRun(item) {
         (ev.type === "assistant" && ev.message?.model === "<synthetic>"))) run.slashMark.seen = true;
     // 清单工具一出结果就推，不等 4 秒轮询
     if (ev.type === "user" && ev.tool_use_result && (ev.tool_use_result.task || ev.tool_use_result.statusChange || ev.tool_use_result.updatedFields)) setImmediate(() => tasksCheck(run.sessionId));
-    // 首条用户消息送达且主会话尚未输出前出现的 <task-notification>（--resume 孤儿后台任务停止通知）
-    if (!run.initReplayed && !turnSawMainOutput && ((ev.type === "system" && ev.subtype === "task_notification")
+    // 首条用户消息送达且主会话尚未输出（或已处于孤儿通知序列）前出现的 <task-notification>（--resume 孤儿后台任务停止通知）
+    if (!run.initReplayed && (!turnSawMainOutput || orphanTaskNotif > 0) && ((ev.type === "system" && ev.subtype === "task_notification")
         || (ev.type === "user" && !ev.isReplay && textOf(ev.message?.content).startsWith("<task-notification>")))) {
-      orphanTaskNotif = true;
+      orphanTaskNotif++;
     }
     // 我们发的 set_permission_mode 的回执：被拒要记下来（以前直接丢掉，切了没生效也看不出来）
     if (ev.type === "control_response") {

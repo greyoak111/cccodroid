@@ -224,6 +224,9 @@ public class Stab2LHostTest {
             boolean symBlocked = false;
             try { Share.resolveGrant(store, tok2, "archive-1gb.bin", gt0 + 600); } catch (java.io.FileNotFoundException e) { symBlocked = true; }
             eq("Share.resolveGrant 拒绝授权后被替换成软链的路径", symBlocked, true);
+            eq("Share.secret 拦截大写 FUSE 路径 .SSH/ID_RSA", Share.secret(new java.io.File("/sdcard/.SSH/ID_RSA")), true);
+            eq("Share.secret 拦截大写 FUSE 路径 CCAPP-SEED.JSON", Share.secret(new java.io.File("/sdcard/CCAPP-SEED.JSON")), true);
+            eq("Share.secret 放行普通文档", Share.secret(new java.io.File("/sdcard/Documents/report.pdf")), false);
             big.delete(); secret.delete(); store.delete(); sdir.delete();
         } catch (Exception e) {
             System.out.println("FAIL Share 句柄单测异常: " + e);

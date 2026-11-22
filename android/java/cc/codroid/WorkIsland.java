@@ -123,9 +123,11 @@ final class WorkIsland {
         try {
             ctx.startActivity(i);
         } catch (RuntimeException e) {
-            ctx.startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.getPackageName())
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            try {
+                ctx.startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.getPackageName())
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (RuntimeException ignored) {}
         }
     }
 
@@ -136,9 +138,11 @@ final class WorkIsland {
         try {
             ctx.startActivity(i);
         } catch (RuntimeException e) {
-            ctx.startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:" + ctx.getPackageName()))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            try {
+                ctx.startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + ctx.getPackageName()))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (RuntimeException ignored) {}
         }
     }
 

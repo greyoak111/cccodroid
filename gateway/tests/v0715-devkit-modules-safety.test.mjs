@@ -113,7 +113,7 @@ test("大模块安装与卸载：写入看门狗心跳并分批让出，结束�
     }
     await new Promise((ok) => setImmediate(ok));
   }
-  await job.done;
+  await job.promise;
   assert.ok(job && job.finished && !job.error, `安装失败: ${job && job.error}`);
   assert.equal(sawInstallMove, true, "安装 >256 文件期间应写出 move 心跳");
   assert.equal(fs.existsSync(mark), false, "安装完成后心跳必须删掉");
@@ -164,7 +164,7 @@ test("在线安装 lib-guile 后刷新 .go 缓存时间戳，严格晚于 .scm �
   const r = await _modForTest.modInstall(id);
   assert.equal(r.ok, true, JSON.stringify(r));
   const job = _modForTest.MOD_JOBS.get(id);
-  if (job) await job.done;
+  if (job) await job.promise;
   assert.ok(job && job.finished && !job.error, `安装失败: ${job && job.error}`);
 
   const scmSt = fs.statSync(path.join(PREFIX, "share/guile/3.0/ice-9/boot-9.scm"));

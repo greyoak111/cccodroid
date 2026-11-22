@@ -3240,3 +3240,32 @@
 3240	Instala el componente de herramientas PDF y vuelve a abrirlas.
 3241	Indica una carpeta de salida nueva en una ubicación con permiso de escritura.
 3242	El resultado supera 512 MB. Reduce las páginas o la resolución.
+3243	Ya hay una tarea PDF en curso. Inténtalo más tarde.
+3244	Instala el componente de herramientas PDF y vuelve a abrirlas.
+3245	Indica una carpeta de salida nueva en una ubicación con permiso de escritura.
+3246	El resultado supera 512 MB. Reduce las páginas o la resolución.
+3247	archivo(s)
+3248	La copia de seguridad de la última instalación aún no se ha restaurado. Reintenta o desinstala y vuelve a instalar.
+3249	El desplazamiento parece bloqueado; mantén pulsado el título de la barra superior (~0,6 s) para desbloquearlo
+3250	Isla de trabajo (estado en vivo)
+3251	Muestra el estado de Claude en vivo en las notificaciones en directo del sistema o en una cápsula flotante
+3252	Al activarlo, el progreso, la lista, las confirmaciones y la finalización se actualizan en una sola tarjeta y se ocultan 8 s después de terminar. Android 16+ usa notificaciones en directo nativas; otros dispositivos pueden activar la cápsula flotante.
+3253	Notificaciones en directo / Isla del sistema (Android 16+)
+3254	Cápsula flotante de respaldo (táctil transparente, visible en segundo plano)
+3255	Vista previa (10 s)
+3256	Permitir notificaciones en directo
+3257	Permitir superposición
+3258	Las notificaciones de la app o el canal de Isla de trabajo están desactivados en los ajustes del sistema.
+3259	Las notificaciones en directo aún no están permitidas para esta app; se usará una notificación de progreso estándar.
+3260	La cápsula flotante está activada, pero aún falta el permiso de superposición.
+3261	✓ Notificaciones en directo listas
+3262	✓ Cápsula flotante lista
+3263	Este dispositivo es anterior a Android 16. Se usará una notificación de progreso o puedes activar la cápsula flotante.
+3264	Vista previa de 10 s iniciada — ve al inicio o mira la barra de estado
+3265	Error en la vista previa
+3266	Índice
+3267	Nombre de archivo de memoria no válido
+3268	Memoria no encontrada
+3269	Solo se permiten archivos de memoria normales
+3270	El archivo de memoria es demasiado grande (más de 1 MB)
+3271	Las memorias son de solo lectura aquí

@@ -457,7 +457,7 @@ export async function routeSessions(req, res, u, p) {
     // busy：正在生成没删；failed：已经不在了（别处删了、已在回收站）或删的时候出错——界面分开说（#176-2）
     const done = [], failed = [], busy = [];
     for (const id of [].concat(b.ids || [])) {
-      if (runOfSession(id)) { busy.push(id); failed.push(id); continue; }
+      if (runOfSession(id) || isSessionRewinding(id)) { busy.push(id); failed.push(id); continue; }
       try { (trashSession(String(id)).ok ? done : failed).push(id); } catch { failed.push(id); }
     }
     if (done.length) log(`${done.length} 个会话进回收站`);
@@ -675,7 +675,7 @@ export async function routeSessions(req, res, u, p) {
     if (req.method === "POST" && (action === "delmsg" || action === "undodel")) {
       const b = JSON.parse((await readBody(req)) || "{}");
       // 只剩后台任务的 idle 轮：先结束它（否则永远 409），真正在生成的仍拒绝（195-A.3）
-      if (action === "delmsg" && (isSessionRewinding(id) || !(await idleRetired(id)))) return sendJson(res, 409, { ok: false, error: "delmsg", message: tz("这个会话正在生成中，等它答完再删。") });
+      if (isSessionRewinding(id) || (action === "delmsg" && !(await idleRetired(id)))) return sendJson(res, 409, { ok: false, error: action, message: tz("这个会话正在生成中，等它答完再删。") });
       let r;
       try { r = action === "delmsg" ? deleteMessage(id, String(b.userText || ""), Number(b.after) || 0, b.which === "user" ? "user" : "bot", String(b.uuid || "").slice(0, 64), String(b.replyUuid || "").slice(0, 64), Array.isArray(b.offs) ? b.offs.slice(0, 64).map(Number) : []) : undoDelete(id, String(b.undo || "")); }
       catch (e) { r = { ok: false, status: 500, message: e.message }; }

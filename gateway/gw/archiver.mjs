@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import { CFG, log } from "./config.mjs";
 import { NEXT, fileKind, readBody, sendJson } from "./http.mjs";
-import { SECRET_NAMES, safeFilePath, safeWritePath } from "./files.mjs";
+import { SECRET_NAMES, pathBlocked, safeFilePath, safeWritePath } from "./files.mjs";
 import { holdsPrivate } from "./pathguard.mjs";
 import { ZIP_ENCODINGS, zipExtract, zipList, zipNative } from "./zipread.mjs";
 
@@ -382,15 +382,23 @@ export const CREATE_FORMATS = { zip: "zip", "7z": "7z", tar: "tar", "tar.gz": "g
 const EXCLUDE_DIRS = [".ssh", ".gnupg", ".aws", ".config/gcloud"];
 const SECRET_DIR_RE = /(^|\/)(\.ssh|\.gnupg|\.aws|\.config\/gcloud)$/i;
 
-/** 扫描待压缩条目里的大小写变体凭据路径（/sdcard 不区分大小写，7zz 默认 -xr! 区分大小写；
+/** 扫描待压缩条目里的大小写变体凭据路径与逃逸/指向凭据的软链（/sdcard 不区分大小写，7zz 默认 -xr! 区分大小写，
+ *  且 7zz 打包 zip 默认跟随软链会直接把指向的私有/凭据文件内容打进压缩包；
  *  不传全局 -ssc-，否则 ext4 同目录有 foo.txt 与 Foo.txt 时 7zz 会报 Duplicate filename） */
 async function collectSecretExcludes(items) {
   const out = [];
   let seen = 0;
-  const walk = async (abs, rel) => {
+  const walk = async (abs, rel, realRoot) => {
     if (seen > 200000) return;
     let st; try { st = await fs.promises.lstat(abs); } catch { return; }
-    if (st.isSymbolicLink()) return;
+    if (st.isSymbolicLink()) {
+      let target = null;
+      try { target = await fs.promises.realpath(abs); } catch {}
+      const outside = !target || !realRoot || (target !== realRoot && !target.startsWith(realRoot + "/"));
+      const base = target ? path.basename(target).toLowerCase() : "";
+      if (outside || pathBlocked(target) || SECRET_NAMES.has(base) || SECRET_DIR_RE.test(target)) out.push(rel);
+      return;
+    }
     const base = path.basename(abs).toLowerCase();
     if (SECRET_NAMES.has(base) || SECRET_DIR_RE.test(rel)) { out.push(rel); return; }
     if (!st.isDirectory()) return;
@@ -398,10 +406,14 @@ async function collectSecretExcludes(items) {
     for (const n of ds) {
       if (++seen > 200000) return;
       if ((seen & 255) === 0) await new Promise((ok) => setImmediate(ok));
-      await walk(path.join(abs, n), rel + "/" + n);
+      await walk(path.join(abs, n), rel + "/" + n, realRoot);
     }
   };
-  for (const f of items) await walk(f, path.basename(f));
+  for (const f of items) {
+    let realRoot = null;
+    try { realRoot = await fs.promises.realpath(f); } catch {}
+    await walk(f, path.basename(f), realRoot);
+  }
   return out;
 }
 
