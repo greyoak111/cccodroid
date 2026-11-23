@@ -3276,4 +3276,13 @@ window.I18N_DICT["fr"] = {
   "通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。": "Si la saisie dans la notification ne fonctionne pas, ouvrez les réglages à côté de cette page avant d’afficher le code. Gardez les deux fenêtres ouvertes.",
   "正在尝试分屏打开设置…": "Tentative d’ouverture des réglages en écran partagé…",
   "未知": "Inconnu",
+  "无线 ADB 保活": "Maintenir ADB sans fil actif",
+  "开启 USB 调试并将系统 adbd 切到 TCP 5555 端口（该端口可能在局域网可达），以便断开 Wi-Fi 后也能恢复意外停止的 Shizuku。关闭开关会尝试切回 USB 模式；重启手机后仍需连一次 Wi-Fi。没遇到过特权指令掉线问题请保持关闭。": "Active le débogage USB et bascule adbd sur le port TCP 5555 (qui peut être accessible sur votre réseau local) afin de relancer Shizuku sans Wi-Fi s’il s’arrête. La désactivation tente de revenir en mode USB ; après un redémarrage du téléphone, le Wi-Fi reste nécessaire une fois. Laissez désactivé si vos commandes privilégiées ne se déconnectent pas.",
+  "本机 ADB 通道已就绪": "Connexion ADB locale prête",
+  "正在建立本机 ADB 通道…": "Préparation de la connexion ADB locale…",
+  "系统正在使用另一个 ADB 端口。": "Android utilise un autre port ADB.",
+  "等待本机 ADB 通道。手机重启后请先连 Wi-Fi 激活 Shizuku。": "En attente de la connexion ADB locale. Après un redémarrage, activez d’abord Shizuku via le Wi-Fi.",
+  "ADB 通道已连接，等待 Shizuku 授权或系统投递凭据。": "ADB connecté. En attente de l’autorisation de Shizuku ou des données d’authentification du système.",
+  "本机 ADB 尚未获系统授权。请检查系统调试授权，需要时重新配对。": "Android n’a pas autorisé ADB local. Vérifiez les autorisations de débogage et associez de nouveau l’appareil si besoin.",
+  "本机 ADB 通道暂不可用，将自动重试。如果调试授权已撤销，可重新配对。": "ADB local est temporairement indisponible. Nouvel essai automatique. Si l’autorisation de débogage a été révoquée, vous pouvez refaire l’association.",
 };

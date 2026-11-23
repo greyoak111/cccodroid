@@ -1990,7 +1990,7 @@ public class MainActivity extends Activity {
             }
             @android.webkit.JavascriptInterface public String deviceConsentTicket(String k, String operation, String argument) {
                 if (!Env.bridgeOk(k) || !visible || isFinishing() || isDestroyed() || operation == null || argument == null || argument.length() > 16
-                    || !java.util.Arrays.asList("dev_set", "noask", "keepalive", "shz_autostart").contains(operation)) return "";
+                    || !java.util.Arrays.asList("dev_set", "noask", "keepalive", "shz_autostart", "shz_adb_keepalive").contains(operation)) return "";
                 PageConsent.visible(MainActivity.this, true);
                 return PageConsent.ticket(MainActivity.this, operation, argument);
             }

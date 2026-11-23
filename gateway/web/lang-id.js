@@ -3276,4 +3276,13 @@ window.I18N_DICT["id"] = {
   "通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。": "Jika notifikasi tidak bisa menerima masukan, buka Pengaturan di samping halaman ini sebelum menampilkan kode. Biarkan kedua jendela terbuka.",
   "正在尝试分屏打开设置…": "Mencoba membuka Pengaturan dalam layar terbagi…",
   "未知": "Tidak diketahui",
+  "无线 ADB 保活": "Jaga ADB nirkabel tetap aktif",
+  "开启 USB 调试并将系统 adbd 切到 TCP 5555 端口（该端口可能在局域网可达），以便断开 Wi-Fi 后也能恢复意外停止的 Shizuku。关闭开关会尝试切回 USB 模式；重启手机后仍需连一次 Wi-Fi。没遇到过特权指令掉线问题请保持关闭。": "Mengaktifkan debugging USB dan mengalihkan adbd ke port TCP 5555 (yang mungkin dapat dijangkau di jaringan lokal Anda) agar Shizuku dapat dipulihkan saat Wi-Fi terputus. Mematikannya akan mencoba kembali ke mode USB; setelah ponsel dimulai ulang, Wi-Fi tetap diperlukan sekali. Biarkan mati jika perintah istimewa tidak pernah terputus.",
+  "本机 ADB 通道已就绪": "Koneksi ADB lokal siap",
+  "正在建立本机 ADB 通道…": "Menyiapkan koneksi ADB lokal…",
+  "系统正在使用另一个 ADB 端口。": "Android menggunakan port ADB lain.",
+  "等待本机 ADB 通道。手机重启后请先连 Wi-Fi 激活 Shizuku。": "Menunggu koneksi ADB lokal. Setelah ponsel dinyalakan ulang, aktifkan Shizuku melalui Wi-Fi terlebih dahulu.",
+  "ADB 通道已连接，等待 Shizuku 授权或系统投递凭据。": "ADB tersambung. Menunggu otorisasi Shizuku atau kredensial dari sistem.",
+  "本机 ADB 尚未获系统授权。请检查系统调试授权，需要时重新配对。": "Android belum mengizinkan ADB lokal. Periksa izin debug dan pasangkan ulang bila perlu.",
+  "本机 ADB 通道暂不可用，将自动重试。如果调试授权已撤销，可重新配对。": "ADB lokal untuk sementara tidak tersedia. Sistem akan mencoba lagi otomatis. Jika izin debug dicabut, Anda dapat memasangkan ulang.",
 };

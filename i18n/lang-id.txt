@@ -3273,3 +3273,12 @@
 3273	Jika notifikasi tidak bisa menerima masukan, buka Pengaturan di samping halaman ini sebelum menampilkan kode. Biarkan kedua jendela terbuka.
 3274	Mencoba membuka Pengaturan dalam layar terbagi…
 3275	Tidak diketahui
+3276	Jaga ADB nirkabel tetap aktif
+3277	Mengaktifkan debugging USB dan mengalihkan adbd ke port TCP 5555 (yang mungkin dapat dijangkau di jaringan lokal Anda) agar Shizuku dapat dipulihkan saat Wi-Fi terputus. Mematikannya akan mencoba kembali ke mode USB; setelah ponsel dimulai ulang, Wi-Fi tetap diperlukan sekali. Biarkan mati jika perintah istimewa tidak pernah terputus.
+3278	Koneksi ADB lokal siap
+3279	Menyiapkan koneksi ADB lokal…
+3280	Android menggunakan port ADB lain.
+3281	Menunggu koneksi ADB lokal. Setelah ponsel dinyalakan ulang, aktifkan Shizuku melalui Wi-Fi terlebih dahulu.
+3282	ADB tersambung. Menunggu otorisasi Shizuku atau kredensial dari sistem.
+3283	Android belum mengizinkan ADB lokal. Periksa izin debug dan pasangkan ulang bila perlu.
+3284	ADB lokal untuk sementara tidak tersedia. Sistem akan mencoba lagi otomatis. Jika izin debug dicabut, Anda dapat memasangkan ulang.

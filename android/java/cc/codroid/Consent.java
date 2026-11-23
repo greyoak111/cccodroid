@@ -42,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class Consent {
     static final String TAG = "cccodroid-consent";
     static final String NOASK = "noask", KEEPALIVE = "keepalive", DEV_ON = "dev.on", DEV_A11Y = "dev.a11y", WEBDEBUG = "webdebug", SHZ_AUTO = "shz.autostart";
+    static final String SHZ_TCP = "shz.adb.keepalive";
     private static final String PREFS = "consent", ALIAS = "cc_consent_";
     /** 本次运行确认过或验过签的：名字 → 值 */
     private static final Map<String, String> MEM = new ConcurrentHashMap<>();
@@ -202,6 +203,7 @@ final class Consent {
         switch (name) {
             case NOASK: return Tr.t("特权命令不再逐条确认");
             case KEEPALIVE: return Tr.t("后台保活增强");
+            case SHZ_TCP: return Tr.t("无线 ADB 保活");
             case DEV_ON: return Tr.t("设备工具");
             case WEBDEBUG: return Tr.t("网页调试");
             case DEV_A11Y: return "on".equals(value) ? Tr.t("读屏和点按：常开") : Tr.t("读屏和点按：用时自动开");

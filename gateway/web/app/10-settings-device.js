@@ -86,7 +86,7 @@
     const busy = SETUP_BUSY.includes(su.phase);
     privBusy = busy;
     const se = $("priv-setup");
-    const showSetup = su.message && !(st.state === "ok" && su.phase !== "done");
+    const showSetup = su.message && (st.state !== "ok" || ["done", "need_wifi", "pairing"].includes(su.phase));
     se.classList.toggle("hidden", !showSetup);
     if (showSetup) {
       se.className = "prov-state " + (su.phase === "error" ? "err" : su.phase === "done" ? "ok" : "warn");
@@ -101,13 +101,18 @@
         `<button class="btn sm ghost" data-act="open">${t("打开 Shizuku")}</button>` :
       st.state === "no_permission" ? `<button class="btn sm" data-act="request">${t("授权给 cccodroid")}</button>` : "";
     // Shizuku 在跑，但没有（或已失效的）无线调试配对：重启后就没法自动激活。这种情况平时看不出来，主动提示
-    if (st.state === "ok" && wl && !st.paired && !busy) {
+    const pairingWasLost = st.pairOk === 0 || (!st.paired && st.pairedBefore);
+    const adbNeedsRepair = st.adbKeepalive && (pairingWasLost || ["unauthorized", "unavailable"].includes(st.adbKeepaliveState));
+    if (st.state === "ok" && wl && !st.paired && !busy && su.phase !== "need_wifi") {
       se.classList.remove("hidden");
       se.className = "prov-state warn";
-      se.textContent = st.pairOk === 0
+      se.textContent = pairingWasLost
                 ? t("无线调试里 cccodroid 的配对已被取消：现在还能用，但重启手机后没法自动激活。")
         : t("Shizuku 不是由 cccodroid 激活的：重启手机后 cccodroid 没法自动激活它。配对一次即可。");
-      $("priv-actions").insertAdjacentHTML("afterbegin", `<button class="btn sm" data-act="repair">${st.pairOk === 0 ? t("重新配对") : t("配对")}</button>`);
+    }
+    const needsFirstPair = !st.paired && !pairingWasLost;
+    if (st.state === "ok" && wl && !busy && (needsFirstPair || adbNeedsRepair)) {
+      $("priv-actions").insertAdjacentHTML("afterbegin", `<button class="btn sm" data-act="repair">${adbNeedsRepair ? t("重新配对") : t("配对")}</button>`);
     }
     // 说的是「这次开机」，允许了自启动也要等下次开机才会消失；点「已允许」就收起到下次开机
     if (st.bootMissed && !(st.bootAt && Math.abs(st.bootAt - (+localStorage.getItem("cc.bootAck") || 0)) <= 1)) {
@@ -130,6 +135,22 @@
       (st.dev ? "" : `<button class="btn sm ghost" data-act="audit">${t("特权命令记录")}</button>`));
     $("priv-auto-row").classList.toggle("hidden", !(wl && st.paired));
     $("priv-auto").checked = !!st.autostart;
+    $("priv-adb-keepalive-row").classList.toggle("hidden", !st.adbKeepaliveSupported || !!st.dev);
+    const adbKeepalive = $("priv-adb-keepalive");
+    if (!adbKeepalive.dataset.saving) {
+      adbKeepalive.checked = !!st.adbKeepalive;
+      adbKeepalive.disabled = !st.adbKeepalive && !(st.wss && st.paired);
+    }
+    $("priv-adb-keepalive-state").textContent = !st.adbKeepalive ? "" : ({
+      ready: t("本机 ADB 通道已就绪"),
+      preparing: t("正在建立本机 ADB 通道…"),
+      conflict: t("系统正在使用另一个 ADB 端口。"),
+      waiting: t("等待本机 ADB 通道。手机重启后请先连 Wi-Fi 激活 Shizuku。"),
+      binder: t("ADB 通道已连接，等待 Shizuku 授权或系统投递凭据。"),
+      unauthorized: t("本机 ADB 尚未获系统授权。请检查系统调试授权，需要时重新配对。"),
+      unavailable: t("本机 ADB 通道暂不可用，将自动重试。如果调试授权已撤销，可重新配对。"),
+    })[st.adbKeepaliveState] || "";
+    adbKeepalive.setAttribute("aria-label", t("无线 ADB 保活"));
     $("priv-ka-row").classList.toggle("hidden", !!st.dev);
     $("priv-ka-row").style.opacity = st.state === "ok" ? "1" : ".45";
     $("priv-ka").disabled = st.state !== "ok";
@@ -160,7 +181,7 @@
     else if (naOut.dataset.until) { naOut.textContent = ""; delete naOut.dataset.until; }
     // 安装、配对、启动继续在后台执行，只在设备分类里跟进状态。
     clearTimeout(privPoll);
-    if (busy) privLater(1500, visit);
+    if (busy || st.adbKeepalive) privLater(busy ? 1500 : 5000, visit);
   }
   function privLater(ms, visit = setVisit) {
     if (!setVisible("device", visit)) return;
@@ -228,6 +249,24 @@
     const body = { enable: e.target.checked };
     if (body.enable) Object.assign(body, deviceConsentTicket(e, "shz_autostart", "1"));
     post("/api/app/shz_autostart", body).catch(() => {}).finally(() => privLater(300, visit));
+  });
+
+  $("priv-adb-keepalive").addEventListener("change", async (e) => {
+    const visit = setVisit, input = e.target, enable = input.checked;
+    input.disabled = true;
+    input.dataset.saving = "1";
+    try {
+      const body = { enable };
+      if (enable) Object.assign(body, deviceConsentTicket(e, "shz_adb_keepalive", "1"));
+      const r = await post("/api/app/shz_adb_keepalive", body);
+      if (!r.ok) throw new Error(r.message);
+    } catch (err) {
+      input.checked = !enable;
+      toast(err.message, true);
+    } finally {
+      delete input.dataset.saving;
+      privLater(200, visit);
+    }
   });
 
   // ── 更新：应用本体 / 开发工具包 / Claude Code ──

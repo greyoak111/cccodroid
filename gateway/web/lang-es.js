@@ -3276,4 +3276,13 @@ window.I18N_DICT["es"] = {
   "通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。": "Si no puedes escribir en la notificación, abre Ajustes junto a esta página antes de mostrar el código. Mantén abiertas las dos ventanas.",
   "正在尝试分屏打开设置…": "Intentando abrir Ajustes en pantalla dividida…",
   "未知": "Desconocido",
+  "无线 ADB 保活": "Mantener activo ADB inalámbrico",
+  "开启 USB 调试并将系统 adbd 切到 TCP 5555 端口（该端口可能在局域网可达），以便断开 Wi-Fi 后也能恢复意外停止的 Shizuku。关闭开关会尝试切回 USB 模式；重启手机后仍需连一次 Wi-Fi。没遇到过特权指令掉线问题请保持关闭。": "Activa la depuración USB y cambia adbd al puerto TCP 5555 (que puede ser accesible en tu red local) para recuperar Shizuku sin Wi-Fi si se detiene. Al desactivarlo se intentará volver al modo USB; tras reiniciar el teléfono seguirás necesitando Wi-Fi una vez. Déjalo desactivado si no sufres cortes en comandos con privilegios.",
+  "本机 ADB 通道已就绪": "Conexión ADB local lista",
+  "正在建立本机 ADB 通道…": "Preparando la conexión ADB local…",
+  "系统正在使用另一个 ADB 端口。": "Android está usando otro puerto ADB.",
+  "等待本机 ADB 通道。手机重启后请先连 Wi-Fi 激活 Shizuku。": "Esperando la conexión ADB local. Tras reiniciar el teléfono, activa Shizuku primero por Wi-Fi.",
+  "ADB 通道已连接，等待 Shizuku 授权或系统投递凭据。": "ADB conectado. Esperando la autorización de Shizuku o que el sistema entregue sus credenciales.",
+  "本机 ADB 尚未获系统授权。请检查系统调试授权，需要时重新配对。": "Android no ha autorizado ADB local. Comprueba las autorizaciones de depuración y vuelve a emparejar si es necesario.",
+  "本机 ADB 通道暂不可用，将自动重试。如果调试授权已撤销，可重新配对。": "ADB local no está disponible temporalmente. Se reintentará automáticamente. Si se revocó la autorización de depuración, puedes volver a emparejar.",
 };
