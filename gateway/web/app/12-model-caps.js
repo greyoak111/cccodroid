@@ -365,6 +365,7 @@
     } catch (e) {
       if (my !== modelsSeq) return null;
       $("model-info").textContent = t("拉取模型清单失败：{msg}", { msg: e.message });
+      if (typeof provCatRetry === "function" && /HTTP 50[234]|Failed to fetch|NetworkError|Load failed/i.test((e && e.message) || "")) provCatRetry();
       return false;
     }
   }

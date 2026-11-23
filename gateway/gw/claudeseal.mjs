@@ -60,7 +60,7 @@ export function procMapsHasInode(mapsText, dev, ino, { execOnly = false } = {}) 
   return { matched, pathEntries };
 }
 
-const LOADER_EXE_RE = /(?:^|\/)(?:ld-linux-aarch64\.so\.1|libldlinux\.so|linker64|linker|libccrun\.so|libccenosysrun\.so)$/;
+const LOADER_EXE_RE = /(?:^|\/)(?:ld-linux-aarch64\.so\.1|libldlinux\.so|linker64|linker|libccrun\.so|libccenosysrun\.so)(?: \(deleted\))?$/;
 
 /** 起进程之后再看一眼：核过之后、真正执行之前程序被换掉了（含「换入→spawn→换回」双跳 TOCTOU），这一轮要停掉。
  *  防线 1（不受 PR_SET_DUMPABLE=0 / hidepid=2 影响）：核对入口链接 bin0、真实二进制 realBin 与所在版本目录的

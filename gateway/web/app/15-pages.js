@@ -135,16 +135,25 @@
   // ── 设置分类：宽屏左栏分类 + 右边一类的内容；窄屏先是分类列表，点进去才是内容 ──
   var setCatOpen = null;
   const pagesNarrow = () => innerWidth < 680;
-  let setVisit = 0;
+  let setVisit = 0, provPoll = 0;
   function setVisible(cat, visit = setVisit) {
     return setOpen && !document.hidden && setCatOpen === cat && visit === setVisit;
+  }
+  function provCatRetry(visit = setVisit) {
+    if (!setVisible("provider", visit)) return;
+    clearTimeout(provPoll);
+    provPoll = setTimeout(() => {
+      if (!setVisible("provider", visit)) return;
+      refreshSettings(false).then(() => { if (setVisible("provider", visit)) { loadProviders(); loadModels(); } });
+    }, 2000);
   }
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && setCatOpen === "device") window.CCApp?.leaveDeviceConsentPage?.();
   });
   function pauseSetReads() {
     setVisit++;
-    clearTimeout(ST.poll); clearTimeout(privPoll); clearTimeout(updPoll);
+    clearTimeout(ST.poll); clearTimeout(privPoll); clearTimeout(updPoll); clearTimeout(provPoll);
+    if (typeof ntfPoll !== "undefined") clearTimeout(ntfPoll);
     clearTimeout(devPoll); clearTimeout(fixTimer); clearTimeout(envFactsTimer);
     clearWiTimers();
     if (!setOpen || setCatOpen !== "provider") stopLoginWatch();

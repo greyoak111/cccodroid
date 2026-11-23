@@ -470,7 +470,13 @@ const COLLISION_LOGGED = new Set();
 function writeOwnersAtomicNoFollow(dir, mapFile, owners) {
   let tmp = "";
   try {
-    const dst = fs.lstatSync(dir);
+    let dst;
+    try { dst = fs.lstatSync(dir); } catch (e) {
+      if (e && e.code === "ENOENT") {
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        dst = fs.lstatSync(dir);
+      } else throw e;
+    }
     if (!dst.isDirectory() || dst.isSymbolicLink()) return;
     tmp = `${mapFile}.tmp-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
     const fd = fs.openSync(tmp, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW, 0o600);

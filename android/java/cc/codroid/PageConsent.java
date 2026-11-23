@@ -205,23 +205,66 @@ final class PageConsent {
     }
 
     static String restore(Context c, String name, String serialized) {
+        return restore(c, name, serialized, null);
+    }
+
+    static boolean isPermanentRestoreFailure(boolean parseStage, Throwable e) {
+        if (parseStage) return true;
+        return e instanceof org.json.JSONException
+            || e instanceof java.security.spec.InvalidKeySpecException;
+    }
+
+    /**
+     * 恢复页面授权记录；permanent[0] 为 true 表示记录本身损坏、钥匙已删或签名不匹配（可缓存 BAD_SIG），
+     * 为 false 表示 AndroidKeyStore / KeyMint 瞬时异常（不进 BAD_SIG，下次继续重试）。
+     */
+    static String restore(Context c, String name, String serialized, boolean[] permanent) {
+        boolean parseStage = true;
         try {
             JSONObject record = new JSONObject(serialized);
-            String value = record.getString("value"), rootId = record.getString("root");
-            if (!UUID.fromString(rootId).toString().equals(rootId)) return null;
-            byte[] delegate = decode(record.getString("delegate")), marker = decode(record.getString("marker"));
+            String value = record.getString("value");
+            String rootId = record.getString("root");
+            if (!UUID.fromString(rootId).toString().equals(rootId)) {
+                if (permanent != null && permanent.length > 0) permanent[0] = true;
+                return null;
+            }
+            byte[] delegate = decode(record.getString("delegate"));
+            byte[] marker = decode(record.getString("marker"));
+            byte[] proofBytes = decode(record.getString("proof"));
+            byte[] sigBytes = decode(record.getString("signature"));
+            PublicKey delegatePub = publicKey(delegate);
+            PublicKey markerPub = publicKey(marker);
+            parseStage = false;
             KeyStore store = keyStore();
+            if (!store.containsAlias(ROOT + rootId) || !store.containsAlias(MARKER + name)) {
+                if (permanent != null && permanent.length > 0) permanent[0] = true;
+                return null;
+            }
             byte[] message = proofMessage(c, rootId, delegate);
             X509Certificate leaf = attested(c, store, rootId, hash(message));
-            if (leaf == null || !verify(leaf.getPublicKey(), message, decode(record.getString("proof")))) return null;
-            if (!verify(publicKey(delegate), recordMessage(c, name, value, rootId, marker), decode(record.getString("signature")))) return null;
+            if (leaf == null || !verify(leaf.getPublicKey(), message, proofBytes)) {
+                if (permanent != null && permanent.length > 0) permanent[0] = true;
+                return null;
+            }
+            if (!verify(delegatePub, recordMessage(c, name, value, rootId, marker), sigBytes)) {
+                if (permanent != null && permanent.length > 0) permanent[0] = true;
+                return null;
+            }
             // A restored certificate is insufficient: revocation deletes the actual private key.
             PrivateKey key = (PrivateKey) store.getKey(MARKER + name, null);
-            if (key == null) return null;
+            if (key == null) {
+                if (permanent != null && permanent.length > 0) permanent[0] = true;
+                return null;
+            }
             byte[] probe = new byte[32];
             RANDOM.nextBytes(probe);
-            return verify(publicKey(marker), probe, sign(key, probe)) ? value : null;
+            boolean probeOk = verify(markerPub, probe, sign(key, probe));
+            if (!probeOk && permanent != null && permanent.length > 0) permanent[0] = true;
+            return probeOk ? value : null;
         } catch (Exception e) {
+            if (isPermanentRestoreFailure(parseStage, e) && permanent != null && permanent.length > 0) {
+                permanent[0] = true;
+            }
             Log.w(Consent.TAG, "无法恢复页面授权 " + name, e);
             return null;
         }

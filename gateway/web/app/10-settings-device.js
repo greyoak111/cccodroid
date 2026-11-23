@@ -63,9 +63,12 @@
     const visit = setVisit, cat = setCatOpen;
     if ((cat !== "device" && cat !== "run") || !setVisible(cat, visit)) return;
     let st;
-    try { st = await api("/api/priv/status"); } catch {
-      if (privBusy && cat === "device" && setVisible("device", visit)) privLater(2000, visit);
-      return;
+    try { st = await api("/api/priv/status"); } catch (e) {
+      if (!setVisible(cat, visit) || cat === "run") return;
+      // 已经画出过卡片（例如正在填配对码或瞬时 502）就保留原状并在后台重拉；
+      // 首次打开就遇到 502 不能直接 return 把整张 Shizuku 卡片留在 hidden，按 unreachable 画出来并自动重试
+      if (!$("priv-field").classList.contains("hidden")) { privLater(2000, visit); return; }
+      st = { state: "unreachable", message: (e && e.message) || "" };
     }
     if (!setVisible(cat, visit)) return;
     if (cat === "run") { renderBg(st.frozen); return; }
@@ -79,7 +82,7 @@
     } else {
       const [cls, txt] = PRIV_TEXT[st.state] || ["err", st.message || t("状态未知")];
       el.className = "prov-state " + cls;
-      el.textContent = txt + (st.lastPermission === "denied" ? t("（上次被拒绝了）") : "");
+      el.textContent = txt + (st.state === "unreachable" && st.message ? "（" + st.message + "）" : "") + (st.lastPermission === "denied" ? t("（上次被拒绝了）") : "");
     }
     // 一键安装 / 激活的进度
     const su = st.setup || { phase: "idle" };
@@ -179,9 +182,9 @@
     const naOut = $("priv-na-result");
     if (st.noask && st.noaskUntil) { naOut.className = "prov-state warn"; naOut.textContent = t("已打开，{t} 自动关闭", { t: new Date(st.noaskUntil).toLocaleString() }); naOut.dataset.until = "1"; }
     else if (naOut.dataset.until) { naOut.textContent = ""; delete naOut.dataset.until; }
-    // 安装、配对、启动继续在后台执行，只在设备分类里跟进状态。
+    // 安装、配对、启动继续在后台执行，只在设备分类里跟进状态；连不上网关时也 2 秒自动重拉自愈。
     clearTimeout(privPoll);
-    if (busy || st.adbKeepalive) privLater(busy ? 1500 : 5000, visit);
+    if (busy || st.adbKeepalive || st.state === "unreachable") privLater(busy ? 1500 : st.state === "unreachable" ? 2000 : 5000, visit);
   }
   function privLater(ms, visit = setVisit) {
     if (!setVisible("device", visit)) return;
@@ -496,6 +499,8 @@
     } finally { if (btn && btn.isConnected) btn.disabled = false; }
   });
   // ── 通知（只有 cccodroid：GatewayService 订阅事件流发通知）──
+  let ntfPoll = 0;
+  const isTransientSetErr = (e) => /HTTP 50[234]|Failed to fetch|NetworkError|Load failed/i.test((e && e.message) || "");
   async function loadNotify() {
     const visit = setVisit;
     if (!setVisible("device", visit)) return;
@@ -508,9 +513,11 @@
       // 网关刚起 / 断网：以前直接隐藏整块，和「这个版本没有这项」分不出来（稳定性报告 FIND-032）
       $("ntf-err").textContent = t("读取失败") + (e && e.message ? "：" + e.message : "");
       $("ntf-err-block").classList.remove("hidden");
+      if (isTransientSetErr(e)) { clearTimeout(ntfPoll); ntfPoll = setTimeout(() => { if (setVisible("device", visit)) loadNotify(); }, 2000); }
       return;
     }
     if (!setVisible("device", visit)) return;
+    clearTimeout(ntfPoll);
     $("ntf-err-block").classList.add("hidden");
     $("ntf-field").classList.toggle("hidden", !st.ok);
     if (!st.ok) return;                              // 开发端 / 旧版：没有这项
@@ -607,6 +614,7 @@
       // 同通知：首读失败要说出原因、给重试，不能和「这个版本没有设备工具」一样整块隐藏（FIND-032）
       $("dev-err").textContent = t("读取失败") + (e && e.message ? "：" + e.message : "");
       $("dev-err-block").classList.remove("hidden");
+      if (isTransientSetErr(e)) { clearTimeout(devPoll); devPoll = setTimeout(() => { if (setVisible("device", visit)) loadDev(); }, 2000); }
       return false;
     }
     if (!setVisible("device", visit)) return false;

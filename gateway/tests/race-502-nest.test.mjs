@@ -251,3 +251,112 @@ test("W-P0-4/W-P0-5 06-files.js & 18-terminal.js: 压缩任务重试瞬时错误
   assert.ok(filesSrc.includes("fsDeleting"), "fsDelete 应防止并发双击删除");
   assert.ok(termSrc.includes("/api/term/list") && termSrc.includes("EventSource.CLOSED"), "termAttach 在 EventSource.CLOSED 时应探测 /api/term/list 确认存活而非立即标死");
 });
+
+test("Shizuku & 静默自更新 502 防护：Priv 不用标准带参 waitFor/isAlive，Updater 前台静默装不提前杀网关，设置页遇 502 不藏卡片且自动重试自愈", async () => {
+  const privSrc = fs.readFileSync(path.join(root, "android", "java", "cc", "codroid", "Priv.java"), "utf8");
+  const updSrc = fs.readFileSync(path.join(root, "android", "java", "cc", "codroid", "Updater.java"), "utf8");
+  assert.ok(!privSrc.includes(".waitFor(timeoutMs"), "Priv.java 严禁对 ShizukuRemoteProcess 调用未重写的 Process.waitFor(long, TimeUnit)");
+  assert.ok(!privSrc.includes("p.isAlive()"), "Priv.java 严禁对 ShizukuRemoteProcess 调用未重写的 Process.isAlive()");
+  assert.ok(privSrc.includes("waitProcess(p, timeoutMs)") && privSrc.includes("processAlive(p)"), "Priv.java 应统一通过 waitProcess / processAlive 处理远端进程");
+  assert.ok(privSrc.includes("stageLog = \"/data/local/tmp/upd-\""), "Priv.pipeInstall 应使用每次调用独占的日志路径防跨应用与残留污染");
+  assert.ok(!updSrc.includes("Priv.granted() && !gatewayBusy()"), "Updater.java 静默安装前必须以实测 Priv.verified() 为准");
+  assert.ok(/boolean fg = MainActivity\.appForeground\(\);\s*if \(!fg\) GatewayService\.pause\(true\);/.test(updSrc),
+    "Updater.installApp 在界面处于前台时不应提前 pause(true) 杀掉网关导致全界面连环 502");
+
+  const devSetSrc = fs.readFileSync(path.join(root, "gateway", "web", "app", "10-settings-device.js"), "utf8");
+  const nodes = new Map(), timers = [];
+  const makeNode = (id) => {
+    if (!nodes.has(id)) {
+      const initHidden = ["priv-field", "ntf-field", "ntf-err-block", "dev-field", "dev-err-block"].includes(id);
+      nodes.set(id, {
+        id, innerHTML: "", textContent: "", className: "", value: "1440", checked: false, disabled: false,
+        dataset: {}, style: {}, listeners: {}, children: [],
+        classList: {
+          _s: new Set(initHidden ? ["hidden"] : []),
+          toggle(k, f) { if (f == null) this._s.has(k) ? this._s.delete(k) : this._s.add(k); else if (f) this._s.add(k); else this._s.delete(k); },
+          contains(k) { return this._s.has(k); },
+          add(k) { this._s.add(k); },
+          remove(k) { this._s.delete(k); },
+        },
+        insertAdjacentHTML(pos, html) { this.innerHTML = pos === "afterbegin" ? html + this.innerHTML : this.innerHTML + html; },
+        setAttribute() {},
+        replaceChildren(... xs) { this.children = xs; },
+        appendChild(x) { this.children.push(x); },
+        querySelector() { return { textContent: "" }; },
+        querySelectorAll() { return []; },
+        addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+      });
+    }
+    return nodes.get(id);
+  };
+  let gwDown = true;
+  const box = {
+    window: { I18N: { lang: "zh" }, CCApp: {} }, I18N: { lang: "zh" },
+    Option: class { constructor(t, v) { this.text = t; this.value = v; } },
+    setVisit: 1, setCatOpen: "device", setOpen: true,
+    setVisible: (cat, v = 1) => cat === "device" && v === 1,
+    setDiscovery() {},
+    selectionChangesFromUser: new WeakSet(),
+    state: { settings: {} },
+    $: makeNode,
+    t: (s, p) => p ? s.replace(/\{(\w+)\}/g, (_, k) => p[k] ?? "") : s,
+    tk: (s) => s,
+    esc: (s) => String(s ?? ""),
+    fmtSize: (n) => `${n}B`,
+    fmtDur: (n) => `${n}ms`,
+    toast() {},
+    confirm: () => true,
+    alert() {},
+    viewRead: (_k, _r, _ok, fn) => fn(),
+    localStorage: { getItem: () => null, setItem() {} },
+    document: {
+      hidden: false, activeElement: null,
+      addEventListener() {},
+      createElement: () => ({ className: "", style: {}, set innerHTML(_) {}, firstChild: { addEventListener() {} } }),
+    },
+    post: (url) => box.api(url),
+    api: async (url) => {
+      if (gwDown) throw new Error("HTTP 502");
+      if (url === "/api/priv/status") return { state: "ok", uid: 2000, version: 13, paired: true, noaskDurations: [{ minutes: 60, label: "1h" }] };
+      if (url === "/api/app/notify_status") return { ok: true, done: true, ask: true, system: true, chAsk: true, chDone: true };
+      if (url === "/api/app/dev_status") return { ok: true, on: true, tools: [{ name: "notify", enabled: true }], a11y: { mode: "off" } };
+      return { ok: true };
+    },
+    setTimeout: (fn, delay) => { timers.push({ fn, delay }); return timers.length; },
+    clearTimeout() {},
+  };
+  vm.runInNewContext(
+    devSetSrc + "\nglobalThis.__loadPriv = loadPriv;\nglobalThis.__loadNotify = loadNotify;\nglobalThis.__loadDev = loadDev;",
+    box,
+    { filename: "10-settings-device.js" },
+  );
+
+  await Promise.all([box.__loadPriv(), box.__loadNotify(), box.__loadDev()]);
+  assert.equal(makeNode("priv-field").classList.contains("hidden"), false, "首读 502 时不应把 Shizuku 卡片留在 hidden");
+  assert.match(makeNode("priv-state").textContent, /连不上应用的后台服务（HTTP 502）/);
+  assert.match(makeNode("priv-actions").innerHTML, /data-act="refresh"/);
+  assert.equal(timers.filter((x) => x.delay === 2000).length, 3, "Shizuku / 通知 / 设备工具 首读 502 均应安排 2s 自动重拉");
+
+  // 网关恢复后触发已排程的 2s 重试：三张卡片全部自愈为正常状态
+  gwDown = false;
+  const due = timers.splice(0);
+  for (const x of due) await x.fn();
+  await new Promise((r) => setImmediate(r));
+  assert.match(makeNode("priv-state").textContent, /已就绪 · 以 shell 身份执行/);
+  assert.equal(makeNode("ntf-err-block").classList.contains("hidden"), true);
+  assert.equal(makeNode("dev-err-block").classList.contains("hidden"), true);
+
+  // 已画出正常状态后再遇瞬时 502：保留已渲染卡片不闪红，并安排 2s 重拉
+  gwDown = true;
+  timers.length = 0;
+  await box.__loadPriv();
+  assert.match(makeNode("priv-state").textContent, /已就绪 · 以 shell 身份执行/, "已显示的 Shizuku 卡片遇瞬时 502 应保持原状");
+  assert.ok(timers.some((x) => x.delay === 2000), "瞬时 502 应在后台 2s 重拉");
+
+  // ShizukuSetup 激活回前台用动态包名（兼容开发版 cc.codrdev），且无线 ADB 保活首轮延迟 15s 不抢占 reactivateAsync
+  const shzSrc = fs.readFileSync(path.join(root, "android", "java", "cc", "codroid", "ShizukuSetup.java"), "utf8");
+  assert.ok(!shzSrc.includes("-n cc.codroid/.MainActivity"), "ShizukuSetup 不应写死 cc.codroid 包名，以免开发版 cc.codrdev 切回错包");
+  assert.ok(shzSrc.includes("ctx.getPackageName() + \"/\" + MainActivity.class.getName()"), "ShizukuSetup 应按当前应用包名切回前台");
+  assert.ok(shzSrc.includes("scheduleWithFixedDelay(() -> keepaliveTick(worker), 15, 15, TimeUnit.SECONDS)"),
+    "startKeepaliveWatch 首轮应延迟 15s，避免 0ms 抢占 busy 把开机/起服务的 reactivateAsync 顶掉");
+});

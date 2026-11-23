@@ -64,13 +64,15 @@ final class Priv {
         try { sui = rikka.sui.Sui.init(ctx.getPackageName()); } catch (Throwable t) { sui = false; }
         if (sui) Log.i(TAG, "检测到 Sui");
         Shizuku.addBinderReceivedListenerSticky(() -> {
+            invalidateVerified();
             Log.i(TAG, "Shizuku binder 到手 uid=" + safeUid());
             if (Consent.on(ctx, Consent.KEEPALIVE) && granted()) {
                 new Thread(() -> keepAlive(true), "keepalive").start();
             }
         });
-        Shizuku.addBinderDeadListener(() -> Log.w(TAG, "Shizuku binder 断了"));
+        Shizuku.addBinderDeadListener(() -> { invalidateVerified(); Log.w(TAG, "Shizuku binder 断了"); });
         Shizuku.addRequestPermissionResultListener((code, result) -> {
+            invalidateVerified();
             lastPermission = result == PackageManager.PERMISSION_GRANTED ? "granted" : "denied";
             ShizukuSetup.get(ctx).onPermission(result == PackageManager.PERMISSION_GRANTED);
             if (result == PackageManager.PERMISSION_GRANTED && Consent.on(ctx, Consent.KEEPALIVE)) {
@@ -121,13 +123,24 @@ final class Priv {
      */
     private static volatile long verifiedAt;
     private static volatile boolean verifiedOk;
+    private static volatile long verifyGen;
     private static final Object VERIFY_LOCK = new Object();
     private static boolean verifyInFlight;
+    static void invalidateVerified() {
+        synchronized (VERIFY_LOCK) {
+            verifyGen++;
+            verifiedAt = 0;
+            verifiedOk = false;
+        }
+    }
     static boolean verified() {
         if (!granted()) return false;
-        if (System.currentTimeMillis() - verifiedAt < 10_000) return verifiedOk;
+        long ttl = verifiedOk ? 10_000L : 1_500L;
+        if (System.currentTimeMillis() - verifiedAt < ttl) return verifiedOk;
+        long gen0;
         synchronized (VERIFY_LOCK) {
-            if (System.currentTimeMillis() - verifiedAt < 10_000) return verifiedOk;
+            ttl = verifiedOk ? 10_000L : 1_500L;
+            if (System.currentTimeMillis() - verifiedAt < ttl) return verifiedOk;
             if (verifyInFlight) {
                 long deadline = System.nanoTime() + 3500_000_000L;
                 while (verifyInFlight) {
@@ -138,17 +151,93 @@ final class Priv {
                 return verifiedOk;
             }
             verifyInFlight = true;
+            gen0 = verifyGen;
         }
         boolean ok = false;
         try {
-            String[] r = runProcessWithTimeout(new String[]{"id", "-u"}, 3000);
+            String[] r = runProcessWithTimeout(new String[]{"/system/bin/id", "-u"}, 3000);
             ok = "0".equals(r[0]) && (r[1].equals("2000") || r[1].equals("0"));
         } catch (Throwable t) { ok = false; }
         finally {
-            verifiedOk = ok; verifiedAt = System.currentTimeMillis();
-            synchronized (VERIFY_LOCK) { verifyInFlight = false; VERIFY_LOCK.notifyAll(); }
+            synchronized (VERIFY_LOCK) {
+                if (verifyGen == gen0) {
+                    verifiedOk = ok;
+                    verifiedAt = System.currentTimeMillis();
+                }
+                verifyInFlight = false;
+                VERIFY_LOCK.notifyAll();
+            }
         }
         return ok;
+    }
+
+    /**
+     * ShizukuRemoteProcess 不重写 Process.waitFor(long, TimeUnit) 与 isAlive()；
+     * 而 java.lang.Process 默认实现轮询 exitValue() 时只捕获 IllegalThreadStateException。
+     * 跨 Android Binder 后服务端抛的 IllegalThreadStateException("process hasn't exited")
+     * 会反序列化成父类 IllegalArgumentException("process hasn't exited")，导致标准带参 waitFor/isAlive 当场误炸。
+     */
+    static boolean isBinderNotExited(Throwable t) {
+        if (!(t instanceof IllegalArgumentException)) return false;
+        String m = t.getMessage();
+        return m != null && (m.contains("hasn't exited") || m.contains("has not exited"));
+    }
+
+    static boolean processAlive(java.lang.Process p) {
+        if (p == null) return false;
+        try {
+            Method m = p.getClass().getMethod("alive");
+            m.setAccessible(true);
+            return Boolean.TRUE.equals(m.invoke(p));
+        } catch (NoSuchMethodException ignored) {
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            return isBinderNotExited(e.getTargetException());
+        } catch (Throwable ignored) {
+            return false;
+        }
+        try {
+            p.exitValue();
+            return false;
+        } catch (IllegalThreadStateException e) {
+            return true;
+        } catch (IllegalArgumentException e) {
+            if (isBinderNotExited(e)) return true;
+            return false;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    static boolean waitProcess(java.lang.Process p, long timeoutMs) throws InterruptedException {
+        if (p == null) return false;
+        long waitMs = Math.max(0L, timeoutMs);
+        long deadline = System.nanoTime() + waitMs * 1_000_000L;
+        try {
+            Method m = p.getClass().getMethod("waitForTimeout", long.class, java.util.concurrent.TimeUnit.class);
+            m.setAccessible(true);
+            return Boolean.TRUE.equals(m.invoke(p, waitMs, java.util.concurrent.TimeUnit.MILLISECONDS));
+        } catch (NoSuchMethodException ignored) {
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getTargetException();
+            if (cause instanceof InterruptedException) throw (InterruptedException) cause;
+            if (!isBinderNotExited(cause)) {
+                throw (cause instanceof RuntimeException) ? (RuntimeException) cause : new RuntimeException(cause);
+            }
+        } catch (IllegalAccessException ignored) {
+        }
+        while (true) {
+            try {
+                p.exitValue();
+                return true;
+            } catch (IllegalThreadStateException e) {
+                // 仍在运行
+            } catch (IllegalArgumentException e) {
+                if (!isBinderNotExited(e)) throw e;
+            }
+            long remNs = deadline - System.nanoTime();
+            if (remNs <= 0) return false;
+            Thread.sleep(Math.min(Math.max(1L, remNs / 1_000_000L), 50L));
+        }
     }
 
     /** 带超时的短命令执行并确保流关闭与僵死进程回收，防止 Shizuku 僵死时线程/FD 泄漏 */
@@ -156,7 +245,7 @@ final class Priv {
         java.lang.Process p = null;
         try {
             p = newProcess(argv, null, "/");
-            try { p.getOutputStream().close(); } catch (IOException ignored) {}
+            try { p.getOutputStream().close(); } catch (Throwable ignored) {}
             final java.lang.Process fp = p;
             final String[] out = { "" };
             Thread rd = new Thread(() -> {
@@ -166,19 +255,17 @@ final class Priv {
             }, "priv-read");
             rd.setDaemon(true);
             rd.start();
-            boolean finished = p.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            boolean finished = waitProcess(p, timeoutMs);
             if (!finished) {
-                p.destroyForcibly();
-                try { p.getInputStream().close(); } catch (IOException ignored) {}
-                try { p.getErrorStream().close(); } catch (IOException ignored) {}
+                try { p.destroy(); } catch (Throwable ignored) {}
+                try { p.getInputStream().close(); } catch (Throwable ignored) {}
                 rd.join(500);
                 return new String[]{"-", "timeout"};
             }
             rd.join(1000);
-            try { p.getErrorStream().close(); } catch (IOException ignored) {}
             return new String[]{String.valueOf(p.exitValue()), out[0]};
         } catch (Throwable t) {
-            if (p != null) { try { p.destroyForcibly(); } catch (Throwable ignored) {} }
+            if (p != null) { try { p.destroy(); } catch (Throwable ignored) {} }
             return new String[]{"-", String.valueOf(t)};
         }
     }
@@ -264,6 +351,18 @@ final class Priv {
 
     static final String STAGE_LOG = "/data/local/tmp/cccodroid-update.log";
 
+    static String cleanInstallLog(String raw) {
+        if (raw == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (String line : raw.split("\n")) {
+            String t = line.trim();
+            if (t.isEmpty() || "STARTED".equals(t) || "INSTALL_FAILED".equals(t)) continue;
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(t);
+        }
+        return sb.toString();
+    }
+
     /**
      * 静默装自己的新版本。两步走，因为 pm 替换本应用时会杀掉本进程，而 Shizuku 会跟着杀掉本进程开的子进程：
      *   1. 把 APK 流式写到 /data/local/tmp（shell 读不到本应用私有目录，那里它能读写）；
@@ -273,43 +372,71 @@ final class Priv {
      * @return 走到返回说明还活着：多半没装上，返回 pm 的输出
      */
     static String pipeInstall(java.io.File apk, boolean reopenUi, String version) {
+        String stageApk = null, stageLog = null;
         try {
-            // 文件名带随机数、装之前再核一遍 sha256（审查 10-29 第六份 低6）：固定路径能被别的 shell 进程抢先占住，
-            // 或在写完到 pm install 之间换成另一个同签名的包（28 / 36 两种）
+            // APK 与日志均按包名+随机数独占文件名：既防跨应用（cccodroid / dev / hachimia）互踩和旧残留 "Success" 污染，
+            // 也防固定路径被别的 shell 进程抢占或在写完到 pm install 之间被调包（审查 10-29 第六份 低6）
+            String pkg = ctx.getPackageName();
             byte[] rb = new byte[8];
             new java.security.SecureRandom().nextBytes(rb);
-            final String STAGE = "/data/local/tmp/cccodroid-update-" + Installer.hex(rb) + ".apk";
+            String tag = pkg.replace('.', '_') + "-" + Installer.hex(rb);
+            stageApk = "/data/local/tmp/upd-" + tag + ".apk";
+            stageLog = "/data/local/tmp/upd-" + tag + ".log";
             String sha = Installer.sha256(apk);
-            java.lang.Process p = newProcess(new String[]{"sh", "-c", "rm -f " + STAGE + " && cat > " + STAGE + " && chmod 644 " + STAGE}, null, "/");
+            java.lang.Process p = newProcess(new String[]{"/system/bin/sh", "-c", "rm -f " + stageApk + " && cat > " + stageApk + " && chmod 644 " + stageApk}, null, "/");
             try (InputStream in = new java.io.FileInputStream(apk); OutputStream o = p.getOutputStream()) {
                 byte[] buf = new byte[1 << 16];
                 for (int n; (n = in.read(buf)) > 0; ) o.write(buf, 0, n);
             }
-            if (p.waitFor() != 0) return Tr.t("[失败] 写不进 ") + STAGE;
-            String pkg = ctx.getPackageName();
+            if (!waitProcess(p, 30_000) || p.exitValue() != 0) {
+                try { p.destroy(); } catch (Throwable ignored) {}
+                runRc("rm -f " + stageApk);
+                return Tr.t("[失败] 写不进 ") + stageApk;
+            }
             // 带点击动作的通知有的 ROM 不让 shell 发（红魔：getIntentSender 权限不足），失败就发纯文字的
             String note = "cmd notification post -t \"" + shq(Tr.f("cccodroid 已更新到 v{0}（系统不让它在后台自己启动）", version)) + "\"";
             String notify = "{ " + note + " -c \"activity -n " + pkg + "/.MainActivity\" cccodroid-updated \"" + shq(Tr.t("点此打开即可继续使用")) + "\""
-                + " || " + note + " cccodroid-updated \"" + shq(Tr.t("打开 cccodroid 即可继续使用")) + "\"; } >> " + STAGE_LOG + " 2>&1";
+                + " || " + note + " cccodroid-updated \"" + shq(Tr.t("打开 cccodroid 即可继续使用")) + "\"; } >> " + stageLog + " 2>&1";
             // 拉界面：am start 回「Starting」不等于界面真出来了 —— 刚装完系统还在做安装后扫描（ColorOS 等），
             // 这时的启动会被悄悄丢掉（10-22 用户手机 0.3.11→0.3.12：日志全成功，界面没回来）。
             // 所以先等两秒，起完看本应用有没有在前台，没有就再拉，三次都不行发通知
             String up = "dumpsys activity activities | grep -qE \"ResumedActivity.*" + pkg + "/\"";
-            String job = "if [ \"$(sha256sum " + STAGE + " | cut -d\" \" -f1)\" = " + sha + " ]; then pm install -r " + STAGE + " > " + STAGE_LOG + " 2>&1; else echo \"Error: 安装包被换过\" > " + STAGE_LOG + "; fi; rm -f " + STAGE + "; sleep 2; "
-                + "am start-foreground-service -n " + pkg + "/.GatewayService >> " + STAGE_LOG + " 2>&1"
-                + (reopenUi ? "; ok=; for i in 1 2 3; do am start -W -n " + pkg + "/.MainActivity >> " + STAGE_LOG + " 2>&1; sleep 3; "
-                     + "if " + up + "; then ok=1; break; fi; echo \"界面没起来（第 $i 次）\" >> " + STAGE_LOG + "; done; [ -n \"$ok\" ] || " + notify
-                   : "; grep -q Error " + STAGE_LOG + " && " + notify);
-            run("rm -f " + STAGE_LOG);       // 上一次的结果别被当成这一次的
-            run("setsid sh -c '" + job + "' < /dev/null > /dev/null 2>&1 &");
-            // 装上的话本进程在这期间就没了。没装上（pm 回 Failure / Error）就别睡满 60 秒：调用方停着网关在等（审查 11-05 #12）
-            for (int i = 0; i < 60; i++) {
-                Thread.sleep(1000);
-                String[] r = runRc("cat " + STAGE_LOG);
-                if (r[0].equals("0") && (r[1].contains("Failure") || r[1].contains("Error") || r[1].contains("Exception"))) return r[1];
+            String postOk = "sleep 2; am start-foreground-service -n " + pkg + "/.GatewayService >> " + stageLog + " 2>&1"
+                + (reopenUi ? "; ok=; for i in 1 2 3; do am start -W -n " + pkg + "/.MainActivity >> " + stageLog + " 2>&1; sleep 3; "
+                     + "if " + up + "; then ok=1; break; fi; echo \"界面没起来（第 $i 次）\" >> " + stageLog + "; done; [ -n \"$ok\" ] || " + notify
+                   : "; grep -q Error " + stageLog + " && " + notify)
+                + "; rm -f " + stageLog;
+            String job = "echo STARTED > " + stageLog + "; ok_pm=; "
+                + "if [ \"$(sha256sum " + stageApk + " | cut -d\" \" -f1)\" = " + sha + " ]; then pm install -r " + stageApk + " >> " + stageLog + " 2>&1 && ok_pm=1; else echo \"Error: 安装包被换过\" >> " + stageLog + "; fi; "
+                + "rm -f " + stageApk + "; "
+                + "if [ -n \"$ok_pm\" ]; then " + postOk + "; else echo INSTALL_FAILED >> " + stageLog + "; sleep 90; rm -f " + stageLog + "; fi";
+            String[] sr = runRc("setsid /system/bin/sh -c '" + job + "' < /dev/null > /dev/null 2>&1 &");
+            if (!"0".equals(sr[0])) {
+                runRc("rm -f " + stageApk + " " + stageLog);
+                return Tr.t("[失败] ") + sr[1];
             }
-            return run("cat " + STAGE_LOG);
+            // 装上的话本进程在这期间就被系统杀掉了。没装上（pm 回 Failure / Error）或 setsid 根本没跑起来时立即收工清理；慢机留足 75 秒
+            for (int i = 0; i < 75; i++) {
+                Thread.sleep(1000);
+                String[] r = runRc("cat " + stageLog);
+                if (i >= 3 && (!"0".equals(r[0]) || r[1].isEmpty())) {
+                    runRc("rm -f " + stageApk + " " + stageLog);
+                    return Tr.t("[失败] ") + (r[1].isEmpty() ? "setsid install did not start" : r[1]);
+                }
+                if ("0".equals(r[0]) && (r[1].contains("Failure") || r[1].contains("Error") || r[1].contains("Exception") || r[1].contains("INSTALL_FAILED"))) {
+                    runRc("rm -f " + stageApk + " " + stageLog);
+                    String clean = cleanInstallLog(r[1]);
+                    return clean.isEmpty() ? r[1].trim() : clean;
+                }
+            }
+            String[] last = runRc("cat " + stageLog);
+            runRc("rm -f " + stageApk + " " + stageLog);
+            String clean = "0".equals(last[0]) ? cleanInstallLog(last[1]) : "";
+            return !clean.isEmpty() ? clean : Tr.t("[失败] ") + (last[1].isEmpty() ? "pm install timeout" : last[1]);
         } catch (Throwable t) {
+            if (stageApk != null || stageLog != null) {
+                try { runRc("rm -f " + (stageApk != null ? stageApk : "") + " " + (stageLog != null ? stageLog : "")); } catch (Throwable ignored) {}
+            }
             return Tr.t("[失败] ") + t;
         }
     }
@@ -1150,7 +1277,7 @@ final class Priv {
     }
 
     private static void stopIfAlive(java.lang.Process p, String why) {
-        try { if (p.isAlive()) { Log.w(TAG, "特权命令还在跑，" + why + "，停掉"); p.destroy(); } } catch (Throwable ignored) {}
+        try { if (processAlive(p)) { Log.w(TAG, "特权命令还在跑，" + why + "，停掉"); p.destroy(); } } catch (Throwable ignored) {}
     }
 
     private static void frame(DataOutputStream out, int type, byte[] b) throws IOException {

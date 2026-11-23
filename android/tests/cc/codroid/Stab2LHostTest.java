@@ -245,6 +245,81 @@ public class Stab2LHostTest {
         }
         eq("Env.invokeOnBoot 吞住回调异常不打翻证明结果", survived, true);
 
+        // ── Priv 跨 Binder 进程等待与存活探测（ShizukuRemoteProcess 不重写带参 waitFor / isAlive）──
+        eq("Priv.isBinderNotExited 识别 Binder 反序列化的 IllegalArgumentException",
+            Priv.isBinderNotExited(new IllegalArgumentException("process hasn't exited")), true);
+        eq("Priv.isBinderNotExited 不误判其他参数异常",
+            Priv.isBinderNotExited(new IllegalArgumentException("bad flag")), false);
+        try {
+            final int[] polls = { 0 };
+            java.lang.Process binderProc = new java.lang.Process() {
+                @Override public java.io.OutputStream getOutputStream() { return new java.io.ByteArrayOutputStream(); }
+                @Override public java.io.InputStream getInputStream() { return new java.io.ByteArrayInputStream(new byte[0]); }
+                @Override public java.io.InputStream getErrorStream() { return new java.io.ByteArrayInputStream(new byte[0]); }
+                @Override public int waitFor() { return 0; }
+                @Override public int exitValue() {
+                    if (++polls[0] <= 3) throw new IllegalArgumentException("process hasn't exited");
+                    return 0;
+                }
+                @Override public void destroy() {}
+            };
+            eq("Priv.processAlive 在 exitValue 抛 Binder hasn't exited 时返回 true", Priv.processAlive(binderProc), true);
+            eq("Priv.waitProcess 容忍 Binder hasn't exited 轮询直到进程退出", Priv.waitProcess(binderProc, 1000), true);
+            eq("Priv.processAlive 在进程退出后返回 false", Priv.processAlive(binderProc), false);
+
+            java.lang.Process hangProc = new java.lang.Process() {
+                @Override public java.io.OutputStream getOutputStream() { return new java.io.ByteArrayOutputStream(); }
+                @Override public java.io.InputStream getInputStream() { return new java.io.ByteArrayInputStream(new byte[0]); }
+                @Override public java.io.InputStream getErrorStream() { return new java.io.ByteArrayInputStream(new byte[0]); }
+                @Override public int waitFor() { return 0; }
+                @Override public int exitValue() { throw new IllegalArgumentException("process hasn't exited"); }
+                @Override public void destroy() {}
+            };
+            eq("Priv.waitProcess 到时未退出返回 false 而非误抛异常", Priv.waitProcess(hangProc, 60), false);
+
+            final boolean[] remoteCalled = { false, false };
+            java.lang.Process shzLikeProc = new java.lang.Process() {
+                public boolean alive() { remoteCalled[0] = true; return true; }
+                public boolean waitForTimeout(long t, java.util.concurrent.TimeUnit u) { remoteCalled[1] = true; return t == 500 && u == java.util.concurrent.TimeUnit.MILLISECONDS; }
+                @Override public java.io.OutputStream getOutputStream() { return new java.io.ByteArrayOutputStream(); }
+                @Override public java.io.InputStream getInputStream() { return new java.io.ByteArrayInputStream(new byte[0]); }
+                @Override public java.io.InputStream getErrorStream() { return new java.io.ByteArrayInputStream(new byte[0]); }
+                @Override public int waitFor() { return 0; }
+                @Override public int exitValue() { throw new AssertionError("不应退化轮询 exitValue"); }
+                @Override public void destroy() {}
+            };
+            eq("Priv.processAlive 优先走 ShizukuRemoteProcess.alive()", Priv.processAlive(shzLikeProc) && remoteCalled[0], true);
+            eq("Priv.waitProcess 优先走 ShizukuRemoteProcess.waitForTimeout()", Priv.waitProcess(shzLikeProc, 500) && remoteCalled[1], true);
+
+            java.lang.Process shzIteProc = new java.lang.Process() {
+                public boolean alive() { throw new IllegalArgumentException("process hasn't exited"); }
+                public boolean waitForTimeout(long t, java.util.concurrent.TimeUnit u) { throw new IllegalArgumentException("process hasn't exited"); }
+                @Override public java.io.OutputStream getOutputStream() { return new java.io.ByteArrayOutputStream(); }
+                @Override public java.io.InputStream getInputStream() { return new java.io.ByteArrayInputStream(new byte[0]); }
+                @Override public java.io.InputStream getErrorStream() { return new java.io.ByteArrayInputStream(new byte[0]); }
+                @Override public int waitFor() { return 0; }
+                @Override public int exitValue() { throw new IllegalArgumentException("process hasn't exited"); }
+                @Override public void destroy() {}
+            };
+            eq("Priv.processAlive 正确拆包反射 InvocationTargetException(Binder hasn't exited)", Priv.processAlive(shzIteProc), true);
+            eq("Priv.waitProcess 反射抛 Binder hasn't exited 时回退轮询不崩", Priv.waitProcess(shzIteProc, 40), false);
+
+            eq("Priv.cleanInstallLog 剥掉 STARTED 与 INSTALL_FAILED 保留真实报错",
+                "Failure [INSTALL_FAILED_OLDER_SDK]".equals(Priv.cleanInstallLog("STARTED\nFailure [INSTALL_FAILED_OLDER_SDK]\nINSTALL_FAILED\n")), true);
+
+            eq("PageConsent.isPermanentRestoreFailure 解析期异常判为永久失效",
+                PageConsent.isPermanentRestoreFailure(true, new IllegalArgumentException("bad uuid")), true);
+            eq("PageConsent.isPermanentRestoreFailure KeyStore 瞬时异常不进 BAD_SIG",
+                PageConsent.isPermanentRestoreFailure(false, new java.security.KeyStoreException("KeyMint busy")), false);
+            eq("PageConsent.isPermanentRestoreFailure Provider 运行时抖动不进 BAD_SIG",
+                PageConsent.isPermanentRestoreFailure(false, new java.security.ProviderException("StrongBox busy")), false);
+            eq("DeviceTools.isSafeHttpUrl 拒绝伪装 IPv6 括号主机 [evil.com]", DeviceTools.isSafeHttpUrl("http://[evil.com]/"), false);
+            eq("DeviceTools.isSafeHttpUrl 放行大写十六进制 IPv6 [FF02::1]", DeviceTools.isSafeHttpUrl("http://[FF02::1]:8080/"), true);
+        } catch (Exception e) {
+            System.out.println("FAIL Priv 进程等待单测异常: " + e);
+            fail++;
+        }
+
         if (fail > 0) { System.out.println(fail + " 条失败"); System.exit(1); }
         System.out.println("全部通过");
     }

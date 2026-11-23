@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CFG, PATHS } from "../gw/config.mjs";
-import { latestContextTokens, readSessionForward } from "../gw/transcript.mjs";
+import { latestContextTokens, readSessionPage, readSessionForward } from "../gw/transcript.mjs";
 import { searchSessions } from "../gw/sessions.mjs";
 import { LL, ensureLlama, localRunAttach } from "../gw/local.mjs";
 
@@ -33,6 +33,34 @@ test("① latestContextTokens：跨 256KB 块多字节 UTF-8 + 超限巨型无�
   const tok = await latestContextTokens(f, { maxLine: 1 << 20 });
   assert.equal(tok, 12345 + 6789);
   assert.ok(Date.now() - t0 < 5000, "不应出现 O(N^2) 退化卡顿");
+
+  // P0-1 回归：readSessionPage 跨 256KiB 块边界恰好对齐 '\n' 时绝不能粘连蒸发相邻两行
+  const CH = 256 * 1024;
+  const uLine = JSON.stringify({ type: "user", uuid: "u-bound", message: { role: "user", content: "边界前一条消息" } });
+  const aShell = (pad) => JSON.stringify({
+    type: "assistant",
+    uuid: "a-bound",
+    message: {
+      role: "assistant",
+      model: "claude-sonnet-4-6",
+      content: [{ type: "text", text: pad }],
+      usage: { input_tokens: 12000, cache_read_input_tokens: 345 },
+    },
+  });
+  const baseLen = Buffer.byteLength(aShell(""));
+  // 形态 A：末尾无换行且末行长度恰好 = 256KiB（上一块末字节恰为 uLine 后的 '\n'）
+  const fBoundNoNl = path.join(tmpDir, "bound-nonl.jsonl");
+  fs.writeFileSync(fBoundNoNl, uLine + "\n" + aShell("x".repeat(CH - baseLen)));
+  const pNoNl = await readSessionPage(fBoundNoNl, { limit: 40 });
+  assert.equal(pNoNl.items.length, 2, "末行恰为 256KiB（无尾换行）时相邻两行不能粘连丢失");
+  assert.equal(pNoNl.contextTokens, 12345);
+
+  // 形态 B：带尾换行且 (末行 + '\n') 长度恰好 = 256KiB
+  const fBoundNl = path.join(tmpDir, "bound-nl.jsonl");
+  fs.writeFileSync(fBoundNl, uLine + "\n" + aShell("y".repeat(CH - 1 - baseLen)) + "\n");
+  const pNl = await readSessionPage(fBoundNl, { limit: 40 });
+  assert.equal(pNl.items.length, 2, "末行+换行恰为 256KiB 时相邻两行不能粘连丢失");
+  assert.equal(pNl.contextTokens, 12345);
 });
 
 test("① readSessionForward：超限无换行巨型单行进入 dropping 直至 \\n，且跨块 UTF-8 正常解码", async () => {

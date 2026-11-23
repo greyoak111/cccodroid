@@ -186,8 +186,19 @@ int main(int argc, char **argv) {
     const char *loader_bin = getenv("CCAPP_LOADER_BIN");
     char *clean_path = strip_loader_bin_from_path(getenv("PATH"), loader_bin);
 
+    const char *ccapp_ld = getenv("CCAPP_LD");
+    const char *ccapp_exec = getenv("CCAPP_EXEC");
+    int use_loader = (ccapp_ld && *ccapp_ld) || (ccapp_exec && strcmp(ccapp_exec, "loader") == 0);
+
     const char *real_shell = getenv("CCAPP_SHELL");
-    if (real_shell && *real_shell) {
+    if (use_loader && loader_bin && *loader_bin) {
+        const char *cur_sh = getenv("SHELL");
+        if (!cur_sh || !*cur_sh || strstr(cur_sh, "libccrun.so") != NULL) {
+            char lb_sh[PATH_MAX];
+            snprintf(lb_sh, sizeof lb_sh, "%s/bash", loader_bin);
+            setenv("SHELL", lb_sh, 1);
+        }
+    } else if (real_shell && *real_shell) {
         setenv("SHELL", real_shell, 1);
     }
 
@@ -231,13 +242,10 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) av[e++] = argv[i];
     av[e] = NULL;
 
-    const char *ccapp_ld = getenv("CCAPP_LD");
-    const char *ccapp_exec = getenv("CCAPP_EXEC");
     const char *bionic_preload = getenv("CCAPP_BIONIC_PRELOAD");
     const char *glibc_lib = getenv("CCAPP_GLIBC_LIB");
     const char *glibc_preload = getenv("CCAPP_GLIBC_PRELOAD");
     const char *prefix = getenv("PREFIX");
-    int use_loader = (ccapp_ld && *ccapp_ld) || (ccapp_exec && strcmp(ccapp_exec, "loader") == 0);
 
     for (int depth = 0; depth < 5; depth++) {
         char *cur = av[s];
@@ -306,7 +314,15 @@ int main(int argc, char **argv) {
                     av[--s] = (char *)glibc_lib;
                     av[--s] = "--library-path";
                 }
-                av[--s] = (char *)orig_argv0;
+                const char *g_argv0 = (depth == 0) ? orig_argv0 : cur;
+                if (depth == 0 && loader_bin && *loader_bin) {
+                    size_t lblen = strlen(loader_bin);
+                    while (lblen > 1 && loader_bin[lblen - 1] == '/') lblen--;
+                    if (strncmp(orig_argv0, loader_bin, lblen) == 0 && (orig_argv0[lblen] == '/' || orig_argv0[lblen] == 0)) {
+                        g_argv0 = cur;
+                    }
+                }
+                av[--s] = (char *)g_argv0;
                 av[--s] = "--argv0";
                 av[--s] = (char *)ccapp_ld;
                 execv(ccapp_ld, av + s);

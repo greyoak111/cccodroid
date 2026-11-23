@@ -221,7 +221,8 @@ export async function readSessionPage(file, { before = null, limit = 40, exclude
       let end = chunk.length;   // 这一行在本块里的结尾（不含）
 
       for (;;) {
-        const nl = end >= 2 ? chunk.lastIndexOf(10, end - 2) : -1;
+        const searchFrom = (carry.length || carryOver) ? end - 1 : end - 2;
+        const nl = searchFrom >= 0 ? chunk.lastIndexOf(10, searchFrom) : -1;
         if (nl < 0) {
           if (start > 0) {
             // 整段都是某条跨块行的开头部分：先攒着（它是目前最旧的一段，放在 carry 末尾）
@@ -249,6 +250,7 @@ export async function readSessionPage(file, { before = null, limit = 40, exclude
         if (ret) return ret;
         if (cursor === 0) break outer;
         end = nl;
+        if (end === 0) break;
       }
       if (scanned >= MAX_SCAN && items.length) break;   // 极端大行：先交这一页，别无限往前扫
     }

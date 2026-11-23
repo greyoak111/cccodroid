@@ -261,9 +261,12 @@ final class ShizukuSetup {
             if (busy) { activateQueued = true; log("上一步还在进行，激活排队中"); return; }
             busy = true;
         }
-        wifiOrig = wirelessOn();
+        wifiOrig = -1;
         new Thread(() -> {
-            try { doActivate(); }
+            try {
+                wifiOrig = wirelessOn();
+                doActivate();
+            }
             catch (Exception e) { set("error", e.getMessage()); }
             finally {
                 if (handedOff) handedOff = false;
@@ -278,8 +281,14 @@ final class ShizukuSetup {
 
     private void idle() {
         adbQuit();
-        boolean again;
-        synchronized (this) { busy = false; again = activateQueued && !Priv.granted(); activateQueued = false; }
+        boolean again, teardown;
+        synchronized (this) {
+            busy = false;
+            again = activateQueued && !Priv.granted();
+            activateQueued = false;
+            teardown = keepaliveTeardownPending && !adbKeepalive();
+        }
+        if (teardown) new Thread(this::teardownKeepalive, "shz-adb-keepalive-off").start();
         if (again) activate();
     }
 
@@ -465,8 +474,9 @@ final class ShizukuSetup {
                 // 整段在设备侧执行：切到桌面（荣耀上 shell 解析不了 HOME intent 就注入 Home 键），
                 // 3 秒后经 shell 的 am start 把应用叫回前台。用 shell 叫回不受安卓后台起 Activity
                 // 的限制，也不依赖应用进程在后台没被厂商冻住——整段跑在 adbd 那侧。
+                String cmp = ctx.getPackageName() + "/" + MainActivity.class.getName();
                 String r = adb(20, "-s", serial, "shell",
-                    "am start -c android.intent.category.HOME 2>/dev/null || input keyevent 3; sleep 3; am start --activity-reorder-to-front -n cc.codroid/.MainActivity");
+                    "am start -c android.intent.category.HOME 2>/dev/null || input keyevent 3; sleep 3; am start --activity-reorder-to-front -n " + cmp);
                 adb(10, "disconnect", serial);
                 log("自动切出切回：" + tail(r));
             } catch (Exception e) {
@@ -570,12 +580,18 @@ final class ShizukuSetup {
             try {
                 if (boot) Thread.sleep(10_000);
                 for (int i = 0; i < 18 && !onWifi(); i++) Thread.sleep(10_000);
-                synchronized (ShizukuSetup.this) {
-                    if (Priv.running() || busy) return;
-                    busy = true;
+                // 避免与 verifyPairAsync / keepaliveTick 的短时探测撞锁后直接放弃开机/起服务自动激活（最多等 30 秒）
+                for (int w = 0; w < 60; w++) {
+                    synchronized (ShizukuSetup.this) {
+                        if (Priv.running()) return;
+                        if (!busy) { busy = true; break; }
+                    }
+                    if (w == 59) return;
+                    Thread.sleep(500);
                 }
-                wifiOrig = wirelessOn();
+                wifiOrig = -1;
                 try {
+                    wifiOrig = wirelessOn();
                     if (!onWifi()) { failNote(Tr.t("没连 Wi‑Fi，Shizuku 没能自动激活。连上 Wi‑Fi 后点此重试")); return; }
                     if (!connectAndStart(false)) failNote(Tr.t("Shizuku 自动激活没成功，点此重试"));
                 } finally { if (!Priv.running()) restoreWifi(); idle(); }
@@ -629,9 +645,10 @@ final class ShizukuSetup {
             if (busy) return false;
             busy = true;
         }
-        wifiOrig = wirelessOn();
+        wifiOrig = -1;
         new Thread(() -> {
             try {
+                wifiOrig = wirelessOn();
                 if (Build.VERSION.SDK_INT < 30) { set("error", Tr.t("安卓 11 以下没有无线调试")); return; }
                 if (!onWifi()) { set("need_wifi", Tr.t("无线调试要连着 Wi‑Fi 才能用。连上 Wi‑Fi 后再点「重新配对」")); return; }
                 startPairing();
@@ -650,6 +667,7 @@ final class ShizukuSetup {
     }
 
     // KEEPALIVE 管的是应用后台限制，这条同意单独授权 ADB 通道。
+    private volatile boolean keepaliveTeardownPending;
     boolean adbKeepalive() { return Consent.on(ctx, Consent.SHZ_TCP); }
 
     void setAdbKeepalive(boolean on) { setAdbKeepalive(on, null); }
@@ -659,9 +677,11 @@ final class ShizukuSetup {
         keepaliveNextPrepareAt = 0;
         keepaliveNextCheckAt = 0;
         if (on) {
+            keepaliveTeardownPending = false;
             Consent.grant(ctx, Consent.SHZ_TCP, "1", pageVisit);
             keepaliveState = "waiting";
         } else {
+            keepaliveTeardownPending = true;
             Consent.revoke(ctx, Consent.SHZ_TCP);
             keepaliveState = "waiting";
             // 回退本应用开启的 tcpip 5555 与 USB 调试开关，避免关闭后端口仍长期暴露
@@ -672,17 +692,17 @@ final class ShizukuSetup {
     private void teardownKeepalive() {
         boolean ownedTcp = prefs().getBoolean("adbKeepaliveSetTcp", false);
         boolean ownedUsb = prefs().getBoolean("adbKeepaliveEnabledUsb", false);
-        if (!ownedTcp && !ownedUsb) return;
+        if (!ownedTcp && !ownedUsb) { keepaliveTeardownPending = false; return; }
         for (int i = 0; i < 20; i++) {
             synchronized (this) {
-                if (adbKeepalive()) return;
+                if (adbKeepalive()) { keepaliveTeardownPending = false; return; }
                 if (!busy) { busy = true; break; }
             }
             try { Thread.sleep(250); } catch (InterruptedException e) { return; }
-            if (i == 19) return;
+            if (i == 19) return; // keepaliveTeardownPending 仍为 true，当前占锁任务调 idle() 时会立即接力完成回退
         }
         try {
-            if (adbKeepalive()) return;
+            if (adbKeepalive()) { keepaliveTeardownPending = false; return; }
             if (ownedTcp) {
                 prefs().edit().remove("adbKeepaliveSetTcp").apply();
                 try {
@@ -703,6 +723,7 @@ final class ShizukuSetup {
                     log("关闭无线 ADB 保活恢复 USB 调试失败：" + e.getMessage());
                 }
             }
+            keepaliveTeardownPending = false;
         } finally {
             idle();
         }
@@ -713,7 +734,8 @@ final class ShizukuSetup {
         ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "shz-adb-keepalive"));
         keepaliveState = "waiting";
         keepaliveWorker = worker;
-        worker.scheduleWithFixedDelay(() -> keepaliveTick(worker), 0, 15, TimeUnit.SECONDS);
+        // 首轮延迟 15 秒，给紧随其后的 reactivateAsync(false) 留出激活窗口，避免 0ms 抢占 busy 把自动激活顶掉
+        worker.scheduleWithFixedDelay(() -> keepaliveTick(worker), 15, 15, TimeUnit.SECONDS);
     }
 
     synchronized void stopKeepaliveWatch() {
@@ -785,8 +807,8 @@ final class ShizukuSetup {
                         keepaliveState = "binder";
                         return;
                     }
-                    if (!keepaliveAllowed(worker) || Priv.running()) return;
-                    startServer(TCP_SERIAL, false);
+                    if (!keepaliveAllowed(worker) || keepaliveTeardownPending || Priv.running()) return;
+                    startServerFromKeepalive(worker);
                 }
                 if (keepaliveAllowed(worker)) {
                     boolean readyNow = Priv.verified();
@@ -808,6 +830,20 @@ final class ShizukuSetup {
         } finally {
             if (triedWireless) restoreWifi();
             idle();
+        }
+    }
+
+    /** 保活后台轻量拉起：只短等 10 秒观察凭据，绝不在后台持着 busy 跑 startServer 的 11 分钟循环 */
+    private void startServerFromKeepalive(ScheduledExecutorService worker) throws Exception {
+        String out = adb(25, "-s", TCP_SERIAL, "shell", starter());
+        try { adb(5, "disconnect", TCP_SERIAL); } catch (Exception ignored) {}
+        try { ctx.startService(new Intent(ctx, ShzNudge.class)); } catch (Throwable ignored) {}
+        for (int i = 0; i < 40 && !Priv.running(); i++) {
+            if (!keepaliveAllowed(worker) || keepaliveTeardownPending || activateQueued) return;
+            Thread.sleep(250);
+        }
+        if (!Priv.running() && out != null && !out.trim().isEmpty()) {
+            log("无线 ADB 保活已拉起服务，等待系统投递凭据：" + tail(out));
         }
     }
 

@@ -289,6 +289,10 @@ export function ensureLoaderBin(envLike = process.env, { extraDirs = [] } = {}) 
       try { ents = fs.readdirSync(d); } catch { continue; }
       for (const name of ents) {
         if (!name || name === "." || name === ".." || name.includes("/") || name.startsWith(".")) continue;
+        try {
+          const st = fs.statSync(path.join(d, name));
+          if (!st.isFile() || (st.mode & 0o111) === 0) continue;
+        } catch { continue; }
         want.add(name);
       }
     }
@@ -363,8 +367,12 @@ export function claudeEnv(o = {}) {
     // 自带的 ripgrep 按 /proc/self/exe 找，经加载器起的 claude 那是加载器本身：Grep / Glob 不报错、一律「没找到」（2.1.311 实测）。
     // 改用 PATH 里的 rg：工具包装了「命令行增强」用它的，没装落到 app/bin/rg（经加载器以 argv0=rg 调 claude 自带的那份）
     USE_BUILTIN_RIPGREP: "0",
-    CLAUDE_CODE_SHELL: ensureShell(),
-    SHELL: ensureShell(),
+    ...(() => {
+      const sh = ensureShell();
+      return loaderBin
+        ? { CLAUDE_CODE_SHELL: sh, CCAPP_SHELL: process.env.CCAPP_SHELL || sh, SHELL: path.join(loaderBin, "bash") }
+        : { CLAUDE_CODE_SHELL: sh, SHELL: sh };
+    })(),
     CI: "1",
     TERM: "dumb",
     NO_COLOR: "1",

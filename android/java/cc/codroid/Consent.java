@@ -88,7 +88,8 @@ final class Consent {
         SharedPreferences p = sp(c);
         String page = p.getString("page." + name, null);
         if (page != null && !page.equals(BAD_SIG.get(name))) {
-            String restored = PageConsent.restore(c, name, page);
+            boolean[] permanent = new boolean[1];
+            String restored = PageConsent.restore(c, name, page, permanent);
             if (restored != null) {
                 synchronized (LOCK) {
                     String current = MEM.get(name);
@@ -98,7 +99,7 @@ final class Consent {
                         return restored;
                     }
                 }
-            } else {
+            } else if (permanent[0]) {
                 synchronized (LOCK) {
                     if (page.equals(p.getString("page." + name, null))) BAD_SIG.put(name, page);
                 }
@@ -203,6 +204,7 @@ final class Consent {
         switch (name) {
             case NOASK: return Tr.t("特权命令不再逐条确认");
             case KEEPALIVE: return Tr.t("后台保活增强");
+            case SHZ_AUTO: return Tr.t("开机后自动激活 Shizuku");
             case SHZ_TCP: return Tr.t("无线 ADB 保活");
             case DEV_ON: return Tr.t("设备工具");
             case WEBDEBUG: return Tr.t("网页调试");

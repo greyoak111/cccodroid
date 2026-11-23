@@ -21,6 +21,8 @@ test("ensureLoaderBin：仅在 CCAPP_EXEC=loader 且 libccrun.so 存在时生成
   fs.writeFileSync(fakeRun2, "#!/bin/sh\n", { mode: 0o755 });
   fs.mkdirSync(extraBin, { recursive: true });
   fs.writeFileSync(path.join(extraBin, "gh"), "#!/bin/sh\n", { mode: 0o755 });
+  fs.writeFileSync(path.join(extraBin, "README.txt"), "not executable\n", { mode: 0o644 });
+  fs.mkdirSync(path.join(extraBin, "subdir"), { recursive: true });
 
   assert.equal(ensureLoaderBin({ CCAPP_EXEC: "direct", CCAPP_LOADER_RUN: fakeRun1, CCAPP_LOADER_BIN: loaderBin }), "");
   assert.ok(!fs.existsSync(loaderBin));
@@ -33,6 +35,8 @@ test("ensureLoaderBin：仅在 CCAPP_EXEC=loader 且 libccrun.so 存在时生成
   assert.equal(fs.readlinkSync(path.join(loaderBin, "bash")), fakeRun1);
   assert.equal(fs.readlinkSync(path.join(loaderBin, "xdg-open")), fakeRun1);
   assert.equal(fs.readlinkSync(path.join(loaderBin, "gh")), fakeRun1);
+  assert.equal(fs.existsSync(path.join(loaderBin, "README.txt")), false, "非可执行文件不应放进 loader-bin");
+  assert.equal(fs.existsSync(path.join(loaderBin, "subdir")), false, "子目录不应放进 loader-bin");
 
   const got2 = ensureLoaderBin(
     { CCAPP_EXEC: "loader", CCAPP_LOADER_RUN: fakeRun2, CCAPP_LOADER_BIN: loaderBin },
@@ -63,6 +67,7 @@ test("claudeEnv：loader 模式下把 loader-bin 挂到 PATH 首位，direct 模
     const loaderEnv = claudeEnv();
     assert.equal(loaderEnv.PATH.split(":")[0], loaderBin);
     assert.equal(loaderEnv.CCAPP_LOADER_BIN, loaderBin);
+    assert.equal(loaderEnv.SHELL, path.join(loaderBin, "bash"), "loader 模式下 SHELL 应指向 loader-bin/bash 供 Go 子程序直调");
   } finally {
     for (const [k, v] of Object.entries(prev)) {
       if (v === undefined) delete process.env[k];
@@ -161,13 +166,14 @@ int main(int argc, char **argv, char **envp) {
   };
   delete runEnv.LD_PRELOAD;
 
-  // 1) 模拟 Go 直发裸 SYS_execve 调用 loader-bin/bash（保留 PATH 首位的 loader-bin 供子孙 Go 程序续跳）
+  // 1) 模拟 Go 直发裸 SYS_execve 调用 loader-bin/bash（保留 PATH 首位的 loader-bin 与 SHELL 跳板供子孙 Go 程序续跳）
+  const expectShell = runEnv.CCAPP_EXEC === "loader" ? path.join(lbin, "bash") : realBash;
   const r1 = spawnSync(rawBin, [path.join(lbin, "bash"), "-c", 'printf "OK|%s|%s" "$SHELL" "$PATH"'], {
     env: runEnv,
     encoding: "utf8",
   });
   assert.equal(r1.status, 0, `裸 execve -> bash 失败: stderr=${r1.stderr}`);
-  assert.ok(r1.stdout.startsWith(`OK|${realBash}|${lbin}:`), `SHELL 还原或 PATH 保留跳板不符: ${r1.stdout}`);
+  assert.ok(r1.stdout.startsWith(`OK|${expectShell}|${lbin}:`), `SHELL 或 PATH 保留跳板不符: ${r1.stdout}`);
 
   // 2) 模拟 Go 直发裸 SYS_execve 调用带 CRLF shebang 的 #! 脚本
   const r2 = spawnSync(rawBin, [path.join(lbin, "demo-script"), "hello"], {
@@ -185,15 +191,16 @@ int main(int argc, char **argv, char **envp) {
   assert.equal(r3.status, 0, `libccrun.so 回落 bash 失败: stderr=${r3.stderr}`);
   assert.equal(r3.stdout.trim(), "FALLBACK_OK");
 
-  // 4) 二级链（模拟 claude -> bash -> gh -> git/script）：经跳板启动的 fake-gh 从继承的 PATH 首位再裸 execve 调子命令
+  // 4) 二级链（模拟 claude -> bash -> gh -> git/script 及直读 $SHELL）：经跳板启动的 fake-gh 从继承的 PATH / $SHELL 再裸 execve 调子命令
   const r4 = spawnSync(rawBin, [
     path.join(lbin, "bash"),
     "-c",
-    'FGH="$(command -v fake-gh)" && SUB="$(command -v demo-script)" && "$FGH" "$SUB" second-hop',
+    'FGH="$(command -v fake-gh)" && SUB="$(command -v demo-script)" && "$FGH" "$SUB" second-hop && "$FGH" "$SHELL" -c "echo SUBSHELL_OK"',
   ], {
     env: runEnv,
     encoding: "utf8",
   });
   assert.equal(r4.status, 0, `二级 Go 裸 execve 链失败: stderr=${r4.stderr}`);
   assert.ok(r4.stdout.startsWith(`SCRIPT:second-hop:${path.join(realBin, "demo-script")}:`), `二级链输出不符: ${r4.stdout}`);
+  assert.ok(r4.stdout.includes("SUBSHELL_OK"), `二级 Go 直读 $SHELL 执行失败: ${r4.stdout}`);
 });

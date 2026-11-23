@@ -585,7 +585,9 @@ export async function startRun(item) {
       const m = /^(\d+)\n/.exec(got);
       if (m && !run.claudePid) {
         run.claudePid = child.claudePid = +m[1];
-        checkSpawnedSeal(run.claudePid);
+        const strict = !!run.needStrictSeal;
+        run.needStrictSeal = false;
+        checkSpawnedSeal(run.claudePid, strict ? { strictMaps: true } : undefined);
       }
     });
     child.stdio[3].on("error", () => {});
@@ -593,7 +595,7 @@ export async function startRun(item) {
   // 留下的进程冒充这一轮时比启动先后（见 leftover.mjs）。claude 不可转储时 /proc 里看不见它：拿一个刚起的进程的启动时刻代替（不会更晚于 claude）
   run.childStart = procStart(child.pid) ?? nowTicks();
   // 核过之后、真正执行之前程序被换掉了（含双跳 TOCTOU）：这一轮停掉（DeepSeek 复核建议 2）
-  checkSpawnedSeal(run.claudePid || child.pid);
+  checkSpawnedSeal(wrapped ? run.claudePid : child.pid);
   if (item.timeoutMs > 0) run.limitTimer = setTimeout(() => { run.timedOut = true; log(`${runTag(run)} ⏱ 超过时长上限 ${Math.round(item.timeoutMs / 60000)} 分钟，停止`); abortRun(run); }, item.timeoutMs);
   child.stdin.on("error", () => {});
   const writeUser = (content) => child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n");
@@ -856,7 +858,12 @@ export async function startRun(item) {
     emit({ type: "session_created", sessionId: run.sessionId, runId: run.id, cwd: run.cwd });
   };
   const onInit = (init) => {
-    checkSpawnedSeal(run.claudePid || child.pid, { strictMaps: true });
+    if (wrapped && !run.claudePid) {
+      run.needStrictSeal = true;
+      checkSpawnedSeal(0);
+    } else {
+      checkSpawnedSeal(wrapped ? run.claudePid : child.pid, { strictMaps: true });
+    }
     if (run.aborted || run.ended) return;
     if (!run.tInit) { run.tInit = Date.now(); emit({ type: "phase", phase: "connect", from: "init" }); }
     setLastInit(init);

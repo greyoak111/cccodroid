@@ -40,8 +40,26 @@ export function localRunAttach(run) {
   if (!llRunsHooked) { llRunsHooked = true; END_HOOKS.push((r) => LL_RUNS.delete(r)); }
 }
 function liveRuns() {
-  for (const r of LL_RUNS) if (r.ended) LL_RUNS.delete(r);
+  for (const r of LL_RUNS) if (r.ended || r.aborted) LL_RUNS.delete(r);
   return [...LL_RUNS];
+}
+function awaitWithRunAbort(promise, run) {
+  if (!run) return promise;
+  if (run.aborted) { LL_RUNS.delete(run); return Promise.reject(new Error("aborted")); }
+  return new Promise((resolve, reject) => {
+    const iv = setInterval(() => {
+      if (run.aborted || run.ended) {
+        clearInterval(iv);
+        LL_RUNS.delete(run);
+        reject(new Error("aborted"));
+      }
+    }, 200);
+    iv.unref?.();
+    promise.then(
+      (v) => { clearInterval(iv); if (run.aborted || run.ended) { LL_RUNS.delete(run); reject(new Error("aborted")); } else resolve(v); },
+      (e) => { clearInterval(iv); LL_RUNS.delete(run); reject(e); }
+    );
+  });
 }
 /** 把一条端侧提示发给所有还在用它的轮次；emit 可换实现（测试用） */
 export function localRunNote(key, text, emit = runEmit) {
@@ -166,7 +184,7 @@ export async function ensureLlama(want, note, run = null) {
   // 同模型/参数已在加载中：共享这次加载，并把等待方计入占位，避免加载刚结束就被别的会话抢换
   if (llStarting && llStartingSig === sig) {
     llWaiters++;
-    try { await llStarting; } finally { llWaiters--; }
+    try { await awaitWithRunAbort(llStarting, run); } finally { llWaiters--; }
     llLeaseSig = sig;
     llLeaseUntil = Date.now() + LLAMA_HANDOFF_LEASE_MS;
     if (run) localRunAttach(run);
@@ -194,7 +212,7 @@ export async function ensureLlama(want, note, run = null) {
     llStartingSig = "";
     llStartingId = "";
   });
-  await llStarting;
+  await awaitWithRunAbort(llStarting, run);
   return m;
 }
 // /sdcard 上的模型别的应用也能改写：加载前按目录里记的 sha256 核一遍（没有哈希的至少核 GGUF 头），

@@ -1094,14 +1094,15 @@ final class Updater {
         app.set("installing", "");
         // 上次静默安装已经失败过：这次用户点「安装」就走系统确认，别再回到同一条失败路
         boolean forceSystem = app.silentFail;
-        // 有 Shizuku 就静默装（进程会被系统替换掉，服务由 MY_PACKAGE_REPLACED 拉起）；否则走系统安装确认
-        if (!forceSystem && Priv.granted() && !gatewayBusy()) {
-            // 装的时候先停网关：旧网关和它的运行期文件核对不跟安装、新版重铺 files/app 搅在一起（更新链复盘 U-08）。
-            // 装上了本进程就没了，服务由 MY_PACKAGE_REPLACED 拉起；没装上马上放开
-            GatewayService.pause(true);
+        // 有 Shizuku（实测可跑命令）就静默装；否则走系统安装确认
+        if (!forceSystem && Priv.verified() && !gatewayBusy()) {
+            // 后台自动安装时先停网关（防旧网关与后台替换冲突，U-08）；界面在前台时绝不能提前杀网关，
+            // 否则 pm install 扫描校验的 5–15 秒窗口内用户看到的整个 WebView 会连环报 HTTP 502（包替换提交时系统会原子强杀整组进程）
+            boolean fg = MainActivity.appForeground();
+            if (!fg) GatewayService.pause(true);
             String out;
-            try { out = Priv.pipeInstall(app.file, MainActivity.appForeground(), app.latest); }
-            finally { GatewayService.pause(false); }
+            try { out = Priv.pipeInstall(app.file, fg, app.latest); }
+            finally { if (!fg) GatewayService.pause(false); }
             Log.i(TAG, "pm install → " + out);     // 走到这里多半说明没装上（装上的话本进程已经没了）
             if (sdkTooOld(out) && "28".equals(wantFlavor())) { markOnly36(out.trim()); return; }
             if (!out.contains("Success")) { app.silentFail = true; prefs().edit().putBoolean("appSilentFail", true).apply(); app.set("ready", Tr.f("静默安装失败（{0}），点安装走系统确认", out)); }
@@ -1117,7 +1118,7 @@ final class Updater {
     private void maybeSilentInstallApp() {
         if (!loopOn) return;
         if (deferApp(false)) return;
-        if (Priv.granted() && !gatewayBusy() && !MainActivity.appForeground()) installApp();
+        if (Priv.verified() && !gatewayBusy() && !MainActivity.appForeground()) installApp();
         else notifyReady(app);
     }
 

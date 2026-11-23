@@ -46,6 +46,7 @@
     } catch (e) {
       if (!ok()) return;
       $("provider-info").textContent = t("读取接口清单失败：{msg}", { msg: e.message });
+      if (typeof provCatRetry === "function" && /HTTP 50[234]|Failed to fetch|NetworkError|Load failed/i.test((e && e.message) || "")) provCatRetry();
     }
   }
 
