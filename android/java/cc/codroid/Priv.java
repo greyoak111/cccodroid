@@ -1,5 +1,6 @@
 package cc.codroid;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -190,9 +191,18 @@ final class Priv {
         o.put("state", !ins ? "not_installed" : !run ? "not_running" : !ok ? "no_permission" : "ok");
         o.put("installed", ins);
         o.put("sui", sui);
-        long naUntil = noAskUntil();
-        o.put("noask", naUntil > 0);
-        if (naUntil > 0) o.put("noaskUntil", naUntil);
+        String noAskValue = activeNoAskValue();
+        o.put("noask", noAskValue != null);
+        if (noAskValue != null) {
+            o.put("noaskUntil", NoAskDuration.until(noAskValue));
+            int minutes = NoAskDuration.minutes(noAskValue);
+            if (minutes > 0) o.put("noaskMinutes", minutes);
+        }
+        JSONArray durations = new JSONArray();
+        for (int minutes : NoAskDuration.options()) {
+            durations.put(new JSONObject().put("minutes", minutes).put("label", noAskDurationLabel(minutes)));
+        }
+        o.put("noaskDurations", durations);
         o.put("running", run);
         o.put("granted", ok);
         if (run) {
@@ -420,10 +430,11 @@ final class Priv {
                     // 特权命令免确认（总开关）：打开要过原生对话框里的免责说明，脚本发请求没用；关掉随时可以
                     boolean on = req.optBoolean("enable", false);
                     // 时长可选，最长一周（11-08 用户定）；只认固定几档，别的一律按 24 小时。选的时长写进原生说明里，由用户在这里确认
-                    long ttl = noAskTtl(req.optInt("hours", 24));
-                    long hrs = ttl / 3600000L;
-                    String pageVisit = on ? PageConsent.consume(ctx, req.optString("pageTicket"), "noask", String.valueOf(hrs)) : null;
-                    String until = hrs % 24 == 0 ? Tr.f("{0} 天后自动关闭，恢复逐条确认。", hrs / 24) : Tr.f("{0} 小时后自动关闭，恢复逐条确认。", hrs);
+                    int hours = req.optInt("hours", 24);
+                    int minutes = req.optInt("minutes", hours >= 1 && hours <= 168 ? hours * 60 : NoAskDuration.DEFAULT);
+                    final int selected = NoAskDuration.supports(minutes) ? minutes : NoAskDuration.DEFAULT;
+                    String pageVisit = on ? PageConsent.consume(ctx, req.optString("pageTicket"), "noask", String.valueOf(selected)) : null;
+                    String until = Tr.f("{0} 后自动关闭，恢复逐条确认。", noAskDurationLabel(selected));
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                     if (on && !noAsk() && !confirm(Tr.t("特权命令不再逐条确认（风险自负）") + "\n\n"
                             + Tr.t("打开后，Claude、终端和本机其他程序发来的特权命令都不再弹框问你，直接以 Shizuku（shell）身份执行，cccodroid 在后台时也一样。这类命令能装卸应用、改权限和系统设置。") + "\n\n"
@@ -433,7 +444,13 @@ final class Priv {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("没有确认，仍然逐条询问"));
                         break;
                     }
-                    if (on) { if (!noAsk()) Consent.grant(ctx, Consent.NOASK, String.valueOf(System.currentTimeMillis() + ttl), pageVisit); } else Consent.revoke(ctx, Consent.NOASK);
+                    synchronized (NOASK_GATE) {
+                        if (!on || !noAsk()) {
+                            clearRenewal();
+                            if (on) Consent.grant(ctx, Consent.NOASK, NoAskDuration.value(selected, System.currentTimeMillis()), pageVisit);
+                            else Consent.revoke(ctx, Consent.NOASK);
+                        }
+                    }
                     Log.w(TAG, "特权命令免确认 " + (on ? "打开" : "关闭"));
                     resp = new JSONObject().put("ok", true).put("noask", on);
                     break;
@@ -458,6 +475,7 @@ final class Priv {
                     }
                     ShizukuSetup.get(ctx).activate(); resp = status(); break;
                 }
+                case "shz_split_settings": resp = MainActivity.requestSplitPairing(); break;
                 case "shz_pair": ShizukuSetup.get(ctx).onCode(req.optString("code")); resp = status(); break;
                 case "shz_repair": ShizukuSetup.get(ctx).repair(); resp = status(); break;
                 case "shz_autostart": {
@@ -731,20 +749,42 @@ final class Priv {
     }
     /** 存在 Consent 里（锁屏签名），不再是谁都能改的 prefs（11-03 审查 H-2） */
     /** 免确认是限时的：同意时存的是到期时刻（和同意一起签名，改不了），到点自动关。旧版存的 "1" 当作已到期 */
+    private static final Object NOASK_GATE = new Object();
     static final long NOASK_MAX = 7L * 24 * 3600 * 1000;
-    static final int[] NOASK_HOURS = { 1, 4, 24, 72, 168 };
-    static long noAskTtl(int hours) {
-        for (int h : NOASK_HOURS) if (h == hours) return h * 3600L * 1000;
-        return 24L * 3600 * 1000;
+    private static volatile long renewalGeneration;
+    private static final String RENEWAL_HINT = "expiredNoAskMinutes";
+    static String noAskDurationLabel(int minutes) {
+        if (minutes % 1440 == 0) return Tr.f("{0} 天", minutes / 1440);
+        return Tr.f("{0} 小时", minutes / 60);
     }
-    static boolean noAsk() { return noAskUntil() > 0; }
-    static long noAskUntil() {
-        String v = Consent.get(ctx, Consent.NOASK);
-        if (v == null) return 0;
-        long t, now = System.currentTimeMillis();
-        try { t = Long.parseLong(v); } catch (NumberFormatException e) { t = 0; }
-        if (t <= now || t > now + NOASK_MAX + 60000) { Consent.revoke(ctx, Consent.NOASK); Log.w(TAG, "特权命令免确认到期，已关闭"); return 0; }
-        return t;
+    private static SharedPreferences renewalHints() { return ctx.getSharedPreferences("priv", Context.MODE_PRIVATE); }
+    private static void clearRenewal() {
+        renewalGeneration++;
+        renewalHints().edit().remove(RENEWAL_HINT).apply();
+    }
+    private static int expiredDuration() {
+        try {
+            int minutes = renewalHints().getInt(RENEWAL_HINT, 0);
+            return NoAskDuration.supports(minutes) ? minutes : 0;
+        } catch (ClassCastException e) { return 0; }
+    }
+    static boolean noAsk() { return activeNoAskValue() != null; }
+    private static String activeNoAskValue() {
+        synchronized (NOASK_GATE) {
+            String value = Consent.get(ctx, Consent.NOASK);
+            if (value == null) return null;
+            long until = NoAskDuration.until(value), now = System.currentTimeMillis();
+            int minutes = NoAskDuration.minutes(value);
+            if (until <= now || until > now + NOASK_MAX + 60000) {
+                boolean expired = until > 0 && until <= now && minutes > 0;
+                clearRenewal();
+                Consent.revoke(ctx, Consent.NOASK);
+                if (expired) renewalHints().edit().putInt(RENEWAL_HINT, minutes).apply();
+                Log.w(TAG, "特权命令免确认到期，已关闭");
+                return null;
+            }
+            return value;
+        }
     }
     /** 动到本应用、Shizuku / Sui 自己的命令：开了免确认也照样问。规则见 PrivRules.touchesSelf */
     static boolean touchesSelf(String text) { return PrivRules.touchesSelf(text, ctx.getPackageName()); }
@@ -837,6 +877,10 @@ final class Priv {
     private static boolean ask(String cmd, String who, String key, boolean trustable) { return ask(cmd, who, key, trustable, null); }
     /** sess：发起方带着的会话口令（见 run.mjs privToken）。给了就在确认框里多一个「本会话都允许」 */
     private static boolean ask(String cmd, String who, String key, boolean trustable, String sess) {
+        return ask(cmd, who, key, trustable, sess, false);
+    }
+
+    private static boolean ask(String cmd, String who, String key, boolean trustable, String sess, boolean canRenew) {
         Long t = trustable ? TRUST.get(key) : null;
         if (t != null && System.currentTimeMillis() < t) return true;
         // 命令整条摆出来（对话框正文能滚动）：截头截尾的话，危险的那段正好藏在省略的中间。太长的不问，直接拒
@@ -844,7 +888,13 @@ final class Priv {
         String show = cmd;
         String id = Long.toHexString(System.nanoTime()) + Integer.toHexString((int) (Math.random() * 0x7fffffff));
         java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
-        Object[] slot = { done, Boolean.FALSE, Boolean.FALSE, Boolean.FALSE };
+        int expired;
+        long generation;
+        synchronized (NOASK_GATE) {
+            expired = canRenew && !noAsk() ? expiredDuration() : 0;
+            generation = renewalGeneration;
+        }
+        Object[] slot = { done, Boolean.FALSE, Boolean.FALSE, Boolean.FALSE, expired, generation };
         synchronized (ASKS) {     // 「同一时间只问一条」：查和登记要一起做，不然同时来的两条都会弹
             if (!ASKS.isEmpty() || !foreground()) return false;
             ASKS.put(id, slot);
@@ -877,6 +927,32 @@ final class Priv {
     }
 
     /** 对话框的回答：how 0=拒绝 1=允许这一次 2=允许，这条命令 10 分钟内不再问 3=允许，这个会话后面的都不再问 */
+    static int renewalDuration(String id) {
+        Object[] slot = ASKS.get(id);
+        return slot != null && (long) slot[5] == renewalGeneration ? (int) slot[4] : 0;
+    }
+
+    static void renewAndAllow(Activity activity, String id, int minutes, java.util.function.Consumer<Boolean> complete) {
+        Object[] slot = ASKS.get(id);
+        if (slot == null || renewalDuration(id) == 0 || !NoAskDuration.supports(minutes)) {
+            complete.accept(false);
+            return;
+        }
+        long generation = (long) slot[5];
+        Consent.grantAfterVerification(activity, Consent.NOASK, NoAskDuration.value(minutes, System.currentTimeMillis()),
+            () -> ASKS.get(id) == slot && renewalGeneration == generation
+                && ((java.util.concurrent.CountDownLatch) slot[0]).getCount() > 0,
+            saved -> {
+                if (saved) {
+                    synchronized (NOASK_GATE) {
+                        if (renewalGeneration == generation) clearRenewal();
+                    }
+                    answer(id, 1);
+                }
+                complete.accept(saved);
+            });
+    }
+
     static void answer(String id, int how) {
         Object[] slot = id == null ? null : ASKS.get(id);
         if (slot == null) return;
@@ -916,7 +992,7 @@ final class Priv {
         boolean self = risky && touchesSelf(text);
         String pass = !risky || self ? null : noAsk() ? "免确认" : sess != null && SESS_OK.contains(sess) ? "本会话已允许" : null;
         if (pass != null) who = who + "·" + pass;
-        else if (risky && !ask(text, who, a + "\0" + req.optString("cwd", "/") + "\0" + e, trustable(argv, req.optString("cwd", "/"), e), self ? null : sess)) {
+        else if (risky && !ask(text, who, a + "\0" + req.optString("cwd", "/") + "\0" + e, trustable(argv, req.optString("cwd", "/"), e), self ? null : sess, !self)) {
             audit(t0, who, req, 126, 0);
             frame(out, 4, Tr.t("这条特权命令要你在 cccodroid 里点「允许」才会执行（只有带服务名的 dumpsys、pm list、settings get 这类查看命令不用问）。这次没有允许，没有执行。cccodroid 不在前台、或者已经有一条在等确认时，会直接拒绝。想让任务在后台也能跑：下次确认时勾上「这个会话后面的特权命令都允许」，或者在设置 → 设备与权限里打开「特权命令不再逐条确认」。").getBytes(StandardCharsets.UTF_8));
             frameExit(out, 126);

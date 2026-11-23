@@ -292,9 +292,10 @@ export async function routeDevside(req, res, u, p) {
   }
   if (req.method === "POST" && p === "/api/priv/noask") {
     let b; try { b = JSON.parse((await readBody(req)) || "{}"); } catch { return sendJson(res, 400, { error: "bad json" }); }
-    // 时长只认固定几档（应用侧同样只认这几档，别的按 24 小时），最长一周（11-08 用户定）
-    const hours = [1, 4, 24, 72, 168].includes(+b.hours) ? +b.hours : 24;
-    return sendJson(res, 200, await privCall({ op: "noask", enable: b.enable === true, hours, pageTicket: consentTicket(b.pageTicket) }, 90000));
+    // 固定档位由 Android 宿主返回并校验。hours 保留给仍在使用旧界面的客户端。
+    const minutes = Number.isSafeInteger(b.minutes) ? b.minutes : undefined;
+    const hours = Number.isSafeInteger(b.hours) ? b.hours : undefined;
+    return sendJson(res, 200, await privCall({ op: "noask", enable: b.enable === true, minutes, hours, pageTicket: consentTicket(b.pageTicket) }, 90000));
   }
   if (req.method === "POST" && p === "/api/priv/keepalive") {
     const b = JSON.parse((await readBody(req)) || "{}");
@@ -303,7 +304,8 @@ export async function routeDevside(req, res, u, p) {
   // 更新（APK / 工具包 / Claude Code）与 Shizuku 一键安装激活：都在应用进程里做，这里只转话
   if (p.startsWith("/api/app/")) {
     const op = p.slice(9);
-    const OPS = ["upd_status", "upd_check", "upd_apply", "upd_set", "upd_verify", "upd_repair", "share_logs", "factory_reset", "share_file", "apk_install", "shz_install", "shz_activate", "shz_pair", "shz_autostart", "shz_repair", "open_app_settings", "freeze_ack", "notify_status", "notify_set", "notify_settings", "island_status", "island_set", "island_preview", "island_promo_settings", "island_overlay_settings", "dev_status", "dev_set", "a11y_settings"];
+    const OPS = ["upd_status", "upd_check", "upd_apply", "upd_set", "upd_verify", "upd_repair", "share_logs", "factory_reset", "share_file", "apk_install", "shz_install", "shz_activate", "shz_pair", "shz_autostart", "shz_repair", "shz_split_settings", "open_app_settings", "freeze_ack", "notify_status", "notify_set", "notify_settings", "island_status", "island_set", "island_preview", "island_promo_settings", "island_overlay_settings", "dev_status", "dev_set", "a11y_settings"];
+    if (op === "shz_split_settings" && req.method !== "POST") return sendJson(res, 405, { ok: false });
     if (!OPS.includes(op)) return sendJson(res, 404, { ok: false, message: tz("未知操作") });
     const raw = req.method === "POST" ? JSON.parse((await readBody(req)) || "{}") : {};
     // 只转各操作认的字段、认的类型：应用那头也逐项校验，这里再挡一道（11-01 独立审查低-3）

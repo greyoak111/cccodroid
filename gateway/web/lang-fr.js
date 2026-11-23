@@ -3272,4 +3272,8 @@ window.I18N_DICT["fr"] = {
   "只允许查看普通记忆文件": "Seuls les fichiers mémoire ordinaires peuvent être consultés",
   "记忆文件太大了（超过 1 MB）": "Le fichier mémoire est trop volumineux (plus de 1 Mo)",
   "记忆只读，不能在这里修改": "Les mémoires sont en lecture seule ici",
+  "分屏打开设置": "Ouvrir les réglages en écran partagé",
+  "通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。": "Si la saisie dans la notification ne fonctionne pas, ouvrez les réglages à côté de cette page avant d’afficher le code. Gardez les deux fenêtres ouvertes.",
+  "正在尝试分屏打开设置…": "Tentative d’ouverture des réglages en écran partagé…",
+  "未知": "Inconnu",
 };

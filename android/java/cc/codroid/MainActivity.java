@@ -106,6 +106,61 @@ public class MainActivity extends Activity {
     static final String ACTION_SHIZUKU_NOOP = "cc.codroid.SHIZUKU_NOOP";
     /** 主界面（聊天）在前台吗：通知只在用户没盯着聊天时发 */
     static volatile boolean visible;
+    private static volatile java.lang.ref.WeakReference<MainActivity> foregroundOwner;
+
+    private static final SplitPairing splitPairing = new SplitPairing();
+
+    static void clearSplitPairing(Context context) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            splitPairing.reset();
+            SplitPairingNotice.dismiss(context);
+        });
+    }
+
+    static org.json.JSONObject splitPairingStatus() throws org.json.JSONException {
+        SplitPairing.Result r=splitPairing.snapshot();
+        return new org.json.JSONObject().put("supported",SplitPairing.supported(Build.VERSION.SDK_INT))
+            .put("sdk",Build.VERSION.SDK_INT).put("phase",r.phase).put("path",r.path).put("message",Tr.t(r.message()));
+    }
+
+    /** Socket worker delegates to the actual foreground Activity; no background task launch. */
+    static org.json.JSONObject requestSplitPairing() throws Exception {
+        if(!SplitPairing.supported(Build.VERSION.SDK_INT))
+            return splitPairingStatus().put("ok",false).put("message",Tr.t("此 Android 版本不支持分屏。"));
+        MainActivity a=foregroundOwner==null?null:foregroundOwner.get();
+        if(a==null||!visible||a.isFinishing()||a.isDestroyed())
+            return splitPairingStatus().put("ok",false).put("message",Tr.t("请先回到 cccodroid 前台，再尝试分屏打开设置。"));
+        java.util.concurrent.FutureTask<SplitPairing.Result> work=new java.util.concurrent.FutureTask<>(()->splitPairing.start(new SplitPairing.Host(){
+            public int sdk(){return Build.VERSION.SDK_INT;}
+            public boolean foreground(){return visible&&!a.isFinishing()&&!a.isDestroyed()&&a.hasWindowFocus()&&!guarding()&&"pairing".equals(ShizukuSetup.get(a).phase);}
+            public boolean visibleInMultiWindow(){return !a.isFinishing()&&!a.isDestroyed()&&visible&&a.isInMultiWindowMode();}
+            public void openAdjacent(){
+                SplitPairingNotice.dismiss(a);
+                Intent target=new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS);
+                Bundle args=new Bundle();args.putString(":settings:fragment_args_key","toggle_adb_wireless");
+                target.putExtra(":settings:fragment_args_key","toggle_adb_wireless");
+                target.putExtra(":settings:show_fragment_args",args);
+                target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
+                a.startActivity(target);
+            }
+            public void later(Runnable task,int delay){new Handler(Looper.getMainLooper()).postDelayed(task,delay);}
+            public void showManualHint(){
+                SplitPairing.Result result=splitPairing.snapshot();
+                String message=Tr.t(result.message());
+                android.widget.Toast.makeText(a.getApplicationContext(),message,android.widget.Toast.LENGTH_LONG).show();
+                SplitPairingNotice.show(a,message,()->splitPairing.snapshot()==result);
+            }
+        }));
+        a.ui.post(work);
+        try {
+            SplitPairing.Result r=work.get(3,java.util.concurrent.TimeUnit.SECONDS);
+            return splitPairingStatus().put("ok",r.ok()).put("message",Tr.t(r.message()));
+        }catch(Exception e){
+            work.cancel(false);
+            return splitPairingStatus().put("ok",false).put("message",Tr.t("分屏请求未完成，请回到应用后重试。"));
+        }
+    }
+
     /** 本应用有界面在前台吗（主界面或独立浏览器）：静默更新、读剪贴板这类按「用户在不在用本应用」判断（11-04 报告 A4） */
     static boolean appForeground() { return visible || BrowserActivity.visible; }
 
@@ -347,7 +402,7 @@ public class MainActivity extends Activity {
         @Override public void run() { FrameRate.apply(MainActivity.this); ui.postDelayed(this, 30000); }
     };
 
-    @Override protected void onResume() { super.onResume(); visible = true; PageConsent.onActivityResume(this); applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
+    @Override protected void onResume() { super.onResume(); foregroundOwner = new java.lang.ref.WeakReference<>(this); visible = true; PageConsent.onActivityResume(this); applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
         // 在后台从常驻通知点了「停止」、界面还活着：回来时把网关服务拉起来（审查 #105 06-007）。以前只有 boot 起服务，回来只能对着连不上的页面
         if (booted && !GatewayService.serviceUp()) GatewayService.start(this);
         Consent.runNext(this);   // 上次排着的锁屏签名（界面当时正在关、没问成）
@@ -364,6 +419,7 @@ public class MainActivity extends Activity {
     @Override protected void onStop() {
         PageConsent.onLeaveOrStop(this);
         super.onStop();
+        if (foregroundOwner != null && foregroundOwner.get() == this) foregroundOwner = null;
         // 分屏里被整个切走 / 熄屏时 onPause 没记过账，这里补上；转屏重建不算到后台
         boolean was = visible;
         visible = false;
@@ -416,6 +472,7 @@ public class MainActivity extends Activity {
     }
     @Override public void onMultiWindowModeChanged(boolean on, android.content.res.Configuration cfg) {
         super.onMultiWindowModeChanged(on, cfg);
+        if (on && splitPairing.multiWindowDetected()) SplitPairingNotice.dismiss(this);
         applyLandBars();
     }
     /** 壁纸主色（安卓 12+ 的动态取色，系统 system_accent1_500）；更早的系统没有，返回空串。
@@ -560,21 +617,87 @@ public class MainActivity extends Activity {
             .setNegativeButton(Tr.t("拒绝"), (x, w) -> { said[0] = true; Priv.answer(id, 0); });
         // 这个会话后面的都允许（Claude 发来的才有）：勾上再点「允许」。只在内存里，应用重启就失效
         final android.widget.CheckBox all = sess && !clipGet && !clipSet && !openUrl ? new android.widget.CheckBox(this) : null;
-        if (all != null) {
-            all.setText(Tr.t("这个会话后面的特权命令都允许，不再逐条问（应用重启后失效）"));
-            int pad = (int) (20 * getResources().getDisplayMetrics().density);
-            android.widget.FrameLayout box = new android.widget.FrameLayout(this);
-            box.setPadding(pad, pad / 2, pad, 0);
-            box.addView(all);
+        boolean canRenew = Priv.renewalDuration(id) > 0;
+        int[] durations = canRenew ? NoAskDuration.options() : new int[0];
+        android.widget.Spinner duration = canRenew ? new android.widget.Spinner(this) : null;
+        if (all != null || canRenew) {
+            android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+            box.setOrientation(android.widget.LinearLayout.VERTICAL);
+            box.setPadding(dp(24), dp(12), dp(24), canRenew ? dp(16) : 0);
+            if (all != null) {
+                all.setText(Tr.t("这个会话后面的特权命令都允许，不再逐条问（应用重启后失效）"));
+                box.addView(all);
+            }
+            if (canRenew) {
+                String label = Tr.t("放行所有特权指令（指定期限）");
+                android.widget.TextView heading = new android.widget.TextView(this);
+                heading.setText(label);
+                android.widget.LinearLayout.LayoutParams headingLayout = new android.widget.LinearLayout.LayoutParams(-1, -2);
+                if (all != null) headingLayout.topMargin = dp(12);
+                box.addView(heading, headingLayout);
+                String[] labels = new String[durations.length + 1];
+                labels[0] = Tr.t("关闭");
+                for (int i = 0; i < durations.length; i++) labels[i + 1] = Priv.noAskDurationLabel(durations[i]);
+                duration.setContentDescription(label);
+                duration.setMinimumHeight(dp(48));
+                android.widget.ArrayAdapter<String> options = new android.widget.ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
+                options.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                duration.setAdapter(options);
+                duration.setSelection(0);
+                android.widget.LinearLayout.LayoutParams pickerLayout = new android.widget.LinearLayout.LayoutParams(-1, -2);
+                pickerLayout.topMargin = dp(6);
+                box.addView(duration, pickerLayout);
+                android.widget.TextView note = new android.widget.TextView(this);
+                note.setText(Tr.t("选定时长后，点「允许」并验证。授权对所有会话和终端生效，后台也一样。涉及应用自身、Shizuku / Sui 的命令仍需确认。"));
+                android.widget.LinearLayout.LayoutParams noteLayout = new android.widget.LinearLayout.LayoutParams(-1, -2);
+                noteLayout.topMargin = dp(8);
+                box.addView(note, noteLayout);
+            }
             b.setView(box);
         }
-        b.setPositiveButton(openUrl ? Tr.t("打开") : Tr.t("允许"), (x, w) -> { said[0] = true; Priv.answer(id, all != null && all.isChecked() ? 3 : 1); });
+        Runnable allow = () -> { said[0] = true; Priv.answer(id, all != null && all.isChecked() ? 3 : 1); };
+        b.setPositiveButton(openUrl ? Tr.t("打开") : Tr.t("允许"), (x, w) -> allow.run());
+        if (canRenew) b.setNegativeButton(Tr.t("取消"), (x, w) -> { said[0] = true; Priv.answer(id, 0); });
         // 命令里引用了文件的，不给「不再问」：信任的是文字，文件内容随时能换（见 Priv.trustable）
         if (trustable) b.setNeutralButton(Tr.t("允许，这条命令 10 分钟内不再问"), (x, w) -> { said[0] = true; Priv.answer(id, 2); });
         android.app.AlertDialog d = b.create();
         d.setOnDismissListener((x) -> { PRIV_DLG.remove(id); if (!said[0]) Priv.answer(id, 0); });
         PRIV_DLG.put(id, d);
         if (!guard(d, android.content.DialogInterface.BUTTON_POSITIVE, android.content.DialogInterface.BUTTON_NEUTRAL)) { PRIV_DLG.remove(id); Priv.answer(id, 0); }
+        else if (canRenew) {
+            android.widget.Button action = d.getButton(android.content.DialogInterface.BUTTON_POSITIVE);
+            android.widget.Button limited = d.getButton(android.content.DialogInterface.BUTTON_NEUTRAL);
+            duration.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long rowId) {
+                    if (all != null) all.setEnabled(position == 0);
+                    if (limited != null) limited.setVisibility(position == 0 ? View.VISIBLE : View.GONE);
+                }
+                @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+            });
+            action.setOnClickListener(v -> {
+                int position = duration.getSelectedItemPosition();
+                if (position <= 0) {
+                    allow.run();
+                    d.dismiss();
+                    return;
+                }
+                if (position > durations.length) return;
+                action.setEnabled(false);
+                duration.setEnabled(false);
+                Priv.renewAndAllow(this, id, durations[position - 1], saved -> {
+                    if (PRIV_DLG.get(id) != d || !d.isShowing()) return;
+                    if (saved) {
+                        said[0] = true;
+                        d.dismiss();
+                    } else {
+                        duration.setSelection(0);
+                        duration.setEnabled(true);
+                        action.setEnabled(true);
+                        android.widget.Toast.makeText(this, Tr.t("没有续期，仍可单独确认这条命令"), android.widget.Toast.LENGTH_SHORT).show();
+                    }
+                });
+            });
+        }
     }
     private static final java.util.Map<String, android.app.Dialog> PRIV_DLG = new java.util.concurrent.ConcurrentHashMap<>();
     /** Priv.ask 等不到回答（超时）时收起对话框：别留一个点了也没用的「允许」在屏幕上 */
@@ -596,6 +719,7 @@ public class MainActivity extends Activity {
             if (r != null && !r.optBoolean("ok", true) && !msg.isEmpty())
                 android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show();
         }
+        else if (SplitPairingNotice.ACTION_ACK.equals(a)) SplitPairingNotice.dismiss(this);
         else if (ACTION_SHIZUKU.equals(a)) ShizukuSetup.get(this).activate();
         else if (ACTION_FACTORY_RESET.equals(a)) askFactoryReset();
         else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false), i.getStringExtra("pageVisit"));
