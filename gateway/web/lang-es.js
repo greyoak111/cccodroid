@@ -3275,4 +3275,5 @@ window.I18N_DICT["es"] = {
   "分屏打开设置": "Abrir Ajustes en pantalla dividida",
   "通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。": "Si no puedes escribir en la notificación, abre Ajustes junto a esta página antes de mostrar el código. Mantén abiertas las dos ventanas.",
   "正在尝试分屏打开设置…": "Intentando abrir Ajustes en pantalla dividida…",
+  "未知": "Desconocido",
 };

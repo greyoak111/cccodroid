@@ -139,7 +139,21 @@
     $("priv-na").disabled = st.state !== "ok";
     $("priv-na").checked = !!st.noask;
     // 时长只在关着时能选：开着时改它没意义（要关了再开才按新时长算）
-    $("priv-na-hours").disabled = st.state !== "ok" || !!st.noask;
+    const duration = $("priv-na-hours");
+    if (Array.isArray(st.noaskDurations) && st.noaskDurations.length) {
+      const current = duration.value;
+      duration.replaceChildren(...st.noaskDurations.map(({ minutes, label }) => new Option(label, String(minutes))));
+      const hasOption = (value) => st.noaskDurations.some(({ minutes }) => String(minutes) === value);
+      if (st.noask) {
+        const active = String(st.noaskMinutes);
+        if (hasOption(active)) duration.value = active;
+        else {
+          duration.add(new Option(t("未知"), ""));
+          duration.value = "";
+        }
+      } else duration.value = hasOption(current) ? current : "1440";
+    }
+    duration.disabled = st.state !== "ok" || !!st.noask;
     // 免确认限时（打开时选，1 小时到 7 天，应用侧到点自动关）：开着时写上到什么时候
     const naOut = $("priv-na-result");
     if (st.noask && st.noaskUntil) { naOut.className = "prov-state warn"; naOut.textContent = t("已打开，{t} 自动关闭", { t: new Date(st.noaskUntil).toLocaleString() }); naOut.dataset.until = "1"; }
@@ -626,7 +640,7 @@
   $("priv-na").addEventListener("change", async (e) => {
     const on = e.target.checked, out = $("priv-na-result");
     out.className = "prov-state"; out.textContent = on ? t("请在弹出的说明里确认…") : t("正在关闭…");
-    const r = await post("/api/priv/noask", { enable: on, hours: +$("priv-na-hours").value || 24 }).catch((e2) => ({ ok: false, message: e2.message }));
+    const r = await post("/api/priv/noask", { enable: on, minutes: +$("priv-na-hours").value || 1440 }).catch((e2) => ({ ok: false, message: e2.message }));
     out.className = "prov-state " + (r.ok ? (on ? "warn" : "ok") : "err");
     out.textContent = r.ok ? (on ? t("已打开：特权命令不再逐条确认") : t("✓ 已关闭，恢复逐条确认")) : "✗ " + (r.message || t("失败"));
     loadPriv();

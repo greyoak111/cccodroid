@@ -3272,3 +3272,4 @@
 3272	Buka Pengaturan dalam layar terbagi
 3273	Jika notifikasi tidak bisa menerima masukan, buka Pengaturan di samping halaman ini sebelum menampilkan kode. Biarkan kedua jendela terbuka.
 3274	Mencoba membuka Pengaturan dalam layar terbagi…
+3275	Tidak diketahui

@@ -9,6 +9,8 @@ javac -nowarn -d "$OUT" "$ROOT/android/tests/stub/android/util/Base64.java" "$RO
 java -cp "$OUT" cc.codroid.Ed25519Vectors
 javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/PrivRules.java" "$ROOT/android/tests/cc/codroid/PrivRulesTest.java"
 java -cp "$OUT" cc.codroid.PrivRulesTest
+javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/NoAskDuration.java" "$ROOT/android/tests/cc/codroid/NoAskDurationTest.java"
+java -cp "$OUT" cc.codroid.NoAskDurationTest
 javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/KeyAttest.java" "$ROOT/android/tests/cc/codroid/KeyAttestTest.java"
 java -cp "$OUT" cc.codroid.KeyAttestTest
 javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/SplitPairing.java" "$ROOT/android/tests/cc/codroid/SplitPairingTest.java"

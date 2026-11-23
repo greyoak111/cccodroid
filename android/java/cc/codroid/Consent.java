@@ -124,6 +124,7 @@ final class Consent {
      */
     static void grant(Context c, String name, String value) {
         synchronized (LOCK) {
+            if (verifiedGrant != null && verifiedGrant.name.equals(name)) verifiedGrant = null;
             MEM.put(name, value);
             // 旧签名先作废：值变了（读屏 自动 → 常开）不能让旧的那份还验得过
             dropSaved(c, name);
@@ -138,6 +139,7 @@ final class Consent {
     /** 关掉：内存、存档、钥匙一起清。不用验证 */
     static void revoke(Context c, String name) {
         synchronized (LOCK) {
+            if (verifiedGrant != null && verifiedGrant.name.equals(name)) verifiedGrant = null;
             MEM.remove(name);
             PENDING.removeIf((x) -> x[0].equals(name));
             dropSaved(c, name);
@@ -176,6 +178,123 @@ final class Consent {
 
     // ── 签名（主线程，MainActivity 收到 ACTION_CONSENT 时调）──
     private static boolean running;
+    private static final class VerifiedGrant {
+        final String name, value;
+        final java.util.function.BooleanSupplier current;
+        final java.util.function.Consumer<Boolean> complete;
+        boolean finished;
+
+        VerifiedGrant(String name, String value, java.util.function.BooleanSupplier current, java.util.function.Consumer<Boolean> complete) {
+            this.name = name;
+            this.value = value;
+            this.current = current;
+            this.complete = complete;
+        }
+    }
+    private static VerifiedGrant verifiedGrant;
+
+    /** Renewal publishes neither an in-memory grant nor a stored grant until authentication succeeds. */
+    static void grantAfterVerification(Activity a, String name, String value, java.util.function.BooleanSupplier current,
+            java.util.function.Consumer<Boolean> complete) {
+        VerifiedGrant request = new VerifiedGrant(name, value, current, complete);
+        synchronized (LOCK) {
+            if (running || !PENDING.isEmpty() || !persistable(a) || !current.getAsBoolean() || MEM.containsKey(name)) {
+                complete.accept(false);
+                return;
+            }
+            verifiedGrant = request;
+            running = true;
+        }
+        new Thread(() -> {
+            try {
+                // Keep KeyStore / attestation verification off the UI thread and outside LOCK.
+                if (get(a, name) != null) {
+                    a.runOnUiThread(() -> finishVerifiedGrant(a, request, false));
+                    return;
+                }
+                Signature signature = signing(a, name, value);
+                a.runOnUiThread(() -> verifyGrant(a, request, signature));
+            } catch (Exception e) {
+                Log.w(TAG, "无法准备续期验证", e);
+                a.runOnUiThread(() -> finishVerifiedGrant(a, request, false));
+            }
+        }, "consent-renewal").start();
+    }
+
+    private static void verifyGrant(Activity a, VerifiedGrant request, Signature signature) {
+        synchronized (LOCK) {
+            if (signature == null || verifiedGrant != request || !request.current.getAsBoolean() || a.isFinishing() || a.isDestroyed()) {
+                finishVerifiedGrant(a, request, false);
+                return;
+            }
+        }
+        try {
+            BiometricPrompt prompt = new BiometricPrompt.Builder(a)
+                .setTitle(Tr.t("用锁屏验证保存这项设置"))
+                .setSubtitle(label(request.name, request.value))
+                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                .build();
+            prompt.authenticate(new BiometricPrompt.CryptoObject(signature), new CancellationSignal(), a.getMainExecutor(),
+                new BiometricPrompt.AuthenticationCallback() {
+                    @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult r) {
+                        boolean saved = false;
+                        try {
+                            Signature signer = r.getCryptoObject().getSignature();
+                            signer.update(msg(a, request.name, request.value));
+                            String sig = Base64.encodeToString(signer.sign(), Base64.NO_WRAP);
+                            synchronized (LOCK) {
+                                if (verifiedGrant == request && request.current.getAsBoolean() && !a.isFinishing() && !a.isDestroyed()) {
+                                    saved = sp(a).edit().putString("v." + request.name, request.value).putString("s." + request.name, sig).commit();
+                                    if (saved) {
+                                        BAD_SIG.remove(request.name);
+                                        MEM.put(request.name, request.value);
+                                    }
+                                    else sp(a).edit().remove("v." + request.name).remove("s." + request.name).commit();
+                                }
+                            }
+                        } catch (Exception e) { Log.w(TAG, "续期签名保存失败", e); }
+                        finishVerifiedGrant(a, request, saved);
+                    }
+                    @Override public void onAuthenticationError(int code, CharSequence message) {
+                        finishVerifiedGrant(a, request, false);
+                    }
+                });
+        } catch (RuntimeException e) {
+            Log.w(TAG, "无法显示续期验证", e);
+            finishVerifiedGrant(a, request, false);
+        }
+    }
+
+    private static void finishVerifiedGrant(Activity a, VerifiedGrant request, boolean saved) {
+        synchronized (LOCK) {
+            if (request.finished) return;
+            request.finished = true;
+            verifiedGrant = null;
+            running = false;
+        }
+        request.complete.accept(saved);
+        runNext(a);
+    }
+
+    private static Signature signing(Context c, String name, String value) throws Exception {
+        KeyPairGenerator g = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore");
+        g.initialize(new KeyGenParameterSpec.Builder(ALIAS + name, KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
+            .setDigests(KeyProperties.DIGEST_SHA256)
+            .setUserAuthenticationRequired(true)
+            .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL)
+            .setInvalidatedByBiometricEnrollment(false)
+            .setAttestationChallenge(challenge(c, name, value))
+            .build());
+        PrivateKey k = g.generateKeyPair().getPrivate();
+        KeyStore ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null);
+        if (attested(c, ks, name, value) == null) {
+            try { ks.deleteEntry(ALIAS + name); } catch (Exception ignored) {}
+            return null;
+        }
+        Signature signature = Signature.getInstance("SHA256withECDSA");
+        signature.initSign(k);
+        return signature;
+    }
     static void runNext(Activity a) {
         try { runNext0(a); }
         catch (Throwable t) {   // 主线程上：任何意外都别把应用带崩（DeepSeek 复核 11-03），这一项只在这次运行有效
@@ -200,23 +319,11 @@ final class Consent {
         new Thread(() -> {
             final Signature s;
             try {
-                KeyPairGenerator g = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore");
-                g.initialize(new KeyGenParameterSpec.Builder(ALIAS + name, KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
-                    .setDigests(KeyProperties.DIGEST_SHA256)
-                    .setUserAuthenticationRequired(true)
-                    .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG | KeyProperties.AUTH_DEVICE_CREDENTIAL)
-                    .setInvalidatedByBiometricEnrollment(false)
-                    .setAttestationChallenge(challenge(a, name, value))
-                    .build());
-                PrivateKey k = g.generateKeyPair().getPrivate();
-                KeyStore ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null);
-                if (attested(a, ks, name, value) == null) {
-                    try { ks.deleteEntry(ALIAS + name); } catch (Exception ignored) {}
+                s = signing(a, name, value);
+                if (s == null) {
                     a.runOnUiThread(() -> done(a, Tr.f("这台设备做不了硬件密钥认证，「{0}」只在这次运行有效", label(name, value))));
                     return;
                 }
-                s = Signature.getInstance("SHA256withECDSA");
-                s.initSign(k);
             } catch (Exception e) {
                 Log.w(TAG, "生成签名钥匙失败", e);
                 a.runOnUiThread(() -> done(a, Tr.f("没能保存「{0}」，只在这次运行有效：", label(name, value)) + e.getMessage()));

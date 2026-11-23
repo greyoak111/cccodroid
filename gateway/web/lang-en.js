@@ -3313,4 +3313,5 @@ window.I18N_DICT.en = {
   "分屏打开设置": "Open Settings in split screen",
   "通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。": "If you cannot type in the notification, open Settings beside this page before showing the pairing code. Keep both windows open.",
   "正在尝试分屏打开设置…": "Trying to open Settings in split screen…",
+  "未知": "Unknown",
 };

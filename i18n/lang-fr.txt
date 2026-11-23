@@ -3272,3 +3272,4 @@
 3272	Ouvrir les réglages en écran partagé
 3273	Si la saisie dans la notification ne fonctionne pas, ouvrez les réglages à côté de cette page avant d’afficher le code. Gardez les deux fenêtres ouvertes.
 3274	Tentative d’ouverture des réglages en écran partagé…
+3275	Inconnu
