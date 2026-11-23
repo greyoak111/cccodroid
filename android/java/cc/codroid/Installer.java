@@ -554,7 +554,7 @@ final class Installer {
     void installDevkit(InputStream raw, long total, boolean gzip, String base, String sha, String tarSha) throws IOException {
         ui.step(Tr.t("解包开发工具包…"));
         File tmp = usrNew();
-        deleteTree(tmp);
+        clearDirSlot(tmp);
         tmp.mkdirs();
         String got = extractInto(tmp, raw, total, gzip, tarSha);
         JSONObject p = new JSONObject();
@@ -658,7 +658,7 @@ final class Installer {
             gzs.add(download(mirrorFirst ? mirror : gh, mirrorFirst ? gh : mirror, new File(env.files, file), gz.optLong("bytes"), gz.optString("sha256")));
         }
         File tmp = usrNew();
-        deleteTree(tmp);
+        clearDirSlot(tmp);
         tmp.mkdirs();
         org.json.JSONArray ids = new org.json.JSONArray();
         for (int i = 0; i < order.size(); i++) {
@@ -703,11 +703,16 @@ final class Installer {
     /** 两次换名把新版换上；第二次失败就把旧版换回来 */
     private void swapIn(File tmp) throws IOException {
         File old = usrOld();
-        deleteTree(old);
-        if (env.usr.exists() && !env.usr.renameTo(old)) throw new IOException(Tr.t("换名失败: ") + env.usr);
-        if (!tmp.renameTo(env.usr)) {
-            if (old.exists()) old.renameTo(env.usr);
-            throw new IOException(Tr.t("换名失败: ") + tmp);
+        clearDirSlot(old);
+        if (existsEntry(env.usr)) {
+            try { renameOrThrow(env.usr, old, env.usr.getPath()); }
+            catch (IOException e) { deleteTree(tmp); throw e; }
+        }
+        try {
+            renameOrThrow(tmp, env.usr, tmp.getPath());
+        } catch (IOException e) {
+            if (existsEntry(old)) { try { Os.rename(old.getPath(), env.usr.getPath()); } catch (Exception ignored) {} }
+            throw e;
         }
     }
 
@@ -846,16 +851,20 @@ final class Installer {
      */
     void uninstallDevkit() throws IOException {
         File trash = usrTrash();
-        if (trash.exists()) deleteTree(trash);
-        if (env.usr.exists() && !env.usr.renameTo(trash)) throw new IOException(Tr.t("换名失败: ") + env.usr);
+        clearDirSlot(trash);
+        if (existsEntry(env.usr)) renameOrThrow(env.usr, trash, env.usr.getPath());
         ui.step(Tr.t("删除开发工具包文件…"));
         deleteTree(trash);
         deleteTree(new File(env.files, "components"));
         deleteTree(new File(env.files, "devkit-stage"));
     }
 
-    /** 卸载删到一半被打断留下的 usr.trash：启动时顺手删掉 */
-    void dropTrash() { deleteTree(usrTrash()); }
+    /** 卸载删到一半被打断留下的 usr.trash，及此前换名让位留下的 *.stuck-*：启动时顺手清理 */
+    void dropTrash() {
+        deleteTree(usrTrash());
+        File[] stuck = env.files.listFiles((d, n) -> n.startsWith("usr.old.stuck-") || n.startsWith("usr.trash.stuck-") || n.startsWith("usr.new.stuck-"));
+        if (stuck != null) for (File f : stuck) deleteTree(f);
+    }
 
     /** 卸载 Claude Code：删掉 install-claude.mjs 装的各个版本，记下「用户卸了」（不再自动装回）。~/.claude 里的登录、会话、设置不动 */
     void uninstallClaude() throws IOException {
@@ -877,8 +886,8 @@ final class Installer {
         boolean did = false;
         recovered = null;
         // 断在两次换名之间：旧版已换下、新版（校验过的）还没换上
-        if (!env.usr.exists() && neu.isDirectory() && new File(neu, PENDING).isFile()) {
-            if (!neu.renameTo(env.usr)) throw new IOException(Tr.t("换名失败: ") + neu);
+        if (!existsEntry(env.usr) && neu.isDirectory() && new File(neu, PENDING).isFile()) {
+            renameOrThrow(neu, env.usr, neu.getPath());
             did = true;
             recovered = Tr.t("两次换名之间被打断：把已校验的新版换上");
         }
@@ -1312,12 +1321,46 @@ final class Installer {
     }
 
     static void deleteTree(File f) {
-        if (f == null || !f.exists() && !isSymlink(f)) return;
-        if (f.isDirectory() && !isSymlink(f)) {
+        if (f == null) return;
+        android.system.StructStat st;
+        try { st = Os.lstat(f.getPath()); }
+        catch (Exception e) { return; }
+        if ((st.st_mode & 0170000) == 0040000) {
+            // 只读目录（如 go/pkg/mod 的 0555）会让子项删除失败、整棵 usr.old 删不掉，进而导致后续 usr 换名 ENOTEMPTY
+            if ((st.st_mode & 0700) != 0700) {
+                try { Os.chmod(f.getPath(), 0700); } catch (Exception ignored) {}
+            }
             File[] kids = f.listFiles();
             if (kids != null) for (File k : kids) deleteTree(k);
         }
         f.delete();
+    }
+    private static boolean existsEntry(File f) {
+        if (f == null) return false;
+        try { Os.lstat(f.getPath()); return true; }
+        catch (Exception e) { return false; }
+    }
+    private static void clearDirSlot(File dir) {
+        deleteTree(dir);
+        if (!existsEntry(dir)) return;
+        // 内部有只读或异属主残留删不干净时，整棵移走让出目标名，避免后续 rename 报 ENOTEMPTY 卡死重装与修复
+        File parent = dir.getParentFile();
+        if (parent == null) return;
+        File stuck = new File(parent, dir.getName() + ".stuck-" + System.currentTimeMillis());
+        try {
+            Os.rename(dir.getPath(), stuck.getPath());
+            android.util.Log.w("Installer", "无法彻底删除 " + dir + "，已移至 " + stuck);
+        } catch (Exception e) {
+            android.util.Log.w("Installer", "清理目标位失败 " + dir + ": " + e.getMessage());
+        }
+    }
+    private static void renameOrThrow(File from, File to, String label) throws IOException {
+        try {
+            Os.rename(from.getPath(), to.getPath());
+        } catch (android.system.ErrnoException e) {
+            android.util.Log.w("Installer", "rename " + from + " -> " + to + " 失败: " + e.getMessage());
+            throw new IOException(Tr.t("换名失败: ") + label + " (" + e.getMessage() + ")", e);
+        }
     }
     private static boolean isSymlink(File f) {
         try { return (Os.lstat(f.getPath()).st_mode & 0170000) == 0120000; }
