@@ -3269,12 +3269,16 @@
 3269	Solo se permiten archivos de memoria normales
 3270	El archivo de memoria es demasiado grande (más de 1 MB)
 3271	Las memorias son de solo lectura aquí
-3272	Mantener activo ADB inalámbrico
-3273	Activa la depuración USB y cambia adbd al puerto TCP 5555 (que puede ser accesible en tu red local) para recuperar Shizuku sin Wi-Fi si se detiene. Al desactivarlo se intentará volver al modo USB; tras reiniciar el teléfono seguirás necesitando Wi-Fi una vez. Déjalo desactivado si no sufres cortes en comandos con privilegios.
-3274	Conexión ADB local lista
-3275	Preparando la conexión ADB local…
-3276	Android está usando otro puerto ADB.
-3277	Esperando la conexión ADB local. Tras reiniciar el teléfono, activa Shizuku primero por Wi-Fi.
-3278	ADB conectado. Esperando la autorización de Shizuku o que el sistema entregue sus credenciales.
-3279	Android no ha autorizado ADB local. Comprueba las autorizaciones de depuración y vuelve a emparejar si es necesario.
-3280	ADB local no está disponible temporalmente. Se reintentará automáticamente. Si se revocó la autorización de depuración, puedes volver a emparejar.
+3272	Abrir Ajustes en pantalla dividida
+3273	Si no puedes escribir en la notificación, abre Ajustes junto a esta página antes de mostrar el código. Mantén abiertas las dos ventanas.
+3274	Intentando abrir Ajustes en pantalla dividida…
+3275	Desconocido
+3276	Mantener activo ADB inalámbrico
+3277	Activa la depuración USB y cambia adbd al puerto TCP 5555 (que puede ser accesible en tu red local) para recuperar Shizuku sin Wi-Fi si se detiene. Al desactivarlo se intentará volver al modo USB; tras reiniciar el teléfono seguirás necesitando Wi-Fi una vez. Déjalo desactivado si no sufres cortes en comandos con privilegios.
+3278	Conexión ADB local lista
+3279	Preparando la conexión ADB local…
+3280	Android está usando otro puerto ADB.
+3281	Esperando la conexión ADB local. Tras reiniciar el teléfono, activa Shizuku primero por Wi-Fi.
+3282	ADB conectado. Esperando la autorización de Shizuku o que el sistema entregue sus credenciales.
+3283	Android no ha autorizado ADB local. Comprueba las autorizaciones de depuración y vuelve a emparejar si es necesario.
+3284	ADB local no está disponible temporalmente. Se reintentará automáticamente. Si se revocó la autorización de depuración, puedes volver a emparejar.

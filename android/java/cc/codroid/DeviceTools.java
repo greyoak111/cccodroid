@@ -57,9 +57,9 @@ final class DeviceTools {
 
     /** 用户在原生对话框里确认过开读屏（MainActivity.confirmA11y）。总开关和读屏模式存在 Consent 里（锁屏签名），
      *  不再是同 uid 脚本改一下 prefs 就能伪造的明文（11-03 审查 H-2） */
-    static void a11yConfirmed(Context c, String mode, boolean on) {
-        if (on) Consent.grant(c, Consent.DEV_ON, "1");
-        if (mode.equals("auto") || mode.equals("on")) Consent.grant(c, Consent.DEV_A11Y, mode);
+    static void a11yConfirmed(Context c, String mode, boolean on, String pageVisit) {
+        if (on) Consent.grant(c, Consent.DEV_ON, "1", pageVisit);
+        if (mode.equals("auto") || mode.equals("on")) Consent.grant(c, Consent.DEV_A11Y, mode, pageVisit);
         if (mode.equals("on")) new Thread(() -> A11y.enable(c, 4000)).start();
     }
     static boolean on(Context c) { return Consent.on(c, Consent.DEV_ON); }
@@ -111,7 +111,9 @@ final class DeviceTools {
         // 之后谁发一条 dev_set 都能静默切到常开）。这条设置能经网关改，被带偏的模型也改得了；对话框只能在 App 前台弹，后台发起的直接没下文
         boolean ask = (mode.equals("auto") || mode.equals("on")) && !mode.equals(a11yMode(c));
         if (ask || askOn) {
+            String pageVisit = PageConsent.consume(c, r.optString("pageTicket"), "dev_set", (askOn ? "1" : "0") + ":" + (ask ? mode : ""));
             try { c.startActivity(MainActivity.internal(c, MainActivity.ACTION_A11Y_OK).putExtra("mode", ask ? mode : "").putExtra("on", askOn)
+                .putExtra("pageVisit", pageVisit)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
         }
         if (mode.equals("off")) Consent.revoke(c, Consent.DEV_A11Y);

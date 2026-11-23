@@ -3269,12 +3269,16 @@
 3269	Seuls les fichiers mémoire ordinaires peuvent être consultés
 3270	Le fichier mémoire est trop volumineux (plus de 1 Mo)
 3271	Les mémoires sont en lecture seule ici
-3272	Maintenir ADB sans fil actif
-3273	Active le débogage USB et bascule adbd sur le port TCP 5555 (qui peut être accessible sur votre réseau local) afin de relancer Shizuku sans Wi-Fi s’il s’arrête. La désactivation tente de revenir en mode USB ; après un redémarrage du téléphone, le Wi-Fi reste nécessaire une fois. Laissez désactivé si vos commandes privilégiées ne se déconnectent pas.
-3274	Connexion ADB locale prête
-3275	Préparation de la connexion ADB locale…
-3276	Android utilise un autre port ADB.
-3277	En attente de la connexion ADB locale. Après un redémarrage, activez d’abord Shizuku via le Wi-Fi.
-3278	ADB connecté. En attente de l’autorisation de Shizuku ou des données d’authentification du système.
-3279	Android n’a pas autorisé ADB local. Vérifiez les autorisations de débogage et associez de nouveau l’appareil si besoin.
-3280	ADB local est temporairement indisponible. Nouvel essai automatique. Si l’autorisation de débogage a été révoquée, vous pouvez refaire l’association.
+3272	Ouvrir les réglages en écran partagé
+3273	Si la saisie dans la notification ne fonctionne pas, ouvrez les réglages à côté de cette page avant d’afficher le code. Gardez les deux fenêtres ouvertes.
+3274	Tentative d’ouverture des réglages en écran partagé…
+3275	Inconnu
+3276	Maintenir ADB sans fil actif
+3277	Active le débogage USB et bascule adbd sur le port TCP 5555 (qui peut être accessible sur votre réseau local) afin de relancer Shizuku sans Wi-Fi s’il s’arrête. La désactivation tente de revenir en mode USB ; après un redémarrage du téléphone, le Wi-Fi reste nécessaire une fois. Laissez désactivé si vos commandes privilégiées ne se déconnectent pas.
+3278	Connexion ADB locale prête
+3279	Préparation de la connexion ADB locale…
+3280	Android utilise un autre port ADB.
+3281	En attente de la connexion ADB locale. Après un redémarrage, activez d’abord Shizuku via le Wi-Fi.
+3282	ADB connecté. En attente de l’autorisation de Shizuku ou des données d’authentification du système.
+3283	Android n’a pas autorisé ADB local. Vérifiez les autorisations de débogage et associez de nouveau l’appareil si besoin.
+3284	ADB local est temporairement indisponible. Nouvel essai automatique. Si l’autorisation de débogage a été révoquée, vous pouvez refaire l’association.

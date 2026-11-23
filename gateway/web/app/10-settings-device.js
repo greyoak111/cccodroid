@@ -6,7 +6,23 @@
         unreachable: ["err", t("连不上应用的后台服务")],
   };
   const SETUP_BUSY = ["downloading", "installing", "connecting", "pairing", "starting", "permission"];
-  let privPoll = null;
+  let privPoll = null, privSplitBusy = false;
+  function paintSplitPairing(st) {
+    const split=st.splitPairing;
+    const supported=split?.supported===true&&Number.isInteger(split.sdk)&&split.sdk>=24;
+    $("priv-split").classList.toggle("hidden",!supported||st.setup?.phase!=="pairing");
+    $("priv-split-settings").disabled=privSplitBusy||split?.phase==="opening";
+    $("priv-split-state").textContent=split?.message||t("通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。");
+  }
+  $("priv-split-settings").addEventListener("click",async()=>{
+    if(privSplitBusy||$("priv-split-settings").disabled)return;
+    privSplitBusy=true;$("priv-split-settings").disabled=true;
+    $("priv-split-state").textContent=t("正在尝试分屏打开设置…");
+    try {
+      const result=await appPost("/api/app/shz_split_settings",{});
+      if(result?.message)$("priv-split-state").textContent=result.message;
+    }finally{privSplitBusy=false;await loadPriv();}
+  });
   // 这些按钮背后是原生跳转 / priv 调用：失败会回 200 + {ok:false}，以前只接网络错误，用户点了没反应（195-N.7）
   const appPost = async (url, body) => {
     try {
@@ -55,6 +71,7 @@
     if (cat === "run") { renderBg(st.frozen); return; }
     $("priv-field").classList.toggle("hidden", st.state === "unsupported");
     if (st.state === "unsupported") { privBusy = false; return; }          // 旧版：没有这项集成
+    paintSplitPairing(st);
     const el = $("priv-state");
     if (st.state === "ok") {
       el.className = "prov-state ok";
@@ -143,7 +160,21 @@
     $("priv-na").disabled = st.state !== "ok";
     $("priv-na").checked = !!st.noask;
     // 时长只在关着时能选：开着时改它没意义（要关了再开才按新时长算）
-    $("priv-na-hours").disabled = st.state !== "ok" || !!st.noask;
+    const duration = $("priv-na-hours");
+    if (Array.isArray(st.noaskDurations) && st.noaskDurations.length) {
+      const current = duration.value;
+      duration.replaceChildren(...st.noaskDurations.map(({ minutes, label }) => new Option(label, String(minutes))));
+      const hasOption = (value) => st.noaskDurations.some(({ minutes }) => String(minutes) === value);
+      if (st.noask) {
+        const active = String(st.noaskMinutes);
+        if (hasOption(active)) duration.value = active;
+        else {
+          duration.add(new Option(t("未知"), ""));
+          duration.value = "";
+        }
+      } else duration.value = hasOption(current) ? current : "1440";
+    }
+    duration.disabled = st.state !== "ok" || !!st.noask;
     // 免确认限时（打开时选，1 小时到 7 天，应用侧到点自动关）：开着时写上到什么时候
     const naOut = $("priv-na-result");
     if (st.noask && st.noaskUntil) { naOut.className = "prov-state warn"; naOut.textContent = t("已打开，{t} 自动关闭", { t: new Date(st.noaskUntil).toLocaleString() }); naOut.dataset.until = "1"; }
@@ -215,7 +246,9 @@
   // 打开要在原生对话框里点头（再验一次锁屏存档）：没允许时开关按实际状态弹回去
   $("priv-auto").addEventListener("change", (e) => {
     const visit = setVisit;
-    post("/api/app/shz_autostart", { enable: e.target.checked }).catch(() => {}).finally(() => privLater(300, visit));
+    const body = { enable: e.target.checked };
+    if (body.enable) Object.assign(body, deviceConsentTicket(e, "shz_autostart", "1"));
+    post("/api/app/shz_autostart", body).catch(() => {}).finally(() => privLater(300, visit));
   });
 
   $("priv-adb-keepalive").addEventListener("change", async (e) => {
@@ -223,7 +256,9 @@
     input.disabled = true;
     input.dataset.saving = "1";
     try {
-      const r = await post("/api/app/shz_adb_keepalive", { enable });
+      const body = { enable };
+      if (enable) Object.assign(body, deviceConsentTicket(e, "shz_adb_keepalive", "1"));
+      const r = await post("/api/app/shz_adb_keepalive", body);
       if (!r.ok) throw new Error(r.message);
     } catch (err) {
       input.checked = !enable;
@@ -582,8 +617,19 @@
     devRender(st);
     return true;
   }
-  $("dev-on").addEventListener("change", (e) => devSet({ on: e.target.checked }));
-  $("dev-a11y").addEventListener("change", (e) => devSet({ a11y: e.target.value }));
+  function deviceConsentTicket(event, operation, argument) {
+    if (!(event.isTrusted || selectionChangesFromUser.has(event)) || !setVisible("device")) return {};
+    const pageTicket = window.CCApp?.deviceConsentTicket?.(operation, argument);
+    return pageTicket ? { pageTicket } : {};
+  }
+  $("dev-on").addEventListener("change", (e) => {
+    const on = e.target.checked;
+    devSet({ on, ...(on && deviceConsentTicket(e, "dev_set", "1:")) });
+  });
+  $("dev-a11y").addEventListener("change", (e) => {
+    const a11y = e.target.value;
+    devSet({ a11y, ...(a11y !== "off" && deviceConsentTicket(e, "dev_set", "0:" + a11y)) });
+  });
   $("dev-idle").addEventListener("change", (e) => devSet({ idle: Number(e.target.value) || 10 }));
   $("dev-a11y-sys").addEventListener("click", () => appPost("/api/app/a11y_settings"));
   $("dev-retry").addEventListener("click", () => loadDev());
@@ -632,7 +678,7 @@
     }
     const out = $("priv-ka-result");
     out.className = "prov-state"; out.textContent = on ? t("正在应用…") : t("正在恢复…");
-    const r = await post("/api/priv/keepalive", { enable: on }).catch((e2) => ({ ok: false, message: e2.message }));
+    const r = await post("/api/priv/keepalive", { enable: on, ...(on && deviceConsentTicket(e, "keepalive", "1")) }).catch((e2) => ({ ok: false, message: e2.message }));
     out.className = "prov-state " + (r.ok ? "ok" : "err");
     out.textContent = r.ok
             ? (on ? t("✓ 已应用") + (r.phantom ? t("（幽灵进程上限 {n}）", { n: r.phantom }) : "") : t("✓ 已恢复"))
@@ -646,7 +692,8 @@
   $("priv-na").addEventListener("change", async (e) => {
     const on = e.target.checked, out = $("priv-na-result");
     out.className = "prov-state"; out.textContent = on ? t("请在弹出的说明里确认…") : t("正在关闭…");
-    const r = await post("/api/priv/noask", { enable: on, hours: +$("priv-na-hours").value || 24 }).catch((e2) => ({ ok: false, message: e2.message }));
+    const minutes = +$("priv-na-hours").value || 1440;
+    const r = await post("/api/priv/noask", { enable: on, minutes, ...(on && deviceConsentTicket(e, "noask", String(minutes))) }).catch((e2) => ({ ok: false, message: e2.message }));
     out.className = "prov-state " + (r.ok ? (on ? "warn" : "ok") : "err");
     out.textContent = r.ok ? (on ? t("已打开：特权命令不再逐条确认") : t("✓ 已关闭，恢复逐条确认")) : "✗ " + (r.message || t("失败"));
     loadPriv();

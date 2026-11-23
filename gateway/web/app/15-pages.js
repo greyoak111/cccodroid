@@ -20,6 +20,7 @@
   }
   function closeSettings() {
     if (!setOpen) return;
+    if (setCatOpen === "device") window.CCApp?.leaveDeviceConsentPage?.();
     setOpen = false;
     pauseSetReads();
     const ov = $("set-ov");
@@ -138,6 +139,9 @@
   function setVisible(cat, visit = setVisit) {
     return setOpen && !document.hidden && setCatOpen === cat && visit === setVisit;
   }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && setCatOpen === "device") window.CCApp?.leaveDeviceConsentPage?.();
+  });
   function pauseSetReads() {
     setVisit++;
     clearTimeout(ST.poll); clearTimeout(privPoll); clearTimeout(updPoll);
@@ -198,6 +202,7 @@
     $("tab-settings").classList.toggle("set-one", narrow && !!setCatOpen);
     cats.forEach((b) => b.classList.toggle("on", b.dataset.cat === setCatOpen));
     const changed = setCatShown !== setCatOpen;
+    if (changed && setCatShown === "device") window.CCApp?.leaveDeviceConsentPage?.();
     if (changed) pauseSetReads();
     if (setCatShown !== "-" && setCatShown !== setCatOpen) {
       const cur = setCatOpen && document.querySelector(`.set-cat[data-cat="${setCatOpen}"]`);

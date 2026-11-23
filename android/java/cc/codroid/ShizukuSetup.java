@@ -82,11 +82,15 @@ final class ShizukuSetup {
     private ShizukuSetup(Context c) {
         ctx = c;
         env = new Env(c);
+        ensureNotificationChannel(c);
+        flushStaleNote(c);
+        new Thread(this::sweepLegacyAdb, "shz-sweep").start();
+    }
+
+    static void ensureNotificationChannel(Context c) {
         NotificationChannel ch = new NotificationChannel(CH, Tr.t("Shizuku 激活"), NotificationManager.IMPORTANCE_HIGH);
         ch.setDescription(Tr.t("无线调试配对码输入框、激活结果"));
         c.getSystemService(NotificationManager.class).createNotificationChannel(ch);
-        flushStaleNote(c);
-        new Thread(this::sweepLegacyAdb, "shz-sweep").start();
     }
 
     /**
@@ -155,7 +159,7 @@ final class ShizukuSetup {
     private static final String EXTRA_PROGRESS = "cc.codroid.progress";
 
     /** 用户退出应用：收起配对 / 激活通知并注销 NSD 配对监听，避免后台泄漏 */
-    void onExit() { stopPairDiscovery(); cancelNote(); }
+    void onExit() { stopPairDiscovery(); cancelNote(); MainActivity.clearSplitPairing(ctx); }
 
     SharedPreferences prefs() { return ctx.getSharedPreferences("shz", Context.MODE_PRIVATE); }
     boolean hasWss() { return ctx.checkSelfPermission(WSS) == PackageManager.PERMISSION_GRANTED; }
@@ -168,6 +172,7 @@ final class ShizukuSetup {
         o.put("adbKeepalive", adbKeepalive());
         o.put("adbKeepaliveState", keepaliveState);
         o.put("adbKeepaliveSupported", Build.VERSION.SDK_INT >= 30 && !Priv.sui());
+        o.put("splitPairing", MainActivity.splitPairingStatus());
         o.put("paired", prefs().getBoolean("paired", false));
         o.put("pairOk", pairOk);
         o.put("pairedBefore", prefs().contains("pairedAt"));
@@ -183,6 +188,7 @@ final class ShizukuSetup {
     }
 
     private void set(String p, String m) {
+        if (phase.equals("pairing") && !p.equals("pairing")) MainActivity.clearSplitPairing(ctx);
         phase = p; message = m == null ? "" : m;
         log(p + " " + message);
     }
@@ -638,20 +644,22 @@ final class ShizukuSetup {
      *  paired 仍是普通 prefs：它只是「配对过」的记号，单独改它不会让任何东西自己跑起来（自动拉起还要这条同意），
      *  真用时 verifyPairAsync 会按实际连不连得上纠正（11-04 报告 A6）。旧版存在 prefs 里的 autostart 不认，升级后要重新打开 */
     boolean autostart() { return Consent.on(ctx, Consent.SHZ_AUTO); }
-    void setAutostart(boolean on) {
-        if (on) Consent.grant(ctx, Consent.SHZ_AUTO, "1"); else Consent.revoke(ctx, Consent.SHZ_AUTO);
+    void setAutostart(boolean on, String pageVisit) {
+        if (on) Consent.grant(ctx, Consent.SHZ_AUTO, "1", pageVisit); else Consent.revoke(ctx, Consent.SHZ_AUTO);
         prefs().edit().remove("autostart").apply();
     }
 
     // KEEPALIVE 管的是应用后台限制，这条同意单独授权 ADB 通道。
     boolean adbKeepalive() { return Consent.on(ctx, Consent.SHZ_TCP); }
 
-    void setAdbKeepalive(boolean on) {
+    void setAdbKeepalive(boolean on) { setAdbKeepalive(on, null); }
+
+    void setAdbKeepalive(boolean on, String pageVisit) {
         keepaliveFailStreak = 0;
         keepaliveNextPrepareAt = 0;
         keepaliveNextCheckAt = 0;
         if (on) {
-            Consent.grant(ctx, Consent.SHZ_TCP, "1");
+            Consent.grant(ctx, Consent.SHZ_TCP, "1", pageVisit);
             keepaliveState = "waiting";
         } else {
             Consent.revoke(ctx, Consent.SHZ_TCP);
