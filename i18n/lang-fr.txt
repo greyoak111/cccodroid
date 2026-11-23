@@ -3270,7 +3270,7 @@
 3270	Le fichier mémoire est trop volumineux (plus de 1 Mo)
 3271	Les mémoires sont en lecture seule ici
 3272	Maintenir ADB sans fil actif
-3273	Maintient ADB sans fil disponible via un socket Unix privé pour relancer Shizuku sans Wi-Fi après un arrêt inattendu. Après le redémarrage du téléphone, connectez-vous une fois au Wi-Fi pour activer Shizuku. Laissez cette option désactivée si vos commandes privilégiées s’exécutent sans échec.
+3273	Active le débogage USB et bascule adbd sur le port TCP 5555 (qui peut être accessible sur votre réseau local) afin de relancer Shizuku sans Wi-Fi s’il s’arrête. La désactivation tente de revenir en mode USB ; après un redémarrage du téléphone, le Wi-Fi reste nécessaire une fois. Laissez désactivé si vos commandes privilégiées ne se déconnectent pas.
 3274	Connexion ADB locale prête
 3275	Préparation de la connexion ADB locale…
 3276	Android utilise un autre port ADB.

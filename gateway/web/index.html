@@ -739,10 +739,10 @@
             <div class="srow sub hidden" id="priv-adb-keepalive-row">
               <div class="sl">
                 <p data-i18n>无线 ADB 保活</p>
-                <p class="tiny" data-i18n>通过私有UnixSocket维持无线ADB，以便在没有WIFI的情况下也能恢复意外停止的Shizuku进程。重启手机后依然需要连接一次WiFi才能激活。如果你没遇到过特权指令执行失败的问题，请保持关闭。</p>
+                <p class="tiny" data-i18n>开启 USB 调试并将系统 adbd 切到 TCP 5555 端口（该端口可能在局域网可达），以便断开 Wi-Fi 后也能恢复意外停止的 Shizuku。关闭开关会尝试切回 USB 模式；重启手机后仍需连一次 Wi-Fi。没遇到过特权指令掉线问题请保持关闭。</p>
                 <div class="prov-state" id="priv-adb-keepalive-state" role="status"></div>
               </div>
-              <div class="sc"><input type="checkbox" class="sw" id="priv-adb-keepalive" aria-label="无线 ADB 保活"></div>
+              <div class="sc"><input type="checkbox" class="sw" id="priv-adb-keepalive" aria-label="无线 ADB 保活" data-i18n-attr="aria-label"></div>
             </div>
             <div class="srow sub" id="priv-ka-row">
               <div class="sl"><p data-i18n>后台保活增强：放宽安卓的“幽灵进程”上限（防止并行编译时子进程被系统杀掉）、加入电池白名单、允许后台运行</p></div>

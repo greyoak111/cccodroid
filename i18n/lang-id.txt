@@ -3270,7 +3270,7 @@
 3270	File memori terlalu besar (lebih dari 1 MB)
 3271	Memori hanya-baca dan tidak dapat diubah di sini
 3272	Jaga ADB nirkabel tetap aktif
-3273	Menjaga ADB nirkabel tersedia melalui soket Unix privat agar Shizuku dapat dipulihkan tanpa Wi-Fi jika berhenti tiba-tiba. Setelah ponsel dinyalakan ulang, sambungkan ke Wi-Fi sekali untuk mengaktifkan Shizuku. Biarkan nonaktif jika tidak pernah mengalami kegagalan saat menjalankan perintah berhak istimewa.
+3273	Mengaktifkan debugging USB dan mengalihkan adbd ke port TCP 5555 (yang mungkin dapat dijangkau di jaringan lokal Anda) agar Shizuku dapat dipulihkan saat Wi-Fi terputus. Mematikannya akan mencoba kembali ke mode USB; setelah ponsel dimulai ulang, Wi-Fi tetap diperlukan sekali. Biarkan mati jika perintah istimewa tidak pernah terputus.
 3274	Koneksi ADB lokal siap
 3275	Menyiapkan koneksi ADB lokal…
 3276	Android menggunakan port ADB lain.

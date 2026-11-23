@@ -15,6 +15,7 @@ import android.net.NetworkCapabilities;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
 import android.os.Build;
+import android.os.SystemClock;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Log;
@@ -72,6 +73,8 @@ final class ShizukuSetup {
     private static final String TCP_SERIAL = "127.0.0.1:" + TCP_PORT;
     private volatile ScheduledExecutorService keepaliveWorker;
     private volatile String keepaliveState = "waiting";
+    private volatile long keepaliveNextPrepareAt, keepaliveNextCheckAt;
+    private volatile int keepaliveFailStreak;
     /** 这次配对期间看到的配对服务（名字 → 端口）。这类广播谁都能注册：不止一个时不替用户挑，要他照配对框填端口 */
     private final java.util.Map<String, Integer> pairSeen = new java.util.concurrent.ConcurrentHashMap<>();
     private NsdManager.DiscoveryListener pairDisc;
@@ -644,13 +647,56 @@ final class ShizukuSetup {
     boolean adbKeepalive() { return Consent.on(ctx, Consent.SHZ_TCP); }
 
     void setAdbKeepalive(boolean on) {
+        keepaliveFailStreak = 0;
+        keepaliveNextPrepareAt = 0;
+        keepaliveNextCheckAt = 0;
         if (on) {
             Consent.grant(ctx, Consent.SHZ_TCP, "1");
             keepaliveState = "waiting";
         } else {
             Consent.revoke(ctx, Consent.SHZ_TCP);
             keepaliveState = "waiting";
-            // 设备端通道可能正在被其他已授权的应用或工具使用。只停本包的恢复。
+            // 回退本应用开启的 tcpip 5555 与 USB 调试开关，避免关闭后端口仍长期暴露
+            new Thread(this::teardownKeepalive, "shz-adb-keepalive-off").start();
+        }
+    }
+
+    private void teardownKeepalive() {
+        boolean ownedTcp = prefs().getBoolean("adbKeepaliveSetTcp", false);
+        boolean ownedUsb = prefs().getBoolean("adbKeepaliveEnabledUsb", false);
+        if (!ownedTcp && !ownedUsb) return;
+        for (int i = 0; i < 20; i++) {
+            synchronized (this) {
+                if (adbKeepalive()) return;
+                if (!busy) { busy = true; break; }
+            }
+            try { Thread.sleep(250); } catch (InterruptedException e) { return; }
+            if (i == 19) return;
+        }
+        try {
+            if (adbKeepalive()) return;
+            if (ownedTcp) {
+                prefs().edit().remove("adbKeepaliveSetTcp").apply();
+                try {
+                    if (systemTcpPort() == TCP_PORT) {
+                        adb(8, "connect", TCP_SERIAL);
+                        adb(8, "-s", TCP_SERIAL, "usb");
+                        try { adb(5, "disconnect", TCP_SERIAL); } catch (Exception ignored) {}
+                    }
+                } catch (Exception e) {
+                    log("关闭无线 ADB 保活切回 USB 失败：" + e.getMessage());
+                }
+            }
+            if (ownedUsb) {
+                prefs().edit().remove("adbKeepaliveEnabledUsb").apply();
+                try {
+                    if (hasWss()) Settings.Global.putInt(ctx.getContentResolver(), Settings.Global.ADB_ENABLED, 0);
+                } catch (Exception e) {
+                    log("关闭无线 ADB 保活恢复 USB 调试失败：" + e.getMessage());
+                }
+            }
+        } finally {
+            idle();
         }
     }
 
@@ -672,15 +718,26 @@ final class ShizukuSetup {
             && Priv.installed() && hasWss() && prefs().getBoolean("paired", false);
     }
 
+    private void backoffKeepalivePrepare() {
+        int streak = Math.min(keepaliveFailStreak + 1, 5);
+        keepaliveFailStreak = streak;
+        long delayMs = Math.min(300_000L, 30_000L << Math.min(streak - 1, 4));
+        keepaliveNextPrepareAt = SystemClock.elapsedRealtime() + delayMs;
+    }
+
     private void keepaliveTick(ScheduledExecutorService worker) {
         if (!keepaliveAllowed(worker)) return;
+        long now = SystemClock.elapsedRealtime();
+        boolean running = Priv.running();
+        // 就绪且 Shizuku 正常在跑时不必每 15 秒 fork getprop，改为每 60 秒复核一次端口
+        if (running && Priv.granted() && "ready".equals(keepaliveState) && now < keepaliveNextCheckAt) return;
         synchronized (this) {
             if (busy || "pairing".equals(phase)) return;
             busy = true;
         }
         boolean triedWireless = false;
         try {
-            boolean running = Priv.running();
+            running = Priv.running();
             boolean listening = systemTcpListening();
             if (!running || !Priv.granted() || !"ready".equals(keepaliveState) || !listening) {
                 keepaliveState = "waiting";
@@ -691,9 +748,16 @@ final class ShizukuSetup {
                         return;
                     }
                     if (!running || !Priv.verified() || !onWifi()) return;
+                    if (SystemClock.elapsedRealtime() < keepaliveNextPrepareAt) {
+                        keepaliveState = "unavailable";
+                        return;
+                    }
                     keepaliveState = "preparing";
                     triedWireless = true;
-                    if (!prepareKeepalive(worker)) return;
+                    if (!prepareKeepalive(worker)) {
+                        backoffKeepalivePrepare();
+                        return;
+                    }
                 }
                 if (!keepaliveAllowed(worker)) return;
                 String result = adb(8, "connect", TCP_SERIAL);
@@ -701,6 +765,7 @@ final class ShizukuSetup {
                 if (!"device".equals(transport)) {
                     keepaliveState = (result + transport).matches("(?is).*(unauthorized|failed to authenticate).*")
                         ? "unauthorized" : "unavailable";
+                    backoffKeepalivePrepare();
                     return;
                 }
                 if (!Priv.running()) {
@@ -715,10 +780,21 @@ final class ShizukuSetup {
                     if (!keepaliveAllowed(worker) || Priv.running()) return;
                     startServer(TCP_SERIAL, false);
                 }
-                if (keepaliveAllowed(worker)) keepaliveState = Priv.verified() ? "ready" : "binder";
+                if (keepaliveAllowed(worker)) {
+                    boolean readyNow = Priv.verified();
+                    keepaliveState = readyNow ? "ready" : "binder";
+                    if (readyNow) {
+                        keepaliveFailStreak = 0;
+                        keepaliveNextPrepareAt = 0;
+                        keepaliveNextCheckAt = SystemClock.elapsedRealtime() + 60_000L;
+                    }
+                }
+            } else {
+                keepaliveNextCheckAt = SystemClock.elapsedRealtime() + 60_000L;
             }
         } catch (Exception e) {
             keepaliveState = "unavailable";
+            if (triedWireless) backoffKeepalivePrepare();
             log("无线 ADB 保活：" + e.getMessage());
             if ("starting".equals(phase)) set("error", Tr.t("Shizuku 未能自动恢复，稍后再试"));
         } finally {
@@ -741,6 +817,7 @@ final class ShizukuSetup {
         // 已确认 TLS 配对身份才切换设备端通道。切换时 adbd 会短暂重启。
         boolean usbWasEnabled = Settings.Global.getInt(ctx.getContentResolver(), Settings.Global.ADB_ENABLED, 0) != 0;
         if (!usbWasEnabled && !Settings.Global.putInt(ctx.getContentResolver(), Settings.Global.ADB_ENABLED, 1)) return false;
+        if (!usbWasEnabled) prefs().edit().putBoolean("adbKeepaliveEnabledUsb", true).apply();
         boolean ready = false;
         try {
             if (!keepaliveAllowed(worker)) return false;
@@ -749,11 +826,13 @@ final class ShizukuSetup {
                 if (systemTcpListening()) { ready = true; break; }
                 Thread.sleep(250);
             }
-            if (!ready) keepaliveState = "unavailable";
+            if (ready) prefs().edit().putBoolean("adbKeepaliveSetTcp", true).apply();
+            else keepaliveState = "unavailable";
             return ready;
         } finally {
             if (!usbWasEnabled && !ready && systemTcpPort() <= 0) {
                 Settings.Global.putInt(ctx.getContentResolver(), Settings.Global.ADB_ENABLED, 0);
+                prefs().edit().remove("adbKeepaliveEnabledUsb").apply();
             }
         }
     }

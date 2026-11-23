@@ -3311,7 +3311,7 @@ window.I18N_DICT.en = {
   "记忆文件太大了（超过 1 MB）": "Memory file is too large (over 1 MB)",
   "记忆只读，不能在这里修改": "Project memories are read-only here",
   "无线 ADB 保活": "Wireless ADB keep-alive",
-  "通过私有UnixSocket维持无线ADB，以便在没有WIFI的情况下也能恢复意外停止的Shizuku进程。重启手机后依然需要连接一次WiFi才能激活。如果你没遇到过特权指令执行失败的问题，请保持关闭。": "Keeps wireless ADB available through a private Unix socket so Shizuku can recover without Wi-Fi if it stops unexpectedly. After restarting your phone, connect to Wi-Fi once to activate Shizuku. Leave this off if you have not experienced failures when running privileged commands.",
+  "开启 USB 调试并将系统 adbd 切到 TCP 5555 端口（该端口可能在局域网可达），以便断开 Wi-Fi 后也能恢复意外停止的 Shizuku。关闭开关会尝试切回 USB 模式；重启手机后仍需连一次 Wi-Fi。没遇到过特权指令掉线问题请保持关闭。": "Enables USB debugging and switches adbd to TCP port 5555 (which may be reachable on your local network) so Shizuku can recover after Wi-Fi disconnects. Turning this off attempts to switch back to USB mode; after a phone reboot you still need Wi-Fi once. Leave this off if you have not had privileged commands drop.",
   "本机 ADB 通道已就绪": "Local ADB connection ready",
   "正在建立本机 ADB 通道…": "Preparing the local ADB connection…",
   "系统正在使用另一个 ADB 端口。": "Android is using a different ADB port.",
