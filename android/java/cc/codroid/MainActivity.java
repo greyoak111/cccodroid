@@ -347,7 +347,7 @@ public class MainActivity extends Activity {
         @Override public void run() { FrameRate.apply(MainActivity.this); ui.postDelayed(this, 30000); }
     };
 
-    @Override protected void onResume() { super.onResume(); visible = true; applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
+    @Override protected void onResume() { super.onResume(); visible = true; PageConsent.onActivityResume(this); applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
         // 在后台从常驻通知点了「停止」、界面还活着：回来时把网关服务拉起来（审查 #105 06-007）。以前只有 boot 起服务，回来只能对着连不上的页面
         if (booted && !GatewayService.serviceUp()) GatewayService.start(this);
         Consent.runNext(this);   // 上次排着的锁屏签名（界面当时正在关、没问成）
@@ -362,7 +362,7 @@ public class MainActivity extends Activity {
         // （0.6.10 审计 200-13-07）。真正看不见了由 onStop 收尾。
         if (!isInMultiWindowMode()) { visible = false; Notify.get(this).onBackground(); } }
     @Override protected void onStop() {
-        PageConsent.visible(this, false);
+        PageConsent.onLeaveOrStop(this);
         super.onStop();
         // 分屏里被整个切走 / 熄屏时 onPause 没记过账，这里补上；转屏重建不算到后台
         boolean was = visible;
@@ -1862,7 +1862,7 @@ public class MainActivity extends Activity {
             // 有副作用的方法第一个参数是口令 k（见 Env.BRIDGE_KEY）；界面在 theme.js 里包一层自动带上，调用处照旧写
             @android.webkit.JavascriptInterface public boolean keyed() { return true; }
             @android.webkit.JavascriptInterface public void leaveDeviceConsentPage(String k) {
-                if (Env.bridgeOk(k)) PageConsent.visible(MainActivity.this, false);
+                if (Env.bridgeOk(k)) PageConsent.onLeaveOrStop(MainActivity.this);
             }
             @android.webkit.JavascriptInterface public String deviceConsentTicket(String k, String operation, String argument) {
                 if (!Env.bridgeOk(k) || !visible || isFinishing() || isDestroyed() || operation == null || argument == null || argument.length() > 16

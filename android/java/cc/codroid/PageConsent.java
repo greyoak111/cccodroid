@@ -22,15 +22,26 @@ import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.json.JSONObject;
 
 /** One authenticated signing authority for one native settings visit. Its private key stays in RAM. */
 final class PageConsent {
     private static final String ROOT = "cc_consent_page_", MARKER = "cc_consent_marker_";
     private static final SecureRandom RANDOM = new SecureRandom();
+    private static final Set<String> PENDING_ROOTS = new HashSet<>();
+    private static final ExecutorService GC = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "page-consent-gc");
+        t.setDaemon(true);
+        return t;
+    });
     private static Visit active;
 
     private static final class Visit {
@@ -38,6 +49,8 @@ final class PageConsent {
         final String id = UUID.randomUUID().toString();
         final Map<String, Ticket> tickets = new LinkedHashMap<>();
         Authority authority;
+        boolean prompting;
+        boolean stoppedDuringPrompt;
 
         Visit(Activity owner) { this.owner = owner; }
     }
@@ -53,6 +66,34 @@ final class PageConsent {
         if (visible) {
             if (active == null || active.owner != owner) active = new Visit(owner);
         } else if (active != null && active.owner == owner) active = null;
+    }
+
+    static synchronized void onActivityResume(Activity owner) {
+        if (active != null && active.owner == owner) active.stoppedDuringPrompt = false;
+    }
+
+    /** Preserve an in-flight PIN/pattern credential prompt (which pauses/stops the activity) without keeping stale visits. */
+    static synchronized void onLeaveOrStop(Activity owner) {
+        if (active == null || active.owner != owner) return;
+        if (active.prompting && !owner.isFinishing() && !owner.isDestroyed() && usable(owner)) {
+            active.stoppedDuringPrompt = true;
+            return;
+        }
+        active = null;
+    }
+
+    static synchronized void setPrompting(Activity owner, String id, boolean prompting) {
+        if (active != null && active.owner == owner && active.id.equals(id)) {
+            active.prompting = prompting;
+            if (prompting) active.stoppedDuringPrompt = false;
+        }
+    }
+
+    static synchronized void finishPrompt(Activity owner, String id, boolean succeeded) {
+        if (active != null && active.owner == owner && active.id.equals(id)) {
+            active.prompting = false;
+            if (!succeeded && active.stoppedDuringPrompt) active = null;
+        }
     }
 
     static synchronized String ticket(Activity owner, String operation, String argument) {
@@ -111,7 +152,9 @@ final class PageConsent {
     }
 
     static Enrollment enroll(Context c) throws Exception {
+        pruneUnusedRootsAsync(c);
         String rootId = UUID.randomUUID().toString();
+        synchronized (PageConsent.class) { PENDING_ROOTS.add(rootId); }
         KeyPairGenerator ephemeral = KeyPairGenerator.getInstance("EC");
         ephemeral.initialize(new ECGenParameterSpec("secp256r1"));
         KeyPair delegate = ephemeral.generateKeyPair();
@@ -126,7 +169,7 @@ final class PageConsent {
             .build());
         try {
             PrivateKey key = hardware.generateKeyPair().getPrivate();
-            if (attested(c, keyStore(), rootId, challenge) == null) throw new GeneralPageError("设备不支持硬件密钥认证");
+            if (attested(c, keyStore(), rootId, challenge) == null) throw new GeneralPageError(Tr.t("设备不支持硬件密钥认证"));
             Signature signing = Signature.getInstance("SHA256withECDSA");
             signing.initSign(key);
             return new Enrollment(rootId, delegate, signing);
@@ -141,6 +184,7 @@ final class PageConsent {
     }
 
     static synchronized boolean activate(Context c, String id, Authority authority) {
+        PENDING_ROOTS.remove(authority.rootId);
         if (!current(c, id)) return false;
         active.authority = authority;
         return true;
@@ -184,7 +228,50 @@ final class PageConsent {
     }
 
     static void removeMarker(String name) { delete(MARKER + name); }
-    static void discard(String rootId) { delete(ROOT + rootId); }
+    static void discard(String rootId) {
+        synchronized (PageConsent.class) { PENDING_ROOTS.remove(rootId); }
+        delete(ROOT + rootId);
+    }
+
+    /** Reclaim unreferenced hardware root keys so StrongBox/KeyStore slots do not leak across visits. */
+    static void pruneUnusedRootsAsync(Context c) {
+        final Context app = c.getApplicationContext();
+        GC.execute(() -> {
+            try {
+                Set<String> inUse = new HashSet<>();
+                synchronized (PageConsent.class) {
+                    if (active != null && active.authority != null) inUse.add(active.authority.rootId);
+                    inUse.addAll(PENDING_ROOTS);
+                }
+                Map<String, ?> all = app.getSharedPreferences("consent", Context.MODE_PRIVATE).getAll();
+                for (Map.Entry<String, ?> entry : all.entrySet()) {
+                    if (!entry.getKey().startsWith("page.") || !(entry.getValue() instanceof String)) continue;
+                    try {
+                        String root = new JSONObject((String) entry.getValue()).optString("root", "");
+                        if (!root.isEmpty()) inUse.add(root);
+                    } catch (Exception ignored) {}
+                }
+                KeyStore ks = keyStore();
+                Enumeration<String> aliases = ks.aliases();
+                while (aliases.hasMoreElements()) {
+                    String alias = aliases.nextElement();
+                    if (!alias.startsWith(ROOT)) continue;
+                    String rootId = alias.substring(ROOT.length());
+                    boolean stillActive;
+                    synchronized (PageConsent.class) {
+                        stillActive = inUse.contains(rootId) || PENDING_ROOTS.contains(rootId)
+                            || (active != null && active.authority != null && rootId.equals(active.authority.rootId));
+                    }
+                    if (!stillActive) {
+                        try { ks.deleteEntry(alias); }
+                        catch (Exception e) { Log.w(Consent.TAG, "无法清理旧页面密钥 " + alias, e); }
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(Consent.TAG, "清理页面授权密钥失败", e);
+            }
+        });
+    }
 
     private static void delete(String alias) {
         try { keyStore().deleteEntry(alias); }

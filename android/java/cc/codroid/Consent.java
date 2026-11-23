@@ -86,7 +86,7 @@ final class Consent {
         if (v != null) return v;
         SharedPreferences p = sp(c);
         String page = p.getString("page." + name, null);
-        if (page != null) {
+        if (page != null && !page.equals(BAD_SIG.get(name))) {
             String restored = PageConsent.restore(c, name, page);
             if (restored != null) {
                 synchronized (LOCK) {
@@ -96,6 +96,10 @@ final class Consent {
                         MEM.put(name, restored);
                         return restored;
                     }
+                }
+            } else {
+                synchronized (LOCK) {
+                    if (page.equals(p.getString("page." + name, null))) BAD_SIG.put(name, page);
                 }
             }
         }
@@ -172,9 +176,11 @@ final class Consent {
         BAD_SIG.remove(name);
         SharedPreferences p = sp(c);
         boolean hasLegacy = p.contains("v." + name) || p.contains("s." + name);
-        if (hasLegacy || p.contains("page." + name)) {
+        boolean hasPage = p.contains("page." + name);
+        if (hasLegacy || hasPage) {
             p.edit().remove("page." + name).remove("v." + name).remove("s." + name).commit();
         }
+        if (hasPage) PageConsent.pruneUnusedRootsAsync(c);
         if (!hasLegacy) return;
         try { KeyStore ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null); ks.deleteEntry(ALIAS + name); }
         catch (Exception e) { Log.w(TAG, "删钥匙失败 " + name, e); }
@@ -328,9 +334,10 @@ final class Consent {
             BiometricPrompt prompt = new BiometricPrompt.Builder(a)
                 .setTitle(Tr.t("用锁屏验证保存这项设置"))
                 .setSubtitle(label(job[0], job[1]))
-                .setDescription("验证后可在本次访问「设备与权限」期间保存该页上的其他更改。")
+                .setDescription(Tr.t("验证后可在本次访问「设备与权限」期间保存该页上的其他更改。"))
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.DEVICE_CREDENTIAL)
                 .build();
+            PageConsent.setPrompting(a, job[2], true);
             prompt.authenticate(new BiometricPrompt.CryptoObject(enrollment.signing), new CancellationSignal(), a.getMainExecutor(),
                 new BiometricPrompt.AuthenticationCallback() {
                     @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
@@ -339,13 +346,16 @@ final class Consent {
                                 PageConsent.Authority authority = enrollment.complete(a, result.getCryptoObject().getSignature());
                                 synchronized (LOCK) {
                                     if (!currentPageRequest(a, job) || !PageConsent.activate(a, job[2], authority)) {
+                                        PageConsent.finishPrompt(a, job[2], false);
                                         PageConsent.discard(enrollment.rootId);
                                         finishPage(a, job, null);
                                         return;
                                     }
+                                    PageConsent.finishPrompt(a, job[2], true);
                                 }
                                 savePage(a, job);
                             } catch (Exception e) {
+                                PageConsent.finishPrompt(a, job[2], false);
                                 PageConsent.discard(enrollment.rootId);
                                 Log.w(TAG, "页面授权签名失败", e);
                                 finishPage(a, job, Tr.f("没有保存，「{0}」只在这次运行有效", label(job[0], job[1])));
@@ -353,11 +363,13 @@ final class Consent {
                         }, "consent-page-save").start();
                     }
                     @Override public void onAuthenticationError(int code, CharSequence message) {
+                        PageConsent.finishPrompt(a, job[2], false);
                         PageConsent.discard(enrollment.rootId);
                         finishPage(a, job, Tr.f("没有保存，「{0}」只在这次运行有效", label(job[0], job[1])));
                     }
                 });
         } catch (Exception e) {
+            PageConsent.finishPrompt(a, job[2], false);
             PageConsent.discard(enrollment.rootId);
             finishPage(a, job, Tr.f("没有保存，「{0}」只在这次运行有效", label(job[0], job[1])));
         }
