@@ -473,6 +473,7 @@ final class Priv {
                     }
                     ShizukuSetup.get(ctx).activate(); resp = status(); break;
                 }
+                case "shz_split_settings": resp = MainActivity.requestSplitPairing(); break;
                 case "shz_pair": ShizukuSetup.get(ctx).onCode(req.optString("code")); resp = status(); break;
                 case "shz_repair": ShizukuSetup.get(ctx).repair(); resp = status(); break;
                 case "shz_autostart": {

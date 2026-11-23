@@ -106,6 +106,61 @@ public class MainActivity extends Activity {
     static final String ACTION_SHIZUKU_NOOP = "cc.codroid.SHIZUKU_NOOP";
     /** 主界面（聊天）在前台吗：通知只在用户没盯着聊天时发 */
     static volatile boolean visible;
+    private static volatile java.lang.ref.WeakReference<MainActivity> foregroundOwner;
+
+    private static final SplitPairing splitPairing = new SplitPairing();
+
+    static void clearSplitPairing(Context context) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            splitPairing.reset();
+            SplitPairingNotice.dismiss(context);
+        });
+    }
+
+    static org.json.JSONObject splitPairingStatus() throws org.json.JSONException {
+        SplitPairing.Result r=splitPairing.snapshot();
+        return new org.json.JSONObject().put("supported",SplitPairing.supported(Build.VERSION.SDK_INT))
+            .put("sdk",Build.VERSION.SDK_INT).put("phase",r.phase).put("path",r.path).put("message",Tr.t(r.message()));
+    }
+
+    /** Socket worker delegates to the actual foreground Activity; no background task launch. */
+    static org.json.JSONObject requestSplitPairing() throws Exception {
+        if(!SplitPairing.supported(Build.VERSION.SDK_INT))
+            return splitPairingStatus().put("ok",false).put("message",Tr.t("此 Android 版本不支持分屏。"));
+        MainActivity a=foregroundOwner==null?null:foregroundOwner.get();
+        if(a==null||!visible||a.isFinishing()||a.isDestroyed())
+            return splitPairingStatus().put("ok",false).put("message",Tr.t("请先回到 cccodroid 前台，再尝试分屏打开设置。"));
+        java.util.concurrent.FutureTask<SplitPairing.Result> work=new java.util.concurrent.FutureTask<>(()->splitPairing.start(new SplitPairing.Host(){
+            public int sdk(){return Build.VERSION.SDK_INT;}
+            public boolean foreground(){return visible&&!a.isFinishing()&&!a.isDestroyed()&&a.hasWindowFocus()&&!guarding()&&"pairing".equals(ShizukuSetup.get(a).phase);}
+            public boolean visibleInMultiWindow(){return !a.isFinishing()&&!a.isDestroyed()&&visible&&a.isInMultiWindowMode();}
+            public void openAdjacent(){
+                SplitPairingNotice.dismiss(a);
+                Intent target=new Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS);
+                Bundle args=new Bundle();args.putString(":settings:fragment_args_key","toggle_adb_wireless");
+                target.putExtra(":settings:fragment_args_key","toggle_adb_wireless");
+                target.putExtra(":settings:show_fragment_args",args);
+                target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
+                a.startActivity(target);
+            }
+            public void later(Runnable task,int delay){new Handler(Looper.getMainLooper()).postDelayed(task,delay);}
+            public void showManualHint(){
+                SplitPairing.Result result=splitPairing.snapshot();
+                String message=Tr.t(result.message());
+                android.widget.Toast.makeText(a.getApplicationContext(),message,android.widget.Toast.LENGTH_LONG).show();
+                SplitPairingNotice.show(a,message,()->splitPairing.snapshot()==result);
+            }
+        }));
+        a.ui.post(work);
+        try {
+            SplitPairing.Result r=work.get(3,java.util.concurrent.TimeUnit.SECONDS);
+            return splitPairingStatus().put("ok",r.ok()).put("message",Tr.t(r.message()));
+        }catch(Exception e){
+            work.cancel(false);
+            return splitPairingStatus().put("ok",false).put("message",Tr.t("分屏请求未完成，请回到应用后重试。"));
+        }
+    }
+
     /** 本应用有界面在前台吗（主界面或独立浏览器）：静默更新、读剪贴板这类按「用户在不在用本应用」判断（11-04 报告 A4） */
     static boolean appForeground() { return visible || BrowserActivity.visible; }
 
@@ -346,7 +401,7 @@ public class MainActivity extends Activity {
         @Override public void run() { FrameRate.apply(MainActivity.this); ui.postDelayed(this, 30000); }
     };
 
-    @Override protected void onResume() { super.onResume(); visible = true; applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
+    @Override protected void onResume() { super.onResume(); foregroundOwner = new java.lang.ref.WeakReference<>(this); visible = true; applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
         // 在后台从常驻通知点了「停止」、界面还活着：回来时把网关服务拉起来（审查 #105 06-007）。以前只有 boot 起服务，回来只能对着连不上的页面
         if (booted && !GatewayService.serviceUp()) GatewayService.start(this);
         Consent.runNext(this);   // 上次排着的锁屏签名（界面当时正在关、没问成）
@@ -362,6 +417,7 @@ public class MainActivity extends Activity {
         if (!isInMultiWindowMode()) { visible = false; Notify.get(this).onBackground(); } }
     @Override protected void onStop() {
         super.onStop();
+        if (foregroundOwner != null && foregroundOwner.get() == this) foregroundOwner = null;
         // 分屏里被整个切走 / 熄屏时 onPause 没记过账，这里补上；转屏重建不算到后台
         boolean was = visible;
         visible = false;
@@ -414,6 +470,7 @@ public class MainActivity extends Activity {
     }
     @Override public void onMultiWindowModeChanged(boolean on, android.content.res.Configuration cfg) {
         super.onMultiWindowModeChanged(on, cfg);
+        if (on && splitPairing.multiWindowDetected()) SplitPairingNotice.dismiss(this);
         applyLandBars();
     }
     /** 壁纸主色（安卓 12+ 的动态取色，系统 system_accent1_500）；更早的系统没有，返回空串。
@@ -660,6 +717,7 @@ public class MainActivity extends Activity {
             if (r != null && !r.optBoolean("ok", true) && !msg.isEmpty())
                 android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show();
         }
+        else if (SplitPairingNotice.ACTION_ACK.equals(a)) SplitPairingNotice.dismiss(this);
         else if (ACTION_SHIZUKU.equals(a)) ShizukuSetup.get(this).activate();
         else if (ACTION_FACTORY_RESET.equals(a)) askFactoryReset();
         else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false));

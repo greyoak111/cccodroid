@@ -3310,5 +3310,8 @@ window.I18N_DICT.en = {
   "只允许查看普通记忆文件": "Only regular memory files can be viewed",
   "记忆文件太大了（超过 1 MB）": "Memory file is too large (over 1 MB)",
   "记忆只读，不能在这里修改": "Project memories are read-only here",
+  "分屏打开设置": "Open Settings in split screen",
+  "通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。": "If you cannot type in the notification, open Settings beside this page before showing the pairing code. Keep both windows open.",
+  "正在尝试分屏打开设置…": "Trying to open Settings in split screen…",
   "未知": "Unknown",
 };

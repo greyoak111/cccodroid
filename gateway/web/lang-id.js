@@ -3272,5 +3272,8 @@ window.I18N_DICT["id"] = {
   "只允许查看普通记忆文件": "Hanya file memori biasa yang boleh dilihat",
   "记忆文件太大了（超过 1 MB）": "File memori terlalu besar (lebih dari 1 MB)",
   "记忆只读，不能在这里修改": "Memori hanya-baca dan tidak dapat diubah di sini",
+  "分屏打开设置": "Buka Pengaturan dalam layar terbagi",
+  "通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。": "Jika notifikasi tidak bisa menerima masukan, buka Pengaturan di samping halaman ini sebelum menampilkan kode. Biarkan kedua jendela terbuka.",
+  "正在尝试分屏打开设置…": "Mencoba membuka Pengaturan dalam layar terbagi…",
   "未知": "Tidak diketahui",
 };

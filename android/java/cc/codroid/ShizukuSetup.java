@@ -71,11 +71,15 @@ final class ShizukuSetup {
     private ShizukuSetup(Context c) {
         ctx = c;
         env = new Env(c);
+        ensureNotificationChannel(c);
+        flushStaleNote(c);
+        new Thread(this::sweepLegacyAdb, "shz-sweep").start();
+    }
+
+    static void ensureNotificationChannel(Context c) {
         NotificationChannel ch = new NotificationChannel(CH, Tr.t("Shizuku 激活"), NotificationManager.IMPORTANCE_HIGH);
         ch.setDescription(Tr.t("无线调试配对码输入框、激活结果"));
         c.getSystemService(NotificationManager.class).createNotificationChannel(ch);
-        flushStaleNote(c);
-        new Thread(this::sweepLegacyAdb, "shz-sweep").start();
     }
 
     /**
@@ -143,7 +147,7 @@ final class ShizukuSetup {
     private static final String EXTRA_PROGRESS = "cc.codroid.progress";
 
     /** 用户退出应用：收起配对 / 激活通知并注销 NSD 配对监听，避免后台泄漏 */
-    void onExit() { stopPairDiscovery(); cancelNote(); }
+    void onExit() { stopPairDiscovery(); cancelNote(); MainActivity.clearSplitPairing(ctx); }
 
     SharedPreferences prefs() { return ctx.getSharedPreferences("shz", Context.MODE_PRIVATE); }
     boolean hasWss() { return ctx.checkSelfPermission(WSS) == PackageManager.PERMISSION_GRANTED; }
@@ -153,6 +157,7 @@ final class ShizukuSetup {
         synchronized (ring) { lg = new JSONArray(ring); }
         o.put("setup", new JSONObject().put("phase", phase).put("message", message).put("done", done).put("total", total).put("log", lg));
         o.put("autostart", autostart());
+        o.put("splitPairing", MainActivity.splitPairingStatus());
         o.put("paired", prefs().getBoolean("paired", false));
         o.put("pairOk", pairOk);
         if (Priv.running()) verifyPairAsync();
@@ -167,6 +172,7 @@ final class ShizukuSetup {
     }
 
     private void set(String p, String m) {
+        if (phase.equals("pairing") && !p.equals("pairing")) MainActivity.clearSplitPairing(ctx);
         phase = p; message = m == null ? "" : m;
         log(p + " " + message);
     }

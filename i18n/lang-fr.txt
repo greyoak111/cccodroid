@@ -3269,4 +3269,7 @@
 3269	Seuls les fichiers mémoire ordinaires peuvent être consultés
 3270	Le fichier mémoire est trop volumineux (plus de 1 Mo)
 3271	Les mémoires sont en lecture seule ici
-3272	Inconnu
+3272	Ouvrir les réglages en écran partagé
+3273	Si la saisie dans la notification ne fonctionne pas, ouvrez les réglages à côté de cette page avant d’afficher le code. Gardez les deux fenêtres ouvertes.
+3274	Tentative d’ouverture des réglages en écran partagé…
+3275	Inconnu
