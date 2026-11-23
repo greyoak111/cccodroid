@@ -393,7 +393,7 @@
     paint();
   }
   segMirror($("set-effort"), (o) => o.value || t("默认"));
-  const PERM_SHORT = { default: "问我", acceptEdits: "接受编辑", plan: "计划", auto: "自动", dontAsk: "不问就拒", bypassPermissions: "全部放行" };
+  const PERM_SHORT = { default: tk("问我"), acceptEdits: tk("接受编辑"), plan: tk("计划"), auto: tk("自动"), dontAsk: tk("不问就拒"), bypassPermissions: tk("全部放行") };
   // 权限模式用原生下拉：六项带说明，分段控件在手机上塞不下
   segMirror($("set-parallel"), (o) => o.value, ["1", "2", "3", "4"]);
   // 设置里的「打开用量页」
@@ -557,7 +557,7 @@
       execPid = r.pid || 0;
       $("set-exec").value = r.pref;
       $("set-exec").querySelector('option[value="direct"]').disabled = !!r.must;
-      let now = t("现在是：{mode}", { mode: t(r.active === "loader" ? "经加载器" : "直接执行") });
+      let now = t("现在是：{mode}", { mode: r.active === "loader" ? t("经加载器") : t("直接执行") });
       if (r.ldso === "differ" || r.ldso === "missing") now += " · " + t("安装包里的 glibc 加载器和工具包里的不是同一版，经加载器暂时用不了：先更新工具包");
       $("exec-now").textContent = now;
     } catch {}

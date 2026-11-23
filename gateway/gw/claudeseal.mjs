@@ -16,7 +16,7 @@ import { tamperRecord } from "./tamper.mjs";
 
 const PLATFORM = "linux-arm64";
 const isVer = (v) => /^\d{1,6}\.\d{1,6}\.\d{1,6}(-[0-9A-Za-z.]{1,40})?$/.test(v || "");
-let cache = { fp: "", res: null };
+let cache = { fp: "", res: null, bin: "", dev: null, ino: null };
 const sealed = new Set();          // 这个进程里核过的版本目录
 // 部署出来的那份（files/app，有 FILES 清单）才核；仓库里直接跑的开发布局不核。
 // 不 import appfiles.mjs：终端里的 bin/claude 经 guard/cc-seal.mjs 也要核，那边不该再起一份文件守护
@@ -26,21 +26,121 @@ const APP_LAYOUT = /[\\/]files[\\/]app$/.test(HERE);
 let askRecheck = null;
 /** 定时补核那边挂进来（devside.mjs）：没清单时叫它尽快去取 */
 export const onSealUnknown = (fn) => { askRecheck = fn; };
-/** 起进程之后再看一眼：核过之后、真正执行之前程序被换掉了（来回替换卡时间窗），这一轮要停掉 */
-export const sealStillValid = (bin0 = PATHS.claude) => {
-  if (!cache.res || cache.res.ok !== true) return true;
-  try { return fpFor(fs.realpathSync(bin0)) === cache.fp; } catch { return false; }
+
+/** 将 Linux st_dev（BigInt 或 Number）转为 /proc/<pid>/maps 的十六进制 "major:minor"（两位起零填充） */
+export function formatProcMapsDev(dev) {
+  const d = typeof dev === "bigint" ? dev : BigInt(dev);
+  const major = ((d >> 8n) & 0xfffn) | ((d >> 32n) & ~0xfffn);
+  const minor = (d & 0xffn) | ((d >> 12n) & ~0xffn);
+  const hex = (v) => v.toString(16).padStart(2, "0");
+  return `${hex(major)}:${hex(minor)}`;
+}
+
+/** 解析 /proc/<pid>/maps，判断目标 (dev, ino) 是否已被进程映射（可选限定路径或可执行段） */
+export function procMapsHasInode(mapsText, dev, ino, { execOnly = false } = {}) {
+  if (!mapsText || dev == null || ino == null) return { matched: false, pathEntries: [] };
+  const wantDev = formatProcMapsDev(dev);
+  const wantIno = String(ino);
+  let matched = false;
+  const pathEntries = [];
+  for (const line of String(mapsText).split("\n")) {
+    if (!line) continue;
+    // 格式: addr perms offset dev inode [pathname...]
+    const m = /^\S+\s+(\S+)\s+\S+\s+([0-9a-fA-F]+:[0-9a-fA-F]+)\s+(\d+)(?:\s+(.*))?$/.exec(line);
+    if (!m) continue;
+    const [, perms, mDevRaw, mIno, rawPath = ""] = m;
+    const [maj, min] = mDevRaw.toLowerCase().split(":");
+    const mDev = `${maj.padStart(2, "0")}:${min.padStart(2, "0")}`;
+    const p = rawPath.trim();
+    if (p) pathEntries.push({ perms, dev: mDev, ino: mIno, path: p });
+    if (mDev === wantDev && mIno === wantIno && (!execOnly || perms.includes("x"))) {
+      matched = true;
+    }
+  }
+  return { matched, pathEntries };
+}
+
+const LOADER_EXE_RE = /(?:^|\/)(?:ld-linux-aarch64\.so\.1|libldlinux\.so|linker64|linker|libccrun\.so|libccenosysrun\.so)$/;
+
+/** 起进程之后再看一眼：核过之后、真正执行之前程序被换掉了（含「换入→spawn→换回」双跳 TOCTOU），这一轮要停掉。
+ *  防线 1（不受 PR_SET_DUMPABLE=0 / hidepid=2 影响）：核对入口链接 bin0、真实二进制 realBin 与所在版本目录的
+ *    dev / ino / 纳秒级 ctimeNs（非 root 进程无法回拨 Linux 内核 ctimeNs，任何移走再移回、改软链再改回或覆写都会推进 ctimeNs）；
+ *  防线 2（当 /proc/<pid> 可见时）：直跑核对 /proc/<pid>/exe 的 dev:ino，加载器模式核对 /proc/<pid>/maps 的 dev:ino 映射
+ *    （strictMaps=true 如收到 init 事件时要求必命中目标 dev:ino，拦截异名文件映射）。 */
+export const sealStillValid = (bin0 = PATHS.claude, seal = null, pid = 0, { strictMaps = false } = {}) => {
+  const ref = (seal && seal.ok === true && seal.ino != null) ? seal : cache.res;
+  if (!ref || ref.ok !== true) return true;
+  let realBin = "";
+  try {
+    const linkSt = fs.lstatSync(bin0, { bigint: true });
+    if (ref.linkCtimeNs != null && (linkSt.dev !== BigInt(ref.linkDev) || linkSt.ino !== BigInt(ref.linkIno) || linkSt.ctimeNs !== BigInt(ref.linkCtimeNs))) {
+      return false;
+    }
+    realBin = fs.realpathSync(bin0);
+    if (cache.res && cache.res.ok === true && cache.fp && fpFor(realBin) !== cache.fp) return false;
+    const binSt = fs.statSync(realBin, { bigint: true });
+    if (ref.dev != null && (binSt.dev !== BigInt(ref.dev) || binSt.ino !== BigInt(ref.ino))) return false;
+    if (ref.size != null && binSt.size !== BigInt(ref.size)) return false;
+    if (ref.ctimeNs != null && binSt.ctimeNs !== BigInt(ref.ctimeNs)) return false;
+    if (ref.dirCtimeNs != null) {
+      const dirSt = fs.statSync(path.dirname(realBin), { bigint: true });
+      if (dirSt.dev !== BigInt(ref.dirDev) || dirSt.ino !== BigInt(ref.dirIno) || dirSt.ctimeNs !== BigInt(ref.dirCtimeNs)) return false;
+    }
+  } catch { return false; }
+
+  const wantDev = ref.dev ?? cache.dev;
+  const wantIno = ref.ino ?? cache.ino;
+  if (!(Number.isInteger(pid) && pid > 0) || wantDev == null || wantIno == null) return true;
+
+  const procDir = `/proc/${pid}`;
+  if (!fs.existsSync(procDir)) return true;
+
+  let exeLink = "";
+  try { exeLink = fs.readlinkSync(`${procDir}/exe`); } catch (e) {
+    if (["EACCES", "EPERM", "ENOENT", "ESRCH"].includes(e.code)) return true;
+    return false;
+  }
+
+  const isLoader = LOADER_EXE_RE.test(exeLink);
+  if (!isLoader) {
+    try {
+      const exeSt = fs.statSync(`${procDir}/exe`, { bigint: true });
+      return exeSt.dev === BigInt(wantDev) && exeSt.ino === BigInt(wantIno);
+    } catch (e) {
+      if (["EACCES", "EPERM", "ENOENT", "ESRCH"].includes(e.code)) return true;
+      return false;
+    }
+  }
+
+  // 加载器模式（或监督器/ld.so 包装）：核对 /proc/<pid>/maps 中的映射 dev:ino
+  let maps = "";
+  try { maps = fs.readFileSync(`${procDir}/maps`, "utf8"); } catch (e) {
+    if (["EACCES", "EPERM", "ENOENT", "ESRCH"].includes(e.code)) return true;
+    return false;
+  }
+  const parsed = procMapsHasInode(maps, wantDev, wantIno);
+  if (parsed.matched) return true;
+  if (strictMaps) return false;
+  // spawn 紧后可能尚未完成 exec/mmap；若已经映射了目标路径（或同名可执行段）却不是核过的 dev:ino，当场拦截
+  const targetBase = path.basename(realBin || bin0);
+  const mappedSameTarget = parsed.pathEntries.some((en) =>
+    en.perms.includes("x") && (en.path === realBin || en.path === `${realBin} (deleted)` || path.basename(en.path.replace(/ \(deleted\)$/, "")) === targetBase)
+  );
+  if (mappedSameTarget) return false;
+  return true;
 };
 
-const fpFor = (bin) => { const d = path.dirname(bin); return fpOf(bin, path.join(d, "manifest.json"), path.join(d, "manifest.json.sig"), path.join(d, ".mismatch")); };
+const fpFor = (bin) => { const d = path.dirname(bin); return fpOf(bin, d, path.join(d, "manifest.json"), path.join(d, "manifest.json.sig"), path.join(d, ".mismatch")); };
 function fpOf(...files) {
-  return files.map((f) => { try { const s = fs.statSync(f); return `${f}:${s.size}:${s.mtimeMs}:${s.ctimeMs}:${s.ino}`; } catch { return f + ":-"; } }).join("|");
+  return files.map((f) => { try { const s = fs.statSync(f, { bigint: true }); return `${f}:${s.size}:${s.mtimeNs}:${s.ctimeNs}:${s.ino}`; } catch { return f + ":-"; } }).join("|");
 }
-async function sha256Async(f) {
+async function sha256AndStatAsync(f) {
   const h = crypto.createHash("sha256");
-  const fh = await fs.promises.open(f, "r");
+  const fh = await fs.promises.open(f, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   const b = Buffer.alloc(2 << 20);
   try {
+    const st = await fh.stat({ bigint: true });
+    if (!st.isFile()) throw new Error("claude binary is not a regular file");
     let pos = 0;
     while (true) {
       const { bytesRead } = await fh.read(b, 0, b.length, pos);
@@ -48,8 +148,12 @@ async function sha256Async(f) {
       h.update(b.subarray(0, bytesRead));
       pos += bytesRead;
     }
+    const stAfter = await fh.stat({ bigint: true });
+    if (st.dev !== stAfter.dev || st.ino !== stAfter.ino || st.size !== stAfter.size || st.ctimeNs !== stAfter.ctimeNs) {
+      throw new Error("claude binary changed while hashing");
+    }
+    return { hex: h.digest("hex"), st: stAfter };
   } finally { await fh.close().catch(() => {}); }
-  return h.digest("hex");
 }
 
 const SEAL_INFLIGHT = new Map();
@@ -88,8 +192,29 @@ export async function claudeSeal(bin0 = PATHS.claude, { force = false, home = CF
         const j = JSON.parse(m.toString("utf8")), p = j && j.platforms && j.platforms[PLATFORM];
         if (!p || !/^[a-f0-9]{64}$/.test(p.checksum || "")) res = { ok: false, why: "signed manifest has no " + PLATFORM + " entry" };
         else if (j.version !== path.basename(dir)) res = { ok: false, why: `manifest is for ${j.version}, directory is ${path.basename(dir)}` };
-        else if ((await sha256Async(bin)) !== p.checksum) res = { ok: false, why: "binary does not match the signed manifest" };
-        else { res = { ok: true, version: j.version }; sealed.add(dir); }
+        else {
+          const { hex, st } = await sha256AndStatAsync(bin);
+          if (hex !== p.checksum) res = { ok: false, why: "binary does not match the signed manifest" };
+          else {
+            const dirSt = fs.statSync(dir, { bigint: true });
+            const linkSt = fs.lstatSync(bin0, { bigint: true });
+            res = {
+              ok: true,
+              version: j.version,
+              dev: st.dev,
+              ino: st.ino,
+              size: st.size,
+              ctimeNs: st.ctimeNs,
+              dirDev: dirSt.dev,
+              dirIno: dirSt.ino,
+              dirCtimeNs: dirSt.ctimeNs,
+              linkDev: linkSt.dev,
+              linkIno: linkSt.ino,
+              linkCtimeNs: linkSt.ctimeNs,
+            };
+            sealed.add(dir);
+          }
+        }
       } catch (e) {
         // 验签模块缺了（files/app 有核对还原，正常不会）：发行版照样不起
         res = /pgp\.mjs not found/.test(e.message) && !editionSealed() ? { ok: null, why: e.message } : { ok: false, why: "manifest signature: " + e.message };
@@ -102,7 +227,7 @@ export async function claudeSeal(bin0 = PATHS.claude, { force = false, home = CF
       tamperRecord("claude", [`${path.basename(dir)}/claude: ${res.why}`]);
     } else if (res.ok === null && cache.res?.ok !== null) log(`[Claude Code 核验] 核不了（${res.why}），照常起；连得上官方时会补存签名清单`);
     if (res.why === "no signed manifest") try { askRecheck?.(); } catch {}
-    cache = { fp, res };
+    cache = { fp, res, bin, dev: res?.dev ?? null, ino: res?.ino ?? null };
     return res;
   })().finally(() => { if (SEAL_INFLIGHT.get(flightKey) === run) SEAL_INFLIGHT.delete(flightKey); });
   SEAL_INFLIGHT.set(flightKey, run);

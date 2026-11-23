@@ -104,30 +104,57 @@ function contextOf(ev) {
 }
 
 /** 会话最新的上下文用量：从尾部倒着找第一行定得下的（正向读一页时页里没有，书签 / 上次读到打开要用，#89）。
- *  最多扫 MAX_SCAN，找不到返回 null */
-export async function latestContextTokens(file) {
-  const CH = 256 * 1024, MAX_SCAN = 12 * 1024 * 1024;
+ *  最多扫 MAX_SCAN，找不到返回 null；与 readSessionPage 同口径用 carry[] 攒块、超 maxLine 直接丢弃该半行，避免 O(N^2) 拷贝 */
+export async function latestContextTokens(file, { maxLine = 16 << 20 } = {}) {
+  const CH = 256 * 1024, MAX_SCAN = 12 * 1024 * 1024, MAX_LINE = maxLine;
   const fh = await fs.promises.open(file, "r");
   try {
-    let pos = (await fh.stat()).size, tail = Buffer.alloc(0), scanned = 0;
+    let pos = (await fh.stat()).size, scanned = 0;
+    let carry = [], carryLen = 0, carryOver = false;
     while (pos > 0 && scanned < MAX_SCAN) {
       const start = Math.max(0, pos - CH);
       const chunk = Buffer.alloc(pos - start);
       await fh.read(chunk, 0, chunk.length, start);
-      const data = tail.length ? Buffer.concat([chunk, tail]) : chunk;
       pos = start; scanned += chunk.length;
-      let end = data.length;
+      let end = chunk.length;
       for (;;) {
-        const nl = end - 2 >= 0 ? data.lastIndexOf(10, end - 2) : -1;
-        if (nl < 0 && start > 0) { tail = data.subarray(0, end); break; }
-        const line = data.toString("utf8", nl < 0 ? 0 : nl + 1, end).trim();
-        end = nl < 0 ? 0 : nl + 1;
+        const searchFrom = (carry.length || carryOver) ? end - 1 : end - 2;
+        const nl = searchFrom >= 0 ? chunk.lastIndexOf(10, searchFrom) : -1;
+        if (nl < 0) {
+          if (start > 0) {
+            if (!carryOver) {
+              carry.push(Buffer.from(chunk.subarray(0, end)));
+              carryLen += end;
+              if (carryLen > MAX_LINE) { carry = []; carryLen = 0; carryOver = true; }
+            }
+            break;
+          }
+          let line = "";
+          if (!carryOver && end + carryLen <= MAX_LINE) {
+            const parts = carry.length ? [chunk.subarray(0, end), ...carry.slice().reverse()] : [chunk.subarray(0, end)];
+            line = Buffer.concat(parts).toString("utf8").trim();
+          }
+          carry = []; carryLen = 0; carryOver = false;
+          if (line) {
+            let ev = null; try { ev = JSON.parse(line); } catch {}
+            const c = ev && contextOf(ev);
+            if (c) return c.n;
+          }
+          break;
+        }
+        const seg = chunk.subarray(nl + 1, end);
+        let line = "";
+        if (!carryOver && seg.length + carryLen <= MAX_LINE) {
+          line = carry.length ? Buffer.concat([seg, ...carry.slice().reverse()]).toString("utf8").trim() : seg.toString("utf8").trim();
+        }
+        carry = []; carryLen = 0; carryOver = false;
         if (line) {
           let ev = null; try { ev = JSON.parse(line); } catch {}
           const c = ev && contextOf(ev);
           if (c) return c.n;
         }
-        if (nl < 0) break;
+        end = nl;
+        if (end === 0) break;
       }
     }
     return null;
@@ -236,8 +263,8 @@ export async function readSessionPage(file, { before = null, limit = 40, exclude
  *  页的边界都落在一轮的开头。一轮里工具调用太多时到 limit*4 就在行边界收页，这时一次调用和它的结果可能分在两页（结果由前端待贴表补上）。
  *  返回 { items, from, next, size }：from 是这一页第一行的偏移（往前翻用 before=from），next 是下一页的起点；next === size 表示到底了。
  *  excludeFrom：时间戳不早于它的行不给（界面里正实时显示的那几轮）。 */
-export async function readSessionForward(file, { after = 0, limit = 40, excludeFrom = 0 } = {}) {
-  const CH = 256 * 1024, MAX_SCAN = 12 * 1024 * 1024;
+export async function readSessionForward(file, { after = 0, limit = 40, excludeFrom = 0, maxLine = 64 << 20 } = {}) {
+  const CH = 256 * 1024, MAX_SCAN = 12 * 1024 * 1024, MAX_LINE = maxLine;
   const fh = await fs.promises.open(file, "r");
   try {
     const size = (await fh.stat()).size;
@@ -255,15 +282,39 @@ export async function readSessionForward(file, { after = 0, limit = 40, excludeF
       }
     }
     const from = pos, items = [];
-    let rest = Buffer.alloc(0), scanned = 0, base = pos;
+    // 用 carry[] 攒块、遇 \n 才一次性合并，避免超长单行退化成 O(N^2) 拷贝；超 MAX_LINE 后进入 dropping 状态直到下一个 \n
+    let carry = [], carryLen = 0, dropping = false, scanned = 0, lineBase = pos;
     while (pos < size) {
+      const chunkOff = pos;
       const chunk = Buffer.alloc(Math.min(CH, size - pos)); await fh.read(chunk, 0, chunk.length, pos);
       pos += chunk.length; scanned += chunk.length;
-      const data = rest.length ? Buffer.concat([rest, chunk]) : chunk;
       let start = 0;
-      for (let nl = data.indexOf(10); nl !== -1; nl = data.indexOf(10, start)) {
-        const lineAt = base + start, line = data.toString("utf8", start, nl).trim();
+      while (start < chunk.length) {
+        const nl = chunk.indexOf(10, start);
+        if (nl === -1) {
+          const seg = chunk.subarray(start);
+          if (!dropping) {
+            if (!carry.length) lineBase = chunkOff + start;
+            if (carryLen + seg.length > MAX_LINE) {
+              carry = []; carryLen = 0; dropping = true;
+            } else {
+              carry.push(Buffer.from(seg)); carryLen += seg.length;
+            }
+          }
+          break;
+        }
+        const seg = chunk.subarray(start, nl);
+        const lineAt = (carry.length || dropping) ? lineBase : chunkOff + start;
         start = nl + 1;
+        if (dropping) {
+          dropping = false; carry = []; carryLen = 0; lineBase = chunkOff + start;
+          continue;
+        }
+        let line = "";
+        if (carryLen + seg.length <= MAX_LINE) {
+          line = (carry.length ? Buffer.concat([...carry, seg]) : seg).toString("utf8").trim();
+        }
+        carry = []; carryLen = 0; lineBase = chunkOff + start;
         if (!line) continue;
         let ev = null; try { ev = JSON.parse(line); } catch {}
         if (!ev || (excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) continue;
@@ -277,14 +328,12 @@ export async function readSessionForward(file, { after = 0, limit = 40, excludeF
         if (items.length >= limit * 4 && lineAt > from) return { items, from, next: lineAt, size };
         items.push(...its);
       }
-      base += start; rest = Buffer.from(data.subarray(start));
-      if (rest.length > 64 << 20) { base += rest.length; rest = Buffer.alloc(0); }   // 单行超长：跳过
-      if (scanned >= MAX_SCAN && items.length) return { items, from, next: base, size };
+      if (scanned >= MAX_SCAN && items.length) return { items, from, next: (carry.length || dropping) ? lineBase : pos, size };
     }
     // 最后一行没换行：是完整的 JSON 就照样算（导入的、被打断的记录末行常不带换行，#98 03-009）；
     // 解析不了就是还在写，当作到底了 —— 再往后的内容走事件总线实时来，不然界面会反复来要一页空的。
     // 正在跑的那一轮的行由 excludeFrom 挡掉，不会和实时来的重复
-    const tail = rest.toString("utf8").trim();
+    const tail = !dropping && carry.length ? Buffer.concat(carry).toString("utf8").trim() : "";
     if (tail && items.length < limit * 4) {
       let ev = null; try { ev = JSON.parse(tail); } catch {}
       if (ev && !(excludeFrom && ev.timestamp && Date.parse(ev.timestamp) >= excludeFrom)) {

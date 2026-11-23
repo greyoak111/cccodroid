@@ -33,7 +33,7 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
   window.addEventListener("error", (e) => {
     // 光秃秃的「Script error.」没有文件和行号：是从外壳 evaluateJavascript 注入的代码里冒出去的错，WebView 把细节抹了。
     // 写在顶栏上谁也看不懂，只进控制台；外壳注入的每段代码自己 try 住交给 __ccErr，页面这边的入口也用 guardHook 包着
-    if (!e.filename && /^Script error\.?$/.test(e.message || "")) { console.warn("[cc] 外壳注入的脚本出错（细节被 WebView 隐去）"); return; }
+    if (!e.filename && /^Script error\.?$/.test(e.message || "")) { console.warn("[cc] Host-injected script error (details hidden by WebView)"); return; }
     // 带上出错位置（app.js 是拼起来的一整份，行号用 scripts/appjs.mjs 对回分段）
     const at = e.filename ? `[${e.filename.split("/").pop().split("?")[0]}:${e.lineno}:${e.colno}] ` : "";   // 放前头：顶栏截断时位置还在
     showErr(at + (e.message || String(e.error)));
@@ -255,9 +255,11 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       return a;
     }
     /** 播一个 CSS 关键帧：时长按档位；用 Web Animations 的话会和元素自己的 CSS 动画打架，这里走 class 切换 */
-    function play(el, cls, ttl) {
+    function play(el, cls, ttl, restart = true) {
       if (!on() || !el) return;
-      el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+      // 工具结果成批到达时，首次播放不用逐张强制排版（避免同步读取 offsetWidth 触发重排）。
+      if (restart) { el.classList.remove(cls); void el.offsetWidth; }
+      el.classList.add(cls);
       clearTimeout(el["_mo_" + cls]);
       // 摘类名时元素自己原本的动画（比如 .msg 的淡入）会被浏览器当成新动画重播一遍 —— 看着就是「又渲染了一次」。
       // 摘掉后把刚起头的那几个直接拨到结尾
@@ -589,8 +591,24 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
       });
       return;
     }
+    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = 0; }
     chatEl.scrollTop = chatEl.scrollHeight;
     progTop = chatEl.scrollTop;
+  }
+  // 工具事件可能同帧到一批，不要每增一张卡就写 DOM、再量聊天区。
+  // 显式发送、返回最新和重放的收尾仍走原来的 scrollDown。
+  let toolFollowGen = -1;
+  function queueToolFollow() {
+    if (busReplay) return scrollDown();
+    if (!stick || touching || view.next != null || document.hidden) return;
+    const gen = view.gen;
+    if (scrollRaf && toolFollowGen === gen) return;
+    if (scrollRaf) cancelAnimationFrame(scrollRaf);
+    toolFollowGen = gen;
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      if (gen === view.gen && view.next == null && !document.hidden && !busReplay) scrollDown();
+    });
   }
   function relTime(ms) {
     const d = Date.now() - ms;

@@ -346,7 +346,7 @@
       });
     }
     // 已知问题：「状态 · 厂商 · **标题**：说明」→ 可折叠卡片
-    const ISSUE_OK = ["修好了", "Fixed"], ISSUE_ALT = ["有绕法", "Workaround"];   // 帮助只有中英两份
+    const ISSUE_OK = ["修好了", "Fixed"], ISSUE_ALT = ["有绕法", "Workaround"]; /* i18n-ignore */   // 帮助只有中英两份
     body.querySelectorAll(".help-sec li").forEach((li) => {
       const m = li.innerHTML.match(/^\s*([^·<]+?)\s*·\s*([^·<]+?)\s*·\s*<strong>(.+?)<\/strong>\s*[：:]\s*([\s\S]*)$/);
       if (!m) return;

@@ -84,6 +84,12 @@ export function localCustomActive() {
   return c.ok ? c.cfg : null;
 }
 let llStarting = null;
+let llStartingSig = "";
+let llStartingId = "";
+let llWaiters = 0;
+let llLeaseUntil = 0;
+let llLeaseSig = "";
+const LLAMA_HANDOFF_LEASE_MS = 5000;
 
 export function localModels() {
   const out = [], seen = new Set();
@@ -139,8 +145,9 @@ function llamaInfo() {
   };
 }
 
-/** 确保 llama-server 跑着、载的是要的模型。note(key, text) 往当前这一轮里报进度 */
-export async function ensureLlama(want, note) {
+/** 确保 llama-server 跑着、载的是要的模型。note(key, text) 往当前这一轮里报进度；
+ *  run（可选）在加载期即挂载占位，防止并发异模型请求在加载完成→开跑间隙抢杀刚载好的模型 */
+export async function ensureLlama(want, note, run = null) {
   const list = localModels();
   // 会话钉住的模型被删了：以前静默换成列表里最小那个，顶栏却还显示原模型（0.6.9 审计 195-F.7）
   const m = want ? list.find((x) => x.id === want) : list[0];
@@ -149,15 +156,44 @@ export async function ensureLlama(want, note) {
   if (!fs.existsSync(llamaBin())) throw new Error(tz("没装 llama.cpp：到「扩展」页装 llama-cpp 组件"));
   LL.lastUse = Date.now();
   const sig = llamaPlan(m).sig;
-  if (LL.child && LL.sig === sig && LL.state === "ready" && await llamaHealthy()) return m;
+  if (LL.child && LL.sig === sig && LL.state === "ready" && await llamaHealthy()) {
+    llLeaseSig = sig;
+    llLeaseUntil = Date.now() + LLAMA_HANDOFF_LEASE_MS;
+    if (run) localRunAttach(run);
+    return m;
+  }
   await verifySharedModel(m, note);
-  if (llStarting && LL.sig === sig) { await llStarting; return m; }
-  if (llStarting) { try { await llStarting; } catch {} }
-  // 只有一个服务、一个槽：另一个会话正用着它答题时换模型，会把那边的生成掐断（#97 02-007）。这边先报错，等那边答完。
-  // 看的是所有还活着的端侧轮次，不是最后一轮：并行时最后一轮可能已经结束（FIND-009）
-  if (LL.child && LL.sig !== sig && liveRuns().length) throw new Error(tz("端侧模型 {model} 正在另一个会话里用，等它答完再换模型", { model: LL.id }));
+  // 同模型/参数已在加载中：共享这次加载，并把等待方计入占位，避免加载刚结束就被别的会话抢换
+  if (llStarting && llStartingSig === sig) {
+    llWaiters++;
+    try { await llStarting; } finally { llWaiters--; }
+    llLeaseSig = sig;
+    llLeaseUntil = Date.now() + LLAMA_HANDOFF_LEASE_MS;
+    if (run) localRunAttach(run);
+    return m;
+  }
+  // 另一会话正在加载不同模型：直接报忙拒绝，绝不等它加载几十秒完后立刻杀掉
+  if (llStarting && llStartingSig && llStartingSig !== sig) {
+    throw new Error(tz("端侧模型 {model} 正在另一个会话里用，等它答完再换模型", { model: llStartingId || LL.id || m.id }));
+  }
+  // 只有一个服务、一个槽：另一个会话正用着它（或刚加载完处于交接租约期内）时换模型，会把那边掐断（#97 02-007 / 并发加载抢占）。
+  // 看的是所有还活着的端侧轮次、等待加载的调用和短期交接租约
+  const leasedOther = llLeaseSig && llLeaseSig !== sig && Date.now() < llLeaseUntil;
+  if (LL.child && LL.sig !== sig && (liveRuns().length || llWaiters > 0 || leasedOther)) {
+    throw new Error(tz("端侧模型 {model} 正在另一个会话里用，等它答完再换模型", { model: LL.id }));
+  }
   if (LL.child) llamaStop("换模型或参数");
-  llStarting = llamaStart(m, note).finally(() => { llStarting = null; });
+  llStartingSig = sig;
+  llStartingId = m.id;
+  if (run) localRunAttach(run);
+  llStarting = llamaStart(m, note).then(() => {
+    llLeaseSig = sig;
+    llLeaseUntil = Date.now() + LLAMA_HANDOFF_LEASE_MS;
+  }).finally(() => {
+    llStarting = null;
+    llStartingSig = "";
+    llStartingId = "";
+  });
   await llStarting;
   return m;
 }
@@ -261,6 +297,8 @@ function llamaStart(m, note) {
   });
 }
 function llamaStop(why) {
+  llLeaseUntil = 0;
+  llLeaseSig = "";
   const c = LL.child;
   if (!c) return;
   log(`[local] 停 llama-server（${why}）`);
@@ -523,7 +561,8 @@ if (PREFIX && LIVE) installLocalSkill();
 /** 把应用界面叫回前台。cccodroid 由 App 进程做（Shizuku 或通知）；开发端直接 priv am start */
 export function toFront(text) {
   if (PREFIX) return privCall({ op: "to_front", text }, 8000);
-  return new Promise((ok) => execFile("priv", ["am start --activity-reorder-to-front -n li.dsh.claudecli/.MainActivity"],
+  const pkg = process.env.CCAPP_PKG || "cc.codroid";
+  return new Promise((ok) => execFile("priv", [`am start --activity-reorder-to-front -n ${pkg}/.MainActivity`],
     { timeout: 8000, env: process.env }, (e) => ok(e ? { message: e.message.slice(0, 120) } : { via: "priv" })));
 }
 

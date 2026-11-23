@@ -313,13 +313,62 @@ final class DeviceTools {
         return new JSONObject().put("ok", true).put("apps", out);
     }
 
-    /** 严格校验 http/https 地址：禁空白与控制字符、要求非空有效主机、禁内嵌凭据（user:pass@host） */
-    static Uri safeHttpUri(String u) {
-        if (u == null || u.isEmpty()) return null;
+    private static boolean isValidPort(String port) {
+        if (port == null || port.isEmpty() || port.length() > 5) return false;
+        int val = 0;
+        for (int i = 0; i < port.length(); i++) {
+            char pc = port.charAt(i);
+            if (pc < '0' || pc > '9') return false;
+            val = val * 10 + (pc - '0');
+        }
+        return val >= 1 && val <= 65535;
+    }
+
+    /** 纯 Java 侧严格校验 http/https 地址（供安卓与桌面 JVM 单元测试共用）：
+     *  禁空白与控制字符、只收 http/https、禁内嵌凭据（user:pass@host）与反斜杠/%编码混淆、要求非空有效主机与合法端口。 */
+    static boolean isSafeHttpUrl(String u) {
+        if (u == null || u.isEmpty()) return false;
         for (int i = 0; i < u.length(); i++) {
             char c = u.charAt(i);
-            if (c <= 0x20 || c == 0x7f || Character.isWhitespace(c)) return null;
+            if (c <= 0x20 || c == 0x7f || Character.isWhitespace(c)) return false;
         }
+        int sep = u.indexOf("://");
+        if (sep <= 0) return false;
+        String scheme = u.substring(0, sep);
+        if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) return false;
+        int authStart = sep + 3;
+        int authEnd = u.length();
+        for (int i = authStart; i < u.length(); i++) {
+            char c = u.charAt(i);
+            if (c == '/' || c == '?' || c == '#') { authEnd = i; break; }
+            if (c == '\\' || c == '%') return false;
+        }
+        String auth = u.substring(authStart, authEnd);
+        if (auth.isEmpty() || auth.indexOf('@') >= 0) return false;
+        String host;
+        if (auth.charAt(0) == '[') {
+            int rb = auth.indexOf(']');
+            if (rb <= 1) return false;
+            for (int i = 1; i < rb; i++) {
+                char hc = auth.charAt(i);
+                boolean hex = (hc >= '0' && hc <= '9') || (hc >= 'a' && hc <= 'f') || (hc >= 'A' && hc <= 'F');
+                if (!hex && hc != ':' && hc != '.') return false;
+            }
+            host = auth.substring(0, rb + 1);
+            if (rb + 1 < auth.length()) {
+                if (auth.charAt(rb + 1) != ':' || !isValidPort(auth.substring(rb + 2))) return false;
+            }
+        } else {
+            int colon = auth.indexOf(':');
+            host = colon >= 0 ? auth.substring(0, colon) : auth;
+            if (colon >= 0 && !isValidPort(auth.substring(colon + 1))) return false;
+        }
+        return !host.isEmpty() && !".".equals(host);
+    }
+
+    /** 严格校验 http/https 地址：禁空白与控制字符、要求非空有效主机、禁内嵌凭据（user:pass@host） */
+    static Uri safeHttpUri(String u) {
+        if (!isSafeHttpUrl(u)) return null;
         Uri uri = Uri.parse(u);
         String scheme = uri.getScheme();
         if (scheme == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) return null;
@@ -345,9 +394,9 @@ final class DeviceTools {
         String what;
         switch (kind) {
             case "url": {
-                String u = a.optString("url");
-                if (!u.matches("(?i)^https?://.+")) return fail(Tr.t("url 只收 http / https"));
-                i = new Intent(Intent.ACTION_VIEW, Uri.parse(u)); what = u; break;
+                Uri uri = safeHttpUri(a.optString("url"));
+                if (uri == null) return fail(Tr.t("url 只收 http / https"));
+                i = new Intent(Intent.ACTION_VIEW, uri); what = uri.getScheme() + "://" + uri.getHost(); break;
             }
             case "map":
                 i = new Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(a.optString("query"))));

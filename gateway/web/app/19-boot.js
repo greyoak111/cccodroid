@@ -68,7 +68,7 @@
       tbNumber();
       root.classList.toggle("tb-open", open);
       more.setAttribute("aria-expanded", String(open));
-      more.setAttribute("aria-label", t(open ? "收起工具" : "展开工具"));
+      more.setAttribute("aria-label", open ? t("收起工具") : t("展开工具"));
       try { localStorage.setItem(KEY, open ? "1" : "0"); } catch {}
     };
     // 打开应用时按上次的样子直接摆好，不放动画

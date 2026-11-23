@@ -418,6 +418,10 @@
   $("fs-crumbs").addEventListener("click", (e) => {
     const c = e.target.closest(".crumb");
     if (!c) return;
+    if (c.dataset.adi != null && state.fs.arc?.crumbDirs) {
+      const dir = state.fs.arc.crumbDirs[Number(c.dataset.adi)];
+      if (dir != null) return arcLoad(dir);
+    }
     if (c.dataset.ad != null) return arcLoad(c.dataset.ad);
     fsLoad(c.dataset.p);
   });
@@ -432,9 +436,16 @@
 
   function arcCrumbs(arc) {
     const parts = arc.dir ? arc.dir.split("/") : [];
-    const html = [`<span class="crumb" data-p="${esc(dirOf(arc.path))}">…</span>`, `<span class="crumb ${parts.length ? "" : "cur"}" data-ad="">${kindIcon("archive")}${esc(arc.name)}</span>`];
+    // 按下标索引（data-adi）而非把路径塞进 data-ad 属性：路径含 \r 时 HTML 属性归一化会把 \r 折成 \n 导致点面包屑失配
+    const dirs = [""];
+    const html = [`<span class="crumb" data-p="${esc(dirOf(arc.path))}">…</span>`, `<span class="crumb ${parts.length ? "" : "cur"}" data-adi="0">${kindIcon("archive")}${esc(arc.name)}</span>`];
     let acc = "";
-    parts.forEach((seg, i) => { acc = arcJoin(acc, seg); html.push(`<span class="crumb ${i === parts.length - 1 ? "cur" : ""}" data-ad="${esc(acc)}">${esc(seg)}</span>`); });
+    parts.forEach((seg, i) => {
+      acc = arcJoin(acc, seg);
+      const idx = dirs.push(acc) - 1;
+      html.push(`<span class="crumb ${i === parts.length - 1 ? "cur" : ""}" data-adi="${idx}">${esc(seg)}</span>`);
+    });
+    arc.crumbDirs = dirs;
     return html.join('<span class="sep">/</span>');
   }
 
@@ -632,14 +643,15 @@
 
   // 任务不因离开而取消。只让最新任务控制对应的进度条，收尾不改别的列表/压缩包会话。
   const arcProgress = new WeakMap();
+  const FS_JOB_KEY = {};
   async function arcRunJob(kind, body, dest, origin) {
-    const key = origin.arc || $("fs-job"), token = {};
+    const key = origin.arc || FS_JOB_KEY, token = {};
     arcProgress.set(key, token);
     const jobBox = () => {
       if (arcProgress.get(key) !== token) return null;
-      if (!origin.arc) return key;
-      // 包内导航会重建 DOM；只在原会话里重新绑定进度条。
-      return origin.here() && VW.path === origin.arc.path ? $("vw-arc-job") : null;
+      // 目录切换或包内导航会重建 DOM；按 id 重查并检查 isConnected，避免操作游离节点
+      const el = origin.arc ? (origin.here() && VW.path === origin.arc.path ? $("vw-arc-job") : null) : $("fs-job");
+      return el && el.isConnected ? el : null;
     };
     const clear = () => {
       const box = jobBox();
@@ -657,14 +669,15 @@
     let line;
     const paint = () => {
       const box = jobBox();
-      if (!box) return;
-      if (!line || line.parentNode !== box) {
+      if (!box || !box.isConnected) return;
+      if (!line || !line.isConnected || line.parentNode !== box) {
         box.classList.remove("hidden");
         box.innerHTML = `<span class="tiny fs-job-t"></span><button class="btn ghost sm" type="button">${esc(t("取消"))}</button>`;
         line = box.querySelector(".fs-job-t");
-        box.querySelector("button").onclick = () => arcPost("cancel", { id: j.id }).catch(() => {});
+        const cancelBtn = box.querySelector("button");
+        if (cancelBtn) cancelBtn.onclick = () => arcPost("cancel", { id: j.id }).catch(() => {});
       }
-      line.textContent = `${label} ${j.pct || 0}%`;
+      if (line) line.textContent = `${label} ${j.pct || 0}%`;
     };
     let pollFails = 0;
     while (j.state === "running") {
@@ -686,6 +699,15 @@
         if (!state.fs.arc) {
           fsDotsAt = 0;
           await fsLoad(origin.dir, { keepSel: true, keepQ: true, keepMulti: true });
+        }
+      } else if (origin.arc && !state.fs.arc && state.fs.path && !filesEl.classList.contains("hidden")) {
+        // 分屏/宽屏下查看器内解压完成刷新右侧文件列表时，保留当前搜索词（keepQ）与多选状态（keepMulti）
+        const cur = state.fs.path.replace(/\/+$/, "") || "/";
+        const dst = String(dest || "").replace(/\/+$/, "") || "/";
+        const dstParent = dirOf(dst).replace(/\/+$/, "") || "/";
+        if (cur === dst || cur === dstParent) {
+          fsDotsAt = 0;
+          await fsLoad(state.fs.path, { keepSel: true, keepQ: true, keepMulti: true });
         }
       }
     } else if (j.state === "cancelled") toast(t("已取消"));

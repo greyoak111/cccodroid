@@ -26,4 +26,7 @@ if [ -f "$AJAR" ]; then
   # 05-工具包重装丢组件：同一版重装时组件自己 dpkg 包清单里的文件要跟着搬（只造 MANIFEST，不碰 org.json）
   javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/InstallerCarryTest.java"
   java -cp "$OUT:$AJAR" cc.codroid.InstallerCarryTest
+  # DeviceTools 两条打开 URL 路径统一严格校验（safeHttpUri / isSafeHttpUrl）
+  javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/DeviceToolsUrlTest.java"
+  java -cp "$OUT:$AJAR" cc.codroid.DeviceToolsUrlTest
 else echo "跳过 WhatsNewPickTest（没有 android.jar）"; fi

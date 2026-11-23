@@ -98,6 +98,8 @@ $CC_ANDROID -O2 -shared -fPIC -nostdlib -fno-stack-protector -Wl,-z,noexecstack 
 # 同一份源码的 bionic 版：排在 termux-exec 前面，把 bionic 进程里 exec glibc 程序 / glibc ld.so 改走 APK 里的 ld.so
 $CC_ANDROID -DBIONIC -O2 -shared -fPIC -fno-stack-protector -Wl,-z,noexecstack -Wl,--hash-style=both \
   -o "$NL/libccexecshimb.so" "$A/native/exec-shim.c" -ldl
+# 「经加载器」下给 Go / 静态二进制等直发裸 SYS_execve（绕过 LD_PRELOAD）的程序提供的可执行跳板（见 loader-run.c）
+$CC_ANDROID -O2 -o "$NL/libccrun.so" "$A/native/loader-run.c"
 # 不可转储：网关（LD_PRELOAD）和发行版的 claude（--preload）挂它，认 CCAPP_NODUMP=1。不依赖 libc，bionic / glibc 两边都能载
 $CC_ANDROID -O2 -shared -fPIC -nostdlib -fno-stack-protector -Wl,-z,noexecstack -Wl,--hash-style=both \
   -o "$NL/libccnodump.so" "$A/native/nodump.c"

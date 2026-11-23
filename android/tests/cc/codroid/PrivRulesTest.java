@@ -90,6 +90,7 @@ public final class PrivRulesTest {
         sh(true, "am start -a android.intent.action.CALL -d tel:10086");
         // v0514 审查低-1：打开界面、写共享存储、读 Wi-Fi / 使用记录都要问
         sh(true, "am start --activity-reorder-to-front -n li.dsh.claudecli/.MainActivity");
+        sh(true, "am start --activity-reorder-to-front -n cc.codroid/.MainActivity");
         sh(true, "am start -a android.intent.action.VIEW -d https://example.com");
         sh(true, "am start-activity -n com.x/.A");
         sh(true, "echo hi > /sdcard/a.txt");

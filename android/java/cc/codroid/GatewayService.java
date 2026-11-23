@@ -497,6 +497,9 @@ public class GatewayService extends Service {
                 pb.environment().put("LD_PRELOAD", pb.environment().get("LD_PRELOAD").replace(tx, new File(gw.dir, "libtermux-exec-linker-ld-preload.so").getPath()));
             }
             pb.environment().put("CCAPP_CHILD_NODE", env.bin("node").getPath());
+            // 受核验的网关自身 Node 运行时路径：供 guardHooks() 优先锚定 files/gw/node（而非可写 $PREFIX/bin/node）
+            pb.environment().put("CCAPP_GW_NODE", gw.node().getPath());
+            pb.environment().put("CCAPP_GW_LIB", gw.dir.getPath());
             // 网关起 claude 用这份 glibc（gateway/gw/config.mjs PATHS.claudeLoader / claudeLib），起之前按钉子再核一遍（gw/gwpin.mjs）
             pb.environment().put("CCAPP_GW_GLIBC_LIB", gw.glibc.getPath());
             pb.environment().put("CCAPP_GW_LOADER", env.loader ? env.nlib("libldlinux.so") : gw.loader().getPath());

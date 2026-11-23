@@ -439,24 +439,100 @@ function userSettings() {
 }
 
 // ── 自动记忆 ──
+// 上游 Claude Code 对 <=200 字符的 cwd 编码就是简单 replace(/[^a-zA-Z0-9]/g, "-")（不带哈希），
+// 网关不能单方面改编码规则（否则会和 Claude Code 实际读写的目录错位）。
+// 因此保持 memoryDir() 编码与上游一致，并在封口时：
+//   1. 记录「编码目录 → 真实项目目录」映射，不同真实项目撞上同一编码目录时记日志并给出碰撞提示；
+//   2. 若 raw cwd（未 realpath）与 realOr(cwd) 编出不同目录且前者存在，一并纳入扫描与重核，杜绝跨别名漏扫。
 const sanitize = (p) => { const s = p.replace(/[^a-zA-Z0-9]/g, "-"); return s.length <= 200 ? s : s.slice(0, 200) + "-" + sha(p).slice(0, 8); };
 export function memoryDir(cwd) { return path.join(userClaude(), "projects", sanitize(realOr(cwd)), "memory"); }
-/** 记忆目录查一遍：命中返回 found；同时给出指纹（起进程紧前再比） */
-export function scanMemory(dir) {
+function extraAliasMemoryDirs(cwd, primaryDir) {
+  const out = [];
+  if (!cwd) return out;
+  const raw = path.resolve(cwd);
+  const rawDir = path.join(userClaude(), "projects", sanitize(raw), "memory");
+  if (rawDir !== primaryDir) {
+    try {
+      const a = fs.statSync(rawDir), b = (() => { try { return fs.statSync(primaryDir); } catch { return null; } })();
+      if (a.isDirectory() && (!b || a.dev !== b.dev || a.ino !== b.ino)) out.push(rawDir);
+    } catch {}
+  }
+  return out;
+}
+function sameRealDir(a, b) {
+  if (a === b) return true;
+  try {
+    const sa = fs.statSync(a), sb = fs.statSync(b);
+    return sa.dev === sb.dev && sa.ino === sb.ino;
+  } catch { return false; }
+}
+const COLLISION_LOGGED = new Set();
+function writeOwnersAtomicNoFollow(dir, mapFile, owners) {
+  let tmp = "";
+  try {
+    const dst = fs.lstatSync(dir);
+    if (!dst.isDirectory() || dst.isSymbolicLink()) return;
+    tmp = `${mapFile}.tmp-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
+    const fd = fs.openSync(tmp, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW, 0o600);
+    try { fs.writeFileSync(fd, JSON.stringify(owners)); } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, mapFile); // rename 在 mapFile 为预埋软链时原子替换软链本身，绝不跟随覆写目标文件
+  } catch {
+    if (tmp) try { fs.unlinkSync(tmp); } catch {}
+  }
+}
+function checkMemoryCollision(cwd, memDir) {
+  const realCwd = realOr(cwd);
+  const key = path.basename(path.dirname(memDir));
+  const rootDir = ROOT();
+  const mapFile = path.join(rootDir, "mem-owners.json");
+  let owners = {};
+  try { const j = JSON.parse(readSmallFile(mapFile, 256 << 10) || "{}"); if (j && typeof j === "object" && !Array.isArray(j)) owners = j; } catch {}
+  const prev = typeof owners[key] === "string" ? owners[key] : "";
+  let collision = null;
+  if (prev && !sameRealDir(prev, realCwd)) {
+    let prevExists = false;
+    try { prevExists = fs.statSync(prev).isDirectory(); } catch {}
+    if (prevExists) {
+      collision = { prevCwd: prev, cwd: realCwd, memDir };
+      const logKey = `${key}|${prev}|${realCwd}`;
+      if (!COLLISION_LOGGED.has(logKey)) {
+        if (COLLISION_LOGGED.size >= 512) COLLISION_LOGGED.clear();
+        COLLISION_LOGGED.add(logKey);
+        log(`⚠️ [封口] 记忆目录编码碰撞：${prev} 与 ${realCwd} 共用 ${memDir}（已对该目录做全量封口扫描）`);
+      }
+    }
+  }
+  if (!prev || (!collision && prev !== realCwd)) {
+    owners[key] = realCwd;
+    const ks = Object.keys(owners);
+    if (ks.length > 256) for (const k of ks.slice(0, ks.length - 256)) delete owners[k];
+    writeOwnersAtomicNoFollow(rootDir, mapFile, owners);
+  }
+  return collision;
+}
+/** 记忆目录查一遍：命中返回 found；同时给出指纹（起进程紧前再比）。
+ *  extraReadOnlyDirs 为软链/别名编码出的额外待检目录（只读扫描拦截破甲内容，不做 .ccapp-skip 改名以免误碰无关目录）。 */
+export function scanMemory(dir, extraReadOnlyDirs = []) {
+  const dirs = Array.isArray(dir) ? dir.map((d, i) => ({ d, ro: i > 0 })) : [{ d: dir, ro: false }, ...extraReadOnlyDirs.map((d) => ({ d, ro: true }))];
   const found = [], skipped = [], parts = [];
-  for (const f of mdUnder(dir, 2)) {
-    let st; try { st = fs.lstatSync(f); } catch { continue; }
-    // 软链不读（readSmallFile 带 O_NOFOLLOW），照旧拦下，但别记成「太大」
-    if (st.isSymbolicLink()) { found.push({ name: f, hits: [{ cat: "symlink", strong: true, line: 0, excerpt: "" }] }); continue; }
-    if (!st.isFile()) continue;
-    const t = st.size > MAX_TEXT * 4 ? null : readSmallFile(f, MAX_TEXT * 4);
-    // 太大不读也不进上下文：跳过+提示，不整轮拦（同 materialize 的 2MiB 口径）
-    // 复核 r8（11-08）：但记忆目录是 claude 直接读的原目录——跳过扫描后文件还在原地，下一轮召回照样读到，
-    // 等于留了活口。改名移出 .md 命名（加 .ccapp-skip 后缀，去掉后缀可恢复），notes 里说明
-    if (t == null) { skipped.push(f); try { fs.renameSync(f, f + ".ccapp-skip"); } catch {} continue; }
-    parts.push(f + "\0" + sha(t));
-    const r = scanText(t);
-    if (r.blocked) found.push({ name: f, hits: r.hits });
+  for (const { d, ro } of dirs) {
+    for (const f of mdUnder(d, 2)) {
+      let st; try { st = fs.lstatSync(f); } catch { continue; }
+      // 软链不读（readSmallFile 带 O_NOFOLLOW），照旧拦下，但别记成「太大」
+      if (st.isSymbolicLink()) { found.push({ name: f, hits: [{ cat: "symlink", strong: true, line: 0, excerpt: "" }] }); continue; }
+      if (!st.isFile()) continue;
+      const t = st.size > MAX_TEXT * 4 ? null : readSmallFile(f, MAX_TEXT * 4);
+      // 太大不读也不进上下文：跳过+提示，不整轮拦（同 materialize 的 2MiB 口径）
+      // 复核 r8（11-08）：但主记忆目录是 claude 直接读的原目录——跳过扫描后文件还在原地，下一轮召回照样读到，
+      // 等于留了活口。主目录改名移出 .md 命名（加 .ccapp-skip 后缀），只读附加目录仅跳过不改盘
+      if (t == null) {
+        if (!ro) { skipped.push(f); try { fs.renameSync(f, f + ".ccapp-skip"); } catch {} }
+        continue;
+      }
+      parts.push(f + "\0" + sha(t));
+      const r = scanText(t);
+      if (r.blocked) found.push({ name: f, hits: r.hits });
+    }
   }
   return { found, skipped, fp: sha(parts.join("\n")) };
 }
@@ -509,7 +585,10 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
 
   // 自动记忆
   const memDir = memoryDir(cwd);
-  const mem = scanMemory(memDir);
+  const memDirs = [memDir, ...extraAliasMemoryDirs(cwd, memDir)];
+  const collision = checkMemoryCollision(cwd, memDir);
+  if (collision) notes.push(`项目路径编码与 ${collision.prevCwd} 共用记忆目录（已全量扫描防碰撞）`);
+  const mem = scanMemory(memDirs);
   found.push(...mem.found);
   if (mem.skipped.length) notes.push(`记忆文件太大没扫，已改名 .ccapp-skip（去掉后缀可恢复）：${mem.skipped.slice(0, 4).join(", ")}`);
   settings.autoMemoryDirectory = memDir;
@@ -522,7 +601,7 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
     if (r.blocked) found.push({ name: "~/.claude.json 的 mcpServers（已不加载）", hits: r.hits });
   }
 
-  if (found.length) return { args: [], settings: null, block: { found }, memDir, memFp: mem.fp, notes };
+  if (found.length) return { args: [], settings: null, block: { found }, memDir, memDirs, memFp: mem.fp, collision, notes };
 
   const rid = String(runId).replace(/[^\w.-]/g, "_") + "-" + crypto.randomBytes(4).toString("hex");
   if (ctx.items.length) {
@@ -537,13 +616,13 @@ export function sealPrepare({ cwd, runId, outputStyle = "" }) {
     fs.writeFileSync(f, JSON.stringify(mcp), { mode: 0o600 });
     args.push("--mcp-config", f);
   }
-  return { args, settings, block: null, memDir, memFp: mem.fp, notes };
+  return { args, settings, block: null, memDir, memDirs, memFp: mem.fp, collision, notes };
 }
 
 /** 起进程紧前：记忆目录跟准备时一样就过；变了再查一遍，命中返回 found */
 export function sealRecheck(prep) {
   if (!prep || !prep.memDir) return null;
-  const mem = scanMemory(prep.memDir);
+  const mem = scanMemory(prep.memDirs || prep.memDir);
   if (mem.fp === prep.memFp) return null;
   return mem.found.length ? { found: mem.found } : null;
 }

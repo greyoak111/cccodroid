@@ -455,19 +455,65 @@ function writeProviderState(value) {
     fs.renameSync(temp, file);
   } finally { try { fs.unlinkSync(temp); } catch {} }
 }
-/** 映射记的那家接口：{ id, stale }。stale = 桥实例换过了（卸载后重装、本地密钥是新的），那家接口还连着旧实例：
+function isCorruptMappingError(error) {
+  return error instanceof SyntaxError || error?.code === "invalid_component";
+}
+function isRegularMappingFile(file = providerStateFile()) {
+  try {
+    const st = fs.lstatSync(file);
+    return !st.isSymbolicLink() && st.isFile();
+  } catch { return false; }
+}
+function quarantineBadMapping(file = providerStateFile()) {
+  try {
+    const st = fs.lstatSync(file);
+    if (st.isSymbolicLink() || !st.isFile()) return "";
+    const backup = `${file}.bad-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+    fs.renameSync(file, backup);
+    return backup;
+  } catch (e) {
+    if (e.code === "ENOENT") return "";
+    return "";
+  }
+}
+function findManagedProviderByConnection(connection) {
+  if (!connection?.baseUrl || !connection?.apiKey) return null;
+  const matches = Object.entries(PROVIDERS_CFG.providers || {}).filter(([, provider]) =>
+    provider?.custom && !provider.login && !provider.local && !provider.nativeModels &&
+    !provider.endpoints?.length && !provider.endpoint && !provider.apiKeyEnv &&
+    !Object.keys(provider.extraEnv || {}).length && ["bearer", "x-api-key"].includes(provider.authStyle) &&
+    provider.baseUrl === connection.baseUrl && provider.apiKey === connection.apiKey
+  );
+  return matches.length === 1 ? { id: matches[0][0], provider: matches[0][1] } : null;
+}
+/** 映射记的那家接口：{ id, stale, corrupt }。stale = 桥实例换过了（卸载后重装、本地密钥是新的），那家接口还连着旧实例：
  *  保存时沿用这个接口号改成新连接，状态里先不报（旧连接已失效，别让「新建会话使用」选到它）。
- *  判据：映射指纹对不上当前连接，但那家接口自己的地址 + 密钥仍和映射指纹吻合 —— 说明映射与接口都没被动过，只是实例换了。
- *  从终端卸载不经过 App，映射没人清，以前这里一律报冲突、配置页从此打不开 */
-function mappedProvider(connection) {
+ *  allowCorrupt=true 仅给覆盖保存自救路径用：当 openai-bridge-app.json（普通文件）损坏或结构非法时不再永久锁死保存，
+ *  若当前正好有唯一一家同连接（baseUrl + apiKey）的托管自定义接口则复用其 id，否则重建新映射；
+ *  若是目录/符号链接等非普通文件，一律视为冲突拒绝覆盖。 */
+function mappedProvider(connection, { allowCorrupt = false } = {}) {
   let state;
   try { state = regularJson(providerStateFile(), 4096); }
-  catch (error) { if (error.code === "ENOENT") return { id: "", stale: false }; throw conflict("APP_MAPPING"); }
+  catch (error) {
+    if (error.code === "ENOENT") return { id: "", stale: false, corrupt: false };
+    const recoverable = isCorruptMappingError(error) && isRegularMappingFile();
+    if (allowCorrupt && recoverable) {
+      const hit = findManagedProviderByConnection(connection);
+      return { id: hit?.id || "", stale: false, corrupt: true };
+    }
+    throw Object.assign(conflict("APP_MAPPING"), recoverable ? { recoverable: true } : {});
+  }
   if (!object(state) || state.schema !== 1 || state.id !== ID || typeof state.providerId !== "string" ||
       !/^custom-[1-9][0-9]*$/.test(state.providerId) || !validFingerprints(state) ||
-      (state.pending !== undefined && !validFingerprints(state.pending))) throw conflict("APP_MAPPING");
+      (state.pending !== undefined && !validFingerprints(state.pending))) {
+    if (allowCorrupt && isRegularMappingFile()) {
+      const hit = findManagedProviderByConnection(connection);
+      return { id: hit?.id || "", stale: false, corrupt: true };
+    }
+    throw Object.assign(conflict("APP_MAPPING"), { recoverable: true });
+  }
   const provider = PROVIDERS_CFG.providers[state.providerId];
-  if (!provider) return { id: "", stale: false };
+  if (!provider) return { id: "", stale: false, corrupt: false };
   if (!provider.custom || provider.login || provider.local || provider.authStyle !== "bearer" ||
       provider.endpoints?.length || provider.apiKeyEnv || Object.keys(provider.extraEnv || {}).length) throw conflict("APP_PROVIDER");
   providerModels(provider);
@@ -481,23 +527,27 @@ function mappedProvider(connection) {
   }
   if (current.fingerprint === localFingerprint(connection)) {
     if (provider.baseUrl !== connection.baseUrl || provider.apiKey !== connection.apiKey) throw conflict("APP_PROVIDER");
-    return { id: state.providerId, stale: false };
+    return { id: state.providerId, stale: false, corrupt: false };
   }
   if (typeof provider.baseUrl !== "string" || typeof provider.apiKey !== "string" ||
       !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{3,4}$/.test(provider.baseUrl) || !/^[0-9a-f]{48}$/.test(provider.apiKey)) throw conflict("APP_PROVIDER");
-  return { id: state.providerId, stale: true };
+  return { id: state.providerId, stale: true, corrupt: false };
 }
 
-function saveProvider(connection, contextWindow = 0, models = [{ id: connection.model, contextWindow: contextWindow || DEFAULT_CONTEXT_WINDOW }], repair = null) {
-  const { id } = repair ? { id: repair.id } : mappedProvider(connection);
+function saveProvider(connection, contextWindow = 0, models = [{ id: connection.model, contextWindow: contextWindow || DEFAULT_CONTEXT_WINDOW }], repair = null, { allowCorruptMapping = false } = {}) {
+  const mapped = repair ? { id: repair.id, corrupt: !!repair.corruptMapping } : mappedProvider(connection, { allowCorrupt: allowCorruptMapping });
+  const { id, corrupt } = mapped;
   if (id && [...RUNS.values()].some((run) => !run.ended && run.provider === id)) throw failure("BUSY");
   // 复用同一个同步持久化入口；先记非秘密指纹事务，避免接口已落盘而映射写失败后永久锁死。
   const modelsUrl = inlineModelList(models), next = { fingerprint: localFingerprint(connection), modelsFingerprint: modelsFingerprint({ modelsUrl }) };
-  const previous = id && PROVIDERS_CFG.providers[id], previousState = id ? regularJson(providerStateFile(), 4096) : null;
+  const previous = id && PROVIDERS_CFG.providers[id];
+  let previousState = null;
+  if (id && !corrupt) { try { previousState = regularJson(providerStateFile(), 4096); } catch {} }
   const response = upsertProvider(id || null, { ...(!repair ? { label: "OpenAI API 本地协议桥" } : {}), baseUrl: connection.baseUrl,
     apiKey: connection.apiKey, defaultModel: connection.model, fastModel: connection.model, authStyle: "bearer", contextWindow, modelsUrl }, (providerId) => {
     repair?.recheck();
-    writeProviderState({ schema: 1, id: ID, providerId, ...(previous ? {
+    if (corrupt) quarantineBadMapping();
+    writeProviderState({ schema: 1, id: ID, providerId, ...(previous && !corrupt ? {
       fingerprint: localFingerprint(previous), ...(previous.modelsUrl ? { modelsFingerprint: modelsFingerprint(previous) } : {}), pending: next,
     } : next) });
     return () => { if (previousState) writeProviderState(previousState); else clearBridgeConfigMapping(ID); };
@@ -512,20 +562,22 @@ function saveProvider(connection, contextWindow = 0, models = [{ id: connection.
   return response.id;
 }
 
-export async function bridgeConfigStatus() {
+export async function bridgeConfigStatus({ allowCorruptMapping = false } = {}) {
   try {
     const view = statusView(await invokeComponent("gui-status"));
     if (view.configured) assertGuiOwnership();
     // 实例换过（stale）不报接口号，但窗口照旧带回表单：修复性保存不该把用户设过的窗口清零。没配置时读映射出错就当没有
-    let m = { id: "", stale: false };
-    if (view.configured) m = mappedProvider(defaultConnection(view.model));
-    else try { m = mappedProvider({ baseUrl: "", apiKey: "" }); } catch {}
+    let m = { id: "", stale: false, corrupt: false };
+    if (view.configured) m = mappedProvider(defaultConnection(view.model), { allowCorrupt: allowCorruptMapping });
+    else try { m = mappedProvider({ baseUrl: "", apiKey: "" }, { allowCorrupt: allowCorruptMapping }); } catch {}
     const provider = m.id && PROVIDERS_CFG.providers[m.id], models = modelWindows(view, provider), known = providerModels(provider);
     const matches = !view.configured || (provider && provider.defaultModel === view.model &&
       JSON.stringify((known || [{ id: provider.defaultModel }]).map((item) => item.id)) === JSON.stringify(view.models));
     const localError = view.localError || (!matches && !m.stale ? "LOCAL_START_FAILED" : "");
     const blocked = localError ? { localReady: false, localError, local: { state: "error", code: localError } } : {};
-    return { ok: true, ...view, ...blocked, ...(!matches && !m.stale ? { check: provider ? "MODEL_LIST" : "APP_MAPPING" } : {}), models, providerId: m.stale || !matches ? "" : m.id,
+    return { ok: true, ...view, ...blocked, ...(!matches && !m.stale ? { check: provider ? "MODEL_LIST" : "APP_MAPPING" } : {}),
+      ...(m.corrupt ? { corruptMapping: true, recoverable: true } : {}),
+      models, providerId: m.stale || !matches || m.corrupt ? "" : m.id,
       contextWindow: models.find((item) => item.id === view.model)?.contextWindow ||
         (!view.configured && provider ? validWindow(provider.contextWindow) : 0) };
   } catch (error) {
@@ -541,7 +593,8 @@ export async function saveBridgeConfig(body) {
     const models = body.models === undefined ? [{ id: input.model, contextWindow: contextWindowInput(body) || DEFAULT_CONTEXT_WINDOW }]
       : configuredModelsInput(body.models, input.model);
     const contextWindow = models.find((item) => item.id === input.model).contextWindow;
-    const current = await bridgeConfigStatus();
+    // 允许在 openai-bridge-app.json 损坏时通过重新保存自救（将坏映射留底 .bad-* 并重写合法映射）
+    const current = await bridgeConfigStatus({ allowCorruptMapping: true });
     if (!current.installed) throw failure("not_installed");
     if (input.upstreams) {
       if (!current.capabilities?.multiUpstream) throw failure("UPDATE_REQUIRED");
@@ -577,7 +630,7 @@ export async function saveBridgeConfig(body) {
         (input.upstreams && JSON.stringify(topology(view.upstreams)) !== JSON.stringify(topology(input.upstreams)))) throw failure("component_response");
     saved = true;
     assertGuiOwnership();
-    const providerId = await saveProvider(defaultConnection(view.model), contextWindow, models);
+    const providerId = await saveProvider(defaultConnection(view.model), contextWindow, models, null, { allowCorruptMapping: true });
     return { ok: true, saved, ...view, models, providerId, contextWindow };
   } catch (error) { error.saved = saved; throw error; }
   finally {
@@ -640,36 +693,52 @@ async function repairCandidate() {
   const manifest = regularJson(path.join(target, ".ccr-bridge-kit.json"), 65536);
   if (manifest.service?.schema !== 1 || !samePlace(manifest.service.home, home) || manifest.service.instanceId !== registration.instanceId ||
       !samePlace(manifest.componentEntry, componentEntry()) || !samePlace(manifest.settings, path.join(home, ".claude/settings.json"))) throw repairFailure();
-  const state = regularJson(providerStateFile(), 4096);
-  if (!object(state) || state.schema !== 1 || state.id !== ID || !/^custom-[1-9][0-9]*$/.test(state.providerId || "") ||
+  let state = null, corruptMapping = false;
+  try { state = regularJson(providerStateFile(), 4096); } catch (err) {
+    if (!isCorruptMappingError(err) || !isRegularMappingFile()) throw repairFailure();
+    corruptMapping = true;
+  }
+  if (!corruptMapping && (!object(state) || state.schema !== 1 || state.id !== ID || !/^custom-[1-9][0-9]*$/.test(state.providerId || "") ||
       Object.keys(state).some(k => !["schema", "id", "providerId", "fingerprint", "modelsFingerprint", "pending"].includes(k)) ||
-      !validFingerprints(state) || state.pending !== undefined && !validFingerprints(state.pending)) throw repairFailure();
-  const provider = PROVIDERS_CFG.providers[state.providerId];
+      !validFingerprints(state) || state.pending !== undefined && !validFingerprints(state.pending))) {
+    corruptMapping = true;
+  }
+  let providerId = "", provider = null;
+  if (corruptMapping) {
+    const hit = findManagedProviderByConnection(connection);
+    if (!hit) throw repairFailure();
+    providerId = hit.id;
+    provider = hit.provider;
+  } else {
+    providerId = state.providerId;
+    provider = PROVIDERS_CFG.providers[providerId];
+  }
   if (!provider?.custom || provider.login || provider.local || provider.nativeModels || provider.endpoints?.length || provider.endpoint ||
       provider.apiKeyEnv || Object.keys(provider.extraEnv || {}).length || !["bearer", "x-api-key"].includes(provider.authStyle) ||
       provider.baseUrl !== connection.baseUrl || provider.apiKey !== connection.apiKey) throw repairFailure();
   const fingerprint = localFingerprint(connection);
-  if (state.fingerprint !== fingerprint && state.pending?.fingerprint !== fingerprint) throw repairFailure();
-  const disk = regularJson(path.join(home, "ccapp-providers.json"), 4 << 20), raw = disk.providers?.[state.providerId];
+  if (!corruptMapping && state.fingerprint !== fingerprint && state.pending?.fingerprint !== fingerprint) throw repairFailure();
+  const disk = regularJson(path.join(home, "ccapp-providers.json"), 4 << 20), raw = disk.providers?.[providerId];
   if (!providersDiskMatches(disk) || !object(raw) ||
       Object.entries(raw).some(([key, value]) => JSON.stringify(provider[key]) !== JSON.stringify(value))) throw repairFailure();
-  if (repairBusy(state.providerId, connection.baseUrl)) throw repairFailure("BUSY");
+  if (repairBusy(providerId, connection.baseUrl)) throw repairFailure("BUSY");
   let known = [];
   try { known = providerModels(provider) || []; } catch {}
   const models = view.models.map(id => ({ id, contextWindow: known.find(m => m.id === id)?.contextWindow ||
     (id === provider.defaultModel ? validWindow(provider.contextWindow) : 0) || DEFAULT_CONTEXT_WINDOW }));
   const changes = [];
+  if (corruptMapping) changes.push("APP_MAPPING");
   if (provider.authStyle !== "bearer") changes.push("AUTH_STYLE");
   if (provider.modelsUrl !== inlineModelList(models) || provider.defaultModel !== view.model || provider.fastModel !== view.model) changes.push("MODELS");
   if (!changes.length) throw repairFailure("REPAIR_NOT_NEEDED");
   if (repairSnapshot() !== before) throw repairFailure("REPAIR_STALE");
-  const providerText = JSON.stringify(provider), stateText = JSON.stringify(state);
+  const providerText = JSON.stringify(provider), stateText = corruptMapping ? "CORRUPT" : JSON.stringify(state);
   const proof = crypto.createHash("sha256").update(before).update(providerText).update(stateText).update(JSON.stringify(view)).digest("hex");
   const recheck = () => {
-    if (repairSnapshot() !== before || JSON.stringify(PROVIDERS_CFG.providers[state.providerId]) !== providerText ||
-        repairBusy(state.providerId, connection.baseUrl)) throw repairFailure("REPAIR_STALE");
+    if (repairSnapshot() !== before || JSON.stringify(PROVIDERS_CFG.providers[providerId]) !== providerText ||
+        repairBusy(providerId, connection.baseUrl)) throw repairFailure("REPAIR_STALE");
   };
-  return { id: state.providerId, connection, models, contextWindow: models.find(m => m.id === view.model).contextWindow,
+  return { id: providerId, corruptMapping, connection, models, contextWindow: models.find(m => m.id === view.model).contextWindow,
     changes, proof, recheck, view };
 }
 export async function handleBridgeRepair(req, res) {
@@ -699,7 +768,7 @@ export async function handleBridgeRepair(req, res) {
       if (candidate.proof !== pending.proof) throw repairFailure("REPAIR_STALE");
       recheckLock(); candidate.recheck();
       const id = saveProvider(candidate.connection, candidate.contextWindow, candidate.models, {
-        id: candidate.id, recheck() { recheckLock(); candidate.recheck(); },
+        id: candidate.id, corruptMapping: candidate.corruptMapping, recheck() { recheckLock(); candidate.recheck(); },
       });
       return { ok: true, repaired: true, scope: "APP_METADATA", providerId: id };
     });
@@ -729,6 +798,7 @@ export async function handleBridgeConfig(req, res) {
     log(`[bridge-config] ${req.method === "POST" ? "save" : "status"} failed stage=${code}`);
     return sendJson(res, status, { ok: false, saved: error.saved === true, localReady: false, code,
       ...(code === "RUNTIME_CONFLICT" ? { check: CONFIG_CHECKS.includes(error.check) ? error.check : "UNKNOWN" } : {}),
+      ...(error.recoverable ? { recoverable: true } : {}),
       ...(["endpoint", "apiKey", "model", "upstreams", "contextWindow"].includes(error.field) ? { field: error.field } : {}), message: failure(code).message });
   }
 }

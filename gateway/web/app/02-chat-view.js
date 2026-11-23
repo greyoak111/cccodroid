@@ -202,7 +202,7 @@
   // 大附件（超过 BIG_ATT）不写成 @路径（claude 会整份读进上下文），写成「[附件：路径 · 大小，…]」只给路径，
   // 气泡里照样画成文件卡片（不出缩略图）
   //   认准后面那段固定文字（05-composer.js attRef），路径按最短匹配取：文件名里带「 · 」「]」也不截错
-  const BIG_REF = "\\[附件：(\\/[^\\n]+?) · [^\\n·，\\]]+，文件较大没有直接读入，需要时按路径读取\\]";
+  const BIG_REF = "\\[附件：(\\/[^\\n]+?) · [^\\n·，\\]]+，文件较大没有直接读入，需要时按路径读取\\]"; /* i18n-ignore */
   // 文件名带空白时发送端写成 @"…"（05-composer.js attAt）：这里也要当成一条引用拆出来，
   // 否则气泡里会露出一串 @路径，文件卡片也没有（0.6.9 审计 195-D.2）
   const AT_REF = '@"(?:[^"\\\\]|\\\\.)*"';
@@ -606,11 +606,12 @@
       onChange: null,
       result(ok, text) {
         if (disposed) return;
+        const repeat = !!result;
         result = { ok, text: String(text || "") };
         api.state = ok ? "ok" : "err";
         st.className = "tool-state " + (ok ? "ok" : "err");
         st.textContent = ok ? t("完成") : t("失败");
-        if (live && !busReplay) { MO.play(st, "mo-tick", 1400); if (ok) MO.play(card, "mo-ok", 1400); }
+        if (live && !busReplay) { MO.play(st, "mo-tick", 1400, repeat); if (ok) MO.play(card, "mo-ok", 1400, repeat); }
         // 后台子代理：工具结果只是「已启动」，真正跑完靠 sub_done
         // 状态也记成在跑：不然步骤组的摘要按「完成」算（审查 #48 UI07-03）
         if (isAgent && ok && /^Async agent launched/.test(result.text) && !(sub && sub.done)) {

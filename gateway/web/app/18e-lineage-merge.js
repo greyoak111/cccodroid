@@ -180,7 +180,7 @@
     // 第 3 步：拼出第一条消息，可以改；落款写在最后
     function compose() {
       const parts = src.map((s) => `## ${no(s)} · ${title(s.n)}\n\n${s.how === "compact" ? t("（压缩摘要）") : t("（摘录最近的对话）")}\n\n${s.mat.text}`);
-      const sig = "（汇合自 " + src.map(no).join("、") + "）";
+      const sig = "（汇合自 " + src.map(no).join("、") + "）"; /* i18n-ignore */
       return t("下面是从 {n} 个会话带过来的材料。先读完，再按最后的目标接着做；材料之间有矛盾的地方先指出来。", { n: src.length })
         + "\n\n" + parts.join("\n\n---\n\n") + "\n\n## " + t("目标") + "\n\n" + (W.goal.trim() || t("（没写目标：先概括这几份材料各自做到了哪一步，再问我接下来做什么）")) + "\n\n" + sig;
     }
@@ -236,7 +236,7 @@
       if (b.hasAttribute("data-send")) {
         let text = getText().trim();
         if (!text) return toast(t("第一条消息是空的"), true);
-        if (!MERGE_TAIL.test(text)) text += "\n\n（汇合自 " + src.map(no).join("、") + "）";
+        if (!MERGE_TAIL.test(text)) text += "\n\n（汇合自 " + src.map(no).join("、") + "）"; /* i18n-ignore */
         const from = src.map((s) => ({ id: s.id, at: s.mat.at || null, how: s.how }));
         leave3();
         OV.close(o);

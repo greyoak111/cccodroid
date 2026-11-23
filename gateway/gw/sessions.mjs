@@ -258,49 +258,75 @@ async function indexTail(fh, off) {
   const { bytesRead } = await fh.read(buf, 0, n, off - n);
   return buf.subarray(0, bytesRead).toString("base64");
 }
+const SEARCH_MAX_LINE = 4 << 20;
 async function indexSessionFile(file, size) {
   let e = SEARCH_IDX.get(file);
-  if (!e || size < e.off) e = { off: 0, text: "", lower: "", skip: false };
+  if (!e || size < e.off) e = { off: 0, text: "", lower: "", skip: false, dropping: false };
   // 文件本身就很大：不建索引，查询时流式扫（Q.3）
-  if (size > SEARCH_STREAM_SIZE) { e = { off: size, text: "", lower: "", skip: true }; SEARCH_IDX.set(file, e); return e; }
+  if (size > SEARCH_STREAM_SIZE) { e = { off: size, text: "", lower: "", skip: true, dropping: false }; SEARCH_IDX.set(file, e); return e; }
   if (e.skip) return e;
   if (e.off) {
     const fh = await fs.promises.open(file, "r");
     try {
       const st = await fh.stat();
-      if (st.ino !== e.ino || (await indexTail(fh, e.off)) !== e.tail) e = { off: 0, text: "", lower: "", skip: false };
+      if (st.ino !== e.ino || (await indexTail(fh, e.off)) !== e.tail) e = { off: 0, text: "", lower: "", skip: false, dropping: false };
     } finally { await fh.close(); }
   }
   if (size > e.off) {
     const fh = await fs.promises.open(file, "r");
     try {
       e.ino = (await fh.stat()).ino;
-      let pos = e.off, rest = Buffer.alloc(0);
+      let pos = e.off, carry = [], carryLen = 0, dropping = !!e.dropping;
       const parts = [];
       while (pos < size) {
         const buf = Buffer.alloc(Math.min(4 << 20, size - pos));
         const { bytesRead } = await fh.read(buf, 0, buf.length, pos);
         if (!bytesRead) break;
         pos += bytesRead;
-        const chunk = rest.length ? Buffer.concat([rest, buf.subarray(0, bytesRead)]) : buf.subarray(0, bytesRead);
-        const nl = chunk.lastIndexOf(10);
-        if (nl < 0) { rest = Buffer.from(chunk); continue; }
-        rest = Buffer.from(chunk.subarray(nl + 1));
-        for (const line of chunk.toString("utf8", 0, nl).split("\n")) { const t = searchText(line); if (t) parts.push(t); }
+        const slice = buf.subarray(0, bytesRead);
+        let start = 0;
+        while (start < slice.length) {
+          const nl = slice.indexOf(10, start);
+          if (nl < 0) {
+            const seg = slice.subarray(start);
+            if (!dropping) {
+              if (carryLen + seg.length > SEARCH_MAX_LINE) {
+                carry = []; carryLen = 0; dropping = true;
+              } else {
+                carry.push(Buffer.from(seg)); carryLen += seg.length;
+              }
+            }
+            break;
+          }
+          const seg = slice.subarray(start, nl);
+          start = nl + 1;
+          if (dropping) {
+            dropping = false; carry = []; carryLen = 0;
+            continue;
+          }
+          if (carryLen + seg.length <= SEARCH_MAX_LINE) {
+            const line = (carry.length ? Buffer.concat([...carry, seg]) : seg).toString("utf8");
+            const t = searchText(line);
+            if (t) parts.push(t);
+          }
+          carry = []; carryLen = 0;
+        }
         await new Promise((r) => setImmediate(r));   // 别一口气把事件循环占住
       }
       // 末行不带换行（导入的、被打断的记录）：能解析成完整 JSON 就收进来，不然最后一条正文永远搜不到（200-15-03）
-      if (rest.length) {
-        const tail = rest.toString("utf8");
-        try { JSON.parse(tail.trim()); const t = searchText(tail); if (t) parts.push(t); pos = size; rest = Buffer.alloc(0); } catch {}
+      if (!dropping && carryLen) {
+        const tail = Buffer.concat(carry).toString("utf8");
+        try { JSON.parse(tail.trim()); const t = searchText(tail); if (t) parts.push(t); carry = []; carryLen = 0; } catch {}
       }
-      e.off = pos - rest.length;   // 半行留到下次
+      // 超长无换行行进入 dropping 后推进到 pos 并记住 e.dropping=true，下次追加到 \n 后可无缝接着索引后续正常行
+      e.dropping = dropping;
+      e.off = dropping ? pos : pos - carryLen;   // 正常半行留到下次
       e.tail = await indexTail(fh, e.off);
       if (parts.length) {
         const add = (e.text ? "\n" : "") + parts.join("\n");
         e.text += add;
         e.lower += normText(add);   // NFKC + 小写：前后端归一化口径一致（200-15-06）
-        if (e.text.length > SEARCH_FILE_KEEP) { e = { off: size, text: "", lower: "", skip: true }; SEARCH_IDX.set(file, e); return e; }
+        if (e.text.length > SEARCH_FILE_KEEP) { e = { off: size, text: "", lower: "", skip: true, dropping: false }; SEARCH_IDX.set(file, e); return e; }
       }
     } finally { await fh.close(); }
   }

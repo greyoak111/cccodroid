@@ -439,6 +439,55 @@ test("修复拒绝磁盘接口与内存不一致，不能覆盖设备上新写�
   assert.equal((await inspectRepair()).body.code, "REPAIR_UNAVAILABLE"); assert.equal(JSON.parse(fs.readFileSync(file)).providers[id].label, "external edit must survive");
 });
 
+test("⑦ 托管桥接：openai-bridge-app.json 损坏时 GET 仍只读 409 可恢复，重新保存与 repair 均可自动隔离损坏文件解开死锁", async () => {
+  // 清理同文件前面用例遗留的同连接测试 provider，模拟真实单实例托管场景
+  for (const [pid, p] of Object.entries(PROVIDERS_CFG.providers)) {
+    if (p?.custom && p.baseUrl === "http://127.0.0.1:34597" && p.apiKey === localSecret) {
+      upsertProvider(pid, { apiKey: "0".repeat(48) });
+    }
+  }
+  const first = await request(input()), id = first.body.providerId;
+  const mappingFile = path.join(path.dirname(registration), "openai-bridge-app.json");
+  // 场景 1：JSON 语法损坏 → GET 只读返回 409 APP_MAPPING + recoverable，不改磁盘
+  fs.writeFileSync(mappingFile, "{corrupt-json", { mode: 0o600 });
+  const badGet = await request();
+  assert.equal(badGet.status, 409);
+  assert.equal(badGet.body.code, "RUNTIME_CONFLICT");
+  assert.equal(badGet.body.check, "APP_MAPPING");
+  assert.equal(badGet.body.recoverable, true);
+  assert.equal(fs.readFileSync(mappingFile, "utf8"), "{corrupt-json");
+
+  // 场景 2：通过 repair（inspect -> apply）恢复损坏映射并保留原 providerId
+  const plan = await inspectRepair();
+  assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  assert.equal(plan.body.repair.available, true);
+  assert.ok(plan.body.repair.changes.includes("APP_MAPPING"));
+  assert.equal(fs.readFileSync(mappingFile, "utf8"), "{corrupt-json", "inspect 必须只读，不得提前改盘");
+  const repaired = await applyRepair(plan.body.repair.ticket);
+  assert.equal(repaired.status, 200, JSON.stringify(repaired.body));
+  assert.equal(repaired.body.repaired, true);
+  assert.equal(repaired.body.providerId, id);
+  const restored = JSON.parse(fs.readFileSync(mappingFile, "utf8"));
+  assert.equal(restored.providerId, id);
+  const quarantined1 = fs.readdirSync(path.dirname(mappingFile)).filter((f) => f.startsWith("openai-bridge-app.json.bad-"));
+  assert.ok(quarantined1.length >= 1, "损坏映射应被隔离为 .bad-* 文件");
+  assert.equal((await request()).status, 200);
+
+  // 场景 3：schema 错误导致映射损坏 → 用户重新保存配置（POST /config）也能隔离损坏文件并重写正常映射
+  put(mappingFile, { schema: 999 });
+  assert.equal((await request()).body.check, "APP_MAPPING");
+  const saved = await request(input({ model: "fixture-model-2" }));
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.saved, true);
+  assert.equal(saved.body.providerId, id);
+  const afterSave = JSON.parse(fs.readFileSync(mappingFile, "utf8"));
+  assert.equal(afterSave.schema, 1);
+  assert.equal(afterSave.providerId, id);
+  const quarantined2 = fs.readdirSync(path.dirname(mappingFile)).filter((f) => f.startsWith("openai-bridge-app.json.bad-"));
+  assert.ok(quarantined2.length >= 2, "二次损坏映射也应被隔离");
+  assert.equal((await request()).status, 200);
+});
+
 test("修复拒绝检查前发生的字段删除和无关接口变更，不以旧整表覆盖磁盘", async () => {
   const first = await request(input()), id = first.body.providerId;
   const other = upsertProvider(null, { label: "unrelated fixture", baseUrl: "https://old.example.invalid", apiKey: "fixture-other-old" }).id;

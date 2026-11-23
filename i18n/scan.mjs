@@ -41,14 +41,17 @@ function stripTranslated(raw) {
 /** JS 词法扫描：记录所有字符串/模板字面量。
  *  模板字面量里的 ${…} 会**递归进去**（那里的 t("…") 也要算数，否则漏译查不出来）。 */
 function scanJs(src) {
-  const lits = [];   // { text, raw, kind, line, wrapped, dynamic }
+  const lits = [];   // { text, raw, kind, line, wrapped, dynamic, ignored }
   const n = src.length;
+  const lines = src.split("\n");
   let i = 0, lastSig = "";
   const lineAt = (p) => { let l = 1; for (let k = 0; k < p && k < n; k++) if (src.charCodeAt(k) === 10) l++; return l; };
   const unesc = (s) => s.replace(/\\(.)/g, (m, ch) => ({ n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v" }[ch] ?? ch));
   const wrappedAt = (p) => /(?:^|[^\w$.])tk?\(\s*$/.test(src.slice(Math.max(0, p - 40), p));
-  const push = (s, e, kind, text, dynamic) =>
-    lits.push({ text, raw: src.slice(s, e), kind, line: lineAt(s), wrapped: wrappedAt(s), dynamic });
+  const push = (s, e, kind, text, dynamic) => {
+    const line = lineAt(s);
+    lits.push({ text, raw: src.slice(s, e), kind, line, wrapped: wrappedAt(s), dynamic, ignored: /\/\*\s*i18n-ignore\s*\*\//.test(lines[line - 1] || "") });
+  };
   const stack = [{ kind: "code", brace: 0 }];   // code 帧带花括号计数，用来找 ${…} 的结尾
   while (i < n) {
     const top = stack[stack.length - 1];
@@ -184,6 +187,7 @@ const A = [];
 for (const f of jsFiles) {
   for (const l of scanJs(fs.readFileSync(path.join(WEB, f), "utf8"))) {
     if (!HAN.test(l.text)) continue;
+    if (l.ignored) continue;
     // 模板里已经用 t("…") 译过的部分不算未接入：把 t("…")/t('…') 摘掉再找中文
     if (l.wrapped && /\$\{/.test(l.raw)) continue;
     if (!HAN.test(stripTranslated(l.raw))) continue;

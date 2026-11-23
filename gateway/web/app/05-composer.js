@@ -9,7 +9,7 @@
   const attAt = (p) => (/[\s"\\]/.test(p) ? '@"' + p
     .replace(/\\/g, "\\\\").replace(/"/g, '\\"')
     .replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t") + '"' : "@" + p);
-  const attRef = (a) => isBigAtt(a) ? `[附件：${a.path} · ${a.size ? fmtSize(a.size) : "?"}，文件较大没有直接读入，需要时按路径读取]` : attAt(a.path);
+  const attRef = (a) => isBigAtt(a) ? `[附件：${a.path} · ${a.size ? fmtSize(a.size) : "?"}，文件较大没有直接读入，需要时按路径读取]` : attAt(a.path); /* i18n-ignore */
   const newCid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   // 还在上传的文件（0.6.9 审计 195-D.1）：传完之前不发送，否则这些附件不在本条消息里、下一条又悄悄带上
   const uploading = new Set();
@@ -356,9 +356,15 @@
   }
 
   // ── 输入框 ────────────────────────────────────────────────────────
+  let growFrame = 0;
   function autoGrow() {
+    if (growFrame) { cancelAnimationFrame(growFrame); growFrame = 0; }
     inputEl.style.height = "auto";
     inputEl.style.height = Math.min(inputEl.scrollHeight, 180) + "px";
+  }
+  // 同帧预编辑或连续 input 只合并测高；草稿、补全和光标仍按原事件处理。
+  function growSoon() {
+    if (!growFrame) growFrame = requestAnimationFrame(() => { growFrame = 0; autoGrow(); });
   }
   // 切换皮肤（如拾色把非首屏 #input 的上下 padding 调成 8px 以对齐 40px 发送键）或字号时重算行内高度，免得旧高度把单行文字压偏或裁切
   new MutationObserver(() => autoGrow()).observe(document.documentElement, { attributes: true, attributeFilter: ["data-skin", "data-fs"] });
@@ -408,7 +414,7 @@
   draftChip.addEventListener("click", draftRestore);
 
   inputEl.addEventListener("input", () => {
-    autoGrow();
+    growSoon();
     syncInterject();
     draftPersistSoon();
     const v = inputEl.value;

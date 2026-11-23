@@ -358,7 +358,7 @@ export async function startRun(item) {
   // 端侧小模型：先确保 llama-server 跑着、载的是这个模型（第一次要加载十几秒）
   if (P.local) {
     try {
-      const m = await ensureLlama(model, (key, text) => emit({ type: "note", key, text }));
+      const m = await ensureLlama(model, (key, text) => emit({ type: "note", key, text }), run);
       model = m.id;
       localRunAttach(run);
     } catch (e) {
@@ -503,10 +503,11 @@ export async function startRun(item) {
   // 设置、厂商配置网关跑着时只有网关自己写：被别人改了按内存写回，留痕（换了接口地址就能把密钥送出去）
   for (const [f, chk] of [["ccapp-settings.json", settingsDiskCheck], ["ccapp-providers.json", providersDiskCheck]]) if (chk()) tamperRecord("runtime", [f]);
   // claude 程序本身：和版本目录里存的 Anthropic 签名清单对不上就不起（被改过字符串的二进制，见 claudeseal.mjs）
+  let seal = null;
   if (!P.local) {
     const gwBad = gwRuntimeBlocked();
     if (gwBad) { emit({ type: "error", message: tr(LAST_LANG, gwBad) }); return endRun(run, { failed: true }); }
-    const seal = await claudeSeal();
+    seal = await claudeSeal();
     if (seal.ok === false) {
       emit({ type: "error", message: tr(LAST_LANG, seal.pending ? "这个版本的 Claude Code 还没有官方签名清单，这一轮没有启动。正在联网补核，过一两分钟再发送；一直不行就到 设置 → 更新 里重新安装。" : "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。") });
       return endRun(run, { failed: true });
@@ -567,20 +568,32 @@ export async function startRun(item) {
   run.tBoot = Date.now();
   emit({ type: "phase", phase: "boot" });
   run.claudePid = wrapped ? 0 : child.pid;
+  const sealRef = typeof seal === "object" ? seal : null;
+  const checkSpawnedSeal = (pid, opts = undefined) => {
+    if (P.local || run.aborted || run.ended) return;
+    if (!sealStillValid(PATHS.claude, sealRef, pid, opts)) {
+      log(`${runTag(run)} ⚠️ [Claude Code 核验] 核过之后程序文件或进程映像不符，停掉这一轮`);
+      tamperRecord("claude", ["claude: changed right after it was verified"]);
+      emit({ type: "error", message: tr(LAST_LANG, "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。") });
+      abortRun(run);
+    }
+  };
   if (wrapped && child.stdio[3]) {
     let got = "";
-    child.stdio[3].on("data", (d) => { got += d; const m = /^(\d+)\n/.exec(got); if (m) run.claudePid = child.claudePid = +m[1]; });
+    child.stdio[3].on("data", (d) => {
+      got += d;
+      const m = /^(\d+)\n/.exec(got);
+      if (m && !run.claudePid) {
+        run.claudePid = child.claudePid = +m[1];
+        checkSpawnedSeal(run.claudePid);
+      }
+    });
     child.stdio[3].on("error", () => {});
   }
   // 留下的进程冒充这一轮时比启动先后（见 leftover.mjs）。claude 不可转储时 /proc 里看不见它：拿一个刚起的进程的启动时刻代替（不会更晚于 claude）
   run.childStart = procStart(child.pid) ?? nowTicks();
-  // 核过之后、真正执行之前程序被换掉了（来回替换卡时间窗）：这一轮停掉（DeepSeek 复核建议 2）
-  if (!P.local && !sealStillValid()) {
-    log(`${runTag(run)} ⚠️ [Claude Code 核验] 核过之后程序文件又变了，停掉这一轮`);
-    tamperRecord("claude", ["claude: changed right after it was verified"]);
-    emit({ type: "error", message: tr(LAST_LANG, "Claude Code 程序和官方签名清单对不上，可能被改过，这一轮没有启动。到 设置 → 更新 里重新安装后再试。") });
-    abortRun(run);
-  }
+  // 核过之后、真正执行之前程序被换掉了（含双跳 TOCTOU）：这一轮停掉（DeepSeek 复核建议 2）
+  checkSpawnedSeal(run.claudePid || child.pid);
   if (item.timeoutMs > 0) run.limitTimer = setTimeout(() => { run.timedOut = true; log(`${runTag(run)} ⏱ 超过时长上限 ${Math.round(item.timeoutMs / 60000)} 分钟，停止`); abortRun(run); }, item.timeoutMs);
   child.stdin.on("error", () => {});
   const writeUser = (content) => child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n");
@@ -843,6 +856,8 @@ export async function startRun(item) {
     emit({ type: "session_created", sessionId: run.sessionId, runId: run.id, cwd: run.cwd });
   };
   const onInit = (init) => {
+    checkSpawnedSeal(run.claudePid || child.pid, { strictMaps: true });
+    if (run.aborted || run.ended) return;
     if (!run.tInit) { run.tInit = Date.now(); emit({ type: "phase", phase: "connect", from: "init" }); }
     setLastInit(init);
     run.newSession = !run.sessionId;

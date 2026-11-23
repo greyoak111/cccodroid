@@ -715,6 +715,10 @@
     bar.addEventListener("click", (e) => {
       const c = e.target.closest(".crumb");
       if (!c) return;
+      if (c.dataset.adi != null && arc.crumbDirs) {
+        const dir = arc.crumbDirs[Number(c.dataset.adi)];
+        if (dir != null) return vwArcLoad(dir);
+      }
       if (c.dataset.ad != null) return vwArcLoad(c.dataset.ad);
       closeViewer();   // 「…」= 压缩包所在目录：查看器关掉就回到之前的位置（聊天 / 文件页）
     });
