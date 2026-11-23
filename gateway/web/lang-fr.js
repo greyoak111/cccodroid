@@ -3272,4 +3272,5 @@ window.I18N_DICT["fr"] = {
   "只允许查看普通记忆文件": "Seuls les fichiers mémoire ordinaires peuvent être consultés",
   "记忆文件太大了（超过 1 MB）": "Le fichier mémoire est trop volumineux (plus de 1 Mo)",
   "记忆只读，不能在这里修改": "Les mémoires sont en lecture seule ici",
+  "未知": "Inconnu",
 };

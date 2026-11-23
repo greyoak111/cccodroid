@@ -3310,4 +3310,5 @@ window.I18N_DICT.en = {
   "只允许查看普通记忆文件": "Only regular memory files can be viewed",
   "记忆文件太大了（超过 1 MB）": "Memory file is too large (over 1 MB)",
   "记忆只读，不能在这里修改": "Project memories are read-only here",
+  "未知": "Unknown",
 };

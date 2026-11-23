@@ -3269,3 +3269,4 @@
 3269	Solo se permiten archivos de memoria normales
 3270	El archivo de memoria es demasiado grande (más de 1 MB)
 3271	Las memorias son de solo lectura aquí
+3272	Desconocido

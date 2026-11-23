@@ -1,22 +1,13 @@
 package cc.codroid;
 
-import java.util.Arrays;
-
 /** Fixed durations shared by the settings page and the renewal dialog. */
 final class NoAskDuration {
-    private static final boolean INCLUDE_TEST_DURATION = false;
     static final int DEFAULT = 24 * 60;
     private static final int[] DURATIONS = { 60, 240, 1440, 4320, 10080 };
 
-    static int[] options() {
-        if (!INCLUDE_TEST_DURATION) return DURATIONS.clone();
-        int[] result = Arrays.copyOf(DURATIONS, DURATIONS.length + 1);
-        result[DURATIONS.length] = 2;
-        return result;
-    }
+    static int[] options() { return DURATIONS.clone(); }
 
     static boolean supports(int minutes) {
-        if (INCLUDE_TEST_DURATION && minutes == 2) return true;
         for (int option : DURATIONS) if (option == minutes) return true;
         return false;
     }

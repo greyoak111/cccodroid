@@ -83,7 +83,8 @@ test("特权免确认的设置页与续期框使用 Android 宿主提供的固�
   assert.match(dialog, /duration\.setSelection\(0\)/);
   assert.match(dialog, /if \(position <= 0\) \{\s*allow\.run\(\);\s*d\.dismiss\(\);\s*return;\s*\}/);
   assert.match(dialog, /Priv\.renewAndAllow\(this, id, durations\[position - 1\]/);
-  assert.match(src("../../android/java/cc/codroid/NoAskDuration.java"), /INCLUDE_TEST_DURATION = false/);
+  assert.doesNotMatch(src("../../android/java/cc/codroid/NoAskDuration.java"), /INCLUDE_TEST_DURATION/);
+  assert.doesNotMatch(java, /2 分钟（测试）/);
 });
 
 test("设置页显示实际授权时长，关闭时保留尚未生效的选择", () => {
@@ -91,7 +92,7 @@ test("设置页显示实际授权时长，关闭时保留尚未生效的选择",
   const start = source.indexOf('    const duration = $("priv-na-hours");');
   const end = source.indexOf("    // 免确认限时", start);
   const script = new vm.Script(source.slice(start, end));
-  const options = [{ minutes: 2, label: "2 分钟" }, { minutes: 1440, label: "1 天" }, { minutes: 4320, label: "3 天" }];
+  const options = [{ minutes: 60, label: "1 小时" }, { minutes: 1440, label: "1 天" }, { minutes: 4320, label: "3 天" }];
   function render(current, status) {
     const select = {
       value: current, disabled: false,
@@ -106,8 +107,8 @@ test("设置页显示实际授权时长，关闭时保留尚未生效的选择",
     });
     return select;
   }
-  const renewed = render("1440", { noask: true, noaskMinutes: 2 });
-  assert.equal(renewed.value, "2");
+  const renewed = render("1440", { noask: true, noaskMinutes: 60 });
+  assert.equal(renewed.value, "60");
   assert.equal(renewed.disabled, true);
   const off = render("4320", { noask: false });
   assert.equal(off.value, "4320");

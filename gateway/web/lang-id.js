@@ -3272,4 +3272,5 @@ window.I18N_DICT["id"] = {
   "只允许查看普通记忆文件": "Hanya file memori biasa yang boleh dilihat",
   "记忆文件太大了（超过 1 MB）": "File memori terlalu besar (lebih dari 1 MB)",
   "记忆只读，不能在这里修改": "Memori hanya-baca dan tidak dapat diubah di sini",
+  "未知": "Tidak diketahui",
 };

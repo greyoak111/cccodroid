@@ -198,7 +198,7 @@ final class Consent {
             java.util.function.Consumer<Boolean> complete) {
         VerifiedGrant request = new VerifiedGrant(name, value, current, complete);
         synchronized (LOCK) {
-            if (running || !PENDING.isEmpty() || !persistable(a) || !current.getAsBoolean() || get(a, name) != null) {
+            if (running || !PENDING.isEmpty() || !persistable(a) || !current.getAsBoolean() || MEM.containsKey(name)) {
                 complete.accept(false);
                 return;
             }
@@ -207,6 +207,11 @@ final class Consent {
         }
         new Thread(() -> {
             try {
+                // Keep KeyStore / attestation verification off the UI thread and outside LOCK.
+                if (get(a, name) != null) {
+                    a.runOnUiThread(() -> finishVerifiedGrant(a, request, false));
+                    return;
+                }
                 Signature signature = signing(a, name, value);
                 a.runOnUiThread(() -> verifyGrant(a, request, signature));
             } catch (Exception e) {

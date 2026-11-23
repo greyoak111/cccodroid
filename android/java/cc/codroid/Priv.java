@@ -750,7 +750,6 @@ final class Priv {
     private static volatile long renewalGeneration;
     private static final String RENEWAL_HINT = "expiredNoAskMinutes";
     static String noAskDurationLabel(int minutes) {
-        if (minutes == 2) return Tr.t("2 分钟（测试）");
         if (minutes % 1440 == 0) return Tr.f("{0} 天", minutes / 1440);
         return Tr.f("{0} 小时", minutes / 60);
     }

@@ -3269,3 +3269,4 @@
 3269	Hanya file memori biasa yang boleh dilihat
 3270	File memori terlalu besar (lebih dari 1 MB)
 3271	Memori hanya-baca dan tidak dapat diubah di sini
+3272	Tidak diketahui

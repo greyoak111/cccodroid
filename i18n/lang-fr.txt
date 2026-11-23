@@ -3269,3 +3269,4 @@
 3269	Seuls les fichiers mémoire ordinaires peuvent être consultés
 3270	Le fichier mémoire est trop volumineux (plus de 1 Mo)
 3271	Les mémoires sont en lecture seule ici
+3272	Inconnu
