@@ -6,7 +6,23 @@
         unreachable: ["err", t("连不上应用的后台服务")],
   };
   const SETUP_BUSY = ["downloading", "installing", "connecting", "pairing", "starting", "permission"];
-  let privPoll = null;
+  let privPoll = null, privSplitBusy = false;
+  function paintSplitPairing(st) {
+    const split=st.splitPairing;
+    const supported=split?.supported===true&&Number.isInteger(split.sdk)&&split.sdk>=24;
+    $("priv-split").classList.toggle("hidden",!supported||st.setup?.phase!=="pairing");
+    $("priv-split-settings").disabled=privSplitBusy||split?.phase==="opening";
+    $("priv-split-state").textContent=split?.message||t("通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。");
+  }
+  $("priv-split-settings").addEventListener("click",async()=>{
+    if(privSplitBusy||$("priv-split-settings").disabled)return;
+    privSplitBusy=true;$("priv-split-settings").disabled=true;
+    $("priv-split-state").textContent=t("正在尝试分屏打开设置…");
+    try {
+      const result=await appPost("/api/app/shz_split_settings",{});
+      if(result?.message)$("priv-split-state").textContent=result.message;
+    }finally{privSplitBusy=false;await loadPriv();}
+  });
   // 这些按钮背后是原生跳转 / priv 调用：失败会回 200 + {ok:false}，以前只接网络错误，用户点了没反应（195-N.7）
   const appPost = async (url, body) => {
     try {
@@ -55,6 +71,7 @@
     if (cat === "run") { renderBg(st.frozen); return; }
     $("priv-field").classList.toggle("hidden", st.state === "unsupported");
     if (st.state === "unsupported") { privBusy = false; return; }          // 旧版：没有这项集成
+    paintSplitPairing(st);
     const el = $("priv-state");
     if (st.state === "ok") {
       el.className = "prov-state ok";
