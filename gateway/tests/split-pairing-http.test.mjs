@@ -4,7 +4,7 @@ import path from "node:path";
 import net from "node:net";
 import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
-const root=fs.mkdtempSync(path.join(os.tmpdir(),"split-pair-http-")),sock=path.join(root,"native.sock");
+const root=fs.mkdtempSync(path.join(process.env.TMPDIR||os.tmpdir(),"split-pair-http-")),sock=path.join(root,"native.sock");
 const home=path.join(root,"home");fs.mkdirSync(home);const seen=[];let reply={ok:true,supported:true,sdk:32,phase:"opening",path:"fullscreen"};
 const peers=new Set();
 const native=net.createServer(c=>{peers.add(c);c.on("close",()=>peers.delete(c));let buffer="";c.on("data",chunk=>{buffer+=chunk;if(!buffer.includes("\n"))return;const request=JSON.parse(buffer.split("\n")[0]);seen.push(request);c.end(JSON.stringify(reply)+"\n");});});
