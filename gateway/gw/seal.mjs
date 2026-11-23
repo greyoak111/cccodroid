@@ -431,6 +431,10 @@ function userSettings() {
   // 以前只查字符集与长度，「ignore all previous rules」这类整句都能过（红队报告 VULN-02）
   const UI_LANGS = /^(?:zh|zh-Hant|en|fr|es|ru|ar|ja|ko|id)$/;
   if (typeof j.language === "string" && UI_LANGS.test(j.language)) out.language = j.language;
+  // Prompt Cache TTL（#257）：只收 Claude Code 官方支持的 "5m" / "1h"，其余丢弃
+  for (const k of ["promptCacheTtl", "subagentPromptCacheTtl"]) {
+    if (j[k] === "5m" || j[k] === "1h") out[k] = j[k];
+  }
   return out;
 }
 

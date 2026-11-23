@@ -88,6 +88,23 @@ test("语言值不在界面注册表：丢弃，不进系统提示（VULN-02）"
   sealCleanup(8);
 });
 
+test("Prompt Cache TTL：只回填 5m / 1h，非法值丢弃（#257）", () => {
+  fresh();
+  put(H(".claude/settings.json"), JSON.stringify({ promptCacheTtl: "1h", subagentPromptCacheTtl: "5m" }));
+  let p = sealPrepare({ cwd: W(), runId: 81 });
+  assert.equal(p.block, null);
+  assert.equal(p.settings.promptCacheTtl, "1h");
+  assert.equal(p.settings.subagentPromptCacheTtl, "5m");
+  sealCleanup(81);
+
+  put(H(".claude/settings.json"), JSON.stringify({ promptCacheTtl: "24h", subagentPromptCacheTtl: 3600 }));
+  p = sealPrepare({ cwd: W(), runId: 82 });
+  assert.equal(p.block, null);
+  assert.equal(p.settings.promptCacheTtl, undefined);
+  assert.equal(p.settings.subagentPromptCacheTtl, undefined);
+  sealCleanup(82);
+});
+
 test("任何一处命中破甲特征：整轮不跑，列出文件", () => {
   for (const [where, file] of [
     ["用户 CLAUDE.md", () => H(".claude/CLAUDE.md")],
