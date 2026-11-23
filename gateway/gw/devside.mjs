@@ -258,11 +258,13 @@ const APP_FIELDS = {
   upd_verify: { full: "boolean" }, upd_repair: { full: "boolean" },
   share_file: { path: "string", mime: "string" },
   apk_install: { path: "string" },
-  shz_pair: { code: "string" }, shz_autostart: { enable: "boolean" },
+  shz_pair: { code: "string" }, shz_autostart: { enable: "boolean", pageTicket: "string" },
   notify_set: { done: "boolean", ask: "boolean" },
   island_set: { systemIsland: "boolean", overlay: "boolean", overlayY: "number", overlayOpacity: "number" },
-  dev_set: { on: "boolean", tool: "string", enabled: "boolean", a11y: "string", idle: "number" },
+  dev_set: { on: "boolean", tool: "string", enabled: "boolean", a11y: "string", idle: "number", pageTicket: "string" },
 };
+
+const consentTicket = (value) => typeof value === "string" && /^[a-f0-9-]{36}$/.test(value) ? value : undefined;
 
 // ── 路由：/api/mem/status /api/mem/clear /api/priv/status /api/priv/request /api/priv/open /api/priv/audit /api/priv/keepalive /api/app/ ──
 export async function routeDevside(req, res, u, p) {
@@ -293,11 +295,11 @@ export async function routeDevside(req, res, u, p) {
     // 固定档位由 Android 宿主返回并校验。hours 保留给仍在使用旧界面的客户端。
     const minutes = Number.isSafeInteger(b.minutes) ? b.minutes : undefined;
     const hours = Number.isSafeInteger(b.hours) ? b.hours : undefined;
-    return sendJson(res, 200, await privCall({ op: "noask", enable: b.enable === true, minutes, hours }, 90000));
+    return sendJson(res, 200, await privCall({ op: "noask", enable: b.enable === true, minutes, hours, pageTicket: consentTicket(b.pageTicket) }, 90000));
   }
   if (req.method === "POST" && p === "/api/priv/keepalive") {
     const b = JSON.parse((await readBody(req)) || "{}");
-    return sendJson(res, 200, await privCall({ op: "keepalive", enable: b.enable !== false }, 60000));
+    return sendJson(res, 200, await privCall({ op: "keepalive", enable: b.enable !== false, pageTicket: consentTicket(b.pageTicket) }, 60000));
   }
   // 更新（APK / 工具包 / Claude Code）与 Shizuku 一键安装激活：都在应用进程里做，这里只转话
   if (p.startsWith("/api/app/")) {

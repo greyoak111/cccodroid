@@ -416,12 +416,13 @@ final class Priv {
                 case "keepalive": {
                     // 打开要用户点头：会改全局的幽灵进程上限、把本应用加进电池白名单（10-31 复核：以前谁发一条都直接改）
                     boolean on = req.optBoolean("enable", true);
+                    String pageVisit = on ? PageConsent.consume(ctx, req.optString("pageTicket"), "keepalive", "1") : null;
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                     if (on && !Consent.on(ctx, Consent.KEEPALIVE) && !ask(Tr.t("打开后台保活增强：") + "\n" + String.join("\n", keepAliveOn()), caller(pid), "keepalive")) {
                         resp = new JSONObject().put("ok", false).put("message", Tr.t("没有允许，保活增强没有打开"));
                         break;
                     }
-                    if (on && !Consent.on(ctx, Consent.KEEPALIVE)) Consent.grant(ctx, Consent.KEEPALIVE, "1");
+                    if (on && !Consent.on(ctx, Consent.KEEPALIVE)) Consent.grant(ctx, Consent.KEEPALIVE, "1", pageVisit);
                     resp = keepAlive(on);
                     break;
                 }
@@ -432,6 +433,7 @@ final class Priv {
                     int hours = req.optInt("hours", 24);
                     int minutes = req.optInt("minutes", hours >= 1 && hours <= 168 ? hours * 60 : NoAskDuration.DEFAULT);
                     final int selected = NoAskDuration.supports(minutes) ? minutes : NoAskDuration.DEFAULT;
+                    String pageVisit = on ? PageConsent.consume(ctx, req.optString("pageTicket"), "noask", String.valueOf(selected)) : null;
                     String until = Tr.f("{0} 后自动关闭，恢复逐条确认。", noAskDurationLabel(selected));
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                     if (on && !noAsk() && !confirm(Tr.t("特权命令不再逐条确认（风险自负）") + "\n\n"
@@ -445,7 +447,7 @@ final class Priv {
                     synchronized (NOASK_GATE) {
                         if (!on || !noAsk()) {
                             clearRenewal();
-                            if (on) Consent.grant(ctx, Consent.NOASK, NoAskDuration.value(selected, System.currentTimeMillis()));
+                            if (on) Consent.grant(ctx, Consent.NOASK, NoAskDuration.value(selected, System.currentTimeMillis()), pageVisit);
                             else Consent.revoke(ctx, Consent.NOASK);
                         }
                     }
@@ -479,12 +481,13 @@ final class Priv {
                 case "shz_autostart": {
                     // 打开 = 以后开机时不问就打开无线调试：和保活一样，要原生确认并签名存档；关掉随时可以
                     boolean on = req.optBoolean("enable", true);
+                    String pageVisit = on ? PageConsent.consume(ctx, req.optString("pageTicket"), "shz_autostart", "1") : null;
                     int pid = 0; try { pid = sock.getPeerCredentials().getPid(); } catch (IOException ignored) {}
                     if (on && !ShizukuSetup.get(ctx).autostart() && !confirm(Tr.t("开机后自动激活 Shizuku：每次开机会临时打开无线调试，用配对过的钥匙启动 Shizuku。"), caller(pid), "shz_autostart")) {
                         resp = status().put("ok", false).put("message", Tr.t("没有允许，自动激活没有打开"));
                         break;
                     }
-                    ShizukuSetup.get(ctx).setAutostart(on); resp = status(); break;
+                    ShizukuSetup.get(ctx).setAutostart(on, pageVisit); resp = status(); break;
                 }
                 // 更新（Updater）
                 case "upd_status": resp = Updater.get(ctx).status(); break;

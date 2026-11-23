@@ -230,6 +230,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        PageConsent.visible(this, false);
         if (fold != null) fold.stop();
         // 放掉这一个界面占着的东西（审查 #105 06-008）：窗格的 500ms 轮询、两个 WebView、网页的选文件回调、
         // 静态回调里捕获的本界面（新界面 showWeb 时会换成它自己的，这里只清还指着自己的）
@@ -401,7 +402,7 @@ public class MainActivity extends Activity {
         @Override public void run() { FrameRate.apply(MainActivity.this); ui.postDelayed(this, 30000); }
     };
 
-    @Override protected void onResume() { super.onResume(); foregroundOwner = new java.lang.ref.WeakReference<>(this); visible = true; applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
+    @Override protected void onResume() { super.onResume(); foregroundOwner = new java.lang.ref.WeakReference<>(this); visible = true; PageConsent.onActivityResume(this); applyLandBars(); Battery.foreground(true); FrameRate.apply(this);
         // 在后台从常驻通知点了「停止」、界面还活着：回来时把网关服务拉起来（审查 #105 06-007）。以前只有 boot 起服务，回来只能对着连不上的页面
         if (booted && !GatewayService.serviceUp()) GatewayService.start(this);
         Consent.runNext(this);   // 上次排着的锁屏签名（界面当时正在关、没问成）
@@ -416,6 +417,7 @@ public class MainActivity extends Activity {
         // （0.6.10 审计 200-13-07）。真正看不见了由 onStop 收尾。
         if (!isInMultiWindowMode()) { visible = false; Notify.get(this).onBackground(); } }
     @Override protected void onStop() {
+        PageConsent.onLeaveOrStop(this);
         super.onStop();
         if (foregroundOwner != null && foregroundOwner.get() == this) foregroundOwner = null;
         // 分屏里被整个切走 / 熄屏时 onPause 没记过账，这里补上；转屏重建不算到后台
@@ -515,17 +517,17 @@ public class MainActivity extends Activity {
     /** 确认框正显示着：同一时刻只弹一个。以前用 20 秒时间窗，开完总开关马上切读屏模式，
      *  后一次请求会被静默吞掉（页面上还提示「请在弹出的对话框里确认」，框却不会出来）。 */
     private android.app.AlertDialog a11yDialog;
-    private void confirmA11y(String mode, boolean on) {
+    private void confirmA11y(String mode, boolean on, String pageVisit) {
         boolean screen = "auto".equals(mode) || "on".equals(mode);
         if (!screen && !on) return;
-        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { ui.post(() -> confirmA11y(mode, on)); return; }
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { ui.post(() -> confirmA11y(mode, on, pageVisit)); return; }
         if (isFinishing() || isDestroyed()) return;
         if (a11yDialog != null) { android.util.Log.i("cccodroid", "无障碍确认框正在显示，忽略重复请求"); return; }
         final android.app.AlertDialog d = new android.app.AlertDialog.Builder(this)
             .setTitle(screen ? Tr.t("允许 Claude 读屏和点按？") : Tr.t("打开设备工具？"))
             .setMessage(screen ? Tr.t("打开后，Claude 能看到屏幕上的内容（包括别的应用里的），也能替你点按、输入。cccodroid 会直接打开无障碍服务，系统不会再提示。\n\n随时可以在 设置 → 设备工具 里关掉。")
                 : Tr.t("打开后，Claude 能读写剪贴板、发通知、打开应用、列出已装应用、分享文件。\n\n随时可以在 设置 → 设备工具 里关掉。"))
-            .setPositiveButton(Tr.t("允许"), (x, w) -> DeviceTools.a11yConfirmed(this, screen ? mode : "", on))
+            .setPositiveButton(Tr.t("允许"), (x, w) -> DeviceTools.a11yConfirmed(this, screen ? mode : "", on, pageVisit))
             .setNegativeButton(Tr.t("取消"), null)
             .create();
         a11yDialog = d;
@@ -720,7 +722,7 @@ public class MainActivity extends Activity {
         else if (SplitPairingNotice.ACTION_ACK.equals(a)) SplitPairingNotice.dismiss(this);
         else if (ACTION_SHIZUKU.equals(a)) ShizukuSetup.get(this).activate();
         else if (ACTION_FACTORY_RESET.equals(a)) askFactoryReset();
-        else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false));
+        else if (ACTION_A11Y_OK.equals(a)) confirmA11y(i.getStringExtra("mode"), i.getBooleanExtra("on", false), i.getStringExtra("pageVisit"));
         else if (ACTION_CONSENT.equals(a)) Consent.runNext(this);
         else if (ACTION_PRIV_OK.equals(a)) confirmPriv(i.getStringExtra("id"), i.getStringExtra("cmd"), i.getStringExtra("who"), i.getBooleanExtra("trust", false), i.getBooleanExtra("sess", false), i.getStringExtra("kind"), "noask".equals(i.getStringExtra("kind")), "apk".equals(i.getStringExtra("kind")));
         else if (Notify.ACTION_OPEN.equals(a)) openSession(i.getStringExtra("session"));
@@ -1983,6 +1985,15 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Object() {
             // 有副作用的方法第一个参数是口令 k（见 Env.BRIDGE_KEY）；界面在 theme.js 里包一层自动带上，调用处照旧写
             @android.webkit.JavascriptInterface public boolean keyed() { return true; }
+            @android.webkit.JavascriptInterface public void leaveDeviceConsentPage(String k) {
+                if (Env.bridgeOk(k)) PageConsent.onLeaveOrStop(MainActivity.this);
+            }
+            @android.webkit.JavascriptInterface public String deviceConsentTicket(String k, String operation, String argument) {
+                if (!Env.bridgeOk(k) || !visible || isFinishing() || isDestroyed() || operation == null || argument == null || argument.length() > 16
+                    || !java.util.Arrays.asList("dev_set", "noask", "keepalive", "shz_autostart").contains(operation)) return "";
+                PageConsent.visible(MainActivity.this, true);
+                return PageConsent.ticket(MainActivity.this, operation, argument);
+            }
             /** 页面上输入框被点了一下、或用户手势里它刚拿到焦点：确认主 WebView 有视图焦点，
              *  再重建输入连接、请键盘出来。视图焦点丢了、或输入法手里还是那条空连接时，
              *  只靠 JS focus() 只有边框变色，既没光标也没键盘。 */

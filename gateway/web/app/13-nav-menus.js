@@ -255,6 +255,7 @@
   const CHECK = '<path d="M5 12l5 5 9-10"/>';
   // 「能看图」标记（多模态）：图片框 + 山 + 太阳，不用 emoji
   const MM_IMG = () => `<svg class="mm-img" viewBox="0 0 24 24" role="img" aria-label="${esc(t("能看图"))}"><title>${esc(t("能看图"))}</title><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 15.5l-4.5-4.5-8.5 8"/></svg>`;
+  const selectionChangesFromUser = new WeakSet();
   function selMenu(sel) {
     const items = [];
     for (const n of sel.children) {
@@ -287,7 +288,9 @@
       if (o.selected) return;
       sel.value = o.value;
       sel.dispatchEvent(new Event("input", { bubbles: true }));
-      sel.dispatchEvent(new Event("change", { bubbles: true }));
+      const change = new Event("change", { bubbles: true });
+      if (e.isTrusted) selectionChangesFromUser.add(change);
+      sel.dispatchEvent(change);
     });
   }
   // 捕获阶段拦住：mousedown / 触摸的 pointerdown 不让系统选择器弹出，click 打开我们的菜单；回车 / 空格同样打开。

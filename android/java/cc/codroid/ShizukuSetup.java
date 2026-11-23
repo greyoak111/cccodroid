@@ -620,8 +620,8 @@ final class ShizukuSetup {
      *  paired 仍是普通 prefs：它只是「配对过」的记号，单独改它不会让任何东西自己跑起来（自动拉起还要这条同意），
      *  真用时 verifyPairAsync 会按实际连不连得上纠正（11-04 报告 A6）。旧版存在 prefs 里的 autostart 不认，升级后要重新打开 */
     boolean autostart() { return Consent.on(ctx, Consent.SHZ_AUTO); }
-    void setAutostart(boolean on) {
-        if (on) Consent.grant(ctx, Consent.SHZ_AUTO, "1"); else Consent.revoke(ctx, Consent.SHZ_AUTO);
+    void setAutostart(boolean on, String pageVisit) {
+        if (on) Consent.grant(ctx, Consent.SHZ_AUTO, "1", pageVisit); else Consent.revoke(ctx, Consent.SHZ_AUTO);
         prefs().edit().remove("autostart").apply();
     }
 

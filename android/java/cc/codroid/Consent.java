@@ -47,6 +47,7 @@ final class Consent {
     private static final Map<String, String> MEM = new ConcurrentHashMap<>();
     /** 等着弹锁屏验证去签名的（只由 grant 放进来，外面没法塞） */
     private static final ArrayDeque<String[]> PENDING = new ArrayDeque<>();
+    private static final Map<String, String[]> PAGE_REQUESTS = new java.util.HashMap<>();
     private static final Object LOCK = new Object();
     /** Google 硬件密钥认证根的公钥（SubjectPublicKeyInfo 的 SHA-256）：RSA 老根，和 2025 年起的 EC P-384 根。
      *  取自 https://android.googleapis.com/attestation/root（11-04） */
@@ -84,6 +85,24 @@ final class Consent {
         String v = MEM.get(name);
         if (v != null) return v;
         SharedPreferences p = sp(c);
+        String page = p.getString("page." + name, null);
+        if (page != null && !page.equals(BAD_SIG.get(name))) {
+            String restored = PageConsent.restore(c, name, page);
+            if (restored != null) {
+                synchronized (LOCK) {
+                    String current = MEM.get(name);
+                    if (current != null) return current;
+                    if (page.equals(p.getString("page." + name, null))) {
+                        MEM.put(name, restored);
+                        return restored;
+                    }
+                }
+            } else {
+                synchronized (LOCK) {
+                    if (page.equals(p.getString("page." + name, null))) BAD_SIG.put(name, page);
+                }
+            }
+        }
         String val = p.getString("v." + name, null), sig = p.getString("s." + name, null);
         if (val == null || sig == null) return null;
         String token = val + "\0" + sig;
@@ -123,14 +142,21 @@ final class Consent {
      * 本次运行立即生效；能签名就排队弹锁屏验证，验过了存到下次启动
      */
     static void grant(Context c, String name, String value) {
+        grant(c, name, value, null);
+    }
+
+    static void grant(Context c, String name, String value, String pageVisit) {
         synchronized (LOCK) {
+            PAGE_REQUESTS.remove(name);
             if (verifiedGrant != null && verifiedGrant.name.equals(name)) verifiedGrant = null;
             MEM.put(name, value);
             // 旧签名先作废：值变了（读屏 自动 → 常开）不能让旧的那份还验得过
             dropSaved(c, name);
             if (!persistable(c)) return;
             PENDING.removeIf((x) -> x[0].equals(name));
-            PENDING.add(new String[]{name, value});
+            String[] request = new String[]{name, value, pageVisit};
+            if (pageVisit != null) PAGE_REQUESTS.put(name, request);
+            PENDING.add(request);
         }
         try { c.startActivity(MainActivity.internal(c, MainActivity.ACTION_CONSENT).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); }
         catch (Exception e) { Log.w(TAG, "弹不出锁屏验证", e); }
@@ -139,6 +165,7 @@ final class Consent {
     /** 关掉：内存、存档、钥匙一起清。不用验证 */
     static void revoke(Context c, String name) {
         synchronized (LOCK) {
+            PAGE_REQUESTS.remove(name);
             if (verifiedGrant != null && verifiedGrant.name.equals(name)) verifiedGrant = null;
             MEM.remove(name);
             PENDING.removeIf((x) -> x[0].equals(name));
@@ -147,10 +174,16 @@ final class Consent {
     }
 
     private static void dropSaved(Context c, String name) {
+        PageConsent.removeMarker(name);
         BAD_SIG.remove(name);
         SharedPreferences p = sp(c);
-        if (!p.contains("v." + name) && !p.contains("s." + name)) return;   // 本就没存档：主线程 showWeb() 不白做 commit + KeyStore IPC
-        p.edit().remove("v." + name).remove("s." + name).commit();
+        boolean hasLegacy = p.contains("v." + name) || p.contains("s." + name);
+        boolean hasPage = p.contains("page." + name);
+        if (hasLegacy || hasPage) {
+            p.edit().remove("page." + name).remove("v." + name).remove("s." + name).commit();
+        }
+        if (hasPage) PageConsent.pruneUnusedRootsAsync(c);
+        if (!hasLegacy) return;
         try { KeyStore ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null); ks.deleteEntry(ALIAS + name); }
         catch (Exception e) { Log.w(TAG, "删钥匙失败 " + name, e); }
     }
@@ -244,7 +277,8 @@ final class Consent {
                             String sig = Base64.encodeToString(signer.sign(), Base64.NO_WRAP);
                             synchronized (LOCK) {
                                 if (verifiedGrant == request && request.current.getAsBoolean() && !a.isFinishing() && !a.isDestroyed()) {
-                                    saved = sp(a).edit().putString("v." + request.name, request.value).putString("s." + request.name, sig).commit();
+                                    PageConsent.removeMarker(request.name);
+                                    saved = sp(a).edit().remove("page." + request.name).putString("v." + request.name, request.value).putString("s." + request.name, sig).commit();
                                     if (saved) {
                                         BAD_SIG.remove(request.name);
                                         MEM.put(request.name, request.value);
@@ -315,6 +349,10 @@ final class Consent {
             running = true;
         }
         final String name = job[0], value = job[1];
+        if (job[2] != null) {
+            runPage(a, job);
+            return;
+        }
         // 硬件密钥生成与认证链核对放到后台线程，完成后回主线程弹 BiometricPrompt，避免 StrongBox 机型主线程卡顿 0.5–3s
         new Thread(() -> {
             final Signature s;
@@ -368,11 +406,109 @@ final class Consent {
             });
         }, "consent-keygen").start();
     }
+    private static void runPage(Activity a, String[] job) {
+        new Thread(() -> {
+            try {
+                if (PageConsent.authority(a, job[2]) != null) {
+                    savePage(a, job);
+                    return;
+                }
+                if (!currentPageRequest(a, job)) {
+                    finishPage(a, job, null);
+                    return;
+                }
+                PageConsent.Enrollment enrollment = PageConsent.enroll(a);
+                a.runOnUiThread(() -> promptPage(a, job, enrollment));
+            } catch (Exception e) {
+                Log.w(TAG, "无法开始页面验证", e);
+                finishPage(a, job, Tr.f("没有保存，「{0}」只在这次运行有效", label(job[0], job[1])));
+            }
+        }, "consent-page-keygen").start();
+    }
+
+    private static boolean currentPageRequest(Activity a, String[] job) {
+        synchronized (LOCK) {
+            return PAGE_REQUESTS.get(job[0]) == job && PageConsent.current(a, job[2]);
+        }
+    }
+
+    private static void promptPage(Activity a, String[] job, PageConsent.Enrollment enrollment) {
+        if (a.isFinishing() || a.isDestroyed() || !currentPageRequest(a, job)) {
+            PageConsent.discard(enrollment.rootId);
+            finishPage(a, job, null);
+            return;
+        }
+        try {
+            BiometricPrompt prompt = new BiometricPrompt.Builder(a)
+                .setTitle(Tr.t("用锁屏验证保存这项设置"))
+                .setSubtitle(label(job[0], job[1]))
+                .setDescription(Tr.t("验证后可在本次访问「设备与权限」期间保存该页上的其他更改。"))
+                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+                .build();
+            PageConsent.setPrompting(a, job[2], true);
+            prompt.authenticate(new BiometricPrompt.CryptoObject(enrollment.signing), new CancellationSignal(), a.getMainExecutor(),
+                new BiometricPrompt.AuthenticationCallback() {
+                    @Override public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                        new Thread(() -> {
+                            try {
+                                PageConsent.Authority authority = enrollment.complete(a, result.getCryptoObject().getSignature());
+                                synchronized (LOCK) {
+                                    if (!currentPageRequest(a, job) || !PageConsent.activate(a, job[2], authority)) {
+                                        PageConsent.finishPrompt(a, job[2], false);
+                                        PageConsent.discard(enrollment.rootId);
+                                        finishPage(a, job, null);
+                                        return;
+                                    }
+                                    PageConsent.finishPrompt(a, job[2], true);
+                                }
+                                savePage(a, job);
+                            } catch (Exception e) {
+                                PageConsent.finishPrompt(a, job[2], false);
+                                PageConsent.discard(enrollment.rootId);
+                                Log.w(TAG, "页面授权签名失败", e);
+                                finishPage(a, job, Tr.f("没有保存，「{0}」只在这次运行有效", label(job[0], job[1])));
+                            }
+                        }, "consent-page-save").start();
+                    }
+                    @Override public void onAuthenticationError(int code, CharSequence message) {
+                        PageConsent.finishPrompt(a, job[2], false);
+                        PageConsent.discard(enrollment.rootId);
+                        finishPage(a, job, Tr.f("没有保存，「{0}」只在这次运行有效", label(job[0], job[1])));
+                    }
+                });
+        } catch (Exception e) {
+            PageConsent.finishPrompt(a, job[2], false);
+            PageConsent.discard(enrollment.rootId);
+            finishPage(a, job, Tr.f("没有保存，「{0}」只在这次运行有效", label(job[0], job[1])));
+        }
+    }
+
+    private static void savePage(Activity a, String[] job) {
+        boolean saved = false;
+        try {
+            synchronized (LOCK) {
+                if (currentPageRequest(a, job)) saved = PageConsent.save(a, job[2], job[0], job[1]);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "页面授权保存失败", e);
+        }
+        finishPage(a, job, saved ? Tr.f("已保存「{0}」", label(job[0], job[1]))
+            : Tr.f("没有保存，「{0}」只在这次运行有效", label(job[0], job[1])));
+    }
+
+    private static void finishPage(Activity a, String[] job, String toast) {
+        synchronized (LOCK) {
+            if (PAGE_REQUESTS.get(job[0]) != job) toast = null;
+            else PAGE_REQUESTS.remove(job[0]);
+        }
+        done(a, toast);
+    }
+
     private static void done(Activity a, String toast) {
         synchronized (LOCK) { running = false; }
         a.runOnUiThread(() -> {
             if (a.isDestroyed()) return;
-            try { android.widget.Toast.makeText(a, toast, android.widget.Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
+            if (toast != null) try { android.widget.Toast.makeText(a, toast, android.widget.Toast.LENGTH_LONG).show(); } catch (Exception ignored) {}
             runNext(a);
         });
     }

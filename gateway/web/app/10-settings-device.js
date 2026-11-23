@@ -225,7 +225,9 @@
   // 打开要在原生对话框里点头（再验一次锁屏存档）：没允许时开关按实际状态弹回去
   $("priv-auto").addEventListener("change", (e) => {
     const visit = setVisit;
-    post("/api/app/shz_autostart", { enable: e.target.checked }).catch(() => {}).finally(() => privLater(300, visit));
+    const body = { enable: e.target.checked };
+    if (body.enable) Object.assign(body, deviceConsentTicket(e, "shz_autostart", "1"));
+    post("/api/app/shz_autostart", body).catch(() => {}).finally(() => privLater(300, visit));
   });
 
   // ── 更新：应用本体 / 开发工具包 / Claude Code ──
@@ -576,8 +578,19 @@
     devRender(st);
     return true;
   }
-  $("dev-on").addEventListener("change", (e) => devSet({ on: e.target.checked }));
-  $("dev-a11y").addEventListener("change", (e) => devSet({ a11y: e.target.value }));
+  function deviceConsentTicket(event, operation, argument) {
+    if (!(event.isTrusted || selectionChangesFromUser.has(event)) || !setVisible("device")) return {};
+    const pageTicket = window.CCApp?.deviceConsentTicket?.(operation, argument);
+    return pageTicket ? { pageTicket } : {};
+  }
+  $("dev-on").addEventListener("change", (e) => {
+    const on = e.target.checked;
+    devSet({ on, ...(on && deviceConsentTicket(e, "dev_set", "1:")) });
+  });
+  $("dev-a11y").addEventListener("change", (e) => {
+    const a11y = e.target.value;
+    devSet({ a11y, ...(a11y !== "off" && deviceConsentTicket(e, "dev_set", "0:" + a11y)) });
+  });
   $("dev-idle").addEventListener("change", (e) => devSet({ idle: Number(e.target.value) || 10 }));
   $("dev-a11y-sys").addEventListener("click", () => appPost("/api/app/a11y_settings"));
   $("dev-retry").addEventListener("click", () => loadDev());
@@ -626,7 +639,7 @@
     }
     const out = $("priv-ka-result");
     out.className = "prov-state"; out.textContent = on ? t("正在应用…") : t("正在恢复…");
-    const r = await post("/api/priv/keepalive", { enable: on }).catch((e2) => ({ ok: false, message: e2.message }));
+    const r = await post("/api/priv/keepalive", { enable: on, ...(on && deviceConsentTicket(e, "keepalive", "1")) }).catch((e2) => ({ ok: false, message: e2.message }));
     out.className = "prov-state " + (r.ok ? "ok" : "err");
     out.textContent = r.ok
             ? (on ? t("✓ 已应用") + (r.phantom ? t("（幽灵进程上限 {n}）", { n: r.phantom }) : "") : t("✓ 已恢复"))
@@ -640,7 +653,8 @@
   $("priv-na").addEventListener("change", async (e) => {
     const on = e.target.checked, out = $("priv-na-result");
     out.className = "prov-state"; out.textContent = on ? t("请在弹出的说明里确认…") : t("正在关闭…");
-    const r = await post("/api/priv/noask", { enable: on, minutes: +$("priv-na-hours").value || 1440 }).catch((e2) => ({ ok: false, message: e2.message }));
+    const minutes = +$("priv-na-hours").value || 1440;
+    const r = await post("/api/priv/noask", { enable: on, minutes, ...(on && deviceConsentTicket(e, "noask", String(minutes))) }).catch((e2) => ({ ok: false, message: e2.message }));
     out.className = "prov-state " + (r.ok ? (on ? "warn" : "ok") : "err");
     out.textContent = r.ok ? (on ? t("已打开：特权命令不再逐条确认") : t("✓ 已关闭，恢复逐条确认")) : "✗ " + (r.message || t("失败"));
     loadPriv();
