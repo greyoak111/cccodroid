@@ -66,7 +66,7 @@ final class FactoryReset {
                 catch (Exception e) { Log.w(TAG, "挪不走 " + rel, e); failed.add(rel); }
             }
             for (String rel : DROP) { File f = new File(env.home, rel); if (f.exists() || isLink(f)) { if (f.delete()) moved.add(rel); else failed.add(rel); } }
-            for (String rel : new String[]{ ".gh-proxy", ".upd-auto-off" }) { File f = new File(env.files, rel); if (f.exists() || isLink(f)) { if (f.delete()) moved.add("files/" + rel); else failed.add("files/" + rel); } }
+            for (String rel : new String[]{ ".gh-proxy" }) { File f = new File(env.files, rel); if (f.exists() || isLink(f)) { if (f.delete()) moved.add("files/" + rel); else failed.add("files/" + rel); } }
             try { if (stripClaudeJson(new File(env.home, ".claude.json"), new File(bak, ".claude.json"))) moved.add(".claude.json (MCP)"); }
             catch (Exception e) { Log.w(TAG, ".claude.json 没处理成", e); failed.add(".claude.json"); }
             // 应用自带的文件（网关、界面、守卫、bin/claude…）按安装包重铺
