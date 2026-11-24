@@ -3161,3 +3161,4 @@
 3161	Error al cargar la interfaz; toca para reintentar
 3162	Guardar no invoca modelos remotos ni cambia la sesión actual.
 3163	Qué pasó
+3164	API Key

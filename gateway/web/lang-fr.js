@@ -3164,4 +3164,5 @@ window.I18N_DICT["fr"] = {
   "界面加载失败，点此重试": "Échec du chargement — touchez pour réessayer",
   "保存不调用远端模型，也不切换当前会话。": "L'enregistrement n'appelle aucun modèle distant et ne change pas la session active.",
   "遇到了什么": "Ce qui s’est passé",
+  "API Key": "API Key",
 };

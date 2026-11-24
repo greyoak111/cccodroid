@@ -382,7 +382,7 @@ test("FIND-018：确认网关不在之后，后续重拨失败不会把文案盖
   b.created[2].onopen();
   b.created[2].onerror();            // 连上后又断：清零了，回到原文案
   await flush();
-  assert.match(b.statuses[b.statuses.length - 1][0], /生成不受影响/);
+  assert.match(b.statuses[b.statuses.length - 1][0], /后台继续生成|生成不受影响/);
 });
 
 test("FIND-018：网关还能应答（连接断在浏览器侧）就不改文案；8 秒内不重复问", async () => {

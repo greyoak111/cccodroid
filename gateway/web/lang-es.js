@@ -3164,4 +3164,5 @@ window.I18N_DICT["es"] = {
   "界面加载失败，点此重试": "Error al cargar la interfaz; toca para reintentar",
   "保存不调用远端模型，也不切换当前会话。": "Guardar no invoca modelos remotos ni cambia la sesión actual.",
   "遇到了什么": "Qué pasó",
+  "API Key": "API Key",
 };

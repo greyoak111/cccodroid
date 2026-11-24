@@ -3198,4 +3198,5 @@ window.I18N_DICT.en = {
   "界面加载失败，点此重试": "Failed to load UI — tap to retry",
   "保存不调用远端模型，也不切换当前会话。": "Saving never calls remote models or switches the current session.",
   "遇到了什么": "What happened",
+  "API Key": "API Key",
 };

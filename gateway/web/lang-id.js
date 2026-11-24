@@ -3164,4 +3164,5 @@ window.I18N_DICT["id"] = {
   "界面加载失败，点此重试": "Gagal memuat antarmuka — ketuk untuk mencoba lagi",
   "保存不调用远端模型，也不切换当前会话。": "Menyimpan tidak memanggil model jarak jauh atau mengalihkan sesi saat ini.",
   "遇到了什么": "Apa yang terjadi",
+  "API Key": "API Key",
 };

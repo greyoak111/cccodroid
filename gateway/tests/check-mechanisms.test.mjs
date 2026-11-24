@@ -123,7 +123,7 @@ test("链路①②③⑤⑥：关键接线与 Java/前端源码契约核验", ()
   assert.match(updater, /finally\s*\{\s*checkedOnce = true;\s*\}/);
   assert.match(updater, /if \(!manual\) ed\.putLong\("lastAutoCheck", now\);/);
   assert.match(updater, /long autoAge = System\.currentTimeMillis\(\) - prefs\(\)\.getLong\("lastAutoCheck", 0\);/);
-  assert.match(updater, /else if \(loopOn && env\.devkitReady\(\) && !checkedOnce\) checkAsync\(true\);/);
+  assert.match(updater, /else if \(loopOn && auto\(\) && env\.devkitReady\(\) && !checkedOnce\) checkAsync\(true\);/);
   assert.match(updater, /Math\.max\(60_000L,\s*Math\.min\(30 \* 60_000L,\s*AUTO_EVERY - autoAge\)\)/);
 
   const devside = readRepo("gateway/gw/devside.mjs");

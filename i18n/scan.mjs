@@ -186,8 +186,11 @@ const used = new Map();   // key → 出处
 const A = [];
 for (const f of jsFiles) {
   for (const l of scanJs(fs.readFileSync(path.join(WEB, f), "utf8"))) {
-    if (!HAN.test(l.text)) continue;
     if (l.ignored) continue;
+    // t()/tk() 包着的静态字符串就是在用的键：不含汉字的键（"API Key"、"{p}：{n}"、"「{n}」{w}"）
+    // 也要先登记，否则会被误报成孤儿删掉。只认普通字符串字面量，模板块走下面原有逻辑。
+    if (l.wrapped && !l.dynamic && l.kind !== "`" && !/\$\{/.test(l.raw)) { if (!used.has(l.text)) used.set(l.text, `${f}:${l.line}`); continue; }
+    if (!HAN.test(l.text)) continue;
     // 模板里已经用 t("…") 译过的部分不算未接入：把 t("…")/t('…') 摘掉再找中文
     if (l.wrapped && /\$\{/.test(l.raw)) continue;
     if (!HAN.test(stripTranslated(l.raw))) continue;
