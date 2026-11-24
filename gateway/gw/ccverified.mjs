@@ -8,6 +8,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { CFG, LIVE, log } from "./config.mjs";
 import { PUBKEY, loadSigned, saveSigned } from "./notices.mjs";
+import { SETTINGS } from "./settings-store.mjs";
 
 // CCAPP_CLAUDE_VERIFIED_URL：只用这一个地址（测试用）
 const SOURCES = process.env.CCAPP_CLAUDE_VERIFIED_URL ? [process.env.CCAPP_CLAUDE_VERIFIED_URL]
@@ -29,6 +30,7 @@ async function fetchOne(url) {
 }
 
 export function refreshVerified(force = false) {
+  if (SETTINGS.remoteNotices === false) return Promise.resolve();
   if (busy) return busy;
   if (!force && Date.now() - fetchedAt < EVERY) return Promise.resolve();
   busy = (async () => {

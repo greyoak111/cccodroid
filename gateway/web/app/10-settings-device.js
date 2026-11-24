@@ -350,6 +350,8 @@
     if (!st?.ok || !st.items) { updWasMoving = false; $("upd-field").classList.add("hidden"); setDiscovery("update", t("不可用")); return; }
     $("upd-field").classList.remove("hidden");
     $("upd-auto").checked = !!st.auto;
+    if ($("upd-ghproxy")) $("upd-ghproxy").checked = st.ghProxy !== undefined ? !!st.ghProxy : !!(state.settings && state.settings.ghProxy);
+    if ($("upd-notices")) $("upd-notices").checked = !state.settings || state.settings.remoteNotices !== false;
     $("upd-channel").value = st.channel === "pinned" ? "pinned" : st.channel || "stable";
     // 安装包方案（28 / 36）：老外壳没有这几个字段就不显示
     $("upd-flavor-row").classList.toggle("hidden", !st.flavor);
@@ -672,9 +674,34 @@
     followUpd(); loadUpd(true);
   });
   // 存不上（网关回 ok:false 或断了）：开关先退回上次读到的值，再重读（审查 #52 D-05）
-  const updBack = (msg) => { toast(msg || t("保存失败"), true); if (lastUpd && lastUpd.items) { $("upd-auto").checked = !!lastUpd.auto; $("upd-channel").value = lastUpd.channel === "pinned" ? "pinned" : lastUpd.channel || "stable"; } loadUpd(true); };
+  const updBack = (msg) => {
+    toast(msg || t("保存失败"), true);
+    if (lastUpd && lastUpd.items) {
+      $("upd-auto").checked = !!lastUpd.auto;
+      if ($("upd-ghproxy")) $("upd-ghproxy").checked = lastUpd.ghProxy !== undefined ? !!lastUpd.ghProxy : !!(state.settings && state.settings.ghProxy);
+      $("upd-channel").value = lastUpd.channel === "pinned" ? "pinned" : lastUpd.channel || "stable";
+    }
+    loadUpd(true);
+  };
   $("upd-auto").addEventListener("change", (e) => post("/api/app/upd_set", { auto: e.target.checked })
     .then((r) => (r && r.ok === false ? updBack(r.message) : loadUpd(true))).catch((e2) => updBack(e2.message)));
+  $("upd-notices")?.addEventListener("change", async (e) => {
+    const want = e.target.checked;
+    try {
+      const r = await post("/api/settings", { remoteNotices: want });
+      if (!r || r.ok === false) throw new Error((r && (r.error || r.message)) || t("保存失败"));
+      if (state.settings) state.settings.remoteNotices = want;
+    } catch (e2) {
+      e.target.checked = !want;
+      toast(e2.message || t("保存失败"), true);
+    }
+  });
+  $("upd-ghproxy")?.addEventListener("change", (e) => post("/api/app/upd_set", { ghProxy: e.target.checked })
+    .then((r) => {
+      if (r && r.ok === false) return updBack(r.message);
+      if (state.settings) state.settings.ghProxy = e.target.checked;
+      return loadUpd(true);
+    }).catch((e2) => updBack(e2.message)));
   $("upd-channel").addEventListener("change", (e) => {
     // 固定版本要先挑一版：开选单，下拉框先退回原样，挑完 loadUpd 会刷新成「固定 x.y.z」
     if (e.target.value === "pinned") { e.target.value = (lastUpd && lastUpd.channel) || "stable"; openClaudeVersions(); return; }

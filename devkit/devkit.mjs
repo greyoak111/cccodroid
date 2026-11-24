@@ -119,7 +119,7 @@ async function loadRepo(repo) {
     for (const l of blk.split("\n")) { const m = l.match(/^([\w-]+): (.*)$/); if (m) f[m[1]] = m[2]; }
     if (!f.Package) continue;
     const p = {
-      name: f.Package, version: f.Version, file: f.Filename, sha256: f.SHA256, size: +f.Size,
+      name: f.Package, version: f.Version, license: f.License || "", file: f.Filename, sha256: f.SHA256, size: +f.Size,
       isize: +(f["Installed-Size"] || 0) * 1024, source: f.Source || f.Package, homepage: f.Homepage || "",
       deps: [f["Pre-Depends"], f.Depends].filter(Boolean).join(", "),
       repo,
@@ -1293,7 +1293,7 @@ if (cmd === "build" || cmd === "component") {
       // 实测：python 的 postinst 看不到 python-pip.list，就认定 pip 是旧版残留，把刚解出来的 pip 整个删掉。
       tw.add({ name: `usr/var/lib/dpkg/info/${n}.list`, type: "0", mode: 0o644, mtime: 0, data: Buffer.from(listing.join("\n") + "\n") });
       lock.push({
-        name: n, repo: p.repo.name || "main", version: p.version, source: p.source, file: p.file, sha256: p.sha256, size: p.size,
+        name: n, repo: p.repo.name || "main", version: p.version, license: p.license || "-", source: p.source, file: p.file, sha256: p.sha256, size: p.size,
         homepage: p.homepage,
         recipe: `https://github.com/termux/termux-packages/tree/master/packages/${p.source}`,
       });
@@ -1555,8 +1555,8 @@ if (cmd === "build" || cmd === "component") {
       packages: lock,
     }, null, 2));
     fs.writeFileSync(path.join(OUT, `SBOM-${BLOCK.id}.tsv`),
-      "package\tversion\tsource\thomepage\trecipe\tsha256\n" +
-      lock.map((l) => [l.name, l.version, l.source, l.homepage, l.recipe, l.sha256].join("\t")).join("\n") + "\n");
+      "package\tversion\tlicense\tsource\thomepage\trecipe\tsha256\n" +
+      lock.map((l) => [l.name, l.version, l.license || "-", l.source, l.homepage, l.recipe, l.sha256].join("\t")).join("\n") + "\n");
     console.log(`\n✓ ${BLOCK.id}：${tarFile}  ${mb(tarInfo.bytes)} → .gz ${mb(gzInfo.bytes)}  ${bins.size} 个命令  用时 ${((Date.now() - t0) / 1000) | 0}s`);
     process.exit(0);
   }
@@ -1574,8 +1574,8 @@ if (cmd === "build" || cmd === "component") {
     packages: lock,
   }, null, 2));
   fs.writeFileSync(path.join(OUT, "SBOM.tsv"),
-    "package\tversion\tsource\thomepage\trecipe\tsha256\n" +
-    lock.map((l) => [l.name, l.version, l.source, l.homepage, l.recipe, l.sha256].join("\t")).join("\n") + "\n");
+    "package\tversion\tlicense\tsource\thomepage\trecipe\tsha256\n" +
+    lock.map((l) => [l.name, l.version, l.license || "-", l.source, l.homepage, l.recipe, l.sha256].join("\t")).join("\n") + "\n");
   console.log(`\n✓ ${tarFile}  ${mb(tarInfo.bytes)} → .gz ${mb(gzInfo.bytes)}  用时 ${((Date.now() - t0) / 1000) | 0}s`);
   console.log(`  前缀改写：${patchedFiles} 个文件、${patchedHits} 处（等长，${TERMUX} → ${R.to}）`);
 }

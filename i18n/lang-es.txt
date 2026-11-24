@@ -3169,3 +3169,11 @@
 3169	ADB local no está disponible temporalmente. Se reintentará automáticamente. Si se revocó la autorización de depuración, puedes volver a emparejar.
 3170	No se pudo saber si el dispositivo está cargando
 3171	No se pudo leer el nivel actual de batería
+3172	Esperando tareas en segundo plano
+3173	sin cambios {d}
+3174	quedan {d}
+3175	Avisos de mantenimiento
+3176	Activado por defecto: obtiene cada 3 h avisos firmados sobre problemas conocidos y soluciones (petición estática sin datos del dispositivo); al desactivarlo no se hacen peticiones de avisos
+3177	Proxy público alternativo para GitHub (gh-proxy.com)
+3178	Desactivado por defecto: al activarlo, solo usa un proxy público de terceros si fallan las fuentes oficiales y réplicas (el operador ve tu IP pública y el enlace; el contenido se sigue verificando con SHA-256 y firma fijados)
+3179	Estás usando una suscripción personal: los términos del proveedor suelen prohibir el sondeo automatizado desatendido de alta frecuencia. Usa mejor una clave API de pago por uso para tareas programadas y evita restricciones en la cuenta.

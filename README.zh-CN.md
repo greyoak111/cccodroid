@@ -204,6 +204,33 @@ cccodroid.apk（Java 外壳：安装器 + 前台服务 + WebView）
 - **外来的东西先验签。** 工具包、模块、组件索引、通知、发布列表都验 ed25519 或 PGP 签名，签名绑定具体 release。
 - **改了就要验。** 网关测试只经 runner 跑，发版和发工具包每一步都核哈希，组件标明有没有真机验证过。
 
+## 隐私与数据保护
+
+完整说明见 **[隐私与数据保护说明（PRIVACY.zh-CN.md）](PRIVACY.zh-CN.md)**。cccodroid **没有用户账号体系、没有后端业务服务器、没有对话云同步，也没有任何第一方遥测或闭源统计 SDK**；以下每一项承诺均可直接在仓库源码中逐行核查：
+
+- **零遥测、零外部 CDN 与上游静默**：
+  - 应用不生成持久化安装 ID（`iid`）、不上传崩溃或用量统计，未集成 Google Play Services、ML Kit、Firebase、Sentry 或任何广告 SDK；前端全部脚本与字体均随包离线内置于 [`gateway/web/vendor/`](gateway/web/vendor/)。
+  - 拉起官方 Claude Code 子进程时，网关在 [`gateway/gw/claude.mjs`](gateway/gw/claude.mjs)（`claudeEnv`）中固定注入 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"`，主动关闭上游 CLI 内置的非必要遥测与后台自更新请求。
+- **凭据隔离、本地统计与诊断脱敏**：
+  - 清单声明 `android:allowBackup="false"`（[`android/AndroidManifest.xml`](android/AndroidManifest.xml)），会话、设置与密钥仅存于应用私有目录 `/data/data/cc.codroid/files/home/`，不进系统云备份。
+  - 第三方 API Key 存于 `0600` 权限私有文件，经 Claude Code 的 `apiKeyHelper` 按需读取，**不注入子进程环境变量**（[`gateway/gw/claude.mjs`](gateway/gw/claude.mjs) `claudeEnv`）；官方订阅登录态显式删除 `ANTHROPIC_BASE_URL` 直连 Anthropic，绝不经过本机协议桥。
+  - 本机网关仅绑定回环地址 `127.0.0.2`（界面专用）与 `127.0.0.1`，要求 256 位安装令牌、Host/Origin 核验与启动期派生的单次防重放 HMAC 签名（[`gateway/gw/access.mjs`](gateway/gw/access.mjs)、[`android/java/cc/codroid/Events.java`](android/java/cc/codroid/Events.java)）。
+  - 「用量」页仅统计本地会话文件，零网络请求（[`gateway/gw/usage.mjs`](gateway/gw/usage.mjs)）；「打包诊断」在调用系统分享面板前本地抹除密钥、令牌、邮箱与你发出的消息正文且不含会话记录（[`android/java/cc/codroid/Share.java`](android/java/cc/codroid/Share.java) `bundleLogs`）；「到 GitHub 反馈」仅在你主动点击时拼出浏览器预填链接供你审阅（[`gateway/gw/feedback.mjs`](gateway/gw/feedback.mjs) `issueDraft`）。
+- **出站网络请求全量清单与一键关闭开关**（除你在对话/终端主动让模型执行的命令外，应用自身仅存在以下联网路径）：
+
+| 用途 | 默认状态与关闭方式 | 目标地址 | 校验锚点与对应源码 |
+|---|---|---|---|
+| 模型推理与账户登录 | 你发消息或登录时触发 | 你所选厂商官方接口或自行填写的第三方调用地址 | [`gateway/gw/claude.mjs`](gateway/gw/claude.mjs)、[`gateway/gw/providers.mjs`](gateway/gw/providers.mjs)、[`gateway/gw/login.mjs`](gateway/gw/login.mjs) |
+| 自动检查更新（每 6 小时） | 默认开；**设置 → 更新 → 自动更新** 可关 | `api.github.com`、`downloads.claude.ai`、`cccodroid.net`、`dl.cccodroid.net`、npm 镜像 | APK 验签名证书 + SHA-256；工具包验钉死 SHA-256 / `ed25519`；Claude Code 验 Anthropic PGP 签名（[`android/java/cc/codroid/Updater.java`](android/java/cc/codroid/Updater.java) `AUTO_EVERY`） |
+| 维护者签名公告与兼容记录（每 3 小时） | 默认开；**设置 → 更新 → 接收维护公告** 可彻底关闭 | `cccodroid.net`、`raw.githubusercontent.com`（纯静态 `GET`，无设备参数） | 强制核验内置 `ed25519` 公钥分离签名 `.sig`（[`gateway/gw/notices.mjs`](gateway/gw/notices.mjs) `refreshNotices`、[`gateway/gw/ccverified.mjs`](gateway/gw/ccverified.mjs) `refreshVerified`） |
+| GitHub 第三方代理兜底 | **默认关闭**；仅主动开启 **设置 → 更新 → GitHub 第三方代理兜底** 且官方与镜像均失败时启用 | `gh-proxy.com`（外部公共代理，开启后对方可见你的公网 IP 与目标 URL） | 下载字节仍强制核对钉死 SHA-256 与签名（[`android/java/cc/codroid/Installer.java`](android/java/cc/codroid/Installer.java) `ghProxyEnabled`、[`gateway/gw/pget.mjs`](gateway/gw/pget.mjs) `ghProxy`） |
+| 工具包 / 组件 / 端侧模型下载 | 首装或你在「扩展」页点击安装时触发 | GitHub Releases、`dl.cccodroid.net`、Termux 官方及高校镜像、魔搭 / HuggingFace | 钉死 SHA-256、Termux PGP 签名或 `ed25519` 索引签名（[`gateway/gw/components.mjs`](gateway/gw/components.mjs)、[`gateway/gw/modules.mjs`](gateway/gw/modules.mjs)、[`android/assets/bin/pkg.mjs`](android/assets/bin/pkg.mjs)） |
+
+- **权限最小化与金融/口令界面硬隔离**：
+  - 绝不申请相机（`CAMERA`）、麦克风（`RECORD_AUDIO`）、定位（`ACCESS_*_LOCATION`）、通讯录、短信、通话记录、日历（`READ_CALENDAR`）、应用使用统计（`PACKAGE_USAGE_STATS`）、通知监听（`NotificationListenerService`）或录屏投影（`MediaProjection`），详见 [docs/permissions.zh-CN.md](docs/permissions.zh-CN.md)。
+  - 设备工具与无障碍默认全关；开启需经系统锁屏验证（[`android/java/cc/codroid/Consent.java`](android/java/cc/codroid/Consent.java)）与前台原生弹窗确认（[`android/java/cc/codroid/DeviceTools.java`](android/java/cc/codroid/DeviceTools.java)），闲置 10 分钟自动调用 `disableSelf()` 自关（[`android/java/cc/codroid/A11y.java`](android/java/cc/codroid/A11y.java) `scheduleIdle`）；自动抹除密码框文本（`isPassword()`），并对支付宝、云闪付、手机银行、2FA 动态口令应用、密码管理器及系统权限控制器实施**硬性拦截**（[`android/java/cc/codroid/A11y.java`](android/java/cc/codroid/A11y.java) `isProtectedPackage`），禁止读屏、截屏与模拟点击；内存态 `PreToolUse` 钩子（[`gateway/guard/cc-guard.mjs`](gateway/guard/cc-guard.mjs)）对触碰密钥、读屏点按、读剪贴板与向外分享强制逐次确认。
+  - **第三方调用提示**：发往模型接口的提示词、代码与工具输出受对应服务商隐私政策约束；来路不明的第三方调用运营者可见经过的密钥与内容，切勿在不可信的第三方调用上处理敏感私密数据。
+
 ## 条款与合规
 
 cccodroid 力求遵守 [Anthropic 对运行 Claude Code 的产品的条款](https://code.claude.com/docs/en/legal-and-compliance)。下面如实写明应用实际怎么做，你可以自己判断：
@@ -309,8 +336,9 @@ cccodroid 本身以 [Apache License 2.0](LICENSE) 发布（另见 [NOTICE](NOTIC
 ### 第三方组件
 
 - **Claude Code**：Anthropic 的专有软件，**不随本项目分发**。使用时须遵守 [Anthropic 的条款](https://code.claude.com/docs/en/legal-and-compliance)。
-- **开发工具包**：取自 Termux 官方仓库，各组件按各自的许可证分发（含 GPL 等）。版本、哈希与构建配方见每个 Release 附带的 `devkit.lock.json` / `SBOM.tsv`。需要源码副本的，请在 Issues 中提出。
-- **glibc 动态加载器**（`lib/arm64-v8a/libldlinux.so`，随 APK 分发）：取自 Termux 的 glibc 包，LGPL-2.1-or-later，见 [android/prebuilt/glibc](android/prebuilt/glibc/README.md)。
+- **开发工具包**：取自 Termux 官方仓库，各组件按各自的许可证分发（含 GPL 等）。版本、许可证（`license`）、哈希与构建配方见每个 Release 附带的 `devkit.lock.json` / `SBOM.tsv`；著佐权组件的对应源码由 [`devkit/archive-sources.mjs`](devkit/archive-sources.mjs) 归档备存并自每次二进制分发之日起至少保留三年，需要源码副本的请在 Issues 中提出。
+- **glibc 动态加载器**（`lib/arm64-v8a/libldlinux.so`，随 APK 分发）：取自 Termux 的 glibc 包，LGPL-2.1-or-later，见 [third_party/glibc/README.md](third_party/glibc/README.md)。
+- **7-Zip 命令行归档器**（`lib/arm64-v8a/libcc7zz.so`，随 APK 分发）：7-Zip 26.06，LGPL-2.1-or-later（含 BSD 部分及 unRAR 限制），见 [third_party/7zip/README.md](third_party/7zip/README.md)。
 - **Shizuku-API**：MIT，见 [third_party/shizuku/LICENSE](third_party/shizuku/LICENSE)。
 - **xz-decompress**（devkit 构建期使用）：MIT。
 - **[xterm.js](https://xtermjs.org)**（终端）：MIT，见 [ThirdPartyLicenses/xterm.js](ThirdPartyLicenses/xterm.js/LICENSE)。

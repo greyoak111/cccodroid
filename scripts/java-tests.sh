@@ -29,4 +29,6 @@ if [ -f "$AJAR" ]; then
   # DeviceTools 两条打开 URL 路径统一严格校验（safeHttpUri / isSafeHttpUrl）
   javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/DeviceToolsUrlTest.java"
   java -cp "$OUT:$AJAR" cc.codroid.DeviceToolsUrlTest
+  javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/A11yProtectedPackageTest.java"
+  java -cp "$OUT:$AJAR" cc.codroid.A11yProtectedPackageTest
 else echo "跳过 WhatsNewPickTest（没有 android.jar）"; fi

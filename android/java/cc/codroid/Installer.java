@@ -94,13 +94,14 @@ final class Installer {
             part.delete(); seg.delete();
             write(tag, id + "\n");
         }
-        // 候选来源：主地址、备用地址，最后是 GitHub 地址经 gh-proxy.com 加速（第三方，内容照样按 sha256 把关）。
+        // 候选来源：主地址、备用地址；若用户在设置里开启了 gh-proxy.com 第三方加速，才在最后垫底（内容照样按 sha256 把关）。
         // 主地址和备用地址不再按写死的顺序排：先各要一小段测速，谁快谁当主，其余按快慢备用（群友 10-31：不开代理时 GitHub 卡住，镜像却通）。
-        // gh-proxy 不参与测速、始终垫底：第三方，前面的都不行才去碰它
+        // gh-proxy 默认关闭，开启时也不参与测速、始终垫底：第三方，前面的都不行才去碰它
         java.util.List<String> cands = new java.util.ArrayList<>();
         cands.add(url);
-        String proxy = ghProxy(url);
-        for (String a : alts) if (a != null && !cands.contains(a)) { cands.add(a); if (proxy == null) proxy = ghProxy(a); }
+        boolean useProxy = ghProxyEnabled();
+        String proxy = useProxy ? ghProxy(url) : null;
+        for (String a : alts) if (a != null && !cands.contains(a)) { cands.add(a); if (proxy == null && useProxy) proxy = ghProxy(a); }
         if (cands.size() > 1 && (hostRank != null || size >= PROBE * 4)) {
             if (hostRank == null) ui.step("  " + Tr.t("测速中…"));
             cands = rank(cands, size);
@@ -283,6 +284,14 @@ final class Installer {
     // 几个来源是逐字节同一份文件，最后照样核 sha256。和 gw/pget.mjs 是同一套做法
     static final int SEGS = 4;
     static final long MIN_SEG = 8L << 20;
+
+    static boolean ghProxyEnabled(File files) {
+        return files != null && new File(files, ".gh-proxy").isFile();
+    }
+
+    boolean ghProxyEnabled() {
+        return env != null && ghProxyEnabled(env.files);
+    }
 
     static String ghProxy(String url) {
         return url != null && url.startsWith("https://github.com/") ? "https://gh-proxy.com/" + url.substring("https://".length()) : null;

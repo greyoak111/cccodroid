@@ -40,6 +40,44 @@ import org.json.JSONObject;
 public class A11y extends AccessibilityService {
     static final String TAG = "cccodroid";
     static volatile A11y self;
+    /** 支付、网银、动态口令（2FA）、密码管理器与系统权限/凭据授权界面：即使当前会话已开启无障碍，也硬性拒绝读屏、截屏与模拟操作 */
+    private static final java.util.Set<String> PROTECTED_PACKAGES = new java.util.HashSet<>(java.util.Arrays.asList(
+        // 系统权限、安装包确认、凭据与 VPN 授权框
+        "com.android.permissioncontroller", "com.google.android.permissioncontroller",
+        "com.android.packageinstaller", "com.google.android.packageinstaller", "com.miui.packageinstaller",
+        "com.miui.securitycenter", "com.oplus.appdetail", "com.vivo.permissionmanager", "com.huawei.systemmanager",
+        "com.android.vpndialogs", "com.android.credentialmanager", "com.android.keychain",
+        // 支付与数字钱包
+        "com.eg.android.AlipayGphone", "com.unionpay", "com.paypal.android.p2pmobile",
+        "com.google.android.apps.walletnfcrel", "com.mipay.wallet", "com.huawei.wallet",
+        "com.finshell.wallet", "com.nearme.atlas", "com.vivo.wallet",
+        // 手机银行与金融客户端
+        "com.icbc", "com.chinamworld.main", "com.chinamworld.bocmbci", "com.android.bankabc",
+        "com.bankcomm.Bankcomm", "cmb.pb", "com.yitong.mbank.psbc", "com.ecitic.bank.mobile",
+        "cn.com.spdb.mobilebank.per", "cn.com.cmbc.newmbank", "com.cebbank.mobile.cemb",
+        "com.pingan.paces.ccms", "com.cib.cibmb", "com.hxb.mobile.client",
+        "com.webank.wemoney", "com.mybank.android.phone", "hk.com.hsbc.hsbchkmobilebanking", "com.chase.sig.android",
+        // 2FA 动态口令与密码管理器（TOTP 数字与明文密码条目常为普通 TextView，isPassword 拦不住）
+        "com.google.android.apps.authenticator2", "com.azure.authenticator", "com.duosecurity.duomobile",
+        "com.authy.authy", "com.beemdevelopment.aegis", "org.fedorahosted.freeotp", "org.fedorahosted.freeotpplus",
+        "me.jmh.authenticatorpro", "com.twofasapp",
+        "com.x8bit.bitwarden", "com.agilebits.onepassword", "com.dashlane", "com.lastpass.lpandroid",
+        "proton.android.pass", "com.kunzisoft.keepass.free", "com.kunzisoft.keepass.libre"
+    ));
+
+    static boolean isProtectedPackage(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        return PROTECTED_PACKAGES.contains(pkg) || pkg.startsWith("keepass2android.");
+    }
+
+    private static String activePackage(A11y s) {
+        if (s == null) return "";
+        try {
+            AccessibilityNodeInfo root = s.getRootInActiveWindow();
+            if (root != null && root.getPackageName() != null) return String.valueOf(root.getPackageName());
+        } catch (Throwable ignored) {}
+        return "";
+    }
     private static final Object LOCK = new Object();
     private static final List<AccessibilityNodeInfo> nodes = new ArrayList<>();
     // 每个编号读屏那一刻长什么样（类名 + 文字 + 描述 + 资源名）。列表回收时同一个节点对象会换上别的内容，
@@ -138,7 +176,12 @@ public class A11y extends AccessibilityService {
         AccessibilityNodeInfo root = s.getRootInActiveWindow();
         JSONObject r = new JSONObject().put("ok", true);
         if (root == null) return r.put("ok", false).put("message", Tr.t("拿不到当前界面（锁屏、或者是不让读的安全界面）"));
-        r.put("package", String.valueOf(root.getPackageName()));
+        String pkg = String.valueOf(root.getPackageName());
+        if (isProtectedPackage(pkg)) {
+            synchronized (LOCK) { nodes.clear(); sigs.clear(); }
+            return fail(Tr.t("当前界面属于支付、网银、动态口令、密码管理或系统授权受保护应用，已拒绝读取：") + pkg);
+        }
+        r.put("package", pkg);
         for (AccessibilityWindowInfo w : s.getWindows())
             if (w.isActive() && w.getTitle() != null) { r.put("window", w.getTitle().toString()); break; }
         StringBuilder out = new StringBuilder();
@@ -290,6 +333,8 @@ public class A11y extends AccessibilityService {
     // ── 动作 ─────────────────────────────────────────────────────────────
     static JSONObject tap(JSONObject a) throws Exception {
         touch();
+        String activePkg = activePackage(self);
+        if (isProtectedPackage(activePkg)) return fail(Tr.t("当前界面属于支付、网银、动态口令、密码管理或系统授权受保护应用，已拒绝操作：") + activePkg);
         boolean lng = a.optBoolean("long", false);
         if (a.has("node")) {
             String[] miss = new String[1];
@@ -309,6 +354,8 @@ public class A11y extends AccessibilityService {
 
     static JSONObject swipe(JSONObject a) throws Exception {
         touch();
+        String activePkg = activePackage(self);
+        if (isProtectedPackage(activePkg)) return fail(Tr.t("当前界面属于支付、网银、动态口令、密码管理或系统授权受保护应用，已拒绝操作：") + activePkg);
         if (a.has("node")) {
             String[] miss = new String[1];
             AccessibilityNodeInfo n = node(a.getInt("node"), miss);
@@ -325,6 +372,8 @@ public class A11y extends AccessibilityService {
 
     static JSONObject type(JSONObject a) throws Exception {
         touch();
+        String activePkg = activePackage(self);
+        if (isProtectedPackage(activePkg)) return fail(Tr.t("当前界面属于支付、网银、动态口令、密码管理或系统授权受保护应用，已拒绝操作：") + activePkg);
         AccessibilityNodeInfo n = null;
         if (a.has("node")) { String[] miss = new String[1]; n = node(a.getInt("node"), miss); if (n == null) return fail(miss[0]); }
         else {
@@ -371,6 +420,9 @@ public class A11y extends AccessibilityService {
         if (android.os.Build.VERSION.SDK_INT < 30) return fail(Tr.t("截屏要安卓 11 以上"));
         A11y s = self;
         if (s == null) return fail(Tr.t("无障碍没开。到 设置 → 设备工具 里打开（要先激活 Shizuku），或自己去系统的无障碍设置里打开 cccodroid"));
+        String activePkg = activePackage(s);
+        if (isProtectedPackage(activePkg))
+            return fail(Tr.t("当前界面属于支付、网银、动态口令、密码管理或系统授权受保护应用，已拒绝截屏：") + activePkg);
         CountDownLatch done = new CountDownLatch(1);
         AtomicReference<Bitmap> bmp = new AtomicReference<>();
         AtomicReference<String> err = new AtomicReference<>();

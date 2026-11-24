@@ -43,6 +43,10 @@ export const SETTINGS = {
   titleModel: null,
   // 不在输入栏模型选单里显示的接口（只是不显示，配置照留；正在用的、全局默认的那家照样显示）
   hiddenProviders: [],
+  // 接收维护者经签名源发布的远程公告（gw/notices.mjs，每 3 小时纯静态 GET）；关闭后不再发起任何公告请求
+  remoteNotices: true,
+  // GitHub 下载是否允许最后兜底走第三方公共代理 gh-proxy.com（默认关；开启后对方可见公网 IP 与下载链接，内容仍按 sha256/签名校验）
+  ghProxy: false,
 };
 
 /** 字符串数组：只留字符串，条数、每条长度、总长（字）都有上限 */
@@ -96,6 +100,8 @@ function loadSettings() {
   if ("appendSystemPrompt" in SETTINGS) { delete SETTINGS.appendSystemPrompt; setImmediate(saveSettings); }
   // 敏感操作再确认没有关闭口子：旧设置里存过 false 的改回 true，别让一次误写跨重启生效
   if (SETTINGS.guard !== true) { SETTINGS.guard = true; setImmediate(saveSettings); }
+  SETTINGS.remoteNotices = SETTINGS.remoteNotices !== false;
+  SETTINGS.ghProxy = SETTINGS.ghProxy === true;
 }
 
 /** 写盘成功返回 true；失败记日志并返回 false（调用方要如实告诉用户，别报「已保存」——#122-3） */

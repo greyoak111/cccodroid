@@ -7,5 +7,6 @@ APK 的 `lib/arm64-v8a/libldlinux.so` 是 glibc 2.44 的 `ld-linux-aarch64.so.1`
 - 上游源码：<https://sourceware.org/glibc/>（2.44 版：<https://ftp.gnu.org/gnu/glibc/glibc-2.44.tar.xz>）
 - Termux 的构建配方与补丁：<https://github.com/termux-pacman/glibc-packages>
 - 改前缀的做法：本仓库 `devkit/devkit.mjs`（`ldso` 子命令），可按它从原包重新得到同一个文件
+- 对应源码自归档与三年书面承诺：通过 `node devkit/archive-sources.mjs` 将 `glibc-2.44.tar.xz` 与构建配方归档备存（清单见 `SOURCES.lock.json`），自每次二进制分发之日起至少保留三（3）年，任何接收方可在仓库 Issues 或联系维护者索取完整对应源码副本。
 
-GNU C Library (glibc) dynamic loader, LGPL-2.1-or-later. Source and build recipes: see the links above.
+GNU C Library (glibc) dynamic loader, LGPL-2.1-or-later. Corresponding source is archived via `devkit/archive-sources.mjs` and retained for at least three (3) years from binary distribution.

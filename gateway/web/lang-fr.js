@@ -3175,4 +3175,9 @@ window.I18N_DICT["fr"] = {
   "等待后台任务": "En attente des tâches en arrière-plan",
   "静默 {d}": "inactif {d}",
   "剩 {d}": "{d} restant",
+  "接收维护公告": "Annonces de maintenance",
+  "默认开：每 3 小时从签名源拉取已知问题与修复提示（纯静态请求，不带任何本机信息）；关闭后不再发起公告请求": "Activé par défaut : récupère toutes les 3 h les avis signés sur les problèmes connus et correctifs (requête statique sans donnée de l'appareil) ; désactiver coupe toute requête d'avis",
+  "GitHub 第三方代理兜底（gh-proxy.com）": "Relais proxy tiers GitHub en secours (gh-proxy.com)",
+  "默认关：开启后，仅当官方源与镜像均连不上时才经第三方公共代理下载（对方可见你的公网 IP 与下载链接；内容仍按钉住的 SHA-256 与签名校验）": "Désactivé par défaut : une fois activé, utilise un proxy public tiers uniquement si les sources officielles et miroirs échouent (l'opérateur voit votre IP publique et l'URL ; le contenu reste vérifié par SHA-256 et signature)",
+  "当前用的是个人订阅登录：上游服务条款通常禁止高频无人值守自动化轮询，定时批处理建议改用按量计费 API Key 以免触发账号风控。": "Vous utilisez un abonnement personnel : les conditions en amont interdisent généralement l'automatisation sans surveillance à haute fréquence. Préférez une clé API facturée à l'usage pour éviter des restrictions de compte.",
 };

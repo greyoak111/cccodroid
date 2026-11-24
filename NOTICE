@@ -8,19 +8,33 @@ Claude Code is proprietary software of Anthropic PBC; it is NOT distributed with
 this product. It is downloaded by the user from Anthropic's official channel and
 run unmodified, subject to Anthropic's terms.
 
-Bundled third-party components:
+Bundled third-party runtime components (shipped in the APK):
   - Shizuku-API 13.1.5 (MIT) — third_party/shizuku/LICENSE
-  - xz-decompress 0.2.3 (MIT) — devkit/vendor/xz-decompress (build-time only)
-  - node-forge 1.4.0 (BSD-3-Clause OR GPL-2.0, used under BSD-3-Clause) —
-    third_party/node-forge (build-time only: APK signing in scripts/apklib.mjs)
+  - eruda 3.4.3 (MIT) — gateway/web/vendor/eruda/LICENSE (and ThirdPartyLicenses/eruda/)
+  - highlight.js 11.12.0 (BSD-3-Clause) — gateway/web/vendor/hljs/LICENSE
+    (and ThirdPartyLicenses/highlight.js/)
+  - KaTeX 0.19.1 (MIT; bundled fonts under SIL OFL 1.1) —
+    gateway/web/vendor/katex/LICENSE (and ThirdPartyLicenses/KaTeX/)
+  - xterm.js (MIT), pdf.js (Apache-2.0, with bundled decoders), and UI/terminal
+    fonts including CC Mono (subset of GitHub Monaspace Neon, SIL OFL 1.1) —
+    see ThirdPartyLicenses/
   - GNU C Library 2.44 dynamic loader (LGPL-2.1-or-later), shipped as
-    lib/arm64-v8a/libldlinux.so — third_party/glibc/COPYING.LIB; source and
-    build recipe links in third_party/glibc/README.md
+    lib/arm64-v8a/libldlinux.so — third_party/glibc/COPYING.LIB; exact source,
+    build recipe and self-archiving tool (devkit/archive-sources.mjs) in
+    third_party/glibc/README.md
   - 7-Zip 26.06 by Igor Pavlov (GNU LGPL-2.1-or-later, parts BSD; RAR decoding
     under the unRAR license restriction), built from unmodified upstream source
     and shipped as lib/arm64-v8a/libcc7zz.so — third_party/7zip/ (License.txt,
     copying.txt, unRarLicense.txt; source and build recipe in README.md)
 
-The developer toolkit (devkit) released alongside this project consists of
-unmodified Termux packages (path prefix rewritten in place), each distributed
-under its own license; see devkit.lock.json / SBOM.tsv in each devkit release.
+Build-time-only third-party components (not shipped in the APK):
+  - xz-decompress 0.2.3 (MIT) — devkit/vendor/xz-decompress
+  - node-forge 1.4.0 (BSD-3-Clause OR GPL-2.0, used under BSD-3-Clause) —
+    third_party/node-forge (APK signing in scripts/apklib.mjs)
+
+The developer toolkit (devkit) and optional components released alongside this
+project consist of Termux / upstream open-source packages (path prefix rewritten
+in place), each distributed under its own license; see devkit.lock.json and
+SBOM.tsv (including the license column) in each devkit release. Corresponding
+source archives are cataloged via devkit/archive-sources.mjs and retained to
+fulfill any written request for at least three (3) years from distribution.

@@ -177,6 +177,16 @@ final class Updater {
 
     SharedPreferences prefs() { return ctx.getSharedPreferences("upd", Context.MODE_PRIVATE); }
     boolean auto() { return prefs().getBoolean("auto", true); }
+    boolean ghProxy() { return new File(env.files, ".gh-proxy").isFile(); }
+    void setGhProxy(boolean on) {
+        File f = new File(env.files, ".gh-proxy");
+        if (on) {
+            try { f.getParentFile().mkdirs(); java.nio.file.Files.write(f.toPath(), "1\n".getBytes(StandardCharsets.UTF_8)); }
+            catch (Exception e) { Log.w(TAG, "write .gh-proxy failed", e); }
+        } else {
+            f.delete();
+        }
+    }
     /** stable / latest = 跟随官方渠道；pinned = 固定在 pinVer()，自动更新、检查更新都不动它（用户 10-22 定：不能强制绑最新） */
     String channel() { String o = ovCh; return o != null ? o : prefs().getString("channel", "stable"); }
     String pinVer() { String o = ovPin; return o != null ? o : prefs().getString("pin", ""); }
@@ -222,7 +232,7 @@ final class Updater {
         refreshCurrent();
         JSONArray a = new JSONArray();
         for (Item i : new Item[]{app, devkit, claude}) a.put(i.json());
-        return new JSONObject().put("ok", true).put("auto", auto()).put("channel", channel()).put("pin", pinVer())
+        return new JSONObject().put("ok", true).put("auto", auto()).put("ghProxy", ghProxy()).put("channel", channel()).put("pin", pinVer())
             .put("flavor", flavor()).put("flavorPref", flavorPref()).put("only36", only36()).put("wantFlavor", wantFlavor())
             .put("lastCheck", prefs().getLong("lastCheck", 0)).put("lastAutoCheck", prefs().getLong("lastAutoCheck", 0)).put("checkedOnce", checkedOnce).put("checking", checking).put("error", lastError).put("items", a)
             .put("verify", lastVerify == null ? JSONObject.NULL : lastVerify);
@@ -252,6 +262,7 @@ final class Updater {
     /** who：发起方（Priv.caller 认的，只作对话框里的参考） */
     void set(JSONObject req, String who) {
         if (req.has("auto")) prefs().edit().putBoolean("auto", req.optBoolean("auto", true)).apply();
+        if (req.has("ghProxy")) setGhProxy(req.optBoolean("ghProxy", false));
         String ch = req.optString("channel", ""), pv = req.optString("version", "").trim();
         boolean switched = (ch.equals("stable") || ch.equals("latest")) && !ch.equals(channel());
         String pin = pinVer();

@@ -7,6 +7,7 @@ import { verifiedInfo } from "./ccverified.mjs";
 import { ledger } from "./claude.mjs";
 import { onSealUnknown } from "./claudeseal.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
+import { SETTINGS, saveSettings } from "./settings-store.mjs";
 import { termEnv } from "./terminal.mjs";
 import { ccMem, privCall } from "./usage.mjs";
 
@@ -134,7 +135,7 @@ async function devUpdInstall() {
 
 function devUpdStatus() {
   const { claude, ...rest } = devUpd;
-  return { ok: true, ...rest, items: [claude] };
+  return { ok: true, ...rest, ghProxy: !!SETTINGS.ghProxy, items: [claude] };
 }
 
 // 自动：启动 1 分钟后、之后每 30 分钟看一眼，距上次自动检查超过 6 小时就查并按自动设置安装；本进程未查过则静默首查
@@ -201,6 +202,11 @@ async function devApp(op, b) {
   if (op === "upd_set") {
     if (b.channel === "pinned") return { ok: false, message: tz("开发端不支持固定版本（只跟随 stable / latest）") };
     if (typeof b.auto === "boolean") devUpd.auto = b.auto;
+    if (typeof b.ghProxy === "boolean") {
+      SETTINGS.ghProxy = b.ghProxy;
+      if (CFG.runtime) { try { const gf = path.join(CFG.runtime, ".gh-proxy"); if (b.ghProxy) fs.writeFileSync(gf, "1\n"); else fs.rmSync(gf, { force: true }); } catch {} }
+      saveSettings();
+    }
     // 换渠道 = 明说要那个渠道的版本：查完对不上就直接换（自动更新关着也换）
     if ((b.channel === "stable" || b.channel === "latest") && b.channel !== devUpd.channel) {
       const want = devUpd.channel = b.channel, c = devUpd.claude;
@@ -263,7 +269,7 @@ async function claudeVersions(force) {
 // /api/app/* 各操作收哪些字段（对照 Priv.java、Updater.set、Notify.set、DeviceTools.set）
 const APP_FIELDS = {
   upd_apply: { item: "string", version: "string" },
-  upd_set: { auto: "boolean", channel: "string", version: "string", flavor: "string" },
+  upd_set: { auto: "boolean", ghProxy: "boolean", channel: "string", version: "string", flavor: "string" },
   upd_verify: { full: "boolean" }, upd_repair: { full: "boolean" },
   share_file: { path: "string", mime: "string" },
   apk_install: { path: "string" },
@@ -328,7 +334,12 @@ export async function routeDevside(req, res, u, p) {
     if (op === "shz_adb_keepalive" && typeof b.enable !== "boolean") return sendJson(res, 400, { ok: false, message: tz("请求参数不对") });
     if (!PREFIX) return sendJson(res, 200, await devApp(op, b));
     // 激活 / 打开自动激活要等用户在原生对话框里点（最多 60 秒），和 keepalive 一样放长；装 APK 还要先把包拷进暂存再等确认
-    return sendJson(res, 200, await privCall({ ...b, op }, op === "shz_activate" || op === "shz_autostart" || op === "shz_adb_keepalive" ? 65000 : op === "apk_install" ? 120000 : undefined));
+    const out = await privCall({ ...b, op }, op === "shz_activate" || op === "shz_autostart" || op === "shz_adb_keepalive" ? 65000 : op === "apk_install" ? 120000 : undefined);
+    if (op === "upd_set" && typeof b.ghProxy === "boolean" && (!out || out.ok !== false)) {
+      SETTINGS.ghProxy = b.ghProxy;
+      saveSettings();
+    }
+    return sendJson(res, 200, out);
   }
   return NEXT;
 }

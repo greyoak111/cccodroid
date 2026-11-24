@@ -3169,3 +3169,11 @@
 3169	ADB local est temporairement indisponible. Nouvel essai automatique. Si l’autorisation de débogage a été révoquée, vous pouvez refaire l’association.
 3170	Impossible de savoir si l'appareil est en charge
 3171	Impossible de lire le niveau de batterie actuel
+3172	En attente des tâches en arrière-plan
+3173	inactif {d}
+3174	{d} restant
+3175	Annonces de maintenance
+3176	Activé par défaut : récupère toutes les 3 h les avis signés sur les problèmes connus et correctifs (requête statique sans donnée de l'appareil) ; désactiver coupe toute requête d'avis
+3177	Relais proxy tiers GitHub en secours (gh-proxy.com)
+3178	Désactivé par défaut : une fois activé, utilise un proxy public tiers uniquement si les sources officielles et miroirs échouent (l'opérateur voit votre IP publique et l'URL ; le contenu reste vérifié par SHA-256 et signature)
+3179	Vous utilisez un abonnement personnel : les conditions en amont interdisent généralement l'automatisation sans surveillance à haute fréquence. Préférez une clé API facturée à l'usage pour éviter des restrictions de compte.

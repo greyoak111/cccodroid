@@ -106,10 +106,11 @@ test("取消：返回非空错误，.part 和 .seg 留着好续传", async () =>
   assert.equal(fs.existsSync(f + ".seg"), true);
 });
 
-test("ghProxy：只改写 github.com 的地址", () => {
-  assert.equal(ghProxy("https://github.com/a/b/releases/download/x/y.tgz"), "https://gh-proxy.com/github.com/a/b/releases/download/x/y.tgz");
-  assert.equal(ghProxy("https://dl.cccodroid.net/x"), "");
-  assert.equal(ghProxy(""), "");
+test("ghProxy：默认关闭；显式开启时只改写 github.com 的地址", () => {
+  assert.equal(ghProxy("https://github.com/a/b/releases/download/x/y.tgz"), "");
+  assert.equal(ghProxy("https://github.com/a/b/releases/download/x/y.tgz", true), "https://gh-proxy.com/github.com/a/b/releases/download/x/y.tgz");
+  assert.equal(ghProxy("https://dl.cccodroid.net/x", true), "");
+  assert.equal(ghProxy("", true), "");
 });
 
 test("curl 起不来：返回错误，不留未处理的 error 把网关带走（#102 04-006）", async () => {

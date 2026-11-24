@@ -848,6 +848,14 @@
               <div class="sl"><b data-i18n>自动更新</b><p class="clamp" data-i18n>自动更新（默认开）：Claude Code 静默更新；新版应用下载好后提醒安装（有 Shizuku 时空闲自动装）；开发工具包只在 Wi‑Fi 下预先下载，下次打开应用时装上</p></div>
               <div class="sc"><input type="checkbox" class="sw" id="upd-auto"></div>
             </div>
+            <div class="srow sub">
+              <div class="sl"><b data-i18n>接收维护公告</b><p class="clamp" data-i18n>默认开：每 3 小时从签名源拉取已知问题与修复提示（纯静态请求，不带任何本机信息）；关闭后不再发起公告请求</p></div>
+              <div class="sc"><input type="checkbox" class="sw" id="upd-notices"></div>
+            </div>
+            <div class="srow sub">
+              <div class="sl"><b data-i18n>GitHub 第三方代理兜底（gh-proxy.com）</b><p class="clamp" data-i18n>默认关：开启后，仅当官方源与镜像均连不上时才经第三方公共代理下载（对方可见你的公网 IP 与下载链接；内容仍按钉住的 SHA-256 与签名校验）</p></div>
+              <div class="sc"><input type="checkbox" class="sw" id="upd-ghproxy"></div>
+            </div>
             <div id="upd-orphans" class="hidden"></div>
             <div class="tiny" id="upd-last"></div>
           </div>

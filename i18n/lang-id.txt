@@ -3169,3 +3169,11 @@
 3169	ADB lokal untuk sementara tidak tersedia. Sistem akan mencoba lagi otomatis. Jika izin debug dicabut, Anda dapat memasangkan ulang.
 3170	Tidak bisa memastikan apakah perangkat sedang mengisi daya
 3171	Tidak bisa membaca level baterai saat ini
+3172	Menunggu tugas latar belakang
+3173	diam {d}
+3174	sisa {d}
+3175	Terima pengumuman pemeliharaan
+3176	Aktif secara bawaan: mengambil pengumuman bertanda tangan tentang masalah umum dan perbaikan setiap 3 jam (permintaan statis tanpa data perangkat); mematikannya menghentikan semua permintaan pengumuman
+3177	Cadangan proksi pihak ketiga GitHub (gh-proxy.com)
+3178	Nonaktif secara bawaan: jika diaktifkan, hanya memakai proksi publik pihak ketiga saat sumber resmi dan cermin gagal (operator dapat melihat IP publik dan URL unduhan Anda; isi tetap diverifikasi dengan SHA-256 dan tanda tangan yang dipatok)
+3179	Anda masuk dengan langganan pribadi: ketentuan penyedia umumnya melarang otomatisasi tanpa pengawasan berfrekuensi tinggi. Gunakan kunci API bayar-sesuai-pakai untuk tugas terjadwal guna menghindari pembatasan akun.

@@ -3175,4 +3175,9 @@ window.I18N_DICT["id"] = {
   "等待后台任务": "Menunggu tugas latar belakang",
   "静默 {d}": "diam {d}",
   "剩 {d}": "sisa {d}",
+  "接收维护公告": "Terima pengumuman pemeliharaan",
+  "默认开：每 3 小时从签名源拉取已知问题与修复提示（纯静态请求，不带任何本机信息）；关闭后不再发起公告请求": "Aktif secara bawaan: mengambil pengumuman bertanda tangan tentang masalah umum dan perbaikan setiap 3 jam (permintaan statis tanpa data perangkat); mematikannya menghentikan semua permintaan pengumuman",
+  "GitHub 第三方代理兜底（gh-proxy.com）": "Cadangan proksi pihak ketiga GitHub (gh-proxy.com)",
+  "默认关：开启后，仅当官方源与镜像均连不上时才经第三方公共代理下载（对方可见你的公网 IP 与下载链接；内容仍按钉住的 SHA-256 与签名校验）": "Nonaktif secara bawaan: jika diaktifkan, hanya memakai proksi publik pihak ketiga saat sumber resmi dan cermin gagal (operator dapat melihat IP publik dan URL unduhan Anda; isi tetap diverifikasi dengan SHA-256 dan tanda tangan yang dipatok)",
+  "当前用的是个人订阅登录：上游服务条款通常禁止高频无人值守自动化轮询，定时批处理建议改用按量计费 API Key 以免触发账号风控。": "Anda masuk dengan langganan pribadi: ketentuan penyedia umumnya melarang otomatisasi tanpa pengawasan berfrekuensi tinggi. Gunakan kunci API bayar-sesuai-pakai untuk tugas terjadwal guna menghindari pembatasan akun.",
 };

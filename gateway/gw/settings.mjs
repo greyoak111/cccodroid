@@ -18,7 +18,7 @@ import { clampAutoCompact } from "./stream.mjs";
 // 以前直接展开 SETTINGS，GET 和保存回执会把它们原样送回界面（FIND-052）。
 const VIEW_KEYS = ["model", "permissionMode", "guard", "addDirs", "outputStyle", "effort", "allowedTools", "disallowedTools",
   "autoCompactWindow", "provider", "memGuard", "autoClean", "maxParallel", "staticCompat", "idleCompaction", "workIsland",
-  "localMode", "titleModel", "hiddenProviders", "permNotice", "permMigrated"];
+  "localMode", "titleModel", "hiddenProviders", "remoteNotices", "ghProxy", "permNotice", "permMigrated"];
 const settingsView = () => Object.fromEntries(VIEW_KEYS.filter((k) => k in SETTINGS).map((k) => [k, SETTINGS[k]]));
 
 // ── 路由：/api/settings ──
@@ -109,6 +109,14 @@ export async function routeSettings(req, res, u, p) {
       // 敏感操作再确认没有关闭口子：设置接口不提供全局关掉这一层的能力，要放行走确认卡片逐次允许
       if ("idleCompaction" in b) { SETTINGS.idleCompaction = !!b.idleCompaction; if (!SETTINGS.idleCompaction) idleDisarmAll(); }
       if ("workIsland" in b) SETTINGS.workIsland = !!b.workIsland;
+      if ("remoteNotices" in b) SETTINGS.remoteNotices = !!b.remoteNotices;
+      if ("ghProxy" in b) {
+        SETTINGS.ghProxy = !!b.ghProxy;
+        if (CFG.runtime) {
+          const gf = path.join(CFG.runtime, ".gh-proxy");
+          try { if (SETTINGS.ghProxy) fs.writeFileSync(gf, "1\n"); else fs.rmSync(gf, { force: true }); } catch {}
+        }
+      }
       // 存储的自动清理（D10）：开关 + 频次（每天 / 每周 / 每月）
       if (b.autoClean && typeof b.autoClean === "object") {
         const a = SETTINGS.autoClean || {};

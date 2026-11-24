@@ -36,8 +36,9 @@ node devkit.mjs build --target <10字符包名> [--groups ...]     # 产出 out/
 产物：
 
 - `out/devkit-<包名>.tar`：App 解到 `files/` 下即可。解完后跑一次 `usr/libexec/devkit/first-run.sh`
-- `devkit.lock.json`：每个包的版本、文件名、SHA256、配方链接，加上仓库快照时间
-- `SBOM.tsv`：同上，表格形式
+- `devkit.lock.json`：每个包的版本、许可证（`license`）、文件名、SHA256、配方链接，加上仓库快照时间
+- `SBOM.tsv`：同上（含 `license` 列），表格形式
+- `archive-sources.mjs`：按 `devkit.lock.json` 提取所有 GPL/LGPL 等著佐权包及 APK 内置 LGPL 库（`glibc`、`7-Zip`）的对应源码归档清单 `SOURCES.lock.json` 并下载核验上游源码包备存，确保滚动源淘汰旧包后仍可履行三年源码提供义务
 
 分组见 `devkit.json`：不加 `--groups` 时**全部分组都打进去**，即整包；按模块分块打见下面「模块」一节。包括 `graphics`（Mesa、Vulkan 加载器等 9 个公共图形包，2026-10-15 并入，GPU 与浏览器组件共用）和 `media`（ffmpeg，2026-10-15 夜并入：+30 包，下载 +21 MB，解开后 +87 MB；带 MediaCodec 硬件编码）。共 273 个包（devkit-2026.11.21；10.22.1 起基础模块补了 patch、ed、dos2unix、lsof、nano、inetutils、net-tools、tree，10.22.3 补上单独的 which 包），从 Termux 仓库下载约 447 MB，整包 gz 约 680 MB（10.22.2 修了 venv 用的 ensurepip pip wheel），解包后约 1.9 GB。
 `extra` 组（typst、duckdb、imagemagick）依赖很重，作为选装。
@@ -118,7 +119,7 @@ node devkit.mjs component --recipe <配方目录> --target <10字符包名> --ba
 
 ## 构建时做的事（devkit.mjs）
 
-1. **校验索引**：取 `Release`，用它核对 `Packages.gz` 的 SHA256。InRelease 的 GPG 签名暂未验证，见 TODO。
+1. **校验索引与 PGP 签名**：成对拉取 `Release` 与 `Release.gpg`，用 `pgp.mjs` 钉死的 `TERMUX_KEYS` 验证 RSA 分离签名，再按 `Release` 核对 `Packages.gz` 的 SHA256 并提取包许可证。
 2. **求依赖闭包**：包括 Provides 虚包；`a | b` 取第一个能满足的。
 3. **下载**：用 curl，大包分 4 MB 块、8 路并行。整包哈希不对时，换镜像逐块复核，按两个来源一致选块。
 4. **解包**：先用 JS 解出 xz 这一个包来自举，之后全部用原生 xz 解压。全量构建约 1 分钟（有缓存时）。
@@ -143,8 +144,5 @@ node devkit.mjs component --recipe <配方目录> --target <10字符包名> --ba
 
 ## TODO
 
-- [ ] 验证 InRelease 的 GPG 签名（Termux 仓库公钥），而不只是走 HTTPS
-- [ ] SBOM 补许可证列：从配方的 `TERMUX_PKG_LICENSE` 抓取。另外有些包的配方在 `x11-packages/` 或 `root-packages/` 下，链接要修正
 - [ ] JDK 21 拖进了 x11/pulseaudio（它是完整 JDK）。看能否换 headless 方案减重
-- [ ] App 侧：解包 + first-run + 外部依赖（android.jar）的下载与许可确认界面
-- [ ] 换掉旧工具链之后，原来的 `cc4`/`cxx4`/`mk4`、glibc DNS 补丁、shell 槽位补丁就都不需要了
+- [ ] App 侧：外部依赖（android.jar）的下载与许可确认界面
