@@ -13,13 +13,14 @@ import { idleDisarmAll, publishState, pump, setPermMode, strList } from "./queue
 export { SETTINGS, saveSettings } from "./settings-store.mjs";
 import { SETTINGS, saveSettings, outputStyles } from "./settings-store.mjs";
 import { clampAutoCompact } from "./stream.mjs";
+import { ghProxyEnabled } from "./pget.mjs";
 
 // 设置回执只带认识的字段：设置文件能手改、能从旧版 / 分享的预置带过来，里面可能有类凭据字段。
 // 以前直接展开 SETTINGS，GET 和保存回执会把它们原样送回界面（FIND-052）。
 const VIEW_KEYS = ["model", "permissionMode", "guard", "addDirs", "outputStyle", "effort", "allowedTools", "disallowedTools",
   "autoCompactWindow", "provider", "memGuard", "autoClean", "maxParallel", "staticCompat", "idleCompaction", "workIsland",
   "localMode", "titleModel", "hiddenProviders", "remoteNotices", "ghProxy", "permNotice", "permMigrated"];
-const settingsView = () => Object.fromEntries(VIEW_KEYS.filter((k) => k in SETTINGS).map((k) => [k, SETTINGS[k]]));
+const settingsView = () => ({ ...Object.fromEntries(VIEW_KEYS.filter((k) => k in SETTINGS).map((k) => [k, SETTINGS[k]])), ghProxy: ghProxyEnabled() });
 
 // ── 路由：/api/settings ──
 export async function routeSettings(req, res, u, p) {
@@ -111,11 +112,19 @@ export async function routeSettings(req, res, u, p) {
       if ("workIsland" in b) SETTINGS.workIsland = !!b.workIsland;
       if ("remoteNotices" in b) SETTINGS.remoteNotices = !!b.remoteNotices;
       if ("ghProxy" in b) {
-        SETTINGS.ghProxy = !!b.ghProxy;
+        const want = !!b.ghProxy;
         if (CFG.runtime) {
           const gf = path.join(CFG.runtime, ".gh-proxy");
-          try { if (SETTINGS.ghProxy) fs.writeFileSync(gf, "1\n"); else fs.rmSync(gf, { force: true }); } catch {}
+          try {
+            fs.mkdirSync(CFG.runtime, { recursive: true });
+            if (want) fs.writeFileSync(gf, "1\n");
+            else fs.rmSync(gf, { force: true });
+          } catch (e) {
+            log("写入 .gh-proxy 失败: " + e.message);
+            return sendJson(res, 500, { ok: false, error: tz("设置没能写入磁盘；本次运行内可能仍按新值生效，重启后恢复旧值（详情见网关日志）") });
+          }
         }
+        SETTINGS.ghProxy = want;
       }
       // 存储的自动清理（D10）：开关 + 频次（每天 / 每周 / 每月）
       if (b.autoClean && typeof b.autoClean === "object") {

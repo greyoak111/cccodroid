@@ -2442,8 +2442,8 @@ public class MainActivity extends Activity {
         box.addView(keys);
         android.app.AlertDialog d = new android.app.AlertDialog.Builder(this)
             .setTitle(Tr.t("恢复初始设置？"))
-            .setMessage(Tr.t("重置为初始配置（将中断当前运行任务）。") + "\n\n"
-                + Tr.t("重置范围：Claude Code 用户级配置（CLAUDE.md、rules、技能、插件、钩子、settings、MCP、记忆）、应用与端侧设置、shell 启动文件，并退出安全模式。") + "\n\n"
+            .setMessage(Tr.t("重置为初始配置（网关会短暂重启并中断当前运行任务）。") + "\n\n"
+                + Tr.t("重置范围：Claude Code 用户级配置（CLAUDE.md、rules、技能、插件、命令、子代理、输出风格、钩子、settings、MCP、记忆）、应用与端侧设置、shell 启动文件；应用自带文件按安装包重铺，并退出安全模式。") + "\n\n"
                 + Tr.t("保留内容：原配置备份至 ~/.ccapp-reset/<时间>；会话、工作区、工具包、组件及 ssh/git 配置不受影响。"))
             .setView(box)
             .setPositiveButton(Tr.t("恢复"), (x, w) -> doFactoryReset(keys.isChecked()))

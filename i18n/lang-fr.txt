@@ -2982,7 +2982,7 @@
 2982	Accès aux clés ou identifiants : {w}
 2983	Déconnecté, reconnexion… (la génération continue)
 2984	Inactif depuis près d'1 h ; compaction auto du contexte pour réduire la consommation suivante (désactivable dans Réglages).
-2985	En attente
+2985	En attente (historique)
 2986	Nouveau changement
 2987	Configuration modifiée en externe ; restaurée aux réglages actuels : 
 2988	Fichiers d'exécution modifiés en externe ; protection activée : 
@@ -2996,7 +2996,7 @@
 2996	Envoi non confirmé : {msg}
 2997	Espace insuffisant, brouillon non enregistré. Copiez ou envoyez le texte.
 2998	Stocké dans /sdcard/cccodroid/models (Q4_K_M). Activez-le dans Réglages → Interfaces et modèles. RAM : {ram} Go (1–4B conseillé).
-2999	Désinstaller le composant {name} ?
+2999	Désinstaller le composant {name} ? (Vos propres fichiers ne sont pas affectés.)
 3000	Supprimer aussi {size} de cache d'exécution laissé par {name} ({path}) ?
 3001	Exporter et partager le pack de diagnostic ?\n\nInclut : versions et appareil, état du kit et d'autotest, journaux récents anonymisés, registre de réparation, connectivité.\nExclut : clés, identifiants, e-mails, messages et historique.
 3002	Le mode local est limité au chat par défaut. Pour personnaliser outils et options, éditez {file} ou envoyez ceci à un modèle cloud :
@@ -3035,12 +3035,12 @@
 3035	Rechargement de l'interface…
 3036	Cette version ne prend pas en charge la récupération auto ; mettez à jour l'app ou redémarrez la passerelle
 3037	Défilement bloqué ? Appuyez ~0,6 s sur le titre en haut pour rétablir
-3038	Récupération auto suspendue. Lancez d'abord le diagnostic ci-dessous.
-3039	Échec de vérification du pont. Diagnostiquez ci-dessous ou réinstallez le composant.
-3040	Le pont est désactivé. Activez d'abord le composant dans Extensions.
-3041	Composant du pont indisponible. Vérifiez son installation.
+3038	Récupération auto arrêtée ; modifier la configuration ne la débloque pas. Lancez le diagnostic ci-dessous puis réinitialisez le compteur.
+3039	Échec de vérification du pont et arrêt de la récupération auto (enregistrer la configuration ne résout pas le défaut) ; diagnostiquez d'abord.
+3040	Le pont est désactivé (enregistrer la configuration ne le réactive pas). Activez d'abord le composant dans Extensions.
+3041	Composant pont indisponible ; vérifiez l'installation (le compteur de récupération n'est pas réinitialisé automatiquement).
 3042	Mettez à jour le composant du pont avant de l'utiliser.
-3043	Pont non prêt. Consultez le diagnostic ci-dessous.
+3043	Le pont n'est pas prêt ; consultez le diagnostic ci-dessous (session actuelle inchangée, enregistrer ne réinitialise pas le compteur).
 3044	Le pont est occupé. Réessayez dans un instant.
 3045	Échec du contrôle de cohérence. Suivez les indications ci-dessous sans supprimer les dossiers manuellement.
 3046	Échec de lecture de la configuration du pont. Retournez dans Extensions et réessayez.
@@ -3049,7 +3049,7 @@
 3049	Chemin impossible à compléter automatiquement ; saisissez l'URL /chat/completions complète.
 3050	Configurez un ou plusieurs points d'accès compatibles OpenAI ; prise d'effet à l'enregistrement.
 3051	Lecture locale uniquement — aucune modification ni requête externe.
-3052	Sauvegardez la config du pont avant migration ou réinstallation (adresses, clés et modèles uniquement).
+3052	Sauvegardez la config du pont avant migration ou réinstallation (adresses, clés et modèles uniquement ; sans historique de chat).
 3053	Ne partagez jamais publiquement un fichier contenant des clés.
 3054	Indiquez l'URL API du fournisseur (pas la page de connexion web).
 3055	Récupérer automatiquement la liste des modèles (envoie la clé API au service indiqué)
@@ -3062,10 +3062,10 @@
 3062	Synchronisé dans Réglages → Interfaces et modèles.
 3063	Les autres sessions peuvent le choisir via l'étiquette de modèle sous le champ de saisie.
 3064	Vérifie les écarts locaux et prépare un plan de synchronisation (sans rien modifier).
-3065	Synchronise uniquement les modèles, le défaut et l'authentification ; adresse et clé inchangées (valable 60 s).
+3065	Synchronise uniquement modèles, modèle par défaut et mode d'auth ; ne touche ni au service, ni aux clés, fichiers d'exécution, verrous de récupération ou session active (valable 60 s).
 3066	Synchroniser l'interface
 3067	Vérifiez que l'application et le composant sont à jour ; attendez la fin des sessions en cours avant de revérifier.
-3068	Si la récupération est suspendue ou la vérification échoue, réinstallez ou mettez à jour le composant dans Extensions sans toucher aux dossiers d'exécution.
+3068	Si la récupération auto est arrêtée ou la vérification échoue, synchroniser ne lève pas le verrou ; consultez le diagnostic puis mettez à jour ou réinstallez dans Extensions sans supprimer le dossier.
 3069	En cas de signalement, indiquez la version et le code diagnostic sans jamais joindre vos clés ni la config complète.
 3070	Revérifier effacera les saisies non enregistrées sur cette page. Continuer ?
 3071	Mettez à jour le composant du pont pour ajouter plusieurs interfaces ; la configuration unique actuelle reste utilisable.
@@ -3100,7 +3100,7 @@
 3100	L'hôte a changé — ressaisissez votre clé API (l'ancienne clé n'est jamais envoyée ailleurs).
 3101	La clé enregistrée reste masquée ; laissez vide pour la garder ou saisissez-en une nouvelle.
 3102	Enregistrement…
-3103	Liste des modèles chargée (inférence non testée)
+3103	L'enregistrement n'appelle aucun modèle distant et ne change pas la session active (liste chargée ; inférence non testée).
 3104	Entrez un entier de 1024 à 16777216 (256k, 1m acceptés), ou laissez vide par défaut.
 3105	Entrez un nom de modèle valide (sans virgule ni retour à la ligne).
 3106	Saisissez une clé API valide pour charger la liste automatiquement.
@@ -3112,7 +3112,7 @@
 3112	Enregistrement…
 3113	Liste chargée, inférence non testée
 3114	Pont local prêt
-3115	Récupération suspendue
+3115	Récupération auto arrêtée
 3116	Échec de vérification
 3117	Pont désactivé
 3118	Config enregistrée, pont non prêt
@@ -3145,10 +3145,10 @@
 3145	Intercepte les appels système bloqués par Android pour éviter le plantage des binaires statiques comme Go (prochain message).
 3146	Choix auto selon le paquet : exécution directe sur targetSdk 28, via le chargeur système sur targetSdk 36 (redémarrage requis).
 3147	Autoriser l'arrêt des apps en arrière-plan hors liste blanche (Shizuku requis)
-3148	Arrête les apps d'arrière-plan hors liste avant une tâche lourde (<code>cc-mem run -- cmd</code>) ; préserve premier plan, écran partagé, clavier, accessibilité, VPN et Shizuku.
+3148	Arrête les apps d'arrière-plan avant les commandes lourdes (<code>cc-mem run -- cmd</code>) ; garde premier plan, écran partagé, notifications permanentes (proxy/musique), lanceur, clavier, accessibilité, VPN, Shizuku et liste blanche.
 3149	Conserve indéfiniment les sessions locales sauf suppression manuelle (respecte cleanupPeriodDays dans settings.json).
-3150	Bascule adbd sur TCP 5555 (accessible sur le réseau local) pour rétablir Shizuku hors Wi‑Fi ; Wi‑Fi requis une fois après redémarrage. Laissez désactivé sans coupures.
-3151	Ne plus confirmer chaque commande privilégiée (à vos risques) : exécute via Shizuku sans invite pendant la durée choisie (les commandes visant l'app ou Shizuku restent filtrées). Pour une seule session, cochez l'option dans la boîte.
+3150	Active le débogage USB système et passe adbd sur TCP 5555 (joignable sur le LAN) pour rétablir Shizuku après coupure Wi-Fi ; la désactivation tente de revenir en USB, et un redémarrage exige le Wi-Fi une fois.
+3151	Ne plus confirmer chaque commande privilégiée (à vos risques) : exécute les commandes Shizuku sans invite jusqu'à expiration ; celles visant cette app ou Shizuku restent filtrées au mieux, sans pouvoir bloquer tous les contournements. Pour une seule session, cochez dans la boîte
 3152	targetSdk 28 offre la meilleure compatibilité ; bascule automatiquement vers targetSdk 36 si refusé sur un appareil récent, sans perte de données.
 3153	Met à jour Claude Code en silence ; invite à installer les mises à jour de l'app (ou auto via Shizuku au repos) ; pré-télécharge le kit en Wi‑Fi pour le prochain démarrage.
 3154	Récupère les avis signés toutes les 3 h (requête statique sans donnée locale) ; aucune requête une fois désactivé.
@@ -3159,3 +3159,5 @@
 3159	Réinitialise configs utilisateur, réglages de l'app et fichiers shell (sauvegardés dans ~/.ccapp-reset) ; conserve sessions, espace de travail, kit et clés par défaut.
 3160	Vérifie compilateurs, Python, Node, git, etc. et transmet l'état à Claude (relancé après mise à jour).
 3161	Échec du chargement — touchez pour réessayer
+3162	L'enregistrement n'appelle aucun modèle distant et ne change pas la session active.
+3163	Ce qui s’est passé

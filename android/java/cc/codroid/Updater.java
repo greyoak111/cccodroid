@@ -141,6 +141,7 @@ final class Updater {
             }
         } catch (Exception ignored) {}
         sweepOldApks();
+        syncAutoMarker();
     }
 
     /** 以前下的安装包：除了眼下待装的那份，一律删掉。装完靠 MY_PACKAGE_REPLACED 清，可国产 ROM 常拦这条广播，
@@ -177,6 +178,15 @@ final class Updater {
 
     SharedPreferences prefs() { return ctx.getSharedPreferences("upd", Context.MODE_PRIVATE); }
     boolean auto() { return prefs().getBoolean("auto", true); }
+    void syncAutoMarker() {
+        File f = new File(env.files, ".upd-auto-off");
+        if (!auto()) {
+            try { f.getParentFile().mkdirs(); java.nio.file.Files.write(f.toPath(), "1\n".getBytes(StandardCharsets.UTF_8)); }
+            catch (Exception e) { Log.w(TAG, "write .upd-auto-off failed", e); }
+        } else {
+            f.delete();
+        }
+    }
     boolean ghProxy() { return new File(env.files, ".gh-proxy").isFile(); }
     void setGhProxy(boolean on) {
         File f = new File(env.files, ".gh-proxy");
@@ -261,7 +271,7 @@ final class Updater {
 
     /** who：发起方（Priv.caller 认的，只作对话框里的参考） */
     void set(JSONObject req, String who) {
-        if (req.has("auto")) prefs().edit().putBoolean("auto", req.optBoolean("auto", true)).apply();
+        if (req.has("auto")) { prefs().edit().putBoolean("auto", req.optBoolean("auto", true)).apply(); syncAutoMarker(); }
         if (req.has("ghProxy")) setGhProxy(req.optBoolean("ghProxy", false));
         String ch = req.optString("channel", ""), pv = req.optString("version", "").trim();
         boolean switched = (ch.equals("stable") || ch.equals("latest")) && !ch.equals(channel());
@@ -902,7 +912,7 @@ final class Updater {
             while (true) {
                 long autoAge = System.currentTimeMillis() - prefs().getLong("lastAutoCheck", 0);
                 if (loopOn && auto() && autoAge > AUTO_EVERY) checkAsync(false);
-                else if (loopOn && env.devkitReady() && !checkedOnce) checkAsync(true);
+                else if (loopOn && auto() && env.devkitReady() && !checkedOnce) checkAsync(true);
                 long wait = (loopOn && auto() && autoAge >= 0 && autoAge < AUTO_EVERY)
                     ? Math.max(60_000L, Math.min(30 * 60_000L, AUTO_EVERY - autoAge))
                     : 30 * 60_000L;

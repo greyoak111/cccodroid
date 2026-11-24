@@ -24,22 +24,22 @@ cccodroid 没有用户账号体系、没有后端业务服务器、没有对话�
 | 用途 | 默认状态与控制开关 | 目标地址 | 发送了什么 | 校验与源码位置 |
 |---|---|---|---|---|
 | **模型推理与账户登录** | 你发消息或登录时触发 | 你所选厂商的官方接口（如 `api.anthropic.com`、`api.deepseek.com`）或你自行配置的第三方调用地址 | 你的提示词、工具返回结果及该接口对应的认证凭据 | [`gateway/gw/claude.mjs`](gateway/gw/claude.mjs)、[`gateway/gw/providers.mjs`](gateway/gw/providers.mjs)、[`gateway/gw/login.mjs`](gateway/gw/login.mjs) |
-| **自动检查更新** | 默认开启（每 6 小时）；可在 **设置 → 更新 → 自动更新** 关闭 | `api.github.com`、`downloads.claude.ai`、`cccodroid.net`、`dl.cccodroid.net`、npm 镜像 | 标准 HTTPS `GET`（不含任何设备指纹或账号信息） | APK 验签名证书 + SHA-256；工具包验钉死 SHA-256 / `ed25519` 签名；Claude Code 验 Anthropic PGP 签名（[`android/java/cc/codroid/Updater.java`](android/java/cc/codroid/Updater.java)） |
-| **维护者远程公告** | 默认开启（每 3 小时）；可在 **设置 → 更新 → 接收维护公告** 彻底关闭 | `cccodroid.net/notices.json`、`raw.githubusercontent.com` | 纯静态 `GET`（不带任何本机参数；关闭后零请求） | 强制核验内置 `ed25519` 公钥分离签名 `.sig`（[`gateway/gw/notices.mjs`](gateway/gw/notices.mjs) `refreshNotices`） |
+| **自动检查更新与问题版本记录** | 默认开启（更新每 6 小时、签名兼容记录每 3 小时）；可在 **设置 → 更新 → 自动更新** 一并关闭 | `api.github.com`、`downloads.claude.ai`、`cccodroid.net`、`dl.cccodroid.net`、`raw.githubusercontent.com`、npm 镜像 | 标准 HTTPS `GET`（不含任何设备指纹或账号信息） | APK 验签名证书 + SHA-256；工具包验钉死 SHA-256 / `ed25519` 签名；Claude Code 验 Anthropic PGP 签名及内置 `ed25519` 公钥 `.sig`（[`android/java/cc/codroid/Updater.java`](android/java/cc/codroid/Updater.java)、[`gateway/gw/ccverified.mjs`](gateway/gw/ccverified.mjs) `refreshVerified`） |
+| **维护者远程公告** | 默认开启（每 3 小时）；可在 **设置 → 更新 → 接收维护公告** 彻底关闭（不影响已知问题版本拦截） | `cccodroid.net/notices.json`、`raw.githubusercontent.com` | 纯静态 `GET`（不带任何本机参数；关闭后零请求） | 强制核验内置 `ed25519` 公钥分离签名 `.sig`（[`gateway/gw/notices.mjs`](gateway/gw/notices.mjs) `refreshNotices`） |
 | **GitHub 第三方代理兜底** | **默认关闭**；仅在你主动开启 **设置 → 更新 → GitHub 第三方代理兜底** 且官方与镜像均失败时启用 | `gh-proxy.com`（外部第三方公共代理） | 下载请求的公网连接 IP 与目标 GitHub Release URL（开启前请知悉对方无隐私契约） | 下载产物仍强制核对钉死 SHA-256 与签名（[`android/java/cc/codroid/Installer.java`](android/java/cc/codroid/Installer.java) `ghProxyEnabled`、[`gateway/gw/pget.mjs`](gateway/gw/pget.mjs) `ghProxy`） |
 | **工具包 / 组件 / 端侧模型按需下载** | 首次安装或你在「扩展」页点击安装时触发 | GitHub Releases、`dl.cccodroid.net`、Termux 官方及高校镜像、魔搭 / HuggingFace | 标准文件下载请求 | 全部核对钉死 SHA-256、Termux PGP 签名或 `ed25519` 索引签名（[`gateway/gw/components.mjs`](gateway/gw/components.mjs)、[`android/assets/bin/pkg.mjs`](android/assets/bin/pkg.mjs)） |
 
 ### 关于自建镜像站（`cccodroid.net` / `dl.cccodroid.net`）
 
-这两处域名仅作静态发布物与签名清单的加速镜像（详见 [`docs/download-sources.zh-CN.md`](docs/download-sources.zh-CN.md)），不运行任何用户系统、统计接口或中继服务；服务端不对下载请求建立设备画像或追踪记录。经 `cccodroid.net` 的流量会穿过 Cloudflare CDN 边缘网络（受 Cloudflare 标准网络隐私政策约束），`dl.cccodroid.net` 则直连镜像源站。如果你希望完全不接触上述镜像与 GitHub 检查，只需在 **设置 → 更新** 中同时关掉「自动更新」与「接收维护公告」。
+这两处域名仅作静态发布物与签名清单的加速镜像（详见 [`docs/download-sources.zh-CN.md`](docs/download-sources.zh-CN.md)），不运行任何用户系统、统计接口或中继服务；服务端不对下载请求建立设备画像或追踪记录。经 `cccodroid.net` 的流量会穿过 Cloudflare CDN 边缘网络（受 Cloudflare 标准网络隐私政策约束），`dl.cccodroid.net` 则直连镜像源站。如果你希望完全停止后台对上述镜像与 GitHub 的周期轮询，只需在 **设置 → 更新** 中同时关掉「自动更新」与「接收维护公告」（注：若本机已装的旧版 Claude Code 缺失官方签名清单文件，`gateway/gw/devside.mjs` 会补核一次签名清单以满足启动完整性校验）。
 
 ## 3. 手机权限边界与敏感界面硬隔离
 
 - **绝不申请的权限**：不申请相机（`CAMERA`）、麦克风（`RECORD_AUDIO`）、粗略或后台定位（`ACCESS_*_LOCATION`）、通讯录、短信、通话记录、日历（`READ_CALENDAR`）、应用使用统计（`PACKAGE_USAGE_STATS`）、通知栏监听（`NotificationListenerService`）或实时录屏投影（`MediaProjection`）。
 - **设备工具与无障碍多重护栏**：
   1. 默认全关；开启需通过系统锁屏生物识别签名（[`Consent.java`](android/java/cc/codroid/Consent.java)）及应用前台原生确认框（[`DeviceTools.java`](android/java/cc/codroid/DeviceTools.java)）；
-  2. 默认「用时自动开」在空闲 10 分钟后自动调用 `disableSelf()` 关闭无障碍服务（[`A11y.java`](android/java/cc/codroid/A11y.java) `scheduleIdle`），绝不后台驻留强行复活；
-  3. 遇到密码框（`isPassword()`）自动剥离文本与描述；遇到支付宝、云闪付、手机银行、2FA 动态口令应用、密码管理器及系统权限控制器（`A11y.isProtectedPackage`）**硬性拒绝读屏、截屏与手势操作**；
+  2. 默认「用时自动开」模式在空闲 10 分钟后自动调用 `disableSelf()` 关闭无障碍服务（[`A11y.java`](android/java/cc/codroid/A11y.java) `scheduleIdle`；若手动切为「常开」则保持开启直至你改回），绝不后台偷偷复活；
+  3. 遇到密码框（`isPassword()`）自动剥离文本与描述；无障碍通道遇到当前活动窗口为支付宝、云闪付、手机银行、2FA 动态口令应用、密码管理器及系统权限控制器（`A11y.isProtectedPackage`）**硬性拒绝读屏、截屏与手势操作**；
   4. 无论权限模式是否设为「全部放行」，内存态 `PreToolUse` 钩子（[`gateway/guard/cc-guard.mjs`](gateway/guard/cc-guard.mjs)）遇到触碰密钥文件、读屏点按、读剪贴板、向外分享文件时仍强制要求你逐次确认。
 
 ## 4. 第三方模型服务商与第三方调用风险提示

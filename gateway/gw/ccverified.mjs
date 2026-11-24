@@ -4,6 +4,7 @@
 // （与应用内通知同一把钥匙、同一条路：官网验过签才镜像）。这里先取官网、取不到取 GitHub，只认签名对得上的。
 // 用处：版本选单标「已验证」/ 有问题的原因（/api/claude/versions 带上）；验过签的那份存到
 // home/.cache/cccodroid/claude-verified.json，Java 的自动更新读它——渠道走到有问题的版本时先不自动装。
+import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { CFG, LIVE, log } from "./config.mjs";
@@ -29,8 +30,16 @@ async function fetchOne(url) {
   return { j, body, sig };
 }
 
+export function autoUpdateOff() {
+  if (SETTINGS.autoUpdate === false) return true;
+  if (CFG.runtime) {
+    try { return fs.statSync(path.join(CFG.runtime, ".upd-auto-off")).isFile(); } catch {}
+  }
+  return false;
+}
+
 export function refreshVerified(force = false) {
-  if (SETTINGS.remoteNotices === false) return Promise.resolve();
+  if (autoUpdateOff()) return Promise.resolve();
   if (busy) return busy;
   if (!force && Date.now() - fetchedAt < EVERY) return Promise.resolve();
   busy = (async () => {

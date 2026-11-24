@@ -146,11 +146,10 @@ function single({ curl, url, file, total, curlArgs, onProgress, cancelled }) {
 }
 
 export function ghProxyEnabled() {
-  if (SETTINGS.ghProxy === true) return true;
   if (CFG.runtime) {
-    try { return fs.statSync(path.join(CFG.runtime, ".gh-proxy")).isFile(); } catch {}
+    try { return fs.statSync(path.join(CFG.runtime, ".gh-proxy")).isFile(); } catch { return false; }
   }
-  return false;
+  return SETTINGS.ghProxy === true;
 }
 
 /** GitHub 地址的备用加速线（gh-proxy.com，第三方）：默认关闭；仅用户在设置里开启后才作为最后一条备用；内容照样按 sha256 把关 */

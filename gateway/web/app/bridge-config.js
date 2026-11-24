@@ -12,12 +12,12 @@
   const CONFIG_CHECKS = ["COMPONENT", "OWNERSHIP", "CONNECTION", "APP_MAPPING", "APP_PROVIDER", "MODEL_LIST"];
   const checkCode = (code) => CONFIG_CHECKS.includes(code) ? code : "UNKNOWN";
   function localMessage(code) {
-    if (code === "RECOVERY_EXHAUSTED") return t("自动恢复已暂停，请先在下方诊断修复。");
-    if (code === "PATCH_VERIFICATION_FAILED") return t("协议桥校验失败，请先诊断修复或重装组件。");
-    if (code === "COMPONENT_DISABLED") return t("协议桥已停用，请先在扩展页启用组件。");
-    if (code === "COMPONENT_UNAVAILABLE") return t("协议桥组件暂不可用，请检查安装状态。");
+    if (code === "RECOVERY_EXHAUSTED") return t("自动恢复已停止，修改配置不会解除；请先在下方诊断并重置恢复次数。");
+    if (code === "PATCH_VERIFICATION_FAILED") return t("协议桥校验失败，自动恢复已停止（保存配置不会解除）；请先诊断修复。");
+    if (code === "COMPONENT_DISABLED") return t("协议桥已停用（保存配置不会解除），请先在扩展页启用组件。");
+    if (code === "COMPONENT_UNAVAILABLE") return t("协议桥组件暂不可用，请检查安装状态（不会自动重置恢复次数）。");
     if (code === "UPDATE_REQUIRED") return t("协议桥需更新组件版本后方可使用。");
-    return t("协议桥未就绪，请查看下方诊断。");
+    return t("协议桥未就绪，请查看下方诊断（当前会话不变，保存配置不会重置恢复次数）。");
   }
   const validWindow = (n) => Number.isInteger(n) && n >= 1024 && n <= 16777216;
   const validModel = (id) => typeof id === "string" && !!id && id === id.trim() && id.length <= 200 && !/[,\u0000-\u001f\u007f-\u009f]/.test(id);
@@ -132,7 +132,7 @@
       <header class="bc-heading"><h2 id="bridge-config-title" tabindex="-1">${esc(t("OpenAI API 本地协议桥"))} <span class="badge">${esc(t("预览"))}</span></h2><p>${esc(t("支持配置多个 OpenAI 兼容接口，保存后生效。"))}</p></header>
       <section id="bc-overview" class="bc-overview" aria-label="${esc(t("桥状态"))}" aria-live="polite"><div><span>${esc(t("组件入口"))}</span><b id="bc-package-state"></b></div><div><span>${esc(t("配置检查"))}</span><b id="bc-config-state"></b></div><div><span>${esc(t("本地服务"))}</span><b id="bc-service-state"></b></div></section>
       <p class="bc-notice hidden" id="bc-notice" role="alert"></p>
-      <section id="bc-issue" class="bc-card bc-issue hidden" aria-labelledby="bc-issue-title"><span class="bc-issue-label">${esc(t("需要检查"))}</span><h3 id="bc-issue-title" tabindex="-1"></h3><p id="bc-issue-detail"></p><p class="bc-hint" id="bc-issue-hint"></p><p class="bc-hint mono" id="bc-issue-code" dir="ltr"></p><div class="bc-actions"><button class="btn ghost" id="bc-check-again" type="button" data-bc="check-again">${esc(t("重新检查"))}</button></div><p class="bc-hint">${esc(t("仅读取本机状态，不改动配置、不请求上游。"))}</p><details id="bc-backup-help"><summary>${esc(t("什么时候需要备份？"))}</summary><p class="bc-hint">${esc(t("迁移或重装前可备份桥配置（仅含接口地址、密钥与模型列表）。"))}</p><p class="bc-hint">${esc(t("含密钥的配置文件请勿公开分享。"))}</p></details></section>
+      <section id="bc-issue" class="bc-card bc-issue hidden" aria-labelledby="bc-issue-title"><span class="bc-issue-label">${esc(t("需要检查"))}</span><h3 id="bc-issue-title" tabindex="-1"></h3><p id="bc-issue-detail"></p><p class="bc-hint" id="bc-issue-hint"></p><p class="bc-hint mono" id="bc-issue-code" dir="ltr"></p><div class="bc-actions"><button class="btn ghost" id="bc-check-again" type="button" data-bc="check-again">${esc(t("重新检查"))}</button></div><p class="bc-hint">${esc(t("仅读取本机状态，不改动配置、不请求上游。"))}</p><details id="bc-backup-help"><summary>${esc(t("什么时候需要备份？"))}</summary><p class="bc-hint">${esc(t("迁移或重装前可备份桥配置（仅含接口地址、密钥与模型列表，不含聊天记录）。"))}</p><p class="bc-hint">${esc(t("含密钥的配置文件请勿公开分享。"))}</p></details></section>
       <div id="bc-loading" role="status">${esc(t("读取中…"))}</div>
       <form id="bc-form" class="bc-card hidden" novalidate autocomplete="off">
         <h3>${esc(t("连接你的 API"))}</h3>
@@ -149,7 +149,7 @@
         <button class="btn" id="bc-save" type="submit">${esc(t("保存配置"))}</button><p class="bc-hint bc-center" id="bc-save-note" role="status"></p>
       </form>
       <section id="bc-saved" class="bc-card hidden" aria-labelledby="bc-saved-title"><h3 id="bc-saved-title" tabindex="-1">${esc(t("配置已保存"))}</h3><dl class="bc-summary"><div><dt>${esc(t("API 地址"))}</dt><dd class="mono" id="bc-saved-endpoint" dir="ltr"></dd></div><div><dt>${esc(t("API Key"))}</dt><dd>${esc(t("已设置 · 不回显"))}</dd></div><div><dt>${esc(t("模型名称"))}</dt><dd class="mono" id="bc-saved-model" dir="ltr"></dd></div><div><dt>${esc(t("上下文窗口"))}</dt><dd class="mono" id="bc-saved-ctx" dir="ltr"></dd></div></dl><div id="bc-saved-apis" class="bc-selected" aria-label="${esc(t("API 列表"))}"></div><div id="bc-saved-models" class="bc-selected"></div><div class="bc-status" role="status"><b id="bc-local-state"></b><span id="bc-remote-state">${esc(t("未测试对话推理"))}</span></div><p class="bc-hint">${esc(t("已同步至「设置 → 接口与型号」。"))}</p><div class="bc-actions"><button class="btn" type="button" id="bc-use" data-bc="use">${esc(t("新建会话使用"))}</button><button class="btn ghost" type="button" data-bc="edit">${esc(t("修改配置"))}</button></div><p class="bc-hint">${esc(t("其他会话可在输入栏下方的模型标签中切换选用。"))}</p></section>
-      <section id="bc-repair" class="bc-card bc-repair hidden" aria-labelledby="bc-repair-title"><h3 id="bc-repair-title">${esc(t("诊断与修复"))}</h3><p class="bc-hint" id="bc-repair-intro">${esc(t("检查本机配置差异并生成同步方案（检查本身不改配置）。"))}</p><div class="bc-actions"><button class="btn ghost" id="bc-repair-inspect" type="button" data-bc="repair-inspect">${esc(t("检查修复方案"))}</button></div><p class="bc-hint" id="bc-repair-status" role="status" aria-live="polite"></p><div id="bc-repair-plan" class="hidden"><p class="bc-hint" id="bc-repair-changes"></p><p class="bc-hint">${esc(t("仅同步模型列表、默认模型与认证方式，接口地址与密钥不变（方案 60 秒内有效）。"))}</p><div class="bc-actions"><button class="btn" id="bc-repair-apply" type="button" data-bc="repair-apply">${esc(t("确认同步接口记录"))}</button><button class="btn ghost" id="bc-repair-cancel" type="button" data-bc="repair-cancel">${esc(t("取消"))}</button></div></div><details id="bc-repair-steps"><summary>${esc(t("不能自动修复时怎么做？"))}</summary><ol class="bc-hint"><li>${esc(t("确认应用与组件均为配套最新版；若有会话在运行，等结束后再检查。"))}</li><li>${esc(t("自动恢复暂停或校验失败时，请回扩展页重装或更新组件，请勿直接删改运行目录。"))}</li><li>${esc(t("反馈问题时请附版本号与诊断码，切勿附带密钥或完整配置。"))}</li></ol></details></section>
+      <section id="bc-repair" class="bc-card bc-repair hidden" aria-labelledby="bc-repair-title"><h3 id="bc-repair-title">${esc(t("诊断与修复"))}</h3><p class="bc-hint" id="bc-repair-intro">${esc(t("检查本机配置差异并生成同步方案（检查本身不改配置）。"))}</p><div class="bc-actions"><button class="btn ghost" id="bc-repair-inspect" type="button" data-bc="repair-inspect">${esc(t("检查修复方案"))}</button></div><p class="bc-hint" id="bc-repair-status" role="status" aria-live="polite"></p><div id="bc-repair-plan" class="hidden"><p class="bc-hint" id="bc-repair-changes"></p><p class="bc-hint">${esc(t("仅同步模型列表、默认模型与认证方式；不启停服务，不改密钥、运行文件、恢复锁或当前会话（60 秒内有效）。"))}</p><div class="bc-actions"><button class="btn" id="bc-repair-apply" type="button" data-bc="repair-apply">${esc(t("确认同步接口记录"))}</button><button class="btn ghost" id="bc-repair-cancel" type="button" data-bc="repair-cancel">${esc(t("取消"))}</button></div></div><details id="bc-repair-steps"><summary>${esc(t("不能自动修复时怎么做？"))}</summary><ol class="bc-hint"><li>${esc(t("确认应用与组件均为配套最新版；若有会话在运行，等结束后再检查。"))}</li><li>${esc(t("自动恢复停止或校验失败时，同步接口记录不会解除恢复锁；请先查诊断，按需回扩展页更新或重装组件，勿直接删目录。"))}</li><li>${esc(t("反馈问题时请附版本号与诊断码，切勿附带密钥或完整配置。"))}</li></ol></details></section>
       <p class="bc-hint bc-footnote">${esc(t("仅支持 OpenAI Chat Completions API，暂不支持 Responses API。"))}</p>`;
     $("tab-ext").appendChild(panel);
     $("bc-form").addEventListener("submit", save);
@@ -528,7 +528,7 @@
     $("bc-model-retry").disabled = busy || modelsTimer !== null || !!modelsAbort || !discoveryAllowed(endpoint);
   }
   function updateSaveNote(saving = false) {
-    $("bc-save-note").textContent = saving ? t("正在保存配置…") : hasDiscovered() ? t("已读取模型列表（未测试对话推理）") : "";
+    $("bc-save-note").textContent = saving ? t("正在保存配置…") : hasDiscovered() ? t("保存不调用远端模型、不切换当前会话（已读取模型列表，未测试对话推理）。") : t("保存不调用远端模型，也不切换当前会话。");
   }
   // 输入为空或正好是清单里某一项时列全部，否则按包含过滤；太长只列前 SUGGEST_MAX 个，继续输入缩小
   function renderSuggest(open) {
@@ -755,7 +755,7 @@
     $("bc-saved-ctx").textContent = snapshot.contextWindow.toLocaleString(); renderSelected(true);
     $("bc-remote-state").textContent = hasDiscovered() ? t("已读取模型列表，未测试对话推理") : t("未测试对话推理");
     const ready = snapshot.local.state === "ready";
-    $("bc-local-state").textContent = ready ? t("本地已就绪") : snapshot.localError === "RECOVERY_EXHAUSTED" ? t("自动恢复已暂停")
+    $("bc-local-state").textContent = ready ? t("本地已就绪") : snapshot.localError === "RECOVERY_EXHAUSTED" ? t("自动恢复已停止")
       : snapshot.localError === "PATCH_VERIFICATION_FAILED" ? t("协议桥校验失败")
       : snapshot.localError === "COMPONENT_DISABLED" ? t("协议桥已停用") : t("配置已保存，协议桥未就绪");
     $("bc-local-state").className = ready ? "bc-ready" : "bc-pending";

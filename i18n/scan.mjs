@@ -196,10 +196,10 @@ for (const f of jsFiles) {
              why: l.wrapped ? "t() 里不能用 ${} 模板，改成 t(\"…{name}…\", { name })" : "没包 t()" });
   }
 }
-// 网关提示语：server.mjs 与 gw/*.mjs 里 tz 包着的中文原句也是键（见 gw/config.mjs「提示语的多语言」）
+// 网关提示语：server.mjs 与 gw/*.mjs 里 tz / L 包着的中文原句也是键（见 gw/config.mjs「提示语的多语言」与 gw/feedback.mjs）
 for (const f of ["server.mjs", ...fs.readdirSync(path.join(WEB, "..", "gw")).filter((x) => x.endsWith(".mjs")).map((x) => "gw/" + x)]) {
   const srv = fs.readFileSync(path.join(WEB, "..", f), "utf8");
-  for (const m of srv.matchAll(/(?:^|[^\w$.])tz\(\s*"((?:[^"\\]|\\.)*)"/g)) {
+  for (const m of srv.matchAll(/(?:^|[^\w$.])(?:tz|L)\(\s*"((?:[^"\\]|\\.)*)"/g)) {
     const k = JSON.parse('"' + m[1] + '"');
     if (!used.has(k)) used.set(k, f);
   }

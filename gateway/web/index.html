@@ -676,7 +676,7 @@
           <div class="sblock" id="mem-field">
             <div class="srow head">
               <div class="sl"><b data-i18n>内存管家</b><p data-i18n>允许停止非白名单后台应用（需 Shizuku）</p>
-                <p class="clamp" data-i18n-html>运行重负载命令（<code>cc-mem run -- 命令</code>）前清理非白名单后台应用；保留前台、分屏、输入法、无障碍、VPN 与 Shizuku。</p></div>
+                <p class="clamp" data-i18n-html>运行重负载命令（<code>cc-mem run -- 命令</code>）前清理后台应用；保留前台、分屏、常驻通知应用（代理/音乐）、桌面、输入法、无障碍、VPN、Shizuku 与白名单。</p></div>
               <div class="sc"><input type="checkbox" class="sw" id="mem-on"></div>
             </div>
             <textarea id="mem-wl" rows="3" placeholder="白名单：每行一个包名，例如 com.tencent.mm" data-i18n-attr="placeholder" spellcheck="false" autocomplete="off"></textarea>
@@ -742,7 +742,7 @@
             <div class="srow sub hidden" id="priv-adb-keepalive-row">
               <div class="sl">
                 <p data-i18n>无线 ADB 保活</p>
-                <p class="tiny" data-i18n>将系统 adbd 切至 TCP 5555（局域网可能可达），断 Wi-Fi 后仍可恢复 Shizuku；手机重启后需重连一次 Wi-Fi。无掉线问题无需开启。</p>
+                <p class="tiny" data-i18n>开启系统 USB 调试并将 adbd 切至 TCP 5555（局域网可能可达），断 Wi-Fi 后仍可恢复 Shizuku；关闭时尝试切回 USB，手机重启后需重连一次 Wi-Fi。</p>
                 <div class="prov-state" id="priv-adb-keepalive-state" role="status"></div>
               </div>
               <div class="sc"><input type="checkbox" class="sw" id="priv-adb-keepalive" aria-label="无线 ADB 保活" data-i18n-attr="aria-label"></div>
@@ -753,7 +753,7 @@
             </div>
             <div class="prov-state" id="priv-ka-result"></div>
             <div class="srow sub" id="priv-na-row">
-              <div class="sl"><p data-i18n>特权命令不再逐条确认（风险自负）：限期内免弹窗直接执行 Shizuku 命令（涉及本应用与 Shizuku 自身仍尽量拦截）。单会话放行可在确认框勾选</p></div>
+              <div class="sl"><p data-i18n>特权命令不再逐条确认（风险自负）：限期内免弹窗直接执行 Shizuku 命令；涉及本应用与 Shizuku 自身仍尽量拦截，但无法拦住所有绕过写法。单会话放行可在确认框勾选</p></div>
               <div class="sc"><select id="priv-na-hours" aria-label="时长" data-i18n-attr="aria-label">
                 <option value="1440" selected data-i18n>1 天</option></select>
                 <input type="checkbox" class="sw" id="priv-na"></div>
@@ -847,16 +847,16 @@
               <div class="sl"><b data-i18n>自动更新</b><p class="clamp" data-i18n>Claude Code 静默更新；新版应用下载后提示安装（有 Shizuku 时空闲自动装）；工具包仅在 Wi‑Fi 预下载，下次启动安装。</p></div>
               <div class="sc"><input type="checkbox" class="sw" id="upd-auto"></div>
             </div>
-            <div class="srow sub">
-              <div class="sl"><b data-i18n>接收维护公告</b><p class="clamp" data-i18n>每 3 小时拉取签名维护提示（纯静态请求，不含本机信息）；关闭后不再请求。</p></div>
-              <div class="sc"><input type="checkbox" class="sw" id="upd-notices"></div>
-            </div>
-            <div class="srow sub">
-              <div class="sl"><b data-i18n>GitHub 第三方代理兜底（gh-proxy.com）</b><p class="clamp" data-i18n>默认关闭：仅当官方源与镜像均不可达时经第三方代理下载（代理可见公网 IP；安装包仍强制校验哈希与签名）。</p></div>
-              <div class="sc"><input type="checkbox" class="sw" id="upd-ghproxy"></div>
-            </div>
             <div id="upd-orphans" class="hidden"></div>
             <div class="tiny" id="upd-last"></div>
+          </div>
+          <div class="srow">
+            <div class="sl"><b data-i18n>接收维护公告</b><p class="clamp" data-i18n>每 3 小时拉取签名维护提示（纯静态请求，不含本机信息）；关闭后不再请求。</p></div>
+            <div class="sc"><input type="checkbox" class="sw" id="upd-notices"></div>
+          </div>
+          <div class="srow">
+            <div class="sl"><b data-i18n>GitHub 第三方代理兜底（gh-proxy.com）</b><p class="clamp" data-i18n>默认关闭：仅当官方源与镜像均不可达时经第三方代理下载（代理可见公网 IP；安装包仍强制校验哈希与签名）。</p></div>
+            <div class="sc"><input type="checkbox" class="sw" id="upd-ghproxy"></div>
           </div>
         </div>
   

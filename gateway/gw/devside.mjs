@@ -201,10 +201,16 @@ async function devApp(op, b) {
   if (op === "upd_check") { devUpdCheck(); await new Promise((r) => setTimeout(r, 200)); return devUpdStatus(); }
   if (op === "upd_set") {
     if (b.channel === "pinned") return { ok: false, message: tz("开发端不支持固定版本（只跟随 stable / latest）") };
-    if (typeof b.auto === "boolean") devUpd.auto = b.auto;
+    if (typeof b.auto === "boolean") {
+      devUpd.auto = b.auto;
+      if (CFG.runtime) { try { fs.mkdirSync(CFG.runtime, { recursive: true }); const uf = path.join(CFG.runtime, ".upd-auto-off"); if (!b.auto) fs.writeFileSync(uf, "1\n"); else fs.rmSync(uf, { force: true }); } catch {} }
+    }
     if (typeof b.ghProxy === "boolean") {
+      if (CFG.runtime) {
+        try { fs.mkdirSync(CFG.runtime, { recursive: true }); const gf = path.join(CFG.runtime, ".gh-proxy"); if (b.ghProxy) fs.writeFileSync(gf, "1\n"); else fs.rmSync(gf, { force: true }); }
+        catch (e) { return { ok: false, message: e.message }; }
+      }
       SETTINGS.ghProxy = b.ghProxy;
-      if (CFG.runtime) { try { const gf = path.join(CFG.runtime, ".gh-proxy"); if (b.ghProxy) fs.writeFileSync(gf, "1\n"); else fs.rmSync(gf, { force: true }); } catch {} }
       saveSettings();
     }
     // 换渠道 = 明说要那个渠道的版本：查完对不上就直接换（自动更新关着也换）

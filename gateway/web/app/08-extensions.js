@@ -1506,7 +1506,7 @@
       const nm = (cb.closest(".item")?.querySelector(".it-title")?.textContent || id).trim();
       if (c === "install" && cb.dataset.unverified && !confirm(t("{name} 还没人在真机上验证过，可能装不上或用不了。仍然安装？", { name: nm }))) return;
       if (c === "remove" && cb.dataset.usedby) return toast(t("{names} 要用它，先卸载那些组件", { names: cb.dataset.usedby }), true);
-      if (c === "remove" && !confirm(t("卸载组件 {name}？", { name: nm }))) return;
+      if (c === "remove" && !confirm(t("卸载组件 {name}？（你自己的文件不受影响）", { name: nm }))) return;
       cb.disabled = true; $("comp-list")._html = null;
       if (c === "remove") {
         // 停服务可能要等一会儿；在下一次轮询回来前也不能再装、再卸或取消。

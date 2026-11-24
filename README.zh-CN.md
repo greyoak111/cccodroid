@@ -221,14 +221,14 @@ cccodroid.apk（Java 外壳：安装器 + 前台服务 + WebView）
 | 用途 | 默认状态与关闭方式 | 目标地址 | 校验锚点与对应源码 |
 |---|---|---|---|
 | 模型推理与账户登录 | 你发消息或登录时触发 | 你所选厂商官方接口或自行填写的第三方调用地址 | [`gateway/gw/claude.mjs`](gateway/gw/claude.mjs)、[`gateway/gw/providers.mjs`](gateway/gw/providers.mjs)、[`gateway/gw/login.mjs`](gateway/gw/login.mjs) |
-| 自动检查更新（每 6 小时） | 默认开；**设置 → 更新 → 自动更新** 可关 | `api.github.com`、`downloads.claude.ai`、`cccodroid.net`、`dl.cccodroid.net`、npm 镜像 | APK 验签名证书 + SHA-256；工具包验钉死 SHA-256 / `ed25519`；Claude Code 验 Anthropic PGP 签名（[`android/java/cc/codroid/Updater.java`](android/java/cc/codroid/Updater.java) `AUTO_EVERY`） |
-| 维护者签名公告与兼容记录（每 3 小时） | 默认开；**设置 → 更新 → 接收维护公告** 可彻底关闭 | `cccodroid.net`、`raw.githubusercontent.com`（纯静态 `GET`，无设备参数） | 强制核验内置 `ed25519` 公钥分离签名 `.sig`（[`gateway/gw/notices.mjs`](gateway/gw/notices.mjs) `refreshNotices`、[`gateway/gw/ccverified.mjs`](gateway/gw/ccverified.mjs) `refreshVerified`） |
+| 自动检查更新与问题版本记录 | 默认开（更新每 6 小时、兼容记录每 3 小时）；**设置 → 更新 → 自动更新** 可一并关 | `api.github.com`、`downloads.claude.ai`、`cccodroid.net`、`dl.cccodroid.net`、`raw.githubusercontent.com`、npm 镜像 | APK 验签名证书 + SHA-256；工具包验钉死 SHA-256 / `ed25519`；Claude Code 验 PGP 与 `ed25519` `.sig`（[`android/java/cc/codroid/Updater.java`](android/java/cc/codroid/Updater.java) `AUTO_EVERY`、[`gateway/gw/ccverified.mjs`](gateway/gw/ccverified.mjs) `refreshVerified`） |
+| 维护者签名公告（每 3 小时） | 默认开；**设置 → 更新 → 接收维护公告** 可彻底关闭 | `cccodroid.net`、`raw.githubusercontent.com`（纯静态 `GET`，无设备参数） | 强制核验内置 `ed25519` 公钥分离签名 `.sig`（[`gateway/gw/notices.mjs`](gateway/gw/notices.mjs) `refreshNotices`） |
 | GitHub 第三方代理兜底 | **默认关闭**；仅主动开启 **设置 → 更新 → GitHub 第三方代理兜底** 且官方与镜像均失败时启用 | `gh-proxy.com`（外部公共代理，开启后对方可见你的公网 IP 与目标 URL） | 下载字节仍强制核对钉死 SHA-256 与签名（[`android/java/cc/codroid/Installer.java`](android/java/cc/codroid/Installer.java) `ghProxyEnabled`、[`gateway/gw/pget.mjs`](gateway/gw/pget.mjs) `ghProxy`） |
 | 工具包 / 组件 / 端侧模型下载 | 首装或你在「扩展」页点击安装时触发 | GitHub Releases、`dl.cccodroid.net`、Termux 官方及高校镜像、魔搭 / HuggingFace | 钉死 SHA-256、Termux PGP 签名或 `ed25519` 索引签名（[`gateway/gw/components.mjs`](gateway/gw/components.mjs)、[`gateway/gw/modules.mjs`](gateway/gw/modules.mjs)、[`android/assets/bin/pkg.mjs`](android/assets/bin/pkg.mjs)） |
 
 - **权限最小化与金融/口令界面硬隔离**：
   - 绝不申请相机（`CAMERA`）、麦克风（`RECORD_AUDIO`）、定位（`ACCESS_*_LOCATION`）、通讯录、短信、通话记录、日历（`READ_CALENDAR`）、应用使用统计（`PACKAGE_USAGE_STATS`）、通知监听（`NotificationListenerService`）或录屏投影（`MediaProjection`），详见 [docs/permissions.zh-CN.md](docs/permissions.zh-CN.md)。
-  - 设备工具与无障碍默认全关；开启需经系统锁屏验证（[`android/java/cc/codroid/Consent.java`](android/java/cc/codroid/Consent.java)）与前台原生弹窗确认（[`android/java/cc/codroid/DeviceTools.java`](android/java/cc/codroid/DeviceTools.java)），闲置 10 分钟自动调用 `disableSelf()` 自关（[`android/java/cc/codroid/A11y.java`](android/java/cc/codroid/A11y.java) `scheduleIdle`）；自动抹除密码框文本（`isPassword()`），并对支付宝、云闪付、手机银行、2FA 动态口令应用、密码管理器及系统权限控制器实施**硬性拦截**（[`android/java/cc/codroid/A11y.java`](android/java/cc/codroid/A11y.java) `isProtectedPackage`），禁止读屏、截屏与模拟点击；内存态 `PreToolUse` 钩子（[`gateway/guard/cc-guard.mjs`](gateway/guard/cc-guard.mjs)）对触碰密钥、读屏点按、读剪贴板与向外分享强制逐次确认。
+  - 设备工具与无障碍默认全关；开启需经系统锁屏验证（[`android/java/cc/codroid/Consent.java`](android/java/cc/codroid/Consent.java)）与前台原生弹窗确认（[`android/java/cc/codroid/DeviceTools.java`](android/java/cc/codroid/DeviceTools.java)），默认「用时自动开」模式下闲置 10 分钟自动调用 `disableSelf()` 自关（[`android/java/cc/codroid/A11y.java`](android/java/cc/codroid/A11y.java) `scheduleIdle`）；自动抹除密码框文本（`isPassword()`），并在无障碍通道下对当前活动窗口为支付宝、云闪付、手机银行、2FA 动态口令应用、密码管理器及系统权限控制器实施**硬性拦截**（[`android/java/cc/codroid/A11y.java`](android/java/cc/codroid/A11y.java) `isProtectedPackage`），禁止读屏、截屏与模拟点击；内存态 `PreToolUse` 钩子（[`gateway/guard/cc-guard.mjs`](gateway/guard/cc-guard.mjs)）对触碰密钥、读屏点按、读剪贴板与向外分享强制逐次确认。
   - **第三方调用提示**：发往模型接口的提示词、代码与工具输出受对应服务商隐私政策约束；来路不明的第三方调用运营者可见经过的密钥与内容，切勿在不可信的第三方调用上处理敏感私密数据。
 
 ## 条款与合规
@@ -336,7 +336,7 @@ cccodroid 本身以 [Apache License 2.0](LICENSE) 发布（另见 [NOTICE](NOTIC
 ### 第三方组件
 
 - **Claude Code**：Anthropic 的专有软件，**不随本项目分发**。使用时须遵守 [Anthropic 的条款](https://code.claude.com/docs/en/legal-and-compliance)。
-- **开发工具包**：取自 Termux 官方仓库，各组件按各自的许可证分发（含 GPL 等）。版本、许可证（`license`）、哈希与构建配方见每个 Release 附带的 `devkit.lock.json` / `SBOM.tsv`；著佐权组件的对应源码由 [`devkit/archive-sources.mjs`](devkit/archive-sources.mjs) 归档备存并自每次二进制分发之日起至少保留三年，需要源码副本的请在 Issues 中提出。
+- **开发工具包**：取自 Termux 官方仓库，各组件按各自的许可证分发（含 GPL 等）。版本、许可证（`license`）、哈希与构建配方见每个 Release 附带的 `devkit.lock.json` / `SBOM.tsv`；对应源码拉取归档工具见 [`devkit/archive-sources.mjs`](devkit/archive-sources.mjs)，自每次二进制分发之日起至少三年内按书面请求（可在仓库 Issues 中提出）提供著佐权组件的完整对应源码副本。
 - **glibc 动态加载器**（`lib/arm64-v8a/libldlinux.so`，随 APK 分发）：取自 Termux 的 glibc 包，LGPL-2.1-or-later，见 [third_party/glibc/README.md](third_party/glibc/README.md)。
 - **7-Zip 命令行归档器**（`lib/arm64-v8a/libcc7zz.so`，随 APK 分发）：7-Zip 26.06，LGPL-2.1-or-later（含 BSD 部分及 unRAR 限制），见 [third_party/7zip/README.md](third_party/7zip/README.md)。
 - **Shizuku-API**：MIT，见 [third_party/shizuku/LICENSE](third_party/shizuku/LICENSE)。

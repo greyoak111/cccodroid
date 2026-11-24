@@ -316,7 +316,7 @@ test("bridge form: local readiness is independent of saved configuration; errors
   const u = ui(); await u.open(); fill(u); u.response(saved({ local: { state: "error" } })); await u.submit();
   assert.equal(u.get("bc-use").disabled, true);
   assert.equal(u.get("bc-local-state").textContent, "配置已保存，协议桥未就绪");
-  assert.match(u.get("bc-notice").textContent, /协议桥未就绪.*诊断/);
+  assert.match(u.get("bc-notice").textContent, /协议桥未就绪.*诊断.*保存配置不会重置恢复次数/);
   await u.click("edit"); u.input("key", "synthetic-new-key");
   u.post(async () => reply({ field: "apiKey", message: "secret-token-must-not-render", apiKey: "synthetic-new-key" }, 400));
   await u.submit();
@@ -335,8 +335,8 @@ for (const code of ["RECOVERY_EXHAUSTED", "PATCH_VERIFICATION_FAILED", "COMPONEN
   const message = u.get("bc-notice").textContent;
   assert.ok(message); assert.equal(message.includes("可修改配置后重试"), false);
   if (code === "RECOVERY_EXHAUSTED") {
-    assert.equal(u.get("bc-local-state").textContent, "自动恢复已暂停");
-    assert.match(message, /自动恢复已暂停.*诊断修复/);
+    assert.equal(u.get("bc-local-state").textContent, "自动恢复已停止");
+    assert.match(message, /自动恢复已停止.*修改配置不会解除.*诊断.*重置恢复次数/);
   }
   for (let i = 0; i < 3; i++) {
     await u.click("edit"); u.response(data); await u.submit();
@@ -370,7 +370,7 @@ test("bridge local fault: saved error response uses fixed explanation, not a mis
   const u = ui(); await u.open(); fill(u);
   u.post(() => reply({ ok: false, saved: true, code: "RECOVERY_EXHAUSTED", message: "untrusted private response" }, 400));
   await u.submit();
-  assert.match(u.get("bc-notice").textContent, /自动恢复已暂停.*诊断修复/);
+  assert.match(u.get("bc-notice").textContent, /自动恢复已停止.*修改配置不会解除.*诊断.*重置恢复次数/);
   assert.equal(u.get("bc-notice").textContent.includes("untrusted"), false);
   assert.equal(u.configPosts().length, 1);
 });
@@ -535,7 +535,7 @@ test("bridge checks: a readable saved model mismatch still marks the configurati
 test("bridge checks: App metadata details never mask an authoritative recovery fault", async () => {
   const u = ui(saved({ localError: "RECOVERY_EXHAUSTED", check: "MODEL_LIST", local: { state: "ready" } }));
   await u.open();
-  assert.match(u.get("bc-notice").textContent, /自动恢复已暂停.*诊断修复/);
+  assert.match(u.get("bc-notice").textContent, /自动恢复已停止.*修改配置不会解除/);
   assert.equal(u.get("bc-service-state").textContent, "不可用于新会话");
   assert.equal(u.get("bc-use").disabled, true);
 });
@@ -1053,8 +1053,8 @@ test("bridge models: saved summary distinguishes list connectivity from model in
     const u = ui(); let used = 0;
     await u.open({ useNew: async () => { used++; } }); fill(u);
     if (discover) { u.change(u.checkbox().id, true); await u.advance(650); }
+    assert.match(u.get("bc-save-note").textContent, /保存不调用远端模型.*不切换当前会话/);
     if (discover) assert.match(u.get("bc-save-note").textContent, /已读取模型列表.*未测试对话推理/);
-    else assert.equal(u.get("bc-save-note").textContent, "");
     u.response(saved()); await u.submit();
     const status = u.get("bc-remote-state").textContent;
     assert.match(status, /未测试对话推理/);
@@ -1387,7 +1387,7 @@ test("multi APIs: API switching aborts discovery, drops late data and consent ev
   pending.resolve(reply({ ok: true, models: [{ id: "late-primary", context_window: 1048576 }], truncated: false })); await u.flush();
   assert.deepEqual(u.modelList().children, []); assert.equal(u.get("bc-ctx").value, "128000");
   await u.advance(1000); assert.equal(u.modelCalls().length, 1);
-  assert.equal(u.get("bc-save-note").textContent, "");
+  assert.match(u.get("bc-save-note").textContent, /保存不调用远端模型.*也不切换当前会话/);
   u.models(() => reply({ ok: true, models: [{ id: "secondary-only" }], truncated: false }));
   u.change(u.checkbox().id, true); await u.advance(650);
   assert.equal(u.modelCalls().at(-1).body.provider, "relay-2");
@@ -1471,7 +1471,7 @@ test("multi APIs: discovering one source then switching keeps the list-connectiv
   u.change(u.checkbox().id, true); await u.advance(650);
   await u.apiAction("api-select", "relay-2");
   assert.equal(u.checkbox().checked, false);
-  assert.match(u.get("bc-save-note").textContent, /已读取模型列表/);
+  assert.match(u.get("bc-save-note").textContent, /保存不调用远端模型.*已读取模型列表/);
   u.post(() => reply(publicReply(u.configPosts().at(-1).body))); await u.submit();
   assert.match(u.get("bc-remote-state").textContent, /已读取模型列表.*未测试对话推理/);
   u.close(); await u.open();

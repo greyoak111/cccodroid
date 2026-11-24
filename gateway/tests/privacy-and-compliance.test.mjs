@@ -1,7 +1,7 @@
 // 隐私与合规加固回归（网关与对应源码归档）：
-//   1. gh-proxy 第三方代理兜底默认关闭（false），仅在显式开启或 files/.gh-proxy 存在时启用；
-//   2. remoteNotices 关闭时，notices.mjs 与 ccverified.mjs 零网络请求且 GET /api/notices 返回 disabled: true；
-//   3. devkit/archive-sources.mjs 正确分类 Copyleft 许可证、解析 Termux 配方并生成 SOURCES.lock.json；
+//   1. gh-proxy 第三方代理兜底默认关闭，CFG.runtime 存在时以 files/.gh-proxy 为唯一真源；
+//   2. remoteNotices 关闭仅停维护公告（notices.mjs），ccverified.mjs 改随自动更新（.upd-auto-off）门控；
+//   3. devkit/archive-sources.mjs 全部 APK 内置项钉死 SHA-256，正确解析配方变量、拦截路径穿越并生成 SOURCES.lock.json；
 //   4. 仓库根部隐私说明（PRIVACY.zh-CN.md / PRIVACY.md）与 Apache-2.0 许可证完整在位。
 import { CFG } from "../gw/config.mjs";
 import test, { after } from "node:test";
@@ -9,13 +9,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SETTINGS, saveSettings } from "../gw/settings-store.mjs";
 import { ghProxy, ghProxyEnabled } from "../gw/pget.mjs";
 import {
   APK_BUNDLED_LGPL_SOURCES,
   requiresCorrespondingSource,
+  safeArchiveFileName,
   parseTermuxRecipeSources,
   buildSourcePlan,
 } from "../../devkit/archive-sources.mjs";
@@ -23,9 +24,10 @@ import {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TMP = fs.mkdtempSync(path.join(process.env.CCAPP_TMP, "privacy-compliance-"));
 
-let hits = 0;
+let noticeHits = 0, verifiedHits = 0;
 const srv = http.createServer((req, res) => {
-  hits++;
+  if (req.url?.startsWith("/notices.json")) noticeHits++;
+  if (req.url?.startsWith("/verified.json")) verifiedHits++;
   res.writeHead(404);
   res.end("not signed");
 });
@@ -36,16 +38,21 @@ after(() => srv.close());
 process.env.CCAPP_NOTICES_URL = `${BASE}/notices.json`;
 process.env.CCAPP_CLAUDE_VERIFIED_URL = `${BASE}/verified.json`;
 const { refreshNotices, routeNotices } = await import("../gw/notices.mjs");
-const { refreshVerified } = await import("../gw/ccverified.mjs");
+const { refreshVerified, autoUpdateOff } = await import("../gw/ccverified.mjs");
 
-test("ghProxy 默认关闭，且同步受 SETTINGS.ghProxy 与 .gh-proxy 控制", () => {
+test("ghProxy 默认关闭，且 CFG.runtime 下以 .gh-proxy 文件为唯一真源", () => {
   const flag = path.join(CFG.runtime, ".gh-proxy");
   fs.rmSync(flag, { force: true });
   SETTINGS.ghProxy = false;
   assert.equal(ghProxyEnabled(), false);
   assert.equal(ghProxy("https://github.com/org/repo/releases/download/v1/pkg.tar.gz"), "");
 
+  // 即使内存中残留旧 SETTINGS.ghProxy = true，只要 .gh-proxy 文件已删（例如外壳/重置已关），也不得偷走代理
   SETTINGS.ghProxy = true;
+  assert.equal(ghProxyEnabled(), false);
+
+  fs.mkdirSync(CFG.runtime, { recursive: true });
+  fs.writeFileSync(flag, "1\n");
   assert.equal(ghProxyEnabled(), true);
   assert.equal(
     ghProxy("https://github.com/org/repo/releases/download/v1/pkg.tar.gz"),
@@ -53,22 +60,25 @@ test("ghProxy 默认关闭，且同步受 SETTINGS.ghProxy 与 .gh-proxy 控制"
   );
   assert.equal(ghProxy("https://example.com/pkg.tar.gz"), "");
 
-  SETTINGS.ghProxy = false;
-  fs.mkdirSync(CFG.runtime, { recursive: true });
-  fs.writeFileSync(flag, "1\n");
-  assert.equal(ghProxyEnabled(), true);
   fs.rmSync(flag, { force: true });
+  SETTINGS.ghProxy = false;
   assert.equal(ghProxyEnabled(), false);
 });
 
-test("remoteNotices 关闭时 notices 与 ccverified 零出站请求", async () => {
-  hits = 0;
+test("remoteNotices 与自动更新（.upd-auto-off）解耦：关公告不废已知问题版本拦截，双关则零后台请求", async () => {
+  const autoOffFlag = path.join(CFG.runtime, ".upd-auto-off");
+  fs.mkdirSync(CFG.runtime, { recursive: true });
+  fs.rmSync(autoOffFlag, { force: true });
+
+  // 1. 仅关维护公告、保留自动更新：notices 零请求，ccverified 仍正常拉取安全拦截清单
+  noticeHits = 0; verifiedHits = 0;
   SETTINGS.remoteNotices = false;
   saveSettings();
 
   await refreshNotices(true);
+  assert.equal(noticeHits, 0, "关闭接收维护公告后 notices 不应发起请求");
   await refreshVerified(true);
-  assert.equal(hits, 0, "关闭接收维护公告后不应发起任何 HTTP 请求");
+  assert.ok(verifiedHits >= 1, "自动更新开启时，关闭维护公告不应停掉已知问题版本拦截清单");
 
   let status = 0, body = "";
   const req = { method: "GET", headers: {} };
@@ -82,16 +92,29 @@ test("remoteNotices 关闭时 notices 与 ccverified 零出站请求", async () 
   assert.equal(parsed.ok, true);
   assert.equal(parsed.disabled, true);
   assert.deepEqual(parsed.items, []);
-  assert.equal(hits, 0);
+  assert.equal(noticeHits, 0);
 
-  // 重新打开后允许请求本地桩服务
+  // 2. 同时关闭自动更新（写入 .upd-auto-off）：notices 与 ccverified 全部零请求
+  noticeHits = 0; verifiedHits = 0;
+  fs.writeFileSync(autoOffFlag, "1\n");
+  assert.equal(autoUpdateOff(), true);
+  await refreshNotices(true);
+  await refreshVerified(true);
+  assert.equal(noticeHits, 0);
+  assert.equal(verifiedHits, 0, "关闭自动更新后 ccverified 不应发起请求");
+
+  // 3. 恢复默认后允许请求
+  fs.rmSync(autoOffFlag, { force: true });
   SETTINGS.remoteNotices = true;
   saveSettings();
   await refreshNotices(true);
-  assert.ok(hits >= 1, "开启接收维护公告后应允许向配置的公告源发起请求");
+  assert.ok(noticeHits >= 1);
 });
 
-test("archive-sources.mjs 许可证分类、配方解析与 --dry-run 归档清单", () => {
+test("archive-sources.mjs 钉死 SHA-256、_VERSION 展开、防路径穿越与参数校验", () => {
+  for (const item of APK_BUNDLED_LGPL_SOURCES) {
+    assert.match(item.sha256 || "", /^[0-9a-f]{64}$/, `${item.id} 必须钉死 64 位 SHA-256`);
+  }
   assert.equal(requiresCorrespondingSource("GPL-3.0-only"), true);
   assert.equal(requiresCorrespondingSource("LGPL-2.1-or-later"), true);
   assert.equal(requiresCorrespondingSource("MIT AND GPL-2.0-or-later"), true);
@@ -102,9 +125,14 @@ test("archive-sources.mjs 许可证分类、配方解析与 --dry-run 归档清�
   assert.equal(requiresCorrespondingSource("Apache-2.0"), false);
   assert.equal(requiresCorrespondingSource("BSD-3-Clause"), false);
 
+  assert.equal(safeArchiveFileName("https://ftpmirror.gnu.org/gnu/glibc/glibc-2.44.tar.xz"), "glibc-2.44.tar.xz");
+  assert.throws(() => safeArchiveFileName("https://example.com/a/%2e%2e"), /非法归档文件名/);
+  assert.throws(() => safeArchiveFileName("https://example.com/a/foo%2fbar.tar.xz"), /非法归档文件名/);
+  assert.throws(() => safeArchiveFileName("https://example.com/a/"), /非法归档文件名/);
+
   const recipe = [
     'TERMUX_PKG_VERSION="9.5"',
-    'TERMUX_PKG_SRCURL=https://ftp.gnu.org/gnu/coreutils/coreutils-${TERMUX_PKG_VERSION}.tar.xz',
+    'TERMUX_PKG_SRCURL=https://ftp.gnu.org/gnu/coreutils/coreutils-${_VERSION}.tar.xz',
     'TERMUX_PKG_SHA256=CD328EDEAC92F6A665DE9F323C93B712AF1858BC2E0D88F3F7100469470A2F3A',
   ].join("\n");
   const srcs = parseTermuxRecipeSources(recipe, "9.5-1");
@@ -115,6 +143,7 @@ test("archive-sources.mjs 许可证分类、配方解析与 --dry-run 归档清�
 
   const lockObj = {
     release: "devkit-2026.11.24",
+    termuxRef: "deadbeef",
     packages: [
       { name: "bash", version: "5.2.37", license: "GPL-3.0", sha256: "aa" },
       { name: "openssl", version: "3.4.0", license: "Apache-2.0", sha256: "bb" },
@@ -124,17 +153,23 @@ test("archive-sources.mjs 许可证分类、配方解析与 --dry-run 归档清�
   const plan = buildSourcePlan(lockObj);
   assert.equal(plan.apkBundled.length, APK_BUNDLED_LGPL_SOURCES.length);
   assert.deepEqual(plan.devkitPackages.map((p) => p.name), ["bash", "mystery"]);
+  assert.match(plan.devkitPackages[0].rawBuildShUrl, /deadbeef\/packages\/bash\/build\.sh$/);
   assert.equal(buildSourcePlan(lockObj, { includeAll: true }).devkitPackages.length, 3);
+
+  const missingArg = spawnSync(process.execPath, [path.join(REPO_ROOT, "devkit/archive-sources.mjs"), "--lock"], { encoding: "utf8" });
+  assert.notEqual(missingArg.status, 0);
+  assert.match(missingArg.stderr, /缺少取值/);
 
   const lockFile = path.join(TMP, "devkit.lock.json");
   const outDir = path.join(TMP, "sources-out");
   fs.writeFileSync(lockFile, JSON.stringify(lockObj));
-  execFileSync(process.execPath, [
+  const dry = spawnSync(process.execPath, [
     path.join(REPO_ROOT, "devkit/archive-sources.mjs"),
     "--lock", lockFile,
     "--out", outDir,
     "--dry-run",
-  ], { stdio: "pipe" });
+  ], { encoding: "utf8" });
+  assert.equal(dry.status, 0, dry.stderr);
   const outLock = JSON.parse(fs.readFileSync(path.join(outDir, "SOURCES.lock.json"), "utf8"));
   assert.equal(outLock.release, "devkit-2026.11.24");
   assert.equal(outLock.devkitPackages.length, 2);

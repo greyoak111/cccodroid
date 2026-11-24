@@ -38,7 +38,7 @@ node devkit.mjs build --target <10字符包名> [--groups ...]     # 产出 out/
 - `out/devkit-<包名>.tar`：App 解到 `files/` 下即可。解完后跑一次 `usr/libexec/devkit/first-run.sh`
 - `devkit.lock.json`：每个包的版本、许可证（`license`）、文件名、SHA256、配方链接，加上仓库快照时间
 - `SBOM.tsv`：同上（含 `license` 列），表格形式
-- `archive-sources.mjs`：按 `devkit.lock.json` 提取所有 GPL/LGPL 等著佐权包及 APK 内置 LGPL 库（`glibc`、`7-Zip`）的对应源码归档清单 `SOURCES.lock.json` 并下载核验上游源码包备存，确保滚动源淘汰旧包后仍可履行三年源码提供义务
+- `archive-sources.mjs`：按 `devkit.lock.json` 分类 GPL/LGPL 等著佐权包及 APK 内置 LGPL 库（`glibc`、`7-Zip`），拉取构建配方与上游源码包并核验 SHA-256 生成 `SOURCES.lock.json`，配合履行自二进制分发之日起至少三年的书面请求源码提供义务
 
 分组见 `devkit.json`：不加 `--groups` 时**全部分组都打进去**，即整包；按模块分块打见下面「模块」一节。包括 `graphics`（Mesa、Vulkan 加载器等 9 个公共图形包，2026-10-15 并入，GPU 与浏览器组件共用）和 `media`（ffmpeg，2026-10-15 夜并入：+30 包，下载 +21 MB，解开后 +87 MB；带 MediaCodec 硬件编码）。共 273 个包（devkit-2026.11.21；10.22.1 起基础模块补了 patch、ed、dos2unix、lsof、nano、inetutils、net-tools、tree，10.22.3 补上单独的 which 包），从 Termux 仓库下载约 447 MB，整包 gz 约 680 MB（10.22.2 修了 venv 用的 ensurepip pip wheel），解包后约 1.9 GB。
 `extra` 组（typst、duckdb、imagemagick）依赖很重，作为选装。

@@ -329,7 +329,8 @@ try {
   fixture.state.config.local = { state: "ready" }; // 故意让残存服务健康，锁仍必须优先阻断。
   await configClose(); await configOpen(true);
   const recoveryNotice = await cdp.eval("document.querySelector('#bc-notice').innerText");
-  assert.equal(recoveryNotice, await cdp.eval("I18N.t('自动恢复已暂停，请先在下方诊断修复。')"));
+  assert.match(recoveryNotice, /恢复|recovery/i);
+  assert.match(recoveryNotice, /修改配置不会解除|configuration.*(?:not|won't|won’t).*clear/i);
   assert.equal(await cdp.eval("document.querySelector('#bc-use').disabled"), true);
   for (let i = 0; i < 3; i++) {
     await click('#bridge-config-panel [data-bc="edit"]'); await click("#bc-save");
@@ -400,7 +401,7 @@ try {
     await click("#bc-backup-help summary");
     assert.equal(await cdp.eval("document.querySelector('#bc-backup-help').open"), true);
     const body = await cdp.eval("document.querySelector('#bc-backup-help').innerText");
-    assert.match(body, /backup|key|备份|密钥/i);
+    assert.match(body, /chat history|conversations|聊天记录/i);
     fixture.state.configMode = "success";
     const reads = fixture.state.requests.filter(r => r.path === CONFIG_ROUTE && r.method === "GET").length;
     await click("#bc-check-again"); await until(() => cdp.eval(visible("#bc-saved")), "read-only recheck recovers saved view");
