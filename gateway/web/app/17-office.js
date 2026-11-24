@@ -7,7 +7,7 @@
   const VW_OFFICE_MAX = 32 * 1024 * 1024;
   async function vwFetchBuf(max, signal) {
     const path = VW.path, knownSize = VW.size;
-    const tooBig = (size) => new Error(t("文件太大（{size}），不适合在应用里直接解析；可以用「原版式」转成 PDF 看，或下载后用别的应用打开。", { size: fmtSize(size) }));
+    const tooBig = (size) => new Error(t("文件太大（{size}），请切换「原版式」转 PDF 预览，或用外部应用打开。", { size: fmtSize(size) }));
     // 先按大小拦，别把 32MB 以上的文件整份读进内存再判：手机主线程可能直接卡死 / 内存不够（稳定性报告 FIND-024）。
     // 打开时一般已带 size；没有（0）就向网关补一次 stat。stat 失败按老路走，读回来那个判断还留着兜底
     if (max) {
@@ -284,7 +284,7 @@
   }
   async function vwOfficeInstall() {
     const still = vwTake();
-    $("vw-body").innerHTML = `<div class="vw-empty"><div>${t("正在安装 LibreOffice…可以先去干别的，装好回来再打开。")}</div>
+    $("vw-body").innerHTML = `<div class="vw-empty"><div>${t("正在后台安装 LibreOffice…")}</div>
       <div class="tiny dim vw-lo-line"></div></div>`;
     let j;
     try { j = await api("/api/office/install", { method: "POST" }); } catch (e) { return still() && vwFail(e.message, false); }

@@ -11,7 +11,7 @@
     popMenu(e.currentTarget, [{ head: t("导出这张图") },
       { label: t("图片（PNG）"), icon: SM.export, fn: () => linExport("png") },
       { label: t("矢量图（SVG）"), icon: SM.export, fn: () => linExport("svg") },
-      { label: t("能拖能点的网页（HTML）"), icon: SM.export, fn: () => linExport("html") }]);
+      { label: t("交互式网页（HTML）"), icon: SM.export, fn: () => linExport("html") }]);
   });
 
   async function linExport(kind) {

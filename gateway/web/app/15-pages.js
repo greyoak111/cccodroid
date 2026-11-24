@@ -260,8 +260,8 @@
         <button type="button" class="cm-num" data-cm="copy" title="${esc(t("点一下复制群号"))}">${COMMUNITY.qq}</button>
         <button type="button" class="btn ghost sm" data-cm="qr">${esc(t("二维码"))}</button></div>
       <img class="cm-qr hidden" src="/qq-group.jpg" alt="${esc(t("QQ 交流群二维码"))}" loading="lazy">
-      ${compact ? "" : `<p>${esc(t("用起来有问题、有想法，欢迎进群聊。报 bug 最好走「设置 → 到 GitHub 反馈」，机型和自检结果会自动带上，群里消息一多就沉了。"))}</p>
-      <p>${esc(t("这个项目目前只有作者一个人在维护，非常需要帮手：译文校对、机型适配报告、组件配方、文档、代码都欢迎，不会写代码也能帮上忙。怎么参与见仓库里的贡献指南。"))}</p>`}
+      ${compact ? "" : `<p>${esc(t("日常交流欢迎进群；提交 Bug 建议走「设置 → 到 GitHub 反馈」（自动附带机型与自检信息）。"))}</p>
+      <p>${esc(t("欢迎参与翻译、测试、文档与开发，详见仓库贡献指南。"))}</p>`}
       <div class="cm-links"><a href="${COMMUNITY.discord}">Discord</a> · <a href="${R}/discussions">${esc(t("讨论区"))}</a> · <a href="${R}/issues">${esc(t("反馈问题"))}</a> · <a href="${R}/blob/main/${zh ? "CONTRIBUTING.zh-CN.md" : "CONTRIBUTING.md"}">${esc(t("参与开发"))}</a></div>
     </div>`;
   }

@@ -20,9 +20,9 @@ final class SplitPairing {
         boolean ok() { return !"unsupported".equals(phase)&&!"foreground".equals(phase); }
         String message() {
             switch (phase) {
-                case "opening": return "正在尝试分屏打开设置…";
-                case "multiwindow": return "已检测到多窗口。请在另一窗口进入无线调试，打开配对码弹框后，在这里填写配对码和端口。";
-                case "manual": return "尚未检测到分屏。请在最近任务中将 cccodroid 与系统设置设为分屏，再打开无线调试的配对码弹框。配对完成前请保持两个窗口打开。";
+                case "opening": return "正在分屏打开设置…";
+                case "multiwindow": return "已进入分屏：请在另一侧打开「无线调试 → 使用配对码配对」，再回此处填写配对码与端口。";
+                case "manual": return "未进入分屏：请在最近任务中将本应用与系统设置并排分屏，再打开配对码弹窗。";
                 case "foreground": return "请先回到 cccodroid 前台，再尝试分屏打开设置。";
                 case "unsupported": return "此 Android 版本不支持分屏。";
                 default: return "";

@@ -58,7 +58,7 @@ test("UI separates sources and includes original time and only explicit acknowle
   const u = ui(), list = [event("runtime", ["ccapp-providers.json"]), event("app", ["TOOLS.md"], 2), event("claude", ["claude"], 3)];
   u.show(list);
   const msg = u.notices[0].text;
-  assert.match(msg, /当前设置写回：ccapp-providers.json/);
+  assert.match(msg, /还原为当前设置：ccapp-providers.json/);
   assert.match(msg, /安装包还原：TOOLS.md/);
   assert.match(msg, /拒绝启动；claude/);
   assert.ok(msg.includes(new Date(list[0].at).toLocaleString()));
@@ -71,17 +71,17 @@ test("pending state is labeled historical after reload, repeated state deduplica
   assert.match(source, /showTamper\(s.tamper, true\)/);
   assert.match(source, /case "tamper": return showTamper\(ev.tamper\)/);
   const e = event("runtime", ["ccapp-providers.json"]), u = ui();
-  u.show([e], true); assert.match(u.notices[0].text, /待确认记录（非本次刷新产生）/);
+  u.show([e], true); assert.match(u.notices[0].text, /历史待确认/);
   u.show([e], true); u.show([e]); assert.equal(u.notices.length, 1);
-  const reload = ui(); reload.show([e], true); assert.match(reload.notices[0].text, /待确认记录/);
-  u.show([{ ...e, files: [...e.files, "ccapp-settings.json"] }]); assert.equal(u.notices.length, 2); assert.match(u.notices[1].text, /新记录或新增文件/);
+  const reload = ui(); reload.show([e], true); assert.match(reload.notices[0].text, /历史待确认/);
+  u.show([{ ...e, files: [...e.files, "ccapp-settings.json"] }]); assert.equal(u.notices.length, 2); assert.match(u.notices[1].text, /新增变动/);
   u.show([{ ...e, at: e.at + 1 }]); assert.equal(u.notices.length, 3);
-  u.show([{ ...e, files: ["TOOLS.md"] }]); assert.equal(u.notices.length, 4); assert.match(u.notices[3].text, /已触发保护处理/);
+  u.show([{ ...e, files: ["TOOLS.md"] }]); assert.equal(u.notices.length, 4); assert.match(u.notices[3].text, /已触发恢复保护/);
 });
 test("mixed runtime files retain config writeback and program-protection explanations", () => {
   const u = ui(); u.show([event("runtime", ["ccapp-settings.json", "web/index.html"])]);
-  assert.match(u.notices[0].text, /当前设置写回：ccapp-settings.json/);
-  assert.match(u.notices[0].text, /已触发保护处理：web\/index.html/);
+  assert.match(u.notices[0].text, /还原为当前设置：ccapp-settings.json/);
+  assert.match(u.notices[0].text, /已触发恢复保护：web\/index.html/);
   assert.doesNotMatch(u.notices[0].text, /安装包还原/);
 });
 test("new tamper translation keys exist in every registered non-source language, preserving placeholders", () => {

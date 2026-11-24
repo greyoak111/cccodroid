@@ -695,7 +695,7 @@
   function setConn(ok) {
     srv.connected = ok;
     // 浏览器从 127.0.0.1 / localhost 打开：网关在线，只是来源不对，别说「断开」盖掉「请在应用里打开」（195-G.6 真机）
-    if (!ok) setStatus(srv.foreign ? t("请在 cccodroid 应用里打开") : t("与网关断开，正在重连…（生成不受影响）"), "warn");
+    if (!ok) setStatus(srv.foreign ? t("请在 cccodroid 应用里打开") : t("连接中断，重连中…（后台继续生成）"), "warn");
     // 刚问过、网关确实不在：每次重拨失败不要把「网关离线」又盖回「生成不受影响」。
     // 45 秒盖住最长的 30 秒退避；连上（onopen）就清零，重新按原文案说（FIND-018）
     if (!ok && !srv.foreign && Date.now() - gwDeadAt < 45000) setStatus(t("网关离线"), "err");
@@ -851,7 +851,7 @@
         const av = AssistantView(liveEl, true);
         tagRun(av.msgEl, ev.runId);
         if (ev.text.trim().startsWith("/")) av.msgEl.classList.add("sys");
-        if (ev.auto === "idle") av.note(t("会话闲置快一小时，提示缓存快过期了，先自动压缩上下文，下一条消息就不用把整段历史重算一遍。不需要可以在设置里关掉。"), true);
+        if (ev.auto === "idle") av.note(t("闲置将满 1 小时，自动压缩上下文以节省后续消耗（可在设置关闭）。"), true);
         const timer = RunTimer(ev.startedAt);
         timer.attach(av);
         av.phase({ phase: "prep" });     // 网关起进程前的准备；起了进程换「启动中」，claude 就绪换「连接中」（F6）
@@ -1146,7 +1146,7 @@
     if (!list.some((e) => !tamperShown.has(key(e)))) return;
     const lines = list.map((e) => {
       const status = restored || tamperShown.has(key(e))
-        ? t("待确认记录（非本次刷新产生）") : t("新记录或新增文件");
+        ? t("历史待确认") : t("新增变动");
       const at = new Date(e.at);
       const time = t("首次记录：{time}", { time: Number.isFinite(at.getTime()) ? at.toLocaleString() : t("时间未知") });
       const files = e.files || [];
@@ -1159,8 +1159,8 @@
         const config = e.src === "runtime" ? files.filter((f) => /^ccapp-(settings|providers)\.json$/.test(f)) : [];
         const program = files.filter((f) => !config.includes(f));
         const parts = [];
-        if (config.length) parts.push(t("配置文件被改过，已按应用里的当前设置写回：") + preview(config));
-        if (program.length) parts.push(t("运行中的应用文件被改过，已触发保护处理：") + preview(program));
+        if (config.length) parts.push(t("配置文件被外部修改，已还原为当前设置：") + preview(config));
+        if (program.length) parts.push(t("运行文件被外部修改，已触发恢复保护：") + preview(program));
         action = parts.join(" · ");
       }
       return status + " · " + time + " · " + action;
@@ -1220,7 +1220,7 @@
     // 别的会话在等你确认：当前视图看不到它的卡片，状态栏和会话列表里提醒
     const elsewhere = srv.runs.filter((r) => r !== srv.run && r.perms && r.perms.length);
     // 还没建会话的（启动前的确认卡）不在会话列表里，指到侧栏的草稿入口——点了会把它们认回新对话页（#171/#172）
-    if (elsewhere.length) setStatus(elsewhere.every((r) => !r.sessionId) ? t("有个新对话在等你确认 · 侧栏「没建会话的新对话」里查看") : t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
+    if (elsewhere.length) setStatus(elsewhere.every((r) => !r.sessionId) ? t("有新对话待确认 · 见侧栏「未保存的新对话」") : t("另一个会话在等你确认 · 打开会话列表查看"), "warn");
     // 没有任何一轮在等确认时回「就绪」：权限在别的会话解决后，状态栏以前会一直挂着「等你确认」直到下一轮（0.6.9 审计 195-B.10）。
     // 网关断开时不碰，留给 setConn 的重连提示（195-BB.2）
     else if (srv.connected && !srv.runs.some((r) => r.perms && r.perms.length)
@@ -1236,7 +1236,7 @@
 
   /** 网关给的中断记录：列表（旧网关是单条对象或 null） */
   // 答完了、只剩后台任务：任务清零后网关还要等一会儿才收尾（claude 可能接着起一轮），这段时间别显示「在跑（0 个）」（195-P.9）
-  function idleStatus(n) { return n > 0 ? t("就绪 · 后台任务在跑（{n} 个）", { n }) : t("就绪 · 后台任务都结束了，正在收尾"); }
+  function idleStatus(n) { return n > 0 ? t("就绪 · {n} 个后台任务运行中", { n }) : t("就绪 · 后台任务收尾中"); }
   function intrList(v) { return (Array.isArray(v) ? v : v ? [v] : []).filter((e) => e && e.id); }
   /** 上一轮被系统结束（App 连同网关被杀）：每个被打断的会话底部各挂一张卡，给「继续」 */
   function renderInterrupted(list) {
@@ -1258,9 +1258,9 @@
     // 有副作用、没等到结果的工具（网关记的台账，FIND-039/049）：点「继续」之前就摆在眼前，
     // 让用户先核对文件 / 命令结果，别默认它们没执行
     const side = Array.isArray(it.sideTools) ? it.sideTools.filter((x) => typeof x === "string") : [];
-    const sideNote = side.length ? t("中断时有 {n} 个可能有副作用的操作没拿到结果：{list}。它们是否已经执行无法确认，点「继续」前请先核对。", {
+    const sideNote = side.length ? t("中断时有 {n} 项操作状态未知（{list}），继续前请先核对结果。", {
       n: side.length, list: side.slice(0, 6).join("、") + (side.length > 6 ? "…" : "") }) : "";
-    setHtml(b, `<p>${esc(card ? t("这一轮没有开始：启动前的确认卡 {n} 分钟没人回答，已经停下了（{when} 发的）。", { n: 10, when })
+    setHtml(b, `<p>${esc(card ? t("确认超时（{n} 分钟未响应），本轮未启动（{when}）。", { n: 10, when })
         : unstarted ? t("这一轮还没开始就被结束了（{when} 发的）。", { when })
         // cause：网关分得清的中断原因（195-A.11）。没有就是没打招呼就没了：系统回收、强行停止
         : it.cause === "update" ? t("这一轮没跑完：App 更新时网关重启了（{when} 开始的）。", { when })
@@ -1268,7 +1268,7 @@
         : t("这一轮没跑完：App 在后台被系统结束了（{when} 开始的）。", { when }))}</p>
       <blockquote>${esc(String(it.text || "").slice(0, 300))}</blockquote>
       <p class="perm-sub">${esc(card || unstarted ? t("Claude 没收到这条消息。点「重发」把它放回输入框。")
-        : it.sessionId ? t("已经做完的部分都在会话里。点「继续」让 Claude 从断开的地方接着做。")
+        : it.sessionId ? t("已完成进度已保留，点「继续」从断点接着执行。")
         : t("会话还没来得及建立，Claude 没收到这条消息。点「重发」把它放回输入框。"))}</p>
       ${sideNote ? `<p class="perm-sub intr-side">${esc(sideNote)}</p>` : ""}
       ${others ? `<p class="perm-sub">${esc(t("另有 {n} 个会话同时被中断，在会话列表里标着「已中断」。", { n: others }))}</p>` : ""}

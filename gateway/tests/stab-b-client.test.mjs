@@ -119,7 +119,7 @@ test("FIND-011：localStorage 配额满了要出声，30 秒内只响一次", ()
   const h = drafts({ quota: true });
   assert.equal(h.f.draftsSave({}), false);
   assert.equal(h.toasts.length, 1);
-  assert.match(h.toasts[0].m, /草稿没能保存/);
+  assert.match(h.toasts[0].m, /草稿未保存/);
   assert.equal(h.toasts[0].isErr, true);
   h.f.draftsSave({});
   assert.equal(h.toasts.length, 1, "同一波写失败不刷屏");

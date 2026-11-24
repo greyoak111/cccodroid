@@ -1704,7 +1704,7 @@ public class MainActivity extends Activity {
         retry.setOnClickListener(v -> { retry.setVisibility(View.GONE); stuck.setVisibility(View.GONE); say(Tr.t("— 重试 —")); boot(); });
         // 「我卡住了」：界面还没起来时（安装就失败了）也能把诊断包发出去
         stuck = new android.widget.Button(this);
-        stuck.setText(Tr.t("我卡住了：分享诊断"));
+        stuck.setText(Tr.t("导出诊断包"));
         stuck.setVisibility(View.GONE);
         stuck.setOnClickListener(v -> new android.app.AlertDialog.Builder(this)
             .setTitle(Tr.t("打包诊断信息"))
@@ -2427,7 +2427,7 @@ public class MainActivity extends Activity {
     private static final String RESCUE_RETRY = "cccodroid-rescue:retry", RESCUE_RESET = "cccodroid-rescue:reset", RESCUE_LOGS = "cccodroid-rescue:logs";
     private static String rescueLinks(String color) {
         String a = "style=\"color:" + color + ";display:inline-block;margin:10px 12px 0\"";
-        return "<p style=\"font-size:14px;margin-top:28px\"><a " + a + " href=\"" + RESCUE_LOGS + "\">" + android.text.TextUtils.htmlEncode(Tr.t("我卡住了：分享诊断")) + "</a>"
+        return "<p style=\"font-size:14px;margin-top:28px\"><a " + a + " href=\"" + RESCUE_LOGS + "\">" + android.text.TextUtils.htmlEncode(Tr.t("导出诊断包")) + "</a>"
             + "<a " + a + " href=\"" + RESCUE_RESET + "\">" + android.text.TextUtils.htmlEncode(Tr.t("恢复初始设置")) + "</a></p>";
     }
     private volatile boolean resetting;
@@ -2442,10 +2442,9 @@ public class MainActivity extends Activity {
         box.addView(keys);
         android.app.AlertDialog d = new android.app.AlertDialog.Builder(this)
             .setTitle(Tr.t("恢复初始设置？"))
-            .setMessage(Tr.t("把配置恢复成刚装好的样子，用于改坏了配置、每轮都被拒或不出回答、自己救不回来的时候。") + "\n\n"
-                + Tr.t("会清掉：Claude Code 的用户级配置（CLAUDE.md、rules、技能、插件、命令、子代理、输出风格、钩子和 settings、MCP、自动记忆）、cccodroid 的设置、端侧模式配置、shell 启动文件（.bashrc 等），并退出安全模式；应用自带的文件按安装包重新铺一遍。") + "\n\n"
-                + Tr.t("不会删：清掉的东西都挪进 ~/.ccapp-reset/<时间> 留底，可以照原路径拷回去。会话记录、工作区、开发工具包和组件、ssh 与 git 配置都不动。") + "\n\n"
-                + Tr.t("期间网关会停一下，正在跑的任务会被中断。"))
+            .setMessage(Tr.t("重置为初始配置（将中断当前运行任务）。") + "\n\n"
+                + Tr.t("重置范围：Claude Code 用户级配置（CLAUDE.md、rules、技能、插件、钩子、settings、MCP、记忆）、应用与端侧设置、shell 启动文件，并退出安全模式。") + "\n\n"
+                + Tr.t("保留内容：原配置备份至 ~/.ccapp-reset/<时间>；会话、工作区、工具包、组件及 ssh/git 配置不受影响。"))
             .setView(box)
             .setPositiveButton(Tr.t("恢复"), (x, w) -> doFactoryReset(keys.isChecked()))
             .setNegativeButton(Tr.t("取消"), null)

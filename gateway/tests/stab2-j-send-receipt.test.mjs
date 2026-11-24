@@ -73,7 +73,7 @@ test("BUG-R04 网关已受理、POST 回执丢失：按送到收尾，不再退�
   });
   await h.send();
   assert.equal(h.toasts.length, 1);
-  assert.match(h.toasts[0].m, /网关已经收下这条/);
+  assert.match(h.toasts[0].m, /消息已送达，无需重发/);
   assert.equal(h.inputEl.value, "", "不要退回原文");
   assert.equal(h.dropped.length, 1, "有受理证据：留底槽和幂等键一起收掉");
   assert.equal(h.view.lastRunId, "R1");
@@ -89,7 +89,7 @@ test("BUG-R04 受理证据来自状态快照（runs / queueAll 里的 cid）", a
     return Promise.reject(new TypeError("network"));
   });
   await h.send();
-  assert.match(h.toasts[0].m, /网关已经收下这条/);
+  assert.match(h.toasts[0].m, /消息已送达，无需重发/);
   assert.equal(h.view.lastRunId, "R2");
 });
 
@@ -98,7 +98,7 @@ test("BUG-R04 结果未知（断网 / 超时）：说「不确定」，留底槽
   h.inputEl.value = "重要的话";
   h.setApi(() => Promise.reject(Object.assign(new Error("请求超时：网关没有响应（20 秒）"), { timeout: true })));
   await h.send();
-  assert.match(h.toasts[0].m, /不确定发出去没有/);
+  assert.match(h.toasts[0].m, /发送结果未确认/);
   assert.equal(h.inputEl.value, "重要的话", "结果未知也要把原文还给用户");
   assert.equal(h.dropped.length, 0, "结果未知不能吃留底槽：重发要沿用幂等键");
   assert.equal(h.view.cids.size, 1, "cid 留着，run_start 晚到还认得出");

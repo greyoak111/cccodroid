@@ -62,7 +62,7 @@
       case "UserConfig": {
         // 用户级配置的改动 + 之前的对话留下的后台进程（网关 userconf.mjs / leftover.mjs）
         const kindL = (k) => ({ added: t("新增"), changed: t("改动"), removed: t("删除"), transient: t("改过又改回") }[k] || "");
-        h = (i.first ? `<div class="perm-sub">${t("第一次检查：下面这些配置每次对话都会交给 Claude，确认一下是不是你自己放的。")} ${t("撤销会把它挪进 ~/.ccapp-userconf/quarantine，找得回来。")}</div>` : "")
+        h = (i.first ? `<div class="perm-sub">${t("首次检查：以下全局配置每轮都会生效，请确认是否由你本人添加（撤销会移入 ~/.ccapp-userconf/quarantine 备份）。")}</div>` : "")
           + (i.changes || []).map((c) => c.kind === "more" ? `<div class="perm-path">${esc(c.rel)}</div>${c.preview ? `<pre class="perm-cmd">${esc(c.preview)}</pre>` : ""}` : `<div class="perm-path">${esc(kindL(c.kind))} ~/${esc(c.rel)}${c.during ? " · " + t("在一轮对话运行期间改的") : ""}${c.again ? " · " + t("撤销后又被改回来（第 {n} 次）", { n: c.again + 1 }) : ""}</div>${c.preview ? `<pre class="perm-cmd">${esc(c.preview)}</pre>` : ""}`).join("")
           + ((i.procs || []).length ? `<div class="perm-sub">${t("之前的对话留下、还在后台运行的程序：")}</div><pre class="perm-cmd">${esc(i.procs.map((x) => `${x.pid}  ${x.kind === "unknown" ? "[" + t("来源不明") + "] " : ""}${x.cmd}`).join("\n"))}</pre>` : "");
         break;
@@ -88,27 +88,27 @@
     if (p.reason && typeof p.reason === "string") h += `<div class="perm-sub">${t("原因：{r}", { r: esc(p.reason) })}</div>`;
     // 敏感操作再确认（网关的 guard 钩子）：说清楚碰到了什么、为什么要多问一句
     if (p.guard) h = `<div class="perm-guard"><b>${esc(permGuardWhat(p.guard, p.input))}</b><p>${p.guard.cat === "userconf"
-      ? t("这些改动如果不是你自己做的、或者认不出来，选「撤销」：配置恢复到上次确认时的样子（新多出来的文件挪进隔离目录，不删），留下的程序会被结束。是你自己改的就选「保留」，以后不再问。")
+      ? t("非本人改动请选「撤销」（还原配置并结束残留进程，新文件移入隔离目录）；本人改动选「保留」。")
       : p.guard.cat === "error"
-      ? t("正常情况下不会出现。拿不准这一步是做什么的，就拒绝。")
+      ? t("安全检查异常，若不确定操作内容建议拒绝。")
       : p.guard.cat === "project"
-      ? t("这些配置会以本应用的身份直接运行程序。不是你自己写的、或者来路不明的项目，选「不加载」：这一轮照常进行，只是不用它们。允许后记住，配置变了会再问。")
-      : t("如果不是你让它这么做的，多半是它读到的网页或文件里藏了指令，建议拒绝。允许后，这一轮里同一类操作不再问。")}</p></div>` + h;
+      ? t("项目配置将直接运行本地程序；来源不明请选「不加载」（不影响正常对话），允许后变更时再询问。")
+      : t("若非你主动要求，可能是网页或文件中的注入指令，建议拒绝。允许后本轮同类操作不再询问。")}</p></div>` + h;
     return h;
   }
 
   function permGuardWhat(g, i) {
     const c = String(g.cat || "");
-    if (c === "userconf") return (i?.changes || []).length ? t("会交给 Claude 的用户级配置有变化，没经过你确认") : t("之前的对话留下了还在运行的后台程序");
-    if (c === "error") return t("安全检查自己出错了，判断不了这一步");
+    if (c === "userconf") return (i?.changes || []).length ? t("检测到未确认的用户级配置改动") : t("之前的对话留下了还在运行的后台程序");
+    if (c === "error") return t("安全检查异常，请手动确认");
     if (c === "device:screen") return t("要读屏幕或替你操作别的应用（{w}）", { w: g.what });
     if (c === "device:clipboard") return t("要读剪贴板");
     if (c === "device:share") return t("要把文件分享到别的应用");
     if (c === "project") return t("这个项目带了打开就会自动运行的配置（钩子、MCP 服务器等）");
     // what 是「英文类别: 命中的那段路径」，界面只显示路径那段
     const w = String(g.what || ""), k = w.indexOf(": ");
-    if (c.startsWith("prompt:")) return t("要改管着提示词或安全检查的文件：{w}", { w: k > 0 ? w.slice(k + 2) : w });
-    return t("碰到了密钥或登录凭据：{w}", { w: k > 0 ? w.slice(k + 2) : w });
+    if (c.startsWith("prompt:")) return t("即将修改提示词或安全规则文件：{w}", { w: k > 0 ? w.slice(k + 2) : w });
+    return t("即将访问密钥或登录凭据：{w}", { w: k > 0 ? w.slice(k + 2) : w });
   }
 
   // 这张卡所属那一轮实际在用的模式：并行时各轮可能不同（项目默认、会话单独选），别拿全局的芯片值猜（DeepSeek 复核 11-02）

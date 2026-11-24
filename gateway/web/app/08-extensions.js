@@ -587,7 +587,7 @@
     const fams = [];
     for (const m of r.items || []) if (!m.custom && !fams.includes(m.fam)) fams.push(m.fam);
     const custom = (r.items || []).filter((m) => m.custom);
-    const html = '<div class="tiny dim">' + t("模型放在 /sdcard/cccodroid/models，下好后到 设置 → 接口与型号 → 端侧小模型 使用。本机内存 {ram} GB。都是 Q4_K_M 量化；手机上 1–4B 比较实用，超过 6B 会很慢。", { ram: r.ram || "?" }) + "</div>" +
+    const html = '<div class="tiny dim">' + t("存放在 /sdcard/cccodroid/models（Q4_K_M 量化），下载后在「设置 → 接口与型号」启用。本机内存 {ram} GB，建议选 1–4B。", { ram: r.ram || "?" }) + "</div>" +
       (r.err ? '<div class="tiny err">' + esc(r.err) + "</div>" : "") +
       fams.map((f) => {
         const list = r.items.filter((m) => !m.custom && m.fam === f);
@@ -1506,7 +1506,7 @@
       const nm = (cb.closest(".item")?.querySelector(".it-title")?.textContent || id).trim();
       if (c === "install" && cb.dataset.unverified && !confirm(t("{name} 还没人在真机上验证过，可能装不上或用不了。仍然安装？", { name: nm }))) return;
       if (c === "remove" && cb.dataset.usedby) return toast(t("{names} 要用它，先卸载那些组件", { names: cb.dataset.usedby }), true);
-      if (c === "remove" && !confirm(t("卸载组件 {name}？会删掉它装进工具包的文件，你自己的文件不受影响。", { name: nm }))) return;
+      if (c === "remove" && !confirm(t("卸载组件 {name}？", { name: nm }))) return;
       cb.disabled = true; $("comp-list")._html = null;
       if (c === "remove") {
         // 停服务可能要等一会儿；在下一次轮询回来前也不能再装、再卸或取消。
@@ -1522,7 +1522,7 @@
       else if (c === "remove") {
         toast(t("已卸载"));
         // 组件自己攒的运行数据（下载缓存、解开的运行环境）不随卸载删，问一句
-        if (r.data && r.data.bytes > 0 && confirm(t("{name} 还留着 {size} 运行数据（{path}：下载缓存、解开的运行环境等）。一起删掉？以后再装要重新下载。", { name: nm, size: fmtSize(r.data.bytes), path: r.data.path }))) {
+        if (r.data && r.data.bytes > 0 && confirm(t("同时清理 {name} 残留的 {size} 运行缓存（{path}）？", { name: nm, size: fmtSize(r.data.bytes), path: r.data.path }))) {
           const p = await post("/api/components/purge", { id }).catch((err) => ({ ok: false, message: err.message }));
           toast(p.ok ? t("运行数据已删除") : t("失败：{msg}", { msg: p.message || "" }), !p.ok);
         }
@@ -1591,7 +1591,7 @@
   $("upd-log").addEventListener("click", () => { closeSettings(); openPage("changelog"); });
   $("btn-share-logs").addEventListener("click", async () => {
     // 打包前给用户看清单：发出去的是什么、去掉了什么
-    if (!confirm(t("打一个诊断包，经系统分享发出去。\n\n包里有：\n· 版本与设备：cccodroid / Android 版本、机型、芯片、剩余空间\n· 开发工具包：装的是哪一版、更新与自检状态\n· 最近的日志：本应用的系统日志、网关日志的最后一段\n· 修复账本：安装、校验、修复做过哪些、成没成\n· 网络：开没开 VPN，应用连不连得上几个下载源（只记结果）\n\n已经去掉：\n· 密钥、令牌、登录凭据、邮箱\n· 你发给 Claude 的消息内容\n· 会话记录本身不在包里\n\n继续？"))) return;
+    if (!confirm(t("导出诊断包并调用系统分享？\n\n包含：版本与机型、工具包与自检状态、近期脱敏日志、修复账本、网络连通结果。\n不含：密钥、凭据、邮箱、消息正文与会话记录。"))) return;
     toast(t("正在打包日志…"));
     const r = await post("/api/app/share_logs").catch((e) => ({ ok: false, message: e.message }));
     if (!r.ok) toast(t("没分享成：{msg}", { msg: r.message || "" }), true);

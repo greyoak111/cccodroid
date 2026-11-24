@@ -373,7 +373,7 @@
     paintTitle();   // 顶栏状态行后面的档号 / 日期也跟着会话列表变
     const row = (x) => `<button class="sr-item${x.id === view.sessionId ? " on" : ""}" data-sid="${esc(x.id)}" title="${esc(x.title)}">${ask.has(x.id) ? '<i class="sr-dot ask"></i>' : live.has(x.id) ? '<i class="sr-dot"></i>' : intr.has(x.id) ? `<i class="sr-dot intr" title="${esc(t("已中断"))}"></i>` : idle.has(x.id) ? `<i class="sr-dot idle" title="${esc(t("后台任务在跑"))}"></i>` : ""}<span>${esc(x.title)}</span></button>`;
     // 没建会话的草稿入口（#172）：停在确认卡上的、排着的、待重发的，会话列表里都没有，统一从这里进
-    const drafts = dr.n ? `<button class="sr-item sr-drafts" data-drafts>${dr.ask ? '<i class="sr-dot ask"></i>' : dr.live ? '<i class="sr-dot"></i>' : '<i class="sr-dot intr"></i>'}<span>${esc(t("没建会话的新对话"))}</span><em>${dr.n}</em></button>` : "";
+    const drafts = dr.n ? `<button class="sr-item sr-drafts" data-drafts>${dr.ask ? '<i class="sr-dot ask"></i>' : dr.live ? '<i class="sr-dot"></i>' : '<i class="sr-dot intr"></i>'}<span>${esc(t("未保存的新对话"))}</span><em>${dr.n}</em></button>` : "";
     box.innerHTML = drafts + (list.length
       ? groups.filter(([, l]) => l.length).map(([g, l, k]) => {
           // 分组可以收起：点标题切换，收起时标出有几个；记在本机

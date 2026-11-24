@@ -237,7 +237,7 @@
       if (es && !srv.connected) {
         // SSE 断了但 HTTP 还通：这里以前画成「就绪」，把「正在重连」盖掉（0.6.9 审计 195-BB.2）。
         // 同时用 /api/state 补一份快照，别让徽标、权限条、工具卡冻结在断线前
-        setStatus(t("与网关断开，正在重连…（生成不受影响）"), "warn");
+        setStatus(t("连接中断，重连中…（后台继续生成）"), "warn");
         api("/api/state").then(applyState).catch(() => {});
       } else if (!s.busy) {
         // 官方账户实际没登录（或上次问到时没登）就别再说「就绪」：一发消息就失败（0.6.9 审计 195-G.3）
@@ -305,8 +305,8 @@
         fetch("/api/freeze", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ why, touch: log[log.length - 1].touch }) }).catch(() => {});
       } catch {}
-      if (window.CCApp && window.CCApp.unfreeze) { toast(t("正在重新挂载界面…")); window.CCApp.unfreeze(); }
-      else toast(t("这个版本的应用还不能脱困，请更新应用；临时办法是重启网关"), true);
+      if (window.CCApp && window.CCApp.unfreeze) { toast(t("正在重载界面…")); window.CCApp.unfreeze(); }
+      else toast(t("当前应用版本不支持自动恢复，请更新应用或重启网关"), true);
     }
     // 手动脱困：长按顶栏标题 0.6 秒（按住时标题慢慢变淡，到点轻振一下）。冻住时点按照常能用，触摸事件也都收得到；
     // 手指挪开 10px 或松手就取消。不另占一个按钮
@@ -366,7 +366,7 @@
         if (sus < 2) return;
         sus = 0;
         const last = Number(sessionStorage.getItem(FZ_AT)) || 0;
-        if (now - last < 60000) toast(t("滚动好像卡住了，可以长按顶栏标题约 0.6 秒脱困"), true);   // 刚自动救过一次，别来回跳
+        if (now - last < 60000) toast(t("滚动卡住时，长按顶栏标题约 0.6 秒可恢复"), true);   // 刚自动救过一次，别来回跳
         else unfreeze("auto");
       }, 350);
     }, { capture: true, passive: true });

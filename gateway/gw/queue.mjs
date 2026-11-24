@@ -676,7 +676,7 @@ export async function routeQueue(req, res, u, p) {
       const prev = IDEM.get(idem);
       if (prev) {
         // 同一把键换了正文：客户端把键用串了。回 409，别把新消息悄悄吞掉
-        if (prev.hash !== idemHash(message)) return sendJson(res, 409, { error: "idem_conflict", message: tz("这条消息的发送标记被用在了别的内容上，请重新发送。") });
+        if (prev.hash !== idemHash(message)) return sendJson(res, 409, { error: "idem_conflict", message: tz("发送状态冲突，请重发。") });
         return sendJson(res, 200, { ...prev.res, duplicate: true });
       }
     }

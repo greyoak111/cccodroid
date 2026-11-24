@@ -28,7 +28,7 @@ test("195-G.6 真机：浏览器打开时 403 记成 foreign，事件流别再�
   // 按有没有原生桥判断，不按地址：127.0.0.2 不通的设备上应用自己的界面也在 127.0.0.1（07 界面地址回退）
   assert.match(boot, /e\.status === 403 && !window\.CCApp\) \{\s*srv\.foreign = true;[\s\S]{0,120}es\.close\(\)/);
   assert.match(flow, /if \(srv\.foreign\) \{ es = null; return; \}/);
-  assert.match(flow, /setStatus\(srv\.foreign \? t\("请在 cccodroid 应用里打开"\) : t\("与网关断开/);
+  assert.match(flow, /setStatus\(srv\.foreign \? t\("请在 cccodroid 应用里打开"\) : t\("连接中断，重连中/);
   assert.match(rd("web/index.html"), /<title>cccodroid<\/title>/);
   assert.match(rd("web/index.html"), /<link rel="icon" type="image\/png" href="\/icon.png">/);
   assert.ok(fs.statSync(path.join(G, "web/icon.png")).size > 1000, "页签图标用应用图标");

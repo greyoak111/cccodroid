@@ -150,7 +150,7 @@
         if (fromInput) draftDropLost(dk1, idem);   // 有受理证据，算送到了：留底槽连同幂等键一起收掉
         if (gen === view.gen) {
           view.runIds.add(acceptedId); view.cidRuns.set(cid, acceptedId); view.lastRunId = acceptedId; view.pendingMerge = null;
-          toast(t("网关已经收下这条了（只是回执没回来），不用重发"));
+          toast(t("消息已送达，无需重发"));
         }
         return;
       }
@@ -159,7 +159,7 @@
       if (!posted || e.status) view.cids.delete(cid);
       const msg = e.message || t("发送失败");
       // 已经发出 POST 又没拿到明确回执 = 结果未知；其余（服务端明确拒绝、本地就没发出去）按原样说「没发出去」
-      const failTitle = posted && !e.status ? t("不确定发出去没有：{msg}", { msg }) : t("没发出去：{msg}", { msg });
+      const failTitle = posted && !e.status ? t("发送结果未确认：{msg}", { msg }) : t("没发出去：{msg}", { msg });
       // 别把用户的话吞了。但回执迟到时可能已经切到别的对话、或者又写了新草稿：那就不往输入框里塞，给个「找回」（审查 A-CHAT-001、#50 S2-01）
       // 留底槽这里不删：原文回了草稿，但它同时是这条消息的幂等键——只有拿到网关回执才算送到（FIND-048：超时后重发不能跑两轮）
       if (fromInput && gen === view.gen && !inputEl.value.trim() && !state.attachments.length) {
@@ -550,7 +550,7 @@
     catch (e) {
       if (Date.now() - draftQuotaAt > 30000) {
         draftQuotaAt = Date.now();
-        toast(t("草稿没能保存：本机存储空间不足。请把内容复制出去，或先发出去。"), true);
+        toast(t("存储空间不足，草稿未保存，请先复制或发送"), true);
       }
       return false;
     }

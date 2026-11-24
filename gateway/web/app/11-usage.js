@@ -116,7 +116,7 @@
     text(t("次对话"), P + nw + 20, y - 12, font(600, 44), FG);
     const dp = st.prev.m ? Math.round(((st.tot.m - st.prev.m) / st.prev.m) * 100) : null;
     y += 62;
-    text(dp == null ? t("和 Claude 一起度过的这个月") : (st.partial ? t("比上月同期 {p}", { p: (dp >= 0 ? "+" : "") + dp + "%" }) : t("比上月 {p}", { p: (dp >= 0 ? "+" : "") + dp + "%" })), P, y, font(500, 32), dp == null ? FG2 : dp >= 0 ? K.UP : K.DOWN);
+    text(dp == null ? t("本月使用概览") : (st.partial ? t("比上月同期 {p}", { p: (dp >= 0 ? "+" : "") + dp + "%" }) : t("比上月 {p}", { p: (dp >= 0 ? "+" : "") + dp + "%" })), P, y, font(500, 32), dp == null ? FG2 : dp >= 0 ? K.UP : K.DOWN);
     // 六格数字
     y += 50;
     const tiles = [
@@ -547,8 +547,8 @@ ${p && p.plainHttp ? `<div class="tiny warn">${esc(t("这个地址是明文 http
       <div class="prov-state" id="pc-result"></div>
             <div class="tiny">${t("要求对端讲 <b>Anthropic Messages</b> 协议（各家文档里写“Claude Code 接入”的那个地址）。")}
         ${t("地址末尾不要带 <code>/v1</code>，claude 会自己补 <code>/v1/messages</code>。")}
-        <br>${t("建议到厂商控制台设个单日消费上限和余额提醒；怀疑 Key 泄漏了，就在那里作废、换个新的。")}</div>
-      <details class="cc-tpl"><summary>${t("示例模板（不是真实服务，换成服务商给你的）")}</summary>
+        <br>${t("建议在服务商后台设置额度上限；若怀疑泄漏请及时轮换 Key。")}</div>
+      <details class="cc-tpl"><summary>${t("示例模板（请替换为实际服务地址）")}</summary>
         <pre style="white-space:pre-wrap;word-break:break-all;margin:6px 0;font-size:12px;line-height:1.5">Base URL: https://api.example.com/anthropic
 Auth: Authorization: Bearer
 Default model: your-model-id
@@ -558,7 +558,7 @@ Extra models (one per line):
 your-model-id 200k
 your-cheap-model 128k
 Context window: 200k (optional; only if the provider doesn't report one)</pre>
-        <div class="tiny">${t("第三方端口由你自己选择，应用不审核、不背书。对方能看到你的 Key、代码和对话，请只用你信任的服务；不要使用共享或转售的账户。")}</div>
+        <div class="tiny">${t("第三方调用由你自行配置，对方可见 Key、代码与对话，请仅使用可信服务。")}</div>
       </details>`;
     box.onclick = async (e) => {
       const btn = e.target.closest && e.target.closest("button[data-act]");

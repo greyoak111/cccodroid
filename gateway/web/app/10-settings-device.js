@@ -12,12 +12,12 @@
     const supported=split?.supported===true&&Number.isInteger(split.sdk)&&split.sdk>=24;
     $("priv-split").classList.toggle("hidden",!supported||st.setup?.phase!=="pairing");
     $("priv-split-settings").disabled=privSplitBusy||split?.phase==="opening";
-    $("priv-split-state").textContent=split?.message||t("通知栏无法输入时，可尝试将设置与本页分屏。请先进入分屏，再打开系统的配对码弹框，并保持两个窗口打开。");
+    $("priv-split-state").textContent=split?.message||t("通知栏不便输入时，可先分屏并排打开系统设置，再点开配对码弹窗。");
   }
   $("priv-split-settings").addEventListener("click",async()=>{
     if(privSplitBusy||$("priv-split-settings").disabled)return;
     privSplitBusy=true;$("priv-split-settings").disabled=true;
-    $("priv-split-state").textContent=t("正在尝试分屏打开设置…");
+    $("priv-split-state").textContent=t("正在分屏打开设置…");
     try {
       const result=await appPost("/api/app/shz_split_settings",{});
       if(result?.message)$("priv-split-state").textContent=result.message;
@@ -149,7 +149,7 @@
       preparing: t("正在建立本机 ADB 通道…"),
       conflict: t("系统正在使用另一个 ADB 端口。"),
       waiting: t("等待本机 ADB 通道。手机重启后请先连 Wi-Fi 激活 Shizuku。"),
-      binder: t("ADB 通道已连接，等待 Shizuku 授权或系统投递凭据。"),
+      binder: t("ADB 已连接，等待 Shizuku 授权就绪。"),
       unauthorized: t("本机 ADB 尚未获系统授权。请检查系统调试授权，需要时重新配对。"),
       unavailable: t("本机 ADB 通道暂不可用，将自动重试。如果调试授权已撤销，可重新配对。"),
     })[st.adbKeepaliveState] || "";

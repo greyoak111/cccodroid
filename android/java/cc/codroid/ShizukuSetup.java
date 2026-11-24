@@ -494,7 +494,7 @@ final class ShizukuSetup {
         for (int i = 0; i < 240 && !Priv.running(); i++) {
             Thread.sleep(250);
             if (i > 0 && i % 120 == 0) {
-                set("starting", Tr.f("Shizuku 在启动：正在把凭据投递给各应用（{0} 秒）…", i / 4));
+                set("starting", Tr.f("正在连接 Shizuku 服务（{0} 秒）…", i / 4));
                 alive[0] = nudgeAndCheck(serial, alive[0], out);
             }
         }
@@ -502,11 +502,11 @@ final class ShizukuSetup {
         // 第二阶段：服务进程在、凭据还没到。系统只在应用状态变化时补投——让用户切出去再切回来。
         // 切回之后 Priv.running() 变 true，这里自动收尾。每 30 秒确认服务进程，没了才放弃。
         for (int i = 0; i < 2400 && !Priv.running(); i++) {
-            if (i == 0) set("starting", Tr.t("服务已启动，正在等系统补投凭据：按 Home 切出去、再切回 cccodroid，就会自动完成激活"));
+            if (i == 0) set("starting", Tr.t("Shizuku 已启动，切回桌面再返回 cccodroid 即可完成连接"));
             Thread.sleep(250);
             if (i > 0 && i % 120 == 0) alive[0] = nudgeAndCheck(serial, alive[0], out);
         }
-        if (!Priv.running()) throw new Exception(Tr.t("等了 10 分钟，凭据还是没投递到 cccodroid：") + (alive[0] ? Tr.t("（服务进程还在，点「刷新」看看，或重新点激活）") : Tr.t("服务进程也没了")) );
+        if (!Priv.running()) throw new Exception(Tr.t("等待 Shizuku 连接超时（10 分钟）：") + (alive[0] ? Tr.t("（服务进程仍在，请点「刷新」或重新激活）") : Tr.t("服务进程已退出")) );
         restoreWifi();
         cancelNote();
         requestPermission();
@@ -525,8 +525,8 @@ final class ShizukuSetup {
                 ctx.getSystemService(NotificationManager.class).notify(NOTE, new Notification.Builder(ctx, CH)
                     .setSmallIcon(android.R.drawable.ic_secure)
                     .setContentTitle("Shizuku")
-                    .setContentText(Tr.t("点此回到 cccodroid，完成凭据投递"))
-                    .setStyle(new Notification.BigTextStyle().bigText(Tr.t("点此回到 cccodroid，完成凭据投递")))
+                    .setContentText(Tr.t("点此返回 cccodroid 完成 Shizuku 连接"))
+                    .setStyle(new Notification.BigTextStyle().bigText(Tr.t("点此返回 cccodroid 完成 Shizuku 连接")))
                     .setContentIntent(pi).setAutoCancel(true).build());
             } catch (Exception ignored) {}
             log("自动切回被拦，留了通知：" + e.getMessage());

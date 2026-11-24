@@ -381,12 +381,12 @@
         .then((r) => {
           // 进程已退出：网关回 409（195-H.5），说清楚，别当成网关在重启
           if (r.status === 409) {
-            if (!a.exitedHint) { a.exitedHint = true; termOutput(a, "\r\n\x1b[2m" + t("[终端已退出，输入没有送出去]") + "\x1b[0m\r\n"); }
+            if (!a.exitedHint) { a.exitedHint = true; termOutput(a, "\r\n\x1b[2m" + t("[进程已退出]") + "\x1b[0m\r\n"); }
             return;
           }
           if (!r.ok) throw new Error("HTTP " + r.status);
         })
-        .catch(() => { if (!a.lostIn) { a.lostIn = true; termOutput(a, "\r\n\x1b[2m" + t("[输入没送到终端，网关可能在重启]") + "\x1b[0m\r\n"); setTimeout(() => { a.lostIn = false; }, 3000); } }));
+        .catch(() => { if (!a.lostIn) { a.lostIn = true; termOutput(a, "\r\n\x1b[2m" + t("[发送失败，网关重连中]") + "\x1b[0m\r\n"); setTimeout(() => { a.lostIn = false; }, 3000); } }));
     }, 6);
   }
 

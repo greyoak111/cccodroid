@@ -47,8 +47,8 @@ const safeRel = (value) => typeof value === "string" && value.length > 0 && !val
 
 function failure(code, field = "") {
   const error = new Error(MODELS_ERROR_CODES.includes(code) ? MODELS_ERRORS[code]() : code === "RUNTIME_CONFLICT"
-    ? tz("桥配置一致性检查未通过，暂不能安全读取或保存；请查看检查说明，不要先删目录或卸载。")
-    : tz("桥配置未完成，请检查字段或组件状态后重试；当前会话保持不变。"));
+    ? tz("配置一致性检查未通过，请按下方说明处理，勿直接删目录。")
+    : tz("协议桥配置未完成，请检查字段或组件状态后重试。"));
   error.code = code;
   error.field = field;
   return error;

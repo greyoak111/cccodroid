@@ -70,7 +70,7 @@
     </button>
     <textarea id="input" rows="1" dir="auto" placeholder="" aria-label="消息输入框" data-i18n-attr="aria-label" autocomplete="off" spellcheck="false"></textarea>
     <!-- 忙碌且输入框有字时才出现：打断当前 + 立刻发这条 -->
-        <button id="btn-interject" class="hidden" aria-label="插话" title="插话：递进正在跑的这一轮，不打断" data-i18n-attr="aria-label,title">
+        <button id="btn-interject" class="hidden" aria-label="插话" title="插话（追加到当前轮次）" data-i18n-attr="aria-label,title">
       <svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11l-1 8.5L18.5 10H12l1-8z"/></svg>
     </button>
         <button id="btn-send" aria-label="发送" data-i18n-attr="aria-label">
@@ -83,7 +83,7 @@
     <span id="model-chip">—</span>
     <span id="perm-chip" role="button" tabindex="0" title="切换权限模式" data-i18n-attr="title"></span>
     <span id="stat-chip"></span>
-    <span id="draft-chip" class="hidden" role="button" tabindex="0" data-i18n>↩ 恢复刚才清掉的内容</span>
+    <span id="draft-chip" class="hidden" role="button" tabindex="0" data-i18n>↩ 恢复刚清空的草稿</span>
   </div>
 </div>
 
@@ -316,7 +316,7 @@
       <div class="field ext-sec-plain hidden" id="gh-field" data-sec="gh"><div class="sec-title"><span class="sec-ico"><svg viewBox="0 0 24 24"><path d="M9 19c-4 1.4-4-2-6-2.5M15 22v-3.5a3 3 0 0 0-.9-2.4c3-.3 6-1.5 6-6.6a5.2 5.2 0 0 0-1.4-3.6 4.8 4.8 0 0 0-.1-3.6s-1.1-.3-3.6 1.4a12.4 12.4 0 0 0-6.5 0C6 1.9 4.9 2.2 4.9 2.2a4.8 4.8 0 0 0-.1 3.6A5.2 5.2 0 0 0 3.4 9.4c0 5.1 3 6.3 6 6.6a3 3 0 0 0-.9 2.4V22"/></svg></span><span>GitHub</span></div>
         <div id="gh-field-box" class="list"></div>
       </div>
-      <div class="tiny" data-i18n>改动在下一条消息生效。插件和 MCP 由 claude 自己的命令装卸，这里只是替你敲命令。</div>
+      <div class="tiny" data-i18n>修改自下条消息生效。</div>
       <details class="field ext-sec" data-sec="plugin" open><summary><span class="sec-ico"><svg viewBox="0 0 24 24"><path d="M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3z"/></svg></span><span data-i18n>插件</span> <span id="ext-p-count" class="pill"></span></summary>
         <div class="ext-idx" id="plugin-idx"></div>
         <div id="ext-plugins" class="list"></div>
@@ -354,7 +354,7 @@
         <div class="ext-idx" id="mcp-idx"></div>
         <div id="ext-mcp" class="list"><div class="tiny" data-i18n>查询中…（要逐个试连，稍等几秒）</div></div>
         <details class="ext-more" id="ext-mcp-catbox"><summary data-i18n>官方 MCP 注册表</summary>
-          <div class="tiny" data-i18n>registry.modelcontextprotocol.io：任何人都能发布，没有人审核。本机能装远程服务和 npm 包；npm 包会在本机运行，装之前看清命令和来源。</div>
+          <div class="tiny" data-i18n>公共注册表（未经官方审核）；npm 包将在本机执行，安装前请核实来源。</div>
           <label class="searchbox sb-go"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg><input id="ext-mcp-q" type="search" enterkeyhint="search" placeholder="搜索 MCP 服务器（名字或用途）" data-i18n-attr="placeholder" autocomplete="off"><button id="ext-mcp-search" type="button" class="sb-btn" data-i18n>搜索</button></label>
           <div id="ext-mcp-cat" class="list"></div>
         </details>
@@ -372,7 +372,7 @@
         </details>
       </details>
       <details class="field ext-sec" id="ext-hook-sec" data-sec="hook" data-short="Hooks" open><summary><span class="sec-ico"><svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11l-1 8.5L18.5 10H12z"/></svg></span><span data-i18n>Hooks（自动规则）</span> <span id="ext-h-count" class="pill"></span></summary>
-        <div class="tiny" data-i18n>hooks 就是「到了某个时刻，自动跑一条命令」：Claude 用工具之前或之后、你发消息时、它答完一轮时……命令可以拦下 Claude 的动作、给它补充说明，也可以顺手做些杂事（存档、记录、格式化）。</div>
+        <div class="tiny" data-i18n>在特定时机（调用工具前后、发消息、回复结束等）自动运行命令，可拦截操作、补充上下文或执行格式化。</div>
         <div class="ext-idx" id="hook-scope"></div>
         <div id="hook-bar" class="hk-bar"></div>
         <div id="ext-hooks" class="list"></div>
@@ -475,7 +475,7 @@
           </div>
           <!-- 强调色（0.4.20）：色块由 app/09-settings.js 画，算色在 theme.js（按底色自动调深浅） -->
           <div class="srow ac-row">
-            <div class="sl"><b data-i18n>强调色</b><p data-i18n>按钮、链接、选中项的颜色。会按当前外观的底色自动调深浅，保证看得清</p></div>
+            <div class="sl"><b data-i18n>强调色</b><p data-i18n>按钮、链接与选中项颜色（随深浅色自动适配对比度）</p></div>
             <div class="sc"><div class="ac-sw" id="ac-sw"></div></div>
           </div>
           <!-- 消息下面的按钮（0.4.20）：只藏不排序，存 ccapp-ui.json 的 msgActs -->
@@ -486,7 +486,7 @@
           </div>
           <!-- 顶栏按钮（0.4.20）：常驻 / 收起 / 隐藏 + 拖动排序，存 ccapp-ui.json 的 topbar（app/09-settings.js 的 TB 一节） -->
           <div class="srow tb-row">
-            <div class="sl"><b data-i18n>顶栏按钮</b><p data-i18n>每个按钮选「常驻」（一直露在顶栏）、「收进 ⋯」（点 ⋯ 才出来）或「隐藏」；按住左边的把手上下拖，换先后顺序</p>
+            <div class="sl"><b data-i18n>顶栏按钮</b><p data-i18n>可设为常驻、收进「⋯」或隐藏，拖动左侧把手排序</p>
               <div id="tb-list" class="tb-list"></div></div>
             <div class="sc"><button type="button" id="tb-reset" class="btn sm ghost" data-i18n>恢复默认</button></div>
           </div>
@@ -501,7 +501,7 @@
             <div class="sc"><span class="seg" id="seg-readfont"><button data-rf="serif" data-i18n>衬线</button><button data-rf="sans" data-i18n>无衬线</button><button data-rf="pick" class="uf-pick"><span data-i18n>自选…</span><i class="uf-cur"></i></button></span></div>
           </div>
           <div class="srow uf-row">
-            <div class="sl"><b data-i18n>导入的字体</b><p data-i18n>支持 ttf、otf、woff、woff2，单个不超过 40 MB，最多 10 个。导入后在上面点「自选…」选用；缺的字会用自带字体补上</p>
+            <div class="sl"><b data-i18n>导入的字体</b><p data-i18n>支持 ttf / otf / woff / woff2（≤ 40 MB，最多 10 个），导入后在上方「自选…」启用</p>
               <div id="uf-list" class="uf-list"></div></div>
             <div class="sc"><button type="button" id="uf-add" class="btn sm ghost" data-i18n>导入字体…</button>
               <input type="file" id="uf-file" accept=".ttf,.otf,.woff,.woff2" class="hidden"></div>
@@ -544,7 +544,7 @@
           <!-- 选中那一家的配置卡：账户登录 / 密钥 / 自定义接口，由 app.js 按类型渲染 -->
           <div class="sblock prov-card" id="prov-card"></div>
           <div class="srow" id="prov-show-row">
-            <div class="sl"><b data-i18n>在模型选单里显示</b><p id="prov-show-info" class="clamp" data-i18n>关掉后输入栏的模型选单里不列这一家，配置和密钥照留，随时能再打开。没登录的官方账户、没下过模型的端侧本来就不列。</p></div>
+            <div class="sl"><b data-i18n>在模型选单里显示</b><p id="prov-show-info" class="clamp" data-i18n>关闭后从输入栏模型选单隐藏，保留配置与密钥</p></div>
             <div class="sc"><input type="checkbox" class="sw" id="set-provshow"></div>
           </div>
           <div class="srow">
@@ -556,7 +556,7 @@
             <div class="sc"><select id="set-effort"></select></div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>自动起名</b><p data-i18n>新对话第一轮答完，在后台起个标题</p><p class="clamp" data-i18n>用你的提问和第一轮回答起标题，几秒后自己换上，会多花一点 token；可以指定一个便宜快速的型号专门起名。关掉后，等你发第二条消息时由对话里的模型起名。</p></div>
+            <div class="sl"><b data-i18n>自动起名</b><p class="clamp" data-i18n>首轮回复后自动生成会话标题（消耗少量 token，可指定轻量模型）</p></div>
             <div class="sc"><select id="set-titlemodel"></select></div>
           </div>
           <!-- 压缩线：拖动设 autoCompactWindow（和「Claude 行为」里的数字框是同一项） -->
@@ -589,7 +589,7 @@
             </div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>敏感操作再确认</b><p data-i18n>碰到密钥、读屏点按时，全部放行也会问你</p><p class="clamp" data-i18n>Claude 要读密钥和登录凭据（.env、SSH 钥匙、接口密钥、网关令牌等）、读屏或替你点按别的应用、读剪贴板、把文件分享出去时，单独弹一张确认卡片，全部放行也不例外；同一轮里同一类点过允许就不再问。它防的是 Claude 读到的网页或文件里藏了指令、把它带偏。只是兜底：故意绕开的写法认不出来。</p></div>
+            <div class="sl"><b data-i18n>敏感操作再确认</b><p class="clamp" data-i18n>读取凭据（.env / SSH / API Key）、读屏点按、读剪贴板或外部分享时强制弹窗确认（「全部放行」下亦生效），防范提示词注入。</p></div>
           </div>
           <div class="srow">
             <div class="sl"><b data-i18n>外链图片点一下才加载</b><p data-i18n>md 文件里引用的网络图片先显示成按钮，点了才去请求，对方服务器看不到你何时在读</p></div>
@@ -604,12 +604,12 @@
             <div class="sc"><input id="set-autocompact" type="number" inputmode="numeric" min="100000" max="1000000" step="1000" placeholder="留空 = 交给 claude 按窗口决定" data-i18n-attr="placeholder"></div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>空闲压缩</b><p data-i18n>长会话闲置快一小时时先压缩</p><p class="clamp" data-i18n>只对 Claude 账户和 Anthropic API Key 生效。上下文超过 20 万 token 的会话闲置约 54 分钟、1 小时提示缓存快过期时，先压缩一次；回来接着聊就不用把整段历史按全价重新处理，订阅账户少占额度，API Key 少花钱。电脑上的 Claude Code 也是这么做的。</p></div>
+            <div class="sl"><b data-i18n>空闲压缩</b><p class="clamp" data-i18n>仅对官方渠道生效：超 20 万 token 的会话闲置约 54 分钟（缓存过期前）自动压缩，节省续聊额度与费用。</p></div>
             <div class="sc"><input type="checkbox" class="sw" id="set-idlecompact"></div>
           </div>
           <div class="sblock" id="wi-block">
             <div class="srow head">
-              <div class="sl"><b data-i18n>工作岛（实时状态）</b><p data-i18n>把 Claude 的工作状态实时显示在系统灵动岛 / 实时通知，或用悬浮胶囊兜底</p><p class="clamp" data-i18n>开启后，正在干活、清单进度、等待确认、任务完成会实时显示在同一张状态卡片上，完成后 8 秒自动收起。Android 16+ 支持原生实时通知（荣耀灵动胶囊、ColorOS 流体云、小米超级岛等），低版本或未放行机型可开启悬浮胶囊兜底。</p><div class="tiny warn hidden" id="wi-state"><span id="wi-state-txt"></span> <button class="btn sm ghost" id="wi-retry" data-i18n>重试</button></div></div>
+              <div class="sl"><b data-i18n>工作岛（实时状态）</b><p class="clamp" data-i18n>在系统灵动岛 / 实时通知（Android 16+）或悬浮胶囊实时展示进度与待确认项，完成后 8 秒收起。</p><div class="tiny warn hidden" id="wi-state"><span id="wi-state-txt"></span> <button class="btn sm ghost" id="wi-retry" data-i18n>重试</button></div></div>
               <div class="sc"><input type="checkbox" class="sw" id="set-workisland"></div>
             </div>
             <div id="wi-builtin" class="hidden">
@@ -632,7 +632,7 @@
           </div>
           <div class="sblock" id="dir-field">
             <div class="srow head">
-              <div class="sl"><b data-i18n>附加目录</b><p data-i18n>--add-dir，让 claude 能读写工作区之外的目录</p><p class="clamp" data-i18n>让 claude 能读写工作区之外的目录。这些目录同时会成为文件浏览器的快捷入口。</p></div>
+              <div class="sl"><b data-i18n>附加目录</b><p class="clamp" data-i18n>通过 --add-dir 允许读写工作区外的目录，同时作为文件浏览器快捷入口。</p></div>
               <div class="sc"><button class="btn sm ghost" id="dir-toggle"></button></div>
             </div>
             <div id="dir-list" class="list compact dir-more hidden"></div>
@@ -642,7 +642,7 @@
             </div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>安全模式</b><p data-i18n>不加载 CLAUDE.md、技能、插件、钩子、MCP</p><p class="clamp" data-i18n>安全模式：用 claude 自带的 --safe-mode 起，CLAUDE.md、技能、插件、钩子、MCP、自定义命令与输出风格一概不加载。登录、Key、会话、模型照旧，不改动任何文件，关掉即恢复</p></div>
+            <div class="sl"><b data-i18n>安全模式</b><p class="clamp" data-i18n>临时跳过 CLAUDE.md、技能、插件、Hooks 与 MCP，不改本地文件，关闭即恢复。</p></div>
             <div class="sc"><input type="checkbox" class="sw" id="safe-mode"></div>
           </div>
         </div>
@@ -661,23 +661,22 @@
             </div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>最多同时跑几个会话</b><p data-i18n>每多跑一个多占几百 MB 内存</p><p class="clamp" data-i18n>不同会话可以同时干活，同一个会话里还是一条接一条。每多跑一个要多占几百 MB 内存，手机内存紧时调小；1 = 一次只跑一轮。</p></div>
+            <div class="sl"><b data-i18n>最多同时跑几个会话</b><p class="clamp" data-i18n>不同会话可并行运行（每个约占数百 MB 内存；设为 1 则串行）。</p></div>
             <div class="sc"><input id="set-parallel" class="narrow" type="number" inputmode="numeric" min="1" step="1"></div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>静态程序兼容</b><p data-i18n>罩住 claude 拉起的所有程序</p><p class="clamp" data-i18n>网上下载的静态程序（多是 Go 写的命令行工具和 MCP 服务器）会用到安卓禁止的新系统调用，直接被系统杀掉。开着它，这些调用会改成「不支持」，程序自己退回老办法接着跑。每次启动子程序多一点点开销；遇到怪问题可以关掉试试，下一条消息生效。</p></div>
+            <div class="sl"><b data-i18n>静态程序兼容</b><p class="clamp" data-i18n>拦截 Android 禁用的新系统调用并回退兼容路径，避免 Go 等静态编译工具崩溃（下条消息生效）。</p></div>
             <div class="sc"><input type="checkbox" class="sw" id="set-static"></div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>执行方式</b><p id="exec-now"></p><p class="clamp" data-i18n>自动：按安装包定。直接执行：工具包里的程序直接运行（targetSdk 28 的安装包）。经加载器：借系统加载器间接运行，targetSdk 36 的安装包只能这样；28 的也能选，用来排查问题。改完重启网关才生效。</p></div>
+            <div class="sl"><b data-i18n>执行方式</b><p id="exec-now"></p><p class="clamp" data-i18n>自动按安装包选择：targetSdk 28 默认直接执行，targetSdk 36 经系统加载器运行（重启网关生效）。</p></div>
             <div class="sc"><select id="set-exec"><option value="auto" data-i18n>自动</option><option value="direct" data-i18n>直接执行</option><option value="loader" data-i18n>经加载器</option></select></div>
           </div>
           <!-- 内存管家（cc-mem）：重活前清场、压住杀了又活的后台应用。默认关，经 Shizuku -->
           <div class="sblock" id="mem-field">
             <div class="srow head">
-              <div class="sl"><b data-i18n>内存管家</b><p data-i18n>开启：允许停掉白名单以外的后台应用（需要 Shizuku）</p>
-                <p class="clamp" data-i18n-html>不会被停的：你正在看的、分屏的、挂着前台通知的（代理、音乐）、桌面、输入法、无障碍服务、VPN、Shizuku，以及它们依赖的组件，再加上下面的白名单。
-                  终端里用 <code>cc-mem run -- 命令</code> 跑重活：开跑前清场，跑的时候谁复活就再停谁。</p></div>
+              <div class="sl"><b data-i18n>内存管家</b><p data-i18n>允许停止非白名单后台应用（需 Shizuku）</p>
+                <p class="clamp" data-i18n-html>运行重负载命令（<code>cc-mem run -- 命令</code>）前清理非白名单后台应用；保留前台、分屏、输入法、无障碍、VPN 与 Shizuku。</p></div>
               <div class="sc"><input type="checkbox" class="sw" id="mem-on"></div>
             </div>
             <textarea id="mem-wl" rows="3" placeholder="白名单：每行一个包名，例如 com.tencent.mm" data-i18n-attr="placeholder" spellcheck="false" autocomplete="off"></textarea>
@@ -700,7 +699,7 @@
             </div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>会话保留</b><p id="st-keep"></p><p class="clamp" data-i18n>Claude Code 默认把 30 天没动过的会话连同附属数据删掉，不进回收站。本应用把它改成永久保留：会话只有你在会话列表里删了才会进回收站。你自己在 ~/.claude/settings.json 里写了 cleanupPeriodDays 的，按你写的天数。</p></div>
+            <div class="sl"><b data-i18n>会话保留</b><p id="st-keep"></p><p class="clamp" data-i18n>默认永久保留本地会话，仅手动删除时移入回收站（若 settings.json 设了 cleanupPeriodDays 则按该配置执行）。</p></div>
           </div>
           <div class="sblock">
             <div class="srow head">
@@ -743,7 +742,7 @@
             <div class="srow sub hidden" id="priv-adb-keepalive-row">
               <div class="sl">
                 <p data-i18n>无线 ADB 保活</p>
-                <p class="tiny" data-i18n>开启 USB 调试并将系统 adbd 切到 TCP 5555 端口（该端口可能在局域网可达），以便断开 Wi-Fi 后也能恢复意外停止的 Shizuku。关闭开关会尝试切回 USB 模式；重启手机后仍需连一次 Wi-Fi。没遇到过特权指令掉线问题请保持关闭。</p>
+                <p class="tiny" data-i18n>将系统 adbd 切至 TCP 5555（局域网可能可达），断 Wi-Fi 后仍可恢复 Shizuku；手机重启后需重连一次 Wi-Fi。无掉线问题无需开启。</p>
                 <div class="prov-state" id="priv-adb-keepalive-state" role="status"></div>
               </div>
               <div class="sc"><input type="checkbox" class="sw" id="priv-adb-keepalive" aria-label="无线 ADB 保活" data-i18n-attr="aria-label"></div>
@@ -754,7 +753,7 @@
             </div>
             <div class="prov-state" id="priv-ka-result"></div>
             <div class="srow sub" id="priv-na-row">
-              <div class="sl"><p data-i18n>特权命令不再逐条确认（风险自负）：打开后特权命令直接执行，在后台也不会卡在等确认；涉及 cccodroid 自身和 Shizuku / Sui 的会尽量拦下来再问，但拦不住所有写法。只想放行一个会话，在确认框里勾「这个会话后面的都允许」即可</p></div>
+              <div class="sl"><p data-i18n>特权命令不再逐条确认（风险自负）：限期内免弹窗直接执行 Shizuku 命令（涉及本应用与 Shizuku 自身仍尽量拦截）。单会话放行可在确认框勾选</p></div>
               <div class="sc"><select id="priv-na-hours" aria-label="时长" data-i18n-attr="aria-label">
                 <option value="1440" selected data-i18n>1 天</option></select>
                 <input type="checkbox" class="sw" id="priv-na"></div>
@@ -841,19 +840,19 @@
               </div>
             </div>
             <div class="srow sub hidden" id="upd-flavor-row">
-              <div class="sl"><b data-i18n>安装包方案</b><p id="upd-flavor-now"></p><p class="clamp" data-i18n>targetSdk 28 是默认的那套，兼容性最好；targetSdk 36 给系统不让装 28 的新机器用。两套功能一样，数据通用，互相覆盖安装不丢东西。自动：跟着现在装的走，系统拒装 28 时自动换成 36。</p></div>
+              <div class="sl"><b data-i18n>安装包方案</b><p id="upd-flavor-now"></p><p class="clamp" data-i18n>默认 targetSdk 28 兼容性最佳；新机型拒装时自动切换 targetSdk 36，覆盖安装不丢数据。</p></div>
               <div class="sc"><select id="upd-flavor"><option value="auto" data-i18n>自动</option><option value="28">targetSdk 28</option><option value="36">targetSdk 36</option></select></div>
             </div>
             <div class="srow sub">
-              <div class="sl"><b data-i18n>自动更新</b><p class="clamp" data-i18n>自动更新（默认开）：Claude Code 静默更新；新版应用下载好后提醒安装（有 Shizuku 时空闲自动装）；开发工具包只在 Wi‑Fi 下预先下载，下次打开应用时装上</p></div>
+              <div class="sl"><b data-i18n>自动更新</b><p class="clamp" data-i18n>Claude Code 静默更新；新版应用下载后提示安装（有 Shizuku 时空闲自动装）；工具包仅在 Wi‑Fi 预下载，下次启动安装。</p></div>
               <div class="sc"><input type="checkbox" class="sw" id="upd-auto"></div>
             </div>
             <div class="srow sub">
-              <div class="sl"><b data-i18n>接收维护公告</b><p class="clamp" data-i18n>默认开：每 3 小时从签名源拉取已知问题与修复提示（纯静态请求，不带任何本机信息）；关闭后不再发起公告请求</p></div>
+              <div class="sl"><b data-i18n>接收维护公告</b><p class="clamp" data-i18n>每 3 小时拉取签名维护提示（纯静态请求，不含本机信息）；关闭后不再请求。</p></div>
               <div class="sc"><input type="checkbox" class="sw" id="upd-notices"></div>
             </div>
             <div class="srow sub">
-              <div class="sl"><b data-i18n>GitHub 第三方代理兜底（gh-proxy.com）</b><p class="clamp" data-i18n>默认关：开启后，仅当官方源与镜像均连不上时才经第三方公共代理下载（对方可见你的公网 IP 与下载链接；内容仍按钉住的 SHA-256 与签名校验）</p></div>
+              <div class="sl"><b data-i18n>GitHub 第三方代理兜底（gh-proxy.com）</b><p class="clamp" data-i18n>默认关闭：仅当官方源与镜像均不可达时经第三方代理下载（代理可见公网 IP；安装包仍强制校验哈希与签名）。</p></div>
               <div class="sc"><input type="checkbox" class="sw" id="upd-ghproxy"></div>
             </div>
             <div id="upd-orphans" class="hidden"></div>
@@ -882,19 +881,19 @@
         <div class="set-cat hidden" data-cat="trouble">
           <h3 class="set-h" data-i18n>排障</h3>
           <div class="srow">
-            <div class="sl"><b data-i18n>打包诊断</b><p class="clamp" id="share-logs-hint" data-i18n>遇到装不上、跑不动、报错看不懂：打一个诊断包，经系统分享发给帮你看的人（或附在 GitHub issue 里）。打包前会列出包里有什么；密钥、令牌、邮箱和你的消息内容都会先去掉。</p></div>
-            <div class="sc"><button class="btn sm" id="btn-share-logs" data-i18n>我卡住了 · 打包诊断</button></div>
+            <div class="sl"><b data-i18n>打包诊断</b><p class="clamp" id="share-logs-hint" data-i18n>导出脱敏日志与环境状态（不含密钥、邮箱与对话内容），便于排查或附入 Issue。</p></div>
+            <div class="sc"><button class="btn sm" id="btn-share-logs" data-i18n>导出诊断包</button></div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>到 GitHub 反馈</b><p class="clamp" id="issue-hint" data-i18n>「到 GitHub 反馈」会打开一个新建 Issue 的页面，机型、系统版本、自检结果都已经填好，你只要写遇到了什么。需要 GitHub 账号；不放日志和对话。</p></div>
+            <div class="sl"><b data-i18n>到 GitHub 反馈</b><p class="clamp" id="issue-hint" data-i18n>打开新建 Issue 页面并预填机型、系统版本与自检结果（不含日志与对话）。</p></div>
             <div class="sc"><button class="btn sm" id="btn-issue" data-i18n>到 GitHub 反馈</button></div>
           </div>
           <div class="srow">
-            <div class="sl"><b data-i18n>恢复初始设置</b><p class="clamp" data-i18n>改坏了配置、每轮都被拒或不出回答、自己救不回来时用：Claude Code 的用户级配置（CLAUDE.md、技能、插件、钩子、MCP、记忆）、cccodroid 设置和 shell 启动文件恢复成刚装好的样子，应用文件按安装包重铺。原来的都挪进 ~/.ccapp-reset 留底，不删；会话记录、工作区、工具包不动，密钥默认保留。会弹系统确认框。</p></div>
+            <div class="sl"><b data-i18n>恢复初始设置</b><p class="clamp" data-i18n>重置用户级配置、应用设置与 shell 启动文件，原文件备份至 ~/.ccapp-reset；会话、工作区与工具包保留（密钥默认保留）。</p></div>
             <div class="sc"><button class="btn sm" id="btn-factory-reset" data-i18n>恢复初始设置</button></div>
           </div>
           <div class="srow hidden" id="envfacts-row">
-            <div class="sl"><b data-i18n>本机自检</b><p class="clamp" data-i18n>把工具包里的编译器、Python、Node、git 等逐项跑一遍，结果会告诉 Claude 这台设备上什么能用、什么不能用。工具包或应用更新后会自动重测；修好了什么、想马上让 Claude 知道，就点重新自检。</p><div class="tiny" id="envfacts-state"></div></div>
+            <div class="sl"><b data-i18n>本机自检</b><p class="clamp" data-i18n>检测编译器、Python、Node、git 等可用状态并同步给 Claude（更新后自动重测）。</p><div class="tiny" id="envfacts-state"></div></div>
             <div class="sc"><button class="btn sm ghost" id="btn-envfacts" data-i18n>重新自检</button></div>
           </div>
           <div class="sblock">
@@ -1096,7 +1095,7 @@
     if (window.__cc) return;
     var el = document.getElementById("sub-title");
     if (!el) return;
-    var msg = "界面脚本没能加载，点这里重试";
+    var msg = "界面加载失败，点此重试";
     el.textContent = (window.I18N && I18N.t) ? I18N.t(msg) : msg;
     el.className = "err";
     el.style.cursor = "pointer";

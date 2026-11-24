@@ -1153,7 +1153,7 @@ final class Priv {
         if (pass != null) who = who + "·" + pass;
         else if (risky && !ask(text, who, a + "\0" + req.optString("cwd", "/") + "\0" + e, trustable(argv, req.optString("cwd", "/"), e), self ? null : sess, !self)) {
             audit(t0, who, req, 126, 0);
-            frame(out, 4, Tr.t("这条特权命令要你在 cccodroid 里点「允许」才会执行（只有带服务名的 dumpsys、pm list、settings get 这类查看命令不用问）。这次没有允许，没有执行。cccodroid 不在前台、或者已经有一条在等确认时，会直接拒绝。想让任务在后台也能跑：下次确认时勾上「这个会话后面的特权命令都允许」，或者在设置 → 设备与权限里打开「特权命令不再逐条确认」。").getBytes(StandardCharsets.UTF_8));
+            frame(out, 4, Tr.t("特权命令未获允许（应用需在前台且无其他待确认项）。如需后台免确认，可在下次弹窗勾选「本会话都允许」，或在「设置 → 设备与权限」开启限时免确认。").getBytes(StandardCharsets.UTF_8));
             frameExit(out, 126);
             return null;
         }

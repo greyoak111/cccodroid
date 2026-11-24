@@ -142,7 +142,7 @@
         ${cu.have && !cu.ok ? `<div class="tiny err">${t("配置文件有误，已按聊天模式跑：{msg}", { msg: esc(cu.err) })}</div>` : ""}
       </div>
       <div class="local-custom tiny dim">
-        ${t("手机算力有限，小模型干不了活，所以只内置聊天。想自己折腾的话，可以写 {file} 开一个自定义模式（指定工具、系统提示、llama-server 参数）。最省事的办法：切到云端模型，把下面这句发给它：", { file: "<code>" + esc(cu.path || "~/.cccodroid/local-mode.json") + "</code>" })}
+        ${t("端侧默认仅开启纯聊天。如需自定义工具与参数，可编辑 {file}，或切到云端模型发送以下指令自动生成：", { file: "<code>" + esc(cu.path || "~/.cccodroid/local-mode.json") + "</code>" })}
         <div class="local-copy"><code>${esc(cmdText)}</code><button class="btn sm ghost" data-act="copy">${t("复制")}</button></div>
       </div>
       <div class="prov-state">${esc(svText)}${sv.loadMs ? ` · ${t("加载用了 {s} 秒", { s: (sv.loadMs / 1000).toFixed(1) })}` : ""}</div>
@@ -197,7 +197,7 @@
   function paintLoginState(st, p) {
     const el = $("login-state"); if (!el) return;
     // 这次没问出来、沿用上次的结果：标明是旧的，带上原因（DeepSeek 复核 #3）
-    const staleNote = st.stale ? `<br><span class="tiny">${esc(t("（这是上次查询的状态，这次没问出来：{msg}）", { msg: st.error || "" }))}</span>` : "";
+    const staleNote = st.stale ? `<br><span class="tiny">${esc(t("（缓存状态，本次刷新失败：{msg}）", { msg: st.error || "" }))}</span>` : "";
     if (st.loggedIn) {
       el.className = "prov-state ok";
             el.innerHTML = (st.email ? t("✓ 已登录：<b>{email}</b>", { email: esc(st.email) }) : t("✓ 已登录")) +
@@ -322,7 +322,7 @@
         ${t("没自动打开？")}<a href="${esc(webUrl(url))}" target="_blank" rel="noopener">${t("点这里打开")}</a></div>`
       : `<div class="tiny">${t("登录还在进行，拿到授权地址后会自动打开。")}</div>`) +
       `<div class="prov-manual">
-        <div class="tiny">${t("浏览器没跳回来（或在别的设备上授权）？在终端里登录：授权码由你直接贴给 claude，本应用不经手。")}</div>
+        <div class="tiny">${t("也可在内置终端直接运行登录命令：")}</div>
         <button class="btn sm" id="btn-login-term">${t("在终端里登录")}</button>
       </div>`;
     $("btn-login-term").onclick = async () => {
@@ -723,7 +723,7 @@
       ${p.endpoints.length > 1 ? `<div class="tiny" id="pc-endpoint-l" style="margin:0 0 4px">${t("线路")}</div>
         <select id="pc-endpoint" aria-labelledby="pc-endpoint-l">${p.endpoints.map((e) =>
           `<option value="${esc(e.id)}" ${e.id === p.endpoint ? "selected" : ""}>${esc(pLabel(e))}</option>`).join("")}</select>` : ""}
-      ${p.endpointLost ? `<div class="tiny warn">${esc(t("原来选的线路已不在了（厂商目录更新删了它），旧 Key 不会带到新线路：请重选线路、重新填 Key 后保存。"))}</div>` : ""}
+      ${p.endpointLost ? `<div class="tiny warn">${esc(t("原线路已下线，请重选线路并重填 Key。"))}</div>` : ""}
       ${p && p.plainHttp ? `<div class="tiny warn">${esc(t("这个地址是明文 http，密钥和对话内容会不加密地发到对方机器上；能用 https 就换成 https。"))}</div>` : ""}
       <input id="pc-key" type="password" autocomplete="off"
         placeholder="${p.hasKey ? t("已保存（…{tail}），留空则不改", { tail: esc(p.keyTail) }) : t("粘贴 API Key")}">
@@ -737,7 +737,7 @@
       <div class="tiny">${t("端点")} <code>${esc(p.baseUrl)}</code>${p.defaultModel ? ` · ${t("默认模型")} <code>${esc(p.defaultModel)}</code>` : ""}
         ${webUrl(p.keyUrl) ? `<br><a href="${esc(p.keyUrl)}" target="_blank" rel="noopener">${t("去官网创建 Key ↗")}</a>` : ""}
         <br>${esc(pHint(p) || t("Key 只存在本机应用私有目录，由 claude 的 apiKeyHelper 按需读取（不进环境变量），直连厂商的 Anthropic 兼容端点。"))}
-        <br>${t("建议到厂商控制台设个单日消费上限和余额提醒；怀疑 Key 泄漏了，就在那里作废、换个新的。")}</div>
+        <br>${t("建议在服务商后台设置额度上限；若怀疑泄漏请及时轮换 Key。")}</div>
       ${p.hasKey ? `<div id="pc-bill" class="bill"></div>` : ""}`;
     if (p.hasKey) loadBill(p);
     box.onclick = async (e) => {

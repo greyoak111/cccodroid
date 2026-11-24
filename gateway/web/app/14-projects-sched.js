@@ -436,7 +436,7 @@
     setPageSub("sched", t("{n} 个开着", { n: on.length }) + (nx ? " · " + t("下次 {w}", { w: whenText(nx) }) : ""));
     const byId = (id) => tasks.find((x) => x.id === id);
     const missed = (D.missed || []).map((m) => { const x = byId(m.taskId); return x ? `<div class="sc-missed">${pi("clock")}<div class="grow"><b>${esc(t("错过 1 次："))}</b>${esc(t("「{n}」{w}", { n: x.name, w: whenText(m.at) }))}</div>
-        <button class="btn sm" data-missed="run" data-id="${esc(m.taskId)}" data-at="${m.at}">${esc(t("现在补跑"))}</button><button class="btn sm ghost" data-missed="skip" data-id="${esc(m.taskId)}" data-at="${m.at}">${esc(t("算了"))}</button></div>` : ""; }).join("");
+        <button class="btn sm" data-missed="run" data-id="${esc(m.taskId)}" data-at="${m.at}">${esc(t("立即补跑"))}</button><button class="btn sm ghost" data-missed="skip" data-id="${esc(m.taskId)}" data-at="${m.at}">${esc(t("忽略"))}</button></div>` : ""; }).join("");
     const list = tasks.filter((x) => SC.flt === "all" || (SC.flt === "on" ? x.on : !x.on));
     const running = new Set(D.running || []);
     const blocked = new Set(D.allowLogin ? [] : D.loginTasks || []);    // 要用订阅账户、开关又没开：到点会跳过
@@ -450,15 +450,15 @@
     const b = D.budget || {}, daily = b.daily || 0, today = b.today || 0, m = b.month || {};
     const pct = daily ? Math.min(100, today / daily * 100) : 0;
     box.innerHTML = pageHead(esc(t("定时任务")), `<button class="btn sm pj-primary" data-a="new">${pi("plus")}${esc(t("新建"))}</button>`) + missed + (SC.err ? staleRow(SC.err, "sc-retry") : "") +
-      `<div class="sc-note">${esc(t("到点在本机跑一次 Claude，在指定目录里；跑完按设置通知你，结果存成一个对话。没人在旁边：要问你的操作一律当拒绝。错过的不会偷偷补跑，按每个任务的设置来。"))}</div>` +
+      `<div class="sc-note">${esc(t("到点在指定目录自动运行，结果存为会话；无人值守期间需确认的操作自动拒绝，错过任务按各任务策略处理。"))}</div>` +
       (tasks.length ? `<div class="seg-scroll">${segOf("flt", [["all", t("全部")], ["on", t("开着的")], ["off", t("关着的")]], SC.flt)}</div>` : "") +
       `<div class="panel">${list.length ? list.map(row).join("") : emptyRow(tasks.length ? t("没有") : t("还没有定时任务。比如每天早上让它看一眼 CI。"))}</div>
       <div class="pj-sec"><span class="grow">${esc(t("花费与额度"))}</span></div>
       <div class="panel"><div class="row"><div class="grow"><b>${esc(daily ? t("今天 {a} / 每日上限 {b}", { a: costText(today), b: costText(daily) }) : t("今天 {a} · 不设每日上限", { a: costText(today) }))}</b>
-          ${daily ? `<div class="bar-mini"><i style="width:${pct.toFixed(1)}%"></i></div>` : ""}<div class="muted pj-sub">${esc(t("到上限后当天其余任务跳过，并通知你。只算官方接口的花费：第三方端口不计花费，每日上限对它不生效。"))}</div></div><button class="btn sm ghost" data-a="budget">${esc(t("改上限"))}</button></div>
+          ${daily ? `<div class="bar-mini"><i style="width:${pct.toFixed(1)}%"></i></div>` : ""}<div class="muted pj-sub">${esc(t("达上限后跳过当日剩余任务（仅统计官方接口费用，第三方调用不计入）。"))}</div></div><button class="btn sm ghost" data-a="budget">${esc(t("改上限"))}</button></div>
         <div class="row"><div class="grow"><b>${esc(t("本月 {c} · 跑了 {n} 次", { c: costText(m.cost || 0), n: m.runs || 0 }))}</b><div class="muted pj-sub">${esc(t("成功 {a} · 失败 {b} · 跳过 {c}", { a: m.ok || 0, b: m.err || 0, c: m.skip || 0 }))}</div></div></div></div>
       <div class="pj-sec"><span class="grow">${esc(t("订阅账户"))}</span></div>
-      <div class="panel"><div class="row"><div class="grow"><b>${esc(t("允许用订阅账户跑"))}</b><div class="muted pj-sub">${esc(t("官方登录的订阅账户默认不跑定时任务。打开前请自己确认：无人值守使用以 Anthropic 条款为准。用 API Key 的接口不受影响。"))}</div>
+      <div class="panel"><div class="row"><div class="grow"><b>${esc(t("允许用订阅账户跑"))}</b><div class="muted pj-sub">${esc(t("个人订阅默认禁用定时任务；开启前请确认符合上游服务条款（API Key 不受限）。"))}</div>
           ${blocked.size ? `<div class="muted pj-sub warn">${esc(t("{n} 个任务会用订阅账户，现在不会跑", { n: blocked.size }))}</div>` : ""}</div>${swHtml(!!D.allowLogin, `data-swlogin="1" aria-label="${esc(t("允许用订阅账户跑"))}"`)}</div></div>
       <div class="pj-sec"><span class="grow">${esc(t("叫醒"))}</span></div>
       <div class="panel"><div class="row"><div class="grow"><b>${esc(t("App 活着就准点跑"))}</b><div class="muted pj-sub">${esc(t("计时在网关里：App 开着或在后台运行时到点就跑；被系统清掉、关机时会错过，下次打开按任务的「错过了」设置处理。"))}</div></div></div>
@@ -552,7 +552,7 @@
       ms.disabled = true;
       try {
         await jsend("/api/sched/missed", { taskId: ms.dataset.id, at: +ms.dataset.at, act: ms.dataset.missed });
-        toast(ms.dataset.missed === "run" ? t("已开始补跑") : t("这次就算了"));
+        toast(ms.dataset.missed === "run" ? t("已开始补跑") : t("已忽略本次"));
       } catch (err) { toast(err.message, true); }
       finally { if (ms.isConnected) ms.disabled = false; }
       return loadSched(true);
@@ -669,7 +669,7 @@
       frow(t("型号"), `<div class="panel">${usableProvs().length > 1 || v.provider ? line(t("接口"), sel("t-prov", provChoices(t("跟随项目 / 全局"), v.provider), v.provider || "")) : ""}${line(t("型号"), sel("t-model", [["", t("跟随项目 / 全局")], ...models.map((m) => [m.id, prettyModel(m.id)]), ...(v.model && !models.some((m) => m.id === v.model) ? [[v.model, prettyModel(v.model)]] : [])], v.model || ""))}${line(t("思考强度"), sel("t-effort", [["", t("跟随项目 / 全局")], ...effs.map((e) => [e, e])], v.effort || ""))}</div>`) +
       frow(t("条件（不满足就跳过这次，记一笔）"), `<div class="panel">${line(t("只在 Wi-Fi 下"), swHtml(v.cond.wifi, 'id="t-wifi"'))}${line(t("只在充电时"), swHtml(v.cond.charging, 'id="t-chg"'))}${line(t("电量低于多少就跳过"), sel("t-bat", [[0, t("不管")], [15, "15%"], [30, "30%"], [50, "50%"]], v.cond.battery || 0))}</div>`) +
       frow(t("到点时有别的对话在跑"), `<div class="seg-scroll">${segOf("busy", [["queue", t("排队等它跑完")], ["skip", t("跳过这次")], ["run", t("照跑")]], v.busy)}</div>`, esc(t("「照跑」占一个并行名额（设置 → 后台与并行）；排队最多等 30 分钟，等不到算跳过。"))) +
-      frow(t("限制"), `<div class="panel">${line(t("单次花费上限"), sel("t-cost", cost.map((c) => [c, c ? costText(c) : t("不限")]).concat(cost.includes(+v.limitCost) ? [] : [[v.limitCost, costText(v.limitCost)]]), v.limitCost || 0), t("超了就停，记成失败；只对官方接口生效"))}<div class="muted pj-sub hidden" id="t-costnote">${esc(t("这个任务用的是第三方端口：不计花费，单次花费上限和每日上限对它都不生效，靠时长上限兜底。"))}</div><div class="muted pj-sub hidden" id="t-subnote">${esc(t("当前用的是个人订阅登录：上游服务条款通常禁止高频无人值守自动化轮询，定时批处理建议改用按量计费 API Key 以免触发账号风控。"))}</div>${line(t("单次时长上限"), sel("t-min", [5, 15, 30, 60, 90, 180].map((n) => [n, n < 60 ? t("{n} 分钟", { n }) : t("{n} 小时", { n: n / 60 })]), v.limitMin || 15))}${line(t("失败了"), sel("t-retry", [[0, t("不重试")], [1, t("重试 1 次")], [2, t("重试 2 次")]], v.retry || 0), t("网络断、接口报错、超上限"))}${line(t("错过了"), sel("t-missed", [["ask", t("下次打开问我")], ["run", t("开机后立刻补跑一次")], ["skip", t("跳过")]], v.missed), t("关机、被系统冻结、没网"))}</div>`) +
+      frow(t("限制"), `<div class="panel">${line(t("单次花费上限"), sel("t-cost", cost.map((c) => [c, c ? costText(c) : t("不限")]).concat(cost.includes(+v.limitCost) ? [] : [[v.limitCost, costText(v.limitCost)]]), v.limitCost || 0), t("超了就停，记成失败；只对官方接口生效"))}<div class="muted pj-sub hidden" id="t-costnote">${esc(t("当前使用第三方调用：不计入费用上限，仅受单次时长上限约束。"))}</div><div class="muted pj-sub hidden" id="t-subnote">${esc(t("当前为个人订阅登录：高频定时运行易触发上游风控，建议改用 API Key。"))}</div>${line(t("单次时长上限"), sel("t-min", [5, 15, 30, 60, 90, 180].map((n) => [n, n < 60 ? t("{n} 分钟", { n }) : t("{n} 小时", { n: n / 60 })]), v.limitMin || 15))}${line(t("失败了"), sel("t-retry", [[0, t("不重试")], [1, t("重试 1 次")], [2, t("重试 2 次")]], v.retry || 0), t("网络断、接口报错、超上限"))}${line(t("错过了"), sel("t-missed", [["ask", t("下次打开问我")], ["run", t("开机后立刻补跑一次")], ["skip", t("跳过")]], v.missed), t("关机、被系统冻结、没网"))}</div>`) +
       frow(t("跑完"), `<div class="panel">${line(t("通知"), sel("t-notify", [["all", t("每次都通知")], ["fail", t("只在失败时")], ["found", t("只在有发现时")], ["none", t("不通知")]], v.notify))}
         <div class="row${v.notify === "found" ? "" : " hidden"}" id="t-quiet-row"><div class="grow"><b>${esc(t("没发现时它回的那句话"))}</b><div class="muted pj-sub">${esc(t("回复正好是这句就不通知"))}</div></div><input class="pj-field pj-quiet" id="t-quiet" value="${esc(v.quiet || "")}" placeholder="${esc(t("全绿"))}"></div>
         ${line(t("结果存成对话"), swHtml(v.saveSession !== false, 'id="t-save"'), t("列表里带时钟标记；关掉就只记在运行记录里"))}${line(t("把上一次的结果带上"), swHtml(v.carryLast, 'id="t-carry"'), t("让它知道上次说了什么（只对「每次新开」有用）"))}</div>`) +

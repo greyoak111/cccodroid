@@ -231,7 +231,7 @@ SWALLOW_HOOKS.push((sid, msg, kind) => {
   const run = sid && runList().find((r) => r.sessionId === sid && !r.ended);
   if (!run) return;
   if (kind === "truncated")
-    runEmit(run, { type: "note", key: "sfx-pad", text: tz("上游没发结束标记就断开了，回答已按说完处理；这条是否完整无法确认，如果没说完，发一句「继续」") });
+    runEmit(run, { type: "note", key: "sfx-pad", text: tz("上游连接提前断开，回复可能不完整，可发「继续」接着生成") });
   else
     runEmit(run, { type: "note", key: "sfx-swallow", text: tz("上游在回答结尾报了错（{msg}），已按说完处理；如果回答不完整，发一句「继续」", { msg }) });
 });

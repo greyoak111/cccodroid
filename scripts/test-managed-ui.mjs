@@ -319,7 +319,7 @@ try {
   fixture.state.configMode = "not-ready";
   await click("#bc-save");
   await until(() => cdp.eval(visible("#bc-saved")), "saved but local bridge not ready");
-  assert.match(await cdp.eval("document.querySelector('#bc-local-state').innerText"), /not ready|isn't ready|isn’t ready|尚未就绪/i);
+  assert.match(await cdp.eval("document.querySelector('#bc-local-state').innerText"), /not ready|isn't ready|isn’t ready|未就绪|尚未就绪/i);
   assert.equal(await cdp.eval("document.querySelector('#bc-use').disabled"), true, "local startup failure cannot create usable session");
   await unchanged();
   ok("bridge saved versus local readiness", "not-ready is explicit and new-session action disabled; remote remains untested");
@@ -329,8 +329,7 @@ try {
   fixture.state.config.local = { state: "ready" }; // 故意让残存服务健康，锁仍必须优先阻断。
   await configClose(); await configOpen(true);
   const recoveryNotice = await cdp.eval("document.querySelector('#bc-notice').innerText");
-  assert.match(recoveryNotice, /恢复|recovery/i);
-  assert.match(recoveryNotice, /修改配置不会解除|configuration.*(?:not|won't|won’t).*clear/i);
+  assert.equal(recoveryNotice, await cdp.eval("I18N.t('自动恢复已暂停，请先在下方诊断修复。')"));
   assert.equal(await cdp.eval("document.querySelector('#bc-use').disabled"), true);
   for (let i = 0; i < 3; i++) {
     await click('#bridge-config-panel [data-bc="edit"]'); await click("#bc-save");
@@ -394,14 +393,14 @@ try {
     assert.equal(await cdp.eval("document.querySelector('#bc-service-state').innerText"), await cdp.eval("I18N.t('未确认')"), "a read conflict cannot prove the service stopped");
     const code = await cdp.eval("document.querySelector('#bc-issue-code').innerText");
     assert.equal(code, "RUNTIME_CONFLICT · " + (mode === "get-provider-conflict" ? "APP_PROVIDER" : mode === "get-model-conflict" ? "MODEL_LIST" : "UNKNOWN"));
-    if (mode === "get-model-conflict") assert.equal(await cdp.eval("document.querySelector('#bc-issue-detail').innerText"), await cdp.eval("I18N.t('App 保存的模型清单未通过格式或一致性检查；这不表示存在另一套桥。')"));
+    if (mode === "get-model-conflict") assert.equal(await cdp.eval("document.querySelector('#bc-issue-detail').innerText"), await cdp.eval("I18N.t('已保存的模型列表格式或内容不一致。')"));
     assert.equal(await cdp.eval("document.querySelector('#bc-backup-help').open"), false);
     assert.equal(await cdp.eval(`document.querySelector('#bridge-config-panel').innerText.includes(${q(CONFIG_ERROR)})`), false);
     assert.equal(await cdp.eval("document.querySelector('#bc-key').value"), "");
     await click("#bc-backup-help summary");
     assert.equal(await cdp.eval("document.querySelector('#bc-backup-help').open"), true);
     const body = await cdp.eval("document.querySelector('#bc-backup-help').innerText");
-    assert.match(body, /chat history|conversations|聊天记录/i);
+    assert.match(body, /backup|key|备份|密钥/i);
     fixture.state.configMode = "success";
     const reads = fixture.state.requests.filter(r => r.path === CONFIG_ROUTE && r.method === "GET").length;
     await click("#bc-check-again"); await until(() => cdp.eval(visible("#bc-saved")), "read-only recheck recovers saved view");
@@ -440,7 +439,7 @@ try {
   await click("#bc-repair-apply"); await until(() => cdp.eval("document.querySelector('#bc-repair-steps').open && !document.querySelector('#bc-saved').classList.contains('hidden')"), "partial commit readonly status refresh");
   assert.equal(fixture.state.requests.filter(r => r.path === CONFIG_ROUTE && r.method === "GET").length, partialReads + 1);
   assert.ok(await cdp.eval(visible("#bc-repair-status")), "partial commit receipt is visible");
-  assert.equal(await cdp.eval(`document.querySelector('#bc-repair-status').innerText`), await cdp.eval(`I18N.t(${q("App 接口已写入，但映射收尾未完成；已尝试只读重查，请核对当前状态。不要反复执行修复，当前会话未切换。")})`));
+  assert.equal(await cdp.eval(`document.querySelector('#bc-repair-status').innerText`), await cdp.eval(`I18N.t(${q("接口已写入，但映射未完成，请重新检查状态。")})`));
   assert.equal(await cdp.eval(`document.querySelector('#bridge-config-panel').innerText.includes(${q(CONFIG_ERROR)})`), false);
   await unchanged(); await configClose(); fixture.state.repairMode = "success";
   ok("bridge partial commit receipt", "provider already written is explicit; one read-only status refresh, no automatic apply retry or private error echo");

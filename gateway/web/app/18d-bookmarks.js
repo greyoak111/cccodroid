@@ -96,7 +96,7 @@
           nth++;
         }
       }
-      if (unsure) return toast(t("后面有一条同样的话还没确认存下，等那一轮答完（或重新打开这个会话）再加书签"), true);
+      if (unsure) return toast(t("后方有相同消息尚未落盘，请等当前轮次结束后再加书签"), true);
       try {
         const r = await post("/api/bookmarks", {
           session: sid, uuid, hint: Number(msg.closest(".page")?.dataset.from) || 0, para: paraIndex(msg, tg.box, tg.para),
@@ -166,7 +166,7 @@
     if (!ok()) return;
     const items = (r.items || []).sort((a, b) => b.at - a.at);
     setPageSub("bookmarks", t("{n} 个", { n: items.length }));
-    if (!items.length) { box.innerHTML = `<div class="panel">${emptyRow(t("还没有书签。在提问或回复底下点书签键，就在那一处留了个记号。"))}</div>`; box._items = []; return; }
+    if (!items.length) { box.innerHTML = `<div class="panel">${emptyRow(t("暂无书签。点击消息下方的书签图标即可添加。"))}</div>`; box._items = []; return; }
     // 按会话分组，组的先后看组里最新的那个
     const groups = new Map();
     for (const b of items) { if (!groups.has(b.sid)) groups.set(b.sid, []); groups.get(b.sid).push(b); }

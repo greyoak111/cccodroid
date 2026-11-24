@@ -173,12 +173,12 @@ test("移动端：从输入区按钮起手不算抽屉手势", () => {
 });
 
 test("app.js 加载失败时静态壳给重试提示（#182 S-02 网页端半）", () => {
-  assert.ok(indexHtml.includes("界面脚本没能加载，点这里重试"));
+  assert.ok(indexHtml.includes("界面加载失败，点此重试"));
   assert.ok(indexHtml.includes("location.reload()"));
 });
 
 test("f1 新增文案：九种语言的词典里都有（暂存的 i18n-f1.json 已灌进词典、移出仓库）", () => {
-  const need = ["回复完成", "回复出错", "界面脚本没能加载，点这里重试"];
+  const need = ["回复完成", "回复出错", "界面加载失败，点此重试"];
   for (const lang of ["en", "ja", "ko", "zh-Hant", "es", "fr", "ru", "id", "ar"]) {
     const src = fs.readFileSync(new URL(`../web/lang-${lang}.js`, import.meta.url), "utf8");
     for (const k of need) {

@@ -66,7 +66,6 @@
       $("git-sync").classList.add("hidden");
       $("git-body").innerHTML = `<div class="vw-empty"><div>${t("这个文件夹还不是 git 仓库。")}</div>
         <div class="tiny">${esc(s.dir || GIT.dir)}</div>
-        <div class="tiny">${t("建一个仓库后，每次改动都能看到改了哪几行，还能随时退回之前的版本。")}</div>
         <button class="btn sm" data-a="init">${t("在这里建一个仓库")}</button></div>`;
       $("git-body").querySelector('[data-a="init"]').onclick = async () => {
         try { await gpost("init"); toast(t("已建好仓库")); gitLoad(); } catch (e2) { toast(e2.message, true); }
@@ -606,7 +605,7 @@
       if (!VW.pv) return;
       // 浏览器里没有查看器那层「不联网」拦截（整页跳外站拦不住），也没有 App 壳的网络拦截：
       // 开没开联网都先问一句（10-31 复核；11-01 独立审查低-9）
-      if (!confirm(t("在浏览器里打开就没有查看器的保护了：网页里的脚本能把它所在文件夹里的文件发到别处，也能访问本机上的其他服务。只对你信得过的网页这样做。"))) return;
+      if (!confirm(t("外部浏览器不受沙箱保护，网页脚本可读取同目录文件并访问本机服务。仅对可信网页继续。"))) return;
       openWeb(VW.pv.url);
       return;
     }
@@ -865,7 +864,7 @@
       if (gen !== VW.gen) return;
       // 二进制当文本解码会卡死界面（扩展名没认出来的也在这里拦）
       if (vwLooksBinary(bytes)) {
-        if (gen === VW.gen) { vwActs([]); $("vw-body").innerHTML = `<div class="vw-empty"><div>${t("这是二进制文件，当作文本打开会把界面卡住。")}</div><button class="btn ghost sm" data-a="share">${shareIco()}${t("分享")}</button></div>`; }
+        if (gen === VW.gen) { vwActs([]); $("vw-body").innerHTML = `<div class="vw-empty"><div>${t("二进制文件，不支持按文本打开。")}</div><button class="btn ghost sm" data-a="share">${shareIco()}${t("分享")}</button></div>`; }
         return;
       }
       dec = vwDecode(bytes);
@@ -1185,7 +1184,7 @@
   async function pvSetNet(on) {
     const pv = VW.pv, p = VW.path;
     if (!pv) return;
-    if (on && !confirm(t("允许这个网页连外网？\n\n联网后，网页里的脚本能把它所在文件夹、以及往上最多三层文件夹里的文件发到别处。只对你信得过的网页打开。换一个网页要重新允许。"))) return;
+    if (on && !confirm(t("允许此网页联网？\n\n联网后脚本可将上层（最多三层）邻近目录文件外发，仅对可信网页开启。"))) return;
     let r; try { r = await post("/api/preview", { path: p, net: !!on }); } catch (e) { return toast(e.message); }
     if (VW.pv !== pv) return;
     pv.net = !!r.net; pv.blocked = 0;

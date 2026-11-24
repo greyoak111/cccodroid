@@ -22,7 +22,7 @@
     LIN.map = CCLineageMap.create($("lin-map"), {
       t, locale: I18N.lang, misc: LIN.misc, band: LIN.band,
       acts: (s) => s.trashed ? [{ act: "restore", label: t("恢复"), pri: true }]
-        : [{ act: "open", label: t("打开"), pri: true }, { act: "prof", label: t("剖面"), title: t("看这个会话一轮轮是怎么跑下来的") }, { act: "menu", label: t("章节与题名") }, { act: "merge", label: t("汇合…"), title: t("把几个会话的思路合进一个新会话") }, { act: "more", label: t("更多…") }],
+        : [{ act: "open", label: t("打开"), pri: true }, { act: "prof", label: t("剖面"), title: t("查看每轮耗时与工具调用时间线") }, { act: "menu", label: t("章节与题名") }, { act: "merge", label: t("汇合…"), title: t("把几个会话的思路合进一个新会话") }, { act: "more", label: t("更多…") }],
       onAct: linAct,
     });
     return LIN.map;
@@ -95,7 +95,7 @@
       LIN.g = g; LIN.stale = false;
       linPaint(first);
       linFill();
-      if (!localStorage.getItem("cc.linTourSeen") && !LIN.hinted) { LIN.hinted = true; toast(t("第一次来？点右上「怎么看」，两分钟学会看脉络")); }
+      if (!localStorage.getItem("cc.linTourSeen") && !LIN.hinted) { LIN.hinted = true; toast(t("首次使用可点右上角「怎么看」了解用法")); }
     });
   }
 
