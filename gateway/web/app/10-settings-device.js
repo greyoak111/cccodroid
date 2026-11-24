@@ -642,12 +642,13 @@
   $("dev-a11y-sys").addEventListener("click", () => appPost("/api/app/a11y_settings"));
   $("dev-retry").addEventListener("click", () => loadDev());
 
-  // 打开更新页时自动查一次：正在查、正在下/装，或 20 秒内刚查过就只刷新显示
+  // 打开更新页时自动查一次：正在查 / 下 / 装时补挂轮询窗口；否则若本进程尚未查过或距上次超过 20 秒就触发检查
   async function updOnOpen() {
     const visit = setVisit, st = await loadUpd();
     if (!st || !setVisible("update", visit)) return;
-    const busy = st.items.some((it) => ["downloading", "installing", "verifying"].includes(it.state));
-    if (st.checking || busy || Date.now() - (st.lastCheck || 0) < 20000 || Date.now() < updFollowUntil) return;
+    const busy = (st.items || []).some((it) => ["downloading", "installing", "verifying"].includes(it.state));
+    if (st.checking || busy) { followUpd(); updLater(1000, visit); return; }
+    if (Date.now() < updFollowUntil || (st.checkedOnce !== false && Date.now() - (st.lastCheck || 0) < 20000)) return;
     followUpd();
     await post("/api/app/upd_check").catch(() => {});
     updRev++; updLater(300, visit);

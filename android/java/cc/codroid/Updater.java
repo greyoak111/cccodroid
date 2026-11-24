@@ -57,6 +57,7 @@ final class Updater {
     final Env env;
     private final Item app = new Item("app", "cccodroid"), devkit = new Item("devkit", "开发工具包"), claude = new Item("claude", "Claude Code");
     private volatile boolean checking;
+    private volatile boolean checkedOnce;
     private volatile String lastError = "";
     /** APK 已下好但因为工具包在忙而推迟安装；user=用户点的（走系统确认），否则静默规则 */
     private volatile boolean appWaiting, appWaitingUser;
@@ -219,13 +220,11 @@ final class Updater {
     // ── 状态 ───────────────────────────────────────────────────────────
     JSONObject status() throws Exception {
         refreshCurrent();
-        // 结果只在内存里：进程重启后第一次有人来看（打开设置页）就顺手查一次（只查，不自动装）
-        if (!checking && "unknown".equals(app.state) && "unknown".equals(claude.state)) checkAsync(true);
         JSONArray a = new JSONArray();
         for (Item i : new Item[]{app, devkit, claude}) a.put(i.json());
         return new JSONObject().put("ok", true).put("auto", auto()).put("channel", channel()).put("pin", pinVer())
             .put("flavor", flavor()).put("flavorPref", flavorPref()).put("only36", only36()).put("wantFlavor", wantFlavor())
-            .put("lastCheck", prefs().getLong("lastCheck", 0)).put("checking", checking).put("error", lastError).put("items", a)
+            .put("lastCheck", prefs().getLong("lastCheck", 0)).put("checkedOnce", checkedOnce).put("checking", checking).put("error", lastError).put("items", a)
             .put("verify", lastVerify == null ? JSONObject.NULL : lastVerify);
     }
 
@@ -474,6 +473,7 @@ final class Updater {
             else if (!mirror) try { checkDevkit(rels); } catch (Exception e) { devkit.set("error", e.getMessage()); }
         }
         try { checkClaude(); } catch (Exception e) { claude.set("error", Tr.t("连不上 downloads.claude.ai：") + e.getMessage()); }
+        checkedOnce = true;
         prefs().edit().putLong("lastCheck", System.currentTimeMillis()).apply();
         if (auto() && !manual && env.devkitReady()) autoApply();      // 首装期间不自动装任何东西，Claude Code 也由首装流程来装
         releaseApp();         // 工具包停在"已下载"没去装（比如有任务在跑）时，别让 APK 一直等着
@@ -883,8 +883,13 @@ final class Updater {
         loopThread = new Thread(() -> {
             sleep(20_000);
             while (true) {
-                if (loopOn && auto() && System.currentTimeMillis() - prefs().getLong("lastCheck", 0) > AUTO_EVERY) checkAsync(false);
-                sleep(30 * 60_000L);
+                long age = System.currentTimeMillis() - prefs().getLong("lastCheck", 0);
+                if (loopOn && auto() && age > AUTO_EVERY) checkAsync(false);
+                else if (loopOn && env.devkitReady() && !checkedOnce) checkAsync(true);
+                long wait = (loopOn && auto() && age >= 0 && age < AUTO_EVERY)
+                    ? Math.max(60_000L, Math.min(30 * 60_000L, AUTO_EVERY - age))
+                    : 30 * 60_000L;
+                sleep(wait);
             }
         }, "upd-loop");
         loopThread.start();

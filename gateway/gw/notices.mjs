@@ -59,6 +59,7 @@ export async function refreshNotices(force = false) {
   if (busy) return busy;
   if (!force && Date.now() - fetchedAt < EVERY) return;
   busy = (async () => {
+    if (!appVer && process.env.CCAPP_APP_VERSION) appVer = String(process.env.CCAPP_APP_VERSION).trim();
     if (PREFIX && !appVer) {
       const st = await privCall({ op: "upd_status" }, 5000).catch(() => ({}));
       appVer = st?.items?.find?.((i) => i.id === "app")?.current || "";

@@ -184,7 +184,7 @@
         Promise.all([loadPriv(), resumed ? undefined : loadNotify(), loadDev()]).then(() => { if (live()) setDiscovery(cat, t("不可用")); });
         break;
       case "update":
-        (resumed ? loadUpd() : updOnOpen()).then(() => { if (live()) setDiscovery(cat, t("不可用")); });
+        updOnOpen().then(() => { if (live()) setDiscovery(cat, t("不可用")); });
         break;
     }
   }

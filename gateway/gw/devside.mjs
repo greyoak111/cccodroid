@@ -16,11 +16,11 @@ import { ccMem, privCall } from "./usage.mjs";
 const DEV_UPD_FILE = path.join(CFG.home, "ccapp-update.json");
 const CC_BASE = "https://downloads.claude.ai/claude-code-releases";
 const devUpd = {
-  auto: true, channel: "stable", lastCheck: 0, checking: false, error: "",
+  auto: true, channel: "stable", lastCheck: 0, checkedOnce: false, checking: false, error: "",
   claude: { id: "claude", name: "Claude Code", current: "", latest: "", state: "unknown", message: "", done: 0, total: 0 },
 };
-try { Object.assign(devUpd, JSON.parse(fs.readFileSync(DEV_UPD_FILE, "utf8")), { checking: false, error: "" }); devUpd.claude.state = devUpd.claude.state === "installing" ? "unknown" : devUpd.claude.state; } catch {}
-const devUpdSave = () => { try { fs.writeFileSync(DEV_UPD_FILE, JSON.stringify(devUpd)); } catch {} };
+try { Object.assign(devUpd, JSON.parse(fs.readFileSync(DEV_UPD_FILE, "utf8")), { checking: false, checkedOnce: false, error: "" }); devUpd.claude.state = devUpd.claude.state === "installing" ? "unknown" : devUpd.claude.state; } catch {}
+const devUpdSave = () => { try { const { checkedOnce: _co, ...disk } = devUpd; fs.writeFileSync(DEV_UPD_FILE, JSON.stringify(disk)); } catch {} };
 const cmpVer = (a, b) => {
   const x = String(a).split(/[^0-9]+/).map(Number), y = String(b).split(/[^0-9]+/).map(Number);
   for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d < 0 ? -1 : 1; }
@@ -60,6 +60,7 @@ async function devUpdCheck() {
     devUpd.lastCheck = Date.now();
   } catch (e) { devUpd.error = tz("连不上 downloads.claude.ai：{err}", { err: e.message }); }
   finally {
+    if (!devUpdAgain) devUpd.checkedOnce = true;
     devUpd.checking = false; devUpdSave();
     if (devUpdAgain) { devUpdAgain = false; setImmediate(devUpdCheck); }
   }
@@ -137,8 +138,8 @@ if (!PREFIX) {
     await devUpdCheck();
     if (devUpd.auto && devUpd.claude.state === "available") devUpdInstall();
   };
-  setTimeout(tick, 60_000);
-  setInterval(tick, 30 * 60_000);
+  setTimeout(tick, 60_000).unref?.();
+  setInterval(tick, 30 * 60_000).unref?.();
 }
 
 // cccodroid：Claude Code 若是官方清单拿不到时靠 npm 签名装上的（版本目录里有 .npm-only），或者版本目录里还没存签过名的清单
@@ -184,8 +185,7 @@ export function devPrivStatus() {
 
 async function devApp(op, b) {
   if (op === "upd_status") {
-    if (!devUpd.lastCheck && !devUpd.checking) devUpdCheck();
-    else if (!devUpd.claude.current) devUpd.claude.current = await claudeVersionOf(PATHS.claude);
+    if (!devUpd.claude.current) devUpd.claude.current = await claudeVersionOf(PATHS.claude);
     return devUpdStatus();
   }
   if (op === "upd_check") { devUpdCheck(); await new Promise((r) => setTimeout(r, 200)); return devUpdStatus(); }

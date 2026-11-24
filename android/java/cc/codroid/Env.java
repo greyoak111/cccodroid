@@ -352,6 +352,7 @@ final class Env {
     /** APK 原生库目录（libldlinux.so 在这里；targetSdk 36 只能 exec 这里的文件） */
     final String nativeLib;
     final String pkg;
+    final String appVersion;
     final int targetSdk;
     static final String LINKER = "/system/bin/linker64";
 
@@ -359,6 +360,9 @@ final class Env {
         files = c.getFilesDir();
         nativeLib = c.getApplicationInfo().nativeLibraryDir;
         pkg = c.getPackageName();
+        String ver = "";
+        try { ver = c.getPackageManager().getPackageInfo(pkg, 0).versionName; } catch (Exception ignored) {}
+        appVersion = ver == null ? "" : ver;
         targetSdk = c.getApplicationInfo().targetSdkVersion;
         usr = new File(files, "usr");
         home = new File(files, "home");
@@ -489,6 +493,7 @@ final class Env {
         e.put("CCAPP_BIN", new File(app, "bin").getPath());
         e.put("CCAPP_PRIV_SOCK", new File(files, ".priv.sock").getPath());   // priv 中转（见 Priv.java）   // 应用自带的小工具（priv）
         e.put("CCAPP_TARGET_SDK", String.valueOf(targetSdk));
+        if (!appVersion.isEmpty()) e.put("CCAPP_APP_VERSION", appVersion);
         e.put("CCAPP_EXEC", loader ? "loader" : "direct");
         e.put("CCAPP_NATIVE_LIB", nativeLib);
         e.put("CCAPP_BUILTIN_ISLAND", "1");

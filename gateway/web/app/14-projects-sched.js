@@ -841,7 +841,7 @@
     if (!name || !pageVisible(name)) return;
     if (name === "usage") { resumeUsage(); loadEnergy(); loadQuota(); loadAcctCard(false); }
     if (name === "lineage") { loadLineage(); pfResume(); }
-    if (name === "ext") { loadModules(); loadComponents(); }
+    if (name === "ext") { loadModules(); loadComponents(60); }
     if (name === "sched") { renderSched(); loadSched(); schedPollSet(true); }
     if (name === "projects") renderProjects();
     if (name === "sessions") renderSessions();
