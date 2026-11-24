@@ -32,7 +32,7 @@ const ENTRIES_MAX = 500000;
 const PREVIEW_MAX = 2 * 1024 ** 3;   // 单个文件解出来预览的上限
 const RESERVE = 64 * 1024 ** 2;      // 解压前与解压期留出的余量
 const LIST_TIMEOUT_MS = 60 * 1000;   // /api/arc/list 7-Zip 列目录超时上限（A-03）
-const RUN7Z_OUT_MAX = 64 << 20;      // run7z 默认 stdout 缓冲上限 64MB，超限杀进程防 OOM（A-03）
+const RUN7Z_OUT_MAX = 256 << 20;     // run7z 默认 stdout 缓冲上限 256MB（容纳 50 万条目 -slt 输出，超限仍杀进程防 OOM，P1-B）
 const PREV_DIR = () => path.join(CFG.workspace, ".cache", "archive-preview");
 const PREV_KEEP = 24;
 
@@ -218,7 +218,7 @@ function pick(list, sel) {
 // ── 单个文件解到缓存（查看器直接打开） ───────────────────────────────
 const PREV_INFLIGHT = new Map();
 export async function previewEntry(file, entry, { enc, password } = {}) {
-  const list = await archiveList(file, { enc, password });
+  const list = await archiveList(file, { enc, password, timeoutMs: 0 });
   if (list.needPassword) return { needPassword: true, wrongPassword: !!list.wrongPassword };
   const want = cleanEntry(entry);
   const e = want && list.entries.find((x) => cleanEntry(x.path) === want && !x.dir);
@@ -331,7 +331,7 @@ function finish(j, err) {
 export function startExtract(file, { dest, entries, enc, password }) {
   const j = newJob("extract", { file, dest });
   (async () => {
-    const list = await archiveList(file, { enc, password, signal: j.ac.signal });
+    const list = await archiveList(file, { enc, password, signal: j.ac.signal, timeoutMs: 0 });
     if (list.needPassword) throw Object.assign(new Error("password required"), { wrongPassword: !!list.wrongPassword, status: 401 });
     const items = pick(list, entries);
     if (!items.length) throw new Error("nothing to extract");

@@ -346,9 +346,10 @@ static long sc5(long n, long a, long b, long c, long d, long e) {
 }
 /* targetSdk 36 下 SELinux 拒绝 app_data_file 的 faccessat(X_OK)，改用 NR_newfstatat 检查普通文件且含可执行位（对齐 loader-run.c，A-01） */
 static int executable(const char *p) {
-    unsigned char st[128];
+    unsigned char st[128] __attribute__((aligned(8)));
     if (sc(NR_newfstatat, AT_FDCWD, (long)p, (long)st, 0) != 0) return 0;
-    unsigned int mode = *(unsigned int *)(st + 16);
+    unsigned int mode = 0;
+    __builtin_memcpy(&mode, st + 16, sizeof(mode));
     return (mode & 0170000u) == 0100000u && (mode & 0111u) != 0;
 }
 

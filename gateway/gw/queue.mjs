@@ -519,6 +519,20 @@ function idleFire(sid) {
 
 export function sessionGone(sid) { return sessionPresence(sid) === "missing"; }
 
+/** 统计当前队列中「可立即起跑且不被运行中车道阻塞」的待跑项数，与 pump() 同口径（S-5 / P2-8a） */
+export function runnableQueueCount() {
+  const seen = new Set();
+  let count = 0;
+  for (const q of QUEUE) {
+    if (q.held || !startable(q)) continue;
+    const lane = laneOfItem(q), key = sidOfLane(lane) || lane;
+    if (seen.has(key) || laneRun(lane)) { seen.add(key); continue; }
+    seen.add(key);
+    count++;
+  }
+  return count;
+}
+
 /** 有空位就从队列里挑能跑的：车道空闲、且是这条车道上排在最前的（同一会话不许插队、不许同时跑两轮） */
 export function pump() {
   const blocked = new Set();

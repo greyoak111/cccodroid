@@ -65,7 +65,7 @@ test("A-07: 新会话独立车道隔离且 sched fireNow 忙等计入未挂起�
   assert.ok(qSrc.includes("!!item.follow && (item.follow === run.id || laneOfItem(item) === run.lane)"));
 
   const scSrc = readRepo("gateway/gw/sched.mjs");
-  assert.ok(scSrc.includes("const busySlots = () => RUNS.size + QUEUE.filter((q) => !q.held).length;"));
+  assert.ok(scSrc.includes("const busySlots = () => RUNS.size + runnableQueueCount();"));
   assert.ok(scSrc.includes("while (busySlots() >= maxParallel())"));
 });
 

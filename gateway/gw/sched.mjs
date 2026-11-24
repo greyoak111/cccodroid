@@ -11,7 +11,7 @@ import { CFG, LIVE, log, tz } from "./config.mjs";
 import { isObj, loadState, saveState, writeAtomic } from "./statefile.mjs";
 import { guarded } from "./crashguard.mjs";
 import { dec, NEXT, readBody, sendJson } from "./http.mjs";
-import { END_HOOKS, INTERRUPTED, QUEUE, RECOVER_HOOKS, START_GUARDS, enqueue, forgetRecoveryHandoff, wasResumed } from "./queue.mjs";
+import { END_HOOKS, INTERRUPTED, QUEUE, RECOVER_HOOKS, START_GUARDS, enqueue, forgetRecoveryHandoff, runnableQueueCount, wasResumed } from "./queue.mjs";
 import { capList } from "./settings-store.mjs";
 import { RUNS, TRASH_HOOKS, maxParallel } from "./runs.mjs";
 import { publish } from "./bus.mjs";
@@ -406,8 +406,8 @@ async function fireNow(t, { reason, attempt, trial, occurrence }) {
       if (c.battery && (st.battery == null || st.battery < c.battery)) return skip(st.battery == null ? tz("判断不了当前电量") : tz("电量 {b}%，低于 {m}%", { b: st.battery, m: c.battery }));
     }
   }
-  // 并行槽和 queue.pump 用同一口径：idle 轮与队列中未挂起待跑项一并算占槽，防止队列已满时定时任务误判空闲直接冲入（A-07）
-  const busySlots = () => RUNS.size + QUEUE.filter((q) => !q.held).length;
+  // 并行槽和 queue.pump 用同一口径：idle 轮与队列中可立即起跑的未阻塞车道一并算占槽（A-07 + S-5 / P2-8a）
+  const busySlots = () => RUNS.size + runnableQueueCount();
   const busy = busySlots() >= maxParallel();
   if (busy && !trial) {
     if (t.busy === "skip") return skip(tz("有对话在跑"));
