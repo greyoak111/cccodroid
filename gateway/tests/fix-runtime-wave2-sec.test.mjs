@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import zlib from "node:zlib";
+import { Readable } from "node:stream";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { CFG } from "../gw/config.mjs";
@@ -13,7 +14,7 @@ import { _setSealed } from "../gw/edition.mjs";
 import { sealPrepare, sealCleanup } from "../gw/seal.mjs";
 import { projectRisks } from "../gw/projtrust.mjs";
 import { safeFilePath } from "../gw/files.mjs";
-import { archiveList, collectSecretExcludes, mergeInto, startExtract, uniquePath } from "../gw/archiver.mjs";
+import { archiveList, collectSecretExcludes, mergeInto, routeArc, startExtract, uniquePath } from "../gw/archiver.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../..");
@@ -122,7 +123,7 @@ test("A-03.1: 解压到父目录不可写的已有目标目录（模拟 /storage
   }
 });
 
-test("A-03.2: mergeInto 拒绝软链目标目录，uniquePath 避开悬空软链", () => {
+test("A-03.2: mergeInto 拒绝软链目标目录，uniquePath 避开悬空软链，/api/arc/extract 悬空软链返 403", async () => {
   const root = path.join(CFG.workspace, "w2-arc-merge");
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(path.join(root, "stage"), { recursive: true });
@@ -138,6 +139,16 @@ test("A-03.2: mergeInto 拒绝软链目标目录，uniquePath 避开悬空软链
     const u = uniquePath(dangling);
     assert.notEqual(u, dangling);
     assert.match(path.basename(u), /^dangling \(2\)\.txt$/);
+
+    // W2-F2a: /api/arc/extract 目标为悬空软链时平稳返回 403，不抛 ENOENT 落 500
+    const zfile = path.join(root, "s.zip");
+    fs.writeFileSync(zfile, makeZip([{ name: "a.txt", data: "ok" }]));
+    const req = Readable.from([Buffer.from(JSON.stringify({ path: zfile, dest: dangling }))]);
+    req.method = "POST";
+    req.headers = {};
+    const res = { code: 0, body: null, writeHead(c) { res.code = c; }, setHeader() {}, end(b) { res.body = b ? JSON.parse(String(b)) : null; } };
+    await routeArc(req, res, new URL("http://x/api/arc/extract"), "/api/arc/extract");
+    assert.equal(res.code, 403);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

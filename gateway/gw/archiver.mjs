@@ -654,9 +654,11 @@ export async function routeArc(req, res, u, p) {
     if (p === "/api/arc/extract") {
       const dest = String(b.dest || "");
       if (!path.isAbsolute(dest)) return sendJson(res, 400, { error: "absolute dest required" });
-      // 目标：已有的文件夹（合并进去），或者父目录里一个还不存在的名字
+      // 目标：已有的文件夹（合并进去），或者父目录里一个还不存在的名字（悬空软链 statSync 抛 ENOENT 须平稳落 403，W2-F2a）
       const exists = lexists(dest);
-      if (exists ? !fs.statSync(dest).isDirectory() || !dirAllowed(dest, { workspace: false }) : safeWritePath(dest).error) return sendJson(res, 403, { error: "forbidden" });
+      let dstSt = null;
+      if (exists) { try { dstSt = fs.statSync(dest); } catch {} }
+      if (exists ? !dstSt?.isDirectory() || !dirAllowed(dest, { workspace: false }) : safeWritePath(dest).error) return sendJson(res, 403, { error: "forbidden" });
       // 新建文件夹时才看父目录：解到已有的文件夹（比如工作区本身）不必管它的上级是什么
       if (!exists && !dirAllowed(path.dirname(dest), { workspace: false })) return sendJson(res, 403, { error: "forbidden" });
       const entries = Array.isArray(b.entries) ? b.entries.map(String).slice(0, 100000) : null;
