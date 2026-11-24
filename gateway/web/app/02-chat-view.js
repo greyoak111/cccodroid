@@ -464,10 +464,11 @@
     || !!(inp && (typeof inp.CommandLine === "string" || typeof inp.command === "string"));
   const isBgShellResult = (name, inp, txt) => {
     if (!isShellToolName(name, inp)) return false;
+    if (inp && inp.IsDaemon) return false;   // 常驻服务启动即算该步完成，存活态由底部 runStrip「常驻」单独追踪，避免对话步骤组永久转圈
     const s = String(txt || "");
     const head = s.split(/\r?\n/, 6).join("\n");
     if (/^Command (?:exited with code \d+|was terminated by signal)/m.test(head)) return false;
-    return !!(inp && (inp.run_in_background || inp.IsDaemon))
+    return !!(inp && inp.run_in_background)
       || /^(?:Command running in (?:the )?background|Tool is running (?:as a background task|in the background))\b/im.test(head);
   };
   /** 收着的子代理过程里的一步：只记数据，不建 DOM。子代理正在跑时每一步都会来，十几个子代理各几百步，

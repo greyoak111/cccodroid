@@ -85,13 +85,34 @@ test("Claude 侧后台任务：bgList 保留稳定 startedAt、task_progress 刷
   await until(() => events.some((e) => e.type === "run_end" && e.runId === "r-bgobs-1"));
 });
 
-test("前端 02-chat-view.js 与 03-perm-status.js 后台 Bash 状态、进度与 runStrip 动态耗时契约完备", () => {
+test("Claude 侧后台任务：stop_task 后若未发 task_notification，background_tasks_changed 清零时补发 sub_done(stopped)", async () => {
+  const s = crypto.randomUUID();
+  script([
+    { type: "system", subtype: "init", session_id: s, model: "fixture-model", tools: [], permissionMode: "default" },
+    { type: "system", subtype: "background_tasks_changed", tasks: [{ task_id: "bg-stop-1", task_type: "local_bash", description: "long cmd" }] },
+    { type: "system", subtype: "task_progress", task_id: "bg-stop-1", tool_use_id: "tu-stop-1", description: "step 1", usage: {} },
+    { sleep: 1 },
+    { type: "system", subtype: "background_tasks_changed", tasks: [] },
+    { type: "result", subtype: "success", is_error: false, num_turns: 1, result: "done", usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 },
+  ]);
+  await startRun({ id: "r-bgobs-stop", message: "stop test", cwd: root });
+  const run = RUNS.get("r-bgobs-stop");
+  await until(() => run.bgTasks === 1 && run.bgList[0]?.toolId === "tu-stop-1");
+  run.stopIds.add("bg-stop-1");
+  await until(() => events.some((e) => e.type === "run_end" && e.runId === "r-bgobs-stop"));
+  assert.equal(events.some((e) => e.type === "sub_done" && e.parent === "tu-stop-1" && e.status === "stopped"), true, "stop_task 后脱离列表应补发 sub_done(stopped)");
+});
+
+test("前端 02-chat-view.js、03-perm-status.js 与 04-session-flow.js 后台 Bash 状态、进度与跨轮收口契约完备", () => {
   const cv = fs.readFileSync(path.join(process.cwd(), "gateway/web/app/02-chat-view.js"), "utf8");
   const ps = fs.readFileSync(path.join(process.cwd(), "gateway/web/app/03-perm-status.js"), "utf8");
+  const sf = fs.readFileSync(path.join(process.cwd(), "gateway/web/app/04-session-flow.js"), "utf8");
   assert.match(cv, /isBgShellResult/);
+  assert.match(cv, /if \(inp && inp\.IsDaemon\) return false/);
   assert.match(cv, /bgDone = true/);
   assert.match(ps, /case "bg":/);
   assert.match(ps, /t\("等待后台任务"\)/);
   assert.match(ps, /t\("静默 \{d\}"/);
   assert.match(ps, /querySelectorAll\("\.rs-el"\)/);
+  assert.match(sf, /if \(!rv0\?\.av && !belongs\(ev\)\) return;/);
 });

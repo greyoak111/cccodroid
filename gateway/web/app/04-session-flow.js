@@ -925,6 +925,16 @@
       }
       case "perm_resolved": return permDone(ev.id, ev.behavior, ev);
     }
+    // 后台任务/子代理跨轮次或空闲期状态（stop_task / 空闲对账 / 跨轮 sub_done）不强依赖活跃 av，经 belongs 归属核验后直达卡片
+    if (ev.type === "ag" || ev.type === "sub_text" || ev.type === "sub_progress" || ev.type === "sub_done") {
+      const rv0 = ev.runId ? runViews.get(ev.runId) : null;
+      if (!rv0?.av && !belongs(ev)) return;
+      if (ev.type === "ag") agApply(ev, rv0?.av || null);
+      else if (ev.type === "sub_text") TOOL_CARDS.get(ev.parent)?.subText?.(ev.text);
+      else if (ev.type === "sub_progress") TOOL_CARDS.get(ev.parent)?.subProgress?.(ev.desc);
+      else TOOL_CARDS.get(ev.parent)?.subDone?.(ev.status);
+      return;
+    }
     const rv = runViews.get(ev.runId);
     if (!rv) return;
     const av = rv.av;
