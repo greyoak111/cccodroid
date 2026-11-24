@@ -3172,4 +3172,7 @@ window.I18N_DICT["es"] = {
   "本机 ADB 通道暂不可用，将自动重试。如果调试授权已撤销，可重新配对。": "ADB local no está disponible temporalmente. Se reintentará automáticamente. Si se revocó la autorización de depuración, puedes volver a emparejar.",
   "判断不了是不是在充电": "No se pudo saber si el dispositivo está cargando",
   "判断不了当前电量": "No se pudo leer el nivel actual de batería",
+  "等待后台任务": "Esperando tareas en segundo plano",
+  "静默 {d}": "sin cambios {d}",
+  "剩 {d}": "quedan {d}",
 };

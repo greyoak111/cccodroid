@@ -76,6 +76,7 @@ const runInfo = (r) => r && {
   perms: r.perms ? [...r.perms.values()].map(permView) : [],
   // sealed：答完了、后台任务还在，但 stdin 已关——插话、停单个任务都送不进去，只能等它结束或整个停掉
   idle: !!r.idle, sealed: !!r.idle && !r.inputOpen && !r.ended, bg: r.bgTasks || 0, bgList: r.bgList || [], auto: r.auto || null, permMode: r.permMode || null,
+  ...(r.lastEvAt ? { lastEvAt: r.lastEvAt } : {}),
 };
 
 /** 改权限模式：存进设置（下一轮沿用），正在跑的那一轮当场切（set_permission_mode） */

@@ -368,15 +368,34 @@
         ${!g.met && g.reason ? `<div class="rs-sub">${esc(g.reason)}</div>` : ""}</div>`;
     }
     if (bg.length) {
+      const nowAt = Date.now();
+      const bgMeta = (x) => {
+        const parts = [];
+        if (x.bytes > 0) parts.push(esc(fmtSize(x.bytes)));
+        if (x.progress) {
+          const pr = String(x.progress).trim();
+          if (pr) parts.push(esc(pr.length > 28 ? pr.slice(0, 28) + "…" : pr));
+        }
+        if (x.oneShot && x.expiresAt > nowAt) {
+          parts.push(`<span class="rs-el" aria-hidden="true">${esc(t("剩 {d}", { d: fmtDur(x.expiresAt - nowAt) }))}</span>`);
+        } else if (x.startedAt > 0) {
+          const idleMs = x.lastActiveAt > 0 ? nowAt - x.lastActiveAt : 0;
+          const showIdle = !x.oneShot && x.type !== "daemon" && x.type !== "monitor" && idleMs >= 90000;
+          const lbl = showIdle ? t("静默 {d}", { d: fmtDur(idleMs) }) : t("已用 {d}", { d: fmtDur(nowAt - x.startedAt) });
+          parts.push(`<span class="rs-el" aria-hidden="true">${esc(lbl)}</span>`);
+        }
+        return parts.length ? `<span class="rs-meta">${parts.join(" · ")}</span>` : "";
+      };
       // 后台任务：只有一个时直接一行带「停止」；多个时默认折成一行（数量 + 最新那个），点开看全部，列表过长自己滚
       const row = (x) => `<div class="rs-row rs-bg"><span class="rs-kind">${esc(BG_KIND(x.type))}</span>
-        <span class="rs-txt">${esc(x.desc || x.id)}</span><button class="rs-stop" data-task="${esc(x.id)}">${t("停止")}</button></div>`;
+        <span class="rs-txt">${esc(x.desc || x.id)}</span>${bgMeta(x)}<button class="rs-stop" data-task="${esc(x.id)}">${t("停止")}</button></div>`;
       if (bg.length === 1) html += `<div class="rs-bgs">${row(bg[0])}</div>`;
       else {
         const last = bg[bg.length - 1];
         html += `<div class="rs-bgs"><div class="rs-row rs-bhead" role="button" tabindex="0" aria-expanded="${bgOpen}">
           <span class="rs-ico">${uiI("hourglass")}</span><span class="rs-tcount">${t("后台在跑 {n} 个", { n: bg.length })}</span>
           <span class="rs-txt">${bgOpen ? "" : esc(last.desc || last.id)}</span>
+          ${!bgOpen ? bgMeta(last) : ""}
           <span class="rs-chev${bgOpen ? " up" : ""}">${uiI("chevDown")}</span></div>
           ${bgOpen ? `<div class="rs-blist">${bg.map(row).join("")}</div>` : ""}</div>`;
       }
@@ -384,15 +403,17 @@
     const tasksShown = !!tasksHtml(0), fold = tasksShown && !tasksOpen;
     const more = fold ? (g ? 1 : 0) + bg.length : 0;
     html = tasksHtml(more) + (fold ? "" : html);
-    // 目标计时每秒重画整条：展开的清单、后台任务列表滚到哪儿要接着留在哪儿（审查 #48 UI07-04）
-    // 只有计时变了：只改那一格的字（它不进读屏），别整条重写 —— 整条在 role=status 里，读屏会每秒念一遍（审查 #49 待确认-5）
-    const key = html.replace(/<span class="rs-el"[^>]*>[^<]*<\/span>/, "");
-    const elx = runStrip.querySelector(".rs-el"), elm = html.match(/<span class="rs-el"[^>]*>([^<]*)<\/span>/);
-    if (key === runStrip._key && elx && elm) {
-      // 那一格是转义过的字：用惰性 template 还原成纯文本再写 textContent，不经 innerHTML（审查 v0.5.4 F-L3）
-      const tp = document.createElement("template"); tp.innerHTML = elm[1];
-      const txt = tp.content.textContent;
-      if (elx.textContent !== txt) elx.textContent = txt;
+    // 目标/后台任务计时每秒重画：展开的清单、后台任务列表滚到哪儿要接着留在哪儿（审查 #48 UI07-04）
+    // 只有计时变了：只改各 .rs-el 的字（不进读屏），别整条重写 —— 整条在 role=status 里，读屏会每秒念一遍（审查 #49 待确认-5）
+    const key = html.replace(/<span class="rs-el"[^>]*>[^<]*<\/span>/g, "");
+    const elxs = runStrip.querySelectorAll(".rs-el"), elms = [...html.matchAll(/<span class="rs-el"[^>]*>([^<]*)<\/span>/g)];
+    if (key === runStrip._key && elxs.length > 0 && elxs.length === elms.length) {
+      const tp = document.createElement("template");
+      for (let i = 0; i < elxs.length; i++) {
+        tp.innerHTML = elms[i][1];
+        const txt = tp.content.textContent;
+        if (elxs[i].textContent !== txt) elxs[i].textContent = txt;
+      }
     }
     else if (html !== runStrip._html) {
       runStrip._key = key;
@@ -402,8 +423,9 @@
       if (by) { const x = runStrip.querySelector(".rs-blist"); if (x) x.scrollTop = by; }
     }
     runStrip.classList.toggle("hidden", !html);
-    // 目标进行中：每秒刷新「已用」；别的情况停掉
-    if (g && g.active && g.setAt) { if (!goalTick) goalTick = setInterval(renderRunStrip, 1000); }
+    // 目标或后台任务进行中：每秒刷新计时；别的情况停掉
+    const needTick = (g && g.active && g.setAt) || bg.some((x) => x && (x.startedAt > 0 || (x.oneShot && x.expiresAt > Date.now())));
+    if (needTick) { if (!goalTick) goalTick = setInterval(renderRunStrip, 1000); }
     else if (goalTick) { clearInterval(goalTick); goalTick = null; }
   }
   // 点 ✕ 收起的清单 / 目标记录按会话记在 localStorage，重开 App 不再冒出来（只留最近 50 个会话）
@@ -771,13 +793,21 @@
         // 官方接口默认把工具参数攒成大块才下发（不像 DeepSeek 逐字流），字数常常一下跳到底就不动了；
         // 后面跟上这一步的用时，不动的时候也看得出没卡住
         case "tool":    return t("正在写 {name} 的参数", { name: phEv.name || "?" }) + (phEv.chars ? " · " + fmtChars(phEv.chars) : "") + sec;
+        case "bg": {
+          const cnt = phEv.count > 1 ? " (" + phEv.count + ")" : "";
+          const sz = phEv.bytes > 0 ? " · " + fmtSize(phEv.bytes) : "";
+          const idleMs = phEv.lastActiveAt > 0 ? Date.now() - phEv.lastActiveAt : 0;
+          if (idleMs >= 90000) return t("等待后台任务") + cnt + sz + " · " + t("静默 {d}", { d: fmtDur(idleMs) });
+          return t("等待后台任务") + cnt + sz + sec;
+        }
       }
       return "";
     };
     const phPaint = () => {
       if (!ph || !phEv) return;
       ph.textContent = phText();
-      const slow = ["prep", "boot", "connect", "wait"].includes(phEv.phase) && Date.now() - phT0 > 30000;
+      const bgSlow = phEv.phase === "bg" && phEv.lastActiveAt > 0 && Date.now() - phEv.lastActiveAt >= 90000;
+      const slow = bgSlow || (["prep", "boot", "connect", "wait"].includes(phEv.phase) && Date.now() - phT0 > 30000);
       ph.classList.toggle("slow", slow);
       ph.classList.toggle("bad", phEv.phase === "retry");
     };

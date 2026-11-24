@@ -3210,4 +3210,7 @@ window.I18N_DICT.en = {
   "本机 ADB 通道暂不可用，将自动重试。如果调试授权已撤销，可重新配对。": "Local ADB is temporarily unavailable. Retrying automatically. If debugging authorization was revoked, you can re-pair.",
   "判断不了是不是在充电": "Couldn't tell whether the device is charging",
   "判断不了当前电量": "Couldn't read the current battery level",
+  "等待后台任务": "Waiting for background tasks",
+  "静默 {d}": "idle {d}",
+  "剩 {d}": "{d} left",
 };

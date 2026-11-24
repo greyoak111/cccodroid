@@ -641,7 +641,9 @@ export async function startRun(item) {
   run.slashMark = { seen: false, bg: false, yielded: false };   // 那条命令有没有动静（回显、压缩事件、<synthetic> 输出）、送进去后后台任务有没有变
   const WROTE = new WeakMap();  // 普通插话 → 写进 stdin 的文字（回显按它认，别按内容猜成斜杠命令的，复核 v067b-1）
   run.bgTasks = 0;             // claude 报的后台任务数（见 feed）
-  run.bgList = [];             // 后台任务明细：{ id, type, desc }（shell / 子代理 / monitor / 工作流），界面列出来、可单独停
+  run.bgList = [];             // 后台任务明细：{ id, type, desc, startedAt, lastActiveAt, progress }（shell / 子代理 / monitor / 工作流），界面列出来、可单独停
+  const bgMeta = new Map();    // task_id → { startedAt, lastActiveAt, progress }
+  let bgProgSyncAt = 0;
   let bgIds = [];              // 完整后台任务 id 列表（不受 bgList 30 条上限影响），用于区分是不是全部由 stop_task 停掉
   run.stopIds = new Set();     // 用户经 stop_task 主动请求停止的任务 id
   run.replays = 0;
@@ -1019,6 +1021,7 @@ export async function startRun(item) {
   };
   const feed = (line) => {
     let ev; try { ev = JSON.parse(line); } catch { return; }
+    run.lastEvAt = Date.now();
     // 上一条事件之后文件可能已经建好：control_request 这类会提前 return 的分支也要先核一次
     noteSessionFile(ev.type);
     if (ev.type === "control_request") {
@@ -1058,13 +1061,46 @@ export async function startRun(item) {
     // 那时 stdin 要还开着，否则这一轮里所有授权请求都报「Tool permission request failed: AbortError: Stream closed」。
     // claude 有任何别的动静（开始请求、回显通知…）就不替它收尾了：之后的 result 会正常关 stdin
     if (run.idleClose && !(ev.type === "system" && ev.subtype === "background_tasks_changed")) { clearTimeout(run.idleClose); run.idleClose = null; }
+    if (ev.type === "system" && ev.subtype === "task_progress" && (ev.task_id || ev.tool_use_id)) {
+      const nowAt = Date.now();
+      const tid = String(ev.task_id || "");
+      const prog = String(ev.description || "").slice(0, 120);
+      const hitId = tid && bgMeta.has(tid) ? tid : (run.bgList.find((x) => x.id === tid || x.id === String(ev.tool_use_id || ""))?.id || tid);
+      if (hitId) {
+        const prev = bgMeta.get(hitId) || { startedAt: nowAt, lastActiveAt: nowAt, progress: "" };
+        prev.lastActiveAt = nowAt;
+        if (prog) prev.progress = prog;
+        bgMeta.set(hitId, prev);
+        const row = run.bgList.find((x) => x.id === hitId);
+        if (row) {
+          row.lastActiveAt = nowAt;
+          if (prog) row.progress = prog;
+          if (nowAt - bgProgSyncAt >= 3000) { bgProgSyncAt = nowAt; publishState(); }
+        }
+      }
+    }
     if (ev.type === "system" && ev.subtype === "background_tasks_changed" && Array.isArray(ev.tasks)) {
       if (run.slashFlight.length && ev.tasks.length !== run.bgTasks) run.slashMark.bg = true;
+      const nowAt = Date.now();
       const prevBgCount = run.bgTasks;
       const prevBgIds = bgIds;
       bgIds = ev.tasks.map((t) => String(t.task_id || ""));
+      const liveSet = new Set(bgIds);
+      for (const k of [...bgMeta.keys()]) if (!liveSet.has(k)) bgMeta.delete(k);
       run.bgTasks = ev.tasks.length;
-      run.bgList = ev.tasks.slice(0, 30).map((t) => ({ id: String(t.task_id || ""), type: String(t.task_type || ""), desc: String(t.description || "").slice(0, 200) }));
+      run.bgList = ev.tasks.slice(0, 30).map((t) => {
+        const id = String(t.task_id || "");
+        let m = bgMeta.get(id);
+        if (!m) { m = { startedAt: nowAt, lastActiveAt: nowAt, progress: "" }; bgMeta.set(id, m); }
+        return {
+          id,
+          type: String(t.task_type || ""),
+          desc: String(t.description || "").slice(0, 200),
+          startedAt: m.startedAt,
+          lastActiveAt: m.lastActiveAt,
+          ...(m.progress ? { progress: m.progress } : {}),
+        };
+      });
       if (!run.bgTasks) run.stopAsked = prevBgIds.length > 0 && prevBgIds.every((id) => run.stopIds.has(id));
       // 本轮进行中后台任务自然清零（非 stop_task 主动停掉）：它的 <task-notification> 可能已排队等待本轮 result 后紧接出队
       if (!run.idle && prevBgCount > 0 && !run.bgTasks && !run.stopAsked) bgDroppedMidTurn = true;

@@ -3172,4 +3172,7 @@ window.I18N_DICT["id"] = {
   "本机 ADB 通道暂不可用，将自动重试。如果调试授权已撤销，可重新配对。": "ADB lokal untuk sementara tidak tersedia. Sistem akan mencoba lagi otomatis. Jika izin debug dicabut, Anda dapat memasangkan ulang.",
   "判断不了是不是在充电": "Tidak bisa memastikan apakah perangkat sedang mengisi daya",
   "判断不了当前电量": "Tidak bisa membaca level baterai saat ini",
+  "等待后台任务": "Menunggu tugas latar belakang",
+  "静默 {d}": "diam {d}",
+  "剩 {d}": "sisa {d}",
 };
