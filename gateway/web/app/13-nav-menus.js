@@ -1,8 +1,8 @@
   // ── 侧栏 / 整页 ───────────────────────────────────────────────────
   // 侧栏（#drawer）只放：新对话、去哪（导航）、对话列表、账户行。设置 / 能力 / 扩展 / 用量 / 帮助是主区域的整页（#pages），
   // 宽屏时侧栏和右侧窗格都留着、整页只占对话那一块；窄屏整页盖住对话，返回键回到对话。
-  function openDrawer(tab) {
-    if (tab && tab !== "sessions") return openPage(tab);
+  function openDrawer(tab, sub) {
+    if (tab && tab !== "sessions") return openPage(tab, sub);
     if (window.CCLayout && CCLayout.expand && CCLayout.expand()) return;   // 三栏收起时：回到常驻，布局层会回调这里把内容填上
     OV.closeAll();
     MO.cancel(drawerEl);

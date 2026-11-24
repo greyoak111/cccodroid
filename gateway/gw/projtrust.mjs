@@ -29,11 +29,24 @@ const breachNote = (raw) => {
   return h ? ` ｜ 破甲特征命中 L${h.line}: ${h.excerpt.slice(0, 60)}` : " ｜ 破甲特征命中";
 };
 
+// 与 saferead.mjs / components.mjs 的 readSmall 同口径（MIG-33）：stat 只取元数据，
+// 再 O_NOFOLLOW 打开、fstat 复核同一 inode，才从 fd 读内容。
 function readSmall(f) {
   let st; try { st = fs.statSync(f); } catch { return null; }
   if (!st.isFile()) return null;
   if (st.size > MAX) return { raw: null, big: `${st.size}:${st.mtimeMs}` };
-  try { return { raw: fs.readFileSync(f, "utf8") }; } catch { return null; }
+  let fd = -1;
+  try {
+    fd = fs.openSync(f, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    const fst = fs.fstatSync(fd);
+    if (!fst.isFile() || fst.dev !== st.dev || fst.ino !== st.ino) return null;
+    if (fst.size > MAX) return { raw: null, big: `${fst.size}:${fst.mtimeMs}` };
+    const buf = Buffer.alloc(fst.size);
+    let off = 0;
+    while (off < buf.length) { const n = fs.readSync(fd, buf, off, buf.length - off, off); if (!n) break; off += n; }
+    return { raw: buf.subarray(0, off).toString("utf8") };
+  } catch { return null; }
+  finally { if (fd >= 0) try { fs.closeSync(fd); } catch {} }
 }
 
 function settingsRisks(file, raw, out) {
@@ -87,16 +100,16 @@ export function projectRisks(cwd) {
     d = up;
   }
   let n = 0;
-  for (const sub of ["agents", "skills"]) {
+  for (const sub of ["agents", "skills", "commands"]) {
     const base = path.join(cwd, ".claude", sub);
     let ents; try { ents = fs.readdirSync(base, { withFileTypes: true }); } catch { continue; }
     for (const e of ents) {
       if (++n > 300) { risks.push(`${path.join(".claude", sub)}: > 300`); break; }
-      const f = sub === "agents" ? (e.name.endsWith(".md") ? path.join(base, e.name) : null) : path.join(base, e.name, "SKILL.md");
+      const f = sub === "skills" ? path.join(base, e.name, "SKILL.md") : (e.name.endsWith(".md") ? path.join(base, e.name) : null);
       const r = f && readSmall(f);
       if (!r || (!r.big && !hasFrontHooks(r.raw))) continue;
       take(f, r);
-      risks.push(`${path.join(".claude", sub, sub === "agents" ? e.name : e.name + "/SKILL.md")}: ${r.big ? "?" : "hooks"}` + (r.big ? "" : breachNote(r.raw)));
+      risks.push(`${path.join(".claude", sub, sub === "skills" ? e.name + "/SKILL.md" : e.name)}: ${r.big ? "?" : "hooks"}` + (r.big ? "" : breachNote(r.raw)));
     }
   }
   // 项目自带的输出风格：选中（项目设置里的 outputStyle 就能选）就成了系统提示的一部分（输出风格目录的安全报告，11-04）

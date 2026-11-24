@@ -72,7 +72,8 @@ export function safeFilePath(p) {
   if (st.isDirectory()) return { error: "is a directory", status: 400 };
   // 只交普通文件：/dev/zero 这类设备读不完，管道会一直挂着（/proc 里的伪文件 fstat 也报普通文件，上面按路径拦）
   if (!st.isFile()) return { error: "not a regular file", status: 400 };
-  return { file: real, size: st.size, mtime: st.mtimeMs };
+  // dev/ino 供调用方打开后 fstat 复核：核完到打开之间文件被换成另一个 inode 就认得出来（MIG-33）
+  return { file: real, size: st.size, mtime: st.mtimeMs, dev: st.dev, ino: st.ino };
 }
 
 /** 写文件前的同一套防呆：已有文件走 safeFilePath；新文件看父目录 */
@@ -250,7 +251,13 @@ export async function routeFiles(req, res, u, p) {
     let fd;
     try { fd = fs.openSync(r.file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW); } catch (e) { return sendJson(res, 404, { error: "not found", detail: e.code || e.message }); }
     let size = r.size;
-    try { const fst = fs.fstatSync(fd); if (!fst.isFile()) { fs.closeSync(fd); return sendJson(res, 400, { error: "not a file" }); } size = fst.size; }
+    try {
+      const fst = fs.fstatSync(fd);
+      if (!fst.isFile()) { fs.closeSync(fd); return sendJson(res, 400, { error: "not a file" }); }
+      // MIG-33：核完路径到打开之间文件被换成另一个 inode（重命名替换）时，fstat 身份对不上就拒绝读
+      if (fst.dev !== r.dev || fst.ino !== r.ino) { fs.closeSync(fd); return sendJson(res, 404, { error: "not found" }); }
+      size = fst.size;
+    }
     catch (e) { try { fs.closeSync(fd); } catch {} return sendJson(res, 500, { error: e.message }); }
     // 音视频 / PDF 拖进度要 Range；以前整份发，大文件只能从头播（195-C.2）
     const rg = rangeOf(req.headers.range, size);

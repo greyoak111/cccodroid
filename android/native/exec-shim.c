@@ -47,6 +47,7 @@ extern int *__errno_location(void);
 #define NR_openat 56
 #define NR_close 57
 #define NR_pread64 67
+#define NR_newfstatat 79
 #define NR_execve 221
 #define ENOENT_ 2
 #define E2BIG_ 7
@@ -343,7 +344,13 @@ static long sc5(long n, long a, long b, long c, long d, long e) {
     __asm__ volatile("svc 0" : "+r"(x0) : "r"(x8), "r"(x1), "r"(x2), "r"(x3), "r"(x4) : "memory");
     return x0;
 }
-static int executable(const char *p) { return sc(NR_faccessat, AT_FDCWD, (long)p, 1 /* X_OK */, 0) == 0; }
+/* targetSdk 36 下 SELinux 拒绝 app_data_file 的 faccessat(X_OK)，改用 NR_newfstatat 检查普通文件且含可执行位（对齐 loader-run.c，A-01） */
+static int executable(const char *p) {
+    unsigned char st[128];
+    if (sc(NR_newfstatat, AT_FDCWD, (long)p, (long)st, 0) != 0) return 0;
+    unsigned int mode = *(unsigned int *)(st + 16);
+    return (mode & 0170000u) == 0100000u && (mode & 0111u) != 0;
+}
 
 /* PATH 里第 skip 个（从 0 数）可执行的候选；没有了返回 0。空项（开头、中间、结尾的冒号）是当前目录，同 execvp（审查 #108 09-007）。
  * 只认能执行的（X_OK）：前面一个同名的普通文件不能把后面的真身挡住（11-04 报告 二） */

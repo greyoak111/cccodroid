@@ -182,7 +182,7 @@
           draftPersist();              // 原文回输入框：立刻落盘
         });
       } else toast(failTitle, true);
-      if (e.status === 503 && gen === view.gen) openDrawer("settings");
+      if (e.status === 503 && gen === view.gen) openDrawer("settings", "provider");
     } finally { if (done) done(); }
   }
   let lastSendAt = 0;

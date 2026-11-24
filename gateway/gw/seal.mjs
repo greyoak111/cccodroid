@@ -219,6 +219,8 @@ function pluginFiles(dir) {
     for (const e of ents) {
       const s = path.join(src, e.name), r = rel ? rel + "/" + e.name : e.name;
       if (!rel && ["hooks", "settings.json", ".in_use", ".orphaned_at", ".git", "node_modules"].includes(e.name)) continue;
+      // G4：插件自带的 .mcp.json/.lsp.json 会被加载时直接拉起外部进程，任意深度都不拷入封口副本
+      if (e.name === ".mcp.json" || e.name === ".lsp.json") continue;
       let st; try { st = fs.statSync(s); } catch { continue; }
       if (st.isDirectory()) { if (depth < 8) walk(s, r, depth + 1); continue; }
       if (!st.isFile()) continue;
@@ -233,11 +235,11 @@ function pluginFiles(dir) {
  *  边界（二轮复核 11-06）：这些文件不会被自动加载进上下文，但插件里的技能可以写「去读 data/x.json」，
  *  诱导模型用 Read 工具主动把它读进来——一条不经过扫描的间接通道，性质和工作区里任意文件被读进上下文一样。 */
 const isPluginData = (rel) => rel.startsWith("data/") && rel.endsWith(".json");
-/** plugin.json 去掉能挂钩子、换设置的字段 */
+/** plugin.json 去掉能挂钩子、换设置、自启 MCP/LSP 的字段（A-04） */
 function cleanManifest(buf) {
   let j; try { j = JSON.parse(buf.toString("utf8")); } catch { return null; }
   if (!j || typeof j !== "object") return null;
-  for (const k of ["hooks", "settings"]) delete j[k];
+  for (const k of ["hooks", "settings", "mcpServers", "lspServers"]) delete j[k];
   return Buffer.from(JSON.stringify(j, null, 2));
 }
 
