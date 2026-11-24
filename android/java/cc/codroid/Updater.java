@@ -224,7 +224,7 @@ final class Updater {
         for (Item i : new Item[]{app, devkit, claude}) a.put(i.json());
         return new JSONObject().put("ok", true).put("auto", auto()).put("channel", channel()).put("pin", pinVer())
             .put("flavor", flavor()).put("flavorPref", flavorPref()).put("only36", only36()).put("wantFlavor", wantFlavor())
-            .put("lastCheck", prefs().getLong("lastCheck", 0)).put("checkedOnce", checkedOnce).put("checking", checking).put("error", lastError).put("items", a)
+            .put("lastCheck", prefs().getLong("lastCheck", 0)).put("lastAutoCheck", prefs().getLong("lastAutoCheck", 0)).put("checkedOnce", checkedOnce).put("checking", checking).put("error", lastError).put("items", a)
             .put("verify", lastVerify == null ? JSONObject.NULL : lastVerify);
     }
 
@@ -449,34 +449,40 @@ final class Updater {
     }
 
     private void check(boolean manual) {
-        lastError = "";
-        refreshCurrent();
-        String[] ghErr = new String[1];
-        JSONArray[] lists = fetchLists(ghErr);
-        JSONArray rels = lists[0];
-        boolean mirror = false;
-        if (rels == null) {
-            lastError = Tr.t("连不上 GitHub：") + ghErr[0];
-            rels = lists[1];
-            mirror = rels != null;
-            // GitHub 不通：应用本身改看镜像的发布列表；工具包没有镜像，如实说查不了（别报成"已是最新"）
-            if (rels == null) app.set("error", lastError);
-            if (pinnedInstalled()) devkit.set("uptodate", Tr.t("已是本应用配套的版本（GitHub 连不上，暂时查不了更新的）"));
-            else devkit.set("error", lastError);
+        try {
+            lastError = "";
+            refreshCurrent();
+            String[] ghErr = new String[1];
+            JSONArray[] lists = fetchLists(ghErr);
+            JSONArray rels = lists[0];
+            boolean mirror = false;
+            if (rels == null) {
+                lastError = Tr.t("连不上 GitHub：") + ghErr[0];
+                rels = lists[1];
+                mirror = rels != null;
+                // GitHub 不通：应用本身改看镜像的发布列表；工具包没有镜像，如实说查不了（别报成"已是最新"）
+                if (rels == null) app.set("error", lastError);
+                if (pinnedInstalled()) devkit.set("uptodate", Tr.t("已是本应用配套的版本（GitHub 连不上，暂时查不了更新的）"));
+                else devkit.set("error", lastError);
+            }
+            if (rels != null) {
+                try { checkApp(rels); if (mirror && !"error".equals(app.state)) app.message = app.message.isEmpty() ? Tr.t("来自 cccodroid.net 镜像") : app.message + Tr.t(" · 来自 cccodroid.net 镜像"); }
+                catch (Exception e) { app.set("error", e.getMessage()); }
+                // 首装还没完成（工具包没装好）就别查工具包：那时读不到已装的模块，planModules 会按「整包用户」规划成全部模块，
+                // 自动更新在 Wi‑Fi 下把它们全下好，首装刚按勾选装完，启动流程又把这份「已下载的更新」装上 —— 勾了两个、装了八个（群友 10-24）
+                if (!env.devkitReady()) devkit.set("uptodate", Tr.t("首次安装进行中"));
+                else if (!mirror) try { checkDevkit(rels); } catch (Exception e) { devkit.set("error", e.getMessage()); }
+            }
+            try { checkClaude(); } catch (Exception e) { claude.set("error", Tr.t("连不上 downloads.claude.ai：") + e.getMessage()); }
+            long now = System.currentTimeMillis();
+            android.content.SharedPreferences.Editor ed = prefs().edit().putLong("lastCheck", now);
+            if (!manual) ed.putLong("lastAutoCheck", now);
+            ed.apply();
+            if (auto() && !manual && env.devkitReady()) autoApply();      // 首装期间不自动装任何东西，Claude Code 也由首装流程来装
+            releaseApp();         // 工具包停在"已下载"没去装（比如有任务在跑）时，别让 APK 一直等着
+        } finally {
+            checkedOnce = true;
         }
-        if (rels != null) {
-            try { checkApp(rels); if (mirror && !"error".equals(app.state)) app.message = app.message.isEmpty() ? Tr.t("来自 cccodroid.net 镜像") : app.message + Tr.t(" · 来自 cccodroid.net 镜像"); }
-            catch (Exception e) { app.set("error", e.getMessage()); }
-            // 首装还没完成（工具包没装好）就别查工具包：那时读不到已装的模块，planModules 会按「整包用户」规划成全部模块，
-            // 自动更新在 Wi‑Fi 下把它们全下好，首装刚按勾选装完，启动流程又把这份「已下载的更新」装上 —— 勾了两个、装了八个（群友 10-24）
-            if (!env.devkitReady()) devkit.set("uptodate", Tr.t("首次安装进行中"));
-            else if (!mirror) try { checkDevkit(rels); } catch (Exception e) { devkit.set("error", e.getMessage()); }
-        }
-        try { checkClaude(); } catch (Exception e) { claude.set("error", Tr.t("连不上 downloads.claude.ai：") + e.getMessage()); }
-        checkedOnce = true;
-        prefs().edit().putLong("lastCheck", System.currentTimeMillis()).apply();
-        if (auto() && !manual && env.devkitReady()) autoApply();      // 首装期间不自动装任何东西，Claude Code 也由首装流程来装
-        releaseApp();         // 工具包停在"已下载"没去装（比如有任务在跑）时，别让 APK 一直等着
     }
 
     /**
@@ -883,11 +889,11 @@ final class Updater {
         loopThread = new Thread(() -> {
             sleep(20_000);
             while (true) {
-                long age = System.currentTimeMillis() - prefs().getLong("lastCheck", 0);
-                if (loopOn && auto() && age > AUTO_EVERY) checkAsync(false);
+                long autoAge = System.currentTimeMillis() - prefs().getLong("lastAutoCheck", 0);
+                if (loopOn && auto() && autoAge > AUTO_EVERY) checkAsync(false);
                 else if (loopOn && env.devkitReady() && !checkedOnce) checkAsync(true);
-                long wait = (loopOn && auto() && age >= 0 && age < AUTO_EVERY)
-                    ? Math.max(60_000L, Math.min(30 * 60_000L, AUTO_EVERY - age))
+                long wait = (loopOn && auto() && autoAge >= 0 && autoAge < AUTO_EVERY)
+                    ? Math.max(60_000L, Math.min(30 * 60_000L, AUTO_EVERY - autoAge))
                     : 30 * 60_000L;
                 sleep(wait);
             }

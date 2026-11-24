@@ -16,7 +16,7 @@ import { ccMem, privCall } from "./usage.mjs";
 const DEV_UPD_FILE = path.join(CFG.home, "ccapp-update.json");
 const CC_BASE = "https://downloads.claude.ai/claude-code-releases";
 const devUpd = {
-  auto: true, channel: "stable", lastCheck: 0, checkedOnce: false, checking: false, error: "",
+  auto: true, channel: "stable", lastCheck: 0, lastAutoCheck: 0, checkedOnce: false, checking: false, error: "",
   claude: { id: "claude", name: "Claude Code", current: "", latest: "", state: "unknown", message: "", done: 0, total: 0 },
 };
 try { Object.assign(devUpd, JSON.parse(fs.readFileSync(DEV_UPD_FILE, "utf8")), { checking: false, checkedOnce: false, error: "" }); devUpd.claude.state = devUpd.claude.state === "installing" ? "unknown" : devUpd.claude.state; } catch {}
@@ -40,8 +40,9 @@ function claudeVersionOf(bin) {
 
 // 检查途中换了渠道：这次的结果是旧渠道的，不能记到新渠道名下；结束后按新渠道再查一次（#136）
 let devUpdAgain = false;
-async function devUpdCheck() {
-  if (devUpd.checking) { devUpdAgain = true; return; }
+let devUpdAgainAuto = false;
+async function devUpdCheck(manual = true) {
+  if (devUpd.checking) { devUpdAgain = true; if (!manual) devUpdAgainAuto = true; return; }
   devUpd.checking = true; devUpd.error = "";
   const c = devUpd.claude, ch = devUpd.channel;
   try {
@@ -58,11 +59,16 @@ async function devUpdCheck() {
       c.message = d < 0 && c.current ? `切回 ${devUpd.channel} 渠道：将换成 ${v}（比当前的 ${c.current} 旧）` : devUpd.channel === "latest" ? "latest 渠道" : "";
     }
     devUpd.lastCheck = Date.now();
+    if (!manual) devUpd.lastAutoCheck = devUpd.lastCheck;
   } catch (e) { devUpd.error = tz("连不上 downloads.claude.ai：{err}", { err: e.message }); }
   finally {
     if (!devUpdAgain) devUpd.checkedOnce = true;
     devUpd.checking = false; devUpdSave();
-    if (devUpdAgain) { devUpdAgain = false; setImmediate(devUpdCheck); }
+    if (devUpdAgain) {
+      const nextManual = !devUpdAgainAuto;
+      devUpdAgain = false; devUpdAgainAuto = false;
+      setImmediate(() => devUpdCheck(nextManual));
+    }
   }
 }
 
@@ -131,12 +137,15 @@ function devUpdStatus() {
   return { ok: true, ...rest, items: [claude] };
 }
 
-// 自动：启动 1 分钟后、之后每 30 分钟看一眼，距上次检查超过 6 小时就查；有新版且开着自动就装
+// 自动：启动 1 分钟后、之后每 30 分钟看一眼，距上次自动检查超过 6 小时就查并按自动设置安装；本进程未查过则静默首查
 if (!PREFIX) {
   const tick = async () => {
-    if (!devUpd.auto || Date.now() - devUpd.lastCheck < 6 * 3600_000) return;
-    await devUpdCheck();
-    if (devUpd.auto && devUpd.claude.state === "available") devUpdInstall();
+    if (devUpd.auto && Date.now() - (devUpd.lastAutoCheck || 0) >= 6 * 3600_000) {
+      await devUpdCheck(false);
+      if (devUpd.auto && devUpd.claude.state === "available") devUpdInstall();
+    } else if (!devUpd.checkedOnce) {
+      await devUpdCheck(true);
+    }
   };
   setTimeout(tick, 60_000).unref?.();
   setInterval(tick, 30 * 60_000).unref?.();

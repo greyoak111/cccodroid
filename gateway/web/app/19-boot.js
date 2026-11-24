@@ -598,10 +598,7 @@
       <div class="wn-body">${list.map((x) => `<section><div class="wn-ver">v${esc(x.v)}</div><div class="bubble wn-md">${renderMd(x.md)}</div></section>`).join("")}
         <section class="wn-cm"><div class="wn-ver">${esc(t("交流与反馈"))}</div>${communityHtml(true)}</section></div>
       <div class="wn-foot"><button class="btn ghost" data-act="log">${esc(t("更新日志"))}</button><button class="btn" data-act="ok">${esc(t("知道了"))}</button></div></div>`;
-    const close = () => {
-      OV.close(el);
-      if (noticeHold) { noticeHold = false; setTimeout(loadNotices, 400); }
-    };
+    const close = () => OV.close(el);
     communityBind(el);
     el.addEventListener("click", (e) => {
       if (e.target.closest("[data-act=log]")) { close(); openPage("changelog"); }
@@ -611,7 +608,10 @@
       const u = a.getAttribute("href") || "";
       if (/^https?:\/\//.test(u) && A.openUrl) { e.preventDefault(); A.openUrl(u); }
     }));
-    OV.open(el, { kind: "modal", keep: true, cover: true });
+    OV.open(el, {
+      kind: "modal", keep: true, cover: true,
+      onClose: () => { if (noticeHold) { noticeHold = false; setTimeout(loadNotices, 400); } },
+    });
     try { A.whatsNewSeen(); } catch {}
     return true;
   }

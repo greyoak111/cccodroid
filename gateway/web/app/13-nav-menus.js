@@ -463,7 +463,6 @@
     if (more) items.push(...more); else items.push({ label: t("在脉络中查看"), icon: SM.lineage, fn: () => { closeDrawer(); openLineage(id); } });
     popMenu(anchor, items, null, "lineage");
   }
-  let acctUpdKickAt = 0;
   // 账户菜单：常用的在上，不可逆的放最下
   function acctMenu() {
     const st = state.serverStatus || {};
@@ -505,17 +504,7 @@
       if (!badge) { badge = document.createElement("small"); row.appendChild(badge); }
       badge.textContent = text;
     };
-    readUpdateStatus().then((upd) => {
-      paintUpdBadge();
-      if (upd?.ok && upd.checkedOnce === false && !upd.checking && Date.now() - acctUpdKickAt > 20000) {
-        acctUpdKickAt = Date.now();
-        post("/api/app/upd_check").then(() => {
-          setTimeout(() => {
-            if (OV.at(anchor) === menu) readUpdateStatus().then(paintUpdBadge).catch(() => {});
-          }, 2500);
-        }).catch(() => {});
-      }
-    }).catch(() => {});
+    readUpdateStatus().then(paintUpdBadge).catch(() => {});
   }
 
   // ══ 项目与定时任务（照稿）════════════════════════════════════════

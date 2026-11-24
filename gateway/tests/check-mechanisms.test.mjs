@@ -50,6 +50,7 @@ test("链路①：开发端 /api/app/upd_status 纯只读不隐式触发检查�
     const body = await r.json();
     assert.equal(body.ok, true);
     assert.equal(body.checkedOnce, false, "冷启动未检查过时 checkedOnce 应为 false");
+    assert.equal(body.lastAutoCheck, 0, "upd_status 应透出 lastAutoCheck");
     assert.equal(body.checking, false, "upd_status 不得隐式触发 devUpdCheck");
     assert.equal(remoteHits, 0, "upd_status 不得发起远端网络检查");
   } finally {
@@ -58,7 +59,7 @@ test("链路①：开发端 /api/app/upd_status 纯只读不隐式触发检查�
   }
 });
 
-test("链路①：updOnOpen() 处理 checking 补挂轮询、!checkedOnce 突破 20s lastCheck、旧壳兼容与节流", async () => {
+test("链路①：updOnOpen() 处理 checking 补挂轮询、!checkedOnce 突破 10 分钟节流、旧壳兼容与节流", async () => {
   const src = readRepo("gateway/web/app/10-settings-device.js");
   const start = src.indexOf("  async function updOnOpen()");
   const end = src.indexOf('\n  $("upd-check")', start);
@@ -95,21 +96,21 @@ test("链路①：updOnOpen() 处理 checking 补挂轮询、!checkedOnce 突破
   assert.equal(c2.postCalls, 0);
   assert.deepEqual(c2.laterCalls, [[1000, 7]]);
 
-  // 3) 进程刚重启 checkedOnce=false，即使磁盘 lastCheck 在 20s 内也必须触发 upd_check
+  // 3) 进程刚重启 checkedOnce=false，即使磁盘 lastCheck 在 10 分钟内也必须触发 upd_check
   const c3 = await runCase({ ok: true, checking: false, checkedOnce: false, lastCheck: Date.now() - 5000, items: [{ state: "unknown" }] });
   assert.equal(c3.followCalls, 1);
   assert.equal(c3.postCalls, 1);
   assert.deepEqual(c3.laterCalls, [[300, 7]]);
 
-  // 4) 本进程已查过（checkedOnce=true）且 20s 内刚查过：不再重复触发
-  const c4 = await runCase({ ok: true, checking: false, checkedOnce: true, lastCheck: Date.now() - 5000, items: [{ state: "uptodate" }] });
+  // 4) 本进程已查过（checkedOnce=true）且 10 分钟内刚查过（如 5 分钟前）：不再重复触发
+  const c4 = await runCase({ ok: true, checking: false, checkedOnce: true, lastCheck: Date.now() - 5 * 60_000, items: [{ state: "uptodate" }] });
   assert.equal(c4.postCalls, 0);
   assert.equal(c4.followCalls, 0);
 
-  // 5) 兼容旧宿主壳（无 checkedOnce 字段，undefined !== false）：20s 内跳过，超 20s 触发
-  const c5 = await runCase({ ok: true, checking: false, lastCheck: Date.now() - 5000, items: [{ state: "uptodate" }] });
+  // 5) 兼容旧宿主壳（无 checkedOnce 字段，undefined !== false）：10 分钟内跳过，超 10 分钟触发
+  const c5 = await runCase({ ok: true, checking: false, lastCheck: Date.now() - 5 * 60_000, items: [{ state: "uptodate" }] });
   assert.equal(c5.postCalls, 0);
-  const c6 = await runCase({ ok: true, checking: false, lastCheck: Date.now() - 25000, items: [{ state: "uptodate" }] });
+  const c6 = await runCase({ ok: true, checking: false, lastCheck: Date.now() - 11 * 60_000, items: [{ state: "uptodate" }] });
   assert.equal(c6.postCalls, 1);
 });
 
@@ -117,10 +118,17 @@ test("链路①②③⑤⑥：关键接线与 Java/前端源码契约核验", ()
   const updater = readRepo("android/java/cc/codroid/Updater.java");
   assert.match(updater, /private volatile boolean checkedOnce;/);
   assert.doesNotMatch(updater, /if \(!checking && "unknown"\.equals\(app\.state\) && "unknown"\.equals\(claude\.state\)\) checkAsync\(true\);/);
+  assert.match(updater, /\.put\("lastAutoCheck",\s*prefs\(\)\.getLong\("lastAutoCheck",\s*0\)\)/);
   assert.match(updater, /\.put\("checkedOnce", checkedOnce\)/);
-  assert.match(updater, /checkedOnce = true;\s*prefs\(\)\.edit\(\)\.putLong\("lastCheck"/);
+  assert.match(updater, /finally\s*\{\s*checkedOnce = true;\s*\}/);
+  assert.match(updater, /if \(!manual\) ed\.putLong\("lastAutoCheck", now\);/);
+  assert.match(updater, /long autoAge = System\.currentTimeMillis\(\) - prefs\(\)\.getLong\("lastAutoCheck", 0\);/);
   assert.match(updater, /else if \(loopOn && env\.devkitReady\(\) && !checkedOnce\) checkAsync\(true\);/);
-  assert.match(updater, /Math\.max\(60_000L,\s*Math\.min\(30 \* 60_000L,\s*AUTO_EVERY - age\)\)/);
+  assert.match(updater, /Math\.max\(60_000L,\s*Math\.min\(30 \* 60_000L,\s*AUTO_EVERY - autoAge\)\)/);
+
+  const devside = readRepo("gateway/gw/devside.mjs");
+  assert.match(devside, /lastAutoCheck:\s*0/);
+  assert.match(devside, /if \(!manual\) devUpd\.lastAutoCheck = devUpd\.lastCheck;/);
 
   const envJava = readRepo("android/java/cc/codroid/Env.java");
   assert.match(envJava, /e\.put\("CCAPP_APP_VERSION",\s*appVersion\)/);
@@ -133,12 +141,16 @@ test("链路①②③⑤⑥：关键接线与 Java/前端源码契约核验", ()
   assert.doesNotMatch(pages, /resumed \? loadUpd\(\) : updOnOpen\(\)/);
 
   const nav = readRepo("gateway/web/app/13-nav-menus.js");
-  assert.match(nav, /upd\?\.ok && upd\.checkedOnce === false && !upd\.checking/);
-  assert.match(nav, /post\("\/api\/app\/upd_check"\)/);
+  const acctStart = nav.indexOf("function acctMenu()");
+  const acctEnd = nav.indexOf("\n  // ══ 项目与定时任务", acctStart);
+  const acctSrc = nav.slice(acctStart, acctEnd);
+  assert.match(acctSrc, /readUpdateStatus\(\)\.then\(paintUpdBadge\)/);
+  assert.doesNotMatch(acctSrc, /\/api\/app\/upd_check/, "acctMenu 应保持纯只读，不得触发 upd_check");
+  assert.doesNotMatch(nav, /acctUpdKickAt/);
 
   const proj = readRepo("gateway/web/app/14-projects-sched.js");
   assert.match(proj, /if \(name === "ext"\) \{ loadModules\(\); loadComponents\(60\); \}/);
 
   const boot = readRepo("gateway/web/app/19-boot.js");
-  assert.match(boot, /if \(noticeHold\) \{ noticeHold = false; setTimeout\(loadNotices, 400\); \}/);
+  assert.match(boot, /OV\.open\(el,\s*\{\s*kind: "modal", keep: true, cover: true,\s*onClose: \(\) => \{ if \(noticeHold\) \{ noticeHold = false; setTimeout\(loadNotices, 400\); \} \},\s*\}\);/);
 });
