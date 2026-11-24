@@ -1145,8 +1145,8 @@ final class Installer {
     }
 
     int run(String... cmd) throws IOException {
-        ProcessBuilder pb = new ProcessBuilder(env.cmd(cmd));
-        env.apply(pb.environment());
+        ProcessBuilder pb = env.proc(cmd);
+        pb.environment().remove("CCAPP_TOKEN_FILE");
         pb.directory(env.home);
         pb.redirectErrorStream(true);
         Process p = pb.start();

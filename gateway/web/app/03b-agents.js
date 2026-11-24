@@ -221,9 +221,10 @@
   async function agLoad(sid) {
     if (!sid || AG.loaded === sid) return;
     AG.loaded = sid;                               // 先占上：取的过程中再来的不重复发
+    const gen = view.gen;
     try {
       const r = await api(`/api/session/${encodeURIComponent(sid)}/agents`);
-      if (view.sessionId !== sid) return;
+      if (view.sessionId !== sid || view.gen !== gen) return;
       for (const rec of r.records || []) agApply(rec, null);
     } catch { if (AG.loaded === sid) AG.loaded = null; }   // 取失败别当取过：下次翻页再取（#95 01-002）
   }

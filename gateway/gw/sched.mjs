@@ -406,14 +406,15 @@ async function fireNow(t, { reason, attempt, trial, occurrence }) {
       if (c.battery && (st.battery == null || st.battery < c.battery)) return skip(st.battery == null ? tz("判断不了当前电量") : tz("电量 {b}%，低于 {m}%", { b: st.battery, m: c.battery }));
     }
   }
-  // 并行槽和 queue.pump 用同一口径：idle 轮也占一个槽，以前这里按 !idle 判定，任务会在队里干等（197-5.6）
-  const busy = RUNS.size >= maxParallel();
+  // 并行槽和 queue.pump 用同一口径：idle 轮与队列中未挂起待跑项一并算占槽，防止队列已满时定时任务误判空闲直接冲入（A-07）
+  const busySlots = () => RUNS.size + QUEUE.filter((q) => !q.held).length;
+  const busy = busySlots() >= maxParallel();
   if (busy && !trial) {
     if (t.busy === "skip") return skip(tz("有对话在跑"));
     if (t.busy !== "run") {
       // 排队：每 30 秒看一次，最多等 30 分钟
       const deadline = Date.now() + 30 * 60000;
-      while (RUNS.size >= maxParallel()) {
+      while (busySlots() >= maxParallel()) {
         if (Date.now() > deadline) return skip(tz("有对话在跑，排队 30 分钟仍没轮到"));
         if (skipIfCancelled()) return;
         await new Promise((r) => setTimeout(r, 30000));

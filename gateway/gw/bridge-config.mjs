@@ -76,7 +76,11 @@ function regularJson(file, max) {
     let length = 0, n;
     while (length < bytes.length && (n = fs.readSync(fd, bytes, length, bytes.length - length, null))) length += n;
     const after = fs.fstatSync(fd, { bigint: true });
-    if (length !== Number(stat.size) || ["dev", "ino", "mode", "size", "mtimeNs", "ctimeNs"].some((k) => stat[k] !== after[k])) throw failure("invalid_component");
+    // 读中一致性检查不含 ctimeNs：部分文件系统（overlayfs）在写入后 0–1ms 内会自发改动
+    // ctimeNs（内容、mtime、ino、size、mode 全不变），把它算进比对会让修复流程偶发
+    // REPAIR_STALE/REPAIR_UNAVAILABLE。唯一失去的是“只改 owner 或只改链接数”的检测，
+    // 不在修复流程的威胁模型里（内容 hash、ino/mtime 原子替换、mode 权限全部保留）。
+    if (length !== Number(stat.size) || ["dev", "ino", "mode", "size", "mtimeNs"].some((k) => stat[k] !== after[k])) throw failure("invalid_component");
     return JSON.parse(bytes.subarray(0, length).toString("utf8"));
   } finally { fs.closeSync(fd); }
 }
@@ -651,7 +655,7 @@ function repairFile(file, max) {
     let length = 0, n;
     while (length < bytes.length && (n = fs.readSync(fd, bytes, length, bytes.length - length, null))) length += n;
     const b = fs.fstatSync(fd, { bigint: true }), c = fs.lstatSync(file, { bigint: true });
-    const keys = ["dev", "ino", "mode", "nlink", "size", "mtimeNs", "ctimeNs"];
+    const keys = ["dev", "ino", "mode", "nlink", "size", "mtimeNs"]; // 不含 ctimeNs：见 regularJson 注释，写后自发漂移会误判文件被改动
     if (length !== Number(a.size) || keys.some(k => a[k] !== b[k] || a[k] !== c[k])) throw repairFailure();
     return keys.map(k => String(a[k])).join(":") + ":" + crypto.createHash("sha256").update(bytes.subarray(0, length)).digest("hex");
   } catch { throw repairFailure(); }
@@ -679,7 +683,7 @@ function repairSnapshot() {
   // 包文件可能为 0644；它们仍需 NOFOLLOW/普通文件及稳定读，不能套用私有凭据的 0600 要求。
   const component = regularJson(path.join(path.dirname(PREFIX), "components", ID + ".json"), 4 << 20);
   const st = fs.lstatSync(entry, { bigint: true });
-  return JSON.stringify([identities, protectedFiles, component, String(st.dev), String(st.ino), String(st.mtimeNs), String(st.ctimeNs)]);
+  return JSON.stringify([identities, protectedFiles, component, String(st.dev), String(st.ino), String(st.mtimeNs)]); // 不含 ctimeNs：同上
 }
 function repairBusy(id, baseUrl) {
   return [...RUNS.values()].some(run => !run.ended && (run.provider === id || PROVIDERS_CFG.providers[run.provider]?.baseUrl === baseUrl));

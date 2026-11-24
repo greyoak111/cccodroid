@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import readline from "node:readline";
 import { CFG, LAST_LANG, PATHS, log, tr, tz } from "./config.mjs";
 import { SID_RE, TRASH_KEEP_DAYS, inTrash, exportSessions, deleteMessage, forkSession, importSessions, listTrash, locateUserTurn, purgeTrash, realWorkspace, restoreSession, rewindFiles, rewindFixup, trashPresence, trashSession, undoDelete } from "./sessionops.mjs";
-import { goalStateOf, tasksOf } from "./goal.mjs";
+import { goalStateOf, goalStateOfAsync, tasksOf } from "./goal.mjs";
 import { backfillAgents, readAgentIndex, settleAgentRecs } from "./agents.mjs";
 import { bodyToFile, forEachLine } from "./bigfile.mjs";
 import { agentFilesOf, findLineOffset, latestContextTokens, lineHas, readSessionForward, readSessionPage, transcriptItems } from "./transcript.mjs";
@@ -606,7 +606,7 @@ export async function routeSessions(req, res, u, p) {
         contextTokens: fwd === null ? page.contextTokens : u.searchParams.has("after") ? undefined : await latestContextTokens(found.file),
         liveRunId: live ? live.id : null,
         // 翻页不带；重连续读的首屏（after + meta=1）要带，界面刚把它们清掉（#178-1）
-        goal: wantMeta ? goalStateOf(found.file) : undefined,
+        goal: wantMeta ? await goalStateOfAsync(found.file) : undefined,
         tasks: wantMeta ? tasksOf(id) : undefined,
       });
     }

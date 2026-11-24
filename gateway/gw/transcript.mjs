@@ -55,8 +55,8 @@ export function transcriptItems(ev) {
     } else if (Array.isArray(c)) {
       const blocks = blocksOf(c);
       const texts = blocks.filter((x) => x.type === "text" && typeof x.text === "string" && x.text && !isInjected(x.text)).map((x) => x.text);
-      // 「图片随消息发」时原话里已有 @图片路径，不再补一行 [图片]
-      if (blocks.some((x) => x.type === "image") && !texts.some((x) => /@\/\S+\.(png|jpe?g|gif|webp)\b/i.test(x))) texts.push("[图片]");
+      // 「图片随消息发」时原话里已有 @图片路径（含带空格引号形态），不再补一行 [图片]
+      if (blocks.some((x) => x.type === "image") && !texts.some((x) => /(?:@"\/[^"<>`\r\n]+\.(?:png|jpe?g|gif|webp)"|@\/\S+\.(?:png|jpe?g|gif|webp)\b)/i.test(x))) texts.push("[图片]");
       if (texts.length) out.push({ role: "user", text: texts.join("\n"), uuid: ev.uuid || null });
       for (const r of blocks) {
         if (r.type !== "tool_result") continue;

@@ -14,7 +14,7 @@ import { pathBlocked } from "./files.mjs";
 const MAX_IMAGES = 5;
 const MAX_RAW = 3.75 * 1024 * 1024;        // base64 后 5 MB 是官方单图上限，第三方只会更紧
 const MAX_SHRINK = 64 * 1024 * 1024;       // 再大的原图不交给 magick 缩（缩在别的进程里，但也要读、要时间），只走 Read
-const REF = /@(\/[^\s"'<>`]+?\.(?:png|jpe?g|gif|webp))(?=[\s"'<>`),.;，。；]|$)/gi;
+const REF = /@"(\/[^"<>`\r\n]+?\.(?:png|jpe?g|gif|webp))"|@(\/[^\s"'<>`]+?\.(?:png|jpe?g|gif|webp))(?=[\s"'<>`),.;，。；]|$)/gi;
 
 /** 按文件头认格式：扩展名和内容对不上时，按扩展名报 media_type 会被拒 */
 function sniff(buf) {
@@ -33,7 +33,7 @@ export const wantsInline = (P) => !!(P && P.inlineImages && !P.local);
 export function imageRefs(msg) {
   const out = [];
   for (const m of String(msg || "").matchAll(REF)) {
-    const p = m[1];
+    const p = m[1] || m[2];
     if (out.includes(p)) continue;
     // 图片原样发给外部接口：应用私有目录、凭据里的不带（0.6.9 审计 P2 R1）
     try { if (!fs.statSync(p).isFile() || pathBlocked(fs.realpathSync(p))) continue; } catch { continue; }

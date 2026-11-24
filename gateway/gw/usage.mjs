@@ -269,44 +269,48 @@ function usageImport(extraOnly) {
       for (const f of list) {
         files++;
         let pending = null;            // 刚收到一条提问、还没见到回复：第一条回复的模型算这一轮的
-        const rl = (await import("node:readline")).createInterface({ input: fs.createReadStream(path.join(PATHS.projects, d, f)), crlfDelay: Infinity });
-        for await (const line of rl) {
-          if (line.length < 20 || !/"type":"(user|assistant)"/.test(line)) continue;
-          let e; try { e = JSON.parse(line); } catch { continue; }
-          if (e.isSidechain || !e.timestamp) continue;
-          const ts = Date.parse(e.timestamp), q = usageQuarter(ts);
-          if (!(ts < cutoff)) continue;
-          const m = e.message || {};
-          if (e.type === "user" && m.role === "user") {
-            if (e.isMeta || e.isCompactSummary || (e.uuid && seenU.has(e.uuid))) continue;
-            if (!usageIsPrompt(usageText(m.content))) continue;
-            if (e.uuid) seenU.add(e.uuid);
-            const b = usageBucket(quarters, q);
-            b.m++; prompts++;
-            if (e.sessionId && !b.s.includes(e.sessionId) && b.s.length < 200) b.s.push(e.sessionId);
-            pending = b;
-          } else if (e.type === "assistant" && m.model && m.model !== "<synthetic>") {
-            if (pending) { pending.t++; pending.md[m.model] = (pending.md[m.model] || 0) + 1; pending = null; }
-            for (const c of m.content || []) if (c && c.type === "tool_use" && c.id && !seenTool.has(c.id)) { seenTool.add(c.id); usageBucket(quarters, q).tl++; }
-            // 同一条回复流式拆成好几行、每行都带 usage：按 message.id 只算一次（取最后一行的）
-            if (m.id && m.usage) msgs.set(m.id, [q, m.usage, m.model, e.sessionId]);
+        try {
+          const rl = (await import("node:readline")).createInterface({ input: fs.createReadStream(path.join(PATHS.projects, d, f)), crlfDelay: Infinity });
+          for await (const line of rl) {
+            if (line.length < 20 || !/"type":"(user|assistant)"/.test(line)) continue;
+            let e; try { e = JSON.parse(line); } catch { continue; }
+            if (e.isSidechain || !e.timestamp) continue;
+            const ts = Date.parse(e.timestamp), q = usageQuarter(ts);
+            if (!(ts < cutoff)) continue;
+            const m = e.message || {};
+            if (e.type === "user" && m.role === "user") {
+              if (e.isMeta || e.isCompactSummary || (e.uuid && seenU.has(e.uuid))) continue;
+              if (!usageIsPrompt(usageText(m.content))) continue;
+              if (e.uuid) seenU.add(e.uuid);
+              const b = usageBucket(quarters, q);
+              b.m++; prompts++;
+              if (e.sessionId && !b.s.includes(e.sessionId) && b.s.length < 200) b.s.push(e.sessionId);
+              pending = b;
+            } else if (e.type === "assistant" && m.model && m.model !== "<synthetic>") {
+              if (pending) { pending.t++; pending.md[m.model] = (pending.md[m.model] || 0) + 1; pending = null; }
+              for (const c of m.content || []) if (c && c.type === "tool_use" && c.id && !seenTool.has(c.id)) { seenTool.add(c.id); usageBucket(quarters, q).tl++; }
+              // 同一条回复流式拆成好几行、每行都带 usage：按 message.id 只算一次（取最后一行的）
+              if (m.id && m.usage) msgs.set(m.id, [q, m.usage, m.model, e.sessionId]);
+            }
           }
-        }
+        } catch {}
         // 子代理的 token 记在 <会话>/subagents/*.jsonl：实时统计（usageMeter 的 scanSubs）算它们，补算也要算，不然历史偏低（审查 B29）。
         // 只算 token；提问数、轮数、工具数照旧只看主会话
         const sid = f.slice(0, -6), sub = path.join(PATHS.projects, d, sid, "subagents");
         let subs = [];
         try { subs = fs.readdirSync(sub).filter((x) => x.endsWith(".jsonl")); } catch {}
         for (const sf of subs) {
-          const rs = (await import("node:readline")).createInterface({ input: fs.createReadStream(path.join(sub, sf)), crlfDelay: Infinity });
-          for await (const line of rs) {
-            if (line.length < 20 || !line.includes('"type":"assistant"')) continue;
-            let e; try { e = JSON.parse(line); } catch { continue; }
-            const m = e.message || {};
-            if (e.type !== "assistant" || !e.timestamp || !m.id || !m.usage || !m.model || m.model === "<synthetic>") continue;
-            const ts = Date.parse(e.timestamp);
-            if (ts < cutoff) msgs.set(m.id, [usageQuarter(ts), m.usage, m.model, e.sessionId || sid]);
-          }
+          try {
+            const rs = (await import("node:readline")).createInterface({ input: fs.createReadStream(path.join(sub, sf)), crlfDelay: Infinity });
+            for await (const line of rs) {
+              if (line.length < 20 || !line.includes('"type":"assistant"')) continue;
+              let e; try { e = JSON.parse(line); } catch { continue; }
+              const m = e.message || {};
+              if (e.type !== "assistant" || !e.timestamp || !m.id || !m.usage || !m.model || m.model === "<synthetic>") continue;
+              const ts = Date.parse(e.timestamp);
+              if (ts < cutoff) msgs.set(m.id, [usageQuarter(ts), m.usage, m.model, e.sessionId || sid]);
+            }
+          } catch {}
         }
       }
     }

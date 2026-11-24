@@ -844,13 +844,15 @@
     if (name === "ext") { loadModules(); loadComponents(60); }
     if (name === "sched") { renderSched(); loadSched(); schedPollSet(true); }
     if (name === "projects") renderProjects();
-    if (name === "sessions") renderSessions();
+    if (name === "sessions") { renderSessions(); loadSessions(); if (sess.mode === "trash") loadTrash(); }
+    if (name === "trash") loadTrash();
+    if (name === "bookmarks") loadBookmarks();
     if (name === "caps") renderCaps();
     if (name === "changelog") loadChangelogVersion();
   }
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { pausePageReads(curPage, false); if (setOpen) pauseSetReads(); }
-    else if (setOpen) enterSetCat(setCatOpen, true);
+    else if (setOpen) { setBaseRead = refreshSettings(false); enterSetCat(setCatOpen, true); }
     else resumePageReads(curPage);
   });
   /** 打开整页：窄屏收起侧栏、盖住对话；宽屏侧栏照旧常驻，高亮当前项 */

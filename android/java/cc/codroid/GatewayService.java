@@ -427,22 +427,11 @@ public class GatewayService extends Service {
         synchronized (life) { myGen = lifeGen; }     // 这次启动属于哪一代服务（BUG-A03）
         env = new Env(this);                 // 每次重读：执行方式（files/.exec-mode）改了，重启网关就生效
         Log.i(TAG, "执行方式 pref=" + Env.execPref(this) + " targetSdk=" + env.targetSdk + " loader=" + env.loader + " ldso=" + env.ldsoMatches());
-        // 起之前核一遍 files/app（见 AppFiles）：两次起网关之间被改过的，按安装包还原了再起
-        java.util.List<String> bad = AppFiles.tampered(this, env.app);
-        if (!bad.isEmpty()) {
-            String upd = AppFiles.updatedFrom(this, env.app);
-            AppFiles.deploy(this, env.app);
-            if (upd != null) {
-                // 刚升级：文件不一样是版本差异，按新安装包铺好就是，不记篡改、不提醒模型（AppFiles.updatedFrom）
-                Log.i(TAG, "刚升级（" + upd + "），起网关前按新安装包重铺 files/app");
-                AppFiles.noteUpdated(upd);
-            } else {
-                Log.w(TAG, "files/app 被改过，起网关前还原：" + bad);
-                Ledger.add(env, "repair", true, Tr.t("界面与网关的文件被改动过，已按安装包还原：") + android.text.TextUtils.join(", ", bad), null);
-                AppFiles.noteRestored(bad);
-            }
+        // 起之前原子核对 files/app（A-09）：与 MainActivity.deployAssets 共用 AppFiles.ensureSynced 锁，避免升级时双铺或假篡改
+        AppFiles.SyncResult syncRes = AppFiles.ensureSynced(this, env, false, null, null);
+        if (syncRes.kind == AppFiles.SyncResult.UPDATED) {
+            Log.i(TAG, "刚升级（" + syncRes.detail + "），起网关前按新安装包重铺 files/app");
         }
-        AppFiles.markSeen(this);
         // 不让 node 按路径去读 server.mjs：核完到它读进来之间能被换掉（安全 5）。引导 boot.mjs 从安装包里取原文经 -e 交过去，
         // 它按 FILES 核 node 实际读到的每个模块的字节再执行（gateway/boot.mjs）
         String boot = AppFiles.assetText(this, "app/boot.mjs");
@@ -549,6 +538,9 @@ public class GatewayService extends Service {
         }
         // 收尾放在锁外：停止方可能正等着这把锁；没交出去的这个进程也要收干净
         if (cancel) { terminate(p); throw new Cancelled(); }
+        int gpid = processPid(p);
+        long gst = gpid > 0 ? procStartTime(gpid) : -1;
+        if (gpid > 0 && gst > 0) writeGatewayPid(env.files, gpid, gst);
         try (java.io.OutputStream o = p.getOutputStream()) { o.write((ks + "\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII)); }
         catch (java.io.IOException e) { Log.w(TAG, "启动随机数没交过去：" + e.getMessage()); }
     }
@@ -786,6 +778,69 @@ public class GatewayService extends Service {
         return cmd.contains("\0--input-type=module\0-e\0") && cmd.endsWith("\0" + app + "\0" + Env.PORT + "\0");
     }
 
+    private static final String GW_PID_FILE = ".gateway.pid";
+
+    /** 提取子进程 PID（兼容 API 26-36，不依赖 Java 9 Process.pid()） */
+    static int processPid(Process p) {
+        if (p == null) return -1;
+        try {
+            java.lang.reflect.Field f = p.getClass().getDeclaredField("pid");
+            f.setAccessible(true);
+            int v = f.getInt(p);
+            if (v > 0) return v;
+        } catch (Throwable ignored) {}
+        try {
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("pid=(\\d+)").matcher(String.valueOf(p));
+            if (m.find()) return Integer.parseInt(m.group(1));
+        } catch (Throwable ignored) {}
+        return -1;
+    }
+
+    /** 解析 /proc/<pid>/stat 第 22 字段 starttime（PR_SET_DUMPABLE=0 下仍可读，防 PID 复用） */
+    static long parseStatStartTime(String stat) {
+        if (stat == null) return -1;
+        int rp = stat.lastIndexOf(')');
+        if (rp < 0 || rp + 2 >= stat.length()) return -1;
+        String[] fields = stat.substring(rp + 2).trim().split("\\s+");
+        if (fields.length <= 19) return -1;
+        try { return Long.parseLong(fields[19]); } catch (NumberFormatException e) { return -1; }
+    }
+
+    static long procStartTime(int pid) {
+        if (pid <= 0) return -1;
+        try {
+            String s = new String(java.nio.file.Files.readAllBytes(new File("/proc/" + pid + "/stat").toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            return parseStatStartTime(s);
+        } catch (Exception e) { return -1; }
+    }
+
+    /** 原子落盘网关 pid:starttime（A-06）：App 重建后即使 PR_SET_DUMPABLE=0 阻断 /proc/cmdline/environ/fd 也能精准收割旧网关 */
+    static void writeGatewayPid(File files, int pid, long startTime) {
+        if (files == null || pid <= 0 || startTime <= 0) return;
+        File dst = new File(files, GW_PID_FILE);
+        File tmp = new File(files, GW_PID_FILE + ".tmp");
+        byte[] data = (pid + ":" + startTime + "\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        try {
+            java.nio.file.Files.write(tmp.toPath(), data);
+            if (!tmp.renameTo(dst)) {
+                java.nio.file.Files.write(dst.toPath(), data);
+                tmp.delete();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    static long[] readGatewayPid(File files) {
+        if (files == null) return null;
+        try {
+            String s = new String(java.nio.file.Files.readAllBytes(new File(files, GW_PID_FILE).toPath()), java.nio.charset.StandardCharsets.US_ASCII).trim();
+            int i = s.indexOf(':');
+            if (i <= 0) return null;
+            long pid = Long.parseLong(s.substring(0, i).trim());
+            long st = Long.parseLong(s.substring(i + 1).trim());
+            return pid > 0 && st > 0 ? new long[]{ pid, st } : null;
+        } catch (Exception e) { return null; }
+    }
+
     private static boolean alivePid(int pid) {
         try { android.system.Os.stat("/proc/" + pid); return true; } catch (Exception e) { return false; }
     }
@@ -813,6 +868,20 @@ public class GatewayService extends Service {
                 if (!isGatewayCmd(cmd, env.app.getPath())) continue;   // 只认本应用的网关，用户自己的 server.mjs 不碰
                 gw.add(Integer.parseInt(name));
             } catch (Exception ignored) {}
+        }
+        // A-06：PR_SET_DUMPABLE=0 下部分内核同 UID 读 /proc/<pid>/cmdline 也会 EACCES；补充查 .gateway.pid（校验同 UID + starttime 防 PID 复用）
+        long[] savedPid = readGatewayPid(env.files);
+        if (savedPid != null) {
+            int spid = (int) savedPid[0];
+            long sstart = savedPid[1];
+            if (spid > 0 && spid != android.os.Process.myPid() && !gw.contains(spid)) {
+                try {
+                    if (android.system.Os.stat("/proc/" + spid).st_uid == me && procStartTime(spid) == sstart) {
+                        Log.w(TAG, "经 .gateway.pid 识别到本应用残留网关 pid=" + spid);
+                        gw.add(spid);
+                    }
+                } catch (Exception ignored) {}
+            }
         }
         // 残留网关正在安装（心跳新鲜）且它的进程真活着：先别发信号杀它，回循环顶部让 alive() 按安装心跳继续等。
         // 没有活着的网关进程就不等——心跳文件可能是刚被杀的网关留下的，空转 120 秒只会让 UI 干等（复核 R2-P1-3）

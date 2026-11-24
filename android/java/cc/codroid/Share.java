@@ -460,9 +460,9 @@ public final class Share extends ContentProvider {
         if (!curl.isFile()) return r.append("  （没有 curl）").toString();
         Process p = null;
         try {
-            ProcessBuilder pb = new ProcessBuilder(env.cmd(curl.getPath(), "-sS", "-o", "/dev/null", "-w", "HTTP %{http_code} %{remote_ip} %{time_total}s",
-                "--connect-timeout", "5", "--max-time", "10", "https://" + host + "/"));
-            env.apply(pb.environment());
+            ProcessBuilder pb = env.proc(curl.getPath(), "-sS", "-o", "/dev/null", "-w", "HTTP %{http_code} %{remote_ip} %{time_total}s",
+                "--connect-timeout", "5", "--max-time", "10", "https://" + host + "/");
+            pb.environment().remove("CCAPP_TOKEN_FILE");
             pb.directory(env.home);
             pb.redirectErrorStream(true);
             p = pb.start();

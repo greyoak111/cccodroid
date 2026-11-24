@@ -402,6 +402,21 @@ final class Env {
         return l;
     }
 
+    /** 拼装命令并应用环境：若 cmd() 在前面插入了 linker64，自动写入 TERMUX_EXEC__PROC_SELF_EXE 指向真实 ELF（A-09） */
+    ProcessBuilder proc(String... argv) {
+        java.util.List<String> c = cmd(argv);
+        ProcessBuilder pb = new ProcessBuilder(c);
+        apply(pb.environment(), c);
+        return pb;
+    }
+
+    void apply(Map<String, String> e, java.util.List<String> cmd) {
+        apply(e);
+        if (loader && cmd != null && cmd.size() >= 2 && LINKER.equals(cmd.get(0))) {
+            e.put("TERMUX_EXEC__PROC_SELF_EXE", cmd.get(1));
+        }
+    }
+
     private static boolean isElf(String p) {
         try (java.io.FileInputStream in = new java.io.FileInputStream(p)) {
             byte[] h = new byte[4];

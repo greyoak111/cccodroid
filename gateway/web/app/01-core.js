@@ -400,8 +400,8 @@ if (/[?&](t|k)=/.test(location.search) || /[#&]k=/.test(location.hash)) history.
     return { paneOut, stopJs, ghost, on, ms, rtl, spring, play, leave, cancel, hide, outRemove, enterOv, stagger, apply, set };
   })();
   // 项目 / 定时任务的状态（模块在 openPage 前；这两个要在启动早期就可用）
-  var PJ = { list: [], colors: [], ws: "", cur: null, detail: null, loaded: false, effLevels: [] };
-  var SC = { data: null, cur: null, detail: null, flt: "all", rflt: "all" };
+  var PJ = { list: [], colors: [], ws: "", cur: null, detail: null, loaded: false, effLevels: [], openSeq: 0 };
+  var SC = { data: null, cur: null, detail: null, flt: "all", rflt: "all", openSeq: 0 };
   const chatEl = $("chat"), inputEl = $("input"), sendEl = $("btn-send");
   // 点了一下输入框、或用户手势里它刚拿到焦点：请外壳确认主 WebView 有视图焦点、重建输入连接并弹键盘。
   // 视图焦点丢了、或输入法手里还是空连接时，只靠 focus() 只有边框变色，既没光标也没键盘（0.7.3 的新对话实测）。

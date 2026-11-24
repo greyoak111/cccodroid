@@ -963,8 +963,8 @@ final class ShizukuSetup {
         cmd.add(env.bin("adb").getPath());
         cmd.add("-L"); cmd.add(adbSock());
         Collections.addAll(cmd, args);
-        ProcessBuilder pb = new ProcessBuilder(env.cmd(cmd.toArray(new String[0])));
-        env.apply(pb.environment());
+        ProcessBuilder pb = env.proc(cmd.toArray(new String[0]));
+        pb.environment().remove("CCAPP_TOKEN_FILE");
         pb.directory(env.home);
         pb.redirectErrorStream(true);
         Process p = pb.start();

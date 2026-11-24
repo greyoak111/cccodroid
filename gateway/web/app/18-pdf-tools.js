@@ -1,5 +1,5 @@
   // PDF 工具箱沿用文件面板、查看器和分享，不经过聊天，也不消耗模型额度。
-  const PT = { files: [], job: null, el: null, importing: false, starting: false, info: null, timer: 0, form: null };
+  const PT = { files: [], job: null, el: null, importing: false, starting: false, info: null, timer: 0, form: null, errs: 0 };
   const PT_OPS = () => [["merge", t("合并 PDF")], ["extract", t("提取页面")], ["split", t("拆成单页")], ["rotate", t("旋转页面")], ["compress", t("压缩 PDF")], ["images", t("PDF 转图片")]];
   const pdfPost = (p, body) => api(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const pdfBusy = () => PT.starting || PT.importing || PT.job?.state === "running";
@@ -66,17 +66,27 @@
   async function pdfPoll(id) {
     clearTimeout(PT.timer);
     if (PT.job?.id !== id) return;
+    let delay = 1000;
     try {
       const j = await api("/api/pdf/job?id=" + encodeURIComponent(id), { timeout: 15000 });
       if (PT.job?.id !== id) return;
+      PT.errs = 0;
       PT.job = j;
       pdfResults();
       if (j.state !== "running") { if (!PT.el) toast(j.state === "done" ? t("处理完成") : j.state === "cancelled" ? t("已取消") : pdfError(j.code), j.state === "error"); return; }
     } catch (e) {
-      if (e.status === 404) { PT.job = { id, state: "error", code: "not-found" }; pdfResults(); return; }
+      if (e.status === 404) { PT.errs = 0; PT.job = { id, state: "error", code: "not-found" }; pdfResults(); return; }
+      PT.errs = (PT.errs || 0) + 1;
+      if (PT.errs >= 10) {
+        PT.job = { id, state: "error", code: "network" };
+        pdfResults();
+        if (!PT.el) toast(pdfError("network"), true);
+        return;
+      }
       if (PT.el) PT.el.querySelector(".pdf-status").textContent = t("连接中断，正在重试…");
+      delay = PT.el ? Math.min(5000, 1000 * PT.errs) : Math.min(15000, 1000 * (1 << Math.min(PT.errs, 4)));
     }
-    PT.timer = setTimeout(() => pdfPoll(id), 1000);
+    PT.timer = setTimeout(() => pdfPoll(id), delay);
   }
   async function openPdfToolbox(paths = []) {
     if (PT.el) return;
@@ -143,7 +153,7 @@
       e.preventDefault(); if (pdfBusy()) return;
       const f = new FormData(e.target), body = Object.fromEntries(f); delete body["pdf-pick"];
       body.files = [...PT.files]; body.angle = +body.angle; body.dpi = +body.dpi;
-      PT.starting = true; PT.job = null; pdfResults();
+      PT.starting = true; PT.job = null; PT.errs = 0; pdfResults();
       try { PT.job = await pdfPost("/api/pdf/start", body); pdfPoll(PT.job.id); }
       catch (err) { PT.job = { state: "error", code: err.body?.error || err.message }; }
       finally { PT.starting = false; pdfResults(); }

@@ -1470,35 +1470,20 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** assets/app → files/app。内容哈希写在 TAG 里，没变、且逐个文件核对和安装包一致（见 AppFiles）就不动 */
+    /** assets/app → files/app。经 AppFiles.ensureSynced 加锁原子核对，避免与 GatewayService.spawnGateway 并发升级时双铺或误报篡改（A-09） */
     private void deployAssets() throws Exception {
-        String want = readAsset("app/TAG")  /* aapt2 打包时会丢掉点开头的文件 */;
-        File tag = new File(env.app, "TAG");
-        String have = tag.isFile() ? new String(java.nio.file.Files.readAllBytes(tag.toPath())) : "";
-        java.util.List<String> bad = want.equals(have) ? AppFiles.tampered(this, env.app) : null;
-        // TAG 对不上不一定是升级：同 uid 改了 TAG 就能让整树重铺不留痕。不是首次安装、又不是刚升级（AppFiles.updatedFrom）的，按篡改记。
-        // 删掉 TAG、换成目录也一样（审查 11-05 #18）：目录里还有别的文件就不是首次安装；整个目录没了（清除数据）才按首次铺
-        String[] left = env.app.list();
-        boolean deployed = tag.exists() || (left != null && left.length > 0);
-        if (bad == null && deployed && AppFiles.updatedFrom(this, env.app) == null) bad = AppFiles.tampered(this, env.app);
-        if (bad != null && bad.isEmpty()) return;
-        if (bad != null) {
-            android.util.Log.w("cccodroid", "files/app 被改过：" + bad);
-            Ledger.add(env, "repair", true, Tr.t("界面与网关的文件被改动过，已按安装包还原：") + android.text.TextUtils.join(", ", bad), null);
-            AppFiles.noteRestored(bad);
+        AppFiles.SyncResult res = AppFiles.ensureSynced(this, env, false,
+            () -> GatewayService.pause(true),
+            () -> {
+                // 守护线程若恰好在 pause 前一刻已经在拉 node，这里再杀一次，保证起来的一定是新文件。
+                // 必须用 pauseKick：pause(true) 是引用计数，再调一次却没有配对的 pause(false) 会让网关永远停在暂停里
+                GatewayService.pauseKick();
+                GatewayService.pause(false);
+            });
+        if (res.kind == AppFiles.SyncResult.RESTORED) {
             say(Tr.t("界面与网关的文件被改动过，已按安装包还原"));
-        } else say(Tr.t("部署界面与网关 ") + want.trim());
-        // boot() 一开头就起了网关服务，守护线程可能已经拿旧的 server.mjs 把 node 拉起来了 ——
-        // 不停一下，升级后界面是新的、网关还是旧的（新接口全 404），直到下次重启。
-        // 只在内容哈希变了（= 刚升级，进程本来就被安装杀过）或文件被改过时走到这里
-        GatewayService.pause(true);
-        try {
-            AppFiles.deploy(this, env.app);
-        } finally {
-            // 守护线程若恰好在 pause 前一刻已经在拉 node，这里再杀一次，保证起来的一定是新文件。
-            // 必须用 pauseKick：pause(true) 是引用计数，再调一次却没有配对的 pause(false) 会让网关永远停在暂停里
-            GatewayService.pauseKick();
-            GatewayService.pause(false);
+        } else if (res.kind == AppFiles.SyncResult.FIRST_INSTALL || res.kind == AppFiles.SyncResult.UPDATED) {
+            say(Tr.t("部署界面与网关 ") + (res.detail == null ? "" : res.detail));
         }
     }
 

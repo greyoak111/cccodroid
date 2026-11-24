@@ -14,7 +14,7 @@ import { isLoginMode } from "./models.mjs";
 import { findSessionFile, sessionPresence } from "./sessions.mjs";
 import { sealSession } from "./integrity.mjs";
 import { killRunProcs, killTree, safeModePerm } from "./claude.mjs";
-import { goalCheck, tasksCheck } from "./goal.mjs";
+import { goalCheck, goalCheckAsync, tasksCheck } from "./goal.mjs";
 import { LAST_SESSION, RUNS, SESSIONS, TRASH_HOOKS, latestRun, maxParallel, runFlag, runList } from "./runs.mjs";
 import { NEXT, readBody, sendJson } from "./http.mjs";
 import { BOOT, publish } from "./bus.mjs";
@@ -412,7 +412,7 @@ export function endRun(run, fields = {}) {
   if (!RUNS.size && !QUEUE.some((q) => !q.held)) runFlag(false);
   // at：真正结束的时刻。断线后增量补发的 run_end 晚到几分钟，回复用时不能按收到的时刻算（#142-4）
   publish({ type: "run_end", at: Date.now(), runId: run.id, sessionId: run.sessionId, aborted: !!run.aborted, ...(run.auto ? { auto: run.auto } : {}), ...(run.sched ? { sched: true } : {}), ...fields });
-  goalCheck(run.sessionId);
+  goalCheckAsync(run.sessionId).catch(() => {});
   tasksCheck(run.sessionId);
   run.log = [];
   publishState();
@@ -618,7 +618,7 @@ function tryInject(run, item) {
   const msg = item.message.trim();
   // 定时任务 / 无人值守的那一轮不收用户的命令：花费会记到任务头上、超预算还会把任务打断（复核 v067b-6）
   if (msg.startsWith("/") && (!run.idle || LOCAL_CMD_RE.test(msg) || run.sched || run.unattended || run.auto)) return false;
-  const same = item.sessionId ? item.sessionId === run.sessionId : (item.follow === run.id || !item.follow);
+  const same = item.sessionId ? item.sessionId === run.sessionId : (!!item.follow && (item.follow === run.id || laneOfItem(item) === run.lane));
   if (!same) return false;
   return run.inject(item);
 }

@@ -104,6 +104,68 @@ final class AppFiles {
     }
     static synchronized void noteUpdated(String v) { updated = v; }
     static synchronized String takeUpdated() { String v = updated; updated = null; return v; }
+
+    /** 原子核对/升级/还原 files/app（A-09）：统一加锁避免 MainActivity.deployAssets 与 GatewayService.spawnGateway
+     *  在 APK 升级时并发竞争 updatedFrom/deploy/markSeen 导致重复部署或误报假篡改。 */
+    static final class SyncResult {
+        static final int OK = 0, FIRST_INSTALL = 1, UPDATED = 2, RESTORED = 3;
+        final int kind;
+        final String detail;
+        final List<String> bad;
+        SyncResult(int kind, String detail, List<String> bad) { this.kind = kind; this.detail = detail; this.bad = bad; }
+    }
+
+    static synchronized SyncResult ensureSynced(Context c, Env env, boolean skipTamper, Runnable beforeDeploy, Runnable afterDeploy) throws Exception {
+        File app = env.app;
+        File tag = new File(app, "TAG");
+        String want = assetText(c, "app/TAG");
+        want = want == null ? "" : want.trim();
+        String[] left = app.list();
+        boolean deployed = tag.exists() || (left != null && left.length > 0);
+        String upd = updatedFrom(c, app);
+        if (skipTamper) {
+            if (tag.isFile() && upd == null) {
+                markSeen(c);
+                return new SyncResult(SyncResult.OK, null, null);
+            }
+            runDeploy(c, app, beforeDeploy, afterDeploy);
+            if (upd != null) noteUpdated(upd);
+            markSeen(c);
+            return new SyncResult(upd != null ? SyncResult.UPDATED : SyncResult.FIRST_INSTALL, upd != null ? upd : want, null);
+        }
+        if (!deployed) {
+            runDeploy(c, app, beforeDeploy, afterDeploy);
+            markSeen(c);
+            return new SyncResult(SyncResult.FIRST_INSTALL, want, null);
+        }
+        if (upd != null) {
+            runDeploy(c, app, beforeDeploy, afterDeploy);
+            noteUpdated(upd);
+            markSeen(c);
+            return new SyncResult(SyncResult.UPDATED, upd, null);
+        }
+        List<String> bad = tampered(c, app);
+        if (bad.isEmpty()) {
+            markSeen(c);
+            return new SyncResult(SyncResult.OK, null, null);
+        }
+        String joined = android.text.TextUtils.join(", ", bad);
+        Log.w("cccodroid", "files/app 被改过，按安装包还原：" + bad);
+        Ledger.add(env, "repair", true, Tr.t("界面与网关的文件被改动过，已按安装包还原：") + joined, null);
+        noteRestored(bad);
+        runDeploy(c, app, beforeDeploy, afterDeploy);
+        markSeen(c);
+        return new SyncResult(SyncResult.RESTORED, joined, bad);
+    }
+
+    private static void runDeploy(Context c, File app, Runnable beforeDeploy, Runnable afterDeploy) throws Exception {
+        if (beforeDeploy != null) beforeDeploy.run();
+        try {
+            deploy(c, app);
+        } finally {
+            if (afterDeploy != null) afterDeploy.run();
+        }
+    }
     private static byte[] readAll(InputStream in) throws java.io.IOException {
         java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
         byte[] buf = new byte[1 << 16];

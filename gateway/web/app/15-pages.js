@@ -1,7 +1,7 @@
   // ── 设置：弹窗。宽屏居中（左分类、右内容）；窄屏铺满，先列分类，点进去看一类，返回键回分类 ──
   var setOpen = false;
   var setCatShown = "-";   // 上次画的是哪一类：null = 窄屏的分类列表，"-" = 刚打开还没画过
-  let setFrom = null, setBaseRead;
+  let setFrom = null, setBaseRead = Promise.resolve();
   function openSettings(cat) {
     if (!setOpen) { setFrom = document.activeElement; if (curPage) pausePageReads(curPage, false); }
     OV.closeAll();
