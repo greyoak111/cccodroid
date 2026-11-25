@@ -225,7 +225,7 @@
         : auth.loggedIn ? t("官方登录态 · 已登录") : t("官方登录态 · 未登录");
       const needLogin = !!auth && auth.loggedIn === false && !auth.unknown;
       $("status-box").textContent =
-                `${t("网关")}     ${s.version} (pid ${s.pid})\n` +
+                `${t("网关")}     ${s.appVersion ? s.appVersion + " · v" + String(s.version || "").replace(/^v/, "") : s.version} (pid ${s.pid})\n` +
         `${t("运行时")}   ${s.ready ? t("就绪") : t("缺失")}\n` +
         `${t("厂商")}     ${provName(s)}\n` +
         `${t("上游")}     ${s.upstream}\n` +

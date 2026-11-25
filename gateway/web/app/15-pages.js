@@ -421,7 +421,7 @@
   // 离远了收回成量好高度的空壳 —— DOM 里任何时候只有眼前那几版。目录、滚动高亮、搜索和帮助页同一套，搜索查原文不用渲染。
   const CL = { lang: "", list: [], low: [], h: [], io: null };
   function paintChangelogVersion() {
-    const cur = lastUpd.items?.find((x) => x.id === "app")?.current;
+    const cur = lastUpd.items?.find((x) => x.id === "app")?.current || state.serverStatus?.appVersion;
     for (const h of $("cl-body").querySelectorAll("h3[data-v]")) {
       const badge = h.querySelector(".pill");
       if (h.dataset.v === cur && !badge) {

@@ -117,6 +117,7 @@ export async function routeCaps(req, res, u, p) {
       bridge: await bridgeAlive(),
       uptimeMs: Math.round(process.uptime() * 1000),
       version: "3.0.0",
+      appVersion: process.env.CCAPP_APP_VERSION || "",
       busy: RUNS.size > 0,
       running: RUNS.size,
       // 挂起的（点了停止、被系统中断的）不会自己发出去，不算「有活要干」：外壳据 queued 判断能不能换工具包

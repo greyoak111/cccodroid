@@ -284,6 +284,7 @@ final class Updater {
         // 同一时间只换一次：上一次还在等确认就不接新的
         if (!switching.compareAndSet(false, true)) { Log.i("cccodroid", "上一次换渠道还没完，这次不接"); return; }
         final String toCh = ch, toPin = pin;
+        final String prevCh = prefs().getString("channel", "stable"), prevPin = prefs().getString("pin", "");
         // 换渠道是用户明说要哪个版本：马上按新渠道查，版本对不上就直接换（切回 stable 也会换回 stable 的版本）
         new Thread(() -> {
             boolean keep = false;
@@ -296,6 +297,21 @@ final class Updater {
                 // 换渠道 / 固定版本落到比已装的旧：和 upd_apply 指定旧版本一样要用户点头（10-31 四轮复核：这是降级的另一条路）
                 if (down && !Priv.confirm(Tr.f("把 Claude Code 降级到 {0}", to), who, "upd:" + to)) {
                     Log.i("cccodroid", "没有允许降级到 " + to + "，设置不变");
+                } else if ("pinned".equals(toCh) && "available".equals(claude.state)) {
+                    // 固定到指定版本需先真正切换成功再落盘偏好：避免下载或安装报错时下拉框提前停在「固定 x.y.z」与实际已装版本脱节
+                    ovCh = null; ovPin = null;
+                    boolean okInstall;
+                    synchronized (Updater.this) {
+                        if ("downloading".equals(claude.state) || "installing".equals(claude.state)) okInstall = false;
+                        else { claude.set("installing", ""); okInstall = true; }
+                    }
+                    if (okInstall && installClaude(to) && toPin.equals(claude.current)) {
+                        prefs().edit().putString("channel", toCh).putString("pin", toPin).commit();
+                        keep = true;
+                    } else {
+                        prefs().edit().putString("channel", prevCh).putString("pin", prevPin).commit();
+                        keep = true;
+                    }
                 } else {
                     prefs().edit().putString("channel", toCh).putString("pin", toPin).commit();
                     keep = true;
@@ -318,8 +334,10 @@ final class Updater {
         try { app.current = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).versionName; } catch (Exception ignored) {}
         String b = installedDevkitBase();
         devkit.current = !b.isEmpty() ? tagOf(b) : !installedDevkitSha().isEmpty() ? Tr.t("本地安装") : env.devkitReady() ? Tr.t("未知") : "";
-        try { claude.current = new File(Os.readlink(new File(env.home, ".local/share/cccodroid/claude/current").getPath())).getName(); }
-        catch (Exception e) { claude.current = ""; }
+        try {
+            File curLink = new File(env.home, ".local/share/cccodroid/claude/current");
+            claude.current = new File(curLink, "claude").isFile() ? new File(Os.readlink(curLink.getPath())).getName() : "";
+        } catch (Exception e) { claude.current = ""; }
     }
 
     /**
@@ -1165,7 +1183,7 @@ final class Updater {
     /** 卸载之后（MainActivity.uninstallUi）：状态改成「未安装」 */
     void claudeRemoved() { refreshCurrent(); claude.set("missing", ""); }
 
-    private void installClaude(String ver) {
+    private boolean installClaude(String ver) {
         claude.set("installing", "");
         claude.done = 0; claude.total = 0;
         try {
@@ -1174,7 +1192,8 @@ final class Updater {
             if (rc != 0) throw new IOException(Tr.t("install-claude.sh 返回 ") + rc);
             env.claudeOffFlag().delete();        // 装上了：以后照常跟着更新走
             claude.set("uptodate", Tr.f("已更新到 {0}（下一轮对话起生效）", claude.current));
-        } catch (Exception e) { claude.set("error", e.getMessage()); }
+            return true;
+        } catch (Exception e) { claude.set("error", e.getMessage()); return false; }
     }
 
     // ── 工具包替换 ───────────────────────────────────────────────────────
