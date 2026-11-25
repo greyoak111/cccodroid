@@ -17,6 +17,13 @@ javac -nowarn -d "$OUT" "$ROOT/android/java/cc/codroid/SplitPairing.java" "$ROOT
 java -cp "$OUT" cc.codroid.SplitPairingTest
 # 更新说明挑版本：WhatsNew 引了安卓类，编译要 android.jar（平板 ~/.bldtools，或 ANDROID_JAR）；pick 本身不碰安卓接口
 AJAR=${ANDROID_JAR:-$HOME/.bldtools/android.jar}
+if [ ! -f "$AJAR" ]; then
+  for SDKD in "${ANDROID_SDK_ROOT:-}" "${ANDROID_HOME:-}" /usr/local/lib/android/sdk; do
+    [ -d "$SDKD/platforms" ] || continue
+    CAND=$(ls -1 "$SDKD"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -n 1)
+    if [ -n "$CAND" ] && [ -f "$CAND" ]; then AJAR="$CAND"; break; fi
+  done
+fi
 if [ -f "$AJAR" ]; then
   javac -nowarn -d "$OUT" -cp "$AJAR:$(ls "$ROOT"/third_party/shizuku/*.jar | tr '\n' ':')" $(find "$ROOT/android/java" -name '*.java') "$ROOT/android/tests/cc/codroid/WhatsNewPickTest.java"
   java -cp "$OUT:$AJAR" cc.codroid.WhatsNewPickTest

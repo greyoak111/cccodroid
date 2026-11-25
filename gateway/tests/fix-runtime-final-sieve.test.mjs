@@ -45,13 +45,20 @@ test("S-5: runnableQueueCount 区分空闲车道与运行中阻塞车道，且 e
   const shim = readRepo("android/native/exec-shim.c");
   assert.ok(shim.includes("__attribute__((aligned(8)))"));
   assert.ok(shim.includes("__builtin_memcpy(&mode, st + 16, sizeof(mode))"));
-  const outSo = path.join(CFG.workspace, "sieve-exec-shim.so");
+  const outObj = path.join(CFG.workspace, "sieve-exec-shim.o");
   try {
-    const r = spawnSync("clang", ["-shared", "-fPIC", "-nostdlib", "-O2", "-Wall", "-Wextra", "-Werror", path.join(REPO, "android/native/exec-shim.c"), "-o", outSo], { encoding: "utf8" });
-    if (!r.error) {
-      assert.equal(r.status, 0, `clang 编译 exec-shim.c 应 0 warning/0 error: ${r.stderr}`);
+    for (const extra of [[], ["-DBIONIC"]]) {
+      const r = spawnSync("clang", [
+        "--target=aarch64-linux-android26",
+        "-c", "-fPIC", "-nostdlib", "-O2", "-Wall", "-Wextra", "-Werror",
+        ...extra,
+        path.join(REPO, "android/native/exec-shim.c"), "-o", outObj,
+      ], { encoding: "utf8" });
+      if (!r.error) {
+        assert.equal(r.status, 0, `clang 编译 exec-shim.c (${extra.join(" ") || "glibc"}) 应 0 warning/0 error: ${r.stderr}`);
+      }
     }
   } finally {
-    fs.rmSync(outSo, { force: true });
+    fs.rmSync(outObj, { force: true });
   }
 });

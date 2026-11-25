@@ -7,7 +7,7 @@
 //
 // 分池并行（test-value 清理后的默认）：按下方实测墙钟贪心把文件分进 N 个池（N = min(4, 核数)，CCAPP_TEST_POOLS 覆盖，=1 即原串行）。
 // 每池独立临时 home / PREFIX / workspace / 端口（8799+i），池内串行（--test-concurrency=1）、文件按字母序，与单进程串行的相对顺序一致。
-// 池输出各自写日志，任一池失败则整体失败，并打印失败池尾部。
+// 池输出各自写日志，任一池失败则整体失败，结束后印结构化失败汇总与各池计数。
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -72,9 +72,12 @@ const poolTmps = []; // 每池一个平级 cccodroid-test-*（registry-flock fix
 // 在假前缀里补一份基础命令，造出与真机前缀相近的环境。tar / sh / git / curl / flock 由各测试自己链接，不放这里。
 const BASIC = ["awk","basename","cat","chmod","cp","cut","date","df","dirname","du","env","find","grep","gzip","head","id","ln","ls","mkdir","mktemp","mv","readlink","realpath","rm","sed","seq","sleep","sort","stat","tail","tee","touch","tr","uname","uniq","wc","xargs","zcat"];
 
-// 在 cccodroid 里跑时环境里有二十几个 CCAPP_* 指着真数据：一个不留全删，再只设测试要的（审查 L18）。
+// 在应用里跑时环境里有二十几个 CCAPP_* 指着真数据：一个不留全删，再只设测试要的（审查 L18）。
 // 网关给 claude 注入的 CLAUDE_CODE_* / ANTHROPIC_*（上下文窗口、接口地址…）也会漏进被测的 claudeEnv，一并去掉（11-01 独立审查）
-const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CCAPP_|CLAUDE_CODE_|ANTHROPIC_)/.test(k)));
+// 沙箱 egress 代理变量（HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 及小写）也会透进测试子进程：claudeEnv 判 viaProxy 为真就跳过
+// streamfix，U.6 因此挂。只在测试子进程环境里过滤，不动生产代码 viaProxy 判定本身。
+const PROXY_VARS = new Set(["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]);
+const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CCAPP_|CLAUDE_CODE_|ANTHROPIC_)/.test(k) && !PROXY_VARS.has(k)));
 
 function setupEnv(i) {
   const tmp = fs.mkdtempSync(path.join(base, "cccodroid-test-"));
@@ -95,17 +98,66 @@ function setupEnv(i) {
   return { tmp, env: { ...clean, CCAPP_TEST: "1", CCAPP_HOME: home, HOME: home, CCAPP_WORKSPACE: workspace, CCAPP_PREFIX: prefix, CCAPP_PORT: String(8799 + i), CCAPP_LOG: path.join(tmp, "gateway.log"), CCAPP_TMP: tmp } };
 }
 
-// 异步起：被 timeout / Ctrl-C / 关终端打断时也要删掉临时目录（以前用 spawnSync，信号一来整个进程直接没了，4 天攒下 29 个，D10）。
-// 收到信号先转给测试进程，等它退出再删；SIGKILL 接不住，留给存储的自动清理（$TMPDIR 里 7 天没动的）
-// CCAPP_TEST_COVERAGE=1 时给子进程加覆盖率旗标：体检测试套件用（哪些行/分支从没被断言摸过）
-const args = ["--test", "--test-concurrency=1"];
+// --test-reporter=spec：强制输出格式确定。Node 22 管道默认 TAP、Node 24 管道默认 spec，指定后两边都是 spec。
+const args = ["--test", "--test-concurrency=1", "--test-reporter=spec"];
 if (process.env.CCAPP_TEST_COVERAGE) args.push("--experimental-test-coverage");
 
-const summary = (log) => {
+const parseSummary = (log) => {
   try {
-    const m = fs.readFileSync(log, "utf8").match(/ℹ tests (\d+)\s*\nℹ suites \d+\s*\nℹ pass (\d+)\s*\nℹ fail (\d+)/);
-    return m ? `tests ${m[1]} pass ${m[2]} fail ${m[3]}` : "";
-  } catch { return ""; }
+    const text = fs.readFileSync(log, "utf8");
+    const m = text.match(/ℹ tests (\d+)\s*\nℹ suites \d+\s*\nℹ pass (\d+)\s*\nℹ fail (\d+)/)
+      || text.match(/# tests (\d+)\s*\n# suites \d+\s*\n# pass (\d+)\s*\n# fail (\d+)/);
+    return m ? { tests: +m[1], pass: +m[2], fail: +m[3] } : null;
+  } catch { return null; }
+};
+const summary = (log) => {
+  const s = parseSummary(log);
+  return s ? `tests ${s.tests} pass ${s.pass} fail ${s.fail}` : "";
+};
+
+const parseFailures = (log) => {
+  let text;
+  try { text = fs.readFileSync(log, "utf8"); } catch { return []; }
+  const lines = text.split("\n");
+  const rel = (p) => {
+    const i = p.indexOf("gateway/tests/");
+    return i >= 0 ? p.slice(i) : path.basename(p);
+  };
+  const specStart = lines.findIndex((l) => l.includes("✖ failing tests:"));
+  if (specStart >= 0) {
+    const out = [];
+    let at = null;
+    for (const line of lines.slice(specStart + 1)) {
+      const mAt = line.match(/^\s*test at (\S+):(\d+):(\d+)\s*$/);
+      if (mAt) { at = { file: rel(mAt[1]), line: +mAt[2] }; continue; }
+      const mName = line.match(/^\s*✖ (.+?)(?: \(\d+(?:\.\d+)?ms\))?\s*$/);
+      if (mName && at) {
+        const name = mName[1];
+        out.push(name.endsWith(".test.mjs") ? { file: at.file, line: at.line, name: rel(name) } : { file: at.file, line: at.line, name });
+        at = null;
+      }
+    }
+    if (out.length) return out;
+  }
+  const out = [];
+  let currentFile = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const mSub = line.match(/^# Subtest: (.+\.test\.mjs)\s*$/);
+    if (mSub) { currentFile = rel(mSub[1]); continue; }
+    const mNotOk = line.match(/^( *)not ok \d+ - (.+?)\s*$/);
+    if (!mNotOk) continue;
+    const name = mNotOk[2];
+    if (/\.test\.mjs$/.test(name)) { currentFile = rel(name); continue; }
+    let file = currentFile, lineNo = null;
+    for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+      const mLoc = lines[j].match(/^\s*location: '?(.+?):(\d+):(\d+)'?/);
+      if (mLoc) { file = rel(mLoc[1]); lineNo = +mLoc[2]; break; }
+      if (/^( *)?(not ok|ok) \d+ - /.test(lines[j]) || lines[j].startsWith("# Subtest:")) break;
+    }
+    out.push({ file: file || "?", line: lineNo, name });
+  }
+  return out;
 };
 const tail = (log) => {
   try { return fs.readFileSync(log, "utf8").split("\n").slice(-70).join("\n"); } catch { return "(日志读不到)"; }
@@ -130,7 +182,7 @@ for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 }
 const done = [];
 const finishOne = (c, code) => {
-  if (done.includes(c)) return; // spawn error 之后可能还会触发一次 exit
+  if (done.includes(c)) return;
   c.code = code;
   done.push(c);
   if (poolCount > 1) {
@@ -139,8 +191,26 @@ const finishOne = (c, code) => {
   }
   if (done.length === children.length) {
     const failed = done.filter((x) => x.code !== 0);
-    if (failed.length && poolCount > 1) {
-      for (const f of failed) console.error(`\n—— 池 ${f.i} 日志尾部（${f.log}）——\n` + tail(f.log));
+    if (poolCount > 1) {
+      const ordered = [...done].sort((a, b) => a.i - b.i);
+      const counts = ordered.map((c) => ({ i: c.i, s: parseSummary(c.log), code: c.code }));
+      const total = counts.reduce((t, c) => { if (c.s) { t.tests += c.s.tests; t.pass += c.s.pass; t.fail += c.s.fail; } return t; }, { tests: 0, pass: 0, fail: 0 });
+      const failures = [];
+      const noNamePools = [];
+      for (const c of ordered) {
+        if (c.code === 0) continue;
+        const items = parseFailures(c.log);
+        if (items.length) for (const it of items) failures.push({ pool: c.i, ...it });
+        else noNamePools.push(c);
+      }
+      if (failures.length) {
+        console.error(`\n失败汇总（${failures.length} 项）：`);
+        for (const f of failures) console.error(`✖ [池 ${f.pool}] ${f.file}${f.line != null ? ":" + f.line : ""} ${f.name}`);
+      }
+      console.error("各池计数：");
+      for (const c of counts) console.error(c.s ? `池 ${c.i}：tests ${c.s.tests} pass ${c.s.pass} fail ${c.s.fail}` : `池 ${c.i}：无摘要（exit ${c.code}）`);
+      if (counts.some((c) => c.s)) console.error(`总计：tests ${total.tests} pass ${total.pass} fail ${total.fail}`);
+      for (const f of noNamePools) console.error(`\n—— 池 ${f.i} 日志尾部（未解析到失败名，见尾部）（${f.log}）——\n` + tail(f.log));
     }
     if (!process.env.KEEP_TEST_TMP) { fs.rmSync(tmpRoot, { recursive: true, force: true }); for (const t of poolTmps) fs.rmSync(t, { recursive: true, force: true }); }
     else console.error("临时目录留着：" + [tmpRoot, ...poolTmps].join(" "));
