@@ -4,7 +4,7 @@
 
 cccodroid 目前只有作者一个人在维护。安卓机型千差万别，一个人测不过来，也写不过来，所以非常需要帮手。下面按门槛从低到高排，挑你顺手的就行。
 
-先来打个招呼也好：**QQ 交流群 1062538743**、[Discord](https://discord.gg/jE6KW8kwpe)，或者 [GitHub 讨论区](https://github.com/greyoak111/cccodroid/discussions)。
+先来 [GitHub 讨论区](https://github.com/greyoak111/cccodroid/discussions) 打个招呼也好。
 
 ---
 
@@ -20,7 +20,7 @@ cccodroid 目前只有作者一个人在维护。安卓机型千差万别，一�
 
 ### 报告安全问题
 
-请私下报告，见 [SECURITY.md](SECURITY.md#中文)，别发在公开的 Issue 或群里。
+请私下报告，见 [SECURITY.md](SECURITY.md#中文)，别发在公开的 Issue 或讨论区里。
 
 ### 校对译文
 
@@ -30,7 +30,7 @@ cccodroid 目前只有作者一个人在维护。安卓机型千差万别，一�
 
 帮助文档在 `gateway/web/help/`，其他文档在 `docs/`。写错的、没写清楚的、你踩过而文档没提的坑，都欢迎补上。
 
-### 在群里和讨论区帮人答疑
+### 在讨论区帮人答疑
 
 回答一个问题，就少一个人卡住放弃。
 

@@ -251,30 +251,19 @@
   new ResizeObserver(() => document.documentElement.style.setProperty("--tbh", $("topbar").getBoundingClientRect().height + "px")).observe($("topbar"), { box: "border-box" });   // 外壳注入 --safe-t 只改内边距，内容盒不变；不看边框盒就漏掉，页面层会压住顶栏
 
 
-  // ── 交流群与参与：帮助页最后一节、更新说明卡片底部共用。群号为主，二维码点开才显示 ──
-  const COMMUNITY = { qq: "1062538743", repo: "https://github.com/greyoak111/cccodroid", discord: "https://discord.gg/jE6KW8kwpe" };
+  // ── 交流与反馈：帮助页最后一节、更新说明卡片底部共用（社群群号与 Discord 暂时下架，择日恢复） ──
+  const COMMUNITY = { repo: "https://github.com/greyoak111/cccodroid" };
   function communityHtml(compact) {
     const R = COMMUNITY.repo, zh = isZh();
     return `<div class="cm-box${compact ? " compact" : ""}">
-      <div class="cm-row"><span class="cm-k">${esc(t("QQ 交流群"))}</span>
-        <button type="button" class="cm-num" data-cm="copy" title="${esc(t("点一下复制群号"))}">${COMMUNITY.qq}</button>
-        <button type="button" class="btn ghost sm" data-cm="qr">${esc(t("二维码"))}</button></div>
-      <img class="cm-qr hidden" src="/qq-group.jpg" alt="${esc(t("QQ 交流群二维码"))}" loading="lazy">
-      ${compact ? "" : `<p>${esc(t("日常交流欢迎进群；提交 Bug 建议走「设置 → 到 GitHub 反馈」（自动附带机型与自检信息）。"))}</p>
-      <p>${esc(t("欢迎参与翻译、测试、文档与开发，详见仓库贡献指南。"))}</p>`}
-      <div class="cm-links"><a href="${COMMUNITY.discord}">Discord</a> · <a href="${R}/discussions">${esc(t("讨论区"))}</a> · <a href="${R}/issues">${esc(t("反馈问题"))}</a> · <a href="${R}/blob/main/${zh ? "CONTRIBUTING.zh-CN.md" : "CONTRIBUTING.md"}">${esc(t("参与开发"))}</a></div>
+      ${compact ? "" : `<p>${esc(t("欢迎参与翻译、测试、文档与开发，详见仓库贡献指南。"))}</p>`}
+      <div class="cm-links"><a href="${R}/discussions">${esc(t("讨论区"))}</a> · <a href="${R}/issues">${esc(t("反馈问题"))}</a> · <a href="${R}/blob/main/${zh ? "CONTRIBUTING.zh-CN.md" : "CONTRIBUTING.md"}">${esc(t("参与开发"))}</a></div>
     </div>`;
   }
   function communityBind(root) {
     root.addEventListener("click", (e) => {
-      const b = e.target.closest("[data-cm]"), a = e.target.closest(".cm-links a");
-      if (b && b.dataset.cm === "copy") {
-        copyText(COMMUNITY.qq).then((ok) => toast(ok ? t("已复制群号 {n}", { n: COMMUNITY.qq }) : COMMUNITY.qq));
-      } else if (b && b.dataset.cm === "qr") {
-        const img = b.closest(".cm-box").querySelector(".cm-qr");
-        img.classList.toggle("hidden");
-        b.textContent = img.classList.contains("hidden") ? t("二维码") : t("收起二维码");
-      } else if (a) {
+      const a = e.target.closest(".cm-links a");
+      if (a) {
         e.preventDefault();
         if (window.CCApp && CCApp.openUrl) CCApp.openUrl(a.href); else window.open(a.href, "_blank", "noopener");
       }
@@ -300,8 +289,8 @@
       const r = await fetch("/help/" + lang + ".md", { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
       setHtml(body, renderMd(await r.text()));
-      // 最后一节：交流群与参与（不写在 md 里：群号、二维码、链接要能点）
-      body.insertAdjacentHTML("beforeend", `<h3>${esc(t("交流群与参与"))}</h3>` + communityHtml(false));
+      // 最后一节：交流与反馈（不写在 md 里：链接要走外部浏览器打开）
+      body.insertAdjacentHTML("beforeend", `<h3>${esc(t("交流与反馈"))}</h3>` + communityHtml(false));
       if (!body.dataset.cm) { body.dataset.cm = "1"; communityBind(body); }
       helpLang = lang;
     } catch (e) {

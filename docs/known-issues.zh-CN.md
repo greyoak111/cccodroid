@@ -47,7 +47,7 @@
 
 你的机型碰到问题，请到 **设置 → 排障 → 到 GitHub 反馈**：机型、系统版本、自检结果会自动填好，你只要写遇到了什么。没有 GitHub 账号就用旁边的「打包诊断」。
 
-用起来没问题也欢迎报一下：到 GitHub 新建 Issue，选「[机型报告](https://github.com/greyoak111/cccodroid/issues/new?template=device.yml)」，或者在 QQ 交流群 1062538743 里说一声。实测过的机型越多，这一节就越可靠。
+用起来没问题也欢迎报一下：到 GitHub 新建 Issue，选「[机型报告](https://github.com/greyoak111/cccodroid/issues/new?template=device.yml)」，或者到 [GitHub 讨论区](https://github.com/greyoak111/cccodroid/discussions) 说一声。实测过的机型越多，这一节就越可靠。
 
 ### 所有机型都一样的
 

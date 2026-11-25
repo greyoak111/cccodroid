@@ -10,7 +10,7 @@ English | [中文](#中文)
 
 ## Reporting a vulnerability
 
-**Please don't report security problems in public issues, Discussions or the QQ group.** Report them privately instead:
+**Please don't report security problems in public issues or Discussions.** Report them privately instead:
 
 - **[Report a vulnerability](https://github.com/greyoak111/cccodroid/security/advisories/new)** (GitHub private vulnerability reporting). Only you and the maintainer can see it.
 
@@ -105,7 +105,7 @@ Testing tip: use a spare install or a separate test gateway, never the data you 
 
 ## 怎么报告
 
-**安全问题请不要发在公开的 Issue、讨论区或 QQ 群里**，请私下报告：
+**安全问题请不要发在公开的 Issue 或讨论区里**，请私下报告：
 
 - **[私密报告漏洞](https://github.com/greyoak111/cccodroid/security/advisories/new)**（GitHub 的私密漏洞报告，只有你和维护者看得到）。
 

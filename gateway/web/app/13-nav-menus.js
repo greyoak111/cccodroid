@@ -478,7 +478,7 @@
       { label: t("帮助"), icon: PAGES.help.icon, fn: () => openPage("help") },
       { label: t("更新日志"), icon: PAGES.changelog.icon, fn: () => openPage("changelog") },
       { label: t("到 GitHub 反馈"), icon: SM.chat, fn: () => $("btn-issue").click() },
-      { label: t("交流群 · 讨论区"), icon: SM.people, fn: () => { openPage("help"); setTimeout(() => $("help-body").querySelector(".cm-box")?.scrollIntoView({ block: "center", behavior: "smooth" }), 400); } },
+      { label: t("交流与反馈"), icon: SM.people, fn: () => { openPage("help"); setTimeout(() => $("help-body").querySelector(".cm-box")?.scrollIntoView({ block: "center", behavior: "smooth" }), 400); } },
     ];
     // 官方账户：按实际登录状态给「退出登录」或「登录」（接口是官方账户 ≠ 已登录）；状态没问到时先不放
     if (st.keyMode === "login" && acctLogged) items.push("hr", { label: t("退出登录"), icon: SM.logout, danger: true, fn: async () => {

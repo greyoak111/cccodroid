@@ -1,6 +1,6 @@
 # cccodroid
 
-**English** · [简体中文](README.zh-CN.md) · [Discord](https://discord.gg/jE6KW8kwpe) · [Discussions](https://github.com/greyoak111/cccodroid/discussions) · [Contributing](CONTRIBUTING.md)
+**English** · [简体中文](README.zh-CN.md) · [Discussions](https://github.com/greyoak111/cccodroid/discussions) · [Contributing](CONTRIBUTING.md)
 
 **A development launcher that runs Claude Code on Android phones.** No root, no custom ROM, no chroot / proot / VM.
 
@@ -140,8 +140,7 @@ RedMagic / ZTE: App info → App battery usage → Battery optimization → **Ba
 
 ## Community and contributing
 
-- **Questions, ideas, device reports**: [GitHub Discussions](https://github.com/greyoak111/cccodroid/discussions), in English or Chinese. There is also a Chinese-speaking QQ group, 1062538743.
-- **Chat**: the [cccodroid society](https://discord.gg/jE6KW8kwpe) Discord server, English or Chinese.
+- **Questions, ideas, device reports**: [GitHub Discussions](https://github.com/greyoak111/cccodroid/discussions), in English or Chinese.
 - **Bugs**: in the app, tap Settings → Report on GitHub; your device and self-test results are filled in for you.
 
 **Day-to-day maintenance is still mostly one person, with a few community members testing, reviewing and red-teaming, so help is very welcome.** Device reports, translation fixes, component recipes, docs and code are all welcome, and you can help without writing code. See the [contributing guide](CONTRIBUTING.md).
