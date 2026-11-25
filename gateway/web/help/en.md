@@ -64,6 +64,8 @@ These choices are stored in the app's own data, so clearing the WebView cache wo
 | Deny unasked | Anything that would need approval is refused; for unattended runs |
 | Allow everything | Never asks; only when you trust the task completely |
 
+**Does Auto mode say its safety check does not run for this session?** Tools that need the check will not run. This does not mean the action was judged unsafe or that MCP disconnected; `/mcp` reports server connection status. A third-party compatible endpoint or bridge may not support Auto mode's server-side check, but the message alone does not identify the cause. To continue, select **Ask me** below the input box and review subsequent permission requests individually.
+
 **What "Allow everything" really means.** Claude stops asking and edits any file or runs any command directly, including deleting things, going online and sending data out. The main risk is not Claude itself but what it reads: web pages, downloaded files, other people's repositories and issues can hide instructions aimed at the AI (prompt injection) that tell it to read your keys, change settings or upload something. In "Ask me" mode you see that step and can refuse; with "Allow everything" that check is gone. So:
 
 - Turn it on only for a clear task where you know which files it will touch, and switch back afterwards.
