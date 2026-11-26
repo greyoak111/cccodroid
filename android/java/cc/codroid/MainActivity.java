@@ -295,6 +295,7 @@ public class MainActivity extends Activity {
                     } finally { GatewayService.pause(false); }
                 }
                 Updater.get(this).dropStagedIfInstalled();
+                Updater.get(this).dropStagedIfOutdated();
                 ins.dropTrash();                  // 卸载删到一半被打断的残骸
                 // 界面与网关先部署：0.6.7 起 first-run 的 bash 预加载的 exec-shim-bionic 在 APK 原生库目录里，不再依赖这一步；先部署照旧无害
                 deployAssets();
@@ -304,6 +305,7 @@ public class MainActivity extends Activity {
                     Ledger.add(env, "install", true, Tr.t("首次安装开发工具包"), null);
                     // 旧版在首装期间可能已经按「全部模块」下好了一份同版本的更新：装好以后它就是多余的，别在下面被当成更新装上
                     Updater.get(this).dropStagedIfInstalled();
+                    Updater.get(this).dropStagedIfOutdated();
                 } else if (ins.firstRunMissed()) {
                     // 0.4.17 及以前首装 36 的包时 first-run 没跑成（见 Installer.firstRunMissed）：补跑一次
                     try { ins.repairFirstRun(); Ledger.add(env, "repair", true, Tr.t("补跑了首次安装时没跑成的首次配置"), null); }
@@ -316,13 +318,20 @@ public class MainActivity extends Activity {
                 }
                 // 上次自动下好的工具包更新：趁现在（刚打开、没有任务）装上
                 Updater upd = Updater.get(this);
+                upd.dropStagedIfInstalled();
+                upd.dropStagedIfOutdated();
                 if (upd.auto() && upd.devkitStaged()) {
                     // 先等网关答话再问它忙不忙：刚起的网关回话慢，读超时会被当成「忙」，更新就一直装不上
                     for (int i = 0; i < 40 && !Updater.pingGateway(); i++) Thread.sleep(250);
                     if (!Updater.gatewayBusy()) {
                         say(Tr.t("安装已下载的开发工具包更新…"));
-                        upd.applyDevkit(ins);
-                        say(Tr.t("✓ 开发工具包已更新"));
+                        try {
+                            if (upd.applyDevkit(ins, false)) say(Tr.t("✓ 开发工具包已更新"));
+                        } catch (Exception e) {
+                            if (!env.devkitReady()) throw e;
+                            android.util.Log.w("cccodroid-setup", "启动时更新工具包未完成，继续使用当前版本", e);
+                            say("⚠ " + humanize(e));
+                        }
                     } else say(Tr.t("开发工具包更新已下载；有任务在跑，等空闲时再装（也可在设置页手动装）"));
                 }
                 askBatteryExemption();
@@ -360,9 +369,15 @@ public class MainActivity extends Activity {
         return raw;
     }
 
+    /** 原生确认弹窗不依赖 WebView：在 boot / 替换工具包（booted=false）期间收到也必须立即处理，避免工作线程等 Priv.confirm 与 onNewIntent 死锁 */
+    static boolean immediateWhileBooting(String action) {
+        return ACTION_PRIV_OK.equals(action) || ACTION_CONSENT.equals(action) || ACTION_A11Y_OK.equals(action);
+    }
+
     @Override protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
-        if (booted) handle(i); else pending = i;
+        if (booted || immediateWhileBooting(i == null ? null : i.getAction())) handle(i);
+        else pending = i;
     }
 
     @Override public void onWindowFocusChanged(boolean has) {
@@ -1334,7 +1349,7 @@ public class MainActivity extends Activity {
                     try { Thread.sleep(4000); } catch (InterruptedException ignored) {}
                 }
                 try { waitGateway(true); } catch (InterruptedException ignored) {}
-                ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; } });
+                ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; Intent p = pending; pending = null; handle(p); } });
             } finally { DEVKIT_APPLYING.set(false); }
         }, "devkit-local").start();
     }
@@ -1442,7 +1457,7 @@ public class MainActivity extends Activity {
             say(Tr.t("（旧的工具包已经不在了的话，划掉应用重新打开会重新安装）"));
         }
         try { waitGateway(true); } catch (InterruptedException ignored) {}
-        ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; } });
+        ui.post(() -> { if (!isDestroyed()) { showWeb(); booted = true; Intent p = pending; pending = null; handle(p); } });
     }
 
     /** 等网关答话，最多约 60 秒。网关服务正在联网取回运行库时（GatewayService.gwFetchStep）不计时：

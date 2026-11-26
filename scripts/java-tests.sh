@@ -38,4 +38,6 @@ if [ -f "$AJAR" ]; then
   java -cp "$OUT:$AJAR" cc.codroid.DeviceToolsUrlTest
   javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/A11yProtectedPackageTest.java"
   java -cp "$OUT:$AJAR" cc.codroid.A11yProtectedPackageTest
+  javac -nowarn -d "$OUT" -cp "$OUT:$AJAR" "$ROOT/android/tests/cc/codroid/UpdaterDevkitStagedTest.java"
+  java -cp "$OUT:$AJAR" cc.codroid.UpdaterDevkitStagedTest
 else echo "跳过 WhatsNewPickTest（没有 android.jar）"; fi

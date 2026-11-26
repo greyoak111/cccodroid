@@ -120,8 +120,12 @@ final class Updater {
                 devkit.set("ready", "");
                 stagedFromPrefs = true;
                 dropStagedIfInstalled();
+                dropStagedIfOutdated();
+            } else if (prefs().contains("devkitStaged")) {
+                f.delete();
+                prefs().edit().remove("devkitStaged").apply();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) { prefs().edit().remove("devkitStaged").apply(); }
         // 上次下好、还没装的 APK：通知能活过进程，用户点通知冷启动时不能因为内存状态没了就拒绝安装（#123-2）
         try {
             JSONObject st = new JSONObject(prefs().getString("appStaged", "{}"));
@@ -157,23 +161,64 @@ final class Updater {
         }
     }
 
-    /** 已下载待装的那份其实已经装上了（上次被打断、recover() 接着装完的）：删掉，别再装一遍 */
-    void dropStagedIfInstalled() {
-        if (!"ready".equals(devkit.state) || devkit.sha == null || !devkit.sha.equals(installedDevkitSha())) return;
-        if (devkit.file != null) devkit.file.delete();
-        // 按块下好的压缩包也删（几百 MB）；已经装进去的那几块，installModules 解完就删过了
+    /** 清掉暂存工具包的落盘文件、待装记录、通知与内存计划（keepModules 非空时保留新清单里同文件名且同 sha256 的模块分块包供续用） */
+    private void clearStagedDevkit(JSONObject keepModules, String nextState) {
+        if (devkit.file != null) {
+            devkit.file.delete();
+            new File(devkit.file.getPath() + ".part").delete();
+            new File(devkit.file.getPath() + ".part.seg").delete();
+            new File(devkit.file.getPath() + ".sha256").delete();
+        }
         if (devkit.modules != null) try {
+            java.util.Set<String> keep = reusableModuleFiles(keepModules);
             JSONArray all = new JSONObject(new String(devkit.modules, StandardCharsets.UTF_8)).optJSONArray("modules");
             for (int i = 0; all != null && i < all.length(); i++) {
                 JSONObject gz = all.optJSONObject(i) == null ? null : all.optJSONObject(i).optJSONObject("gz");
                 if (gz == null) continue;
-                new File(env.files, gz.optString("file")).delete();
-                new File(env.files, gz.optString("file") + ".part").delete();
+                String fn = gz.optString("file");
+                if (fn.isEmpty()) continue;
+                if (!keep.contains(fn + ":" + gz.optString("sha256"))) {
+                    new File(env.files, fn).delete();
+                    new File(env.files, fn + ".part").delete();
+                    new File(env.files, fn + ".part.seg").delete();
+                    new File(env.files, fn + ".sha256").delete();
+                }
             }
         } catch (Exception ignored) {}
         prefs().edit().remove("devkitStaged").apply();
+        try { ctx.getSystemService(NotificationManager.class).cancel(20); } catch (Exception ignored) {}
+        dropDevkitPlan();
+        stagedFromPrefs = false;
         refreshCurrent();
-        devkit.set("uptodate", "");
+        if (nextState != null) devkit.set(nextState, "");
+    }
+
+    static java.util.Set<String> reusableModuleFiles(JSONObject mj) {
+        java.util.Set<String> s = new java.util.HashSet<>();
+        if (mj == null) return s;
+        JSONArray all = mj.optJSONArray("modules");
+        for (int i = 0; i < all.length(); i++) {
+            JSONObject gz = all.optJSONObject(i) == null ? null : all.optJSONObject(i).optJSONObject("gz");
+            if (gz != null && !gz.optString("file").isEmpty() && !gz.optString("sha256").isEmpty())
+                s.add(gz.optString("file") + ":" + gz.optString("sha256"));
+        }
+        return s;
+    }
+
+    /** 已下载待装的那份其实已经装上了（上次被打断、recover() 接着装完的）：删掉，别再装一遍 */
+    synchronized void dropStagedIfInstalled() {
+        if (!"ready".equals(devkit.state) || devkit.sha == null || !devkit.sha.equals(installedDevkitSha())) return;
+        clearStagedDevkit(null, "uptodate");
+    }
+
+    /** 预下载的工具包已被已装版本或升级后的 APK 钉子超越（如先预下 11.21.1、再升 APK 到钉 11.21.2）：直接丢弃清理，避免启动死循环与挡住检查新版 */
+    synchronized boolean dropStagedIfOutdated() {
+        if (!"ready".equals(devkit.state)) return false;
+        String tag = tagOf(devkit.base), floor = devkitFloor();
+        if (!stagedDevkitOutdated(tag, floor)) return false;
+        Log.i(TAG, "丢弃过期的待装工具包 " + tag + "（基线 " + floor + "）");
+        clearStagedDevkit(null, pinnedInstalled() ? "uptodate" : "unknown");
+        return true;
     }
 
     SharedPreferences prefs() { return ctx.getSharedPreferences("upd", Context.MODE_PRIVATE); }
@@ -417,20 +462,53 @@ final class Updater {
         return null;
     }
 
-    /** 已装的与本 APK 钉的工具包，哪一个版本新：比它旧的安装算降级，要先问用户（0.6.9 审计 14-03） */
-    private String devkitFloor() {
+    /** 线上检查与自动暂存的最低版本基线：已装的与本 APK 钉的工具包取较新者 */
+    static String devkitFloorOf(String installedTag, String pinTag) {
         String floor = null;
-        JSONObject pin = devkitPin(ctx);
-        for (String f : new String[] { tagOf(installedDevkitBase()), pin != null ? pin.optString("tag", "") : "" })
+        for (String f : new String[] { installedTag, pinTag })
             if (f != null && f.startsWith("devkit-") && (floor == null || cmpVer(f.substring(7), floor.substring(7)) > 0)) floor = f;
         return floor;
     }
 
-    /** 比 floor 旧的工具包要用户点头才装（和 Claude Code 降级同一个规矩）：不静默拒绝 —— 问了，用户不点就不装 */
-    private boolean allowDevkitDowngrade(String tag, String who) {
-        if (tag == null || !tag.startsWith("devkit-")) return true;
-        String floor = devkitFloor();
-        if (floor == null || cmpVer(tag.substring(7), floor.substring(7)) >= 0) return true;
+    /** 暂存待装的工具包是否已过期（标签非法，或比线上/APK 基线 floor 旧） */
+    static boolean stagedDevkitOutdated(String stagedTag, String floorTag) {
+        if (stagedTag == null || !stagedTag.startsWith("devkit-")) return true;
+        return floorTag != null && floorTag.startsWith("devkit-") && cmpVer(stagedTag.substring(7), floorTag.substring(7)) < 0;
+    }
+
+    /** 已有 ready 暂存包时是否继续保留：仅当暂存包版本 >= 线上 best 时保留，否则允许被验过签的新版计划替换 */
+    static boolean stagedKeepsOver(String stagedTag, String bestTag) {
+        if (stagedTag == null || !stagedTag.startsWith("devkit-")) return false;
+        if (bestTag == null || !bestTag.startsWith("devkit-")) return true;
+        return cmpVer(stagedTag.substring(7), bestTag.substring(7)) >= 0;
+    }
+
+    /**
+     * 实际安装（本地包 / 手动装 / 修复）时是否构成降级：返回被降级的基准 tag，不构成降级返回 null。
+     * · 修复（repairing=true）重装当前已装同版本绝不算降级（哪怕已装版本比新 APK 钉子旧）；
+     * · 已知当前已装版本 installedTag 时，以真实已装版本为准（从 10.28 本地升到 11.21.1 是升级而非降级）；
+     * · 已装版本未知时，退回以本 APK 钉子 pinTag 兜底防回退（0.6.9 审计 14-03）。
+     */
+    static String downgradeFloorForInstall(String targetTag, String installedTag, String pinTag, boolean repairing) {
+        if (targetTag == null || !targetTag.startsWith("devkit-")) return null;
+        boolean hasInstalled = installedTag != null && installedTag.startsWith("devkit-");
+        if (hasInstalled) {
+            if (repairing && targetTag.equals(installedTag)) return null;
+            return cmpVer(targetTag.substring(7), installedTag.substring(7)) < 0 ? installedTag : null;
+        }
+        if (repairing && pinTag != null && targetTag.equals(pinTag)) return null;
+        if (pinTag != null && pinTag.startsWith("devkit-") && cmpVer(targetTag.substring(7), pinTag.substring(7)) < 0) return pinTag;
+        return null;
+    }
+
+    private String devkitFloor() {
+        JSONObject pin = devkitPin(ctx);
+        return devkitFloorOf(tagOf(installedDevkitBase()), pin != null ? pin.optString("tag", "") : "");
+    }
+
+    /** 比基准 floor 旧的工具包要用户点头才装（和 Claude Code 降级同一个规矩）：不静默拒绝 —— 问了，用户不点就不装 */
+    private boolean allowDevkitDowngrade(String tag, String floor, String who) {
+        if (floor == null) return true;
         if (Priv.confirm(Tr.f("把开发工具包降级到 {0}（现在装的是 {1}）", tag, floor), who, "devkit:" + tag)) return true;
         Log.w(TAG, "用户没有允许把开发工具包降级到 " + tag);
         return false;
@@ -439,9 +517,11 @@ final class Updater {
     /** 更新卡片的「从本地文件安装」：在 MainActivity 的线程里调，进度打到安装界面。id 为 null = 用户确认过硬装 */
     void applyLocalDevkit(Installer ins, Installer.Source src, long total, boolean gzip, String sha, JSONObject id) throws Exception {
         if (devkitMoving()) throw new IOException(Tr.t("工具包正在下载或安装，等它结束再试"));
-        // 本地文件也能装旧版（0.6.9 审计 14-03）：认得出是哪一版、又比已装 / APK 钉的旧，就要用户点头
+        // 本地文件也能装旧版（0.6.9 审计 14-03）：认得出是哪一版、又比当前已装（未知时按 APK 钉子）旧，就要用户点头
         String tag = id != null ? id.optString("tag") : "";
-        if (!allowDevkitDowngrade(tag, Tr.t("从本地文件安装开发工具包")))
+        JSONObject pin = devkitPin(ctx);
+        String floor = downgradeFloorForInstall(tag, tagOf(installedDevkitBase()), pin != null ? pin.optString("tag", "") : "", false);
+        if (floor != null && !allowDevkitDowngrade(tag, floor, Tr.t("从本地文件安装开发工具包")))
             throw new IOException(Tr.f("{0} 比现在装着的开发工具包旧，没有安装", tag));
         devkit.set("installing", "");
         GatewayService.pause(true);
@@ -510,7 +590,7 @@ final class Updater {
                 // 首装还没完成（工具包没装好）就别查工具包：那时读不到已装的模块，planModules 会按「整包用户」规划成全部模块，
                 // 自动更新在 Wi‑Fi 下把它们全下好，首装刚按勾选装完，启动流程又把这份「已下载的更新」装上 —— 勾了两个、装了八个（群友 10-24）
                 if (!env.devkitReady()) devkit.set("uptodate", Tr.t("首次安装进行中"));
-                else if (!mirror) try { checkDevkit(rels); } catch (Exception e) { devkit.set("error", e.getMessage()); }
+                else if (!mirror) try { checkDevkit(rels); } catch (Exception e) { if (!"ready".equals(devkit.state)) devkit.set("error", e.getMessage()); }
             }
             try { checkClaude(); } catch (Exception e) { claude.set("error", Tr.t("连不上 downloads.claude.ai：") + e.getMessage()); }
             long now = System.currentTimeMillis();
@@ -620,6 +700,8 @@ final class Updater {
     }
 
     private void checkDevkit(JSONArray rels) throws Exception {
+        dropStagedIfInstalled();
+        dropStagedIfOutdated();
         String best = null;
         for (int i = 0; i < rels.length(); i++) {
             JSONObject r = rels.getJSONObject(i);
@@ -627,23 +709,30 @@ final class Updater {
             if (r.optBoolean("draft") || !tag.startsWith("devkit-")) continue;
             if (best == null || cmpVer(tag.substring(7), best.substring(7)) > 0) best = tag;
         }
-        if (best == null) { devkit.set("uptodate", ""); return; }
+        if (best == null) { if (!"ready".equals(devkit.state)) devkit.set("uptodate", ""); return; }
         // 不往回装：比已装的、比本 APK 钉的旧，一律当没有新版。签名有效的旧清单照样验得过，
         // 中间人只给一份旧版本的发布列表，就能把工具链退回有已知问题的旧版（审查 v0513b 低-21；APK 和 Claude Code 早就防了）
         {
             String floor = devkitFloor();
             if (floor != null && cmpVer(best.substring(7), floor.substring(7)) < 0) {
                 Log.w(TAG, "发布列表里最新的工具包 " + best + " 比 " + floor + " 旧，不装");
-                devkit.set("uptodate", "");
+                if (!"ready".equals(devkit.state)) devkit.set("uptodate", "");
                 return;
             }
         }
         synchronized (this) {
-            devkit.latest = best;
-            // 正在下、正在装、正在校验，或者已下好一份等着装：别动它的文件与哈希（文件名各版本相同，换了哈希就和落盘的那份对不上）
+            // 正在下、正在装、正在校验，或者已下好一份不比 best 旧的等着装：别动它的文件、哈希与显示版本号
             String st0 = devkit.state;
             if ("verifying".equals(st0)) { recheckDevkit = true; return; }   // 校验完再补查（见 verifyAsync）
-            if ("downloading".equals(st0) || "installing".equals(st0) || "ready".equals(st0)) return;
+            if ("downloading".equals(st0) || "installing".equals(st0)) return;
+            if ("ready".equals(st0)) {
+                if (stagedKeepsOver(tagOf(devkit.base), best)) {
+                    devkit.latest = tagOf(devkit.base);
+                    return;
+                }
+            } else {
+                devkit.latest = best;
+            }
         }
         String base = "https://github.com/" + REPO + "/releases/download/" + best + "/";
         // 最新的就是 APK 钉的那版（常态：新工具包跟着新 APK 走）：校验值用 APK 自带的，不联网 ——
@@ -694,7 +783,13 @@ final class Updater {
         synchronized (this) {
             String stNow = devkit.state;
             if ("verifying".equals(stNow)) { recheckDevkit = true; return; }
-            if ("downloading".equals(stNow) || "installing".equals(stNow) || "ready".equals(stNow)) return;
+            if ("downloading".equals(stNow) || "installing".equals(stNow)) return;
+            if ("ready".equals(stNow)) {
+                if (stagedKeepsOver(tagOf(devkit.base), best)) return;
+                JSONObject keepMj = null;
+                if (mp != null) try { keepMj = new JSONObject(new String(mp.modules, StandardCharsets.UTF_8)); } catch (Exception ignored) {}
+                clearStagedDevkit(keepMj, null);
+            }
             devkit.latest = best;
             devkit.base = base; devkit.sha = sha; devkit.size = nextSize;
             devkit.tarSha = nextTarSha; devkit.need = nextNeed;
@@ -1237,11 +1332,32 @@ final class Updater {
     }
 
     /** 在 MainActivity 的线程里调。ins 的进度打到安装界面 */
-    void applyDevkit(Installer ins) throws Exception {
-        // 暂存的 / 修复用的工具包也可能是旧的（进程重启前下好、或者从 prefs 接上的）：装之前照样先问（0.6.9 审计 14-03）
+    void applyDevkit(Installer ins) throws Exception { applyDevkit(ins, true); }
+
+    /** interactive=false 用于冷启动 boot()：过期或降级的暂存包直接丢弃清理并返回 false，绝不在启动阶段弹确认框阻塞 */
+    boolean applyDevkit(Installer ins, boolean interactive) throws Exception {
         String tag = tagOf(devkit.base);
-        if (!allowDevkitDowngrade(tag, repairing ? Tr.t("修复开发工具包") : Tr.t("安装开发工具包")))
-            throw new IOException(Tr.f("{0} 比现在装着的开发工具包旧，没有安装", tag));
+        if (!interactive && stagedDevkitOutdated(tag, devkitFloor())) {
+            Log.i(TAG, "启动时跳过并清理过期的待装工具包 " + tag);
+            synchronized (this) { repairing = false; clearStagedDevkit(null, pinnedInstalled() ? "uptodate" : "unknown"); }
+            releaseApp();
+            return false;
+        }
+        JSONObject pin = devkitPin(ctx);
+        String floor = downgradeFloorForInstall(tag, tagOf(installedDevkitBase()), pin != null ? pin.optString("tag", "") : "", repairing);
+        if (floor != null) {
+            if (!interactive) {
+                Log.i(TAG, "启动时跳过降级工具包 " + tag + "（当前 " + floor + "）");
+                synchronized (this) { repairing = false; clearStagedDevkit(null, pinnedInstalled() ? "uptodate" : "unknown"); }
+                releaseApp();
+                return false;
+            }
+            if (!allowDevkitDowngrade(tag, floor, repairing ? Tr.t("修复开发工具包") : Tr.t("安装开发工具包"))) {
+                synchronized (this) { repairing = false; clearStagedDevkit(null, pinnedInstalled() ? "uptodate" : "unknown"); }
+                releaseApp();
+                throw new IOException(Tr.f("{0} 比现在装着的开发工具包旧，没有安装", tag));
+            }
+        }
         devkit.set("installing", "");
         try {
             // 落盘以后可能过了好几天、经历过 APK 升级：装之前再核一遍，坏了就删掉重下，不拿它去换掉能用的旧版
@@ -1273,6 +1389,7 @@ final class Updater {
             ctx.getSystemService(NotificationManager.class).cancel(20);
             Ledger.add(env, repairing ? "repair" : "install", true, (repairing ? Tr.t("修复完成：重装 ") : Tr.t("已装上 ")) + tagOf(devkit.base),
                 new JSONObject().put("sha256", devkit.sha));
+            return true;
         } catch (Exception e) {
             devkit.set("error", e.getMessage());
             Ledger.add(env, repairing ? "repair" : "install", false, (repairing ? Tr.t("修复失败：") : Tr.t("安装失败：")) + e.getMessage(), null);
