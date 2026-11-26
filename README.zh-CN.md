@@ -322,6 +322,7 @@ App 下载哪个版本的工具包，由 [devkit-sources.txt](devkit-sources.txt
 - **[zhiererer](https://github.com/zhiererer)**：0.7.2 修的七个问题里六个是 ta 发现并定位的。0.7.4 又提交五个 PR——外部/无头会话自动归「杂项」（[#218](https://github.com/greyoak111/cccodroid/pull/218)）、桥路径别名按目录身份判定启动与修复（[#219](https://github.com/greyoak111/cccodroid/pull/219)）、启动预热托管桥并恢复旧周期故障锁（[#220](https://github.com/greyoak111/cccodroid/pull/220)）、篡改提示区分来源并标明时间（[#221](https://github.com/greyoak111/cccodroid/pull/221)）、新对话光标与无障碍确认框（[#223](https://github.com/greyoak111/cccodroid/pull/223)）——以及桥裸模型名 404（[#217](https://github.com/greyoak111/cccodroid/issues/217)）与上下文口径（[#222](https://github.com/greyoak111/cccodroid/issues/222)）的排查报告与补丁，每个都带真机验证和测试。
 - **[wumingzhinu](https://github.com/wumingzhinu)**：修复远程 MCP 表单把 `Authorization=Bearer …` 误判为环境变量导致令牌丢失（[#225](https://github.com/greyoak111/cccodroid/pull/225)，同机 ProxyPin 真机验证）；又独立实现了一版 MCP 编辑（[#226](https://github.com/greyoak111/cccodroid/pull/226)），其中 add-json 写回、停用条目编辑、改名预检、长按进入被收编进 0.7.5。
 - **[ym2025szz](https://github.com/ym2025szz)**：词元支持。
+- **[YQXYWM](https://github.com/YQXYWM)**：排查并提交跨版本升级后预下载开发工具包误判降级、启动期确认弹窗死锁导致无限重试循环的完整根因定位报告（0.8.3 修复）。
 
 报告问题、测试机型、审查代码同样是贡献，都会记在这里。
 
